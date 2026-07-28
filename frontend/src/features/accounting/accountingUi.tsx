@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput } from '@/components/erp';
 import React from 'react';
 import {
   FaBalanceScale,
@@ -211,7 +211,7 @@ export function QueueList<T>({
   return (
     <ErpCard className="p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h2>
+        <h2 className="text-base font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2>
         {actions.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {actions.map((action) => (
@@ -229,7 +229,7 @@ export function QueueList<T>({
       </div>
       <div className="mt-4 space-y-3">
         {items.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">{emptyText}</p>
+          <p className="rounded-lg border border-dashed border-[var(--sds-border-default)] p-4 text-sm text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:text-[var(--sds-text-muted)]">{emptyText}</p>
         ) : (
           items.map(renderItem)
         )}
@@ -255,18 +255,18 @@ export function CompactQueueItem({
 }) {
   const DisplayIcon = Icon || FaBell;
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+    <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
       <div className="flex items-start gap-3">
-        <span className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[#074747]/10 text-[#074747] dark:bg-teal-900/30 dark:text-teal-100">
+        <span className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--sds-accent)]/10 text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
           <DisplayIcon className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
-            <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
+            <p className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</p>
             {status}
           </div>
-          {meta && <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{meta}</p>}
-          {amount && <p className="mt-2 text-sm font-semibold text-[#074747] dark:text-teal-200">{amount}</p>}
+          {meta && <p className="mt-1 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{meta}</p>}
+          {amount && <p className="mt-2 text-sm font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{amount}</p>}
           {footer && <div className="mt-3">{footer}</div>}
         </div>
       </div>
@@ -335,7 +335,7 @@ export function FinancialInvoiceApprovalForm({
   const hasMismatch = sepidarAmount > 0 && Math.round(sepidarAmount) !== Math.round(expectedAmount);
   const locked = isInvoiceLocked(invoice);
   const fieldClass = (field: keyof typeof errors) =>
-    `min-h-11 w-full rounded-lg border bg-slate-50 px-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:bg-slate-900 dark:text-white ${errors[field] ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'}`;
+    `min-h-11 w-full rounded-lg border bg-[var(--sds-surface-subtle)] px-3 text-sm text-[var(--sds-text-primary)] outline-none focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] ${errors[field] ? 'border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'}`;
 
   const clearError = (field: keyof typeof errors) => {
     setErrors((prev) => {
@@ -376,9 +376,9 @@ export function FinancialInvoiceApprovalForm({
 
   if (locked) {
     return (
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-950/40">
-        <p className="font-semibold text-slate-900 dark:text-white">تایید مالی ثبت شده</p>
-        <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-slate-600 dark:text-slate-300 sm:grid-cols-3">
+      <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
+        <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">تایید مالی ثبت شده</p>
+        <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] sm:grid-cols-3">
           <span>شماره فاکتور: {invoice.systemInvoiceNumber || '—'}</span>
           <span>تاریخ: {invoice.systemInvoiceDate ? dateFa(invoice.systemInvoiceDate) : '—'}</span>
           <span>مبلغ سپیدار: {money(invoice.sepidarAmount)}</span>
@@ -388,11 +388,11 @@ export function FinancialInvoiceApprovalForm({
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950/30">
+    <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
       <div className={compact ? 'space-y-3' : 'grid grid-cols-1 gap-3 lg:grid-cols-3'}>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">شماره فاکتور سیستمی</span>
-          <input
+          <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">شماره فاکتور سیستمی</span>
+          <ErpInput
             className={fieldClass('systemInvoiceNumber')}
             value={systemInvoiceNumber}
             onChange={(event) => {
@@ -400,10 +400,10 @@ export function FinancialInvoiceApprovalForm({
               setSystemInvoiceNumber(event.target.value);
             }}
           />
-          <InlineFieldError message={errors.systemInvoiceNumber} className="mt-1 text-xs text-red-600 dark:text-red-300" />
+          <InlineFieldError message={errors.systemInvoiceNumber} className="mt-1 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]" />
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">تاریخ فاکتور سیستمی</span>
+          <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">تاریخ فاکتور سیستمی</span>
           <div className={fieldClass('systemInvoiceDate')}>
             <PersianCalendarComponent
               value={systemInvoiceDate}
@@ -415,10 +415,10 @@ export function FinancialInvoiceApprovalForm({
               className="min-h-11 w-full"
             />
           </div>
-          <InlineFieldError message={errors.systemInvoiceDate} className="mt-1 text-xs text-red-600 dark:text-red-300" />
+          <InlineFieldError message={errors.systemInvoiceDate} className="mt-1 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]" />
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">مبلغ سپیدار (ریال)</span>
+          <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبلغ سپیدار (ریال)</span>
           <FormattedNumberInput
             value={sepidarAmount}
             onChange={(value) => {
@@ -429,11 +429,11 @@ export function FinancialInvoiceApprovalForm({
             placeholder="مبلغ سپیدار"
             className={fieldClass('sepidarAmount')}
           />
-          <InlineFieldError message={errors.sepidarAmount} className="mt-1 text-xs text-red-600 dark:text-red-300" />
+          <InlineFieldError message={errors.sepidarAmount} className="mt-1 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]" />
         </label>
       </div>
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className={`text-xs ${hasMismatch ? 'text-red-600 dark:text-red-300' : 'text-slate-500 dark:text-slate-400'}`}>
+        <p className={`text-xs ${hasMismatch ? 'text-[var(--sds-danger)] dark:text-[var(--sds-danger)]' : 'text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]'}`}>
           مبلغ صورتحساب سبلان: {money(expectedAmount)}
         </p>
         <ErpButton

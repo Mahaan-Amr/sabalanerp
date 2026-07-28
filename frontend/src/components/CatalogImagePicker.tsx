@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpPressable } from '@/components/erp';
 import React from 'react';
 import { FaPlus, FaTimes } from 'react-icons/fa';
 import { resolveBackendAssetUrl, salesAPI } from '@/lib/api';
@@ -32,32 +32,32 @@ const CatalogImagePicker: React.FC<CatalogImagePickerProps> = ({
 
   return (
     <div>
-      <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+      <label className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
         {label}
       </label>
       <div className="flex flex-wrap items-center gap-2">
         {visibleImages.map((image, index) => (
-          <div key={`${image}-${index}`} className="relative h-16 w-16 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+          <div key={`${image}-${index}`} className="relative h-16 w-16 overflow-hidden rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
             <img src={resolveBackendAssetUrl(image)} alt={label} className="h-full w-full object-cover" />
-            <button
+            <ErpPressable
               type="button"
               onClick={() => onChange(images.filter((_, imageIndex) => imageIndex !== index))}
-              className="absolute left-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-950/70 text-white"
+              className="absolute left-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)]"
               aria-label="حذف تصویر"
               title="حذف تصویر"
             >
               <FaTimes className="h-3 w-3" />
-            </button>
+            </ErpPressable>
           </div>
         ))}
         {overflow > 0 && (
-          <span className="inline-flex h-16 min-w-16 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+          <span className="inline-flex h-16 min-w-16 items-center justify-center rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-2 text-xs font-semibold text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]">
             +{overflow}
           </span>
         )}
-        <label className="inline-flex h-16 w-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-teal-300 bg-teal-50 text-teal-700 transition hover:bg-teal-100 dark:border-teal-700 dark:bg-teal-900/20 dark:text-teal-200">
+        <label className="inline-flex h-16 w-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] transition hover:bg-[var(--sds-accent-surface)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
           <FaPlus className="h-5 w-5" />
-          <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={handleUpload} />
+          <ErpInput type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={handleUpload} />
         </label>
       </div>
     </div>

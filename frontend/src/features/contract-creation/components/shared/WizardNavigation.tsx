@@ -1,8 +1,6 @@
-﻿// Wizard Navigation Component
-// Previous/Next buttons and step counter
-
 import React from 'react';
-import { FaArrowRight, FaArrowLeft, FaFileContract } from 'react-icons/fa';
+import { FaArrowLeft, FaArrowRight, FaFileContract } from 'react-icons/fa';
+import { ErpPressable } from '@/components/erp';
 
 interface WizardNavigationProps {
   currentStep: number;
@@ -34,62 +32,47 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
   labels,
   showSubmitOnEveryStep = false
 }) => {
-  const isFirstStep = currentStep === 1;
-  const isLastStep = currentStep === totalSteps;
-  const shouldShowSubmit = isLastStep || showSubmitOnEveryStep;
+  const first = currentStep === 1;
+  const submit = currentStep === totalSteps || showSubmitOnEveryStep;
   const previousLabel = labels?.previous ?? 'قبلی';
   const nextLabel = labels?.next ?? 'بعدی';
   const submitLabel = labels?.submit ?? 'ثبت قرارداد';
-  const submittingLabel = labels?.submitting ?? submitLabel;
 
   return (
-    <div className="flex justify-between items-center relative z-0">
-      {!shouldShowSubmit ? (
-        <button
-          onClick={onNext}
-          disabled={!canGoNext}
-          className="glass-liquid-btn-primary flex items-center gap-3 px-8 py-4 rounded-xl hover:scale-105 hover:shadow-lg transition-all duration-300 transform disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <span className="font-medium">{nextLabel}</span>
-          <FaArrowLeft className="w-4 h-4" />
-        </button>
-      ) : (
-        <button
-          onClick={onSubmit}
-          disabled={loading || !canGoNext}
-          className="glass-liquid-btn-primary flex items-center gap-3 px-8 py-4 rounded-xl hover:scale-105 hover:shadow-lg transition-all duration-300 transform disabled:hover:scale-100 disabled:hover:shadow-none disabled:opacity-50"
-        >
-          {loading ? (
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-          ) : (
-            <FaFileContract className="w-5 h-5" />
-          )}
-          <span className="font-medium">{loading ? submittingLabel : submitLabel}</span>
-        </button>
-      )}
-
-      <div className="text-center">
-        <div className="bg-white/50 dark:bg-gray-800/50 backdrop-blur-sm rounded-full px-6 py-3 border border-gray-200/50 dark:border-gray-600/50">
-          <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
-            مرحله {currentStep} از {totalSteps}
-          </span>
-        </div>
-      </div>
-
-      <button
-        onClick={onPrevious}
-        disabled={isFirstStep || !canGoPrevious}
-        className={`flex items-center gap-3 px-8 py-4 rounded-xl transition-all duration-300 transform ${
-          isFirstStep || !canGoPrevious
-            ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed border border-gray-200 dark:border-gray-700'
-            : 'glass-liquid-btn hover:bg-white/80 dark:hover:bg-gray-800/80 hover:scale-105 hover:shadow-lg border border-gray-200/50 dark:border-gray-600/50'
-        }`}
+    <div className="sds-workspace-surface relative z-0 flex flex-wrap items-center justify-between gap-3 p-3">
+      <ErpPressable
+        type="button"
+        onClick={submit ? onSubmit : onNext}
+        disabled={loading || !canGoNext}
+        aria-busy={loading}
+        tone="primary"
+        variant="solid"
+        className="min-w-32 gap-2 px-5"
       >
-        <FaArrowRight className="w-4 h-4" />
-        <span className="font-medium">{previousLabel}</span>
-      </button>
+        {loading ? (
+          <span className="h-5 w-5 animate-spin rounded-full border-b-2 border-[var(--sds-text-inverse)] motion-reduce:animate-none" />
+        ) : submit ? (
+          <FaFileContract className="h-4 w-4" />
+        ) : (
+          <FaArrowLeft className="h-4 w-4" />
+        )}
+        <span>{loading ? labels?.submitting ?? submitLabel : submit ? submitLabel : nextLabel}</span>
+      </ErpPressable>
+
+      <span className="sds-text-muted order-3 w-full text-center text-xs sm:order-none sm:w-auto">
+        مرحله {currentStep.toLocaleString('fa-IR')} از {totalSteps.toLocaleString('fa-IR')}
+      </span>
+
+      <ErpPressable
+        type="button"
+        onClick={onPrevious}
+        disabled={first || !canGoPrevious}
+        variant="ghost"
+        className="min-w-28 gap-2 px-4"
+      >
+        <FaArrowRight className="h-4 w-4" />
+        <span>{previousLabel}</span>
+      </ErpPressable>
     </div>
   );
 };
-
-

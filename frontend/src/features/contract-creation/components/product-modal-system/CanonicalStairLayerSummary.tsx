@@ -33,17 +33,17 @@ export function CanonicalStairLayerSummary({
       id="stair-layer-calculation-summary"
       tabIndex={-1}
       aria-busy={state.calculating}
-      className="divide-y divide-slate-200 border-y border-slate-200 text-xs dark:divide-slate-700 dark:border-slate-700"
+      className="divide-y divide-[var(--sds-border-default)] border-y border-[var(--sds-border-default)] text-xs dark:divide-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]"
     >
       <div className="py-2 font-semibold">خلاصه محاسبه لایه</div>
       {state.calculating ? (
         <ReservedRowsSkeleton rows={6} />
       ) : state.error ? (
-        <div className="py-2 text-red-600 dark:text-red-400">
+        <div className="py-2 text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">
           محاسبات نیاز به به‌روزرسانی دارد
         </div>
       ) : calculation && !calculation.ok ? (
-        <div className="py-2 text-red-600 dark:text-red-400">
+        <div className="py-2 text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">
           {formatCanonicalLayerConflict(calculation.conflicts[0])}
         </div>
       ) : calculation?.ok ? (
@@ -126,7 +126,7 @@ export function CanonicalStairLayerSummary({
           </div>
         </>
       ) : (
-        <div className="py-2 text-slate-500">—</div>
+        <div className="py-2 text-[var(--sds-text-muted)]">—</div>
       )}
     </section>
   );

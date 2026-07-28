@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import {
   FaBalanceScale,
@@ -205,7 +204,7 @@ export default function AccountingDashboardPage() {
             />
           ))}
           {(!queues.corrections || queues.corrections.length === 0) && (
-            <p className="text-sm text-slate-500 dark:text-slate-400">درخواست اصلاح بازی وجود ندارد.</p>
+            <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">درخواست اصلاح بازی وجود ندارد.</p>
           )}
         </div>
       </ErpSection>

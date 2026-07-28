@@ -2,14 +2,15 @@ FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
-ARG DEBIAN_MIRROR=http://mirror.iranserver.com/debian
-ARG DEBIAN_SECURITY_MIRROR=http://mirror.iranserver.com/debian-security
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=http://security.debian.org/debian-security
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG http_proxy
 ARG https_proxy
 ARG ALL_PROXY
 ARG all_proxy
+ARG NPM_CONFIG_REGISTRY
 
 RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: %s\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$DEBIAN_MIRROR" "$DEBIAN_SECURITY_MIRROR" > /etc/apt/sources.list.d/debian.sources \
   && apt-get -o Acquire::ForceIPv4=true update \
@@ -47,8 +48,8 @@ FROM node:20-bookworm-slim AS runner
 
 WORKDIR /app
 
-ARG DEBIAN_MIRROR=http://mirror.iranserver.com/debian
-ARG DEBIAN_SECURITY_MIRROR=http://mirror.iranserver.com/debian-security
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=http://security.debian.org/debian-security
 
 RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: %s\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$DEBIAN_MIRROR" "$DEBIAN_SECURITY_MIRROR" > /etc/apt/sources.list.d/debian.sources \
   && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
@@ -57,6 +58,9 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   openssl \
   clamdscan \
+  postgresql-client \
+  sqlite3 \
+  tar \
   ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
@@ -86,8 +90,8 @@ COPY backend/excel ./excel
 
 RUN printf 'TCPSocket 3310\nTCPAddr clamav\n' > /etc/clamav/clamd-remote.conf \
   && chmod +x /app/scripts/hr-clamdscan.sh \
-  && mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/uploads
+  && mkdir -p /app/storage/contracts /app/storage/hr-hiring /app/storage/accounting-contracts /app/storage/recovery /app/uploads /app/recovery-sources/inquiry /app/recovery-coordination
 
 EXPOSE 5000
 
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "node dist/scripts/recovery-database-preflight.js && node dist/index.js"]

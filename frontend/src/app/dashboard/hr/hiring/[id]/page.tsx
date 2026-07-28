@@ -1,5 +1,10 @@
 "use client";
-
+import {
+  ErpInput,
+  ErpPressable,
+  ErpSelect,
+  ErpTextarea,
+} from "@/components/erp";
 import { useEffect, useState } from "react";
 import {
   useParams,
@@ -42,7 +47,7 @@ import {
 } from "@/features/hr/hrDisplay";
 
 const field =
-  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900";
+  "w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]";
 const identityFields = [
   "firstName",
   "lastName",
@@ -223,7 +228,9 @@ export default function HiringCasePage() {
       setPayrollMismatchReason(
         result.data.data.payrollParticipation?.startMismatchReason || "",
       );
-      const currentCompensation = result.data.data.compensationSnapshots?.find((snapshot: any) => !snapshot.obsoleteAt);
+      const currentCompensation = result.data.data.compensationSnapshots?.find(
+        (snapshot: any) => !snapshot.obsoleteAt,
+      );
       if (Array.isArray(currentCompensation?.componentsJson))
         setComponents(currentCompensation.componentsJson);
       if (result.data.data.insuranceEnrollment)
@@ -233,9 +240,7 @@ export default function HiringCasePage() {
           effectiveDate: fromIsoDate(
             result.data.data.insuranceEnrollment.effectiveDate,
           ),
-          dueDate: fromIsoDate(
-            result.data.data.insuranceEnrollment.dueDate,
-          ),
+          dueDate: fromIsoDate(result.data.data.insuranceEnrollment.dueDate),
           communicatedAt: fromIsoDateTime(
             result.data.data.insuranceEnrollment.communicatedAt,
           ),
@@ -275,20 +280,23 @@ export default function HiringCasePage() {
   };
   if (!data) return <ErpLoading />;
   const form = data.formRevisions?.[0]?.dataJson || {};
-  const compensation = data.compensationSnapshots?.find((snapshot: any) => !snapshot.obsoleteAt);
+  const compensation = data.compensationSnapshots?.find(
+    (snapshot: any) => !snapshot.obsoleteAt,
+  );
   const plannedStartDate = fromIsoDate(data.scheduledStartDate);
   const payrollDiffersFromPlanned = Boolean(
     payrollDate && plannedStartDate && payrollDate !== plannedStartDate,
   );
   const insuranceOverdue = Boolean(
     insurance.registrationPath === "COMPANY" &&
-      insurance.dueDate &&
-      !["ACTIVE", "EXEMPT"].includes(insurance.status) &&
-      toIsoDate(insurance.dueDate) < new Date().toISOString().slice(0, 10),
+    insurance.dueDate &&
+    !["ACTIVE", "EXEMPT"].includes(insurance.status) &&
+    toIsoDate(insurance.dueDate) < new Date().toISOString().slice(0, 10),
   );
   const latestContract = data.contracts?.[0];
   const hasAuthority = (...values: string[]) =>
-    !data.readOnlyArchived && values.some((value) => authorities.includes(value));
+    !data.readOnlyArchived &&
+    values.some((value) => authorities.includes(value));
   const canHrSensitive = hasAuthority("HR_PROCESSOR", "HR_MANAGER");
   const canCompanyManager = hasAuthority("COMPANY_MANAGER");
   const canFinance = hasAuthority("FINANCE_RECORDER", "FINANCE_MANAGER");
@@ -413,14 +421,14 @@ export default function HiringCasePage() {
       item.downloadKind === "PRE_IDENTITY"
         ? () => hiringAPI.downloadPreIdentityEvidence(id, item.id)
         : item.downloadKind === "DOCUMENT"
-        ? () => hiringAPI.downloadDocument(id, item.id)
-        : item.downloadKind === "ASSESSMENT"
-          ? () => hiringAPI.downloadAssessment(id, item.id)
-          : item.downloadKind === "CONTRACT"
-            ? () => hiringAPI.downloadContract(id, item.id)
-            : item.downloadKind === "COLLATERAL_RETURN"
-              ? () => hiringAPI.downloadCollateralReturnEvidence(id, item.id)
-              : () => hiringAPI.downloadCollateral(id, item.id);
+          ? () => hiringAPI.downloadDocument(id, item.id)
+          : item.downloadKind === "ASSESSMENT"
+            ? () => hiringAPI.downloadAssessment(id, item.id)
+            : item.downloadKind === "CONTRACT"
+              ? () => hiringAPI.downloadContract(id, item.id)
+              : item.downloadKind === "COLLATERAL_RETURN"
+                ? () => hiringAPI.downloadCollateralReturnEvidence(id, item.id)
+                : () => hiringAPI.downloadCollateral(id, item.id);
     return download(request, item.originalName || item.title);
   };
   return (
@@ -432,15 +440,17 @@ export default function HiringCasePage() {
       actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: load }]}
     >
       {error && (
-        <p className="rounded-xl bg-rose-50 p-3 text-rose-700">{error}</p>
+        <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)]">
+          {error}
+        </p>
       )}
       {message && (
-        <p className="rounded-xl bg-emerald-50 p-3 text-emerald-700">
+        <p className="rounded-xl bg-[var(--sds-success-surface)] p-3 text-[var(--sds-success)]">
           {message}
         </p>
       )}
       {data.readOnlyArchived && (
-        <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 font-bold text-amber-800">
+        <p className="rounded-xl border border-[var(--sds-warning)] bg-[var(--sds-warning-surface)] p-3 font-bold text-[var(--sds-warning)]">
           این پرونده بایگانی شده و تا زمان بازیابی فقط قابل مشاهده است.
         </p>
       )}
@@ -475,14 +485,14 @@ export default function HiringCasePage() {
                   {data.employmentRelationship.personnel.firstName}{" "}
                   {data.employmentRelationship.personnel.lastName}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
                   رابطه استخدامی:{" "}
                   {hrDisplayLabel(data.employmentRelationship.status)} · نتیجه
                   پرونده: {hrDisplayLabel(data.outcome || "HIRED")}
                 </p>
               </div>
               <Link
-                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white"
+                className="rounded-xl bg-[var(--sds-success)] px-4 py-2 text-sm font-bold text-[var(--sds-text-inverse)]"
                 href={`/dashboard/hr/personnel?focus=${data.employmentRelationship.personnel.id}`}
               >
                 مشاهده در پرسنل و روابط استخدامی
@@ -497,7 +507,7 @@ export default function HiringCasePage() {
         >
           <div className="space-y-2">
             {(data.documentIndex || []).length === 0 && (
-              <ErpCard className="p-4 text-sm text-slate-500">
+              <ErpCard className="p-4 text-sm text-[var(--sds-text-secondary)]">
                 هنوز سند یا فایل قابل نمایش برای این پرونده ثبت نشده است.
               </ErpCard>
             )}
@@ -508,24 +518,27 @@ export default function HiringCasePage() {
               >
                 <div>
                   <p className="font-bold">{item.title}</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {item.safeOwner} · نسخه {item.version} · {hrDisplayLabel(item.reviewStatus)}
+                  <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
+                    {item.safeOwner} · نسخه {item.version} ·{" "}
+                    {hrDisplayLabel(item.reviewStatus)}
                   </p>
                   {!item.restricted && (
-                    <p className="mt-1 text-xs text-slate-500">
-                      {item.originalName || "بدون فایل پیوست"} · {dateTimeFa(item.date)}
+                    <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
+                      {item.originalName || "بدون فایل پیوست"} ·{" "}
+                      {dateTimeFa(item.date)}
                     </p>
                   )}
                 </div>
                 {item.canOpen ? (
-                  <button
+                  <ErpPressable
+                    type="submit"
                     className="rounded-lg border px-3 py-2 text-sm"
                     onClick={() => downloadIndexedEvidence(item)}
                   >
                     دریافت فایل
-                  </button>
+                  </ErpPressable>
                 ) : (
-                  <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs dark:bg-slate-800">
+                  <span className="rounded-lg bg-[var(--sds-surface-subtle)] px-3 py-2 text-xs dark:bg-[var(--sds-surface-raised)]">
                     جزئیات برای نقش شما محدود است
                   </span>
                 )}
@@ -563,9 +576,9 @@ export default function HiringCasePage() {
                     .map(([key, value]) => (
                       <div
                         key={key}
-                        className="rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-800"
+                        className="rounded-lg bg-[var(--sds-surface-subtle)] p-2 text-xs dark:bg-[var(--sds-surface-raised)]"
                       >
-                        <span className="text-slate-500">
+                        <span className="text-[var(--sds-text-secondary)]">
                           {identityFieldLabels[key] || "اطلاعات تکمیلی"}
                         </span>
                         <p className="mt-1 font-bold">{String(value)}</p>
@@ -590,29 +603,46 @@ export default function HiringCasePage() {
                 </div>
                 <div className="mt-3 space-y-2">
                   {(data.invitations || []).map((invitation: any) => (
-                    <div key={invitation.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-xs">
+                    <div
+                      key={invitation.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-xs"
+                    >
                       <span className="flex flex-col gap-1">
-                        <span>{invitation.accessConfirmedAt
-                          ? "تحویل‌شده (ورود موفق متقاضی)"
-                          : invitation.providerDeliveryState
-                            ? `گزارش SMS.ir: ${hrDisplayLabel(invitation.providerDeliveryState)}`
-                            : "در انتظار گزارش ارسال"}</span>
-                        {invitation.accessConfirmedAt && invitation.providerDeliveryState && <span className="text-slate-500">گزارش ارائه‌دهنده: {hrDisplayLabel(invitation.providerDeliveryState)}</span>}
+                        <span>
+                          {invitation.accessConfirmedAt
+                            ? "تحویل‌شده (ورود موفق متقاضی)"
+                            : invitation.providerDeliveryState
+                              ? `گزارش SMS.ir: ${hrDisplayLabel(invitation.providerDeliveryState)}`
+                              : "در انتظار گزارش ارسال"}
+                        </span>
+                        {invitation.accessConfirmedAt &&
+                          invitation.providerDeliveryState && (
+                            <span className="text-[var(--sds-text-secondary)]">
+                              گزارش ارائه‌دهنده:{" "}
+                              {hrDisplayLabel(invitation.providerDeliveryState)}
+                            </span>
+                          )}
                       </span>
                       <span>اعتبار تا {dateTimeFa(invitation.expiresAt)}</span>
-                      {invitation.providerMessageId && !invitation.accessConfirmedAt && (
-                        <button
-                          className="rounded-lg border px-3 py-1"
-                          onClick={() =>
-                            run(
-                              () => hiringAPI.refreshInvitationDelivery(id, invitation.id),
-                              "آخرین گزارش تحویل SMS.ir دریافت شد.",
-                            )
-                          }
-                        >
-                          به‌روزرسانی گزارش تحویل
-                        </button>
-                      )}
+                      {invitation.providerMessageId &&
+                        !invitation.accessConfirmedAt && (
+                          <ErpPressable
+                            type="submit"
+                            className="rounded-lg border px-3 py-1"
+                            onClick={() =>
+                              run(
+                                () =>
+                                  hiringAPI.refreshInvitationDelivery(
+                                    id,
+                                    invitation.id,
+                                  ),
+                                "آخرین گزارش تحویل SMS.ir دریافت شد.",
+                              )
+                            }
+                          >
+                            به‌روزرسانی گزارش تحویل
+                          </ErpPressable>
+                        )}
                     </div>
                   ))}
                 </div>
@@ -626,7 +656,7 @@ export default function HiringCasePage() {
                   <h3 className="font-black">بررسی منابع انسانی</h3>
                   {hasAuthority("HR_PROCESSOR") && (
                     <div className="mt-3 grid gap-2 md:grid-cols-2">
-                      <select
+                      <ErpSelect
                         className={field}
                         value={document.category}
                         onChange={(e) =>
@@ -638,8 +668,8 @@ export default function HiringCasePage() {
                             {hrDisplayLabel(x)}
                           </option>
                         ))}
-                      </select>
-                      <select
+                      </ErpSelect>
+                      <ErpSelect
                         className={field}
                         value={document.inspectionSource}
                         onChange={(e) =>
@@ -651,8 +681,8 @@ export default function HiringCasePage() {
                       >
                         <option value="ORIGINAL_SEEN">اصل مشاهده شد</option>
                         <option value="COPY_RECEIVED">کپی دریافت شد</option>
-                      </select>
-                      <input
+                      </ErpSelect>
+                      <ErpInput
                         type="file"
                         accept=".pdf,.jpg,.jpeg,.png"
                         className={field}
@@ -681,17 +711,18 @@ export default function HiringCasePage() {
                           {hrDisplayLabel(doc.category)} · نسخه {doc.version}
                         </span>
                         <span className="flex gap-2">
-                          <button
+                          <ErpPressable
+                            type="submit"
                             onClick={() =>
                               download(
                                 () => hiringAPI.downloadDocument(id, doc.id),
                                 doc.originalName,
                               )
                             }
-                            className="text-sky-700"
+                            className="text-[var(--sds-info)]"
                           >
                             دریافت
-                          </button>
+                          </ErpPressable>
                           <ErpBadge>{hrDisplayLabel(doc.status)}</ErpBadge>
                         </span>
                       </div>
@@ -702,7 +733,7 @@ export default function HiringCasePage() {
                   <h3 className="font-black">کنترل فیلد به فیلد</h3>
                   {data.formRevisions?.[0]?.correctionNotificationStatus ===
                     "FAILED" && (
-                    <div className="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
+                    <div className="mt-3 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
                       <p>
                         {data.formRevisions[0].correctionNotificationError ||
                           "ارسال پیامک درخواست اصلاح ناموفق بود."}
@@ -735,7 +766,8 @@ export default function HiringCasePage() {
                           <div className="flex gap-1">
                             {hasAuthority("HR_PROCESSOR") && (
                               <>
-                                <button
+                                <ErpPressable
+                                  type="submit"
                                   onClick={() =>
                                     run(
                                       () =>
@@ -745,11 +777,12 @@ export default function HiringCasePage() {
                                       `${identityFieldLabels[key]} تأیید شد.`,
                                     )
                                   }
-                                  className="rounded bg-emerald-100 px-2 py-1"
+                                  className="rounded bg-[var(--sds-success-surface)] px-2 py-1"
                                 >
                                   مطابق
-                                </button>
-                                <button
+                                </ErpPressable>
+                                <ErpPressable
+                                  type="submit"
                                   onClick={() =>
                                     run(
                                       () =>
@@ -760,15 +793,16 @@ export default function HiringCasePage() {
                                       `${identityFieldLabels[key]} مغایر ثبت شد.`,
                                     )
                                   }
-                                  className="rounded bg-rose-100 px-2 py-1"
+                                  className="rounded bg-[var(--sds-danger-surface)] px-2 py-1"
                                 >
                                   مغایرت
-                                </button>
+                                </ErpPressable>
                                 {[
                                   "militaryStatus",
                                   "birthCertificateExplanations",
                                 ].includes(key) && (
-                                  <button
+                                  <ErpPressable
+                                    type="submit"
                                     onClick={() =>
                                       run(
                                         () =>
@@ -778,10 +812,10 @@ export default function HiringCasePage() {
                                         `${identityFieldLabels[key]} غیرقابل اعمال ثبت شد.`,
                                       )
                                     }
-                                    className="rounded bg-slate-100 px-2 py-1"
+                                    className="rounded bg-[var(--sds-surface-subtle)] px-2 py-1"
                                   >
                                     ندارد/نامرتبط
-                                  </button>
+                                  </ErpPressable>
                                 )}
                               </>
                             )}
@@ -805,11 +839,11 @@ export default function HiringCasePage() {
                     data.identityChecks.some((check: any) =>
                       ["MISMATCH", "UNREADABLE"].includes(check.status),
                     ) && (
-                      <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                      <div className="mt-4 rounded-xl border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)]">
                         <h4 className="font-bold">درخواست اصلاح یکپارچه</h4>
-                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                          برای هر مورد، توضیح فارسی قابل نمایش به متقاضی را وارد کنید.
-                          با ثبت نهایی فقط یک پیامک ارسال می‌شود.
+                        <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+                          برای هر مورد، توضیح فارسی قابل نمایش به متقاضی را وارد
+                          کنید. با ثبت نهایی فقط یک پیامک ارسال می‌شود.
                         </p>
                         <div className="mt-3 space-y-2">
                           {data.identityChecks
@@ -821,8 +855,10 @@ export default function HiringCasePage() {
                                 key={check.fieldKey}
                                 className="grid gap-1 text-sm md:grid-cols-[12rem_1fr]"
                               >
-                                <span>{identityFieldLabels[check.fieldKey]}</span>
-                                <input
+                                <span>
+                                  {identityFieldLabels[check.fieldKey]}
+                                </span>
+                                <ErpInput
                                   className={field}
                                   placeholder="توضیح مشکل و روش اصلاح"
                                   value={
@@ -845,7 +881,9 @@ export default function HiringCasePage() {
                             busy ||
                             data.identityChecks
                               .filter((check: any) =>
-                                ["MISMATCH", "UNREADABLE"].includes(check.status),
+                                ["MISMATCH", "UNREADABLE"].includes(
+                                  check.status,
+                                ),
                               )
                               .some(
                                 (check: any) =>
@@ -899,16 +937,17 @@ export default function HiringCasePage() {
           {selectedLifecyclePhase === "ASSESSMENT" && (
             <ErpSection title="ارزیابی‌های DISC / BIG FIVE / EQ">
               <ErpCard className="p-4">
-                {(hasAuthority("HR_PROCESSOR") || (hasAuthority("HR_MANAGER") && editingAssessmentId)) && (
+                {(hasAuthority("HR_PROCESSOR") ||
+                  (hasAuthority("HR_MANAGER") && editingAssessmentId)) && (
                   <>
-                    <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+                    <p className="mb-4 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                       امتیازهای درج‌شده در گزارش رسمی ارزیابی را وارد کنید. همه
                       امتیازها باید بین ۰ تا ۱۰۰ باشند.
                     </p>
                     <div className="grid gap-3 md:grid-cols-3">
                       <label className="text-sm font-medium">
                         نوع ارزیابی
-                        <select
+                        <ErpSelect
                           className={`${field} mt-1`}
                           value={assessment.assessmentType}
                           onChange={(e) =>
@@ -922,19 +961,17 @@ export default function HiringCasePage() {
                             })
                           }
                         >
-                          {["DISC", "BIG_FIVE", "EQ", "OTHER"].map(
-                            (value) => (
-                              <option key={value} value={value}>
-                                {assessmentTypeLabel(value)}
-                              </option>
-                            ),
-                          )}
-                        </select>
+                          {["DISC", "BIG_FIVE", "EQ", "OTHER"].map((value) => (
+                            <option key={value} value={value}>
+                              {assessmentTypeLabel(value)}
+                            </option>
+                          ))}
+                        </ErpSelect>
                       </label>
                       {requiredAssessmentScores.map(({ key, label }) => (
                         <label key={key} className="text-sm font-medium">
                           {label} (۰ تا ۱۰۰)
-                          <input
+                          <ErpInput
                             type="text"
                             inputMode="decimal"
                             className={`${field} mt-1`}
@@ -953,7 +990,7 @@ export default function HiringCasePage() {
                           {assessment.scores[key] !== undefined &&
                             assessment.scores[key] !== "" &&
                             assessmentScoreValidation[key]?.error && (
-                              <span className="mt-1 block text-xs text-rose-600 dark:text-rose-300">
+                              <span className="mt-1 block text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">
                                 {assessmentScoreValidation[key].error}
                               </span>
                             )}
@@ -963,7 +1000,7 @@ export default function HiringCasePage() {
                         <>
                           <label className="text-sm font-medium">
                             عنوان ارزیابی
-                            <input
+                            <ErpInput
                               className={`${field} mt-1`}
                               value={assessment.title}
                               onChange={(e) =>
@@ -977,7 +1014,7 @@ export default function HiringCasePage() {
                           </label>
                           <label className="text-sm font-medium md:col-span-2">
                             نتیجه ارزیابی
-                            <textarea
+                            <ErpTextarea
                               className={`${field} mt-1`}
                               value={assessment.result}
                               onChange={(e) =>
@@ -993,7 +1030,7 @@ export default function HiringCasePage() {
                       )}
                       <label className="text-sm font-medium md:col-span-2">
                         توضیحات تکمیلی (اختیاری)
-                        <textarea
+                        <ErpTextarea
                           className={`${field} mt-1`}
                           value={assessment.notes}
                           onChange={(e) =>
@@ -1007,7 +1044,7 @@ export default function HiringCasePage() {
                       </label>
                       <label className="text-sm font-medium">
                         فایل گزارش (اختیاری)
-                        <input
+                        <ErpInput
                           type="file"
                           accept=".pdf,.jpg,.jpeg,.png"
                           className={`${field} mt-1`}
@@ -1049,24 +1086,25 @@ export default function HiringCasePage() {
                             : "جایگزین‌شده"}
                       </ErpBadge>
                       {item.originalName && (
-                        <button
+                        <ErpPressable
+                          type="submit"
                           onClick={() =>
                             download(
                               () => hiringAPI.downloadAssessment(id, item.id),
                               item.originalName,
                             )
                           }
-                          className="text-xs text-sky-700"
+                          className="text-xs text-[var(--sds-info)]"
                         >
                           دریافت فایل
-                        </button>
+                        </ErpPressable>
                       )}
                       {hasAuthority("HR_MANAGER") &&
                         item.status === "ACTIVE" && (
                           <>
-                            <button
+                            <ErpPressable
                               type="button"
-                              className="text-xs text-amber-700"
+                              className="text-xs text-[var(--sds-warning)]"
                               onClick={() => {
                                 const result = item.resultJson || {};
                                 setEditingAssessmentId(item.id);
@@ -1081,10 +1119,10 @@ export default function HiringCasePage() {
                               }}
                             >
                               ویرایش
-                            </button>
-                            <button
+                            </ErpPressable>
+                            <ErpPressable
                               type="button"
-                              className="text-xs text-rose-700"
+                              className="text-xs text-[var(--sds-danger)]"
                               onClick={() => {
                                 const reason = window.prompt(
                                   "دلیل حذف ارزیابی را وارد کنید:",
@@ -1103,7 +1141,7 @@ export default function HiringCasePage() {
                               }}
                             >
                               حذف با حفظ سابقه
-                            </button>
+                            </ErpPressable>
                           </>
                         )}
                     </span>
@@ -1148,14 +1186,15 @@ export default function HiringCasePage() {
                       }
                     />
                   )}
-                {hasAuthority("COMPANY_MANAGER") && data.assessmentCompletedAt && (
-                  <AssessmentDecisionPanel
-                    applicationId={id}
-                    currentDecision={data.assessmentDecision}
-                    busy={busy}
-                    run={run}
-                  />
-                )}
+                {hasAuthority("COMPANY_MANAGER") &&
+                  data.assessmentCompletedAt && (
+                    <AssessmentDecisionPanel
+                      applicationId={id}
+                      currentDecision={data.assessmentDecision}
+                      busy={busy}
+                      run={run}
+                    />
+                  )}
               </ErpCard>
             </ErpSection>
           )}
@@ -1185,7 +1224,7 @@ export default function HiringCasePage() {
                 <div className="space-y-2">
                   {components.map((item, i) => (
                     <div key={i} className="grid gap-2 md:grid-cols-3">
-                      <input
+                      <ErpInput
                         className={field}
                         value={item.label}
                         onChange={(e) =>
@@ -1196,7 +1235,7 @@ export default function HiringCasePage() {
                           )
                         }
                       />
-                      <select
+                      <ErpSelect
                         className={field}
                         value={item.category || ""}
                         onChange={(e) =>
@@ -1213,8 +1252,8 @@ export default function HiringCasePage() {
                         <option value="VARIABLE_BENEFIT">مزایای متغیر</option>
                         <option value="ALLOWANCE">کمک‌هزینه</option>
                         <option value="OTHER">سایر</option>
-                      </select>
-                      <input
+                      </ErpSelect>
+                      <ErpInput
                         className={field}
                         inputMode="numeric"
                         placeholder="مبلغ ریال"
@@ -1240,7 +1279,8 @@ export default function HiringCasePage() {
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {hasAuthority("HIRING_MANAGER", "HR_PAYROLL_PROCESSOR") && (
-                    <button
+                    <ErpPressable
+                      type="submit"
                       className="rounded-lg border px-3 py-2 text-sm"
                       onClick={() =>
                         setComponents([
@@ -1250,7 +1290,7 @@ export default function HiringCasePage() {
                       }
                     >
                       افزودن ردیف
-                    </button>
+                    </ErpPressable>
                   )}
                   {hasAuthority("HIRING_MANAGER") && (
                     <ErpButton
@@ -1367,15 +1407,13 @@ export default function HiringCasePage() {
                         >
                           <b>{step.title}</b>
                           {step.actor ? (
-                            <p className="mt-1 text-emerald-700 dark:text-emerald-300">
+                            <p className="mt-1 text-[var(--sds-success)] dark:text-[var(--sds-success)]">
                               {data.compensationParticipants?.[step.actor] ||
                                 step.actor}
-                              {step.at
-                                ? ` · ${dateTimeFa(step.at)}`
-                                : ""}
+                              {step.at ? ` · ${dateTimeFa(step.at)}` : ""}
                             </p>
                           ) : (
-                            <p className="mt-1 text-amber-700 dark:text-amber-300">
+                            <p className="mt-1 text-[var(--sds-warning)] dark:text-[var(--sds-warning)]">
                               در انتظار {step.role}
                             </p>
                           )}
@@ -1383,7 +1421,7 @@ export default function HiringCasePage() {
                       ))}
                     </div>
                     {compensation.candidateNotificationStatus === "FAILED" && (
-                      <div className="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
+                      <div className="mt-3 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
                         <p>
                           {compensation.candidateNotificationError ||
                             "ارسال پیامک پیشنهاد همکاری ناموفق بود."}
@@ -1415,7 +1453,7 @@ export default function HiringCasePage() {
                           <h4 className="font-bold md:col-span-2">
                             ثبت تصمیم آفلاین متقاضی
                           </h4>
-                          <select
+                          <ErpSelect
                             className={field}
                             value={offlineDecision.decision}
                             onChange={(event) =>
@@ -1427,8 +1465,8 @@ export default function HiringCasePage() {
                           >
                             <option value="ACCEPTED">پذیرش</option>
                             <option value="DECLINED">رد پیشنهاد</option>
-                          </select>
-                          <select
+                          </ErpSelect>
+                          <ErpSelect
                             className={field}
                             value={offlineDecision.communicationMethod}
                             onChange={(event) =>
@@ -1442,7 +1480,7 @@ export default function HiringCasePage() {
                             <option value="IN_PERSON">جلسه حضوری</option>
                             <option value="VIDEO_CALL">تماس تصویری</option>
                             <option value="OTHER">روش دیگر</option>
-                          </select>
+                          </ErpSelect>
                           <HrField label="زمان اعلام تصمیم متقاضی" required>
                             <HrPersianCalendar
                               showTime
@@ -1463,7 +1501,7 @@ export default function HiringCasePage() {
                             ],
                             ["note", "شرح گفت‌وگو و تصمیم"],
                           ].map(([key, placeholder]) => (
-                            <input
+                            <ErpInput
                               key={key}
                               className={field}
                               placeholder={placeholder}
@@ -1516,7 +1554,7 @@ export default function HiringCasePage() {
           <ErpSection title="وثیقه و تعهدات امور مالی">
             {hasAuthority("FINANCE_RECORDER") && (
               <ErpCard className="mb-4 grid gap-2 p-4 md:grid-cols-3">
-                <select
+                <ErpSelect
                   className={field}
                   value={templateId}
                   onChange={(e) => setTemplateId(e.target.value)}
@@ -1529,7 +1567,7 @@ export default function HiringCasePage() {
                         {item.name} · نسخه {item.version}
                       </option>
                     ))}
-                </select>
+                </ErpSelect>
                 <ErpButton
                   label="اعمال قالب پس از پذیرش پیشنهاد"
                   disabled={
@@ -1547,7 +1585,7 @@ export default function HiringCasePage() {
             <div className="grid gap-4 xl:grid-cols-2">
               {hasAuthority("FINANCE_RECORDER") && (
                 <ErpCard className="grid gap-2 p-4 md:grid-cols-2">
-                  <select
+                  <ErpSelect
                     className={field}
                     value={collateral.type}
                     onChange={(e) =>
@@ -1559,8 +1597,8 @@ export default function HiringCasePage() {
                     <option value="GUARANTEE">ضمانت‌نامه</option>
                     <option value="UNDERTAKING">تعهدنامه</option>
                     <option value="OTHER">سایر</option>
-                  </select>
-                  <input
+                  </ErpSelect>
+                  <ErpInput
                     className={field}
                     placeholder="مبلغ ریال"
                     value={collateral.amountRials}
@@ -1571,7 +1609,7 @@ export default function HiringCasePage() {
                       })
                     }
                   />
-                  <input
+                  <ErpInput
                     className={field}
                     placeholder="شناسه/سریال"
                     value={collateral.identifier}
@@ -1582,7 +1620,7 @@ export default function HiringCasePage() {
                       })
                     }
                   />
-                  <input
+                  <ErpInput
                     className={field}
                     placeholder="صادرکننده/ضامن"
                     value={collateral.issuerOrGuarantor}
@@ -1593,7 +1631,7 @@ export default function HiringCasePage() {
                       })
                     }
                   />
-                  <input
+                  <ErpInput
                     className={field}
                     placeholder="محل نگهداری اصل"
                     value={collateral.custodyLocation}
@@ -1615,7 +1653,7 @@ export default function HiringCasePage() {
                       }
                     />
                   </HrField>
-                  <input
+                  <ErpInput
                     type="file"
                     className={field}
                     onChange={(e) =>
@@ -1640,13 +1678,13 @@ export default function HiringCasePage() {
               )}
               <ErpCard className="p-4">
                 <div className="mb-3 grid gap-2 md:grid-cols-4">
-                  <input
+                  <ErpInput
                     className={field}
                     placeholder="دلیل هماهنگی قلم ناقص/ردشده"
                     value={collateralIssue}
                     onChange={(e) => setCollateralIssue(e.target.value)}
                   />
-                  <input
+                  <ErpInput
                     className={field}
                     placeholder="تحویل‌گیرنده اصل وثیقه"
                     value={handover.returnedTo}
@@ -1654,7 +1692,7 @@ export default function HiringCasePage() {
                       setHandover({ ...handover, returnedTo: e.target.value })
                     }
                   />
-                  <input
+                  <ErpInput
                     className={field}
                     placeholder="مدرک/شرح تحویل"
                     value={handover.returnEvidenceNote}
@@ -1677,8 +1715,9 @@ export default function HiringCasePage() {
                         {item.identifier} · {item.custodyLocation}
                       </p>
                       {item.originalName && (
-                        <button
-                          className="mt-2 rounded bg-slate-100 px-2 py-1 text-xs"
+                        <ErpPressable
+                          type="submit"
+                          className="mt-2 rounded bg-[var(--sds-surface-subtle)] px-2 py-1 text-xs"
                           onClick={() =>
                             download(
                               () => hiringAPI.downloadCollateral(id, item.id),
@@ -1687,14 +1726,15 @@ export default function HiringCasePage() {
                           }
                         >
                           دریافت اسکن
-                        </button>
+                        </ErpPressable>
                       )}
                       {hasAuthority("FINANCE_RECORDER") &&
                         ["MISSING", "MISMATCH", "UNREADABLE"].includes(
                           item.status,
                         ) && (
-                          <button
-                            className="mt-2 rounded bg-sky-100 px-2 py-1 text-xs"
+                          <ErpPressable
+                            type="submit"
+                            className="mt-2 rounded bg-[var(--sds-info-surface)] px-2 py-1 text-xs"
                             onClick={() =>
                               setCollateral({
                                 ...collateral,
@@ -1707,11 +1747,12 @@ export default function HiringCasePage() {
                             {item.status === "MISSING"
                               ? "ثبت دریافت این قلم"
                               : "ثبت نسخه جایگزین"}
-                          </button>
+                          </ErpPressable>
                         )}
                       {hasAuthority("FINANCE_MANAGER") && (
-                        <button
-                          className="mt-2 rounded bg-emerald-100 px-2 py-1 text-xs"
+                        <ErpPressable
+                          type="submit"
+                          className="mt-2 rounded bg-[var(--sds-success-surface)] px-2 py-1 text-xs"
                           onClick={() =>
                             run(
                               () =>
@@ -1723,11 +1764,12 @@ export default function HiringCasePage() {
                           }
                         >
                           تأیید مدیر مالی
-                        </button>
+                        </ErpPressable>
                       )}
                       {hasAuthority("FINANCE_MANAGER") && (
-                        <button
-                          className="mr-2 mt-2 rounded bg-rose-100 px-2 py-1 text-xs"
+                        <ErpPressable
+                          type="submit"
+                          className="mr-2 mt-2 rounded bg-[var(--sds-danger-surface)] px-2 py-1 text-xs"
                           disabled={!collateralIssue}
                           onClick={() =>
                             run(
@@ -1741,14 +1783,15 @@ export default function HiringCasePage() {
                           }
                         >
                           نیازمند پیگیری
-                        </button>
+                        </ErpPressable>
                       )}
                       {(hasAuthority("FINANCE_RECORDER") ||
                         hasAuthority("FINANCE_MANAGER")) &&
                         item.receivedAt &&
                         !item.returnedAt && (
-                          <button
-                            className="mr-2 mt-2 rounded bg-amber-100 px-2 py-1 text-xs"
+                          <ErpPressable
+                            type="submit"
+                            className="mr-2 mt-2 rounded bg-[var(--sds-warning-surface)] px-2 py-1 text-xs"
                             disabled={
                               !handover.returnedTo ||
                               !handover.returnEvidenceNote ||
@@ -1762,13 +1805,14 @@ export default function HiringCasePage() {
                             }
                           >
                             ثبت تحویل اصل
-                          </button>
+                          </ErpPressable>
                         )}
                       {hasAuthority("FINANCE_MANAGER") &&
                         item.returnedAt &&
                         !item.returnConfirmedAt && (
-                          <button
-                            className="mr-2 mt-2 rounded bg-violet-100 px-2 py-1 text-xs"
+                          <ErpPressable
+                            type="submit"
+                            className="mr-2 mt-2 rounded bg-[var(--sds-info-surface)] px-2 py-1 text-xs"
                             onClick={() =>
                               run(
                                 () =>
@@ -1781,11 +1825,12 @@ export default function HiringCasePage() {
                             }
                           >
                             تأیید مدیر مالی بازگشت
-                          </button>
+                          </ErpPressable>
                         )}
                       {item.returnEvidenceOriginalName && (
-                        <button
-                          className="mr-2 mt-2 rounded bg-slate-100 px-2 py-1 text-xs"
+                        <ErpPressable
+                          type="submit"
+                          className="mr-2 mt-2 rounded bg-[var(--sds-surface-subtle)] px-2 py-1 text-xs"
                           onClick={() =>
                             download(
                               () =>
@@ -1798,7 +1843,7 @@ export default function HiringCasePage() {
                           }
                         >
                           دریافت مدرک تحویل
-                        </button>
+                        </ErpPressable>
                       )}
                     </div>
                   ))}
@@ -1871,13 +1916,13 @@ export default function HiringCasePage() {
         >
           {hasAuthority("HR_MANAGER") && (
             <ErpCard className="grid gap-2 p-4 md:grid-cols-4">
-              <input
+              <ErpInput
                 className={field}
                 placeholder="عنوان وظیفه"
                 value={task.title}
                 onChange={(e) => setTask({ ...task, title: e.target.value })}
               />
-              <select
+              <ErpSelect
                 className={field}
                 value={task.ownerAuthority}
                 onChange={(e) =>
@@ -1888,7 +1933,7 @@ export default function HiringCasePage() {
                 <option value="HIRING_MANAGER">مدیر استخدام‌کننده</option>
                 <option value="HR_PROCESSOR">کارشناس منابع انسانی</option>
                 <option value="FINANCE_MANAGER">مدیر مالی</option>
-              </select>
+              </ErpSelect>
               <HrField label="مهلت انجام وظیفه" hint="اختیاری">
                 <HrPersianCalendar
                   value={task.dueDate}
@@ -1919,15 +1964,16 @@ export default function HiringCasePage() {
               >
                 <span>
                   <b>{item.title}</b>
-                  <small className="block text-slate-500">
+                  <small className="block text-[var(--sds-text-secondary)]">
                     {authorityLabel(item.ownerAuthority)} ·{" "}
                     {hrDisplayLabel(item.status)}
                   </small>
                 </span>
                 {item.status !== "COMPLETE" &&
                   hasAuthority(item.ownerAuthority) && (
-                    <button
-                      className="rounded bg-emerald-100 px-2 py-1 text-xs"
+                    <ErpPressable
+                      type="submit"
+                      className="rounded bg-[var(--sds-success-surface)] px-2 py-1 text-xs"
                       onClick={() =>
                         run(
                           () =>
@@ -1940,179 +1986,185 @@ export default function HiringCasePage() {
                       }
                     >
                       تکمیل
-                    </button>
+                    </ErpPressable>
                   )}
               </ErpCard>
             ))}
           </div>
         </ErpSection>
       )}
-      {selectedLifecyclePhase === "ONBOARDING" &&
-        canViewContractTask && (
-          <>
-            <ErpSection title="قرارداد کاغذی">
-              <div className="grid gap-3 md:grid-cols-4">
-                {hasAuthority("FINANCE_RECORDER") && (
-                  <>
-                    <HrField label="شماره قرارداد" required>
-                      <input
-                        className={field}
-                        value={contract.contractNumber}
-                        onChange={(e) =>
-                          setContract({
-                            ...contract,
-                            contractNumber: e.target.value,
-                          })
-                        }
-                      />
-                    </HrField>
-                    <HrField label="تاریخ شروع اعتبار قرارداد" required>
-                      <HrPersianCalendar
-                        value={contract.effectiveFrom}
-                        onChange={(effectiveFrom) =>
-                          setContract({
-                            ...contract,
-                            effectiveFrom,
-                          })
-                        }
-                      />
-                    </HrField>
-                    <HrField label="تاریخ پایان اعتبار قرارداد" required>
-                      <HrPersianCalendar
-                        value={contract.effectiveTo}
-                        onChange={(effectiveTo) =>
-                          setContract({
-                            ...contract,
-                            effectiveTo,
-                          })
-                        }
-                      />
-                    </HrField>
-                    <HrField label="اسکن قرارداد امضاشده" required>
-                      <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        className={field}
-                        onChange={(e) =>
-                          setContract({ ...contract, file: e.target.files?.[0] })
-                        }
-                      />
-                    </HrField>
-                    <ErpButton
-                      label="ثبت نسخه قرارداد"
-                      disabled={
-                        busy ||
-                        !contract.file ||
-                        !contract.contractNumber ||
-                        !contract.effectiveFrom ||
-                        !contract.effectiveTo
+      {selectedLifecyclePhase === "ONBOARDING" && canViewContractTask && (
+        <>
+          <ErpSection title="قرارداد کاغذی">
+            <div className="grid gap-3 md:grid-cols-4">
+              {hasAuthority("FINANCE_RECORDER") && (
+                <>
+                  <HrField label="شماره قرارداد" required>
+                    <ErpInput
+                      className={field}
+                      value={contract.contractNumber}
+                      onChange={(e) =>
+                        setContract({
+                          ...contract,
+                          contractNumber: e.target.value,
+                        })
                       }
-                      onClick={uploadContract}
                     />
-                    {latestContract?.canSubmit && (
-                      <ErpButton
-                        label="ارسال برای بررسی مدیر مالی"
-                        disabled={busy}
-                        onClick={() =>
-                          run(
-                            () => hiringAPI.submitContract(id, latestContract.id),
-                            "قرارداد برای بررسی مدیر مالی ارسال شد.",
-                          )
-                        }
-                        tone="success"
-                      />
-                    )}
-                  </>
-                )}
-                {hasAuthority("FINANCE_MANAGER") && latestContract?.canReview && (
-                  <div className="space-y-2 md:col-span-2">
-                    <div className="flex flex-wrap gap-2">
-                      <ErpButton
-                        label="تأیید قرارداد"
-                        disabled={busy}
-                        onClick={() =>
-                          run(
-                            () => hiringAPI.approveContract(id, latestContract.id),
-                            "قرارداد تأیید شد.",
-                          )
-                        }
-                        tone="success"
-                      />
-                    </div>
-                    <HrField label="دلیل بازگرداندن قرارداد">
-                      <textarea
-                        className={field}
-                        value={contractReturnReason}
-                        onChange={(event) => setContractReturnReason(event.target.value)}
-                      />
-                    </HrField>
+                  </HrField>
+                  <HrField label="تاریخ شروع اعتبار قرارداد" required>
+                    <HrPersianCalendar
+                      value={contract.effectiveFrom}
+                      onChange={(effectiveFrom) =>
+                        setContract({
+                          ...contract,
+                          effectiveFrom,
+                        })
+                      }
+                    />
+                  </HrField>
+                  <HrField label="تاریخ پایان اعتبار قرارداد" required>
+                    <HrPersianCalendar
+                      value={contract.effectiveTo}
+                      onChange={(effectiveTo) =>
+                        setContract({
+                          ...contract,
+                          effectiveTo,
+                        })
+                      }
+                    />
+                  </HrField>
+                  <HrField label="اسکن قرارداد امضاشده" required>
+                    <ErpInput
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      className={field}
+                      onChange={(e) =>
+                        setContract({ ...contract, file: e.target.files?.[0] })
+                      }
+                    />
+                  </HrField>
+                  <ErpButton
+                    label="ثبت نسخه قرارداد"
+                    disabled={
+                      busy ||
+                      !contract.file ||
+                      !contract.contractNumber ||
+                      !contract.effectiveFrom ||
+                      !contract.effectiveTo
+                    }
+                    onClick={uploadContract}
+                  />
+                  {latestContract?.canSubmit && (
                     <ErpButton
-                      label="بازگرداندن برای اصلاح"
-                      disabled={busy || !contractReturnReason.trim()}
+                      label="ارسال برای بررسی مدیر مالی"
+                      disabled={busy}
+                      onClick={() =>
+                        run(
+                          () => hiringAPI.submitContract(id, latestContract.id),
+                          "قرارداد برای بررسی مدیر مالی ارسال شد.",
+                        )
+                      }
+                      tone="success"
+                    />
+                  )}
+                </>
+              )}
+              {hasAuthority("FINANCE_MANAGER") && latestContract?.canReview && (
+                <div className="space-y-2 md:col-span-2">
+                  <div className="flex flex-wrap gap-2">
+                    <ErpButton
+                      label="تأیید قرارداد"
+                      disabled={busy}
                       onClick={() =>
                         run(
                           () =>
-                            hiringAPI.returnContract(
-                              id,
-                              latestContract.id,
-                              contractReturnReason.trim(),
-                            ),
-                          "قرارداد برای اصلاح بازگردانده شد.",
+                            hiringAPI.approveContract(id, latestContract.id),
+                          "قرارداد تأیید شد.",
                         )
                       }
-                      tone="danger"
+                      tone="success"
                     />
                   </div>
-                )}
-                {latestContract && (
-                  <ErpCard className="p-3 text-sm md:col-span-2">
-                    <p className="font-bold">وضعیت آخرین نسخه</p>
-                    <p className="mt-1">
-                      {{
-                        DRAFT: "ثبت‌شده؛ در انتظار ارسال",
-                        SUBMITTED: "ارسال‌شده؛ در انتظار بررسی مدیر مالی",
-                        RETURNED: "برای اصلاح بازگردانده شده",
-                        APPROVED: "تأییدشده",
-                      }[latestContract.reviewState as string] || latestContract.reviewState}
-                    </p>
-                    {latestContract.returnReason && (
-                      <p className="mt-2 text-rose-700">
-                        دلیل بازگشت: {latestContract.returnReason}
-                      </p>
-                    )}
-                  </ErpCard>
-                )}
-                {latestContract?.originalName && (
-                  <button
-                    className="rounded-lg border px-3 py-2 text-sm"
+                  <HrField label="دلیل بازگرداندن قرارداد">
+                    <ErpTextarea
+                      className={field}
+                      value={contractReturnReason}
+                      onChange={(event) =>
+                        setContractReturnReason(event.target.value)
+                      }
+                    />
+                  </HrField>
+                  <ErpButton
+                    label="بازگرداندن برای اصلاح"
+                    disabled={busy || !contractReturnReason.trim()}
                     onClick={() =>
-                      download(
-                        () => hiringAPI.downloadContract(id, latestContract.id),
-                        latestContract.originalName,
+                      run(
+                        () =>
+                          hiringAPI.returnContract(
+                            id,
+                            latestContract.id,
+                            contractReturnReason.trim(),
+                          ),
+                        "قرارداد برای اصلاح بازگردانده شد.",
                       )
                     }
-                  >
-                    دریافت قرارداد
-                  </button>
-                )}
-              </div>
-            </ErpSection>
-          </>
-        )}
+                    tone="danger"
+                  />
+                </div>
+              )}
+              {latestContract && (
+                <ErpCard className="p-3 text-sm md:col-span-2">
+                  <p className="font-bold">وضعیت آخرین نسخه</p>
+                  <p className="mt-1">
+                    {{
+                      DRAFT: "ثبت‌شده؛ در انتظار ارسال",
+                      SUBMITTED: "ارسال‌شده؛ در انتظار بررسی مدیر مالی",
+                      RETURNED: "برای اصلاح بازگردانده شده",
+                      APPROVED: "تأییدشده",
+                    }[latestContract.reviewState as string] ||
+                      latestContract.reviewState}
+                  </p>
+                  {latestContract.returnReason && (
+                    <p className="mt-2 text-[var(--sds-danger)]">
+                      دلیل بازگشت: {latestContract.returnReason}
+                    </p>
+                  )}
+                </ErpCard>
+              )}
+              {latestContract?.originalName && (
+                <ErpPressable
+                  type="submit"
+                  className="rounded-lg border px-3 py-2 text-sm"
+                  onClick={() =>
+                    download(
+                      () => hiringAPI.downloadContract(id, latestContract.id),
+                      latestContract.originalName,
+                    )
+                  }
+                >
+                  دریافت قرارداد
+                </ErpPressable>
+              )}
+            </div>
+          </ErpSection>
+        </>
+      )}
       {selectedLifecyclePhase === "ONBOARDING" &&
         (canViewInsuranceTask || canViewPayrollTask) && (
           <>
             <ErpSection title="بیمه و حقوق">
               <div className="grid gap-3 xl:grid-cols-3">
                 {canViewInsuranceTask && (
-                  <ErpCard className={`space-y-2 p-4 ${insuranceOverdue ? "ring-2 ring-amber-400" : ""}`}>
+                  <ErpCard
+                    className={`space-y-2 p-4 ${insuranceOverdue ? "ring-2 ring-[var(--sds-focus-ring)]" : ""}`}
+                  >
                     {insuranceOverdue && (
-                      <p className="rounded-lg bg-amber-50 p-2 text-sm font-bold text-amber-900">
+                      <p className="rounded-lg bg-[var(--sds-warning-surface)] p-2 text-sm font-bold text-[var(--sds-warning)]">
                         مهلت پیگیری ثبت بیمه توسط شرکت گذشته است.
                       </p>
                     )}
                     <HrField label="روش ثبت بیمه" required>
-                      <select
+                      <ErpSelect
                         className={field}
                         value={insurance.registrationPath}
                         onChange={(e) =>
@@ -2126,28 +2178,35 @@ export default function HiringCasePage() {
                         <option value="INDEPENDENT_REQUEST">
                           درخواست ثبت مستقل توسط شخص
                         </option>
-                      </select>
+                      </ErpSelect>
                     </HrField>
                     {insurance.registrationPath === "COMPANY" ? (
                       <>
                         <HrField label="وضعیت عملیاتی بیمه" required>
-                          <select
+                          <ErpSelect
                             className={field}
                             value={insurance.status}
                             onChange={(e) =>
-                              setInsurance({ ...insurance, status: e.target.value })
+                              setInsurance({
+                                ...insurance,
+                                status: e.target.value,
+                              })
                             }
                           >
                             <option value="NOT_STARTED">شروع نشده</option>
                             <option value="IN_PROGRESS">در حال پیگیری</option>
                             <option value="ACTIVE">فعال</option>
                             <option value="EXEMPT">معاف/غیرقابل اعمال</option>
-                          </select>
+                          </ErpSelect>
                         </HrField>
                         <HrField
                           label="تاریخ شروع پوشش بیمه"
                           required={insurance.status === "ACTIVE"}
-                          hint={insurance.status === "ACTIVE" ? undefined : "اختیاری تا زمان فعال‌شدن بیمه"}
+                          hint={
+                            insurance.status === "ACTIVE"
+                              ? undefined
+                              : "اختیاری تا زمان فعال‌شدن بیمه"
+                          }
                         >
                           <HrPersianCalendar
                             value={insurance.effectiveDate}
@@ -2170,12 +2229,12 @@ export default function HiringCasePage() {
                       </>
                     ) : (
                       <>
-                        <p className="text-xs text-slate-600 dark:text-slate-300">
+                        <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                           با ثبت این انتخاب، پیگیری شرکت خاتمه می‌یابد و مدرک یا
                           تاریخ فعال‌سازی بعدی از شخص درخواست نمی‌شود.
                         </p>
                         <HrField label="روش اعلام درخواست شخص" required>
-                          <select
+                          <ErpSelect
                             className={field}
                             value={insurance.communicationMethod}
                             onChange={(e) =>
@@ -2189,7 +2248,7 @@ export default function HiringCasePage() {
                             <option value="IN_PERSON">حضوری</option>
                             <option value="MESSAGE">پیام</option>
                             <option value="EMAIL">ایمیل</option>
-                          </select>
+                          </ErpSelect>
                         </HrField>
                         <HrField label="زمان اعلام درخواست شخص" required>
                           <HrPersianCalendar
@@ -2202,7 +2261,7 @@ export default function HiringCasePage() {
                         </HrField>
                       </>
                     )}
-                    <textarea
+                    <ErpTextarea
                       className={field}
                       placeholder="یادداشت"
                       value={insurance.note}
@@ -2233,15 +2292,30 @@ export default function HiringCasePage() {
                 {canViewPayrollTask && (
                   <ErpCard className="space-y-2 p-4">
                     <p className="font-bold">مشارکت حقوق و دستمزد</p>
-                    <div className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800">
-                      <p>تاریخ شروع برنامه‌ریزی‌شده: {dateFa(data.scheduledStartDate)}</p>
-                      <p className="mt-2 font-semibold">حقوق و مزایای تأییدشده</p>
-                      {(compensation?.componentsJson || []).map((item: any, index: number) => (
-                        <div key={`${item.label}-${index}`} className="flex justify-between gap-3">
-                          <span>{item.label}</span>
-                          <span>{Number(item.amountRials || 0).toLocaleString("fa-IR")} ریال</span>
-                        </div>
-                      ))}
+                    <div className="rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-sm dark:bg-[var(--sds-surface-raised)]">
+                      <p>
+                        تاریخ شروع برنامه‌ریزی‌شده:{" "}
+                        {dateFa(data.scheduledStartDate)}
+                      </p>
+                      <p className="mt-2 font-semibold">
+                        حقوق و مزایای تأییدشده
+                      </p>
+                      {(compensation?.componentsJson || []).map(
+                        (item: any, index: number) => (
+                          <div
+                            key={`${item.label}-${index}`}
+                            className="flex justify-between gap-3"
+                          >
+                            <span>{item.label}</span>
+                            <span>
+                              {Number(item.amountRials || 0).toLocaleString(
+                                "fa-IR",
+                              )}{" "}
+                              ریال
+                            </span>
+                          </div>
+                        ),
+                      )}
                     </div>
                     <HrField
                       label="تاریخ شروع مشارکت در حقوق و دستمزد"
@@ -2258,7 +2332,7 @@ export default function HiringCasePage() {
                         label="دلیل تفاوت با تاریخ شروع برنامه‌ریزی‌شده"
                         required
                       >
-                        <textarea
+                        <ErpTextarea
                           className={field}
                           value={payrollMismatchReason}
                           onChange={(event) =>
@@ -2268,7 +2342,7 @@ export default function HiringCasePage() {
                       </HrField>
                     )}
                     <label className="flex items-start gap-2 text-sm">
-                      <input
+                      <ErpInput
                         type="checkbox"
                         checked={payrollReviewConfirmed}
                         onChange={(event) =>
@@ -2276,7 +2350,8 @@ export default function HiringCasePage() {
                         }
                       />
                       <span>
-                        حقوق و مزایای تأییدشده و تاریخ شروع را بررسی و تأیید کردم.
+                        حقوق و مزایای تأییدشده و تاریخ شروع را بررسی و تأیید
+                        کردم.
                       </span>
                     </label>
                     <ErpButton
@@ -2284,7 +2359,8 @@ export default function HiringCasePage() {
                       disabled={
                         !payrollDate ||
                         !payrollReviewConfirmed ||
-                        (payrollDiffersFromPlanned && !payrollMismatchReason.trim())
+                        (payrollDiffersFromPlanned &&
+                          !payrollMismatchReason.trim())
                       }
                       onClick={() =>
                         run(
@@ -2313,23 +2389,40 @@ export default function HiringCasePage() {
           >
             <ErpCard className="space-y-3 p-4">
               <div className="grid gap-2 text-sm md:grid-cols-4">
-                <p>شروع برنامه‌ریزی‌شده: {dateFa(data.activationReadiness.plannedStartDate)}</p>
-                <p>قرارداد: {hrDisplayLabel(data.activationReadiness.paperContractClearance)}</p>
-                <p>حقوق و دستمزد: {data.activationReadiness.payrollConfigured ? "تنظیم‌شده" : "تنظیم‌نشده"}</p>
                 <p>
-                  بیمه (غیرمسدودکننده): {hrDisplayLabel(data.activationReadiness.insurance.status)}
+                  شروع برنامه‌ریزی‌شده:{" "}
+                  {dateFa(data.activationReadiness.plannedStartDate)}
+                </p>
+                <p>
+                  قرارداد:{" "}
+                  {hrDisplayLabel(
+                    data.activationReadiness.paperContractClearance,
+                  )}
+                </p>
+                <p>
+                  حقوق و دستمزد:{" "}
+                  {data.activationReadiness.payrollConfigured
+                    ? "تنظیم‌شده"
+                    : "تنظیم‌نشده"}
+                </p>
+                <p>
+                  بیمه (غیرمسدودکننده):{" "}
+                  {hrDisplayLabel(data.activationReadiness.insurance.status)}
                 </p>
               </div>
               {data.activationReadiness.blockers.length > 0 && (
-                <ul className="space-y-1 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                <ul className="space-y-1 rounded-xl bg-[var(--sds-warning-surface)] p-3 text-sm text-[var(--sds-warning)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
                   {data.activationReadiness.blockers.map((blocker: any) => (
                     <li key={blocker.id}>• {blocker.message}</li>
                   ))}
                 </ul>
               )}
               {data.activationReadiness.activatedAt ? (
-                <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">
-                  فعال‌سازی توسط {data.activationReadiness.activatedBy || "مدیر منابع انسانی"} در {dateTimeFa(data.activationReadiness.activatedAt)} انجام شد.
+                <p className="rounded-xl bg-[var(--sds-success-surface)] p-3 text-sm text-[var(--sds-success)]">
+                  فعال‌سازی توسط{" "}
+                  {data.activationReadiness.activatedBy || "مدیر منابع انسانی"}{" "}
+                  در {dateTimeFa(data.activationReadiness.activatedAt)} انجام
+                  شد.
                 </p>
               ) : (
                 <ErpButton
@@ -2359,7 +2452,7 @@ export default function HiringCasePage() {
               description="اطلاعات عادی در بانک متقاضیان قابل جست‌وجو می‌ماند؛ داده‌ها و اسناد حساس فقط تحت دسترسی محدود نگهداری می‌شوند."
             >
               <ErpCard className="grid gap-3 p-4 md:grid-cols-3">
-                <select
+                <ErpSelect
                   className={field}
                   value={closure.outcome}
                   onChange={(e) =>
@@ -2369,8 +2462,8 @@ export default function HiringCasePage() {
                   <option value="REJECTED">رد شده</option>
                   <option value="WITHDRAWN">انصراف متقاضی</option>
                   <option value="REQUEST_CANCELLED">لغو درخواست</option>
-                </select>
-                <input
+                </ErpSelect>
+                <ErpInput
                   className={field}
                   placeholder="دلیل الزامی"
                   value={closure.reason}
@@ -2407,7 +2500,7 @@ export default function HiringCasePage() {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <ErpCard className="p-3 text-center">
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-xs text-[var(--sds-text-secondary)]">{label}</p>
       <b className="mt-1 block text-xs">{value}</b>
     </ErpCard>
   );
@@ -2500,14 +2593,14 @@ function PreIdentitySection({
                 </ErpBadge>
               </div>
               {current && (
-                <div className="rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-800">
+                <div className="rounded-lg bg-[var(--sds-surface-subtle)] p-2 text-xs dark:bg-[var(--sds-surface-raised)]">
                   <p>{current.explanation || "بدون توضیح"}</p>
                   <small>نسخه {current.version.toLocaleString("fa-IR")}</small>
                 </div>
               )}
               {has(authority) && (
                 <>
-                  <select
+                  <ErpSelect
                     className={field}
                     value={draft.outcome}
                     onChange={(event) =>
@@ -2519,11 +2612,12 @@ function PreIdentitySection({
                   >
                     <option value="POSITIVE">تأیید</option>
                     <option value="NEGATIVE">رد</option>
-                  </select>
-                  <textarea
+                  </ErpSelect>
+                  <ErpTextarea
                     className={field}
                     placeholder={
-                      kind === "COMPANY_APPROVAL" && draft.outcome === "POSITIVE"
+                      kind === "COMPANY_APPROVAL" &&
+                      draft.outcome === "POSITIVE"
                         ? "توضیح اختیاری"
                         : "توضیح تصمیم (الزامی)"
                     }
@@ -2536,14 +2630,17 @@ function PreIdentitySection({
                     }
                   />
                   {current && (
-                    <input
+                    <ErpInput
                       className={field}
                       placeholder="دلیل تغییر تصمیم قبلی"
                       value={draft.changeReason}
                       onChange={(event) =>
                         setDecisionDrafts({
                           ...decisionDrafts,
-                          [kind]: { ...draft, changeReason: event.target.value },
+                          [kind]: {
+                            ...draft,
+                            changeReason: event.target.value,
+                          },
                         })
                       }
                     />
@@ -2552,13 +2649,15 @@ function PreIdentitySection({
                     label="ثبت نسخه تصمیم"
                     disabled={
                       busy ||
-                      (kind !== "COMPANY_APPROVAL" || draft.outcome === "NEGATIVE") &&
-                        !draft.explanation.trim() ||
+                      ((kind !== "COMPANY_APPROVAL" ||
+                        draft.outcome === "NEGATIVE") &&
+                        !draft.explanation.trim()) ||
                       Boolean(current && !draft.changeReason.trim())
                     }
                     onClick={() =>
                       run(
-                        () => hiringAPI.recordDecision(applicationId, kind, draft),
+                        () =>
+                          hiringAPI.recordDecision(applicationId, kind, draft),
                         "تصمیم با سابقه حسابرسی ثبت شد.",
                       )
                     }
@@ -2574,40 +2673,76 @@ function PreIdentitySection({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <b>چک‌لیست الزامات مدیریت شرکت</b>
           <ErpBadge
-            tone={application.preIdentityRequirementsFinalizedAt ? "success" : "warning"}
+            tone={
+              application.preIdentityRequirementsFinalizedAt
+                ? "success"
+                : "warning"
+            }
           >
-            {application.preIdentityRequirementsFinalizedAt ? "نهایی شده" : "در حال تنظیم"}
+            {application.preIdentityRequirementsFinalizedAt
+              ? "نهایی شده"
+              : "در حال تنظیم"}
           </ErpBadge>
         </div>
         {has("COMPANY_MANAGER") && (
           <div className="space-y-3">
             <div className="grid gap-2 md:grid-cols-3">
-              <select className={field} value={templateId} onChange={(event) => setTemplateId(event.target.value)}>
+              <ErpSelect
+                className={field}
+                value={templateId}
+                onChange={(event) => setTemplateId(event.target.value)}
+              >
                 <option value="">انتخاب قالب نسخه‌دار</option>
                 {templates.map((template) => (
                   <option key={template.id} value={template.id}>
-                    {template.name} · نسخه {template.version.toLocaleString("fa-IR")}
+                    {template.name} · نسخه{" "}
+                    {template.version.toLocaleString("fa-IR")}
                   </option>
                 ))}
-              </select>
+              </ErpSelect>
               <ErpButton
                 label="اعمال قالب به پرونده"
                 disabled={busy || !templateId}
-                onClick={() => run(() => hiringAPI.applyPreIdentityTemplate(applicationId, templateId), "قالب چک‌لیست به پرونده اعمال شد.")}
+                onClick={() =>
+                  run(
+                    () =>
+                      hiringAPI.applyPreIdentityTemplate(
+                        applicationId,
+                        templateId,
+                      ),
+                    "قالب چک‌لیست به پرونده اعمال شد.",
+                  )
+                }
               />
               <div className="flex gap-2">
-                <input className={field} placeholder="نام قالب جدید" value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
+                <ErpInput
+                  className={field}
+                  placeholder="نام قالب جدید"
+                  value={templateName}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                />
                 <ErpButton
                   label="ذخیره اقلام فعلی به‌عنوان قالب جایگاه"
-                  disabled={busy || !templateName.trim() || !(application.preIdentityChecklistItems || []).length}
+                  disabled={
+                    busy ||
+                    !templateName.trim() ||
+                    !(application.preIdentityChecklistItems || []).length
+                  }
                   onClick={() =>
                     run(
-                      () => hiringAPI.createPreIdentityTemplate({
-                        name: templateName,
-                        scopeType: "POSITION",
-                        scopeId: application.positionId,
-                        items: (application.preIdentityChecklistItems || []).map((item: any) => ({ title: item.title, instructions: item.instructions, evidencePolicy: item.evidencePolicy })),
-                      }),
+                      () =>
+                        hiringAPI.createPreIdentityTemplate({
+                          name: templateName,
+                          scopeType: "POSITION",
+                          scopeId: application.positionId,
+                          items: (
+                            application.preIdentityChecklistItems || []
+                          ).map((item: any) => ({
+                            title: item.title,
+                            instructions: item.instructions,
+                            evidencePolicy: item.evidencePolicy,
+                          })),
+                        }),
                       "نسخه جدید قالب برای این جایگاه ذخیره شد.",
                     )
                   }
@@ -2615,67 +2750,81 @@ function PreIdentitySection({
               </div>
             </div>
             <div className="grid gap-2 md:grid-cols-4">
-            <input
-              className={field}
-              placeholder="عنوان الزام یا ارزیابی سفارشی"
-              value={requirement.title}
-              onChange={(event) =>
-                setRequirement({ ...requirement, title: event.target.value })
-              }
-            />
-            <input
-              className={field}
-              placeholder="شرح و دستور پیگیری"
-              value={requirement.instructions}
-              onChange={(event) =>
-                setRequirement({ ...requirement, instructions: event.target.value })
-              }
-            />
-            <select
-              className={field}
-              value={requirement.evidencePolicy}
-              onChange={(event) =>
-                setRequirement({ ...requirement, evidencePolicy: event.target.value })
-              }
-            >
-              <option value="NOTE_REQUIRED">توضیح الزامی</option>
-              <option value="FILE_REQUIRED">فایل الزامی</option>
-              <option value="FILE_OPTIONAL">فایل اختیاری</option>
-              <option value="NO_FILE">بدون فایل</option>
-            </select>
-            <HrField label="مهلت انجام" hint="تاریخ و ساعت شمسی">
-              <HrPersianCalendar
-                value={requirement.dueAt}
-                onChange={(dueAt) => setRequirement({ ...requirement, dueAt })}
-                placeholder="انتخاب مهلت انجام"
-                showTime
-                clearable
+              <ErpInput
+                className={field}
+                placeholder="عنوان الزام یا ارزیابی سفارشی"
+                value={requirement.title}
+                onChange={(event) =>
+                  setRequirement({ ...requirement, title: event.target.value })
+                }
               />
-            </HrField>
-            <ErpButton
-              label="افزودن به چک‌لیست"
-              disabled={busy || !requirement.title.trim()}
-              onClick={() =>
-                run(
-                  () => hiringAPI.addPreIdentityItem(applicationId, {
+              <ErpInput
+                className={field}
+                placeholder="شرح و دستور پیگیری"
+                value={requirement.instructions}
+                onChange={(event) =>
+                  setRequirement({
                     ...requirement,
-                    dueAt: requirement.dueAt ? toIsoDateTime(requirement.dueAt) : "",
-                  }),
-                  "الزام جدید به چک‌لیست افزوده شد.",
-                )
-              }
-            />
-            <ErpButton
-              label="نهایی‌سازی الزامات"
-              tone="success"
-              disabled={busy || Boolean(application.preIdentityRequirementsFinalizedAt)}
-              onClick={() =>
-                run(
-                  () => hiringAPI.finalizePreIdentity(applicationId),
-                  "الزامات توسط مدیریت شرکت نهایی شد.",
-                )
-              }
-            />
+                    instructions: event.target.value,
+                  })
+                }
+              />
+              <ErpSelect
+                className={field}
+                value={requirement.evidencePolicy}
+                onChange={(event) =>
+                  setRequirement({
+                    ...requirement,
+                    evidencePolicy: event.target.value,
+                  })
+                }
+              >
+                <option value="NOTE_REQUIRED">توضیح الزامی</option>
+                <option value="FILE_REQUIRED">فایل الزامی</option>
+                <option value="FILE_OPTIONAL">فایل اختیاری</option>
+                <option value="NO_FILE">بدون فایل</option>
+              </ErpSelect>
+              <HrField label="مهلت انجام" hint="تاریخ و ساعت شمسی">
+                <HrPersianCalendar
+                  value={requirement.dueAt}
+                  onChange={(dueAt) =>
+                    setRequirement({ ...requirement, dueAt })
+                  }
+                  placeholder="انتخاب مهلت انجام"
+                  showTime
+                  clearable
+                />
+              </HrField>
+              <ErpButton
+                label="افزودن به چک‌لیست"
+                disabled={busy || !requirement.title.trim()}
+                onClick={() =>
+                  run(
+                    () =>
+                      hiringAPI.addPreIdentityItem(applicationId, {
+                        ...requirement,
+                        dueAt: requirement.dueAt
+                          ? toIsoDateTime(requirement.dueAt)
+                          : "",
+                      }),
+                    "الزام جدید به چک‌لیست افزوده شد.",
+                  )
+                }
+              />
+              <ErpButton
+                label="نهایی‌سازی الزامات"
+                tone="success"
+                disabled={
+                  busy ||
+                  Boolean(application.preIdentityRequirementsFinalizedAt)
+                }
+                onClick={() =>
+                  run(
+                    () => hiringAPI.finalizePreIdentity(applicationId),
+                    "الزامات توسط مدیریت شرکت نهایی شد.",
+                  )
+                }
+              />
             </div>
           </div>
         )}
@@ -2693,7 +2842,9 @@ function PreIdentitySection({
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <b>{item.title}</b>
-                    <p className="text-xs text-slate-500">{item.instructions}</p>
+                    <p className="text-xs text-[var(--sds-text-secondary)]">
+                      {item.instructions}
+                    </p>
                   </div>
                   <ErpBadge
                     tone={
@@ -2708,134 +2859,175 @@ function PreIdentitySection({
                   </ErpBadge>
                 </div>
                 {item.resultExplanation && (
-                  <p className="mt-2 rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-800">
+                  <p className="mt-2 rounded-lg bg-[var(--sds-surface-subtle)] p-2 text-xs dark:bg-[var(--sds-surface-raised)]">
                     {item.resultExplanation}
                   </p>
                 )}
-                {has("HR_PROCESSOR", "HR_MANAGER", "COMPANY_MANAGER") && item.originalName && (
-                  <button
-                    className="mt-2 rounded-lg border px-3 py-1 text-xs"
-                    onClick={() => download(() => hiringAPI.downloadPreIdentityEvidence(applicationId, item.id), item.originalName)}
-                  >
-                    دریافت گزارش محرمانه
-                  </button>
-                )}
-                {has("HR_PROCESSOR") && !["POSITIVE", "NEGATIVE"].includes(item.status) && (
-                  <div className="mt-3 grid gap-2 md:grid-cols-4">
-                    <select
-                      className={field}
-                      value={draft.status}
-                      onChange={(event) =>
-                        setResults({
-                          ...results,
-                          [item.id]: { ...draft, status: event.target.value },
-                        })
-                      }
-                    >
-                      <option value="PENDING">در انتظار</option>
-                      <option value="IN_PROGRESS">در حال پیگیری</option>
-                      <option value="POSITIVE">مثبت</option>
-                      <option value="NEGATIVE">منفی</option>
-                    </select>
-                    <input
-                      className={field}
-                      placeholder="توضیح نتیجه HR"
-                      value={draft.resultExplanation}
-                      onChange={(event) =>
-                        setResults({
-                          ...results,
-                          [item.id]: { ...draft, resultExplanation: event.target.value },
-                        })
-                      }
-                    />
-                    <input
-                      className={field}
-                      placeholder="منبع گزارش"
-                      value={draft.resultSource}
-                      onChange={(event) =>
-                        setResults({
-                          ...results,
-                          [item.id]: { ...draft, resultSource: event.target.value },
-                        })
-                      }
-                    />
-                    <input
-                      className={field}
-                      type="file"
-                      onChange={(event) =>
-                        setResults({
-                          ...results,
-                          [item.id]: { ...draft, file: event.target.files?.[0] },
-                        })
-                      }
-                    />
-                    <ErpButton
-                      label="ثبت نتیجه HR"
-                      disabled={
-                        busy ||
-                        (["POSITIVE", "NEGATIVE"].includes(draft.status) &&
-                          !draft.resultExplanation.trim())
-                      }
-                      onClick={() => {
-                        const payload = new FormData();
-                        payload.append("status", draft.status);
-                        payload.append("resultExplanation", draft.resultExplanation);
-                        payload.append("resultSource", draft.resultSource);
-                        if (draft.file) payload.append("file", draft.file);
-                        return run(
+                {has("HR_PROCESSOR", "HR_MANAGER", "COMPANY_MANAGER") &&
+                  item.originalName && (
+                    <ErpPressable
+                      type="submit"
+                      className="mt-2 rounded-lg border px-3 py-1 text-xs"
+                      onClick={() =>
+                        download(
                           () =>
-                            hiringAPI.recordPreIdentityResult(
+                            hiringAPI.downloadPreIdentityEvidence(
                               applicationId,
                               item.id,
-                              payload,
                             ),
-                          "نتیجه چک‌لیست توسط HR ثبت شد.",
-                        );
-                      }}
-                    />
-                  </div>
-                )}
-                {has("HR_MANAGER") && ["POSITIVE", "NEGATIVE"].includes(item.status) && (
-                  <button
-                    type="button"
-                    className="mt-3 rounded-lg border border-amber-300 px-3 py-2 text-xs font-bold text-amber-700"
-                    onClick={() => {
-                      const reason = window.prompt("دلیل ایجاد نسخه اصلاحی نتیجه را وارد کنید:");
-                      if (reason?.trim()) void run(() => hiringAPI.correctPreIdentityItem(applicationId, item.id, reason.trim()), "نسخه اصلاحی جدید ایجاد شد.");
-                    }}
-                  >
-                    ایجاد نسخه اصلاحی
-                  </button>
-                )}
-                {has("COMPANY_MANAGER") && item.status === "NEGATIVE" && !item.managementResolution && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {["CONTINUE", "REPEAT", "RESERVE"].map((resolution) => (
-                      <button
-                        key={resolution}
-                        className="rounded-lg border px-3 py-2 text-xs font-bold"
-                        onClick={() => {
-                          const reason = window.prompt("دلیل تصمیم مدیریت شرکت را ثبت کنید:");
-                          if (reason?.trim())
-                            void run(
-                              () =>
-                                hiringAPI.resolvePreIdentityNegative(
-                                  applicationId,
-                                  item.id,
-                                  { resolution, reason: reason.trim() },
-                                ),
-                              "نتیجه منفی توسط مدیریت شرکت تعیین تکلیف شد.",
-                            );
-                        }}
+                          item.originalName,
+                        )
+                      }
+                    >
+                      دریافت گزارش محرمانه
+                    </ErpPressable>
+                  )}
+                {has("HR_PROCESSOR") &&
+                  !["POSITIVE", "NEGATIVE"].includes(item.status) && (
+                    <div className="mt-3 grid gap-2 md:grid-cols-4">
+                      <ErpSelect
+                        className={field}
+                        value={draft.status}
+                        onChange={(event) =>
+                          setResults({
+                            ...results,
+                            [item.id]: { ...draft, status: event.target.value },
+                          })
+                        }
                       >
-                        {resolution === "CONTINUE"
-                          ? "ادامه با دلیل"
-                          : resolution === "REPEAT"
-                            ? "تکرار الزام"
-                            : "رد/ذخیره"}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                        <option value="PENDING">در انتظار</option>
+                        <option value="IN_PROGRESS">در حال پیگیری</option>
+                        <option value="POSITIVE">مثبت</option>
+                        <option value="NEGATIVE">منفی</option>
+                      </ErpSelect>
+                      <ErpInput
+                        className={field}
+                        placeholder="توضیح نتیجه HR"
+                        value={draft.resultExplanation}
+                        onChange={(event) =>
+                          setResults({
+                            ...results,
+                            [item.id]: {
+                              ...draft,
+                              resultExplanation: event.target.value,
+                            },
+                          })
+                        }
+                      />
+                      <ErpInput
+                        className={field}
+                        placeholder="منبع گزارش"
+                        value={draft.resultSource}
+                        onChange={(event) =>
+                          setResults({
+                            ...results,
+                            [item.id]: {
+                              ...draft,
+                              resultSource: event.target.value,
+                            },
+                          })
+                        }
+                      />
+                      <ErpInput
+                        className={field}
+                        type="file"
+                        onChange={(event) =>
+                          setResults({
+                            ...results,
+                            [item.id]: {
+                              ...draft,
+                              file: event.target.files?.[0],
+                            },
+                          })
+                        }
+                      />
+                      <ErpButton
+                        label="ثبت نتیجه HR"
+                        disabled={
+                          busy ||
+                          (["POSITIVE", "NEGATIVE"].includes(draft.status) &&
+                            !draft.resultExplanation.trim())
+                        }
+                        onClick={() => {
+                          const payload = new FormData();
+                          payload.append("status", draft.status);
+                          payload.append(
+                            "resultExplanation",
+                            draft.resultExplanation,
+                          );
+                          payload.append("resultSource", draft.resultSource);
+                          if (draft.file) payload.append("file", draft.file);
+                          return run(
+                            () =>
+                              hiringAPI.recordPreIdentityResult(
+                                applicationId,
+                                item.id,
+                                payload,
+                              ),
+                            "نتیجه چک‌لیست توسط HR ثبت شد.",
+                          );
+                        }}
+                      />
+                    </div>
+                  )}
+                {has("HR_MANAGER") &&
+                  ["POSITIVE", "NEGATIVE"].includes(item.status) && (
+                    <ErpPressable
+                      type="button"
+                      className="mt-3 rounded-lg border border-[var(--sds-warning-border)] px-3 py-2 text-xs font-bold text-[var(--sds-warning)]"
+                      onClick={() => {
+                        const reason = window.prompt(
+                          "دلیل ایجاد نسخه اصلاحی نتیجه را وارد کنید:",
+                        );
+                        if (reason?.trim())
+                          void run(
+                            () =>
+                              hiringAPI.correctPreIdentityItem(
+                                applicationId,
+                                item.id,
+                                reason.trim(),
+                              ),
+                            "نسخه اصلاحی جدید ایجاد شد.",
+                          );
+                      }}
+                    >
+                      ایجاد نسخه اصلاحی
+                    </ErpPressable>
+                  )}
+                {has("COMPANY_MANAGER") &&
+                  item.status === "NEGATIVE" &&
+                  !item.managementResolution && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {["CONTINUE", "REPEAT", "RESERVE"].map((resolution) => (
+                        <ErpPressable
+                          type="submit"
+                          key={resolution}
+                          className="rounded-lg border px-3 py-2 text-xs font-bold"
+                          onClick={() => {
+                            const reason = window.prompt(
+                              "دلیل تصمیم مدیریت شرکت را ثبت کنید:",
+                            );
+                            if (reason?.trim())
+                              void run(
+                                () =>
+                                  hiringAPI.resolvePreIdentityNegative(
+                                    applicationId,
+                                    item.id,
+                                    { resolution, reason: reason.trim() },
+                                  ),
+                                "نتیجه منفی توسط مدیریت شرکت تعیین تکلیف شد.",
+                              );
+                          }}
+                        >
+                          {resolution === "CONTINUE"
+                            ? "ادامه با دلیل"
+                            : resolution === "REPEAT"
+                              ? "تکرار الزام"
+                              : "رد/ذخیره"}
+                        </ErpPressable>
+                      ))}
+                    </div>
+                  )}
               </div>
             );
           })}
@@ -2877,25 +3069,34 @@ function AssessmentDecisionPanel({
       <div className="md:col-span-3">
         <b>تصمیم مدیریت شرکت</b>
         {currentDecision && (
-          <span className="mr-2 text-xs text-slate-500">
+          <span className="mr-2 text-xs text-[var(--sds-text-secondary)]">
             وضعیت فعلی: {hrDisplayLabel(currentDecision)}
           </span>
         )}
       </div>
-      <select className={field} value={decision} onChange={(event) => setDecision(event.target.value)}>
+      <ErpSelect
+        className={field}
+        value={decision}
+        onChange={(event) => setDecision(event.target.value)}
+      >
         <option value="APPROVED">تأیید و تکمیل خودکار مرحله</option>
         <option value="REPEAT_REQUIRED">تکرار ارزیابی</option>
         <option value="RESERVE">رد/ذخیره</option>
         <option value="REJECTED">رد نهایی</option>
-      </select>
-      <input
+      </ErpSelect>
+      <ErpInput
         className={field}
         placeholder={decision === "APPROVED" ? "توضیح اختیاری" : "دلیل الزامی"}
         value={reason}
         onChange={(event) => setReason(event.target.value)}
       />
       {decision === "REPEAT_REQUIRED" && (
-        <input className={field} type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+        <ErpInput
+          className={field}
+          type="datetime-local"
+          value={dueAt}
+          onChange={(event) => setDueAt(event.target.value)}
+        />
       )}
       <ErpButton
         label="ثبت تصمیم ارزیابی"
@@ -2903,7 +3104,12 @@ function AssessmentDecisionPanel({
         disabled={busy || (decision !== "APPROVED" && !reason.trim())}
         onClick={() =>
           run(
-            () => hiringAPI.decideAssessment(applicationId, { decision, reason, dueAt: dueAt || undefined }),
+            () =>
+              hiringAPI.decideAssessment(applicationId, {
+                decision,
+                reason,
+                dueAt: dueAt || undefined,
+              }),
             "تصمیم مدیریت شرکت درباره ارزیابی ثبت شد.",
           )
         }
@@ -2934,20 +3140,56 @@ function CollateralRequirementPanel({
     <ErpCard className="mb-4 space-y-3 p-4">
       <div>
         <b>الزام وثیقه پیشنهادی مدیریت شرکت</b>
-        {current && <p className="text-xs text-slate-500">نسخه فعال {current.version.toLocaleString("fa-IR")}</p>}
+        {current && (
+          <p className="text-xs text-[var(--sds-text-secondary)]">
+            نسخه فعال {current.version.toLocaleString("fa-IR")}
+          </p>
+        )}
       </div>
       <div className="grid gap-2 md:grid-cols-5">
-        <select className={field} value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })}>
+        <ErpSelect
+          className={field}
+          value={draft.type}
+          onChange={(event) => setDraft({ ...draft, type: event.target.value })}
+        >
           <option value="PROMISSORY_NOTE">سفته</option>
           <option value="CHEQUE">چک ضمانت</option>
           <option value="GUARANTEE">ضامن</option>
           <option value="UNDERTAKING">تعهدنامه</option>
           <option value="OTHER">سایر</option>
-        </select>
-        <input className={field} placeholder="مبلغ (ریال)" value={draft.amountRials} onChange={(event) => setDraft({ ...draft, amountRials: event.target.value })} />
-        <input className={field} placeholder="تعهد" value={draft.obligation} onChange={(event) => setDraft({ ...draft, obligation: event.target.value })} />
-        <input className={field} placeholder="زمان تحویل" value={draft.dueTiming} onChange={(event) => setDraft({ ...draft, dueTiming: event.target.value })} />
-        <input className={field} placeholder="توضیح قابل نمایش به متقاضی" value={draft.candidateExplanation} onChange={(event) => setDraft({ ...draft, candidateExplanation: event.target.value })} />
+        </ErpSelect>
+        <ErpInput
+          className={field}
+          placeholder="مبلغ (ریال)"
+          value={draft.amountRials}
+          onChange={(event) =>
+            setDraft({ ...draft, amountRials: event.target.value })
+          }
+        />
+        <ErpInput
+          className={field}
+          placeholder="تعهد"
+          value={draft.obligation}
+          onChange={(event) =>
+            setDraft({ ...draft, obligation: event.target.value })
+          }
+        />
+        <ErpInput
+          className={field}
+          placeholder="زمان تحویل"
+          value={draft.dueTiming}
+          onChange={(event) =>
+            setDraft({ ...draft, dueTiming: event.target.value })
+          }
+        />
+        <ErpInput
+          className={field}
+          placeholder="توضیح قابل نمایش به متقاضی"
+          value={draft.candidateExplanation}
+          onChange={(event) =>
+            setDraft({ ...draft, candidateExplanation: event.target.value })
+          }
+        />
       </div>
       <ErpButton
         label={current ? "ثبت نسخه جدید الزام وثیقه" : "ثبت الزام وثیقه"}
@@ -2980,8 +3222,11 @@ function CaseRecoveryPanel({
 }) {
   const [reason, setReason] = useState("");
   const [consent, setConsent] = useState({ method: "PHONE", at: "", note: "" });
-  const has = (...values: string[]) => values.some((value) => authorities.includes(value));
-  const authorized = (application.reopenings || []).some((item: any) => item.status === "AUTHORIZED");
+  const has = (...values: string[]) =>
+    values.some((value) => authorities.includes(value));
+  const authorized = (application.reopenings || []).some(
+    (item: any) => item.status === "AUTHORIZED",
+  );
   if (application.disposition) {
     const canReactivate =
       (application.disposition === "INITIAL_REJECTED" && has("HR_MANAGER")) ||
@@ -2989,10 +3234,26 @@ function CaseRecoveryPanel({
     return (
       <ErpSection title="فعال‌سازی مجدد پرونده متوقف‌شده">
         <ErpCard className="grid gap-2 p-4 md:grid-cols-3">
-          <p className="text-sm">برچسب فعلی: {hrDisplayLabel(application.disposition)}</p>
-          <input className={field} placeholder="دلیل فعال‌سازی مجدد" value={reason} onChange={(event) => setReason(event.target.value)} />
+          <p className="text-sm">
+            برچسب فعلی: {hrDisplayLabel(application.disposition)}
+          </p>
+          <ErpInput
+            className={field}
+            placeholder="دلیل فعال‌سازی مجدد"
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
           {canReactivate && (
-            <ErpButton label="فعال‌سازی مجدد" disabled={busy || !reason.trim()} onClick={() => run(() => hiringAPI.reactivateDisposition(applicationId, reason), "پرونده در همان مرحله دوباره فعال شد.")} />
+            <ErpButton
+              label="فعال‌سازی مجدد"
+              disabled={busy || !reason.trim()}
+              onClick={() =>
+                run(
+                  () => hiringAPI.reactivateDisposition(applicationId, reason),
+                  "پرونده در همان مرحله دوباره فعال شد.",
+                )
+              }
+            />
           )}
         </ErpCard>
       </ErpSection>
@@ -3004,33 +3265,84 @@ function CaseRecoveryPanel({
       description="پرونده استخدام‌شده هرگز بازگشایی نمی‌شود؛ استخدام قبلی یا لغوشده باید Application جدید بگیرد."
     >
       <ErpCard className="grid gap-2 p-4 md:grid-cols-3">
-        <input className={field} placeholder="دلیل بازگشایی" value={reason} onChange={(event) => setReason(event.target.value)} />
+        <ErpInput
+          className={field}
+          placeholder="دلیل بازگشایی"
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+        />
         {has("COMPANY_MANAGER") && !authorized && (
-          <ErpButton label="صدور مجوز مدیریت شرکت" disabled={busy || !reason.trim()} onClick={() => run(() => hiringAPI.authorizeReopening(applicationId, reason), "مجوز بازگشایی صادر شد.")} />
+          <ErpButton
+            label="صدور مجوز مدیریت شرکت"
+            disabled={busy || !reason.trim()}
+            onClick={() =>
+              run(
+                () => hiringAPI.authorizeReopening(applicationId, reason),
+                "مجوز بازگشایی صادر شد.",
+              )
+            }
+          />
         )}
-        {application.outcome === "WITHDRAWN" && has("HR_MANAGER") && authorized && (
-          <>
-            <select className={field} value={consent.method} onChange={(event) => setConsent({ ...consent, method: event.target.value })}>
-              <option value="PHONE">رضایت تلفنی</option>
-              <option value="IN_PERSON">رضایت حضوری</option>
-            </select>
-            <input className={field} type="datetime-local" value={consent.at} onChange={(event) => setConsent({ ...consent, at: event.target.value })} />
-            <input className={field} placeholder="شرح رضایت جدید متقاضی" value={consent.note} onChange={(event) => setConsent({ ...consent, note: event.target.value })} />
-          </>
-        )}
+        {application.outcome === "WITHDRAWN" &&
+          has("HR_MANAGER") &&
+          authorized && (
+            <>
+              <ErpSelect
+                className={field}
+                value={consent.method}
+                onChange={(event) =>
+                  setConsent({ ...consent, method: event.target.value })
+                }
+              >
+                <option value="PHONE">رضایت تلفنی</option>
+                <option value="IN_PERSON">رضایت حضوری</option>
+              </ErpSelect>
+              <ErpInput
+                className={field}
+                type="datetime-local"
+                value={consent.at}
+                onChange={(event) =>
+                  setConsent({ ...consent, at: event.target.value })
+                }
+              />
+              <ErpInput
+                className={field}
+                placeholder="شرح رضایت جدید متقاضی"
+                value={consent.note}
+                onChange={(event) =>
+                  setConsent({ ...consent, note: event.target.value })
+                }
+              />
+            </>
+          )}
         {has("HR_MANAGER") && authorized && (
           <ErpButton
             label="اجرای بازگشایی توسط مدیر HR"
             tone="success"
-            disabled={busy || !reason.trim() || (application.outcome === "WITHDRAWN" && (!consent.at || !consent.note.trim()))}
+            disabled={
+              busy ||
+              !reason.trim() ||
+              (application.outcome === "WITHDRAWN" &&
+                (!consent.at || !consent.note.trim()))
+            }
             onClick={() =>
               run(
-                () => hiringAPI.executeReopening(applicationId, {
-                  reason,
-                  candidateConsentMethod: application.outcome === "WITHDRAWN" ? consent.method : undefined,
-                  candidateConsentedAt: application.outcome === "WITHDRAWN" ? consent.at : undefined,
-                  candidateConsentNote: application.outcome === "WITHDRAWN" ? consent.note : undefined,
-                }),
+                () =>
+                  hiringAPI.executeReopening(applicationId, {
+                    reason,
+                    candidateConsentMethod:
+                      application.outcome === "WITHDRAWN"
+                        ? consent.method
+                        : undefined,
+                    candidateConsentedAt:
+                      application.outcome === "WITHDRAWN"
+                        ? consent.at
+                        : undefined,
+                    candidateConsentNote:
+                      application.outcome === "WITHDRAWN"
+                        ? consent.note
+                        : undefined,
+                  }),
                 "پرونده با حفظ شواهد در آخرین مرحله پیش از بسته‌شدن بازگشایی شد.",
               )
             }

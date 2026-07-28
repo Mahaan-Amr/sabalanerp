@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { FaBan, FaBuilding, FaCheckCircle, FaEdit, FaEnvelope, FaExclamationTriangle, FaEye, FaLock, FaMapMarkerAlt, FaPhone, FaPlus, FaUser, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpEmptyState, ErpFieldView, ErpListPage, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
@@ -237,10 +236,10 @@ export default function CustomersPage() {
       priority: 'primary',
       cell: (customer) => (
         <div>
-          <p className="font-semibold text-slate-900 dark:text-white">{customer.firstName} {customer.lastName}</p>
-          {customer.companyName && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{customer.companyName}</p>}
-          <p className="mt-1 text-xs text-purple-600 dark:text-purple-300">مسئول فروش: {getOwnerLabel(customer)}</p>
-          {customer.nationalCode && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">کد ملی: {customer.nationalCode}</p>}
+          <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{customer.firstName} {customer.lastName}</p>
+          {customer.companyName && <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{customer.companyName}</p>}
+          <p className="mt-1 text-xs text-[var(--sds-info)] dark:text-[var(--sds-info)]">مسئول فروش: {getOwnerLabel(customer)}</p>
+          {customer.nationalCode && <p className="mt-1 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-secondary)]">کد ملی: {customer.nationalCode}</p>}
         </div>
       ),
     },
@@ -262,7 +261,7 @@ export default function CustomersPage() {
       mobileLabel: 'تماس',
       priority: 'secondary',
       cell: (customer) => (
-        <div className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+        <div className="space-y-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
           {customer.primaryContact && (
             <p className="flex items-center gap-1"><FaUser className="h-3 w-3" />{customer.primaryContact.firstName} {customer.primaryContact.lastName}</p>
           )}
@@ -281,7 +280,7 @@ export default function CustomersPage() {
       mobileLabel: 'پروژه',
       priority: 'meta',
       cell: (customer) => (
-        <div className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+        <div className="space-y-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
           {customer.projectManagerName && <p className="flex items-center gap-1"><FaUser className="h-3 w-3" />مدیر پروژه: {customer.projectManagerName}</p>}
           {customer.projectAddresses.length > 0 && <p className="flex items-center gap-1"><FaMapMarkerAlt className="h-3 w-3" />{customer.projectAddresses.length.toLocaleString('fa-IR')} پروژه</p>}
           {customer.brandName && <p className="flex items-center gap-1"><FaBuilding className="h-3 w-3" />برند: {customer.brandName}</p>}
@@ -297,7 +296,7 @@ export default function CustomersPage() {
         <div className="flex flex-wrap gap-1.5">
           {customer.isBlacklisted && <ErpBadge tone="danger">بلک‌لیست</ErpBadge>}
           {customer.isLocked && <ErpBadge tone="warning">قفل‌شده</ErpBadge>}
-          {!customer.isBlacklisted && !customer.isLocked && <span className="text-xs text-slate-500 dark:text-slate-400">بدون محدودیت</span>}
+          {!customer.isBlacklisted && !customer.isLocked && <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">بدون محدودیت</span>}
         </div>
       ),
     },
@@ -416,12 +415,12 @@ export default function CustomersPage() {
           </div>
           {pagination.pages > 1 && (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-sm text-slate-500 dark:text-slate-400">
+              <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                 نمایش {(((pagination.page - 1) * pagination.limit) + 1).toLocaleString('fa-IR')} تا {Math.min(pagination.page * pagination.limit, pagination.total).toLocaleString('fa-IR')} از {pagination.total.toLocaleString('fa-IR')} مشتری
               </span>
               <div className="flex items-center gap-2">
                 <ErpButton label="قبلی" onClick={() => setPagination((prev) => ({ ...prev, page: prev.page - 1 }))} disabled={pagination.page === 1} tone="neutral" variant="outline" />
-                <span className="text-sm text-slate-500 dark:text-slate-400">
+                <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                   صفحه {pagination.page.toLocaleString('fa-IR')} از {pagination.pages.toLocaleString('fa-IR')}
                 </span>
                 <ErpButton label="بعدی" onClick={() => setPagination((prev) => ({ ...prev, page: prev.page + 1 }))} disabled={pagination.page === pagination.pages} tone="neutral" variant="outline" />

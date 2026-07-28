@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpSelect } from '@/components/erp';
 import { useCallback, useEffect, useState } from 'react';
 import {
   FaBalanceScale,
@@ -389,24 +389,24 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       ]}
     >
       {actionError && !deleteTarget && !voidTarget && !replacementTarget && !resolveTarget && !flagModalOpen && !correctionModalOpen && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+        <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-4 py-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {actionError}
         </div>
       )}
       <ErpSection title="خروجی چاپ قرارداد" description="نسخه مورد نیاز حسابداری را انتخاب کنید و سپس چاپ یا دانلود بگیرید.">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
             نسخه چاپ
-            <select
+            <ErpSelect
               value={salesPdfVariant}
               onChange={(event) => setSalesPdfVariant(event.target.value as SalesPdfVariant)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+              className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] shadow-sm outline-none transition focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
             >
               <option value="original">{salesPdfVariantLabels.original}</option>
               <option value="accounting">{salesPdfVariantLabels.accounting}</option>
               <option value="workshop">{salesPdfVariantLabels.workshop}</option>
               <option value="custom">{salesPdfVariantLabels.custom}</option>
-            </select>
+            </ErpSelect>
           </label>
           <div className="flex flex-wrap gap-2">
             <ErpButton
@@ -426,39 +426,39 @@ export default function AccountingContractDetailPage({ params }: { params: { con
           </div>
         </div>
         {salesPdfVariant === 'custom' && (
-          <div className="mt-4 space-y-4 rounded-xl border border-dashed border-teal-300 bg-teal-50/50 p-4 dark:border-teal-800 dark:bg-teal-950/20">
+          <div className="mt-4 space-y-4 rounded-xl border border-dashed border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)]">
             <div className="grid gap-3 md:grid-cols-2">
-              <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+              <label className="flex flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                 الگوی چاپ
-                <select
+                <ErpSelect
                   value={customPrintSettings.preset}
                   onChange={(event) => applyCustomPreset(event.target.value as CustomPrintPreset)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] shadow-sm outline-none transition focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
                 >
                   <option value="accounting">حسابداری</option>
                   <option value="workshop">کارگاه بدون قیمت</option>
                   <option value="detailed">جزئیات کامل</option>
                   <option value="summarized">خلاصه گروه‌بندی‌شده افزونه‌ها</option>
-                </select>
+                </ErpSelect>
               </label>
-              <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+              <label className="flex flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                 نمایش محصولات
-                <select
+                <ErpSelect
                   value={customPrintSettings.productRowsMode}
                   onChange={(event) => setCustomPrintSettings((current) => ({
                     ...current,
                     productRowsMode: event.target.value as CustomProductRowsMode,
                   }))}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] shadow-sm outline-none transition focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
                 >
                   <option value="detailed">جزئیات کامل</option>
                   <option value="summarized">ردیف‌های خلاصه افزونه‌ها</option>
-                </select>
+                </ErpSelect>
               </label>
             </div>
 
             <div>
-              <p className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-200">بخش‌ها</p>
+              <p className="mb-2 text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">بخش‌ها</p>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 {[
                   ['showCustomerSection', 'مشخصات مشتری'],
@@ -470,8 +470,8 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                   ['showTotals', 'جمع‌ها و تخفیف'],
                   ['showNotes', 'توضیحات'],
                 ].map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-                    <input
+                  <label key={key} className="flex items-center gap-2 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]">
+                    <ErpInput
                       type="checkbox"
                       checked={Boolean(customPrintSettings[key as keyof CustomPrintSettings])}
                       onChange={(event) => setCustomPrintSettings((current) => ({
@@ -486,7 +486,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
             </div>
 
             <div>
-              <p className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-200">ستون‌های جدول محصولات</p>
+              <p className="mb-2 text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">ستون‌های جدول محصولات</p>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                 {[
                   ['index', 'ردیف'],
@@ -500,8 +500,8 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                   ['rate', 'نرخ'],
                   ['total', 'مبلغ کل'],
                 ].map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-                    <input
+                  <label key={key} className="flex items-center gap-2 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]">
+                    <ErpInput
                       type="checkbox"
                       checked={customPrintSettings.columns[key as keyof CustomPrintSettings['columns']]}
                       onChange={(event) => setCustomPrintSettings((current) => ({
@@ -541,7 +541,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
             </ErpSection>
 
             {replacementWorkflow && (
-              <ErpSection title="راهنمای جایگزینی رکورد مالی">
+              <ErpSection title="جایگزینی رکورد مالی">
                 <div className="space-y-4">
                   <ErpSummaryGrid
                     columns={3}
@@ -553,7 +553,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                   />
 
                   {!replacementWorkflow.amountChanged ? (
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100">
+                    <div className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
                       مبلغ تایید شده با مبلغ اصلاح‌شده برابر است. پس از بررسی مدیریتی، اصلاح را با یادداشت بستن ثبت کنید.
                     </div>
                   ) : (
@@ -586,7 +586,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                       </div>
 
                       {replacementWorkflow.blockingReasons?.length > 0 && (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                        <div className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 text-sm text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
                           {replacementWorkflow.blockingReasons.join('، ')}
                         </div>
                       )}
@@ -616,9 +616,9 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                       </div>
 
                       {replacementWorkflow.canApproveReplacement && replacementRecord && (
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                        <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
                           {actionError && (
-                            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+                            <div className="mb-3 rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-3 py-2 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
                               {actionError}
                             </div>
                           )}
@@ -647,7 +647,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                   />
                 ))}
                 {(!source.items || source.items.length === 0) && (
-                  <p className="text-sm text-slate-500 dark:text-slate-400">قلمی برای قرارداد ثبت نشده است.</p>
+                  <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">قلمی برای قرارداد ثبت نشده است.</p>
                 )}
               </div>
             </ErpSection>
@@ -669,7 +669,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     footer={record.kind === 'INVOICE_CANDIDATE' ? (
                       <div className="space-y-3">
                         {(contract.accounting.openCorrections > 0 || contract.accounting.openBlockerFlags > 0) && !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status) ? (
-                          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+                          <div className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 text-sm text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
                             ابتدا درخواست‌های اصلاح و پرچم‌های مسدودکننده باز را بررسی و ببندید؛ سپس تایید مالی انجام می‌شود.
                           </div>
                         ) : (
@@ -696,7 +696,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                   />
                 ))}
                 {(!data.financialRecords || data.financialRecords.length === 0) && (
-                  <p className="text-sm text-slate-500 dark:text-slate-400">هنوز رکورد مالی برای این قرارداد ایجاد نشده است.</p>
+                  <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">هنوز رکورد مالی برای این قرارداد ایجاد نشده است.</p>
                 )}
               </div>
             </ErpSection>
@@ -788,7 +788,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     status={<StatusBadge status={item.submissionStatus} />}
                   />
                 ))}
-                {(!data.tax || data.tax.length === 0) && <p className="text-sm text-slate-500 dark:text-slate-400">پرونده مالیاتی هنوز ایجاد نشده است.</p>}
+                {(!data.tax || data.tax.length === 0) && <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">پرونده مالیاتی هنوز ایجاد نشده است.</p>}
               </div>
             </ErpSection>
 

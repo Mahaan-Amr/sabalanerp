@@ -1,5 +1,4 @@
 'use client';
-
 import { ErpBadge } from '@/components/erp';
 
 export const statusLabels: Record<string, string> = {
@@ -53,6 +52,6 @@ export const loadingDriversName = (loading: any) => {
 };
 
 export const inputClass =
-  'min-h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
+  'min-h-11 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3 py-2 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
 
-export const labelClass = 'block text-xs font-semibold text-slate-500 dark:text-slate-400';
+export const labelClass = 'block text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]';

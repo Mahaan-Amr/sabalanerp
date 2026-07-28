@@ -37,6 +37,7 @@ import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import StoneCanvas from '@/components/StoneCanvas';
+import { ErpInput, ErpInlineState, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 
 // Import new step components
 import { Step1ContractDate } from '@/features/contract-creation/components/steps/Step1ContractDate';
@@ -74,7 +75,7 @@ const CanonicalStairLayerSummary = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="border-y border-slate-200 py-2 dark:border-slate-700">
+      <div className="border-y border-[var(--sds-border-default)] py-2 dark:border-[var(--sds-border-subtle)]">
         <ReservedRowsSkeleton rows={6} />
       </div>
     )
@@ -2165,23 +2166,23 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const serviceTypeMeta: Record<'tool' | 'layer' | 'cut' | 'finishing', { label: string; badgeClass: string; chipClass: string }> = {
     tool: {
       label: 'ابزار',
-      badgeClass: 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-200',
-      chipClass: 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-200 border border-amber-200 dark:border-amber-800'
+      badgeClass: 'bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-warning-surface)] text-[var(--sds-warning)] dark:text-[var(--sds-warning)]',
+      chipClass: 'bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-warning-surface)] text-[var(--sds-warning)] dark:text-[var(--sds-warning)] border border-[var(--sds-warning-border)] dark:border-[var(--sds-warning-border)]'
     },
     layer: {
       label: 'لایه',
-      badgeClass: 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-200',
-      chipClass: 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-200 border border-purple-200 dark:border-purple-800'
+      badgeClass: 'bg-[var(--sds-purple-surface)] dark:bg-[var(--sds-purple-surface)] text-[var(--sds-purple)] dark:text-[var(--sds-purple)]',
+      chipClass: 'bg-[var(--sds-purple-surface)] dark:bg-[var(--sds-purple-surface)] text-[var(--sds-purple)] dark:text-[var(--sds-purple)] border border-[var(--sds-purple-border)] dark:border-[var(--sds-purple-border)]'
     },
     cut: {
       label: 'برش',
-      badgeClass: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
-      chipClass: 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-800'
+      badgeClass: 'bg-[var(--sds-info-surface)] text-[var(--sds-info)] dark:bg-[var(--sds-info-surface)] dark:text-[var(--sds-info)]',
+      chipClass: 'bg-[var(--sds-info-surface)] dark:bg-[var(--sds-info-surface)] text-[var(--sds-info)] dark:text-[var(--sds-info)] border border-[var(--sds-info-border)] dark:border-[var(--sds-info-border)]'
     },
     finishing: {
       label: 'پرداخت',
-      badgeClass: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-200',
-      chipClass: 'bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-200 border border-teal-200 dark:border-teal-700'
+      badgeClass: 'bg-[var(--sds-accent-soft)] text-[var(--sds-accent)] dark:bg-[var(--sds-accent-soft)] dark:text-[var(--sds-accent)]',
+      chipClass: 'bg-[var(--sds-accent-soft)] dark:bg-[var(--sds-accent-soft)] text-[var(--sds-accent)] dark:text-[var(--sds-accent)] border border-[var(--sds-accent)] dark:border-[var(--sds-accent)]'
     }
   };
 
@@ -5885,29 +5886,73 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setShowProductModal(false);
   };
 
+  const requestCloseStairConfigurationRef = useRef(requestCloseStairConfiguration);
+  requestCloseStairConfigurationRef.current = requestCloseStairConfiguration;
+  const stairDialogRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (
+      editRecoveryBlocked ||
+      !showProductModal ||
+      productConfig.productType !== 'stair'
+    ) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const selector = 'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+    const focusTimer = window.setTimeout(() => {
+      stairDialogRef.current?.querySelector<HTMLElement>(selector)?.focus();
+    }, 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      const focusable = Array.from(
+        stairDialogRef.current?.querySelectorAll<HTMLElement>(selector) ?? []
+      );
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        requestCloseStairConfigurationRef.current();
+      } else if (event.key === 'Tab' && focusable.length > 0) {
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [editRecoveryBlocked, productConfig.productType, showProductModal]);
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 py-4 sm:py-8 relative z-0">
+    <main className="sds-workspace relative z-0 min-h-screen py-4 sm:py-8">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 relative z-0">
-        {/* Header */}
-        <div className="text-center mb-5 sm:mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white mb-2">
-            ایجاد قرارداد جدید
+        <div className="mb-5 sm:mb-8">
+          <h1 className="sds-text-primary text-2xl font-bold sm:text-3xl">
+            {isContractEditMode
+              ? 'ویرایش قرارداد'
+              : isCollaborationContract
+                ? 'قرارداد همکاری در فروش'
+                : 'ایجاد قرارداد'}
           </h1>
-          <p className="text-gray-600 dark:text-gray-300">
-            مراحل ایجاد قرارداد را تکمیل کنید
-          </p>
         </div>
 
         {editRecovery.blocked && (
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-y border-amber-300 py-3 text-sm text-amber-900 dark:border-amber-800 dark:text-amber-100">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-y border-[var(--sds-warning-border)] py-3 text-sm text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:text-[var(--sds-warning)]">
             <span>این قرارداد در محل دیگری در حال ویرایش است</span>
-            <button
+            <ErpPressable
               type="button"
               onClick={() => void handleEditRecoveryTakeover()}
-              className="font-semibold text-teal-700 dark:text-teal-300"
+              className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"
             >
               ادامه ویرایش در اینجا
-            </button>
+            </ErpPressable>
           </div>
         )}
 
@@ -5929,7 +5974,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         />
 
         {/* Step Content */}
-        <div className="glass-liquid-card step-content-card p-4 sm:p-6 lg:p-8 mb-6 sm:mb-8 relative z-0">
+        <div className="sds-workspace-surface step-content-card p-4 sm:p-6 lg:p-8 mb-6 sm:mb-8 relative z-0">
           {renderStepContent()}
         </div>
 
@@ -5956,37 +6001,43 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
         {/* Error Display */}
         {errors.general && (
-          <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-            <p className="text-red-600 dark:text-red-400">{errors.general}</p>
-          </div>
+          <ErpInlineState kind="error" title={errors.general} />
         )}
 
         {/* Product Configuration Modal */}
         {!editRecoveryBlocked && showProductModal && productConfig.productType === 'stair' && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/55 p-3">
-            <div className="stair-v2-modal flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 z-[10000]">
-              <div className="stair-v2-header flex min-h-14 flex-shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-950">
-                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--sds-surface-overlay)] p-3">
+            <div
+              ref={stairDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="stair-product-dialog-title"
+              className="stair-v2-modal z-[10000] flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] shadow-[var(--sds-shadow-raised)]"
+            >
+              <div className="stair-v2-header flex min-h-14 flex-shrink-0 items-center justify-between border-b border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4 dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
+                <h3 id="stair-product-dialog-title" className="text-base font-bold text-[var(--sds-text-primary)]">
                   تنظیمات محصول
                 </h3>
-                <button
-                  className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg p-2 transition-colors"
+                <ErpPressable
+                  type="button"
+                  aria-label="بستن"
+                  className="text-[var(--sds-text-muted)] hover:text-[var(--sds-text-secondary)] dark:hover:text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-subtle)] rounded-lg p-2 transition-colors"
                   onClick={requestCloseStairConfiguration}
                   title="بستن"
                 >
                   <FaTimes className="w-5 h-5" />
-                </button>
+                </ErpPressable>
               </div>
 
               {/* Product family is fixed for the lifetime of this modal. */}
-              <div className="stair-v2-type-selector flex-shrink-0 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-slate-950">
+              <div className="stair-v2-type-selector flex-shrink-0 border-b border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4 py-2 dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
                 <div className="flex min-h-8 items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-600 dark:text-slate-300">نوع محصول</span>
-                  <span className="text-slate-900 dark:text-slate-100">پله</span>
+                  <span className="font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">نوع محصول</span>
+                  <span className="text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">پله</span>
                 </div>
               </div>
 
-              <div className="stair-v2-body min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white dark:bg-slate-950">
+              <div className="stair-v2-body min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)]">
                 <div className="p-6 space-y-6">
                   {!isEditMode && (
                     <StairQuantityModeSection
@@ -5997,7 +6048,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   <div
                     data-stair-active-part
                     tabIndex={-1}
-                    className="border-b border-slate-200 py-3 outline-none dark:border-slate-700"
+                    className="border-b border-[var(--sds-border-default)] py-3 outline-none dark:border-[var(--sds-border-subtle)]"
                   >
                     <CompactSegmentedControl
                       label="انتخاب بخش پله"
@@ -6137,7 +6188,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         <div
                           id="stair-calculation-summary"
                           tabIndex={-1}
-                          className="border-y border-red-200 py-2 text-xs text-red-600 dark:border-red-900 dark:text-red-300"
+                          className="border-y border-[var(--sds-danger-border)] py-2 text-xs text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:text-[var(--sds-danger)]"
                           role="alert"
                         >
                           {totals.canonicalCalculation.conflicts.map((conflict) => (
@@ -6152,9 +6203,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         </div>
                       )}
                       {/* Input Fields Section - Enhanced */}
-                      <div className="border-b border-gray-200 py-3 dark:border-gray-700">
+                      <div className="border-b border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
                         {draft.stoneProduct && (
-                          <div className="mb-3 border-y border-slate-100 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-300">
+                          <div className="mb-3 border-y border-[var(--sds-border-subtle)] py-2 text-xs text-[var(--sds-text-muted)] dark:border-[var(--sds-border-subtle)] dark:text-[var(--sds-text-secondary)]">
                             {draft.stoneProduct.namePersian}
                             {draft.stoneProduct.widthValue
                               ? ` · عرض مادر ${formatDisplayNumber(draft.stoneProduct.widthValue)}cm`
@@ -6164,62 +6215,62 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               : ''}
                           </div>
                         )}
-                        <label className="mb-4 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        <label className="mb-4 block text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                           عنوان محصول
-                          <input
+                          <ErpInput
                             value={draft.contractualTitle || ''}
                             onChange={(event) => setDraft({
                               ...draft,
                               contractualTitle: event.target.value
                             })}
-                            className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-transparent px-3 text-sm font-normal outline-none focus:border-teal-500 dark:border-slate-600"
+                            className="mt-1 h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm font-normal outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-default)]"
                           />
                         </label>
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                           <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                               نوع سنگ
                             </label>
                             <div className="relative">
-                              <input
+                              <ErpInput
                                 name="stone"
-                                className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-gray-800 transition-all focus:border-teal-500 focus:outline-none dark:border-gray-600 dark:text-white"
+                                className="w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 py-2 text-[var(--sds-text-primary)] transition-all focus:border-[var(--sds-accent)] focus:outline-none dark:border-[var(--sds-border-default)] dark:text-[var(--sds-text-inverse)]"
                                 value={stairSystemV2.stoneSearchTerm}
                                 onChange={(e) => stairSystemV2.setStoneSearchTerm(e.target.value)}
                               />
                             </div>
                             {stairSystemV2.stoneSearchTerm &&
                               stairSystemV2.stoneSearchTerm !== draft.stoneLabel && (
-                              <div className="mt-2 max-h-48 divide-y divide-gray-100 overflow-auto border-y border-gray-200 bg-white dark:divide-gray-700 dark:border-gray-700 dark:bg-gray-800">
+                              <div className="mt-2 max-h-48 divide-y divide-[var(--sds-border-subtle)] overflow-auto border-y border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] dark:divide-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
                                 {stairSystemV2.isSearchingStones && (
-                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">
+                                  <div className="p-3 text-center text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                     <span className="animate-pulse">در حال جستجو...</span>
                                   </div>
                                 )}
                                 {!stairSystemV2.isSearchingStones && stairSystemV2.stoneSearchResults.length === 0 && (
-                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">نتیجه‌ای یافت نشد</div>
+                                  <div className="p-3 text-center text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">نتیجه‌ای یافت نشد</div>
                                 )}
                                 {stairSystemV2.stoneSearchResults.map((p: Product) => (
-                                  <button
+                                  <ErpPressable
                                     key={p.id}
                                     type="button"
-                                    className="w-full text-right px-4 py-2.5 hover:bg-teal-50 dark:hover:bg-teal-900/20 text-sm border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors"
+                                    className="w-full text-right px-4 py-2.5 hover:bg-[var(--sds-accent-soft)] dark:hover:bg-[var(--sds-accent-soft)] text-sm border-b border-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)] last:border-0 transition-colors"
                                     onClick={() => {
                                       selectProductForStairPart(stairSystemV2.stairActivePart, p);
                                     }}
                                   >
                                     {/* 🎯 Show complete product name using generateFullProductName */}
-                                    <div className="font-medium text-gray-800 dark:text-white">
+                                    <div className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                                       {p.fullName || generateFullProductName(p) || p.namePersian || p.name}
                                     </div>
-                                  </button>
+                                  </ErpPressable>
                                 ))}
                               </div>
                             )}
                           </div>
 
                           <div>
-                            <label className="mb-2 flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                            <label className="mb-2 flex items-center justify-between text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                               <span>طول</span>
                               <CompactUnitSwitch
                                 label="واحد طول"
@@ -6259,10 +6310,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             }}
                                 min={0}
                                 step={0.01}
-                                className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                                className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                               />
                             <div className="mt-3">
-                              <label className="mb-2 flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                              <label className="mb-2 flex items-center justify-between text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                 <span>طول مادر</span>
                                 <CompactUnitSwitch
                                   label="واحد طول مادر"
@@ -6329,21 +6380,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 }}
                                 min={0}
                                 step={0.01}
-                                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2.5 text-gray-800 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-700/50 dark:text-white"
+                                className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-2.5 text-[var(--sds-text-primary)] transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-inverse)]"
                               />
                               {draftErrors.motherLength && (
-                                <p className="mt-1 text-xs text-red-500">
+                                <p className="mt-1 text-xs text-[var(--sds-danger)]">
                                   {draftErrors.motherLength}
                                 </p>
                               )}
                             </div>
                           {draftErrors.length && (
-                            <p className="mt-1 text-xs text-red-500">{draftErrors.length}</p>
+                            <p className="mt-1 text-xs text-[var(--sds-danger)]">{draftErrors.length}</p>
                           )}
                           </div>
 
                           <div>
-                            <label className="mb-2 flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-300">
+                            <label className="mb-2 flex items-center justify-between text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                               <span>
                                 {stairSystemV2.stairActivePart === 'tread'
                                   ? 'عمق'
@@ -6404,15 +6455,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             }}
                               min={0}
                               step={0.1}
-                              className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                             />
                           {draftErrors.width && (
-                            <p className="mt-1 text-xs text-red-500">{draftErrors.width}</p>
+                            <p className="mt-1 text-xs text-[var(--sds-danger)]">{draftErrors.width}</p>
                           )}
                           </div>
 
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                               تعداد
                             </label>
                             <FormattedNumberInput
@@ -6445,15 +6496,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             }}
                               min={1}
                               step={1}
-                              className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                             />
                           {draftErrors.quantity && (
-                            <p className="mt-1 text-xs text-red-500">{draftErrors.quantity}</p>
+                            <p className="mt-1 text-xs text-[var(--sds-danger)]">{draftErrors.quantity}</p>
                           )}
                           </div>
                           {draft.stoneProduct && totals.piecesPerStone > 0 && totals.baseStoneQuantity > 0 && (
                             <div className="md:col-span-2">
-                              <div className="mt-2 border-y border-slate-100 py-2 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                              <div className="mt-2 border-y border-[var(--sds-border-subtle)] py-2 text-xs leading-5 text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-subtle)] dark:text-[var(--sds-text-secondary)]">
                                 <div>
                                   ظرفیت برش هر سنگ: تا {formatDisplayNumber(totals.piecesPerStone)} قطعه با عرض {formatDisplayNumber(draft.widthCm ?? 0)} سانتی‌متر.
                                 </div>
@@ -6467,9 +6518,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             </div>
                           )}
 
-                          <div className="md:col-span-2 divide-y divide-slate-100 border-y border-slate-100 text-sm dark:divide-slate-700 dark:border-slate-700">
+                          <div className="md:col-span-2 divide-y divide-[var(--sds-border-subtle)] border-y border-[var(--sds-border-subtle)] text-sm dark:divide-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)]">
                             <div className="flex min-h-10 items-center justify-between">
-                              <span className="text-slate-500 dark:text-slate-400">
+                              <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                 محصول نهایی
                               </span>
                               <strong>
@@ -6481,7 +6532,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </strong>
                             </div>
                             <div className="flex min-h-10 items-center justify-between">
-                              <span className="text-slate-500 dark:text-slate-400">
+                              <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                 سنگ مادر مصرفی
                               </span>
                               <strong>
@@ -6491,7 +6542,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </strong>
                             </div>
                             <div className="flex min-h-10 items-center justify-between">
-                              <span className="text-slate-500 dark:text-slate-400">
+                              <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                 باقی‌مانده پرداخت‌شده
                               </span>
                               <strong>
@@ -6501,7 +6552,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </strong>
                             </div>
                             <div className="flex min-h-10 items-center justify-between">
-                              <span className="text-slate-500 dark:text-slate-400">
+                              <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                 مبلغ ماده
                               </span>
                               <strong>
@@ -6513,7 +6564,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           </div>
 
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            <label className="block text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                               {stairSystemV2.stairActivePart === 'tread'
                                 ? 'فی کف پله'
                                 : stairSystemV2.stairActivePart === 'riser'
@@ -6539,14 +6590,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             }}
                               min={0}
                               step={1000}
-                              className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                             />
                           {draftErrors.pricePerSquareMeter && (
-                            <p className="mt-1 text-xs text-red-500">{draftErrors.pricePerSquareMeter}</p>
+                            <p className="mt-1 text-xs text-[var(--sds-danger)]">{draftErrors.pricePerSquareMeter}</p>
                           )}
                           </div>
                           {supportsMandatory && (
-                            <div className="md:col-span-2 border-y border-slate-100 py-2 dark:border-slate-700">
+                            <div className="md:col-span-2 border-y border-[var(--sds-border-subtle)] py-2 dark:border-[var(--sds-border-subtle)]">
                               <div className="flex items-center gap-2">
                                 <CompactSwitch
                                   label="حکمی"
@@ -6563,7 +6614,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     setDraft(updatedDraft);
                                   }}
                                 />
-                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                <span className="text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                   حکمی
                                 </span>
                               </div>
@@ -6588,13 +6639,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     min={0}
                                     max={100}
                                     step={1}
-                                    className="w-24 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-sm"
+                                    className="w-24 rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent text-sm"
                                   />
-                                  <span className="text-xs text-gray-600 dark:text-gray-300">%</span>
+                                  <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">%</span>
                                 </div>
                               )}
                               {draftErrors.mandatoryPercentage && (
-                                <p className="mt-1 text-xs text-red-500">
+                                <p className="mt-1 text-xs text-[var(--sds-danger)]">
                                   {draftErrors.mandatoryPercentage}
                                 </p>
                               )}
@@ -6602,7 +6653,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           )}
                           {totals.billableCuttingCost > 0 && (
                             <div className="md:col-span-2">
-                              <div className="mt-2 border-y border-slate-100 py-2 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                              <div className="mt-2 border-y border-[var(--sds-border-subtle)] py-2 text-xs leading-5 text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-subtle)] dark:text-[var(--sds-text-secondary)]">
                                 {totals.billableCuttingCostLongitudinal > 0 && (
                                   <div>
                                     هزینه برش طولی: {formatPrice(totals.billableCuttingCostLongitudinal)} ({formatDisplayNumber(totals.cuttingMetersLongitudinal || (lengthMInfo * totals.baseStoneQuantity))} m × {formatPrice(totals.shouldChargeCuttingCost ? (totals.cuttingCostPerMeterLongitudinal || totals.cuttingCostPerMeter) : 0)})
@@ -6624,8 +6675,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         </div>
                       </div>
 
-                      <div className="border-b border-gray-200 py-3 dark:border-gray-700">
-                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+                      <div className="border-b border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
+                        <label className="block text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                           توضیحات
                         <AutoGrowingDescription
                           value={draft.description || ''}
@@ -6692,41 +6743,41 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
                       {/* Tools Section - Enhanced */}
                       {false && (
-                      <div id="stair-tools-section" className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
+                      <div id="stair-tools-section" className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)] p-5 shadow-sm">
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-2">
-                            <div className="w-1 h-5 bg-gradient-to-b from-purple-500 to-purple-600 rounded-full"></div>
-                            <h5 className="text-sm font-semibold text-gray-800 dark:text-white">ابزارها (بر متر)</h5>
+                            <div className="w-1 h-5 bg-gradient-to-b from-[var(--sds-purple)] to-[var(--sds-purple-surface)] rounded-full"></div>
+                            <h5 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">ابزارها (بر متر)</h5>
                           </div>
                           {stairSystemV2.stairActivePart === 'landing' && (
-                            <span className="text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded">مدل لبه پاگرد: محیط/جهت‌ها</span>
+                            <span className="text-xs text-[var(--sds-purple)] dark:text-[var(--sds-purple)] bg-[var(--sds-purple-surface)] dark:bg-[var(--sds-purple-surface)] px-2 py-1 rounded">مدل لبه پاگرد: محیط/جهت‌ها</span>
                           )}
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">افزودن ابزار</label>
-                            <input
-                              className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                            <label className="block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">افزودن ابزار</label>
+                            <ErpInput
+                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                               value={stairSystemV2.toolsSearchTerm}
                               onChange={(e) => stairSystemV2.setToolsSearchTerm(e.target.value)}
                               onFocus={() => stairSystemV2.setToolsDropdownOpen(true)}
                               onBlur={() => setTimeout(() => stairSystemV2.setToolsDropdownOpen(false), 150)}
                             />
                             {(stairSystemV2.toolsDropdownOpen || stairSystemV2.toolsSearchTerm) && (
-                              <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
+                              <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)] bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] shadow-lg">
                                 {stairSystemV2.isSearchingTools && (
-                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">
+                                  <div className="p-3 text-center text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                     <span className="animate-pulse">در حال جستجو...</span>
                                   </div>
                                 )}
                                 {!stairSystemV2.isSearchingTools && stairSystemV2.toolsResults.length === 0 && (
-                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">نتیجه‌ای یافت نشد</div>
+                                  <div className="p-3 text-center text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">نتیجه‌ای یافت نشد</div>
                                 )}
                                 {stairSystemV2.toolsResults.map((t: any) => (
-                                  <button
+                                  <ErpPressable
                                     key={t.id}
                                     type="button"
-                                    className="w-full text-right px-4 py-2.5 hover:bg-purple-50 dark:hover:bg-purple-900/20 text-sm border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors"
+                                    className="w-full text-right px-4 py-2.5 hover:bg-[var(--sds-purple-surface)] dark:hover:bg-[var(--sds-purple-surface)] text-sm border-b border-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)] last:border-0 transition-colors"
                                     onClick={() => {
                                       setDraft({
                                         ...draft,
@@ -6753,23 +6804,23 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       stairSystemV2.setToolsDropdownOpen(false);
                                     }}
                                   >
-                                    <div className="font-medium text-gray-800 dark:text-white">{t.namePersian || t.name}</div>
+                                    <div className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">{t.namePersian || t.name}</div>
                                     {(t.pricePerMeter || t.price || t.costPerMeter) && (
-                                      <div className="text-xs text-purple-600 dark:text-purple-400 mt-0.5">
+                                      <div className="text-xs text-[var(--sds-purple)] dark:text-[var(--sds-purple)] mt-0.5">
                                         {formatPrice(t.pricePerMeter || t.price || t.costPerMeter)}/m
                                       </div>
                                     )}
-                                  </button>
+                                  </ErpPressable>
                                 ))}
                               </div>
                             )}
                           </div>
 
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">ابزارهای انتخاب شده و لبه‌ها</label>
+                            <label className="block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">ابزارهای انتخاب شده و لبه‌ها</label>
                             {(draft.tools || []).length === 0 ? (
-                              <div className="text-center py-8 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
-                                <p className="text-xs text-gray-400 dark:text-gray-500">ابزاری انتخاب نشده است.</p>
+                              <div className="text-center py-8 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-dashed border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]">
+                                <p className="text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">ابزاری انتخاب نشده است.</p>
                               </div>
                             ) : (
                               <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -6777,17 +6828,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   const meters = computeToolMetersForTool(stairSystemV2.stairActivePart, draft, tool);
                                   const tp = meters * (tool.pricePerMeter || 0);
                                   return (
-                                    <div key={tool.selectionId || `${tool.toolId}:${idx}`} className="p-3 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 shadow-sm">
+                                    <div key={tool.selectionId || `${tool.toolId}:${idx}`} className="p-3 rounded-lg border border-[var(--sds-purple-border)] dark:border-[var(--sds-purple-border)] bg-[var(--sds-purple-surface)] dark:bg-[var(--sds-purple-surface)] shadow-sm">
                                       <div className="flex items-center justify-between mb-3">
-                                        <div className="font-medium text-purple-800 dark:text-purple-200 text-sm">{tool.name}</div>
+                                        <div className="font-medium text-[var(--sds-purple)] dark:text-[var(--sds-purple)] text-sm">{tool.name}</div>
                                         <div className="flex items-center gap-2 text-xs">
-                                          <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded font-medium">
+                                          <span className="px-2 py-1 bg-[var(--sds-purple-surface)] dark:bg-[var(--sds-purple-surface)] text-[var(--sds-purple)] dark:text-[var(--sds-purple)] rounded font-medium">
                                             {formatDisplayNumber(meters)} {tool.calculationBase === 'squareMeters' ? 'm²' : 'm'}
                                           </span>
-                                          <span className="font-semibold text-purple-600 dark:text-purple-400">{formatPrice(tp)}</span>
-                                          <button
+                                          <span className="font-semibold text-[var(--sds-purple)] dark:text-[var(--sds-purple)]">{formatPrice(tp)}</span>
+                                          <ErpPressable
                                             type="button"
-                                            className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 px-2 py-1 rounded transition-colors"
+                                            className="text-[var(--sds-danger)] hover:text-[var(--sds-danger)] hover:bg-[var(--sds-danger-surface)] dark:hover:bg-[var(--sds-danger-surface)] px-2 py-1 rounded transition-colors"
                                             onClick={() => {
                                               const tools = (draft.tools || []).filter((_, i) => i !== idx);
                                               setDraft({ ...draft, tools });
@@ -6795,12 +6846,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                             title="حذف ابزار"
                                           >
                                             <FaTrash className="w-3 h-3" />
-                                          </button>
+                                          </ErpPressable>
                                         </div>
                                       </div>
-                                      <label className="mb-2 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                                      <label className="mb-2 flex items-center gap-2 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                         <span>تعداد قطعات</span>
-                                        <input
+                                        <ErpInput
                                           value={tool.coveredQuantity ?? draft.quantity ?? ''}
                                           onChange={(event) => {
                                             const value = Number(event.target.value);
@@ -6814,18 +6865,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                             setDraft({ ...draft, tools });
                                           }}
                                           inputMode="numeric"
-                                          className="h-8 w-20 rounded-md border border-slate-300 bg-transparent px-2 dark:border-slate-700"
+                                          className="h-8 w-20 rounded-md border border-[var(--sds-border-default)] bg-transparent px-2 dark:border-[var(--sds-border-subtle)]"
                                         />
                                       </label>
                                       {(tool.coveredQuantity || 0) > Number(draft.quantity || 0) && (
-                                        <div className="mb-2 text-[11px] text-red-600">
+                                        <div className="mb-2 text-[11px] text-[var(--sds-danger)]">
                                           تعداد تحت عملیات از تعداد محصول بیشتر است
                                         </div>
                                       )}
                                       {tool.calculationBase !== 'squareMeters' && (
                                       <div className="flex flex-wrap gap-2 text-xs">
-                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
-                                            <input
+                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded border border-[var(--sds-purple-border)] dark:border-[var(--sds-purple-border)] cursor-pointer hover:bg-[var(--sds-purple-surface)] dark:hover:bg-[var(--sds-purple-surface)] transition-colors">
+                                            <ErpInput
                                               type="checkbox"
                                               checked={!!tool.perimeter}
                                               onChange={(e) => {
@@ -6833,12 +6884,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                 tools[idx] = { ...tool, perimeter: e.target.checked };
                                                 setDraft({ ...draft, tools });
                                               }}
-                                              className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                              className="rounded border-[var(--sds-border-default)] text-[var(--sds-purple)] focus:ring-[var(--sds-focus-ring)]"
                                             />
-                                            <span className="text-gray-700 dark:text-gray-300">محیط کامل</span>
+                                            <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">محیط کامل</span>
                                         </label>
-                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
-                                          <input
+                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded border border-[var(--sds-purple-border)] dark:border-[var(--sds-purple-border)] cursor-pointer hover:bg-[var(--sds-purple-surface)] dark:hover:bg-[var(--sds-purple-surface)] transition-colors">
+                                          <ErpInput
                                             type="checkbox"
                                             checked={!!tool.front}
                                             onChange={(e) => {
@@ -6846,12 +6897,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                               tools[idx] = { ...tool, front: e.target.checked };
                                               setDraft({ ...draft, tools });
                                             }}
-                                            className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                            className="rounded border-[var(--sds-border-default)] text-[var(--sds-purple)] focus:ring-[var(--sds-focus-ring)]"
                                           />
-                                          <span className="text-gray-700 dark:text-gray-300">جلو</span>
+                                          <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">جلو</span>
                                         </label>
-                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
-                                            <input
+                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded border border-[var(--sds-purple-border)] dark:border-[var(--sds-purple-border)] cursor-pointer hover:bg-[var(--sds-purple-surface)] dark:hover:bg-[var(--sds-purple-surface)] transition-colors">
+                                            <ErpInput
                                               type="checkbox"
                                               checked={!!tool.back}
                                               onChange={(e) => {
@@ -6859,12 +6910,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                 tools[idx] = { ...tool, back: e.target.checked };
                                                 setDraft({ ...draft, tools });
                                               }}
-                                              className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                              className="rounded border-[var(--sds-border-default)] text-[var(--sds-purple)] focus:ring-[var(--sds-focus-ring)]"
                                             />
-                                            <span className="text-gray-700 dark:text-gray-300">عقب</span>
+                                            <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">عقب</span>
                                         </label>
-                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
-                                          <input
+                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded border border-[var(--sds-purple-border)] dark:border-[var(--sds-purple-border)] cursor-pointer hover:bg-[var(--sds-purple-surface)] dark:hover:bg-[var(--sds-purple-surface)] transition-colors">
+                                          <ErpInput
                                             type="checkbox"
                                             checked={!!tool.left}
                                             onChange={(e) => {
@@ -6872,12 +6923,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                               tools[idx] = { ...tool, left: e.target.checked };
                                               setDraft({ ...draft, tools });
                                             }}
-                                            className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                            className="rounded border-[var(--sds-border-default)] text-[var(--sds-purple)] focus:ring-[var(--sds-focus-ring)]"
                                           />
-                                          <span className="text-gray-700 dark:text-gray-300">چپ</span>
+                                          <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">چپ</span>
                                         </label>
-                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 rounded border border-purple-200 dark:border-purple-700 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
-                                          <input
+                                        <label className="flex items-center gap-1.5 px-2 py-1 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded border border-[var(--sds-purple-border)] dark:border-[var(--sds-purple-border)] cursor-pointer hover:bg-[var(--sds-purple-surface)] dark:hover:bg-[var(--sds-purple-surface)] transition-colors">
+                                          <ErpInput
                                             type="checkbox"
                                             checked={!!tool.right}
                                             onChange={(e) => {
@@ -6885,9 +6936,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                               tools[idx] = { ...tool, right: e.target.checked };
                                               setDraft({ ...draft, tools });
                                             }}
-                                            className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                            className="rounded border-[var(--sds-border-default)] text-[var(--sds-purple)] focus:ring-[var(--sds-focus-ring)]"
                                           />
-                                          <span className="text-gray-700 dark:text-gray-300">راست</span>
+                                          <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">راست</span>
                                         </label>
                                       </div>
                                       )}
@@ -6897,7 +6948,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         !tool.back &&
                                         !tool.left &&
                                         !tool.right && (
-                                          <div className="mt-2 text-[11px] text-red-600">
+                                          <div className="mt-2 text-[11px] text-[var(--sds-danger)]">
                                             حداقل یک لبه را انتخاب کنید
                                           </div>
                                         )}
@@ -6913,13 +6964,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
                       {/* Inline stair layer configurations */}
                       {true && (
-                      <div className="border-y border-gray-200 py-3 dark:border-gray-700">
+                      <div className="border-y border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
                         <div className="mb-3 flex items-center justify-between">
-                          <h5 className="text-sm font-semibold text-gray-800 dark:text-white">لایه‌ها</h5>
+                          <h5 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">لایه‌ها</h5>
                           {(draft.numberOfLayersPerStair || 0) > 0 && (
-                            <button
+                            <ErpPressable
                               type="button"
-                              className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+                              className="text-xs font-semibold text-[var(--sds-accent)] hover:underline dark:text-[var(--sds-accent)]"
                               onClick={() => {
                                 const layerErrors: StairDraftFieldErrors = {};
                                 if (!draft.layerTypeId || !(Number(draft.layerTypePrice) > 0)) {
@@ -6970,11 +7021,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               }}
                             >
                               افزودن لایه دیگر
-                            </button>
+                            </ErpPressable>
                           )}
                         </div>
                         {(draft.layerConfigurations || []).length > 0 && (
-                          <div className="mb-3 divide-y divide-slate-200 border-y border-slate-200 text-xs dark:divide-slate-700 dark:border-slate-700">
+                          <div className="mb-3 divide-y divide-[var(--sds-border-subtle)] border-y border-[var(--sds-border-default)] text-xs dark:divide-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)]">
                             {(draft.layerConfigurations || []).map((configuration, index) => (
                               <div
                                 key={configuration.layerConfigurationDraftId || index}
@@ -6986,9 +7037,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   {formatDisplayNumber(configuration.layerWidthCm || 0)}cm
                                 </span>
                                 <span className="flex items-center gap-3">
-                                  <button
+                                  <ErpPressable
                                     type="button"
-                                    className="font-semibold text-teal-700 hover:underline dark:text-teal-300"
+                                    className="font-semibold text-[var(--sds-accent)] hover:underline dark:text-[var(--sds-accent)]"
                                     onClick={() => {
                                       const configurationId =
                                         configuration.layerConfigurationDraftId;
@@ -7002,10 +7053,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     }}
                                   >
                                     ویرایش
-                                  </button>
-                                  <button
+                                  </ErpPressable>
+                                  <ErpPressable
                                     type="button"
-                                    className="font-semibold text-red-600 hover:underline"
+                                    className="font-semibold text-[var(--sds-danger)] hover:underline"
                                     onClick={() => {
                                       const configurationId =
                                         configuration.layerConfigurationDraftId;
@@ -7019,7 +7070,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     }}
                                   >
                                     حذف
-                                  </button>
+                                  </ErpPressable>
                                 </span>
                               </div>
                             ))}
@@ -7027,7 +7078,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         )}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <label className="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                            <label className="mb-2 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                               تعداد لایه برای هر پله
                             </label>
                             <FormattedNumberInput
@@ -7072,14 +7123,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               }}
                               min={1}
                               step={1}
-                              className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-gray-800 outline-none focus:border-teal-500 dark:border-gray-600 dark:text-white"
+                              className="w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 py-2 text-[var(--sds-text-primary)] outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-default)] dark:text-[var(--sds-text-inverse)]"
                             />
                           </div>
 
                           {draft.numberOfLayersPerStair && draft.numberOfLayersPerStair > 0 && (
                             <>
                               <div>
-                                <label className="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                                <label className="mb-2 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                   عرض لایه
                                 </label>
                                 <FormattedNumberInput
@@ -7108,13 +7159,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   }}
                                   min={0}
                                   step={0.1}
-                                  className="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-gray-800 outline-none focus:border-teal-500 dark:border-gray-600 dark:text-white"
+                                  className="w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 py-2 text-[var(--sds-text-primary)] outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-default)] dark:text-[var(--sds-text-inverse)]"
                                 />
                               </div>
 
 
-                              <div className="md:col-span-2 flex min-h-9 items-center justify-between border-b border-gray-200 py-2 text-xs dark:border-gray-700">
-                                <span className="font-semibold text-gray-800 dark:text-white">
+                              <div className="md:col-span-2 flex min-h-9 items-center justify-between border-b border-[var(--sds-border-default)] py-2 text-xs dark:border-[var(--sds-border-subtle)]">
+                                <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                                   خوراک اره
                                 </span>
                                 <CompactSwitch
@@ -7131,7 +7182,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </div>
 
                               <div>
-                                  <label className="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                                  <label className="mb-2 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                     نوع لایه
                                   </label>
                                   <EnhancedDropdown
@@ -7190,41 +7241,41 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     }}
                                   />
                                   {stairSystemV2.layerTypesStatus === 'loading' && (
-                                    <p className="mt-1 text-xs text-slate-500">در حال دریافت انواع لایه…</p>
+                                    <p className="mt-1 text-xs text-[var(--sds-text-muted)]">در حال دریافت انواع لایه…</p>
                                   )}
                                   {stairSystemV2.layerTypesStatus === 'empty' && (
-                                    <p className="mt-1 text-xs text-red-500 dark:text-red-400">
+                                    <p className="mt-1 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">
                                       هیچ نوع لایه فعالی ثبت نشده است؛ با مدیر انبار تماس بگیرید
                                     </p>
                                   )}
                                   {stairSystemV2.layerTypesStatus === 'error' && (
-                                    <div className="mt-1 flex items-center gap-2 text-xs text-red-500 dark:text-red-400">
+                                    <div className="mt-1 flex items-center gap-2 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">
                                       <span>{stairSystemV2.layerTypesError}</span>
-                                      <button
+                                      <ErpPressable
                                         type="button"
-                                        className="font-semibold text-teal-600 hover:underline dark:text-teal-400"
+                                        className="font-semibold text-[var(--sds-accent)] hover:underline dark:text-[var(--sds-accent)]"
                                         onClick={() => void stairSystemV2.reloadLayerTypes()}
                                       >
                                         تلاش مجدد
-                                      </button>
+                                      </ErpPressable>
                                     </div>
                                   )}
                                   {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerType && (
-                                    <p className="mt-1 text-xs text-red-500">
+                                    <p className="mt-1 text-xs text-[var(--sds-danger)]">
                                       {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerType}
                                     </p>
                                   )}
                                   {draft.layerTypeId && (
-                                    <div className="mt-3 grid grid-cols-2 gap-3 border-y border-slate-200 py-2 text-xs dark:border-slate-800">
+                                    <div className="mt-3 grid grid-cols-2 gap-3 border-y border-[var(--sds-border-default)] py-2 text-xs dark:border-[var(--sds-border-subtle)]">
                                       <div>
-                                        <span className="block text-slate-500 dark:text-slate-400">قیمت نوع لایه</span>
-                                        <strong className="mt-1 block text-sm text-slate-900 dark:text-slate-100">
+                                        <span className="block text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">قیمت نوع لایه</span>
+                                        <strong className="mt-1 block text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                                           {formatPrice(Number(draft.layerTypePrice) || 0)}
                                         </strong>
                                       </div>
                                       <div>
-                                        <span className="block text-slate-500 dark:text-slate-400">واحد محاسبه</span>
-                                        <strong className="mt-1 block text-sm text-slate-900 dark:text-slate-100">
+                                        <span className="block text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">واحد محاسبه</span>
+                                        <strong className="mt-1 block text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                                         {(stairSystemV2.layerTypes.find(
                                           option => option.id === draft.layerTypeId
                                         )?.calculationUnit || draft.layerTypeCalculationUnit) === 'physicalPiece'
@@ -7244,8 +7295,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   )}
                                 </div>
 
-                              <div className="md:col-span-2 border-t border-slate-200 pt-3 dark:border-slate-700">
-                                <div className="mb-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                              <div className="md:col-span-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-subtle)]">
+                                <div className="mb-2 text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                   منبع سنگ لایه
                                 </div>
                                 <CompactSegmentedControl
@@ -7289,7 +7340,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 {stairSystemV2.stairDraftErrors[
                                   stairSystemV2.stairActivePart
                                 ]?.layerSource && (
-                                  <p className="mt-1 text-xs text-red-500">
+                                  <p className="mt-1 text-xs text-[var(--sds-danger)]">
                                     {stairSystemV2.stairDraftErrors[
                                       stairSystemV2.stairActivePart
                                     ]?.layerSource}
@@ -7302,19 +7353,19 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   );
                                   if (availableRemainders.length === 0) {
                                     return (
-                                      <div className="py-2 text-xs text-slate-500">
+                                      <div className="py-2 text-xs text-[var(--sds-text-muted)]">
                                         باقی‌مانده‌ای وجود ندارد
                                       </div>
                                     );
                                   }
                                   return (
-                                    <div className="mt-2 divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-700 dark:border-slate-700">
+                                    <div className="mt-2 divide-y divide-[var(--sds-border-subtle)] border-y border-[var(--sds-border-default)] dark:divide-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)]">
                                       {availableRemainders.map(stone => {
                                         const selected = Boolean(
                                           draft.layerSelectedRemainingStoneIds?.includes(stone.id)
                                         );
                                         return (
-                                          <button
+                                          <ErpPressable
                                             key={stone.id}
                                             type="button"
                                             aria-pressed={selected}
@@ -7340,12 +7391,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                               {formatDisplayNumber(stone.quantity || 1)} عدد
                                             </span>
                                             <span className={selected
-                                              ? 'font-semibold text-teal-700 dark:text-teal-300'
-                                              : 'text-slate-500'}
+                                              ? 'font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]'
+                                              : 'text-[var(--sds-text-muted)]'}
                                             >
                                               {selected ? 'انتخاب‌شده' : 'استفاده'}
                                             </span>
-                                          </button>
+                                          </ErpPressable>
                                         );
                                       })}
                                     </div>
@@ -7355,42 +7406,42 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
                               {draft.layerSourceKind === 'newMaterial' && (
                               <div className="md:col-span-2">
-                                <div className="border-t border-slate-200 pt-3 dark:border-slate-700">
-                                  <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                <div className="border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-subtle)]">
+                                  <div className="text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                     سنگ جدید
                                   </div>
 
                                   {draft.layerUseDifferentStone && (
                                     <div className="mt-4 space-y-4">
                                       <div>
-                                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        <label className="block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                                           انتخاب سنگ برای لایه‌ها
                                         </label>
                                         {!draft.layerStoneProduct ? (
                                           <>
-                                            <input
+                                            <ErpInput
                                               name="layerStone"
-                                              className="w-full rounded-lg bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+                                              className="w-full rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                                               value={stairSystemV2.layerStoneSearchTerm}
                                               onChange={(e) => stairSystemV2.setLayerStoneSearchTerm(e.target.value)}
                                               onFocus={() => stairSystemV2.setLayerStoneDropdownOpen(true)}
                                               onBlur={() => setTimeout(() => stairSystemV2.setLayerStoneDropdownOpen(false), 150)}
                                             />
                                             {stairSystemV2.layerStoneDropdownOpen && (
-                                              <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
+                                              <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)] bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] shadow-lg">
                                                 {stairSystemV2.isSearchingLayerStones && (
-                                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">
+                                                  <div className="p-3 text-center text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                                     <span className="animate-pulse">در حال جستجو...</span>
                                                   </div>
                                                 )}
                                                 {!stairSystemV2.isSearchingLayerStones && stairSystemV2.layerStoneSearchResults.length === 0 && (
-                                                  <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">نتیجه‌ای یافت نشد</div>
+                                                  <div className="p-3 text-center text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">نتیجه‌ای یافت نشد</div>
                                                 )}
                                                 {stairSystemV2.layerStoneSearchResults.map((p) => (
-                                                  <button
+                                                  <ErpPressable
                                                     key={p.id}
                                                     type="button"
-                                                    className="w-full text-right px-4 py-2.5 hover:bg-orange-50 dark:hover:bg-orange-900/20 text-sm border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors"
+                                                    className="w-full text-right px-4 py-2.5 hover:bg-[var(--sds-warning-surface)] text-sm border-b border-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)] last:border-0 transition-colors"
                                                     onClick={() => {
                                                       const altLabel = (p as any).fullName || generateFullProductName(p as Product) || p.namePersian || p.name;
                                                       setDraft({
@@ -7408,28 +7459,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                       clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerStone');
                                                     }}
                                                   >
-                                                    <div className="font-medium text-gray-800 dark:text-white">
+                                                    <div className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                                                       {(p as any).fullName || generateFullProductName(p as Product) || p.namePersian || p.name}
                                                     </div>
-                                                  </button>
+                                                  </ErpPressable>
                                                 ))}
                                               </div>
                                             )}
                                           </>
                                         ) : (
-                                          <div className="flex items-center justify-between p-3 bg-white dark:bg-gray-900/40 border border-orange-200 dark:border-orange-700 rounded-lg">
+                                          <div className="flex items-center justify-between rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] p-3 dark:bg-[var(--sds-surface-subtle)]">
                                             <div>
-                                              <div className="text-sm font-semibold text-gray-800 dark:text-white">
+                                              <div className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                                                 {draft.layerStoneLabel || draft.layerStoneProduct.namePersian || draft.layerStoneProduct.name}
                                               </div>
-                                              <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                                              <div className="text-[11px] text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                                 کد: {draft.layerStoneProduct.code || '-'}
                                               </div>
                                             </div>
                                             <div className="flex gap-2">
-                                              <button
+                                              <ErpPressable
                                                 type="button"
-                                                className="px-2 py-1 text-xs text-orange-600 hover:text-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/30 rounded"
+                                                className="rounded px-2 py-1 text-xs text-[var(--sds-warning)] hover:bg-[var(--sds-warning-surface)]"
                                                 onClick={() => {
                                                   setDraft({
                                                     ...draft,
@@ -7442,10 +7493,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                 }}
                                               >
                                                 تغییر
-                                              </button>
-                                              <button
+                                              </ErpPressable>
+                                              <ErpPressable
                                                 type="button"
-                                                className="px-2 py-1 text-xs text-red-600 hover:text-red-800 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                                                className="px-2 py-1 text-xs text-[var(--sds-danger)] hover:text-[var(--sds-danger)] hover:bg-[var(--sds-danger-surface)] dark:hover:bg-[var(--sds-danger-surface)] rounded"
                                                 onClick={() => {
                                                   setDraft({
                                                     ...draft,
@@ -7461,19 +7512,19 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                 }}
                                               >
                                                 حذف
-                                              </button>
+                                              </ErpPressable>
                                             </div>
                                           </div>
                                         )}
                                         {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerStone && (
-                                          <p className="mt-1 text-xs text-red-500">
+                                          <p className="mt-1 text-xs text-[var(--sds-danger)]">
                                             {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerStone}
                                           </p>
                                         )}
                                       </div>
 
                                       <div>
-                                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                        <label className="block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                                           قیمت هر متر مربع سنگ لایه (تومان)
                                         </label>
                                         <FormattedNumberInput
@@ -7497,21 +7548,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           }}
                                           min={0}
                                           step={1000}
-                                          className="w-full rounded-lg bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all"
+                                          className="w-full rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                                         />
                                         {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerStonePrice && (
-                                          <p className="mt-1 text-xs text-red-500">
+                                          <p className="mt-1 text-xs text-[var(--sds-danger)]">
                                             {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerStonePrice}
                                           </p>
                                         )}
                                       </div>
 
-                                      <div className="rounded-lg border border-orange-100 dark:border-orange-800 bg-white dark:bg-gray-900/30 p-3">
+                                      <div className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] p-3 dark:bg-[var(--sds-surface-subtle)]">
                                         <div className="flex items-center gap-2">
-                                          <input
+                                          <ErpInput
                                             id="layer-mandatory-pricing-checkbox"
                                             type="checkbox"
-                                            className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                                            className="rounded border-[var(--sds-border-default)] text-[var(--sds-warning)] focus:ring-[var(--sds-focus-ring)]"
                                             checked={draft.layerUseMandatory ?? true}
                                             aria-label="فعال‌سازی قیمت‌گذاری حکمی برای لایه"
                                             onChange={(e) => {
@@ -7530,10 +7581,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                             }}
                                           />
                                           <div>
-                                            <label className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                                            <label className="text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                               حکمی (افزایش قیمت)
                                             </label>
-                                            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                            <p className="text-[11px] text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                               در صورت فعال بودن، قیمت سنگ لایه به صورت درصدی افزایش داده می‌شود.
                                             </p>
                                           </div>
@@ -7559,16 +7610,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                               min={0}
                                               max={100}
                                               step={1}
-                                              className="w-24 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm"
+                                              className="w-24 rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent text-sm"
                                             />
-                                            <span className="text-xs text-gray-600 dark:text-gray-300">%</span>
-                                            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                            <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">%</span>
+                                            <p className="text-[11px] text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                               قیمت نهایی با {formatDisplayNumber(draft.layerMandatoryPercentage ?? 20)}% افزایش محاسبه می‌شود.
                                             </p>
                                           </div>
                                         )}
                                         {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerMandatoryPercentage && (
-                                          <p className="mt-1 text-xs text-red-500">
+                                          <p className="mt-1 text-xs text-[var(--sds-danger)]">
                                             {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerMandatoryPercentage}
                                           </p>
                                         )}
@@ -7581,15 +7632,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
                               {/* 🎯 Layer Edge Selection */}
                               <div className="md:col-span-2">
-                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                <label className="block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                                   <span className="flex items-center gap-1">
-                                    <span className="w-2 h-2 rounded-full bg-orange-500"></span>
+                                    <span className="h-2 w-2 rounded-full bg-[var(--sds-warning)]"></span>
                                     انتخاب لبه‌های مورد نیاز برای لایه
                                   </span>
                                 </label>
-                                <div className="flex flex-wrap gap-2 p-3 bg-orange-50/50 dark:bg-orange-900/10 rounded-lg border border-orange-200 dark:border-orange-800">
-                                  <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
-                                      <input
+                                <div className="flex flex-wrap gap-2 rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3">
+                                  <label className="flex cursor-pointer items-center gap-1.5 rounded border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] px-3 py-2 transition-colors hover:bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-surface-subtle)]">
+                                      <ErpInput
                                         type="checkbox"
                                         checked={!!(draft.layerEdges?.perimeter)}
                                         onChange={(e) => {
@@ -7607,61 +7658,61 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                             }
                                           });
                                         }}
-                                        className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                                        className="rounded border-[var(--sds-border-default)] text-[var(--sds-warning)] focus:ring-[var(--sds-focus-ring)]"
                                       />
-                                      <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">محیط کامل</span>
+                                      <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] text-xs font-medium">محیط کامل</span>
                                   </label>
-                                  <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
-                                    <input
+                                  <label className="flex cursor-pointer items-center gap-1.5 rounded border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] px-3 py-2 transition-colors hover:bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-surface-subtle)]">
+                                    <ErpInput
                                       type="checkbox"
                                       checked={!!(draft.layerEdges?.front)}
                                       onChange={(e) =>
                                         setLayerSideEnabled('front', e.target.checked)
                                       }
-                                      className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                                      className="rounded border-[var(--sds-border-default)] text-[var(--sds-warning)] focus:ring-[var(--sds-focus-ring)]"
                                       disabled={!!(draft.layerEdges?.perimeter)}
                                     />
-                                    <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">جلو</span>
+                                    <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] text-xs font-medium">جلو</span>
                                   </label>
-                                  <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
-                                      <input
+                                  <label className="flex cursor-pointer items-center gap-1.5 rounded border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] px-3 py-2 transition-colors hover:bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-surface-subtle)]">
+                                      <ErpInput
                                         type="checkbox"
                                         checked={!!(draft.layerEdges?.back)}
                                         onChange={(e) =>
                                           setLayerSideEnabled('back', e.target.checked)
                                         }
-                                        className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                                        className="rounded border-[var(--sds-border-default)] text-[var(--sds-warning)] focus:ring-[var(--sds-focus-ring)]"
                                         disabled={!!(draft.layerEdges?.perimeter)}
                                       />
-                                      <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">عقب</span>
+                                      <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] text-xs font-medium">عقب</span>
                                   </label>
-                                  <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
-                                    <input
+                                  <label className="flex cursor-pointer items-center gap-1.5 rounded border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] px-3 py-2 transition-colors hover:bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-surface-subtle)]">
+                                    <ErpInput
                                       type="checkbox"
                                       checked={!!(draft.layerEdges?.left)}
                                       onChange={(e) =>
                                         setLayerSideEnabled('left', e.target.checked)
                                       }
-                                      className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                                      className="rounded border-[var(--sds-border-default)] text-[var(--sds-warning)] focus:ring-[var(--sds-focus-ring)]"
                                       disabled={!!(draft.layerEdges?.perimeter)}
                                     />
-                                    <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">چپ</span>
+                                    <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] text-xs font-medium">چپ</span>
                                   </label>
-                                  <label className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-orange-200 dark:border-orange-700 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors">
-                                    <input
+                                  <label className="flex cursor-pointer items-center gap-1.5 rounded border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] px-3 py-2 transition-colors hover:bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-surface-subtle)]">
+                                    <ErpInput
                                       type="checkbox"
                                       checked={!!(draft.layerEdges?.right)}
                                       onChange={(e) =>
                                         setLayerSideEnabled('right', e.target.checked)
                                       }
-                                      className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                                      className="rounded border-[var(--sds-border-default)] text-[var(--sds-warning)] focus:ring-[var(--sds-focus-ring)]"
                                       disabled={!!(draft.layerEdges?.perimeter)}
                                     />
-                                    <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">راست</span>
+                                    <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] text-xs font-medium">راست</span>
                                   </label>
                                 </div>
                                 {(!draft.layerEdges || (!draft.layerEdges.front && !draft.layerEdges.left && !draft.layerEdges.right && !draft.layerEdges.back && !draft.layerEdges.perimeter)) && (
-                                  <p className="mt-2 text-xs text-orange-600 dark:text-orange-400">
+                                  <p className="mt-2 text-xs text-[var(--sds-warning)]">
                                     لطفاً حداقل یک لبه را انتخاب کنید
                                   </p>
                                 )}
@@ -7677,27 +7728,27 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   return (
                                     <div
                                       key={`removed-layer-side:${side}`}
-                                      className="mt-2 border-y border-red-200 py-2 text-xs dark:border-red-900"
+                                      className="mt-2 border-y border-[var(--sds-danger-border)] py-2 text-xs dark:border-[var(--sds-danger-border)]"
                                     >
-                                      <div className="font-semibold text-red-600 dark:text-red-300">
+                                      <div className="font-semibold text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">
                                         سمت {sideLabel} دارای عملیات اختصاصی است
                                       </div>
-                                      <div className="mt-1 text-slate-500 dark:text-slate-400">
+                                      <div className="mt-1 text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                         {(sideOperations?.tools.length || 0)} ابزار · {(sideOperations?.finishings.length || 0)} پرداخت
                                       </div>
                                       <div className="mt-2 flex gap-3">
-                                        <button
+                                        <ErpPressable
                                           type="button"
-                                          className="font-semibold text-teal-700 dark:text-teal-300"
+                                          className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"
                                           onClick={() =>
                                             setLayerSideEnabled(side, true)
                                           }
                                         >
                                           بازگرداندن سمت
-                                        </button>
-                                        <button
+                                        </ErpPressable>
+                                        <ErpPressable
                                           type="button"
-                                          className="font-semibold text-red-600"
+                                          className="font-semibold text-[var(--sds-danger)]"
                                           onClick={() => {
                                             const nextOperations = {
                                               ...(draft.layerSideOperations || {})
@@ -7718,7 +7769,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           }}
                                         >
                                           حذف سمت و عملیات آن
-                                        </button>
+                                        </ErpPressable>
                                       </div>
                                     </div>
                                   );
@@ -7777,9 +7828,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     };
                                   });
                                   return (
-                                    <div className="md:col-span-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+                                    <div className="md:col-span-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-subtle)]">
                                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                        <span className="text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                           عملیات لایه
                                         </span>
                                         <CompactSegmentedControl
@@ -7898,13 +7949,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           })()
                                         }))}
                                       />
-                                      <div className="mt-2 divide-y divide-slate-100 border-y border-slate-100 text-xs dark:divide-slate-800 dark:border-slate-800">
+                                      <div className="mt-2 divide-y divide-[var(--sds-border-subtle)] border-y border-[var(--sds-border-subtle)] text-xs dark:divide-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)]">
                                         {sideBreakdown.map(entry => (
                                           <div
                                             key={entry.side}
                                             className="flex min-h-8 items-center justify-between gap-3"
                                           >
-                                            <span className="text-slate-500 dark:text-slate-400">
+                                            <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                               {sideLabels[entry.side]} — {entry.input.quantity || 0} × {formatDisplayNumber(Number(entry.input.lengthMeters))}m
                                             </span>
                                             <strong>
@@ -7918,16 +7969,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     </div>
                                   );
                                 })()}
-                              <label className="md:col-span-2 border-t border-slate-200 pt-3 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                              <label className="md:col-span-2 border-t border-[var(--sds-border-default)] pt-3 text-xs font-semibold text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-subtle)] dark:text-[var(--sds-text-secondary)]">
                                 توضیحات لایه
-                                <textarea
+                                <ErpTextarea
                                   value={draft.layerDescription || ''}
                                   onChange={event => setDraft({
                                     ...draft,
                                     layerDescription: event.target.value
                                   })}
                                   rows={1}
-                                  className="mt-1 max-h-24 min-h-9 w-full resize-none overflow-y-auto rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+                                  className="mt-1 max-h-24 min-h-9 w-full resize-none overflow-y-auto rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 py-2 text-sm font-normal focus:border-[var(--sds-accent)] focus:outline-none dark:border-[var(--sds-border-subtle)]"
                                 />
                               </label>
 
@@ -8102,14 +8153,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       <div className="mt-1">
                                         <span className="font-medium">لبه‌های انتخاب شده: </span>
                                         {draft.layerEdges?.perimeter && (
-                                          <span className="text-orange-600 dark:text-orange-400">محیط کامل</span>
+                                          <span className="text-[var(--sds-warning)]">محیط کامل</span>
                                         )}
                                         {!draft.layerEdges?.perimeter && (
                                           <>
-                                            {draft.layerEdges?.front && <span className="text-orange-600 dark:text-orange-400">جلو </span>}
-                                            {draft.layerEdges?.back && <span className="text-orange-600 dark:text-orange-400">عقب </span>}
-                                            {draft.layerEdges?.left && <span className="text-orange-600 dark:text-orange-400">چپ </span>}
-                                            {draft.layerEdges?.right && <span className="text-orange-600 dark:text-orange-400">راست </span>}
+                                            {draft.layerEdges?.front && <span className="text-[var(--sds-warning)]">جلو </span>}
+                                            {draft.layerEdges?.back && <span className="text-[var(--sds-warning)]">عقب </span>}
+                                            {draft.layerEdges?.left && <span className="text-[var(--sds-warning)]">چپ </span>}
+                                            {draft.layerEdges?.right && <span className="text-[var(--sds-warning)]">راست </span>}
                                           </>
                                         )}
                                       </div>
@@ -8121,21 +8172,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         edgeDemandsPreview.reduce((sum, demand) => sum + demand.layersNeeded, 0)
                                       )} نوار</div>
                                       {draft.layerSourceKind !== 'newMaterial' && (
-                                        <div className="text-teal-700 dark:text-teal-300">
+                                        <div className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
                                           از باقی‌مانده سنگ اصلی: {formatDisplayNumber(layerMetricsPreview.layersFromRemainingStones || 0)} لایه
                                           {` | نیاز به سنگ اصلی جدید: ${formatDisplayNumber(layerMetricsPreview.layersFromNewStones || 0)} لایه`}
                                         </div>
                                       )}
                                       {false && (layerMetricsPreview.layersFromNewStones || 0) > 0 && (
-                                        <div className="mt-3 rounded-lg border border-orange-300 bg-white/80 p-3 dark:border-orange-700 dark:bg-slate-900/50">
-                                          <div className="mb-2 font-semibold text-orange-800 dark:text-orange-200">منبع تامین کمبود لایه</div>
+                                        <div className="mt-3 rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] p-3 dark:bg-[var(--sds-surface-subtle)]">
+                                          <div className="mb-2 font-semibold text-[var(--sds-warning)]">منبع تامین کمبود لایه</div>
                                           <div className="grid gap-2 md:grid-cols-3">
                                             {([
                                               ['fullOrigin', 'سنگ کامل هم‌مبدا'],
                                               ['manualWarehouse', 'ابعاد انبار'],
                                               ['autoSuggested', 'محاسبه خودکار']
                                             ] as const).map(([value, label]) => (
-                                              <button
+                                              <ErpPressable
                                                 key={value}
                                                 type="button"
                                                 onClick={() => setDraft({
@@ -8147,12 +8198,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                 })}
                                                 className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
                                                   draft.layerShortageSource === value
-                                                    ? 'border-orange-500 bg-orange-500 text-white'
-                                                    : 'border-orange-200 bg-orange-50 text-orange-700 hover:border-orange-400 dark:border-orange-800 dark:bg-orange-900/20 dark:text-orange-200'
+                                                    ? 'border-[var(--sds-warning)] bg-[var(--sds-warning)] text-[var(--sds-text-inverse)]'
+                                                    : 'border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] text-[var(--sds-warning)] hover:border-[var(--sds-warning)]'
                                                 }`}
                                               >
                                                 {label}
-                                              </button>
+                                              </ErpPressable>
                                             ))}
                                           </div>
                                           {draft.layerShortageSource === 'manualWarehouse' && (
@@ -8160,21 +8211,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                               <FormattedNumberInput
                                                 value={draft.layerManualSourceWidthCm ?? null}
                                                 onChange={(value) => setDraft({ ...draft, layerManualSourceWidthCm: value || null })}
-                                                className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm dark:border-orange-800 dark:bg-slate-900"
+                                                className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:bg-[var(--sds-surface-subtle)]"
                                                 min={0}
                                                 step={0.1}
                                               />
                                               <FormattedNumberInput
                                                 value={draft.layerManualSourceLengthM ?? null}
                                                 onChange={(value) => setDraft({ ...draft, layerManualSourceLengthM: value || null })}
-                                                className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm dark:border-orange-800 dark:bg-slate-900"
+                                                className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:bg-[var(--sds-surface-subtle)]"
                                                 min={0}
                                                 step={0.1}
                                               />
                                               <FormattedNumberInput
                                                 value={draft.layerManualSourceQuantity ?? null}
                                                 onChange={(value) => setDraft({ ...draft, layerManualSourceQuantity: value ? Math.floor(value) : null })}
-                                                className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm dark:border-orange-800 dark:bg-slate-900"
+                                                className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:bg-[var(--sds-surface-subtle)]"
                                                 min={1}
                                                 step={1}
                                               />
@@ -8185,27 +8236,27 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       {stoneAreaUsedSqm > 0 && (
                                         <div>متر مربع سنگ: {formatSquareMeters(stoneAreaUsedSqm)}</div>
                                       )}
-                                      <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                      <div className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mt-1">
                                         قیمت هر متر مربع: {formatPrice(pricePerSqm)} (همان سنگ اصلی)
                                       </div>
-                                      <div className="mt-1 pt-1 border-t border-orange-200 dark:border-orange-700">
-                                        <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">
+                                      <div className="mt-1 border-t border-[var(--sds-warning-border)] pt-1">
+                                        <div className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mb-1">
                                             قیمت سنگ لایه: {formatPrice(pricingStoneAreaSqm * pricePerSqm)}
                                             {stoneAreaUsedSqm > 0 && (
-                                            <span className="text-xs text-gray-500 dark:text-gray-500 mr-1">
+                                            <span className="text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)] mr-1">
                                                 (بر اساس متر مربع سنگ: {formatSquareMeters(stoneAreaUsedSqm)})
                                             </span>
                                           )}
                                         </div>
                                         {layerTypeUnitPrice > 0 && (
-                                          <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">
+                                          <div className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mb-1">
                                             هزینه نوع لایه ({draft.layerTypeName || '-'}): {formatPrice(layerTypeCostPreview)}
-                                            <span className="text-xs text-gray-500 dark:text-gray-500 ml-1">
+                                            <span className="text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)] ml-1">
                                               ({formatDisplayNumber(layerPricingQuantity)} × {formatPrice(layerTypeUnitPrice)})
                                             </span>
                                           </div>
                                         )}
-                                        <div className="mt-1 pt-1 border-t border-orange-200 dark:border-orange-700">
+                                        <div className="mt-1 border-t border-[var(--sds-warning-border)] pt-1">
                                           <span className="font-semibold">قیمت کل لایه‌ها: {formatPrice(layerTotalPrice)}</span>
                                         </div>
                                       </div>
@@ -8219,8 +8270,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       </div>
                       )}
 
-                      <div className="flex min-h-9 items-center justify-between border-b border-gray-200 py-2 text-xs dark:border-gray-700">
-                        <span className="font-semibold text-gray-800 dark:text-white">برش کالیبر</span>
+                      <div className="flex min-h-9 items-center justify-between border-b border-[var(--sds-border-default)] py-2 text-xs dark:border-[var(--sds-border-subtle)]">
+                        <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">برش کالیبر</span>
                         <CompactSwitch
                           label="برش کالیبر"
                           checked={draft.calibrationSelection === 'manual'
@@ -8242,21 +8293,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       </div>
 
                       {false && stoneFinishings.length > 0 && (
-                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
+                        <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)] p-5 shadow-sm">
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
-                              <div className="w-1 h-5 bg-gradient-to-b from-teal-500 to-teal-600 rounded-full"></div>
-                              <h5 className="text-sm font-semibold text-gray-800 dark:text-white">پرداخت سنگ</h5>
+                              <div className="w-1 h-5 bg-gradient-to-b from-[var(--sds-accent)] to-[var(--sds-accent-hover)] rounded-full"></div>
+                              <h5 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">پرداخت سنگ</h5>
                             </div>
-                            <span className="text-xs text-teal-600 dark:text-teal-300 bg-teal-50 dark:bg-teal-900/30 px-2 py-1 rounded">
+                            <span className="text-xs text-[var(--sds-accent)] dark:text-[var(--sds-accent)] bg-[var(--sds-accent-soft)] dark:bg-[var(--sds-accent-soft)] px-2 py-1 rounded">
                               هزینه به ازای {finishingUnitLabel}
                             </span>
                           </div>
                           <div className="space-y-4">
-                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-                              <input
+                            <label className="flex items-center gap-2 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
+                              <ErpInput
                                 type="checkbox"
-                                className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                                className="rounded border-[var(--sds-border-default)] text-[var(--sds-accent)] focus:ring-[var(--sds-focus-ring)]"
                                 checked={!!draft.finishingEnabled}
                                 onChange={(e) => {
                                   const enabled = e.target.checked;
@@ -8284,18 +8335,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               <>
                                 <div className="space-y-3">
                                   {draft.finishingId && (
-                                    <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-3 py-2 text-xs text-teal-800 dark:text-teal-100">
+                                    <div className="rounded-lg border border-[var(--sds-accent)] dark:border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] dark:bg-[var(--sds-accent-soft)] px-3 py-2 text-xs text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
                                       <div className="flex items-start justify-between gap-3">
                                         <div>
                                           <div className="font-semibold">
                                             {selectedFinishing?.namePersian || selectedFinishing?.name || draft.finishingLabel || 'پرداخت ذخیره‌شده'}
                                           </div>
-                                          <div className="mt-1 text-teal-700 dark:text-teal-200">
+                                          <div className="mt-1 text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
                                             {formatPrice(finishingPricePerSquareMeter || 0)} / {finishingUnitLabel}
                                             {!selectedFinishing && draft.finishingLabel ? ' - خارج از کاتالوگ فعلی' : ''}
                                           </div>
                                         </div>
-                                        <button
+                                        <ErpPressable
                                           type="button"
                                           onClick={() => setDraft({
                                             ...draft,
@@ -8307,32 +8358,32 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                             finishingCalculationBase: null,
                                             finishingQuantity: null
                                           })}
-                                          className="rounded-md px-2 py-1 text-[11px] font-medium text-teal-700 hover:bg-teal-100 dark:text-teal-100 dark:hover:bg-teal-800"
+                                          className="rounded-md px-2 py-1 text-[11px] font-medium text-[var(--sds-accent)] hover:bg-[var(--sds-accent-soft)] dark:text-[var(--sds-accent)] dark:hover:bg-[var(--sds-accent-soft)]"
                                         >
                                           حذف
-                                        </button>
+                                        </ErpPressable>
                                       </div>
                                     </div>
                                   )}
-                                  <label htmlFor="stone-finishing-picker" className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                                  <label htmlFor="stone-finishing-picker" className="block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                     جستجو و انتخاب پرداخت سنگ
                                   </label>
-                                  <input
+                                  <ErpInput
                                     id="stone-finishing-picker"
                                     value={(draft as any).finishingSearchTerm || ''}
                                     onChange={(e) => setDraft({
                                       ...draft,
                                       finishingSearchTerm: e.target.value
                                     } as any)}
-                                    className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                                    className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                                   />
-                                  <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 divide-y divide-gray-200 dark:divide-gray-700">
+                                  <div className="max-h-44 overflow-y-auto rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">
                                     {visibleStoneFinishings.length > 0 ? visibleStoneFinishings.map(option => {
                                       const unitPrice = getFinishingUnitPrice(option);
                                       const calculationBase = getFinishingCalculationBase(option);
                                       const isSelected = draft.finishingId === option.id;
                                       return (
-                                        <button
+                                        <ErpPressable
                                           key={option.id}
                                           type="button"
                                           onClick={() => setDraft({
@@ -8353,23 +8404,23 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                               squareMeters: totals.pricingSquareMeters
                                             })
                                           })}
-                                          className={`w-full px-3 py-2.5 text-right transition-colors ${isSelected ? 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-100' : 'hover:bg-white dark:hover:bg-gray-800 text-gray-800 dark:text-gray-100'}`}
+                                          className={`w-full px-3 py-2.5 text-right transition-colors ${isSelected ? 'bg-[var(--sds-accent-soft)] dark:bg-[var(--sds-accent-soft)] text-[var(--sds-accent)] dark:text-[var(--sds-accent)]' : 'hover:bg-[var(--sds-surface-raised)] dark:hover:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]'}`}
                                         >
                                           <div className="flex items-center justify-between gap-3">
                                             <span className="font-medium">{option.namePersian || option.name}</span>
-                                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                                            <span className="text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                               {formatPrice(unitPrice)} / {getFinishingUnitLabel(calculationBase)}
                                             </span>
                                           </div>
                                           {option.description && (
-                                            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+                                            <div className="mt-1 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)] line-clamp-1">
                                               {option.description}
                                             </div>
                                           )}
-                                        </button>
+                                        </ErpPressable>
                                       );
                                     }) : (
-                                      <div className="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">
+                                      <div className="px-3 py-3 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                         پرداختی با این جستجو پیدا نشد.
                                       </div>
                                     )}
@@ -8378,7 +8429,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
                                 {draft.finishingEnabled && (
                                   <div>
-                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    <label className="block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">
                                       مقدار فرآوری ({finishingUnitLabel})
                                     </label>
                                     <FormattedNumberInput
@@ -8397,10 +8448,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       min={0}
                                       max={maxFinishingQuantity || undefined}
                                       step={0.01}
-                                      className="w-full rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 px-3 py-2.5 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all"
+                                      className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                                     />
                                     {Number(maxFinishingQuantity || 0) > 0 && (
-                                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                      <p className="mt-1 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                                         حداکثر قابل استفاده: {formatDisplayNumber(maxFinishingQuantity)} {finishingUnitLabel}
                                       </p>
                                     )}
@@ -8408,7 +8459,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 )}
 
                                 {selectedFinishing && finishingPricePerSquareMeter && (
-                                  <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 text-xs leading-5 text-teal-700 dark:text-teal-200 space-y-1.5">
+                                  <div className="rounded-lg border border-[var(--sds-accent)] dark:border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] dark:bg-[var(--sds-accent-soft)] px-4 py-3 text-xs leading-5 text-[var(--sds-accent)] dark:text-[var(--sds-accent)] space-y-1.5">
                                     <div className="flex justify-between">
                                       <span>نرخ هر {finishingUnitLabel}:</span>
                                       <span className="font-semibold">{formatPrice(finishingPricePerSquareMeter)}</span>
@@ -8431,7 +8482,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       </div>
                       )}
                       {false && stoneFinishings.length === 0 && (
-                        <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-xs text-amber-700 dark:text-amber-200">
+                        <div className="rounded-lg border border-[var(--sds-warning-border)] dark:border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-warning-surface)] px-4 py-3 text-xs text-[var(--sds-warning)] dark:text-[var(--sds-warning)]">
                           {stoneFinishingLoadState === 'forbidden'
                             ? 'دسترسی شما برای مشاهده پرداخت‌ها کافی نیست.'
                             : 'هیچ پرداخت فعالی برای انتخاب یافت نشد.'}
@@ -8439,11 +8490,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       )}
 
                       {/* Part Total - Enhanced */}
-                      <div className="flex min-h-10 items-center justify-between border-y border-slate-200 py-2 text-sm dark:border-slate-700">
-                        <span className="font-semibold text-slate-600 dark:text-slate-300">
+                      <div className="flex min-h-10 items-center justify-between border-y border-[var(--sds-border-default)] py-2 text-sm dark:border-[var(--sds-border-subtle)]">
+                        <span className="font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                           جمع این بخش
                         </span>
-                        <strong className="text-slate-900 dark:text-slate-100">
+                        <strong className="text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                           {formatPrice(
                             (totals.partTotal || 0) +
                             stairOperationPreviewAmount
@@ -8455,24 +8506,24 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 })()}
 
                 {/* Session group summary */}
-                <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4 dark:border-[var(--sds-border-subtle)]">
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">خلاصه اقلام افزوده شده</h4>
-                    <span className="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-bold text-teal-700 dark:bg-teal-950/60 dark:text-teal-200">
+                    <h4 className="text-sm font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">خلاصه اقلام افزوده شده</h4>
+                    <span className="rounded-full bg-[var(--sds-accent-soft)] px-2.5 py-1 text-xs font-bold text-[var(--sds-accent)] dark:bg-[var(--sds-accent-soft)] dark:text-[var(--sds-accent)]">
                       {stairSystemV2.stairSessionItems.length} آیتم
                     </span>
                   </div>
                   {stairSystemV2.stairSessionItems.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 py-6 text-center dark:border-slate-700">
-                      <p className="text-sm text-slate-400 dark:text-slate-500">هنوز آیتمی افزوده نشده است.</p>
+                    <div className="rounded-xl border border-dashed border-[var(--sds-border-default)] py-6 text-center dark:border-[var(--sds-border-subtle)]">
+                      <p className="text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">هنوز آیتمی افزوده نشده است.</p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                    <div className="overflow-x-auto rounded-xl border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
                       <table className="min-w-full text-sm">
                         <thead>
-                          <tr className="border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900">
+                          <tr className="border-b border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
                             {['بخش', 'ابعاد', 'تعداد', 'متر مربع', 'قیمت متر مربع', 'ابزارها', 'هزینه ابزار', 'جمع جزء'].map(label => (
-                              <th key={label} className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold text-slate-600 dark:text-slate-300">
+                              <th key={label} className="whitespace-nowrap px-4 py-3 text-right text-xs font-bold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                 {label}
                               </th>
                             ))}
@@ -8504,34 +8555,34 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             const finishing = normalizeProductFinishing(it);
 
                             return (
-                              <tr key={idx} className="border-b border-slate-100 transition-colors last:border-b-0 hover:bg-slate-50/70 dark:border-slate-800 dark:hover:bg-slate-900/70">
+                              <tr key={idx} className="border-b border-[var(--sds-border-subtle)] transition-colors last:border-b-0 hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-subtle)] dark:hover:bg-[var(--sds-surface-subtle)]">
                                 <td className="py-3 px-4">
                                   <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                                    partTypeColor === 'teal' ? 'bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-200' :
-                                    partTypeColor === 'blue' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
-                                    partTypeColor === 'orange' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300' :
-                                    'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
+                                    partTypeColor === 'teal' ? 'bg-[var(--sds-accent-soft)] text-[var(--sds-accent)] dark:bg-[var(--sds-accent-soft)] dark:text-[var(--sds-accent)]' :
+                                    partTypeColor === 'blue' ? 'bg-[var(--sds-info-surface)] dark:bg-[var(--sds-info-surface)] text-[var(--sds-info)] dark:text-[var(--sds-info)]' :
+                                    partTypeColor === 'orange' ? 'bg-[var(--sds-warning-surface)] text-[var(--sds-warning)]' :
+                                    'bg-[var(--sds-purple-surface)] dark:bg-[var(--sds-purple-surface)] text-[var(--sds-purple)] dark:text-[var(--sds-purple)]'
                                   }`}>
                                     {partTypeLabel}
                                   </span>
                                   {isLayer && layerInfo && (
-                                    <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
+                                    <div className="mt-1 text-xs text-[var(--sds-warning)]">
                                       {layerInfo.numberOfLayersPerStair} لایه برای هر پله
                                     </div>
                                   )}
                                 </td>
-                                <td className="py-3 px-4 text-gray-700 dark:text-gray-300">
+                                <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                   <div className="flex flex-col gap-0.5">
                                     <span className="font-medium">طول: {lengthDisplay}</span>
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">عرض: {widthDisplay}</span>
+                                    <span className="text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">عرض: {widthDisplay}</span>
                                   </div>
                                 </td>
-                                <td className="py-3 px-4 text-gray-700 dark:text-gray-300">
+                                <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                   <div className="flex flex-col gap-1">
                                     <span className="font-medium">{formatDisplayNumber(it.quantity || 0)} عدد</span>
                                     {(baseStoneQuantity > 0 || (isLayer && layerInfo)) && (
-                                      <details className="text-xs text-slate-600 dark:text-slate-300">
-                                        <summary className="cursor-pointer font-semibold text-teal-700 dark:text-teal-300">
+                                      <details className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
+                                        <summary className="cursor-pointer font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
                                           جزئیات
                                         </summary>
                                         <div className="mt-1 space-y-1">
@@ -8545,7 +8596,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                             </div>
                                           )}
                                           {isLayer && layerInfo && (
-                                            <div className="text-orange-600 dark:text-orange-400">
+                                            <div className="text-[var(--sds-warning)]">
                                               {layerInfo.layersFromRemainingStones > 0 || layerInfo.layersFromNewStones > 0
                                                 ? `${layerInfo.layersFromRemainingStones || 0} از باقی‌مانده ${layerInfo.layersFromNewStones || 0} از سنگ جدید`
                                                 : ''}
@@ -8557,36 +8608,36 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     )}
                                   </div>
                                 </td>
-                                <td className="py-3 px-4 text-gray-700 dark:text-gray-300 font-medium">
+                                <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] font-medium">
                                   {formatSquareMeters(it.squareMeters || 0)}
                                 </td>
-                                <td className="py-3 px-4 text-gray-700 dark:text-gray-300">
+                                <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                                   {formatPrice(it.pricePerSquareMeter || 0)}
                                 </td>
                                 <td className="py-3 px-4">
                                   <div className="flex flex-col gap-1.5">
                                   {(((it as any).meta?.tools) || []).length === 0 && !(finishing && finishing.cost) ? (
-                                    <span className="text-xs text-gray-400 dark:text-gray-500">-</span>
+                                    <span className="text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">-</span>
                                   ) : (
                                     <details className="text-xs">
-                                      <summary className="cursor-pointer font-semibold text-teal-700 dark:text-teal-300">
+                                      <summary className="cursor-pointer font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
                                         جزئیات خدمات
                                       </summary>
                                       <div className="mt-2 flex flex-col gap-1.5">
                                         {((it as any).meta?.tools || []).map((t: any, i: number) => (
-                                          <div key={i} className="rounded border border-slate-200 bg-slate-50 px-2 py-1 dark:border-slate-700 dark:bg-slate-900">
-                                            <span className="font-medium text-slate-800 dark:text-slate-200">{t.name}</span>
-                                            <span className="text-gray-600 dark:text-gray-400"> • {formatDisplayNumber(t.computedMeters || 0)} m</span>
-                                            <span className="text-gray-500 dark:text-gray-500"> × {formatPrice(t.pricePerMeter || 0)}</span>
+                                          <div key={i} className="rounded border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-2 py-1 dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
+                                            <span className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-secondary)]">{t.name}</span>
+                                            <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]"> • {formatDisplayNumber(t.computedMeters || 0)} m</span>
+                                            <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]"> × {formatPrice(t.pricePerMeter || 0)}</span>
                                           </div>
                                         ))}
                                         {finishing && finishing.cost ? (
-                                          <div className="bg-teal-50 dark:bg-teal-900/20 px-2 py-1 rounded border border-teal-200 dark:border-teal-800">
-                                            <span className="font-medium text-teal-700 dark:text-teal-300">پرداخت:</span>
-                                            <span className="text-gray-600 dark:text-gray-400 mr-1">
+                                          <div className="bg-[var(--sds-accent-soft)] dark:bg-[var(--sds-accent-soft)] px-2 py-1 rounded border border-[var(--sds-accent)] dark:border-[var(--sds-accent)]">
+                                            <span className="font-medium text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">پرداخت:</span>
+                                            <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mr-1">
                                               {it.finishingName || 'پرداخت'} • {finishing.amountLabel}
                                             </span>
-                                            <span className="text-teal-600 dark:text-teal-300 font-semibold">
+                                            <span className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)] font-semibold">
                                               {formatPrice(finishing.cost)}
                                             </span>
                                           </div>
@@ -8598,13 +8649,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 </td>
                                 <td className="py-3 px-4">
                                   {toolsTotal > 0 ? (
-                                    <span className="font-medium text-slate-700 dark:text-slate-300">{formatPrice(toolsTotal)}</span>
+                                    <span className="font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{formatPrice(toolsTotal)}</span>
                                   ) : (
-                                    <span className="text-xs text-gray-400 dark:text-gray-500">-</span>
+                                    <span className="text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">-</span>
                                   )}
                                 </td>
                                 <td className="py-3 px-4">
-                                  <span className="font-semibold text-teal-600 dark:text-teal-400">
+                                  <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
                                     {formatPrice(
                                       typeof it.totalPrice === 'number' ? it.totalPrice : (typeof it.totalPrice === 'string' ? parseFloat(it.totalPrice) || 0 : 0)
                                     )}
@@ -8613,10 +8664,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               </tr>
                             );
                           })}
-                          <tr className="border-t border-teal-200 bg-teal-50/70 dark:border-teal-900 dark:bg-teal-950/40">
-                            <td className="px-4 py-3 font-bold text-teal-900 dark:text-teal-200" colSpan={7}>جمع کل گروه</td>
+                          <tr className="border-t border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] dark:border-[var(--sds-accent)] dark:bg-[var(--sds-accent-soft)]">
+                            <td className="px-4 py-3 font-bold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]" colSpan={7}>جمع کل گروه</td>
                             <td className="py-3 px-4">
-                              <span className="font-bold text-lg text-teal-700 dark:text-teal-300">
+                              <span className="font-bold text-lg text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
                                 {formatPrice(sumNumericValues(stairSystemV2.stairSessionItems, (item) => item.totalPrice))}
                               </span>
                             </td>
@@ -8631,7 +8682,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               {errors.products && (
                 <div
                   role="alert"
-                  className="mx-4 mb-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
+                  className="mx-4 mb-2 rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-3 py-2 text-sm font-medium text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]"
                 >
                   {errors.products}
                 </div>
@@ -8639,33 +8690,33 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               {stairDiscardConfirmationVisible && (
                 <div
                   data-stair-discard-confirmation
-                  className="flex flex-wrap items-center justify-between gap-3 border-t border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+                  className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-4 py-3 text-xs text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]"
                 >
                   <span className="font-semibold">
                     تغییرات این پیکربندی پله ذخیره نشده است
                   </span>
                   <span className="flex items-center gap-3">
-                    <button
+                    <ErpPressable
                       type="button"
-                      className="font-semibold text-teal-700 hover:underline dark:text-teal-300"
+                      className="font-semibold text-[var(--sds-accent)] hover:underline dark:text-[var(--sds-accent)]"
                       onClick={() =>
                         setStairDiscardConfirmationVisible(false)}
                     >
                       ادامه ویرایش
-                    </button>
-                    <button
+                    </ErpPressable>
+                    <ErpPressable
                       type="button"
-                      className="font-semibold text-red-700 hover:underline dark:text-red-300"
+                      className="font-semibold text-[var(--sds-danger)] hover:underline dark:text-[var(--sds-danger)]"
                       onClick={discardStairConfiguration}
                     >
                       دور ریختن کل پیش‌نویس
-                    </button>
+                    </ErpPressable>
                   </span>
                 </div>
               )}
-              <div className="stair-v2-footer flex min-h-16 flex-shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-950">
-                <button type="button" className="min-h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 dark:text-slate-300" onClick={requestCloseStairConfiguration}>انصراف</button>
-                <button ref={stairStageButtonRef} type="button" className={`min-h-10 min-w-28 rounded-lg bg-teal-600 px-4 text-sm font-bold text-white transition hover:bg-teal-500 ${isEditMode ? 'hidden' : ''}`} onClick={() => {
+              <div className="stair-v2-footer flex min-h-16 flex-shrink-0 items-center justify-end gap-2 border-t border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4 dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
+                <ErpPressable type="button" className="min-h-10 rounded-lg px-4 text-sm font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]" onClick={requestCloseStairConfiguration}>انصراف</ErpPressable>
+                <ErpPressable ref={stairStageButtonRef} type="button" className={`min-h-10 min-w-28 rounded-lg bg-[var(--sds-accent-soft)] px-4 text-sm font-bold text-[var(--sds-text-inverse)] transition hover:bg-[var(--sds-accent-soft)] ${isEditMode ? 'hidden' : ''}`} onClick={() => {
                   const requestedFooterAction =
                     requestedStairFooterActionRef.current;
                   requestedStairFooterActionRef.current = 'stage';
@@ -10250,8 +10301,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         : requestedFooterAction
                     });
                   }
-                }}>افزودن این بخش</button>
-                <button ref={stairFinishButtonRef} type="button" className="min-h-11 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-teal-600 hover:to-teal-700" onClick={() => {
+                }}>افزودن این بخش</ErpPressable>
+                <ErpPressable ref={stairFinishButtonRef} type="button" className="min-h-11 rounded-lg bg-gradient-to-r from-[var(--sds-accent)] to-[var(--sds-accent-hover)] px-4 py-2 text-sm font-semibold text-[var(--sds-text-inverse)] shadow-sm transition hover:from-[var(--sds-accent)] hover:to-[var(--sds-accent-hover)]" onClick={() => {
                   const [activeDraft] = getActiveDraft();
                   const commitStagedSession =
                     commitStagedStairSessionRef.current;
@@ -10454,85 +10505,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         : 'finish'
                     });
                   }
-                }}>{isEditMode ? 'ذخیره تغییرات' : 'اتمام و افزودن به قرارداد'}</button>
+                }}>{isEditMode ? 'ذخیره تغییرات' : 'اتمام و افزودن به قرارداد'}</ErpPressable>
               </div>
-              <style jsx global>{`
-                .stair-v2-modal {
-                  overflow: hidden;
-                  border: 1px solid rgb(226 232 240);
-                  box-shadow: 0 24px 70px rgb(15 23 42 / 0.28);
-                }
-                .dark .stair-v2-modal {
-                  border-color: rgb(30 41 59);
-                }
-                .stair-v2-modal [class*="bg-gradient"] {
-                  background-image: none !important;
-                }
-                .stair-v2-header,
-                .stair-v2-type-selector,
-                .stair-v2-footer {
-                  padding-inline: 1rem !important;
-                }
-                .stair-v2-header {
-                  min-height: 3.5rem;
-                }
-                .stair-v2-header > div > div:first-child,
-                .stair-v2-step-indicators {
-                  display: none !important;
-                }
-                .stair-v2-type-selector button {
-                  min-height: 2rem;
-                  border-radius: .5rem !important;
-                  box-shadow: none !important;
-                }
-                .stair-v2-body > div {
-                  padding: .75rem 1rem !important;
-                  gap: 0 !important;
-                }
-                .dark .stair-v2-body input,
-                .dark .stair-v2-body textarea,
-                .dark .stair-v2-body select {
-                  background-color: transparent !important;
-                  border-color: rgb(51 65 85) !important;
-                }
-                .stair-v2-body [class*="shadow"] {
-                  box-shadow: none !important;
-                }
-                .stair-v2-modal input::placeholder,
-                .stair-v2-modal textarea::placeholder {
-                  color: transparent !important;
-                }
-                .stair-v2-body [class*="rounded-2xl"],
-                .stair-v2-body [class*="rounded-xl"] {
-                  border-radius: .5rem !important;
-                }
-                .stair-v2-body [class*="from-purple"],
-                .stair-v2-body [class*="from-orange"],
-                .stair-v2-body [class*="from-blue"],
-                .stair-v2-body [class*="from-green"],
-                .stair-v2-body [class*="from-teal"] {
-                  background-color: transparent !important;
-                }
-                .stair-v2-body section,
-                .stair-v2-body details,
-                .stair-v2-body .border {
-                  box-shadow: none !important;
-                }
-                .stair-v2-footer {
-                  min-height: 4rem;
-                  position: sticky;
-                  bottom: 0;
-                }
-                @media (prefers-reduced-motion: reduce) {
-                  .stair-v2-modal *,
-                  .stair-v2-modal *::before,
-                  .stair-v2-modal *::after {
-                    scroll-behavior: auto !important;
-                    transition-duration: 0.01ms !important;
-                    animation-duration: 0.01ms !important;
-                  }
-                }
-              `}</style>
             </div>
           </div>
         )}
@@ -10612,6 +10586,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         )}
         </div>
       </div>
-    </div>
+    </main>
   );
 }

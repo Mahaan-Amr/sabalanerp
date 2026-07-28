@@ -1,5 +1,5 @@
-﻿'use client';
-
+'use client';
+import { ErpPressable } from '@/components/erp';
 import { useState } from 'react';
 import { FaEye, FaTimes } from 'react-icons/fa';
 
@@ -10,9 +10,9 @@ interface SignatureDisplayProps {
   className?: string;
 }
 
-export default function SignatureDisplay({ 
-  signatureData, 
-  employeeName, 
+export default function SignatureDisplay({
+  signatureData,
+  employeeName,
   timestamp,
   className = ''
 }: SignatureDisplayProps) {
@@ -20,7 +20,7 @@ export default function SignatureDisplay({
 
   if (!signatureData) {
     return (
-      <div className={`text-gray-500 text-sm ${className}`}>
+      <div className={`text-[var(--sds-text-secondary)] text-sm ${className}`}>
         امضایی ثبت نشده است
       </div>
     );
@@ -29,34 +29,34 @@ export default function SignatureDisplay({
   return (
     <>
       <div className={`flex items-center space-x-2 space-x-reverse ${className}`}>
-        <div className="w-8 h-8 bg-gray-700 rounded border flex items-center justify-center">
-          <img 
-            src={signatureData} 
-            alt="امضا" 
+        <div className="w-8 h-8 bg-[var(--sds-surface-raised)] rounded border flex items-center justify-center">
+          <img
+            src={signatureData}
+            alt="امضا"
             className="w-6 h-6 object-contain"
           />
         </div>
-        <button
+        <ErpPressable type="submit"
           onClick={() => setShowModal(true)}
-          className="text-teal-400 hover:text-teal-300 text-sm flex items-center space-x-1 space-x-reverse"
+          className="text-[var(--sds-accent)] hover:text-[var(--sds-accent)] text-sm flex items-center space-x-1 space-x-reverse"
         >
           <FaEye className="h-3 w-3" />
           <span>مشاهده امضا</span>
-        </button>
+        </ErpPressable>
       </div>
 
       {/* Signature Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="glass-liquid-card p-6 max-w-md w-full">
+        <div className="fixed inset-0 bg-[var(--sds-surface-overlay)] flex items-center justify-center z-50 p-4">
+          <div className="sds-workspace-surface p-6 max-w-md w-full">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold text-primary">مشاهده امضا</h3>
-              <button
+              <ErpPressable type="submit"
                 onClick={() => setShowModal(false)}
-                className="text-gray-400 hover:text-white"
+                className="text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)]"
               >
                 <FaTimes className="h-5 w-5" />
-              </button>
+              </ErpPressable>
             </div>
 
             {employeeName && (
@@ -73,21 +73,21 @@ export default function SignatureDisplay({
               </div>
             )}
 
-            <div className="border border-gray-600 rounded-lg p-4 bg-white">
-              <img 
-                src={signatureData} 
-                alt="تصویر امضا" 
+            <div className="border border-[var(--sds-border-strong)] rounded-lg p-4 bg-[var(--sds-surface-raised)]">
+              <img
+                src={signatureData}
+                alt="تصویر امضا"
                 className="w-full h-auto max-h-64 object-contain"
               />
             </div>
 
             <div className="mt-4 text-center">
-              <button
+              <ErpPressable type="submit"
                 onClick={() => setShowModal(false)}
-                className="glass-liquid-btn px-6 py-2"
+                className="sds-action px-6 py-2"
               >
                 بستن
-              </button>
+              </ErpPressable>
             </div>
           </div>
         </div>

@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -10,6 +9,7 @@ import {
   FaCheck,
   FaClock,
   FaCog,
+  FaDatabase,
   FaEdit,
   FaExclamationTriangle,
   FaFileContract,
@@ -264,6 +264,7 @@ export default function DashboardPage() {
                     { title: 'تقویم سالیانه سبلان', description: 'تعریف تعطیلی‌ها و رویدادهای شرکت', href: '/dashboard/admin/sabalan-calendar', icon: FaCalendarAlt, tone: 'info' },
                     { title: 'امنیت سیستم', description: 'نظارت بر امنیت و فعالیت‌ها', href: '/dashboard/admin/security', icon: FaUserShield, tone: 'danger' },
                     { title: 'گزارشات مدیریتی', description: 'گزارش‌های جامع و تحلیل‌های سیستم', href: '/dashboard/admin/reports', icon: FaChartLine, tone: 'primary' },
+                    { title: 'پشتیبان‌گیری و بازیابی', description: 'ساخت، دانلود، اعتبارسنجی و بازیابی امن کل سامانه', href: '/dashboard/admin/system-recovery', icon: FaDatabase, tone: 'warning' },
                   ]}
                 />
               </ErpSection>
@@ -282,30 +283,30 @@ export default function DashboardPage() {
                     <Link
                       key={contract.id}
                       href={`/dashboard/contracts/${contract.id}`}
-                      className="block rounded-lg border border-slate-200 bg-slate-50 p-4 transition hover:border-[#074747]/40 hover:bg-white dark:border-slate-800 dark:bg-slate-800/50 dark:hover:border-teal-700 dark:hover:bg-slate-800"
+                      className="block rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 transition hover:border-[var(--sds-accent)]/40 hover:bg-[var(--sds-surface-raised)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:hover:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]"
                     >
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="flex min-w-0 items-start gap-3">
-                          <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[#074747]/10 text-[#074747] dark:bg-teal-900/40 dark:text-teal-100">
+                          <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--sds-accent)]/10 text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
                             {getStatusIcon(contract.status)}
                           </span>
                           <div className="min-w-0">
-                            <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-white">{contract.titlePersian}</h3>
-                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            <h3 className="truncate text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{contract.titlePersian}</h3>
+                            <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                               {contract.customer.firstName} {contract.customer.lastName}
                               {contract.customer.companyName && ` (${contract.customer.companyName})`}
                             </p>
-                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                               {contract.department.namePersian} | {contract.createdByUser.firstName} {contract.createdByUser.lastName} | {formatDate(contract.createdAt)}
                             </p>
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:text-left">
                           <div>
-                            <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                            <p className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                               {contract.totalAmount ? formatAmount(contract.totalAmount) : 'نامشخص'}
                             </p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">{contract.contractNumber}</p>
+                            <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{contract.contractNumber}</p>
                           </div>
                           <ErpBadge tone={statusTone[contract.status] || 'neutral'}>
                             {CONTRACT_STATUS_LABELS[contract.status] || contract.status}

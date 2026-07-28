@@ -2,6 +2,7 @@
 // Payment entries management
 
 import React from 'react';
+import { ErpPressable, ErpSelect } from '@/components/erp';
 import { FaPlus, FaTrash, FaEdit, FaCheck } from 'react-icons/fa';
 import { formatPrice, formatDisplayNumber, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
@@ -80,30 +81,30 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h3 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">
+        <h3 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] mb-2">
           روش پرداخت
         </h3>
-        <p className="text-gray-600 dark:text-gray-300">
+        <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
           روش‌های پرداخت را تعیین کنید (جمع پرداخت و مانده مشتری نباید کمتر از مبلغ قرارداد باشد)
         </p>
       </div>
       
       <div className="max-w-4xl mx-auto space-y-4">
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+        <div className="p-4 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div className="space-y-1">
-              <h4 className="text-lg font-medium text-gray-800 dark:text-white">تخفیف</h4>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <h4 className="text-lg font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">تخفیف</h4>
+              <p className="text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                 تخفیف فقط روی جمع پایه محصولات سنگی اعمال می‌شود.
               </p>
-              <div className="grid grid-cols-1 gap-2 text-sm text-gray-600 dark:text-gray-300 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] sm:grid-cols-3">
                 <span>جمع پایه: {formatPrice(baseSubtotal, wizardData.payment.currency)}</span>
                 <span>جمع قبل از تخفیف: {formatPrice(productsTotal, wizardData.payment.currency)}</span>
                 <span>سقف مجاز: {formatDisplayNumber(maxDiscountPercent)}٪</span>
               </div>
             </div>
             <div className="w-full md:w-44">
-              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">درصد تخفیف</label>
+              <label className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">درصد تخفیف</label>
               <FormattedNumberInput
                 value={discountPercent}
                 onChange={(value) => onDiscountPercentChange(Math.min(Math.max(value || 0, 0), maxDiscountPercent))}
@@ -111,65 +112,65 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
                 max={maxDiscountPercent}
                 step={0.1}
                 disabled={!hasMatchingDiscountRange || baseSubtotal <= 0}
-                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700/50 dark:text-white"
+                className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3 py-2.5 text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-inverse)]"
               />
             </div>
           </div>
           {!hasMatchingDiscountRange && baseSubtotal > 0 && (
-            <p className="mt-3 rounded border border-yellow-200 bg-yellow-50 p-2 text-sm text-yellow-700 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
+            <p className="mt-3 rounded border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-2 text-sm text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
               برای این مبلغ پایه، بازه تخفیف فعالی تعریف نشده است.
             </p>
           )}
           {discountAmount > 0 && (
-            <div className="mt-3 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+            <div className="mt-3 rounded border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
               مبلغ تخفیف: {formatPrice(discountAmount, wizardData.payment.currency)}
             </div>
           )}
         </div>
 
         {/* Summary Section */}
-        <div className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
+        <div className="p-4 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <span className="text-sm text-gray-600 dark:text-gray-400">مبلغ قرارداد:</span>
+              <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبلغ قرارداد:</span>
               <div className="mr-2">
-                <span className="font-semibold text-gray-800 dark:text-white">
+                <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                   {formatPrice(totalContractAmount, wizardData.payment.currency)}
                 </span>
                 {wizardData.payment.currency === 'تومان' && (
-                  <span className="mr-2 text-xs text-gray-500 dark:text-gray-400">
+                  <span className="mr-2 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                     ({formatDisplayNumber(tomanToRial(totalContractAmount))} ریال)
                   </span>
                 )}
               </div>
             </div>
             <div>
-              <span className="text-sm text-gray-600 dark:text-gray-400">جمع پرداخت:</span>
+              <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">جمع پرداخت:</span>
               <div className="mr-2">
-                <span className={`font-semibold ${isPaymentCovered ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
+                <span className={`font-semibold ${isPaymentCovered ? 'text-[var(--sds-success)] dark:text-[var(--sds-success)]' : 'text-[var(--sds-warning)] dark:text-[var(--sds-warning)]'}`}>
                   {formatPrice(paymentSum, wizardData.payment.currency)}
                 </span>
                 {wizardData.payment.currency === 'تومان' && (
-                  <span className="mr-2 text-xs text-gray-500 dark:text-gray-400">
+                  <span className="mr-2 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                     ({formatDisplayNumber(tomanToRial(paymentSum))} ریال)
                   </span>
                 )}
               </div>
             </div>
             <div>
-              <span className="text-sm text-gray-600 dark:text-gray-400">{hasExtraPayment ? 'مبلغ اضافه:' : 'باقیمانده:'}</span>
+              <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{hasExtraPayment ? 'مبلغ اضافه:' : 'باقیمانده:'}</span>
               <div className="mr-2">
                 <span className={`font-semibold ${
                   Math.abs(remainingAmount) < 0.01 
-                    ? 'text-green-600 dark:text-green-400' 
+                    ? 'text-[var(--sds-success)] dark:text-[var(--sds-success)]'
                     : remainingAmount > 0 
-                      ? 'text-yellow-600 dark:text-yellow-400' 
-                      : 'text-blue-600 dark:text-blue-400'
+                      ? 'text-[var(--sds-warning)] dark:text-[var(--sds-warning)]'
+                      : 'text-[var(--sds-info)] dark:text-[var(--sds-info)]'
                 }`}>
                   {formatPrice(Math.abs(remainingAmount), wizardData.payment.currency)}
                 </span>
                 {wizardData.payment.currency === 'تومان' && (
-                  <span className="mr-2 text-xs text-gray-500 dark:text-gray-400">
+                  <span className="mr-2 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                     ({formatDisplayNumber(tomanToRial(remainingAmount))} ریال)
                   </span>
                 )}
@@ -178,15 +179,15 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
           </div>
           
           {remainingAmount > 0.01 && (
-            <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded">
-              <p className="text-yellow-700 dark:text-yellow-300 text-sm">
+            <div className="mt-3 p-3 bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-warning-surface)] border border-[var(--sds-warning-border)] dark:border-[var(--sds-warning-border)] rounded">
+              <p className="text-[var(--sds-warning)] dark:text-[var(--sds-warning)] text-sm">
                 مجموع پرداخت و مانده مشتری ({formatPrice(paymentSum, wizardData.payment.currency)}) کمتر از مبلغ قرارداد ({formatPrice(totalContractAmount, wizardData.payment.currency)}) است
               </p>
             </div>
           )}
 
           {hasExtraPayment && (
-            <div className="mt-3 rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200">
+            <div className="mt-3 rounded border border-[var(--sds-info-border)] bg-[var(--sds-info-surface)] p-3 text-sm text-[var(--sds-info)] dark:border-[var(--sds-info-border)] dark:bg-[var(--sds-info-surface)] dark:text-[var(--sds-info)]">
               <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_220px] md:items-end">
                 <div>
                   <p className="font-semibold">مبلغ اضافه: {formatPrice(extraPaymentAmount, wizardData.payment.currency)}</p>
@@ -196,7 +197,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium">توضیحات</label>
-                  <select
+                  <ErpSelect
                     value={wizardData.payment.extraPaymentReason || ''}
                     onChange={(event) => updateWizardData({
                       payment: {
@@ -204,19 +205,19 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
                         extraPaymentReason: event.target.value === 'PREVIOUS_DEBT' ? 'PREVIOUS_DEBT' : null
                       }
                     })}
-                    className="w-full rounded-md border border-blue-200 bg-white px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:border-blue-700 dark:bg-gray-800 dark:text-white"
+                    className="w-full rounded-md border border-[var(--sds-info-border)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   >
                     <option value="">انتخاب کنید</option>
                     <option value="PREVIOUS_DEBT">به علت بدهی از قبل</option>
-                  </select>
+                  </ErpSelect>
                 </div>
               </div>
             </div>
           )}
           
           {paymentSumMatchesTotal && paymentSum > 0 && (
-            <div className="mt-3 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded">
-              <p className="text-green-700 dark:text-green-300 text-sm flex items-center gap-2">
+            <div className="mt-3 p-3 bg-[var(--sds-success-surface)] dark:bg-[var(--sds-success-surface)] border border-[var(--sds-success-border)] dark:border-[var(--sds-success-border)] rounded">
+              <p className="text-[var(--sds-success)] dark:text-[var(--sds-success)] text-sm flex items-center gap-2">
                 <FaCheck className="w-4 h-4" />
                 مجموع پرداخت‌ها با مبلغ قرارداد برابر است
               </p>
@@ -227,12 +228,12 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
         {/* Payment Entries List */}
         <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <h4 className="text-lg font-medium text-gray-800 dark:text-white">
+            <h4 className="text-lg font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
               لیست پرداخت‌ها
             </h4>
-            <button
+            <ErpPressable
               onClick={handleAddPaymentEntry}
-              className="px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white rounded-lg transition-all duration-200 font-medium flex items-center gap-2"
+              className="sds-tone-primary sds-action-solid flex items-center gap-2 px-4 py-2 font-medium"
             >
               <FaPlus className="w-4 h-4" />
               <span>افزودن پرداخت</span>
@@ -241,49 +242,49 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
                   مانده: {formatPrice(remainingAmount, wizardData.payment.currency)}
                 </span>
               )}
-            </button>
+            </ErpPressable>
           </div>
 
           {wizardData.payment.payments.length === 0 ? (
-            <div className="p-8 text-center border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-              <p className="text-gray-500 dark:text-gray-400 mb-4">
+            <div className="p-8 text-center border-2 border-dashed border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg">
+              <p className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)] mb-4">
                 هنوز پرداختی ثبت نشده است
               </p>
-              <button
+              <ErpPressable
                 onClick={handleAddPaymentEntry}
-                className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors"
+                className="px-4 py-2 bg-[var(--sds-accent-soft)] text-[var(--sds-text-inverse)] rounded-lg hover:bg-[var(--sds-accent-soft)] transition-colors"
               >
                 ایجاد پرداخت جدید
-              </button>
+              </ErpPressable>
             </div>
           ) : (
             <div className="space-y-3">
               {wizardData.payment.payments.map((payment, index) => (
                 <div
                   key={index}
-                  className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                  className="p-4 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]"
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
-                        <span className="font-semibold text-gray-800 dark:text-white">
+                        <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                           پرداخت {index + 1}
                         </span>
-                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-[var(--sds-info-surface)] text-[var(--sds-info)] dark:bg-[var(--sds-info-surface)] dark:text-[var(--sds-info)]">
                           {getPaymentMethodLabel(payment)}
                         </span>
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
                         <div>
-                          <span className="text-gray-500 dark:text-gray-400">مبلغ: </span>
-                          <span className="font-medium text-gray-700 dark:text-gray-300">
+                          <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">مبلغ: </span>
+                          <span className="font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                             {formatPrice(payment.amount, wizardData.payment.currency)}
                           </span>
                         </div>
                         {payment.paymentDate && (
                           <div>
-                            <span className="text-gray-500 dark:text-gray-400">تاریخ: </span>
-                            <span className="font-medium text-gray-700 dark:text-gray-300">
+                            <span className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">تاریخ: </span>
+                            <span className="font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                               {payment.paymentDate}
                             </span>
                           </div>
@@ -291,7 +292,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
                       </div>
                     </div>
                     <div className="flex gap-2 ml-4">
-                      <button
+                      <ErpPressable
                         onClick={() => {
                           if (onEditPaymentEntry && payment.id) {
                             onEditPaymentEntry(payment.id);
@@ -299,18 +300,18 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
                             setShowPaymentEntryModal(true);
                           }
                         }}
-                        className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                        className="p-2 text-[var(--sds-info)] dark:text-[var(--sds-info)] hover:bg-[var(--sds-info-surface)] dark:hover:bg-[var(--sds-info-surface)] rounded-lg transition-colors"
                         title="ویرایش"
                       >
                         <FaEdit className="w-4 h-4" />
-                      </button>
-                      <button
+                      </ErpPressable>
+                      <ErpPressable
                         onClick={() => handleRemovePayment(index)}
-                        className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                        className="p-2 text-[var(--sds-danger)] dark:text-[var(--sds-danger)] hover:bg-[var(--sds-danger-surface)] dark:hover:bg-[var(--sds-danger-surface)] rounded-lg transition-colors"
                         title="حذف"
                       >
                         <FaTrash className="w-4 h-4" />
-                      </button>
+                      </ErpPressable>
                     </div>
                   </div>
                 </div>
@@ -320,11 +321,11 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
         </div>
 
         {(errors.paymentMethod || errors.payments) && (
-          <p className="text-red-500 text-sm mt-2">{errors.paymentMethod || errors.payments}</p>
+          <p className="text-[var(--sds-danger)] text-sm mt-2">{errors.paymentMethod || errors.payments}</p>
         )}
 
         {errors.paymentWarning && (
-          <div className="mt-2 rounded border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-700 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300">
+          <div className="mt-2 rounded border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 text-sm text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
             {errors.paymentWarning}
           </div>
         )}

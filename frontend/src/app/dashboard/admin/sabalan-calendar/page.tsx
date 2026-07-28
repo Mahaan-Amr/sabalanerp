@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpSelect } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { FaCalendarAlt, FaPlus, FaSave } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
@@ -7,8 +7,8 @@ import { sabalanCalendarAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 
-const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
-const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
+const inputClass = 'min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
+const labelClass = 'mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]';
 
 const eventLabels: Record<string, string> = {
   OFFICIAL_HOLIDAY: 'تعطیل رسمی',
@@ -99,8 +99,8 @@ export default function SabalanCalendarPage() {
         { label: 'روزهای تعطیل', value: new Set(entries.filter((entry) => entry.isActive && entry.isHoliday).map((entry) => new Date(entry.date).toDateString())).size.toLocaleString('fa-IR'), icon: FaCalendarAlt, tone: 'warning' },
       ]}
     >
-      {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
+      {message && <div className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)]">{message}</div>}
+      {error && <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)]">{error}</div>}
 
       <ErpSection title={form.id ? 'ویرایش رویداد' : 'رویداد جدید'}>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
@@ -110,27 +110,27 @@ export default function SabalanCalendarPage() {
           </label>
           <label>
             <span className={labelClass}>عنوان</span>
-            <input className={inputClass} value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} />
+            <ErpInput className={inputClass} value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} />
           </label>
           <label>
             <span className={labelClass}>نوع رویداد</span>
-            <select className={inputClass} value={form.eventType} onChange={(event) => setForm((current) => ({ ...current, eventType: event.target.value }))}>
+            <ErpSelect className={inputClass} value={form.eventType} onChange={(event) => setForm((current) => ({ ...current, eventType: event.target.value }))}>
               {Object.entries(eventLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+            </ErpSelect>
           </label>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-end">
           <label>
             <span className={labelClass}>توضیحات</span>
-            <input className={inputClass} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
+            <ErpInput className={inputClass} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
           </label>
-          <label className="flex min-h-12 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 dark:border-slate-700 dark:bg-slate-800">
-            <input type="checkbox" checked={form.isHoliday} onChange={(event) => setForm((current) => ({ ...current, isHoliday: event.target.checked }))} />
-            <span className="text-sm text-slate-700 dark:text-slate-200">تعطیل</span>
+          <label className="flex min-h-12 items-center gap-2 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
+            <ErpInput type="checkbox" checked={form.isHoliday} onChange={(event) => setForm((current) => ({ ...current, isHoliday: event.target.checked }))} />
+            <span className="text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">تعطیل</span>
           </label>
-          <label className="flex min-h-12 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 dark:border-slate-700 dark:bg-slate-800">
-            <input type="checkbox" checked={form.isActive} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
-            <span className="text-sm text-slate-700 dark:text-slate-200">فعال</span>
+          <label className="flex min-h-12 items-center gap-2 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
+            <ErpInput type="checkbox" checked={form.isActive} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
+            <span className="text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">فعال</span>
           </label>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
@@ -149,21 +149,21 @@ export default function SabalanCalendarPage() {
               return (
                 <ErpCard key={date} className="p-4">
                   <div className="mb-3 flex flex-wrap items-center gap-2">
-                    <p className="font-semibold text-slate-900 dark:text-white">{date}</p>
+                    <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{date}</p>
                     {holiday && <ErpBadge tone="warning">تعطیل</ErpBadge>}
                   </div>
                   <div className="space-y-3">
                     {dayEntries.map((entry) => (
-                      <div key={entry.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800/50">
+                      <div key={entry.id} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-semibold text-slate-900 dark:text-white">{entry.title}</p>
+                              <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{entry.title}</p>
                               <ErpBadge tone={entry.isActive ? 'info' : 'neutral'}>{eventLabels[entry.eventType] || entry.eventType}</ErpBadge>
                               {entry.isHoliday && <ErpBadge tone="warning">تعطیل</ErpBadge>}
                               {!entry.isActive && <ErpBadge tone="neutral">غیرفعال</ErpBadge>}
                             </div>
-                            {entry.description && <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{entry.description}</p>}
+                            {entry.description && <p className="mt-2 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{entry.description}</p>}
                           </div>
                           <ErpButton label="ویرایش" variant="outline" tone="neutral" onClick={() => setForm({ id: entry.id, date: PersianCalendar.toPersian(entry.date), title: entry.title, description: entry.description || '', eventType: entry.eventType, isHoliday: entry.isHoliday, isActive: entry.isActive })} />
                         </div>

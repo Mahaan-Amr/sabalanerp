@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpPressable } from '@/components/erp';
 import { formatPriceWithRial, toFiniteNumber } from '@/lib/numberFormat';
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
 
@@ -78,16 +78,16 @@ export default function ConfirmationContractView({
     : data.contract.items || [];
 
   return (
-    <div className="min-h-screen px-4 py-10 text-primary">
+    <main className="sds-workspace min-h-screen px-4 py-10 text-primary">
       <div className="mx-auto max-w-5xl space-y-6">
-        <section className="glass-liquid-card step-content-card p-6">
+        <section className="sds-workspace-surface step-content-card p-6">
           <h1 className="mb-2 text-2xl font-bold">تایید دیجیتال قرارداد</h1>
           <p className="text-secondary">
             لطفا اطلاعات قرارداد را بررسی کنید. ثبت کد پیامک شده به منزله تایید نهایی قرارداد و شرایط درج شده در آن است.
           </p>
         </section>
 
-        <section className="glass-liquid-card step-content-card p-6">
+        <section className="sds-workspace-surface step-content-card p-6">
           <h2 className="mb-4 text-xl font-semibold">اطلاعات قرارداد</h2>
           <div className="grid gap-3 text-sm sm:grid-cols-2">
             <p>شماره قرارداد: <span className="font-semibold">{data.contract.contractNumber}</span></p>
@@ -100,12 +100,12 @@ export default function ConfirmationContractView({
         </section>
 
         {displayItems.length > 0 && (
-          <section className="glass-liquid-card step-content-card p-6">
+          <section className="sds-workspace-surface step-content-card p-6">
             <h2 className="mb-4 text-xl font-semibold">اقلام قرارداد</h2>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
-                  <tr className="border-b border-white/10 text-secondary">
+                  <tr className="border-b border-[var(--sds-border-default)] text-secondary">
                     <th className="py-2 text-right">محصول</th>
                     <th className="py-2 text-right">تعداد</th>
                     <th className="py-2 text-right">مبلغ</th>
@@ -115,7 +115,7 @@ export default function ConfirmationContractView({
                   {displayItems.map((item: any, index: number) => {
                     const finishing = normalizeProductFinishing(item);
                     return (
-                      <tr key={item.id || `${item.productId || 'item'}-${index}`} className="border-b border-white/5">
+                      <tr key={item.id || `${item.productId || 'item'}-${index}`} className="border-b border-[var(--sds-border-default)]">
                         <td className="py-3">
                           <div>{item.product?.namePersian || item.product?.name || item.stoneName || item.description || 'محصول'}</div>
                           {finishing && (
@@ -136,36 +136,36 @@ export default function ConfirmationContractView({
         )}
 
         {!isApproved ? (
-          <section className="glass-liquid-card step-content-card p-6">
+          <section className="sds-workspace-surface step-content-card p-6">
             <h2 className="mb-3 text-xl font-semibold">ثبت کد تایید</h2>
             <p className="mb-4 text-sm text-secondary">
               بعد از بررسی قرارداد، کد ارسال شده به شماره مشتری را وارد کنید.
             </p>
-            <input
+            <ErpInput
               value={code}
               onChange={(event) => onCodeChange(event.target.value)}
-              className="glass-liquid-input max-w-sm text-center"
+              className="sds-field max-w-sm text-center"
               inputMode="numeric"
               maxLength={8}
               placeholder="کد تایید"
             />
             <div className="mt-4 flex flex-wrap gap-3">
-              <button disabled={submitting} onClick={onVerify} className="glass-liquid-btn-primary px-6 py-3 disabled:opacity-50">
+              <ErpPressable type="submit" disabled={submitting} onClick={onVerify} className="sds-action sds-tone-primary sds-action-solid px-6 py-3 disabled:opacity-50">
                 تایید قرارداد
-              </button>
-              <button disabled={submitting} onClick={onResend} className="glass-liquid-btn disabled:opacity-50">
+              </ErpPressable>
+              <ErpPressable type="submit" disabled={submitting} onClick={onResend} className="sds-action disabled:opacity-50">
                 ارسال مجدد کد
-              </button>
+              </ErpPressable>
             </div>
-            {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
-            {success && <p className="mt-4 text-sm text-emerald-400">{success}</p>}
+            {error && <p className="mt-4 text-sm text-[var(--sds-danger)]">{error}</p>}
+            {success && <p className="mt-4 text-sm text-[var(--sds-success)]">{success}</p>}
           </section>
         ) : (
-          <section className="glass-liquid-card step-content-card border-emerald-500/40 p-6 text-emerald-300">
+          <section className="sds-workspace-surface step-content-card border-[var(--sds-success-border)] p-6 text-[var(--sds-success)]">
             {verifiedDate ? `تایید شده در تاریخ ${verifiedDate}` : 'تایید شده'}
           </section>
         )}
       </div>
-    </div>
+    </main>
   );
 }

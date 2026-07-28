@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { FaCheckCircle, FaExclamationTriangle, FaEye, FaHistory, FaLock, FaUserShield } from 'react-icons/fa';
 import { ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPage, ErpSection, type ErpMetric, type ErpTone } from '@/components/erp';
@@ -84,11 +83,11 @@ export default function AdminSecurityPage() {
         ) : (
           <div className="space-y-3">
             {securityLogs.map((log) => (
-              <div key={log.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
+              <div key={log.id} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_auto] lg:items-center">
                   <div>
-                    <p className="font-semibold text-slate-900 dark:text-white">{log.userName}</p>
-                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{log.action}</p>
+                    <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{log.userName}</p>
+                    <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{log.action}</p>
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <ErpFieldView label="آدرس IP" value={<span className="font-mono">{log.ipAddress}</span>} />

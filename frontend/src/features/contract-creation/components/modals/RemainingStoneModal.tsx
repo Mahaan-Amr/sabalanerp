@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ErpPressable, ErpInput } from '@/components/erp';
 import { useReducedMotion } from 'framer-motion';
 import {
   parseCanonicalDecimal,
@@ -21,6 +22,7 @@ import type {
 } from '../../types/contract.types';
 import {
   AutoGrowingDescription,
+  CentralProductModalShell,
   CompactSwitch,
   CompactUnitSwitch,
   focusProductModalError,
@@ -76,9 +78,9 @@ const SummaryRow = ({
   label: string;
   value: React.ReactNode;
 }) => (
-  <div className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)] items-center gap-4 border-t border-slate-100 py-2 text-xs first:border-t-0 dark:border-slate-800">
-    <span className="text-slate-500 dark:text-slate-400">{label}</span>
-    <strong className="text-slate-800 dark:text-slate-100">{value}</strong>
+  <div className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)] items-center gap-4 border-t border-[var(--sds-border-subtle)] py-2 text-xs first:border-t-0 border-[var(--sds-border-subtle)]">
+    <span className="text-[var(--sds-text-muted)] text-[var(--sds-text-muted)]">{label}</span>
+    <strong className="text-[var(--sds-text-primary)] text-[var(--sds-text-primary)]">{value}</strong>
   </div>
 );
 
@@ -195,59 +197,48 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="remaining-stone-title"
-        className="flex max-h-[96vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl transition-opacity duration-200 motion-reduce:transition-none dark:bg-slate-950 sm:max-h-[90vh] sm:rounded-xl"
-      >
-        <header className="sticky top-0 z-10 flex min-h-16 items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
-          <h2 id="remaining-stone-title" className="truncate text-base font-bold">
-            ساخت از باقی‌مانده · {formatDisplayNumber(remainingStone.width)}cm × {formatDisplayNumber(remainingStone.length)}m
-          </h2>
-          <button
-            type="button"
-            onClick={resetAndClose}
-            className="min-h-9 px-2 text-xs font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-white"
-          >
-            بازگشت
-          </button>
-        </header>
-
-        <div className="flex-1 overflow-y-auto px-4 py-2">
-          <section className="border-b border-slate-200 py-3 dark:border-slate-800">
-            <div className="text-xs text-slate-500 dark:text-slate-400">
+    <CentralProductModalShell
+      open
+      title={`ساخت از باقی‌مانده · ${formatDisplayNumber(remainingStone.width)}cm × ${formatDisplayNumber(remainingStone.length)}m`}
+      view="main"
+      onClose={resetAndClose}
+      primaryLabel="افزودن از باقی‌مانده"
+      pending={false}
+      onPrimary={submit}
+    >
+        <div className="px-0 py-0">
+          <section className="border-b border-[var(--sds-border-default)] py-3 border-[var(--sds-border-subtle)]">
+            <div className="text-xs text-[var(--sds-text-muted)] text-[var(--sds-text-muted)]">
               {sourceProduct?.stoneName || sourceProduct?.product?.namePersian || '—'} ·
               {' '}{formatDisplayNumber(remainingStone.width)}cm ×
               {' '}{formatDisplayNumber(remainingStone.length)}m
             </div>
-            <label className="mt-3 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+            <label className="mt-3 block text-xs font-semibold text-[var(--sds-text-secondary)] text-[var(--sds-text-secondary)]">
               عنوان محصول
-              <input
+              <ErpInput
                 value={remainingStoneConfig.stoneName || ''}
                 onChange={event => setRemainingStoneConfig(current => ({
                   ...current,
                   stoneName: event.target.value
                 }))}
-                className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm font-normal focus:border-teal-500 focus:outline-none dark:border-slate-700"
+                className="mt-1 h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-2 text-sm font-normal focus:border-[var(--sds-accent)] focus:outline-none border-[var(--sds-border-default)]"
               />
             </label>
           </section>
 
-          <section className="border-b border-slate-200 py-3 dark:border-slate-800">
+          <section className="border-b border-[var(--sds-border-default)] py-3 border-[var(--sds-border-subtle)]">
             <div className="flex min-h-8 items-center justify-between gap-3">
               <h3 className="text-sm font-bold">محصول نهایی</h3>
-              <button
+              <ErpPressable
                 type="button"
                 onClick={handleAddPartition}
-                className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+                className="text-xs font-semibold text-[var(--sds-accent)] hover:underline text-[var(--sds-accent)]"
               >
                 افزودن ردیف
-              </button>
+              </ErpPressable>
             </div>
 
-            <div className="mt-2 divide-y divide-slate-100 border-y border-slate-100 dark:divide-slate-800 dark:border-slate-800">
+            <div className="mt-2 divide-y divide-[var(--sds-border-subtle)] border-y border-[var(--sds-border-subtle)] divide-[var(--sds-border-subtle)] border-[var(--sds-border-subtle)]">
               {partitions.map((partition, index) => {
                 const rowError =
                   partition.validationError ||
@@ -259,7 +250,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                     <div className="grid grid-cols-[1fr_1fr_.65fr_auto] items-start gap-2">
                       <label
                         data-remainder-first={index === 0 ? '' : undefined}
-                        className="min-w-0 text-xs font-semibold text-slate-600 dark:text-slate-300"
+                        className="min-w-0 text-xs font-semibold text-[var(--sds-text-secondary)] text-[var(--sds-text-secondary)]"
                       >
                         <span className="mb-1 flex min-h-6 items-center justify-between gap-1">
                           عرض
@@ -277,16 +268,16 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                           onChange={value =>
                             handleUpdatePartition(partition.id, 'width', value)}
                           min={0}
-                          className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm focus:border-teal-500 focus:outline-none dark:border-slate-700"
+                          className="h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-2 text-sm focus:border-[var(--sds-accent)] focus:outline-none border-[var(--sds-border-default)]"
                         />
                         {widthInvalid && errors.products && (
-                          <span className="mt-1 block text-[11px] text-red-600">
+                          <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">
                             عرض را وارد کنید
                           </span>
                         )}
                       </label>
 
-                      <label className="min-w-0 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                      <label className="min-w-0 text-xs font-semibold text-[var(--sds-text-secondary)] text-[var(--sds-text-secondary)]">
                         <span className="mb-1 flex min-h-6 items-center justify-between gap-1">
                           طول
                           {index === 0 && (
@@ -303,16 +294,16 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                           onChange={value =>
                             handleUpdatePartition(partition.id, 'length', value)}
                           min={0}
-                          className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm focus:border-teal-500 focus:outline-none dark:border-slate-700"
+                          className="h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-2 text-sm focus:border-[var(--sds-accent)] focus:outline-none border-[var(--sds-border-default)]"
                         />
                         {lengthInvalid && errors.products && (
-                          <span className="mt-1 block text-[11px] text-red-600">
+                          <span className="mt-1 block text-[11px] text-[var(--sds-danger)]">
                             طول را وارد کنید
                           </span>
                         )}
                       </label>
 
-                      <label className="min-w-0 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                      <label className="min-w-0 text-xs font-semibold text-[var(--sds-text-secondary)] text-[var(--sds-text-secondary)]">
                         <span className="mb-1 flex min-h-6 items-center">تعداد</span>
                         <FormattedNumberInput
                           value={partition.quantity || ''}
@@ -320,20 +311,20 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                             handleUpdatePartition(partition.id, 'quantity', value)}
                           min={1}
                           step={1}
-                          className="h-9 w-full rounded-lg border border-slate-300 bg-transparent px-2 text-sm focus:border-teal-500 focus:outline-none dark:border-slate-700"
+                          className="h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-2 text-sm focus:border-[var(--sds-accent)] focus:outline-none border-[var(--sds-border-default)]"
                         />
                       </label>
 
-                      <button
+                      <ErpPressable
                         type="button"
                         disabled={partitions.length === 1}
                         onClick={() => handleRemovePartition(partition.id)}
-                        className="mt-7 min-h-9 px-1 text-xs font-semibold text-red-600 disabled:opacity-30"
+                        className="mt-7 min-h-9 px-1 text-xs font-semibold text-[var(--sds-danger)] disabled:opacity-30"
                       >
                         حذف
-                      </button>
+                      </ErpPressable>
                     </div>
-                    <div className="mt-1 min-h-4 text-[11px] text-red-600">
+                    <div className="mt-1 min-h-4 text-[11px] text-[var(--sds-danger)]">
                       {rowError || ''}
                     </div>
                   </div>
@@ -342,7 +333,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
             </div>
           </section>
 
-          <label className="block border-b border-slate-200 py-3 text-xs font-semibold text-slate-600 dark:border-slate-800 dark:text-slate-300">
+          <label className="block border-b border-[var(--sds-border-default)] py-3 text-xs font-semibold text-[var(--sds-text-secondary)] border-[var(--sds-border-subtle)] text-[var(--sds-text-secondary)]">
             توضیحات
             <AutoGrowingDescription
               value={remainingStoneConfig.description || ''}
@@ -401,7 +392,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
             />
           )}
 
-          <section className="border-b border-slate-200 py-3 dark:border-slate-800">
+          <section className="border-b border-[var(--sds-border-default)] py-3 border-[var(--sds-border-subtle)]">
             <div className="flex min-h-8 items-center justify-between gap-3">
               <h3 className="text-sm font-bold">تنظیمات مستقیم</h3>
               <label className="flex items-center gap-2 text-xs font-semibold">
@@ -417,7 +408,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
 
           <section className="py-3" tabIndex={-1}>
             <h3 className="mb-2 text-sm font-bold">خلاصه محاسبه</h3>
-            <div className="border-y border-slate-100 dark:border-slate-800">
+            <div className="border-y border-[var(--sds-border-subtle)] border-[var(--sds-border-subtle)]">
               <SummaryRow
                 label="منبع مصرفی"
                 value={previewIsValid
@@ -448,30 +439,12 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
               />
             </div>
             {!previewIsValid && (preview.summaryError || errors.products) && (
-              <p className="mt-2 text-xs text-red-600 dark:text-red-300">
+              <p className="mt-2 text-xs text-[var(--sds-danger)] text-[var(--sds-danger)]">
                 {preview.summaryError || errors.products}
               </p>
             )}
           </section>
         </div>
-
-        <footer className="sticky bottom-0 z-10 flex min-h-16 items-center justify-between gap-3 border-t border-slate-200 bg-white/95 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
-          <button
-            type="button"
-            onClick={resetAndClose}
-            className="min-h-10 px-3 text-sm font-semibold text-slate-500"
-          >
-            بازگشت
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            className="min-h-10 rounded-lg bg-teal-600 px-5 text-sm font-bold text-white transition-colors hover:bg-teal-700"
-          >
-            افزودن از باقی‌مانده
-          </button>
-        </footer>
-      </div>
-    </div>
+    </CentralProductModalShell>
   );
 };

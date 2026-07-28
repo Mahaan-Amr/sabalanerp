@@ -88,10 +88,21 @@ services:
       HR_HIRING_ANTIVIRUS_COMMAND: /app/scripts/hr-clamdscan.sh
       ALLOW_UNSCANNED_HR_FILES: "false"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+      RECOVERY_STORAGE_DIR: /app/storage/recovery
+      RECOVERY_COORDINATION_DIR: /app/recovery-coordination
+      INQUIRY_RECOVERY_SOURCE_DIR: /app/recovery-sources/inquiry
+      INQUIRY_RECOVERY_COORDINATED: "true"
+      ALLOW_SANITIZED_RECOVERY: "false"
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      APP_COMMIT: ${APP_COMMIT:-unknown}
     volumes:
       - backend_storage_contracts:/app/storage/contracts
       - backend_storage_hr_hiring:/app/storage/hr-hiring
+      - backend_storage_accounting_contracts:/app/storage/accounting-contracts
       - backend_uploads:/app/uploads
+      - backend_recovery:/app/storage/recovery
+      - recovery_coordination:/app/recovery-coordination
+      - inquiry_data:/app/recovery-sources/inquiry
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,8 +158,10 @@ services:
       ADMIN_EMAIL: ${INQUIRY_ADMIN_EMAIL}
       ADMIN_PASSWORD: ${INQUIRY_ADMIN_PASSWORD}
       SESSION_SECRET: ${INQUIRY_SESSION_SECRET}
+      RECOVERY_COORDINATION_DIR: /app/recovery-coordination
     volumes:
       - inquiry_data:/data
+      - recovery_coordination:/app/recovery-coordination
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3001',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1));\""]
       interval: 15s
@@ -202,7 +215,10 @@ volumes:
   redis_data:
   backend_storage_contracts:
   backend_storage_hr_hiring:
+  backend_storage_accounting_contracts:
   backend_uploads:
+  backend_recovery:
+  recovery_coordination:
   inquiry_data:
   certbot_www:
   certbot_conf:

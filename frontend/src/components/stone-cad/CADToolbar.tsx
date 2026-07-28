@@ -1,11 +1,9 @@
-﻿/**
+'use client';
+import { ErpPressable } from '@/components/erp';
+/**
  * CAD Toolbar Component
  * Tool selection and controls
- */
-
-'use client';
-
-import React from 'react';
+ */import React from 'react';
 import { FaSquare, FaRuler, FaHandPointer, FaThLarge, FaLink, FaUndo, FaRedo, FaLayerGroup, FaCircle, FaMinus, FaPencilAlt, FaFont, FaDownload } from 'react-icons/fa';
 
 interface CADToolbarProps {
@@ -50,143 +48,143 @@ export function CADToolbar({
   onExport
 }: CADToolbarProps) {
   return (
-    <div className="cad-toolbar bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-3 flex items-center gap-2 flex-wrap">
+    <div className="cad-toolbar bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] p-3 flex items-center gap-2 flex-wrap">
       {/* Tool Selection */}
-      <div className="flex items-center gap-1 border-r border-gray-200 dark:border-gray-700 pr-3">
+      <div className="flex items-center gap-1 border-r border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] pr-3">
         {tools.map(tool => {
           const Icon = tool.icon;
           return (
-            <button
+            <ErpPressable
               key={tool.id}
               type="button"
               onClick={() => onToolChange(tool.id)}
               className={`p-2 rounded-lg transition-colors ${
                 selectedTool === tool.id
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  ? 'bg-[var(--sds-info)] text-[var(--sds-text-inverse)]'
+                  : 'bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-subtle)]'
               }`}
               title={tool.label}
             >
               <Icon className="w-5 h-5" />
-            </button>
+            </ErpPressable>
           );
         })}
       </div>
-      
+
       {/* Grid Controls */}
-      <div className="flex items-center gap-1 border-r border-gray-200 dark:border-gray-700 pr-3">
-        <button
+      <div className="flex items-center gap-1 border-r border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] pr-3">
+        <ErpPressable
           type="button"
           onClick={onToggleGrid}
           className={`p-2 rounded-lg transition-colors ${
             gridVisible
-              ? 'bg-indigo-600 text-white'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+              ? 'bg-[var(--sds-info)] text-[var(--sds-text-inverse)]'
+              : 'bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-subtle)]'
           }`}
           title="نمایش/مخفی کردن شبکه"
         >
           <FaThLarge className="w-5 h-5" />
-        </button>
-        
-        <button
+        </ErpPressable>
+
+        <ErpPressable
           type="button"
           onClick={onToggleSnap}
           className={`p-2 rounded-lg transition-colors ${
             snapEnabled
-              ? 'bg-indigo-600 text-white'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+              ? 'bg-[var(--sds-info)] text-[var(--sds-text-inverse)]'
+              : 'bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-subtle)]'
           }`}
           title="چسبیدن به شبکه"
         >
           <FaLink className="w-5 h-5" />
-        </button>
+        </ErpPressable>
       </div>
-      
+
       {/* Layers Toggle */}
       {onToggleLayers && (
-        <div className="flex items-center gap-1 border-r border-gray-200 dark:border-gray-700 pr-3">
-          <button
+        <div className="flex items-center gap-1 border-r border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] pr-3">
+          <ErpPressable
             type="button"
             onClick={onToggleLayers}
             className={`p-2 rounded-lg transition-colors ${
               showLayersPanel
-                ? 'bg-indigo-600 text-white'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                ? 'bg-[var(--sds-info)] text-[var(--sds-text-inverse)]'
+                : 'bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-subtle)]'
             }`}
             title="نمایش/مخفی کردن پنل لایه‌ها"
           >
             <FaLayerGroup className="w-5 h-5" />
-          </button>
+          </ErpPressable>
         </div>
       )}
-      
+
       {/* Export */}
       {onExport && (
-        <div className="flex items-center gap-1 border-r border-gray-200 dark:border-gray-700 pr-3">
+        <div className="flex items-center gap-1 border-r border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] pr-3">
           <div className="relative group">
-            <button
+            <ErpPressable
               type="button"
-              className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              className="p-2 rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-subtle)] transition-colors"
               title="خروجی گرفتن"
             >
               <FaDownload className="w-5 h-5" />
-            </button>
-            <div className="absolute left-0 mt-2 w-32 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-              <button
+            </ErpPressable>
+            <div className="absolute left-0 mt-2 w-32 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+              <ErpPressable
                 type="button"
                 onClick={() => onExport('png')}
-                className="w-full text-right px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-t-lg"
+                className="w-full text-right px-3 py-2 text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-raised)] rounded-t-lg"
               >
                 PNG
-              </button>
-              <button
+              </ErpPressable>
+              <ErpPressable
                 type="button"
                 onClick={() => onExport('svg')}
-                className="w-full text-right px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="w-full text-right px-3 py-2 text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-raised)]"
               >
                 SVG
-              </button>
-              <button
+              </ErpPressable>
+              <ErpPressable
                 type="button"
                 onClick={() => onExport('json')}
-                className="w-full text-right px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-b-lg"
+                className="w-full text-right px-3 py-2 text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-raised)] rounded-b-lg"
               >
                 JSON
-              </button>
+              </ErpPressable>
             </div>
           </div>
         </div>
       )}
-      
+
       {/* Undo/Redo */}
       <div className="flex items-center gap-1">
-        <button
+        <ErpPressable
           type="button"
           onClick={onUndo}
           disabled={!canUndo}
           className={`p-2 rounded-lg transition-colors ${
             canUndo
-              ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+              ? 'bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-subtle)]'
+              : 'bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-muted)] dark:text-[var(--sds-text-secondary)] cursor-not-allowed'
           }`}
           title="واگرد"
         >
           <FaUndo className="w-5 h-5" />
-        </button>
-        
-        <button
+        </ErpPressable>
+
+        <ErpPressable
           type="button"
           onClick={onRedo}
           disabled={!canRedo}
           className={`p-2 rounded-lg transition-colors ${
             canRedo
-              ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+              ? 'bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-subtle)]'
+              : 'bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-muted)] dark:text-[var(--sds-text-secondary)] cursor-not-allowed'
           }`}
           title="انجام دوباره"
         >
           <FaRedo className="w-5 h-5" />
-        </button>
+        </ErpPressable>
       </div>
     </div>
   );

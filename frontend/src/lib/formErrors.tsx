@@ -1,5 +1,4 @@
 'use client';
-
 import React from 'react';
 
 export type FormErrorMap = Record<string, string>;
@@ -66,7 +65,7 @@ export const mapAxiosFormErrors = (
 export function InlineFieldError({
   id,
   message,
-  className = 'text-red-400 text-sm mt-1'
+  className = 'text-[var(--sds-danger)] text-sm mt-1'
 }: {
   id?: string;
   message?: string;

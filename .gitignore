@@ -38,6 +38,7 @@ logs
 .codex-tmp/
 .scratch/hr-hiring-e2e/
 .scratch/hr-hiring-reliability/
+.scratch/design-system-e2e/
 
 # Browser test artifacts
 test-results/

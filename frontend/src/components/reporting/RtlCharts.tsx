@@ -1,5 +1,4 @@
 'use client';
-
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer,
   Tooltip, XAxis, YAxis
@@ -24,7 +23,7 @@ export const resolveChartLabel = (row: any, labelKey = 'label') =>
   String(row?.[labelKey] ?? row?.statusLabel ?? row?.status ?? 'نامشخص');
 
 function SeriesLegend({ items }: { items: Array<{ label: string; color: string; dashed?: boolean }> }) {
-  return <div dir="rtl" className="mb-3 flex min-h-8 flex-wrap items-center justify-start gap-x-5 gap-y-2 px-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
+  return <div dir="rtl" className="mb-3 flex min-h-8 flex-wrap items-center justify-start gap-x-5 gap-y-2 px-2 text-sm font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
     {items.map((item) => <span key={item.label} className="inline-flex items-center gap-2"><i className="inline-block w-7 border-t-[3px]" style={{ borderColor: item.color, borderTopStyle: item.dashed ? 'dashed' : 'solid' }} />{item.label}</span>)}
   </div>;
 }
@@ -76,7 +75,7 @@ export function RtlHorizontalBarChart({ data, valueKey = 'value', labelKey = 'la
           </BarChart>
         </ResponsiveContainer>
         <div dir="rtl" className="grid py-3 text-right" style={{ gridTemplateRows: `repeat(${Math.max(normalizedData.length, 1)}, minmax(0, 1fr))`, paddingBottom: 18 }}>
-          {normalizedData.map((row, index) => <div key={`${resolveChartLabel(row, labelKey)}-${index}`} title={resolveChartLabel(row, labelKey)} className="flex min-w-0 items-center border-r-2 border-transparent pr-2 text-xs font-semibold leading-5 text-slate-700 dark:text-slate-200"><span className="line-clamp-2">{resolveChartLabel(row, labelKey)}</span></div>)}
+          {normalizedData.map((row, index) => <div key={`${resolveChartLabel(row, labelKey)}-${index}`} title={resolveChartLabel(row, labelKey)} className="flex min-w-0 items-center border-r-2 border-transparent pr-2 text-xs font-semibold leading-5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"><span className="line-clamp-2">{resolveChartLabel(row, labelKey)}</span></div>)}
         </div>
       </div>
     </div>

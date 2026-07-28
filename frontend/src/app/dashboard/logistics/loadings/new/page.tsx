@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -568,21 +568,21 @@ export default function NewLoadingPage() {
         const active = item.id === step;
         const done = steps.findIndex((candidate) => candidate.id === step) > index;
         return (
-          <button
+          <ErpPressable
             key={item.id}
             type="button"
             disabled={!canEnterStep(item.id)}
             onClick={() => { void navigateToStep(item.id); }}
             className={`min-h-12 rounded-lg border px-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
               active
-                ? 'border-[#074747] bg-[#074747] text-white'
+                ? 'border-[var(--sds-accent)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
                 : done
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200'
-                  : 'border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
+                  ? 'border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]'
+                  : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]'
             }`}
           >
             {item.label}
-          </button>
+          </ErpPressable>
         );
       })}
     </div>
@@ -591,7 +591,7 @@ export default function NewLoadingPage() {
   const renderCustomerStep = () => (
     <ErpSection title="انتخاب مشتری" description="فقط مشتری‌هایی نمایش داده می‌شوند که حداقل یک پروژه با مانده مثبت بارگیری دارند.">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <input
+        <ErpInput
           className={inputClass}
           value={customerSearch}
           onChange={(event) => setCustomerSearch(event.target.value)}
@@ -602,27 +602,27 @@ export default function NewLoadingPage() {
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
         {customers.map((customer) => (
-          <button
+          <ErpPressable
             key={customer.id}
             type="button"
             onClick={() => loadCustomerProjects(customer)}
-            className={`rounded-lg border bg-white p-4 text-right shadow-sm transition hover:border-[#074747]/40 dark:bg-slate-900/70 ${
-              selectedCustomer?.id === customer.id ? 'border-[#074747]' : 'border-slate-200 dark:border-slate-700'
+            className={`rounded-lg border bg-[var(--sds-surface-raised)] p-4 text-right shadow-sm transition hover:border-[var(--sds-accent)]/40 dark:bg-[var(--sds-surface-raised)] ${
+              selectedCustomer?.id === customer.id ? 'border-[var(--sds-accent)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
             }`}
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="font-semibold text-slate-900 dark:text-white">{customer.customerName}</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">
+                <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{customer.customerName}</p>
+                <p className="mt-1 text-xs leading-5 text-[var(--sds-text-secondary)]">
                   {[customer.companyName, customer.brandName, customer.primaryPhone].filter(Boolean).join(' · ') || 'بدون اطلاعات تکمیلی'}
                 </p>
                 {customer.projectManagerName && (
-                  <p className="mt-1 text-xs text-slate-500">مدیر پروژه: {customer.projectManagerName} {customer.projectManagerNumber ? `· ${customer.projectManagerNumber}` : ''}</p>
+                  <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">مدیر پروژه: {customer.projectManagerName} {customer.projectManagerNumber ? `· ${customer.projectManagerNumber}` : ''}</p>
                 )}
               </div>
               <ErpBadge tone="success">{numberFa(customer.loadableProjectCount, 0)} پروژه قابل بارگیری</ErpBadge>
             </div>
-          </button>
+          </ErpPressable>
         ))}
         {!customers.length && <ErpEmptyState icon={FaUser} title="مشتری قابل بارگیری پیدا نشد" />}
       </div>
@@ -632,7 +632,7 @@ export default function NewLoadingPage() {
   const renderProjectStep = () => (
     <ErpSection title="انتخاب پروژه" description="فقط پروژه‌هایی که مانده مثبت بارگیری دارند قابل انتخاب هستند.">
       {selectedCustomer && (
-        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
+        <div className="mb-4 rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
           مشتری انتخاب‌شده: {selectedCustomer.customerName || selectedCustomer.companyName}
         </div>
       )}
@@ -641,10 +641,10 @@ export default function NewLoadingPage() {
           <ErpCard key={project.id} interactive className="p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="font-semibold text-slate-900 dark:text-white">{project.projectName || project.address}</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{[project.city, project.address].filter(Boolean).join(' · ')}</p>
+                <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{project.projectName || project.address}</p>
+                <p className="mt-1 text-xs leading-5 text-[var(--sds-text-secondary)]">{[project.city, project.address].filter(Boolean).join(' · ')}</p>
                 {(project.projectManagerName || project.projectManagerNumber) && (
-                  <p className="mt-1 text-xs text-slate-500">مدیر پروژه: {[project.projectManagerName, project.projectManagerNumber].filter(Boolean).join(' · ')}</p>
+                  <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">مدیر پروژه: {[project.projectManagerName, project.projectManagerNumber].filter(Boolean).join(' · ')}</p>
                 )}
               </div>
               <div className="flex flex-wrap gap-2 sm:justify-end">
@@ -680,8 +680,8 @@ export default function NewLoadingPage() {
               <ErpCard key={contract.id} className="p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <p className="font-semibold text-slate-900 dark:text-white">قرارداد {contract.contractNumber}</p>
-                    <p className="mt-1 text-xs text-slate-500">{numberFa(contract.rows.length, 0)} ردیف قابل بارگیری · {numberFa(selectedCount, 0)} انتخاب‌شده</p>
+                    <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">قرارداد {contract.contractNumber}</p>
+                    <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{numberFa(contract.rows.length, 0)} ردیف قابل بارگیری · {numberFa(selectedCount, 0)} انتخاب‌شده</p>
                   </div>
                   <ErpButton
                     label={isOpen ? 'بستن جزئیات' : 'مشاهده محصولات'}
@@ -694,7 +694,7 @@ export default function NewLoadingPage() {
                   <div className="mt-4 overflow-x-auto">
                     <table className="w-full min-w-[820px] text-sm">
                       <thead>
-                        <tr className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-700">
+                        <tr className="border-b border-[var(--sds-border-default)] text-xs text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)]">
                           <th className="px-3 py-3 text-right">محصول</th>
                           <th className="px-3 py-3 text-right">مشخصات</th>
                           <th className="px-3 py-3 text-right">جزئیات</th>
@@ -707,12 +707,12 @@ export default function NewLoadingPage() {
                           const selected = selectedSourceIds.has(source.contractItemId);
                           const details = productDetailBadges(source.productSnapshot);
                           return (
-                            <tr key={source.contractItemId} className="border-b border-slate-100 align-top dark:border-slate-800">
-                              <td className="px-3 py-4 font-semibold text-slate-900 dark:text-white">{source.productSnapshot?.name || source.groupDisplayName}</td>
-                              <td className="px-3 py-4 text-xs leading-6 text-slate-500">{productIdentityParts(source.productSnapshot).join(' · ') || 'بدون مشخصات'}</td>
+                            <tr key={source.contractItemId} className="border-b border-[var(--sds-border-default)] align-top dark:border-[var(--sds-border-strong)]">
+                              <td className="px-3 py-4 font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{source.productSnapshot?.name || source.groupDisplayName}</td>
+                              <td className="px-3 py-4 text-xs leading-6 text-[var(--sds-text-secondary)]">{productIdentityParts(source.productSnapshot).join(' · ') || 'بدون مشخصات'}</td>
                               <td className="px-3 py-4">
                                 <div className="flex max-w-md flex-wrap gap-1">
-                                  {details.length ? details.slice(0, 5).map((detail) => <ErpBadge key={detail} tone="info">{detail}</ErpBadge>) : <span className="text-xs text-slate-400">بدون جزئیات افزوده</span>}
+                                  {details.length ? details.slice(0, 5).map((detail) => <ErpBadge key={detail} tone="info">{detail}</ErpBadge>) : <span className="text-xs text-[var(--sds-text-muted)]">بدون جزئیات افزوده</span>}
                                 </div>
                               </td>
                               <td className="px-3 py-4 text-center">
@@ -743,11 +743,11 @@ export default function NewLoadingPage() {
   );
 
   const renderLineQuantityInputs = (line: DraftLine) => (
-    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+    <div className="mt-3 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-sm font-semibold text-slate-900 dark:text-white">قرارداد {line.source.contractNumber}</p>
-          <p className="mt-1 text-xs text-slate-500">مانده قابل بارگیری: {numberFa(line.source.remainingQuantity)} {line.source.unitLabel}</p>
+          <p className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">قرارداد {line.source.contractNumber}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">مانده قابل بارگیری: {numberFa(line.source.remainingQuantity)} {line.source.unitLabel}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <ErpButton label="پر کردن با کل مانده" onClick={() => fillLineWithRemaining(line)} tone="neutral" variant="soft" />
@@ -769,16 +769,16 @@ export default function NewLoadingPage() {
       <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
         {line.mode === 'linear' ? (
           <>
-            <label><span className={labelClass}>خط راس</span><input className={inputClass} value={line.khatRas} onChange={(event) => updateLine(line.key, { khatRas: event.target.value })} /></label>
-            <label><span className={labelClass}>تعداد</span><input className={inputClass} value={line.pieceCount} onChange={(event) => updateLine(line.key, { pieceCount: event.target.value })} /></label>
-            <label><span className={labelClass}>اضافه</span><input className={inputClass} value={line.plus} onChange={(event) => updateLine(line.key, { plus: event.target.value })} /></label>
-            <label><span className={labelClass}>کسر</span><input className={inputClass} value={line.minus} onChange={(event) => updateLine(line.key, { minus: event.target.value })} /></label>
+            <label><span className={labelClass}>خط راس</span><ErpInput className={inputClass} value={line.khatRas} onChange={(event) => updateLine(line.key, { khatRas: event.target.value })} /></label>
+            <label><span className={labelClass}>تعداد</span><ErpInput className={inputClass} value={line.pieceCount} onChange={(event) => updateLine(line.key, { pieceCount: event.target.value })} /></label>
+            <label><span className={labelClass}>اضافه</span><ErpInput className={inputClass} value={line.plus} onChange={(event) => updateLine(line.key, { plus: event.target.value })} /></label>
+            <label><span className={labelClass}>کسر</span><ErpInput className={inputClass} value={line.minus} onChange={(event) => updateLine(line.key, { minus: event.target.value })} /></label>
           </>
         ) : (
-          <label><span className={labelClass}>مقدار مستقیم</span><input className={inputClass} value={line.quantity} onChange={(event) => updateLine(line.key, { quantity: event.target.value })} /></label>
+          <label><span className={labelClass}>مقدار مستقیم</span><ErpInput className={inputClass} value={line.quantity} onChange={(event) => updateLine(line.key, { quantity: event.target.value })} /></label>
         )}
       </div>
-      <p className="mt-2 text-xs font-semibold text-[#074747] dark:text-teal-200">
+      <p className="mt-2 text-xs font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
         مقدار محاسبه‌شده: {numberFa(calculateLineQuantity(line))} {unitLabels[line.source.unit] || line.source.unit}
       </p>
     </div>
@@ -788,11 +788,11 @@ export default function NewLoadingPage() {
     const driverLine = lineWithDriverInput(driver.id, line);
     const update = (patch: Partial<DraftLine>) => updateDriverLineInput(driver.id, line.key, patch);
     return (
-      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+      <div className="mt-3 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-sm font-semibold text-slate-900 dark:text-white">قرارداد {line.source.contractNumber}</p>
-            <p className="mt-1 text-xs text-slate-500">مانده قابل بارگیری: {numberFa(line.source.remainingQuantity)} {line.source.unitLabel}</p>
+            <p className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">قرارداد {line.source.contractNumber}</p>
+            <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">مانده قابل بارگیری: {numberFa(line.source.remainingQuantity)} {line.source.unitLabel}</p>
           </div>
           <ErpBadge tone={calculateDriverLineQuantity(driver.id, line) > 0 ? 'success' : 'neutral'}>
             مقدار این راننده: {numberFa(calculateDriverLineQuantity(driver.id, line))} {unitLabels[line.source.unit] || line.source.unit}
@@ -813,13 +813,13 @@ export default function NewLoadingPage() {
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
           {driverLine.mode === 'linear' ? (
             <>
-              <label><span className={labelClass}>خط راس</span><input className={inputClass} value={driverLine.khatRas} onChange={(event) => update({ khatRas: event.target.value })} /></label>
-              <label><span className={labelClass}>تعداد</span><input className={inputClass} value={driverLine.pieceCount} onChange={(event) => update({ pieceCount: event.target.value })} /></label>
-              <label><span className={labelClass}>اضافه</span><input className={inputClass} value={driverLine.plus} onChange={(event) => update({ plus: event.target.value })} /></label>
-              <label><span className={labelClass}>کسر</span><input className={inputClass} value={driverLine.minus} onChange={(event) => update({ minus: event.target.value })} /></label>
+              <label><span className={labelClass}>خط راس</span><ErpInput className={inputClass} value={driverLine.khatRas} onChange={(event) => update({ khatRas: event.target.value })} /></label>
+              <label><span className={labelClass}>تعداد</span><ErpInput className={inputClass} value={driverLine.pieceCount} onChange={(event) => update({ pieceCount: event.target.value })} /></label>
+              <label><span className={labelClass}>اضافه</span><ErpInput className={inputClass} value={driverLine.plus} onChange={(event) => update({ plus: event.target.value })} /></label>
+              <label><span className={labelClass}>کسر</span><ErpInput className={inputClass} value={driverLine.minus} onChange={(event) => update({ minus: event.target.value })} /></label>
             </>
           ) : (
-            <label><span className={labelClass}>مقدار مستقیم</span><input className={inputClass} value={driverLine.quantity} onChange={(event) => update({ quantity: event.target.value })} /></label>
+            <label><span className={labelClass}>مقدار مستقیم</span><ErpInput className={inputClass} value={driverLine.quantity} onChange={(event) => update({ quantity: event.target.value })} /></label>
           )}
         </div>
       </div>
@@ -838,16 +838,16 @@ export default function NewLoadingPage() {
             <ErpCard key={driver.id} className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="font-semibold text-slate-900 dark:text-white">{driver.firstName} {driver.lastName}</p>
-                  <p className="mt-1 text-xs text-slate-500">{driver.vehiclePlate} · {driver.vehicleType}</p>
+                  <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{driver.firstName} {driver.lastName}</p>
+                  <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{driver.vehiclePlate} · {driver.vehicleType}</p>
                 </div>
                 <ErpBadge tone={driverCarriesAny(driver.id) ? 'success' : 'warning'}>{driverCarriesAny(driver.id) ? 'دارای مقدار' : 'بدون مقدار'}</ErpBadge>
               </div>
               <div className="mt-3 space-y-3">
                 {groupedLines.map((group) => (
-                  <div key={`${driver.id}-${group.key}`} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
-                    <p className="font-semibold text-slate-900 dark:text-white">{group.displayName}</p>
-                    <p className="mt-1 text-xs text-slate-500">{productIdentityParts(group.snapshot).join(' · ') || 'بدون مشخصات'}</p>
+                  <div key={`${driver.id}-${group.key}`} className="rounded-xl border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]">
+                    <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{group.displayName}</p>
+                    <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{productIdentityParts(group.snapshot).join(' · ') || 'بدون مشخصات'}</p>
                     {group.lines.map((line) => <div key={`${driver.id}-${line.key}`}>{renderDriverLineQuantityInputs(driver, line)}</div>)}
                   </div>
                 ))}
@@ -855,12 +855,12 @@ export default function NewLoadingPage() {
             </ErpCard>
           ))}
           <ErpCard className="p-4" tone="info">
-            <p className="mb-3 font-semibold text-slate-900 dark:text-white">جمع ردیف‌ها</p>
+            <p className="mb-3 font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">جمع ردیف‌ها</p>
             <div className="space-y-2">
               {lines.map((line) => (
-                <div key={line.key} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white p-3 text-sm dark:bg-slate-900">
+                <div key={line.key} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--sds-surface-raised)] p-3 text-sm dark:bg-[var(--sds-surface-raised)]">
                   <span>قرارداد {line.source.contractNumber} · {line.groupDisplayName}</span>
-                  <span className="font-semibold text-[#074747] dark:text-teal-200">{numberFa(calculateTotalLineQuantity(line))} {unitLabels[line.source.unit] || line.source.unit}</span>
+                  <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{numberFa(calculateTotalLineQuantity(line))} {unitLabels[line.source.unit] || line.source.unit}</span>
                 </div>
               ))}
             </div>
@@ -873,7 +873,7 @@ export default function NewLoadingPage() {
   const renderDriverStep = () => (
     <ErpSection title="انتخاب رانندگان آماده بارگیری" description="فقط رانندگانی نمایش داده می‌شوند که گارد با «ورود برای بارگیری» وارد محوطه بارگیری کرده است. می‌توانید چند راننده انتخاب کنید.">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <input
+        <ErpInput
           className={inputClass}
           value={driverSearch}
           onChange={(event) => setDriverSearch(event.target.value)}
@@ -886,38 +886,38 @@ export default function NewLoadingPage() {
           const selected = selectedDriverIds.includes(driver.id);
           const reservedForOther = driver.queueStatus === 'RESERVED' && driver.reservedLoading?.id !== draft?.id && !selected;
           return (
-            <button
+            <ErpPressable
               key={driver.id}
               type="button"
               onClick={() => toggleSelectedDriver(driver)}
               disabled={reservedForOther}
-              className={`rounded-lg border bg-white p-4 text-right shadow-sm transition hover:border-[#074747]/40 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-900/70 ${
-                selected ? 'border-[#074747]' : 'border-slate-200 dark:border-slate-700'
+              className={`rounded-lg border bg-[var(--sds-surface-raised)] p-4 text-right shadow-sm transition hover:border-[var(--sds-accent)]/40 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[var(--sds-surface-raised)] ${
+                selected ? 'border-[var(--sds-accent)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
               }`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-semibold text-slate-900 dark:text-white">{driver.firstName} {driver.lastName}</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">{[driver.vehiclePlate, driver.vehicleType, driver.phone, driver.nationalCode].filter(Boolean).join(' · ')}</p>
-                  {driver.enteredLoadingAreaAt && <p className="mt-1 text-xs text-slate-500">ورود برای بارگیری: {new Date(driver.enteredLoadingAreaAt).toLocaleString('fa-IR')}</p>}
+                  <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{driver.firstName} {driver.lastName}</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--sds-text-secondary)]">{[driver.vehiclePlate, driver.vehicleType, driver.phone, driver.nationalCode].filter(Boolean).join(' · ')}</p>
+                  {driver.enteredLoadingAreaAt && <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">ورود برای بارگیری: {new Date(driver.enteredLoadingAreaAt).toLocaleString('fa-IR')}</p>}
                 </div>
                 <ErpBadge tone={selected ? 'success' : reservedForOther ? 'warning' : 'neutral'}>
                   {selected ? 'انتخاب شده' : reservedForOther ? `رزرو شده برای ${driver.reservedLoading?.loadingNumber || 'بارگیری دیگر'}` : 'آماده بارگیری'}
                 </ErpBadge>
               </div>
-            </button>
+            </ErpPressable>
           );
         })}
         {!filteredDrivers.length && <ErpEmptyState icon={FaUsers} title="راننده آماده بارگیری وجود ندارد" description="گارد باید از نوبت‌دهی روی «ورود برای بارگیری» کلیک کند." />}
       </div>
       {selectedDrivers.length > 0 && (
         <ErpCard className="mt-4 p-4" tone="info">
-          <p className="mb-3 font-semibold text-slate-900 dark:text-white">رانندگان انتخاب‌شده</p>
+          <p className="mb-3 font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">رانندگان انتخاب‌شده</p>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             {selectedDrivers.map((driver) => (
-              <div key={driver.id} className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800">
+              <div key={driver.id} className="rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-sm dark:bg-[var(--sds-surface-raised)]">
                 <span className="font-semibold">{driver.firstName} {driver.lastName}</span>
-                <span className="block text-xs text-slate-500">{driver.vehiclePlate} · {driver.vehicleType}</span>
+                <span className="block text-xs text-[var(--sds-text-secondary)]">{driver.vehiclePlate} · {driver.vehicleType}</span>
               </div>
             ))}
           </div>
@@ -931,53 +931,53 @@ export default function NewLoadingPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-3">
           <ErpCard className="p-4">
-            <p className="text-sm text-slate-500">مشتری و پروژه</p>
-            <p className="mt-1 font-semibold text-slate-900 dark:text-white">{selectedCustomer?.customerName || remaining?.project?.customerName || 'انتخاب نشده'}</p>
-            <p className="mt-1 text-xs text-slate-500">{remaining?.project?.projectName || remaining?.project?.address || draft?.project?.projectName || ''}</p>
+            <p className="text-sm text-[var(--sds-text-secondary)]">مشتری و پروژه</p>
+            <p className="mt-1 font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{selectedCustomer?.customerName || remaining?.project?.customerName || 'انتخاب نشده'}</p>
+            <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{remaining?.project?.projectName || remaining?.project?.address || draft?.project?.projectName || ''}</p>
           </ErpCard>
           <ErpCard className="p-4">
-            <p className="text-sm text-slate-500">رانندگان</p>
+            <p className="text-sm text-[var(--sds-text-secondary)]">رانندگان</p>
             <div className="mt-2 space-y-2">
               {selectedDrivers.map((driver) => (
-                <div key={driver.id} className="rounded-lg bg-slate-50 p-2 text-sm dark:bg-slate-800">
-                  <span className="font-semibold text-slate-900 dark:text-white">{driver.firstName} {driver.lastName}</span>
-                  <span className="block text-xs text-slate-500">{driver.vehicleType} · {driver.vehiclePlate}</span>
+                <div key={driver.id} className="rounded-lg bg-[var(--sds-surface-subtle)] p-2 text-sm dark:bg-[var(--sds-surface-raised)]">
+                  <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{driver.firstName} {driver.lastName}</span>
+                  <span className="block text-xs text-[var(--sds-text-secondary)]">{driver.vehicleType} · {driver.vehiclePlate}</span>
                 </div>
               ))}
-              {!selectedDrivers.length && <p className="text-sm text-slate-500">انتخاب نشده</p>}
+              {!selectedDrivers.length && <p className="text-sm text-[var(--sds-text-secondary)]">انتخاب نشده</p>}
             </div>
           </ErpCard>
           <ErpCard className="p-4">
-            <p className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">خلاصه ردیف‌ها</p>
+            <p className="mb-3 text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">خلاصه ردیف‌ها</p>
             <div className="space-y-2">
               {groupedLines.map((group) => (
-                <div key={group.key} className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800">
+                <div key={group.key} className="rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-sm dark:bg-[var(--sds-surface-raised)]">
                   <div className="flex items-start justify-between gap-3">
                     <span>
                       {group.displayName}
-                      <span className="mt-1 block text-xs text-slate-500">{group.lines.map((line) => `قرارداد ${line.source.contractNumber}: ${numberFa(calculateTotalLineQuantity(line))}`).join(' · ')}</span>
+                      <span className="mt-1 block text-xs text-[var(--sds-text-secondary)]">{group.lines.map((line) => `قرارداد ${line.source.contractNumber}: ${numberFa(calculateTotalLineQuantity(line))}`).join(' · ')}</span>
                     </span>
-                    <span className="font-semibold text-[#074747] dark:text-teal-200">
+                    <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
                       {numberFa(group.lines.reduce((sum, line) => sum + calculateTotalLineQuantity(line), 0))} {group.unitLabel}
                     </span>
                   </div>
                 </div>
               ))}
-              {!groupedLines.length && <p className="text-sm text-slate-500">ردیفی اضافه نشده است.</p>}
+              {!groupedLines.length && <p className="text-sm text-[var(--sds-text-secondary)]">ردیفی اضافه نشده است.</p>}
             </div>
           </ErpCard>
           <label>
             <span className={labelClass}>یادداشت</span>
-            <textarea className={`${inputClass} min-h-28`} value={notes} onChange={(event) => setNotes(event.target.value)} />
+            <ErpTextarea className={`${inputClass} min-h-28`} value={notes} onChange={(event) => setNotes(event.target.value)} />
           </label>
         </div>
         <ErpCard className="p-4">
-          <p className="font-semibold text-slate-900 dark:text-white">آمادگی نهایی‌سازی</p>
+          <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">آمادگی نهایی‌سازی</p>
           <div className="mt-3 space-y-2">
             {blockers.length === 0 ? (
-              <p className="rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200">همه موارد تکمیل است.</p>
+              <p className="rounded-lg bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">همه موارد تکمیل است.</p>
             ) : blockers.map((blocker) => (
-              <p key={blocker} className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-100">{blocker}</p>
+              <p key={blocker} className="rounded-lg bg-[var(--sds-warning-surface)] p-3 text-sm text-[var(--sds-warning)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">{blocker}</p>
             ))}
           </div>
           <div className="mt-4 space-y-2">
@@ -1002,8 +1002,8 @@ export default function NewLoadingPage() {
       ]}
     >
       {renderStepNav()}
-      {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">{message}</div>}
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">{error}</div>}
+      {message && <div className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">{message}</div>}
+      {error && <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">{error}</div>}
 
       {step === 'customer' && renderCustomerStep()}
       {step === 'project' && renderProjectStep()}
@@ -1012,10 +1012,10 @@ export default function NewLoadingPage() {
       {step === 'driver' && renderDriverStep()}
       {step === 'review' && renderReviewStep()}
 
-      <div className="sticky bottom-3 z-10 rounded-lg border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+      <div className="sticky bottom-3 z-10 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-3 shadow-lg backdrop-blur dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
         <div className="flex items-center justify-between gap-3">
           <ErpButton label="قبلی" icon={FaArrowRight} onClick={goBack} disabled={step === 'customer' || saving} tone="neutral" variant="outline" />
-          <div className="text-center text-xs text-slate-500">
+          <div className="text-center text-xs text-[var(--sds-text-secondary)]">
             {draft?.loadingNumber ? <span>پیش‌نویس {draft.loadingNumber}</span> : <span>ابتدا مشتری و پروژه قابل بارگیری را انتخاب کنید</span>}
           </div>
           {step === 'review' ? (

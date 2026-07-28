@@ -1,5 +1,5 @@
-"use client";
-
+'use client';
+import { ErpInput, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from "react";
 import { applicantHiringAPI, hiringError } from "@/lib/hiringApi";
 import { normalizeIranianMobile } from "@/lib/phoneFormat";
@@ -69,7 +69,7 @@ const blank = {
 };
 
 const inputClass =
-  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-400";
+  "w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-secondary)] outline-none focus:border-[var(--sds-success-border)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:placeholder:text-[var(--sds-text-muted)]";
 
 function Field({
   label,
@@ -81,10 +81,10 @@ function Field({
   required?: boolean;
 }) {
   return (
-    <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+    <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
       <span>
         {label}
-        {required && <b className="mr-1 text-rose-600">*</b>}
+        {required && <b className="mr-1 text-[var(--sds-danger)]">*</b>}
       </span>
       <div className="mt-1">{children}</div>
     </label>
@@ -228,22 +228,22 @@ export default function ApplicantFormPage() {
 
   if (!verified)
     return (
-      <main dir="rtl" className="hr-applicant-shell min-h-screen bg-slate-100 px-4 py-16 dark:bg-slate-950 dark:text-slate-100">
-        <section className="mx-auto max-w-md rounded-3xl bg-white p-7 shadow-xl">
+      <main dir="rtl" className="sds-workspace hr-applicant-shell min-h-screen bg-[var(--sds-surface-subtle)] px-4 py-16 dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]">
+        <section className="mx-auto max-w-md rounded-3xl bg-[var(--sds-surface-raised)] p-7 shadow-xl">
           <div className="mb-4 flex justify-end"><ThemeToggle /></div>
           <h1 className="text-2xl font-black">فرم استخدام سبلان</h1>
-          <p className="mt-2 text-sm text-slate-500">
+          <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">
             شماره همراهی که پیامک را دریافت کرده و کد شش‌رقمی همان پیامک را وارد کنید.
           </p>
           {error && (
-            <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">
+            <p className="mt-4 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)]">
               {error}
             </p>
           )}
           <>
-            <label className="mt-6 block text-sm font-medium text-slate-700">
+            <label className="mt-6 block text-sm font-medium text-[var(--sds-text-primary)]">
               شماره همراه
-              <input
+              <ErpInput
                 dir="ltr"
                 className={`${inputClass} mt-1 text-left`}
                 inputMode="tel"
@@ -253,9 +253,9 @@ export default function ApplicantFormPage() {
                 onChange={(e) => setMobile(e.target.value)}
               />
             </label>
-            <label className="mt-4 block text-sm font-medium text-slate-700">
+            <label className="mt-4 block text-sm font-medium text-[var(--sds-text-primary)]">
               کد ورود شش‌رقمی
-            <input
+            <ErpInput
               dir="ltr"
               className={`${inputClass} mt-1 text-center text-xl tracking-[.5em]`}
               inputMode="numeric"
@@ -265,31 +265,31 @@ export default function ApplicantFormPage() {
               onChange={(e) => setOtp(e.target.value.replace(/[^0-9۰-۹٠-٩]/g, ""))}
             />
             </label>
-            <button
+            <ErpPressable type="submit"
               disabled={busy || !normalizeIranianMobile(mobile) || otp.length !== 6}
               onClick={verify}
-              className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white disabled:opacity-50"
+              className="mt-4 w-full rounded-xl bg-[var(--sds-success)] px-4 py-3 font-bold text-[var(--sds-text-inverse)] disabled:opacity-50"
             >
               تأیید و ورود
-            </button>
-            <p className="mt-4 text-xs text-slate-500">اگر کد شما منقضی شده است، با واحد منابع انسانی تماس بگیرید.</p>
+            </ErpPressable>
+            <p className="mt-4 text-xs text-[var(--sds-text-secondary)]">اگر کد شما منقضی شده است، با واحد منابع انسانی تماس بگیرید.</p>
           </>
         </section>
       </main>
     );
 
   return (
-    <main dir="rtl" className="hr-applicant-shell min-h-screen bg-slate-100 px-3 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6">
+    <main dir="rtl" className="sds-workspace hr-applicant-shell min-h-screen bg-[var(--sds-surface-subtle)] px-3 py-6 text-[var(--sds-text-primary)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] sm:px-6">
       <div className="mx-auto max-w-6xl">
-        <header className="rounded-3xl bg-slate-900 p-6 text-white shadow-xl">
+        <header className="rounded-3xl bg-[var(--sds-surface-raised)] p-6 text-[var(--sds-text-primary)] shadow-xl">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs text-emerald-300">پرسشنامه استخدام</p>
+              <p className="text-xs text-[var(--sds-success)]">پرسشنامه استخدام</p>
               <h1 className="mt-1 text-2xl font-black">
                 {application?.position?.title || "فرم متقاضی"}
               </h1>
             </div>
-            <button
+            <ErpPressable
               type="button"
               onClick={() => {
                 sessionStorage.removeItem("hrApplicantSession");
@@ -298,31 +298,31 @@ export default function ApplicantFormPage() {
                 setMessage("");
                 setError("");
               }}
-              className="rounded-xl border border-slate-600 px-4 py-2 text-sm font-bold hover:bg-slate-800"
+              className="rounded-xl border border-[var(--sds-border-strong)] px-4 py-2 text-sm font-bold hover:bg-[var(--sds-surface-raised)]"
             >
               خروج امن
-            </button>
+            </ErpPressable>
             <ThemeToggle />
           </div>
-          <div className="mt-5 h-2 rounded-full bg-slate-700">
+          <div className="mt-5 h-2 rounded-full bg-[var(--sds-surface-raised)]">
             <div
-              className="h-2 rounded-full bg-emerald-400"
+              className="h-2 rounded-full bg-[var(--sds-success-surface)]"
               style={{ width: `${completion}%` }}
             />
           </div>
         </header>
         {error && (
-          <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">
+          <p className="mt-4 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)]">
             {error}
           </p>
         )}
         {message && (
-          <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">
+          <p className="mt-4 rounded-xl bg-[var(--sds-success-surface)] p-3 text-sm text-[var(--sds-success)]">
             {message}
           </p>
         )}
         {isCorrection && (
-          <section className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">
+          <section className="mt-4 rounded-xl bg-[var(--sds-warning-surface)] p-4 text-sm text-[var(--sds-warning)]">
             فرم برای اصلاح بازگردانده شده است:{" "}
             {application.revision.correctionReason}
             <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -335,7 +335,7 @@ export default function ApplicantFormPage() {
                   key={key}
                   label={`${detail?.label || "فیلد نیازمند اصلاح"}${detail?.explanation ? ` — ${detail.explanation}` : ""}`}
                 >
-                  <textarea
+                  <ErpTextarea
                     className={inputClass}
                     value={
                       typeof data[key] === "object"
@@ -349,21 +349,21 @@ export default function ApplicantFormPage() {
               })}
             </div>
             <label className="mt-4 flex gap-2">
-              <input
+              <ErpInput
                 type="checkbox"
                 checked={declaration}
                 onChange={(e) => setDeclaration(e.target.checked)}
               />
               صحت نسخه اصلاح‌شده را تأیید می‌کنم.
             </label>
-            <input
+            <ErpInput
               className={`${inputClass} mt-3`}
               placeholder="نام و نام خانوادگی"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
             />
             <div className="mt-3 flex gap-2">
-              <button
+              <ErpPressable type="submit"
                 disabled={busy}
                 onClick={() =>
                   run(
@@ -374,8 +374,8 @@ export default function ApplicantFormPage() {
                 className="rounded-xl border px-4 py-2"
               >
                 ذخیره اصلاحات
-              </button>
-              <button
+              </ErpPressable>
+              <ErpPressable type="submit"
                 disabled={busy || !declaration || !fullName}
                 onClick={() =>
                   run(async () => {
@@ -386,10 +386,10 @@ export default function ApplicantFormPage() {
                     });
                   }, "نسخه اصلاح‌شده ارسال شد.")
                 }
-                className="rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white disabled:opacity-50"
+                className="rounded-xl bg-[var(--sds-success)] px-4 py-2 font-bold text-[var(--sds-text-inverse)] disabled:opacity-50"
               >
                 ارسال مجدد
-              </button>
+              </ErpPressable>
             </div>
           </section>
         )}
@@ -400,21 +400,21 @@ export default function ApplicantFormPage() {
           <Section title="مشخصات فردی">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <Field label="نام">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.firstName}
                   onChange={(e) => set("firstName", e.target.value)}
                 />
               </Field>
               <Field label="نام خانوادگی">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.lastName}
                   onChange={(e) => set("lastName", e.target.value)}
                 />
               </Field>
               <Field label="نام مستعار یا ندارم">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.alias}
                   onChange={(e) => set("alias", e.target.value)}
@@ -429,14 +429,14 @@ export default function ApplicantFormPage() {
                 />
               </Field>
               <Field label="محل تولد">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.birthPlace}
                   onChange={(e) => set("birthPlace", e.target.value)}
                 />
               </Field>
               <Field label="وضعیت نظام وظیفه">
-                <select
+                <ErpSelect
                   className={inputClass}
                   value={data.militaryStatus}
                   onChange={(e) => set("militaryStatus", e.target.value)}
@@ -446,24 +446,24 @@ export default function ApplicantFormPage() {
                   <option>معاف</option>
                   <option>مشمول</option>
                   <option>غیرقابل اعمال</option>
-                </select>
+                </ErpSelect>
               </Field>
               <Field label="نام پدر">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.fatherName}
                   onChange={(e) => set("fatherName", e.target.value)}
                 />
               </Field>
               <Field label="شغل پدر یا وضعیت">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.fatherOccupation}
                   onChange={(e) => set("fatherOccupation", e.target.value)}
                 />
               </Field>
               <Field label="وضعیت تأهل">
-                <select
+                <ErpSelect
                   className={inputClass}
                   value={data.maritalStatus}
                   onChange={(e) => set("maritalStatus", e.target.value)}
@@ -471,12 +471,12 @@ export default function ApplicantFormPage() {
                   <option value="">انتخاب</option>
                   <option value="SINGLE">مجرد</option>
                   <option value="MARRIED">متأهل</option>
-                </select>
+                </ErpSelect>
               </Field>
               {data.maritalStatus === "MARRIED" && (
                 <>
                   <Field label="تعداد فرزندان">
-                    <input
+                    <ErpInput
                       type="number"
                       min="0"
                       className={inputClass}
@@ -485,7 +485,7 @@ export default function ApplicantFormPage() {
                     />
                   </Field>
                   <Field label="شغل همسر">
-                    <input
+                    <ErpInput
                       className={inputClass}
                       value={data.spouseOccupation}
                       onChange={(e) => set("spouseOccupation", e.target.value)}
@@ -494,18 +494,18 @@ export default function ApplicantFormPage() {
                 </>
               )}
               <Field label="نوع هویت">
-                <select
+                <ErpSelect
                   className={inputClass}
                   value={data.identityKind}
                   onChange={(e) => set("identityKind", e.target.value)}
                 >
                   <option value="IRANIAN">ایرانی</option>
                   <option value="FOREIGN">اتباع خارجی</option>
-                </select>
+                </ErpSelect>
               </Field>
               {data.identityKind === "IRANIAN" ? (
                 <Field label="کد ملی">
-                  <input
+                  <ErpInput
                     inputMode="numeric"
                     maxLength={10}
                     className={inputClass}
@@ -518,7 +518,7 @@ export default function ApplicantFormPage() {
               ) : (
                 <>
                   <Field label="نوع مدرک هویتی">
-                    <input
+                    <ErpInput
                       className={inputClass}
                       value={data.foreignIdentityType}
                       onChange={(e) =>
@@ -527,7 +527,7 @@ export default function ApplicantFormPage() {
                     />
                   </Field>
                   <Field label="شماره مدرک">
-                    <input
+                    <ErpInput
                       className={inputClass}
                       value={data.foreignIdentityNumber}
                       onChange={(e) =>
@@ -542,14 +542,14 @@ export default function ApplicantFormPage() {
           <Section title="تماس و سکونت">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <Field label="نشانی محل سکونت">
-                <textarea
+                <ErpTextarea
                   className={inputClass}
                   value={data.address}
                   onChange={(e) => set("address", e.target.value)}
                 />
               </Field>
               <Field label="کد پستی">
-                <input
+                <ErpInput
                   inputMode="numeric"
                   maxLength={10}
                   className={inputClass}
@@ -560,21 +560,21 @@ export default function ApplicantFormPage() {
                 />
               </Field>
               <Field label="شماره همراه">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.mobile}
                   onChange={(e) => set("mobile", e.target.value)}
                 />
               </Field>
               <Field label="تلفن منزل یا ندارم">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.homePhone}
                   onChange={(e) => set("homePhone", e.target.value)}
                 />
               </Field>
               <Field label="ایمیل" required={false}>
-                <input
+                <ErpInput
                   type="email"
                   className={inputClass}
                   value={data.email}
@@ -582,7 +582,7 @@ export default function ApplicantFormPage() {
                 />
               </Field>
               <Field label="شبکه‌های اجتماعی یا ندارم">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.socialMedia}
                   onChange={(e) => set("socialMedia", e.target.value)}
@@ -593,28 +593,28 @@ export default function ApplicantFormPage() {
           <Section title="تحصیلات و بیمه">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <Field label="آخرین مقطع">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.educationLevel}
                   onChange={(e) => set("educationLevel", e.target.value)}
                 />
               </Field>
               <Field label="رشته تحصیلی">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.fieldOfStudy}
                   onChange={(e) => set("fieldOfStudy", e.target.value)}
                 />
               </Field>
               <Field label="سال اخذ مدرک">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.graduationYear}
                   onChange={(e) => set("graduationYear", e.target.value)}
                 />
               </Field>
               <Field label="سابقه بیمه تأمین اجتماعی">
-                <select
+                <ErpSelect
                   className={inputClass}
                   value={String(data.hasSocialSecurityHistory)}
                   onChange={(e) =>
@@ -624,7 +624,7 @@ export default function ApplicantFormPage() {
                   <option value="">انتخاب</option>
                   <option value="true">دارم</option>
                   <option value="false">ندارم</option>
-                </select>
+                </ErpSelect>
               </Field>
             </div>
           </Section>
@@ -636,7 +636,7 @@ export default function ApplicantFormPage() {
             }
             render={(row: any, i: number) => (
               <div className="grid gap-3 md:grid-cols-4">
-                <input
+                <ErpInput
                   placeholder="نام سازمان/شرکت"
                   className={inputClass}
                   value={row.organization}
@@ -644,7 +644,7 @@ export default function ApplicantFormPage() {
                     updateList("workHistory", i, "organization", e.target.value)
                   }
                 />
-                <input
+                <ErpInput
                   placeholder="مدت همکاری"
                   className={inputClass}
                   value={row.duration}
@@ -652,7 +652,7 @@ export default function ApplicantFormPage() {
                     updateList("workHistory", i, "duration", e.target.value)
                   }
                 />
-                <input
+                <ErpInput
                   placeholder="آخرین سمت"
                   className={inputClass}
                   value={row.lastPosition}
@@ -660,7 +660,7 @@ export default function ApplicantFormPage() {
                     updateList("workHistory", i, "lastPosition", e.target.value)
                   }
                 />
-                <input
+                <ErpInput
                   placeholder="آخرین حقوق و مزایا"
                   className={inputClass}
                   value={row.lastSalaryBenefits}
@@ -682,7 +682,7 @@ export default function ApplicantFormPage() {
             add={() => set("skills", [...data.skills, blank.skills[0]])}
             render={(row: any, i: number) => (
               <div className="grid gap-3 md:grid-cols-3">
-                <input
+                <ErpInput
                   placeholder="نام مهارت"
                   className={inputClass}
                   value={row.name}
@@ -690,7 +690,7 @@ export default function ApplicantFormPage() {
                     updateList("skills", i, "name", e.target.value)
                   }
                 />
-                <input
+                <ErpInput
                   placeholder="مدت آشنایی"
                   className={inputClass}
                   value={row.familiarity}
@@ -698,7 +698,7 @@ export default function ApplicantFormPage() {
                     updateList("skills", i, "familiarity", e.target.value)
                   }
                 />
-                <select
+                <ErpSelect
                   className={inputClass}
                   value={row.proficiency}
                   onChange={(e) =>
@@ -709,7 +709,7 @@ export default function ApplicantFormPage() {
                   <option value="BEGINNER">مقدماتی</option>
                   <option value="INTERMEDIATE">متوسط</option>
                   <option value="ADVANCED">پیشرفته</option>
-                </select>
+                </ErpSelect>
               </div>
             )}
           />
@@ -721,7 +721,7 @@ export default function ApplicantFormPage() {
             }
             render={(row: any, i: number) => (
               <div className="grid gap-3 md:grid-cols-3">
-                <input
+                <ErpInput
                   placeholder="نام زبان"
                   className={inputClass}
                   value={row.name}
@@ -729,7 +729,7 @@ export default function ApplicantFormPage() {
                     updateList("languages", i, "name", e.target.value)
                   }
                 />
-                <select
+                <ErpSelect
                   className={inputClass}
                   value={row.level}
                   onChange={(e) =>
@@ -740,8 +740,8 @@ export default function ApplicantFormPage() {
                   <option value="BEGINNER">مقدماتی</option>
                   <option value="INTERMEDIATE">متوسط</option>
                   <option value="ADVANCED">پیشرفته</option>
-                </select>
-                <select
+                </ErpSelect>
+                <ErpSelect
                   className={inputClass}
                   value={row.proficiency}
                   onChange={(e) =>
@@ -752,41 +752,41 @@ export default function ApplicantFormPage() {
                   <option value="BEGINNER">مقدماتی</option>
                   <option value="INTERMEDIATE">متوسط</option>
                   <option value="ADVANCED">پیشرفته</option>
-                </select>
+                </ErpSelect>
               </div>
             )}
           />
           <Section title="ترجیحات همکاری">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <Field label="نوع همکاری">
-                <select
+                <ErpSelect
                   className={inputClass}
                   value={data.cooperationType}
                   onChange={(e) => set("cooperationType", e.target.value)}
                 >
                   <option value="FULL_TIME">تمام‌وقت</option>
                   <option value="PART_TIME">پاره‌وقت</option>
-                </select>
+                </ErpSelect>
               </Field>
               <Field label="مدت همکاری">
-                <select
+                <ErpSelect
                   className={inputClass}
                   value={data.cooperationDuration}
                   onChange={(e) => set("cooperationDuration", e.target.value)}
                 >
                   <option value="LONG_TERM">بلندمدت</option>
                   <option value="SHORT_TERM">کوتاه‌مدت</option>
-                </select>
+                </ErpSelect>
               </Field>
               <Field label="شغل و سمت مورد تقاضا">
-                <input
+                <ErpInput
                   className={inputClass}
                   value={data.requestedPosition}
                   onChange={(e) => set("requestedPosition", e.target.value)}
                 />
               </Field>
               <Field label="حقوق پیشنهادی">
-                <input
+                <ErpInput
                   inputMode="numeric"
                   className={inputClass}
                   value={data.desiredSalary}
@@ -801,7 +801,7 @@ export default function ApplicantFormPage() {
             <div className="space-y-4">
               {questions.map((question, i) => (
                 <Field key={question} label={`${i + 1}. ${question}`}>
-                  <textarea
+                  <ErpTextarea
                     rows={3}
                     className={inputClass}
                     value={data.questions[i] || ""}
@@ -815,9 +815,9 @@ export default function ApplicantFormPage() {
               ))}
             </div>
           </Section>
-          <section className="rounded-3xl bg-white p-5 shadow-sm">
+          <section className="rounded-3xl bg-[var(--sds-surface-raised)] p-5 shadow-sm">
             <label className="flex gap-3 text-sm">
-              <input
+              <ErpInput
                 type="checkbox"
                 checked={declaration}
                 onChange={(e) => setDeclaration(e.target.checked)}
@@ -827,14 +827,14 @@ export default function ApplicantFormPage() {
                 و جست‌وجوی پروفایل عادی در بانک متقاضیان را پذیرفته‌ام.
               </span>
             </label>
-            <input
+            <ErpInput
               className={`${inputClass} mt-3`}
               placeholder="نام و نام خانوادگی برای اظهارنامه"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
             />
             <div className="mt-4 flex flex-wrap gap-3">
-              <button
+              <ErpPressable
                 type="button"
                 onClick={() =>
                   run(
@@ -845,8 +845,8 @@ export default function ApplicantFormPage() {
                 className="rounded-xl border px-5 py-2 font-bold"
               >
                 ذخیره پیش‌نویس
-              </button>
-              <button
+              </ErpPressable>
+              <ErpPressable
                 type="button"
                 disabled={!declaration || !fullName}
                 onClick={() =>
@@ -858,20 +858,20 @@ export default function ApplicantFormPage() {
                     });
                   }, "فرم نهایی ارسال و قفل شد.")
                 }
-                className="rounded-xl bg-emerald-600 px-5 py-2 font-bold text-white disabled:opacity-50"
+                className="rounded-xl bg-[var(--sds-success)] px-5 py-2 font-bold text-[var(--sds-text-inverse)] disabled:opacity-50"
               >
                 ارسال نهایی
-              </button>
+              </ErpPressable>
             </div>
           </section>
         </fieldset>
         {submitted && (
-          <p className="mt-5 rounded-2xl bg-emerald-50 p-5 text-emerald-800">
+          <p className="mt-5 rounded-2xl bg-[var(--sds-success-surface)] p-5 text-[var(--sds-success)]">
             فرم نهایی ثبت شده و تا زمان درخواست اصلاح منابع انسانی قفل است.
           </p>
         )}
         {application?.compensation && (
-          <section className="mt-5 rounded-3xl bg-white p-5 shadow-sm">
+          <section className="mt-5 rounded-3xl bg-[var(--sds-surface-raised)] p-5 shadow-sm">
             <h2 className="text-lg font-black">حقوق و مزایا</h2>
             <div className="mt-3 divide-y">
               {(application.compensation.componentsJson || []).map(
@@ -895,7 +895,7 @@ export default function ApplicantFormPage() {
               </div>
             </div>
             {application.compensation.collateralRequirement && (
-              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+              <div className="mt-4 rounded-2xl border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-4 text-[var(--sds-warning)]">
                 <h3 className="font-black">شرایط وثیقه این پیشنهاد</h3>
                 <p className="mt-2 text-sm">
                   {application.compensation.collateralRequirement.candidateExplanation}
@@ -916,20 +916,20 @@ export default function ApplicantFormPage() {
             {!application.compensation.candidateDecision && (
               <div className="mt-4 space-y-3 border-t pt-4">
                 <label className="flex gap-2 text-sm">
-                  <input
+                  <ErpInput
                     type="checkbox"
                     checked={offerAccepted}
                     onChange={(event) => setOfferAccepted(event.target.checked)}
                   />
                   پیشنهاد همکاری را مطالعه کرده‌ام و می‌پذیرم.
                 </label>
-                <input
+                <ErpInput
                   className={inputClass}
                   placeholder="نام کامل برای پذیرش پیشنهاد"
                   value={offerFullName}
                   onChange={(event) => setOfferFullName(event.target.value)}
                 />
-                <button
+                <ErpPressable type="submit"
                   disabled={!offerAccepted || !offerFullName.trim()}
                   onClick={() =>
                     run(
@@ -938,12 +938,12 @@ export default function ApplicantFormPage() {
                       "پیشنهاد همکاری پذیرفته شد.",
                     )
                   }
-                  className="rounded-xl bg-slate-900 px-5 py-2 font-bold text-white disabled:opacity-50"
+                  className="rounded-xl bg-[var(--sds-surface-raised)] px-5 py-2 font-bold text-[var(--sds-text-primary)] disabled:opacity-50"
                 >
                   پذیرش پیشنهاد
-                </button>
+                </ErpPressable>
                 <div className="grid gap-2 border-t pt-3 md:grid-cols-2">
-                  <select
+                  <ErpSelect
                     className={inputClass}
                     value={decline.category}
                     onChange={(event) =>
@@ -956,8 +956,8 @@ export default function ApplicantFormPage() {
                     <option value="START_DATE">تاریخ شروع همکاری</option>
                     <option value="PERSONAL">شرایط شخصی</option>
                     <option value="OTHER">سایر</option>
-                  </select>
-                  <input
+                  </ErpSelect>
+                  <ErpInput
                     className={inputClass}
                     placeholder="توضیح تکمیلی (اختیاری)"
                     value={decline.note}
@@ -965,7 +965,7 @@ export default function ApplicantFormPage() {
                       setDecline({ ...decline, note: event.target.value })
                     }
                   />
-                  <button
+                  <ErpPressable type="submit"
                     disabled={!decline.category}
                     onClick={() =>
                       run(
@@ -977,10 +977,10 @@ export default function ApplicantFormPage() {
                         "رد پیشنهاد همکاری ثبت شد.",
                       )
                     }
-                    className="rounded-xl border border-rose-300 px-5 py-2 font-bold text-rose-700 disabled:opacity-50"
+                    className="rounded-xl border border-[var(--sds-danger-border)] px-5 py-2 font-bold text-[var(--sds-danger)] disabled:opacity-50"
                   >
                     رد پیشنهاد
-                  </button>
+                  </ErpPressable>
                 </div>
               </div>
             )}
@@ -999,7 +999,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-3xl bg-white p-5 shadow-sm">
+    <section className="rounded-3xl bg-[var(--sds-surface-raised)] p-5 shadow-sm">
       <h2 className="mb-4 text-lg font-black">{title}</h2>
       {children}
     </section>
@@ -1019,13 +1019,13 @@ function Repeater({
   return (
     <Section title={title}>
       <div className="space-y-3">{rows.map(render)}</div>
-      <button
+      <ErpPressable
         type="button"
         onClick={add}
         className="mt-3 rounded-lg border px-3 py-1 text-sm"
       >
         افزودن ردیف
-      </button>
+      </ErpPressable>
     </Section>
   );
 }

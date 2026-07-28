@@ -8,6 +8,7 @@ ARG http_proxy
 ARG https_proxy
 ARG ALL_PROXY
 ARG all_proxy
+ARG NPM_CONFIG_REGISTRY
 
 COPY packages/contract-product-graph/package*.json /packages/contract-product-graph/
 COPY packages/contract-product-graph/tsconfig*.json /packages/contract-product-graph/
@@ -32,6 +33,8 @@ COPY frontend .
 
 ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG BACKEND_API_ORIGIN
+ENV BACKEND_API_ORIGIN=${BACKEND_API_ORIGIN}
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN ./node_modules/.bin/next build

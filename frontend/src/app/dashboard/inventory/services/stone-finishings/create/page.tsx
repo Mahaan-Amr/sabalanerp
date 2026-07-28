@@ -1,5 +1,5 @@
-﻿'use client';
-
+'use client';
+import { ErpInput, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaSave, FaTimes } from 'react-icons/fa';
@@ -66,122 +66,122 @@ const CreateStoneFinishingPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+    <main className="sds-workspace min-h-screen bg-gradient-to-br from-[var(--sds-surface-subtle)] to-[var(--sds-surface-subtle)] dark:from-[var(--sds-surface-raised)] dark:to-[var(--sds-surface-raised)]">
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
+              <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-2">
                 ایجاد فرآوری سنگ
               </h1>
-              <p className="text-slate-600 dark:text-slate-400">
+              <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                 تعریف نوع فرآوری، پرداخت یا سطح نهایی سنگ
               </p>
             </div>
-            <button
+            <ErpPressable type="submit"
               onClick={handleCancel}
-              className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
+              className="p-2 text-[var(--sds-text-secondary)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
             >
               <FaTimes className="w-6 h-6" />
-            </button>
+            </ErpPressable>
           </div>
         </div>
 
         <div className="max-w-2xl mx-auto">
-          <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-xl border border-slate-200/60 dark:border-slate-700/60 shadow-lg p-6">
+          <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-xl border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] shadow-lg p-6">
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                   کد فرآوری سنگ *
                 </label>
-                <input
+                <ErpInput
                   type="text"
                   value={formData.code}
                   onChange={(e) => setFormData(prev => ({ ...prev, code: e.target.value }))}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
-                    errors.code ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] ${
+                    errors.code ? 'border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
                   }`}
                   placeholder="مثال: SF-001"
                 />
                 {errors.code && (
-                  <p className="text-red-500 text-sm mt-1">{errors.code}</p>
+                  <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.code}</p>
                 )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  
-                  
-                  
+                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
+
+
+
                   نام فارسی فرآوری سنگ *
-                
-                
-                
+
+
+
                 </label>
-                <input
+                <ErpInput
                   type="text"
                   value={formData.namePersian}
                   onChange={(e) => setFormData(prev => ({ ...prev, namePersian: e.target.value }))}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
-                    errors.namePersian ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] ${
+                    errors.namePersian ? 'border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
                   }`}
                   placeholder="مثال: ساب نهایی"
                 />
                 {errors.namePersian && (
-                  <p className="text-red-500 text-sm mt-1">{errors.namePersian}</p>
+                  <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.namePersian}</p>
                 )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  
-                  
-                  
+                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
+
+
+
                   نام انگلیسی
-                
-                
-                
+
+
+
                 </label>
-                <input
+                <ErpInput
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
                   placeholder="مثال: Final Polish"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  
-                  
-                  
+                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
+
+
+
                   توضیحات
-                
-                
-                
+
+
+
                 </label>
-                <textarea
+                <ErpTextarea
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   rows={3}
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
                   placeholder="توضیحات فرآوری سنگ..."
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                   واحد محاسبه
                 </label>
-                <select
+                <ErpSelect
                   value={formData.calculationBase}
                   onChange={(e) => setFormData(prev => ({ ...prev, calculationBase: e.target.value as 'length' | 'squareMeters' }))}
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
                 >
                   <option value="squareMeters">متر مربع</option>
                   <option value="length">متر</option>
-                </select>
+                </ErpSelect>
               </div>
 
               <CatalogImagePicker
@@ -190,27 +190,27 @@ const CreateStoneFinishingPage: React.FC = () => {
               />
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                   {formData.calculationBase === 'length' ? 'قیمت هر متر طول (تومان)' : 'قیمت هر متر مربع (تومان)'}
                 </label>
-                <input
+                <ErpInput
                   type="number"
                   min="0"
                   step="1000"
                   value={formData.pricePerSquareMeter}
                   onChange={(e) => setFormData(prev => ({ ...prev, pricePerSquareMeter: e.target.value }))}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-white dark:bg-slate-800 text-slate-900 dark:text-white ${
-                    errors.pricePerSquareMeter ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] ${
+                    errors.pricePerSquareMeter ? 'border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
                   }`}
                   placeholder="مثال: 50000"
                 />
                 {errors.pricePerSquareMeter && (
-                  <p className="text-red-500 text-sm mt-1">{errors.pricePerSquareMeter}</p>
+                  <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.pricePerSquareMeter}</p>
                 )}
                 {errors.unitPrice && (
-                  <p className="text-red-500 text-sm mt-1">{errors.unitPrice}</p>
+                  <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.unitPrice}</p>
                 )}
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mt-1">
                   {formData.calculationBase === 'length'
                     ? 'قیمت پایه فرآوری برای هر متر طول را وارد کنید.'
                     : 'قیمت پایه فرآوری برای هر متر مربع سنگ را وارد کنید.'}
@@ -219,47 +219,47 @@ const CreateStoneFinishingPage: React.FC = () => {
 
               <div>
                 <label className="flex items-center space-x-3 space-x-reverse">
-                  <input
+                  <ErpInput
                     type="checkbox"
                     checked={formData.isActive}
                     onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
-                    className="w-4 h-4 text-teal-600 bg-gray-100 border-gray-300 rounded focus:ring-teal-500 dark:focus:ring-teal-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                    className="w-4 h-4 text-[var(--sds-accent)] bg-[var(--sds-surface-subtle)] border-[var(--sds-border-default)] rounded focus:ring-[var(--sds-focus-ring)] dark:focus:ring-[var(--sds-focus-ring)] dark:ring-offset-gray-800 focus:ring-2 dark:bg-[var(--sds-surface-raised)] dark:border-[var(--sds-border-strong)]"
                   />
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <span className="text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
                     فعال</span>
                 </label>
               </div>
 
               {errors.general && (
-                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                  <p className="text-red-800 dark:text-red-200 text-sm">{errors.general}</p>
+                <div className="bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)] rounded-lg p-4">
+                  <p className="text-[var(--sds-danger)] dark:text-[var(--sds-danger)] text-sm">{errors.general}</p>
                 </div>
               )}
 
-              <div className="flex items-center justify-end space-x-4 space-x-reverse pt-6 border-t border-slate-200 dark:border-slate-700">
-                <button
+              <div className="flex items-center justify-end space-x-4 space-x-reverse pt-6 border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+                <ErpPressable
                   type="button"
                   onClick={handleCancel}
-                  className="px-6 py-2 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                >انصراف</button>
-                <button
+                  className="px-6 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] rounded-lg hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-raised)] transition-colors"
+                >انصراف</ErpPressable>
+                <ErpPressable
                   type="submit"
                   disabled={loading}
-                  className="px-6 py-2 bg-teal-500 hover:bg-teal-600 disabled:bg-teal-300 text-white rounded-lg transition-colors flex items-center space-x-2 space-x-reverse"
+                  className="px-6 py-2 bg-[var(--sds-accent)] hover:bg-[var(--sds-accent)] disabled:bg-[var(--sds-accent-surface)] text-[var(--sds-text-inverse)] rounded-lg transition-colors flex items-center space-x-2 space-x-reverse"
                 >
                   {loading ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--sds-border-default)]"></div>
                   ) : (
                     <FaSave className="w-4 h-4" />
                   )}
                   <span>{loading ? 'در حال ذخیره...' : 'ایجاد فرآوری سنگ'}</span>
-                </button>
+                </ErpPressable>
               </div>
             </form>
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 };
 

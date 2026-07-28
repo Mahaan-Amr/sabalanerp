@@ -1,5 +1,6 @@
 'use client';
 
+import { ErpInput, ErpPressable } from '@/components/erp';
 import { useState, useRef, useEffect, useMemo, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { FaChevronDown, FaSearch, FaCheck } from 'react-icons/fa';
@@ -56,10 +57,10 @@ export default function EnhancedDropdown({
     optionsMaxHeight: 0
   });
 
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLButtonElement>(null);
   const portalRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const filteredOptions = useMemo(() => {
     if (!searchable || !searchTerm.trim()) {
@@ -232,44 +233,46 @@ export default function EnhancedDropdown({
   const renderOptions = () => {
     if (loading) {
       return (
-        <div className="p-4 text-center text-sm text-slate-500 dark:text-slate-400">
-          <div className="animate-spin w-6 h-6 border-2 border-teal-500 border-t-transparent rounded-full mx-auto mb-2" />
+        <div className="p-4 text-center text-sm sds-text-muted ">
+          <div className="animate-spin w-6 h-6 border-2 border-[var(--sds-accent)] border-t-transparent rounded-full mx-auto mb-2" />
           Loading...
         </div>
       );
     }
 
     if (filteredOptions.length === 0) {
-      return <div className="p-4 text-center text-sm text-slate-500 dark:text-slate-400">{noOptionsText}</div>;
+      return <div className="p-4 text-center text-sm sds-text-muted ">{noOptionsText}</div>;
     }
 
     return (
       <div>
         {groupedOptions.ungrouped.map((option, index) => (
-          <div
+          <ErpPressable
             key={option.value}
             ref={(el) => {
               optionRefs.current[index] = el;
             }}
             onClick={() => !option.disabled && handleOptionSelect(option.value)}
+            disabled={option.disabled}
+            tabIndex={-1}
             role="option"
             aria-selected={value === option.value}
-            className={`flex min-h-10 cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
+            className={`flex min-h-10 w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
               option.disabled
-                ? 'cursor-not-allowed text-slate-400 opacity-60 dark:text-slate-500'
+                ? 'cursor-not-allowed sds-text-muted opacity-60 '
                 : highlightedIndex === index
-                ? 'bg-teal-50 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200'
-                : 'text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800'
+                ? 'bg-[var(--sds-accent-soft)] text-[var(--sds-accent)] dark:bg-[var(--sds-accent-soft)] '
+                : 'sds-text-primary hover:bg-[var(--sds-surface-subtle)]'
             }`}
           >
             <span>{option.label}</span>
-            {value === option.value && <FaCheck className="text-teal-500 text-sm" />}
-          </div>
+            {value === option.value && <FaCheck className="text-[var(--sds-accent)] text-sm" />}
+          </ErpPressable>
         ))}
 
         {Object.entries(groupedOptions.groups).map(([groupName, groupOptions]) => (
           <div key={groupName}>
-            <div className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">{groupName}</div>
+            <div className="px-3 py-2 text-xs font-semibold sds-text-muted ">{groupName}</div>
             {groupOptions.map((option, index) => {
               const globalIndex =
                 groupedOptions.ungrouped.length +
@@ -279,25 +282,27 @@ export default function EnhancedDropdown({
                 index;
 
               return (
-                <div
+                <ErpPressable
                   key={option.value}
                   ref={(el) => {
                     optionRefs.current[globalIndex] = el;
                   }}
                   onClick={() => !option.disabled && handleOptionSelect(option.value)}
+                  disabled={option.disabled}
+                  tabIndex={-1}
                   role="option"
                   aria-selected={value === option.value}
-                  className={`flex min-h-10 cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
+                  className={`flex min-h-10 w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
                     option.disabled
-                      ? 'cursor-not-allowed text-slate-400 opacity-60 dark:text-slate-500'
+                      ? 'cursor-not-allowed sds-text-muted opacity-60 '
                       : highlightedIndex === globalIndex
-                      ? 'bg-teal-50 text-teal-800 dark:bg-teal-950/60 dark:text-teal-200'
-                      : 'text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800'
+                      ? 'bg-[var(--sds-accent-soft)] text-[var(--sds-accent)] dark:bg-[var(--sds-accent-soft)] '
+                      : 'sds-text-primary hover:bg-[var(--sds-surface-subtle)]'
                   }`}
                 >
                   <span>{option.label}</span>
-                  {value === option.value && <FaCheck className="text-teal-500 text-sm" />}
-                </div>
+                  {value === option.value && <FaCheck className="text-[var(--sds-accent)] text-sm" />}
+                </ErpPressable>
               );
             })}
           </div>
@@ -318,24 +323,24 @@ export default function EnhancedDropdown({
   return (
     <div className={`relative ${className}`}>
       {label && (
-        <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+        <label className="mb-1 block text-xs font-semibold sds-text-secondary ">
           {label}
-          {required && <span className="text-red-400 mr-1">*</span>}
+          {required && <span className="text-[var(--sds-danger)] mr-1">*</span>}
         </label>
       )}
 
-      <div
+      <ErpPressable
         ref={dropdownRef}
-        className={`flex min-h-10 cursor-pointer items-center justify-between rounded-lg border bg-white px-3 text-sm outline-none transition dark:bg-slate-950 ${
+        className={`sds-field flex min-h-11 w-full cursor-pointer items-center justify-between px-3 ${
           disabled
-            ? 'cursor-not-allowed border-slate-200 opacity-55 dark:border-slate-800'
-            : 'border-slate-300 hover:border-teal-500 dark:border-slate-700'
-        } ${error ? 'border-red-500 dark:border-red-500' : ''} ${
-          isOpen ? 'border-teal-500 ring-2 ring-teal-500/15' : ''
+            ? 'cursor-not-allowed opacity-55'
+            : 'hover:border-[var(--sds-accent)]'
+        } ${error ? 'border-[var(--sds-danger)]' : ''} ${
+          isOpen ? 'border-[var(--sds-accent)] ring-2 ring-[var(--sds-focus-ring)]' : ''
         }`}
         onClick={() => !disabled && setIsOpen((prev) => !prev)}
         onKeyDown={handleKeyDown}
-        tabIndex={disabled ? -1 : 0}
+        disabled={disabled}
         role="combobox"
         aria-expanded={isOpen}
         aria-controls={listboxId}
@@ -343,26 +348,27 @@ export default function EnhancedDropdown({
         aria-label={label || placeholder}
       >
         <div className="flex items-center space-x-2 space-x-reverse flex-1 min-w-0">
-          <span className={`truncate ${displayValue ? 'text-slate-900 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'}`}>
+          <span className={`truncate ${displayValue ? 'sds-text-primary ' : 'sds-text-muted '}`}>
             {displayValue || placeholder}
           </span>
         </div>
 
-        <div className="flex items-center space-x-2 space-x-reverse">
-          {clearable && value && (
-            <button
-              onClick={handleClear}
-              className="p-1 text-slate-400 transition-colors hover:text-red-500"
-              type="button"
-            >
-              ×
-            </button>
-          )}
-          <FaChevronDown className={`text-xs text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        <div className={`flex items-center space-x-2 space-x-reverse ${clearable && value ? 'ml-10' : ''}`}>
+          <FaChevronDown className={`text-xs sds-text-muted transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
         </div>
-      </div>
+      </ErpPressable>
+      {clearable && value && (
+        <ErpPressable
+          onClick={handleClear}
+          aria-label="پاک‌کردن انتخاب"
+          className="absolute left-8 top-0 z-10 h-11 w-11 p-0 sds-text-muted hover:text-[var(--sds-danger)]"
+          type="button"
+        >
+          ×
+        </ErpPressable>
+      )}
 
-      {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+      {error && <p className="mt-1 text-xs text-[var(--sds-danger)]">{error}</p>}
 
       {isOpen &&
         typeof window !== 'undefined' &&
@@ -371,7 +377,7 @@ export default function EnhancedDropdown({
             ref={portalRef}
             id={listboxId}
             role="listbox"
-            className="enhanced-dropdown-portal fixed z-[99999] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-2xl dark:border-slate-700 dark:bg-slate-950"
+            className="enhanced-dropdown-portal fixed z-[99999] overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] p-1 shadow-[var(--sds-shadow-raised)]"
             style={{
               top: `${portalPosition.top}px`,
               left: `${portalPosition.left}px`,
@@ -381,16 +387,16 @@ export default function EnhancedDropdown({
             }}
           >
             {searchable && (
-              <div className="border-b border-slate-200 p-2 dark:border-slate-800">
+              <div className="border-b border-[var(--sds-border-subtle)] p-2">
                 <div className="relative">
-                  <FaSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400" />
-                  <input
+                  <FaSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-sm sds-text-muted" />
+                  <ErpInput
                     ref={searchRef}
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search..."
-                    className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-10 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/15 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    placeholder="جستجو..."
+                    className="pr-10"
                   />
                 </div>
               </div>

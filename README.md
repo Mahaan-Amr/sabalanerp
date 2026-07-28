@@ -108,6 +108,43 @@ This will start:
 - PostgreSQL: localhost:5432
 - Redis: localhost:6379
 
+### Full local Docker stack
+
+To build and run the frontend, backend, inquiry app, PostgreSQL, and Redis entirely
+in Docker:
+
+```bash
+npm run docker:local:up
+```
+
+The frontend is available at `http://localhost:3000`, the inquiry app at
+`http://localhost:3001`, and the backend health check at
+`http://localhost:5000/api/health`. PostgreSQL and Redis are available to host tools
+on ports `55432` and `56379`, respectively. Persistent database and upload volumes
+are preserved when stopping the stack with `npm run docker:local:down`.
+
+Use `npm run docker:local:logs` to follow logs and `npm run docker:local:ps` to check
+container health.
+
+### Fast Docker development
+
+Start the automated development stack with:
+
+```bash
+npm run docker:dev
+```
+
+Keep this command running while editing. Docker Compose Watch synchronizes the main
+frontend, inquiry app, and backend source changes into their containers. Next.js Fast
+Refresh updates both UIs, while `tsx watch` restarts the API. The startup command also
+performs an initial source synchronization after building, so files changed while an
+image builds cannot be stale. Dependency manifest changes rebuild only the affected
+service.
+
+Use `npm run docker:dev:down` to stop development. Before committing or pushing,
+run `npm run docker:verify`; it builds the production-like images, applies migrations,
+waits for healthy containers, and smoke-tests the backend, both UIs, and API proxy.
+
 ## Available Scripts
 
 ### Root Level

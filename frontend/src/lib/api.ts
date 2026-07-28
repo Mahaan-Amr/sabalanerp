@@ -49,6 +49,25 @@ export const authAPI = {
   markSecurityNotificationRead: (id: string) => api.put(`/auth/security-notifications/${id}/read`),
 };
 
+export const systemRecoveryAPI = {
+  getEnvironment: () => api.get('/system-recovery/environment'),
+  getState: () => api.get('/system-recovery'),
+  createBackup: (data: { packageType: 'COMPLETE' | 'SANITIZED_TEST'; adminPassword: string; passphrase: string }) =>
+    api.post('/system-recovery/backups', data),
+  downloadBackup: (id: string, adminPassword: string) =>
+    api.post(`/system-recovery/${id}/download`, { adminPassword }, { responseType: 'blob' }),
+  uploadBackup: (data: FormData) =>
+    api.post('/system-recovery/uploads', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  approveRestore: (id: string, adminPassword: string) =>
+    api.post(`/system-recovery/${id}/approve`, { adminPassword }),
+  restore: (id: string, data: {
+    adminPassword: string;
+    passphrase: string;
+    confirmationPhrase: string;
+    breakGlassReason?: string;
+  }) => api.post(`/system-recovery/${id}/restore`, data),
+};
+
 // Users API
 export const usersAPI = {
   getUsers: (page = 1, limit = 10) =>

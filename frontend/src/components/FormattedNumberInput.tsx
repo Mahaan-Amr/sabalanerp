@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { ErpInput } from '@/components/erp';
 import { normalizeDigits, parseFormattedNumber } from '@/lib/numberFormat';
 
 interface FormattedNumberInputProps {
@@ -151,7 +152,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   };
 
   return (
-    <input
+    <ErpInput
       type="text"
       inputMode="decimal"
       value={displayValue}

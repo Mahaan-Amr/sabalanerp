@@ -1,4 +1,6 @@
 ﻿import type { Metadata } from 'next'
+import '../styles/design-system-tokens.css'
+import '../styles/print.css'
 import './globals.css'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { WorkspaceProvider } from '@/contexts/WorkspaceContext'
@@ -37,7 +39,6 @@ export default function RootLayout({
         <link rel="manifest" href="/manifest.json" />
         <link rel="icon" href="/brand/logo-project.png" />
         <link rel="apple-touch-icon" href="/brand/logo-project.png" />
-        <meta name="theme-color" content="#074747" />
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

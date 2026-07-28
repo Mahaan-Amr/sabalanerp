@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { publicContractsAPI } from '@/lib/api';
@@ -85,17 +84,17 @@ export default function TokenContractConfirmationPage() {
   };
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center text-primary">در حال بارگذاری...</div>;
+    return <main className="sds-workspace flex min-h-screen items-center justify-center text-primary">در حال بارگذاری...</main>;
   }
 
   if (!data) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-6 text-primary">
-        <div className="glass-liquid-card step-content-card w-full max-w-lg p-6">
+      <main className="sds-workspace flex min-h-screen items-center justify-center p-6 text-primary">
+        <div className="sds-workspace-surface step-content-card w-full max-w-lg p-6">
           <h1 className="mb-3 text-xl font-bold">خطا در دسترسی به قرارداد</h1>
-          <p className="text-red-400">{error || 'لینک تایید معتبر نیست'}</p>
+          <p className="text-[var(--sds-danger)]">{error || 'لینک تایید معتبر نیست'}</p>
         </div>
-      </div>
+      </main>
     );
   }
 

@@ -1,0 +1,158 @@
+name: sabalanerp-local
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: sabalanerp
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LOCAL_POSTGRES_PASSWORD:-sabalanerp-local-only}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sabalanerp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 1g
+    cpus: 1
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:56379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        DEBIAN_MIRROR: http://deb.debian.org/debian
+        DEBIAN_SECURITY_MIRROR: http://security.debian.org/debian-security
+        NPM_CONFIG_REGISTRY: https://mirror.abrha.net/repository/npm/
+    command: ["sh", "-c", "node dist/scripts/recovery-database-preflight.js && npx prisma migrate deploy && node dist/index.js"]
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      DATABASE_URL: postgresql://postgres:${LOCAL_POSTGRES_PASSWORD:-sabalanerp-local-only}@postgres:5432/sabalanerp?schema=public
+      JWT_SECRET: local-docker-jwt-secret-at-least-32-characters
+      FRONTEND_URL: http://localhost:3000
+      PUBLIC_APP_URL: http://localhost:3000
+      SMS_IR_ENVIRONMENT: sandbox
+      ALLOW_UNSCANNED_HR_FILES: "true"
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+      RECOVERY_STORAGE_DIR: /app/storage/recovery
+      RECOVERY_COORDINATION_DIR: /app/recovery-coordination
+      INQUIRY_RECOVERY_SOURCE_DIR: /app/recovery-sources/inquiry
+      INQUIRY_RECOVERY_COORDINATED: "true"
+      ALLOW_SANITIZED_RECOVERY: "true"
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      APP_COMMIT: ${APP_COMMIT:-local}
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - backend_storage_contracts:/app/storage/contracts
+      - backend_storage_hr_hiring:/app/storage/hr-hiring
+      - backend_storage_accounting_contracts:/app/storage/accounting-contracts
+      - backend_uploads:/app/uploads
+      - backend_recovery:/app/storage/recovery
+      - recovery_coordination:/app/recovery-coordination
+      - inquiry_data:/app/recovery-sources/inquiry
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:5000/api/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    mem_limit: 3g
+    cpus: 2
+    restart: unless-stopped
+
+  inquiry:
+    build:
+      context: .
+      dockerfile: deploy/docker/inquiry.Dockerfile
+      args:
+        DEBIAN_MIRROR: http://deb.debian.org/debian
+        DEBIAN_SECURITY_MIRROR: http://security.debian.org/debian-security
+        NPM_CONFIG_REGISTRY: https://mirror.abrha.net/repository/npm/
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: file:/data/inquiry.db
+      ADMIN_EMAIL: local-inquiry@example.invalid
+      ADMIN_PASSWORD: local-inquiry-only
+      SESSION_SECRET: local-inquiry-session-secret-at-least-32-characters
+      RECOVERY_COORDINATION_DIR: /app/recovery-coordination
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - inquiry_data:/data
+      - recovery_coordination:/app/recovery-coordination
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3001',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1));\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    mem_limit: 1g
+    cpus: 1
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api
+        BACKEND_API_ORIGIN: http://backend:5000
+        NPM_CONFIG_REGISTRY: https://mirror.abrha.net/repository/npm/
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NEXT_PUBLIC_API_URL: /api
+      BACKEND_API_ORIGIN: http://backend:5000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1));\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    mem_limit: 2g
+    cpus: 2
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_storage_contracts:
+  backend_storage_hr_hiring:
+  backend_storage_accounting_contracts:
+  backend_uploads:
+  backend_recovery:
+  recovery_coordination:
+  inquiry_data:

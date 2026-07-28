@@ -1,5 +1,4 @@
 'use client';
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Stage, Layer, Group, Rect, Text, Line, Circle } from 'react-konva';
 // SlabStandardDimensionEntry type definition (matches the one in page.tsx)
@@ -63,7 +62,7 @@ export function StoneCADDesigner({
   const drawingLayerRef = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [coordSystem, setCoordSystem] = useState<CoordinateSystem | null>(null);
-  
+
   // CAD State Management
   const {
     state: cadState,
@@ -82,10 +81,10 @@ export function StoneCADDesigner({
     deleteLayer,
     setActiveLayer
   } = useCADState(initialDesign);
-  
+
   // Layers panel visibility state
   const [showLayersPanel, setShowLayersPanel] = useState(false);
-  
+
   // Extract dimensions when shapes change
   useEffect(() => {
     if (enableAutoSync && cadState.shapes.length > 0) {
@@ -98,7 +97,7 @@ export function StoneCADDesigner({
         });
       }
     }
-    
+
     // Trigger design change callback
     if (onDesignChange) {
       onDesignChange({
@@ -109,7 +108,7 @@ export function StoneCADDesigner({
       });
     }
   }, [cadState.shapes, cadState.measurements, enableAutoSync, productType, onDimensionsCalculated, onDesignChange]);
-  
+
   // Grid Manager
   const gridManager = useMemo(() => {
     const manager = new GridManager(cadState.gridSize);
@@ -117,7 +116,7 @@ export function StoneCADDesigner({
     manager.setSnapEnabled(cadState.snapEnabled);
     return manager;
   }, [cadState.gridVisible, cadState.gridSize, cadState.snapEnabled]);
-  
+
   // Tool instances
   const tools = useMemo(() => {
     return {
@@ -130,32 +129,32 @@ export function StoneCADDesigner({
       text: new TextTool()
     };
   }, []);
-  
+
   // Current tool
   const currentTool = useMemo(() => {
     return tools[cadState.selectedTool as keyof typeof tools] || tools.select;
   }, [cadState.selectedTool, tools]);
-  
+
   // Convert units to canvas coordinates (all in cm)
   const originalLengthCm = lengthUnit === 'm' ? originalLength * 100 : originalLength;
   const originalWidthCm = widthUnit === 'm' ? originalWidth * 100 : originalWidth;
-  
+
   // Calculate canvas size based on stone dimensions
   useEffect(() => {
     const container = stageRef.current?.container();
     if (container) {
       const containerWidth = container.clientWidth || 800;
-      
+
       if (productType === 'slab' && standardDimensions && standardDimensions.length > 0) {
         // For multiple stones, calculate total width needed
         const totalWidth = standardDimensions.reduce((sum, entry) => sum + entry.standardWidthCm, 0);
         const maxLength = Math.max(...standardDimensions.map(e => e.standardLengthCm * 100));
         const spacing = 50;
         const totalWidthWithSpacing = totalWidth + (spacing * (standardDimensions.length + 1));
-        
+
         const aspectRatio = maxLength / totalWidthWithSpacing;
         const canvasHeight = containerWidth / aspectRatio;
-        
+
         setDimensions({
           width: containerWidth,
           height: Math.max(canvasHeight, 400)
@@ -164,7 +163,7 @@ export function StoneCADDesigner({
         // Single stone
         const aspectRatio = originalLengthCm / originalWidthCm;
         const canvasHeight = containerWidth / aspectRatio;
-        
+
         setDimensions({
           width: containerWidth,
           height: Math.max(canvasHeight, 400)
@@ -172,7 +171,7 @@ export function StoneCADDesigner({
       }
     }
   }, [originalLengthCm, originalWidthCm, productType, standardDimensions]);
-  
+
   // Initialize coordinate system
   useEffect(() => {
     if (dimensions.width > 0 && dimensions.height > 0 && coordSystem === null) {
@@ -197,14 +196,14 @@ export function StoneCADDesigner({
       }
     }
   }, [dimensions, originalLengthCm, originalWidthCm, productType, standardDimensions, coordSystem]);
-  
+
   // Handle mouse events
   const handleMouseDown = useCallback((e: any) => {
     if (!coordSystem || !drawingLayerRef.current || mode !== 'design') return;
-    
+
     const stage = e.target.getStage();
     if (!stage) return;
-    
+
     const toolContext: ToolContext = {
       stage,
       layer: drawingLayerRef.current,
@@ -216,16 +215,16 @@ export function StoneCADDesigner({
       gridManager,
       onDimensionsCalculated
     };
-    
+
     currentTool.onMouseDown(e, toolContext);
   }, [coordSystem, cadState, currentTool, addShape, addMeasurement, gridManager, onDimensionsCalculated, mode]);
-  
+
   const handleMouseMove = useCallback((e: any) => {
     if (!coordSystem || !drawingLayerRef.current || mode !== 'design') return;
-    
+
     const stage = e.target.getStage();
     if (!stage) return;
-    
+
     const toolContext: ToolContext = {
       stage,
       layer: drawingLayerRef.current,
@@ -237,16 +236,16 @@ export function StoneCADDesigner({
       gridManager,
       onDimensionsCalculated
     };
-    
+
     currentTool.onMouseMove(e, toolContext);
   }, [coordSystem, cadState, currentTool, addShape, addMeasurement, gridManager, onDimensionsCalculated, mode]);
-  
+
   const handleMouseUp = useCallback((e: any) => {
     if (!coordSystem || !drawingLayerRef.current || mode !== 'design') return;
-    
+
     const stage = e.target.getStage();
     if (!stage) return;
-    
+
     const toolContext: ToolContext = {
       stage,
       layer: drawingLayerRef.current,
@@ -258,23 +257,23 @@ export function StoneCADDesigner({
       gridManager,
       onDimensionsCalculated
     };
-    
+
     currentTool.onMouseUp(e, toolContext);
   }, [coordSystem, cadState, currentTool, addShape, addMeasurement, gridManager, onDimensionsCalculated, mode]);
-  
+
   // Render stone background(s)
   const renderStoneBackgrounds = () => {
     if (productType === 'slab' && standardDimensions && standardDimensions.length > 0) {
       // Multiple stones for slab
       const spacing = 50;
       let currentX = 50;
-      
+
       return standardDimensions.map((entry, index) => {
         const stoneX = currentX;
         const stoneWidth = entry.standardWidthCm;
         const stoneHeight = entry.standardLengthCm * 100; // Convert to cm
         currentX += stoneWidth + spacing;
-        
+
         return (
           <Group key={`stone-${entry.id}`} x={stoneX} y={50}>
             {/* Stone background */}
@@ -287,7 +286,7 @@ export function StoneCADDesigner({
               cornerRadius={4}
               listening={false}
             />
-            
+
             {/* Stone label */}
             <Text
               text={`${entry.standardLengthCm}×${entry.standardWidthCm}cm`}
@@ -298,7 +297,7 @@ export function StoneCADDesigner({
               fontStyle="bold"
               listening={false}
             />
-            
+
             {/* Quantity label */}
             <Text
               text={`تعداد: ${entry.quantity}`}
@@ -337,11 +336,11 @@ export function StoneCADDesigner({
       );
     }
   };
-  
+
   // Render grid
   const renderGrid = () => {
     if (!coordSystem || !cadState.gridVisible) return null;
-    
+
     const gridLines = gridManager.getGridLines(dimensions.width, dimensions.height, coordSystem);
     return gridLines.map((line, index) => (
       <Line
@@ -354,28 +353,28 @@ export function StoneCADDesigner({
       />
     ));
   };
-  
+
   // Render shapes (filtered by layer visibility)
   const renderShapes = () => {
     if (!coordSystem) return null;
-    
+
     // Get visible layers
     const visibleLayerIds = new Set(
       cadState.layers.filter(layer => layer.visible).map(layer => layer.id)
     );
-    
+
     // Filter shapes by visible layers
     const visibleShapes = cadState.shapes.filter(shape =>
       visibleLayerIds.has(shape.layer)
     );
-    
+
     return visibleShapes.map(shape => {
       const canvasPos = realToCanvas(shape.x, shape.y, coordSystem);
-      
+
       // Check if shape's layer is locked
       const shapeLayer = cadState.layers.find(l => l.id === shape.layer);
       const isLocked = shapeLayer?.locked || false;
-      
+
       switch (shape.type) {
         case 'rectangle':
           const canvasWidth = (shape.width || 0) * coordSystem.scale;
@@ -494,7 +493,7 @@ export function StoneCADDesigner({
       }
     });
   };
-  
+
   // Render measurements
   const renderMeasurements = () => {
     return cadState.measurements.map(measurement => (
@@ -519,7 +518,7 @@ export function StoneCADDesigner({
       </Group>
     ));
   };
-  
+
   // Update cursor based on tool
   useEffect(() => {
     if (stageRef.current && mode === 'design') {
@@ -529,7 +528,7 @@ export function StoneCADDesigner({
       }
     }
   }, [currentTool, mode]);
-  
+
   return (
     <div className="stone-cad-designer w-full">
       {mode === 'design' && (
@@ -549,9 +548,9 @@ export function StoneCADDesigner({
             showLayersPanel={showLayersPanel}
             onExport={enableExport ? (format) => {
               if (!stageRef.current || !coordSystem) return;
-              
+
               const stage = stageRef.current;
-              
+
               switch (format) {
                 case 'png':
                   exportToPNG(stage, `cad-design-${Date.now()}.png`);
@@ -578,7 +577,7 @@ export function StoneCADDesigner({
               }
             } : undefined}
           />
-          
+
           {showLayersPanel && (
             <div className="mt-2">
               <CADLayersPanel
@@ -593,8 +592,8 @@ export function StoneCADDesigner({
           )}
         </>
       )}
-      
-      <div className="cad-canvas-container border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden bg-white dark:bg-gray-800">
+
+      <div className="cad-canvas-container border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg overflow-hidden bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)]">
         <Stage
           ref={stageRef}
           width={dimensions.width}
@@ -611,7 +610,7 @@ export function StoneCADDesigner({
             {renderGrid()}
             {renderStoneBackgrounds()}
           </Layer>
-          
+
           {/* Drawing Layer */}
           <Layer ref={drawingLayerRef}>
             {renderShapes()}
@@ -619,9 +618,9 @@ export function StoneCADDesigner({
           </Layer>
         </Stage>
       </div>
-      
+
       {mode === 'design' && (
-        <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 text-center">
+        <div className="mt-2 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] text-center">
           ابزار فعال: {currentTool.displayName}
         </div>
       )}

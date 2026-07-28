@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { FaHistory, FaSync } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpColumn } from '@/components/erp';
@@ -47,7 +46,7 @@ export default function AccountingAuditPage() {
   }, [loadRows]);
 
   const columns: ErpColumn<any>[] = [
-    { id: 'action', header: 'عملیات', priority: 'primary', cell: (row) => <div><p className="font-semibold">{row.action}</p><p className="mt-1 text-xs text-slate-500">{row.note || 'بدون یادداشت'}</p></div> },
+    { id: 'action', header: 'عملیات', priority: 'primary', cell: (row) => <div><p className="font-semibold">{row.action}</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{row.note || 'بدون یادداشت'}</p></div> },
     { id: 'actor', header: 'حسابدار', mobileLabel: 'حسابدار', priority: 'secondary', cell: (row) => row.actor?.displayName || row.actorId || '—' },
     { id: 'contract', header: 'قرارداد', mobileLabel: 'قرارداد', priority: 'secondary', cell: (row) => row.contract?.contractNumber || row.contractId || '—' },
     { id: 'entity', header: 'رکورد', mobileLabel: 'رکورد', priority: 'meta', cell: (row) => row.entityType || row.recordId || '—' },

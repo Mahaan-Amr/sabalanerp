@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { FAILED_EVENT_DAYS, SESSION_HISTORY_DAYS } from './identitySessionService';
+import { getRecoveryRuntimeState } from './recoveryRuntime';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -16,7 +17,10 @@ export const cleanupAuthenticationEvidence = async (prisma: PrismaClient, now = 
 };
 
 export const startAuthenticationRetentionCleanup = (prisma: PrismaClient) => {
-  const run = () => cleanupAuthenticationEvidence(prisma).catch((error) => console.error('Authentication retention cleanup failed:', error));
+  const run = () => {
+    if (getRecoveryRuntimeState().mode !== 'NORMAL') return Promise.resolve();
+    return cleanupAuthenticationEvidence(prisma).then(() => undefined).catch((error) => console.error('Authentication retention cleanup failed:', error));
+  };
   run();
   const timer = setInterval(run, DAY_MS);
   timer.unref();

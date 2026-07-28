@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpPressable } from '@/components/erp';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authAPI } from '@/lib/api';
@@ -19,17 +19,17 @@ export default function ChangePasswordPage() {
     } catch (err: any) { setError(err.response?.data?.error || 'تغییر رمز عبور ناموفق بود.'); }
     finally { setSaving(false); }
   };
-  return <main className="flex min-h-screen items-center justify-center bg-slate-950 p-4" dir="rtl">
-    <section className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-7 text-white shadow-2xl">
+  return <main className="sds-workspace flex min-h-screen items-center justify-center bg-[var(--sds-surface-raised)] p-4" dir="rtl">
+    <section className="w-full max-w-md rounded-2xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-7 text-[var(--sds-text-primary)] shadow-2xl">
       <h1 className="text-2xl font-bold">تغییر رمز عبور</h1>
-      <p className="mt-2 text-sm text-slate-300">برای ادامه، رمز موقت را با رمز شخصی خود جایگزین کنید.</p>
-      {error && <p className="mt-4 rounded-lg bg-red-500/15 p-3 text-sm text-red-200">{error}</p>}
+      <p className="mt-2 text-sm text-[var(--sds-text-muted)]">برای ادامه، رمز موقت را با رمز شخصی خود جایگزین کنید.</p>
+      {error && <p className="mt-4 rounded-lg bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)]">{error}</p>}
       <div className="mt-5 space-y-4">
-        <input type="password" className="min-h-12 w-full rounded-lg bg-white/10 px-4" placeholder="رمز فعلی یا موقت" value={form.currentPassword} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} />
-        <input type="password" className="min-h-12 w-full rounded-lg bg-white/10 px-4" placeholder="رمز جدید" value={form.newPassword} onChange={(e) => setForm({ ...form, newPassword: e.target.value })} />
-        <input type="password" className="min-h-12 w-full rounded-lg bg-white/10 px-4" placeholder="تکرار رمز جدید" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} />
-        <button className="min-h-12 w-full rounded-lg bg-teal-500 font-bold text-slate-950 disabled:opacity-50" disabled={saving} onClick={submit}>ثبت رمز جدید</button>
-        <button className="w-full text-sm text-slate-300" onClick={async () => { await authAPI.logout().catch(() => undefined); router.push('/login'); }}>خروج</button>
+        <ErpInput type="password" className="min-h-12 w-full rounded-lg bg-[var(--sds-surface-raised)] px-4" placeholder="رمز فعلی یا موقت" value={form.currentPassword} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} />
+        <ErpInput type="password" className="min-h-12 w-full rounded-lg bg-[var(--sds-surface-raised)] px-4" placeholder="رمز جدید" value={form.newPassword} onChange={(e) => setForm({ ...form, newPassword: e.target.value })} />
+        <ErpInput type="password" className="min-h-12 w-full rounded-lg bg-[var(--sds-surface-raised)] px-4" placeholder="تکرار رمز جدید" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} />
+        <ErpPressable type="submit" className="min-h-12 w-full rounded-lg bg-[var(--sds-accent)] font-bold text-[var(--sds-text-inverse)] disabled:opacity-50" disabled={saving} onClick={submit}>ثبت رمز جدید</ErpPressable>
+        <ErpPressable type="submit" className="w-full text-sm text-[var(--sds-text-muted)]" onClick={async () => { await authAPI.logout().catch(() => undefined); router.push('/login'); }}>خروج</ErpPressable>
       </div>
     </section>
   </main>;

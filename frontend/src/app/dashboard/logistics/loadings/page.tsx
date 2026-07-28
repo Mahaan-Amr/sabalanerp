@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpPressable } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import {
   FaBan,
@@ -217,8 +217,8 @@ export default function LogisticsLoadingsPage() {
         { label: 'به‌روزرسانی', onClick: () => { void load(); }, icon: FaSync, tone: 'neutral' },
       ]}
     >
-      {message && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</div>}
-      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {message && <div className="rounded-xl border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] px-4 py-3 text-sm text-[var(--sds-success)]">{message}</div>}
+      {error && <div className="rounded-xl border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-4 py-3 text-sm text-[var(--sds-danger)]">{error}</div>}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
@@ -227,32 +227,32 @@ export default function LogisticsLoadingsPage() {
           ['نهایی‌شده', counts.FINALIZED, 'FINALIZED', 'success'],
           ['لغوشده', counts.CANCELLED, 'CANCELLED', 'danger'],
         ].map(([label, value, key, tone]) => (
-          <button
+          <ErpPressable
             key={String(key)}
             type="button"
             onClick={() => setStatus(String(key))}
             className={`rounded-xl border p-4 text-right transition ${
               status === key
-                ? 'border-[#074747] bg-teal-50 text-[#074747] dark:border-teal-500 dark:bg-teal-950/30 dark:text-teal-100'
-                : 'border-slate-200 bg-white text-slate-700 hover:border-[#074747]/40 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200'
+                ? 'border-[var(--sds-accent)] bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]'
+                : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-accent)]/40 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]'
             }`}
           >
-            <p className="text-xs text-slate-500">{String(label)}</p>
+            <p className="text-xs text-[var(--sds-text-secondary)]">{String(label)}</p>
             <p className="mt-1 text-2xl font-bold">{Number(value).toLocaleString('fa-IR')}</p>
             <span className="mt-2 inline-block"><ErpBadge tone={tone as any}>{String(label)}</ErpBadge></span>
-          </button>
+          </ErpPressable>
         ))}
       </div>
 
       <ErpCard className="p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative max-w-xl flex-1">
-            <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
+            <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
+            <ErpInput
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="جستجو در شماره، مشتری، پروژه، راننده یا وضعیت"
-              className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-4 pr-10 text-sm outline-none focus:border-[#074747] dark:border-slate-700 dark:bg-slate-900"
+              className="w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] py-3 pl-4 pr-10 text-sm outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
             />
           </div>
           <ErpQuickFilters
@@ -271,8 +271,8 @@ export default function LogisticsLoadingsPage() {
       <ErpCard className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="font-semibold text-slate-900 dark:text-white">عملیات گروهی</p>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">عملیات گروهی</p>
+            <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
               {selectedRows.length
                 ? `${selectedRows.length.toLocaleString('fa-IR')} سند انتخاب شده`
                 : 'برای فعال‌شدن عملیات گروهی چند سند را انتخاب کنید.'}
@@ -293,38 +293,38 @@ export default function LogisticsLoadingsPage() {
       <ErpCard className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-right text-sm dark:divide-slate-800">
-            <thead className="bg-slate-50 dark:bg-slate-900/70">
+            <thead className="bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)]">
               <tr>
-                <th className="px-3 py-3"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} /></th>
-                <th className="px-3 py-3 font-semibold text-slate-500">شماره</th>
-                <th className="px-3 py-3 font-semibold text-slate-500">وضعیت</th>
-                <th className="px-3 py-3 font-semibold text-slate-500">مشتری / پروژه</th>
-                <th className="px-3 py-3 font-semibold text-slate-500">رانندگان</th>
-                <th className="px-3 py-3 font-semibold text-slate-500">تاریخ</th>
-                <th className="px-3 py-3 text-center font-semibold text-slate-500">ردیف</th>
-                <th className="px-3 py-3 text-center font-semibold text-slate-500">اصلاح</th>
-                <th className="px-3 py-3 font-semibold text-slate-500">عملیات</th>
+                <th className="px-3 py-3"><ErpInput type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} /></th>
+                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">شماره</th>
+                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">وضعیت</th>
+                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">مشتری / پروژه</th>
+                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">رانندگان</th>
+                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">تاریخ</th>
+                <th className="px-3 py-3 text-center font-semibold text-[var(--sds-text-secondary)]">ردیف</th>
+                <th className="px-3 py-3 text-center font-semibold text-[var(--sds-text-secondary)]">اصلاح</th>
+                <th className="px-3 py-3 font-semibold text-[var(--sds-text-secondary)]">عملیات</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 bg-white dark:divide-slate-800 dark:bg-slate-950">
+            <tbody className="divide-y divide-slate-100 bg-[var(--sds-surface-raised)] dark:divide-slate-800 dark:bg-[var(--sds-surface-raised)]">
               {filteredRows.map((row) => {
                 const selected = selectedIds.includes(row.id);
                 return (
-                  <tr key={row.id} className={selected ? 'bg-[#074747]/5 dark:bg-teal-950/20' : undefined}>
-                    <td className="px-3 py-3 align-top"><input type="checkbox" checked={selected} onChange={() => toggleSelected(row.id)} /></td>
+                  <tr key={row.id} className={selected ? 'bg-[var(--sds-accent)]/5 dark:bg-[var(--sds-accent-surface)]' : undefined}>
+                    <td className="px-3 py-3 align-top"><ErpInput type="checkbox" checked={selected} onChange={() => toggleSelected(row.id)} /></td>
                     <td className="px-3 py-3 align-top">
-                      <a className="font-semibold text-[#074747] dark:text-teal-200" href={`/dashboard/logistics/loadings/${row.id}`}>{row.loadingNumber}</a>
+                      <a className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]" href={`/dashboard/logistics/loadings/${row.id}`}>{row.loadingNumber}</a>
                     </td>
                     <td className="px-3 py-3 align-top"><StatusBadge status={row.status} /></td>
                     <td className="px-3 py-3 align-top">
-                      <p className="font-medium text-slate-900 dark:text-white">{row.customerName || '—'}</p>
-                      <p className="mt-1 text-xs text-slate-500">{row.projectName || '—'}</p>
+                      <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{row.customerName || '—'}</p>
+                      <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{row.projectName || '—'}</p>
                     </td>
-                    <td className="px-3 py-3 align-top text-slate-700 dark:text-slate-200">{loadingDriversName(row)}</td>
-                    <td className="px-3 py-3 align-top text-slate-600 dark:text-slate-300">{dateFa(row.loadingDate)}</td>
+                    <td className="px-3 py-3 align-top text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{loadingDriversName(row)}</td>
+                    <td className="px-3 py-3 align-top text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{dateFa(row.loadingDate)}</td>
                     <td className="px-3 py-3 text-center align-top">{(row.lineCount || 0).toLocaleString('fa-IR')}</td>
                     <td className="px-3 py-3 text-center align-top">
-                      {row.correctionCount ? <ErpBadge tone="warning">{row.correctionCount.toLocaleString('fa-IR')}</ErpBadge> : <span className="text-slate-400">۰</span>}
+                      {row.correctionCount ? <ErpBadge tone="warning">{row.correctionCount.toLocaleString('fa-IR')}</ErpBadge> : <span className="text-[var(--sds-text-muted)]">۰</span>}
                     </td>
                     <td className="px-3 py-3 align-top">
                       <div className="flex flex-wrap gap-1">

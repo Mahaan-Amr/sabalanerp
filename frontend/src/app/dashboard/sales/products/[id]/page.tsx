@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Product } from '@/types/product';
@@ -19,7 +19,7 @@ const generateFullProductName = (product: Product): string => {
     product.colorNamePersian,
     product.qualityNamePersian
   ].filter(part => part && part.trim() !== '');
-  
+
   return parts.join(' - ');
 };
 
@@ -27,7 +27,7 @@ const ProductDetailPage: React.FC = () => {
   const router = useRouter();
   const params = useParams();
   const productId = params.id as string;
-  
+
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -108,10 +108,10 @@ const ProductDetailPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-6">
+      <div className="min-h-screen bg-gradient-to-br from-[var(--sds-surface-subtle)] to-[var(--sds-surface-subtle)] dark:from-[var(--sds-surface-raised)] dark:to-[var(--sds-surface-raised)] p-6">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--sds-border-strong)]"></div>
           </div>
         </div>
       </div>
@@ -120,18 +120,18 @@ const ProductDetailPage: React.FC = () => {
 
   if (!product) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-6">
+      <div className="min-h-screen bg-gradient-to-br from-[var(--sds-surface-subtle)] to-[var(--sds-surface-subtle)] dark:from-[var(--sds-surface-raised)] dark:to-[var(--sds-surface-raised)] p-6">
         <div className="max-w-4xl mx-auto">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-200 mb-4">
+            <h1 className="text-2xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
               محصول یافت نشد
             </h1>
-            <button
+            <ErpPressable type="submit"
               onClick={() => router.push('/dashboard/sales/products')}
-              className="px-6 py-3 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors"
+              className="px-6 py-3 bg-[var(--sds-accent)] text-[var(--sds-text-inverse)] rounded-lg hover:bg-[var(--sds-accent)] transition-colors"
             >
               بازگشت به لیست محصولات
-            </button>
+            </ErpPressable>
           </div>
         </div>
       </div>
@@ -139,112 +139,112 @@ const ProductDetailPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-6">
+    <main className="sds-workspace min-h-screen">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-2">
+              <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-2">
                 جزئیات محصول
               </h1>
-              <p className="text-slate-600 dark:text-slate-400">
+              <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                 مشاهده و ویرایش اطلاعات محصول
               </p>
             </div>
-            <button
+            <ErpPressable type="submit"
               onClick={() => router.push('/dashboard/sales/products')}
-              className="px-4 py-2 bg-slate-500 text-white rounded-lg hover:bg-slate-600 transition-colors"
+              className="px-4 py-2 bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] rounded-lg hover:bg-[var(--sds-surface-subtle)] transition-colors"
             >
               بازگشت
-            </button>
+            </ErpPressable>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Product Information */}
           <div className="lg:col-span-2">
-            <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-6 border border-white/20 dark:border-slate-700/50">
+            <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200">
+                <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                   اطلاعات محصول
                 </h2>
-                <button
+                <ErpPressable type="submit"
                   onClick={() => setEditing(!editing)}
-                  className="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors"
+                  className="px-4 py-2 bg-[var(--sds-accent)] text-[var(--sds-text-inverse)] rounded-lg hover:bg-[var(--sds-accent)] transition-colors"
                 >
                   {editing ? 'لغو ویرایش' : 'ویرایش'}
-                </button>
+                </ErpPressable>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Full Product Name */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     نام کامل محصول
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-sm font-medium leading-relaxed">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg text-sm font-medium leading-relaxed">
                     {generateFullProductName(product)}
                   </div>
                 </div>
 
                 {/* Product Name Persian */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     نام فارسی
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                     {product.namePersian}
                   </div>
                 </div>
 
                 {/* Product Name English */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     نام انگلیسی
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                     {product.name}
                   </div>
                 </div>
 
                 {/* Stone Type */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     نوع سنگ
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                     {product.stoneTypeNamePersian}
                   </div>
                 </div>
 
                 {/* Dimensions */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     ابعاد
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                     {product.widthValue} × {product.thicknessValue} سانتی‌متر
                   </div>
                 </div>
 
                 {/* Mine */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     طول مادر
                   </label>
                   {editing ? (
-                    <input
+                    <ErpInput
                       value={formData.motherLengthValue}
                       onChange={(event) => setFormData({
                         ...formData,
                         motherLengthValue: event.target.value
                       })}
                       inputMode="decimal"
-                      className="w-full rounded-lg border border-slate-200 bg-white/50 px-4 py-2 focus:border-teal-500 focus:outline-none dark:border-slate-600 dark:bg-slate-700/50"
+                      className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4 py-2 focus:border-[var(--sds-border-strong)] focus:outline-none dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
                     />
                   ) : (
-                    <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                    <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                       {product.motherLengthValue
                         ? `${product.motherLengthValue} متر`
                         : 'در موجودی ثبت نشده است'}
@@ -254,50 +254,50 @@ const ProductDetailPage: React.FC = () => {
 
                 {/* Mine */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     معدن
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                     {product.mineNamePersian}
                   </div>
                 </div>
 
                 {/* Finish */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     نوع پرداخت
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                     {product.finishNamePersian}
                   </div>
                 </div>
 
                 {/* Color */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     رنگ
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                     {product.colorNamePersian}
                   </div>
                 </div>
 
                 {/* Quality */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     کیفیت
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                     {product.qualityNamePersian}
                   </div>
                 </div>
 
                 {/* Cutting Dimension */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     ابعاد برش
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                     {product.cuttingDimensionNamePersian}
                   </div>
                 </div>
@@ -308,27 +308,27 @@ const ProductDetailPage: React.FC = () => {
           {/* Pricing and Management */}
           <div className="space-y-6">
             {/* Pricing */}
-            <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-6 border border-white/20 dark:border-slate-700/50">
-              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-4">
+            <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+              <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
                 قیمت‌گذاری
               </h3>
 
               <div className="space-y-4">
                 {/* Base Price */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     قیمت پایه (ریال)
                   </label>
                   {editing ? (
                     <FormattedNumberInput
                       value={formData.basePrice ? parseFloat(formData.basePrice) : 0}
                       onChange={(value) => setFormData({ ...formData, basePrice: value.toString() })}
-                      className="w-full px-4 py-2 bg-white/50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                      className="w-full px-4 py-2 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent"
                       placeholder="قیمت را وارد کنید"
                       min={0}
                     />
                   ) : (
-                    <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                    <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                       {formatPrice(product.basePrice)}
                     </div>
                   )}
@@ -336,29 +336,29 @@ const ProductDetailPage: React.FC = () => {
 
                 {/* Currency */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     واحد پول
                   </label>
-                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                     {product.currency}
                   </div>
                 </div>
 
                 {/* Lead Time */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     زمان تحویل (روز)
                   </label>
                   {editing ? (
                     <FormattedNumberInput
                       value={formData.leadTime ? parseFloat(formData.leadTime) : 0}
                       onChange={(value) => setFormData({ ...formData, leadTime: value.toString() })}
-                      className="w-full px-4 py-2 bg-white/50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                      className="w-full px-4 py-2 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent"
                       placeholder="تعداد روز"
                       min={0}
                     />
                   ) : (
-                    <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                    <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
                       {product.leadTime ? `${product.leadTime} روز` : 'تعیین نشده'}
                     </div>
                   )}
@@ -367,32 +367,32 @@ const ProductDetailPage: React.FC = () => {
             </div>
 
             {/* Status */}
-            <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-6 border border-white/20 dark:border-slate-700/50">
-              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-4">
+            <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+              <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
                 وضعیت
               </h3>
 
               <div className="space-y-4">
                 {/* Availability */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     وضعیت موجودی
                   </label>
                   {editing ? (
-                    <select
+                    <ErpSelect
                       value={formData.isAvailable.toString()}
                       onChange={(e) => setFormData({ ...formData, isAvailable: e.target.value === 'true' })}
-                      className="w-full px-4 py-2 bg-white/50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                      className="w-full px-4 py-2 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent"
                     >
                       <option value="true">موجود</option>
                       <option value="false">ناموجود</option>
-                    </select>
+                    </ErpSelect>
                   ) : (
                     <div className="flex items-center space-x-2">
                       <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        product.isAvailable 
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                        product.isAvailable
+                          ? 'bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]'
+                          : 'bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]'
                       }`}>
                         {product.isAvailable ? 'موجود' : 'ناموجود'}
                       </span>
@@ -402,14 +402,14 @@ const ProductDetailPage: React.FC = () => {
 
                 {/* Active Status */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     وضعیت فعال
                   </label>
                   <div className="flex items-center space-x-2">
                     <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                      product.isActive 
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                      product.isActive
+                        ? 'bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]'
+                        : 'bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]'
                     }`}>
                       {product.isActive ? 'فعال' : 'غیرفعال'}
                     </span>
@@ -419,27 +419,27 @@ const ProductDetailPage: React.FC = () => {
             </div>
 
             {/* Description */}
-            <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-6 border border-white/20 dark:border-slate-700/50">
-              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-4">
+            <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+              <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
                 توضیحات
               </h3>
 
               {editing ? (
-                <textarea
+                <ErpTextarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={4}
-                  className="w-full px-4 py-2 bg-white/50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  className="w-full px-4 py-2 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent"
                   placeholder="توضیحات محصول را وارد کنید"
                 />
               ) : (
-                <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg min-h-[100px]">
+                <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg min-h-[100px]">
                   {product.description || 'توضیحی وارد نشده است'}
                 </div>
               )}
             </div>
 
-            <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-6 border border-white/20 dark:border-slate-700/50">
+            <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
               {editing ? (
                 <CatalogImagePicker
                   images={formData.images}
@@ -447,7 +447,7 @@ const ProductDetailPage: React.FC = () => {
                 />
               ) : (
                 <>
-                  <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-4">تصاویر</h3>
+                  <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">تصاویر</h3>
                   {product.images && product.images.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                       {product.images.slice(0, 3).map((image, index) => (
@@ -455,7 +455,7 @@ const ProductDetailPage: React.FC = () => {
                       ))}
                     </div>
                   ) : (
-                    <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg">تصویری ثبت نشده است</div>
+                    <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">تصویری ثبت نشده است</div>
                   )}
                 </>
               )}
@@ -464,24 +464,24 @@ const ProductDetailPage: React.FC = () => {
             {/* Save Button */}
             {editing && (
               <div className="flex space-x-3">
-                <button
+                <ErpPressable type="submit"
                   onClick={handleSave}
-                  className="flex-1 px-6 py-3 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors"
+                  className="flex-1 px-6 py-3 bg-[var(--sds-accent)] text-[var(--sds-text-inverse)] rounded-lg hover:bg-[var(--sds-accent)] transition-colors"
                 >
                   ذخیره تغییرات
-                </button>
-                <button
+                </ErpPressable>
+                <ErpPressable type="submit"
                   onClick={() => setEditing(false)}
-                  className="flex-1 px-6 py-3 bg-slate-500 text-white rounded-lg hover:bg-slate-600 transition-colors"
+                  className="flex-1 px-6 py-3 bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] rounded-lg hover:bg-[var(--sds-surface-subtle)] transition-colors"
                 >
                   لغو
-                </button>
+                </ErpPressable>
               </div>
             )}
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 };
 

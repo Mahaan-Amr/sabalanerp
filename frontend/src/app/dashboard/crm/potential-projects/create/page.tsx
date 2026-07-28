@@ -1,9 +1,8 @@
 'use client';
-
+import { ErpInput, ErpTextarea } from '@/components/erp';
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FaSave } from 'react-icons/fa';
-import { CrmGuide } from '@/components/crm/CrmGuide';
 import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendarComponent from '@/components/PersianCalendar';
@@ -13,23 +12,8 @@ import { crmPersonName, CRM_WORK_TYPES, persianDateToApiDate, POTENTIAL_PROJECT_
 type Customer = { id: string; firstName?: string; lastName?: string; companyName?: string; phoneNumbers?: Array<{ number: string }> };
 type Seller = { id: string; firstName?: string; lastName?: string; username?: string };
 
-const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
-const labelClass = 'block text-sm font-semibold text-slate-700 dark:text-slate-200';
-
-const guideSteps = [
-  {
-    targetId: 'potential-project-required',
-    title: 'اطلاعات الزامی پروژه',
-    body: 'برای شروع پیگیری فقط اطلاعات اصلی لازم است. جزئیات برآوردی می‌تواند بعداً تکمیل شود.',
-    fields: ['مخاطب CRM', 'عنوان پروژه', 'فروشنده مسئول', 'وضعیت', 'نوع کار/معامله'],
-  },
-  {
-    targetId: 'potential-project-optional',
-    title: 'اطلاعات تکمیلی',
-    body: 'ارزش، احتمال تبدیل و تاریخ احتمالی بستن معامله اختیاری هستند و برای پیش‌بینی مدیر CRM استفاده می‌شوند.',
-    mistakes: ['اجبار فروشنده به وارد کردن ارزش برآوردی وقتی پروژه هنوز در مرحله کشف است'],
-  },
-];
+const inputClass = 'min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
+const labelClass = 'block text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]';
 
 export default function CreatePotentialProjectPage() {
   const router = useRouter();
@@ -108,11 +92,11 @@ export default function CreatePotentialProjectPage() {
       backHref="/dashboard/crm/potential-projects"
       actions={[{ label: saving ? 'در حال ذخیره...' : 'ذخیره', onClick: () => document.getElementById('potential-project-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })), icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving }]}
     >
-      <div className="flex justify-end"><CrmGuide steps={guideSteps} /></div>
+
       {error && <ErpEmptyState title="خطا" description={error} />}
       <form id="potential-project-form" onSubmit={submit} className="space-y-5">
         <ErpSection title="اطلاعات اصلی" description="این فیلدها برای ایجاد پروژه احتمالی الزامی هستند." className="space-y-4">
-          <div data-crm-guide="potential-project-required" className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className={labelClass}>مخاطب CRM
               <EnhancedDropdown
                 className="mt-2"
@@ -126,7 +110,7 @@ export default function CreatePotentialProjectPage() {
               />
             </label>
             <label className={labelClass}>عنوان پروژه
-              <input className={`${inputClass} mt-2`} value={form.title} onChange={(e) => update('title', e.target.value)} required />
+              <ErpInput className={`${inputClass} mt-2`} value={form.title} onChange={(e) => update('title', e.target.value)} required />
             </label>
             <label className={labelClass}>فروشنده مسئول
               <EnhancedDropdown
@@ -150,18 +134,18 @@ export default function CreatePotentialProjectPage() {
         </ErpSection>
 
         <ErpSection title="اطلاعات تکمیلی" className="space-y-4">
-          <div data-crm-guide="potential-project-optional" className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className={labelClass}>آدرس/موقعیت
-              <input className={`${inputClass} mt-2`} value={form.address} onChange={(e) => update('address', e.target.value)} />
+              <ErpInput className={`${inputClass} mt-2`} value={form.address} onChange={(e) => update('address', e.target.value)} />
             </label>
             <label className={labelClass}>منبع/معرف
-              <input className={`${inputClass} mt-2`} value={form.source} onChange={(e) => update('source', e.target.value)} />
+              <ErpInput className={`${inputClass} mt-2`} value={form.source} onChange={(e) => update('source', e.target.value)} />
             </label>
             <label className={labelClass}>ارزش برآوردی
-              <input className={`${inputClass} mt-2`} inputMode="numeric" value={form.estimatedValue} onChange={(e) => update('estimatedValue', e.target.value)} />
+              <ErpInput className={`${inputClass} mt-2`} inputMode="numeric" value={form.estimatedValue} onChange={(e) => update('estimatedValue', e.target.value)} />
             </label>
             <label className={labelClass}>احتمال تبدیل
-              <input className={`${inputClass} mt-2`} inputMode="numeric" min="0" max="100" value={form.probability} onChange={(e) => update('probability', e.target.value)} placeholder="۰ تا ۱۰۰" />
+              <ErpInput className={`${inputClass} mt-2`} inputMode="numeric" min="0" max="100" value={form.probability} onChange={(e) => update('probability', e.target.value)} placeholder="۰ تا ۱۰۰" />
             </label>
             <label className={labelClass}>تاریخ احتمالی بستن
               <div className="mt-2">
@@ -169,7 +153,7 @@ export default function CreatePotentialProjectPage() {
               </div>
             </label>
             <label className={`${labelClass} md:col-span-2`}>توضیحات
-              <textarea className={`${inputClass} mt-2 min-h-28`} value={form.description} onChange={(e) => update('description', e.target.value)} />
+              <ErpTextarea className={`${inputClass} mt-2 min-h-28`} value={form.description} onChange={(e) => update('description', e.target.value)} />
             </label>
           </div>
         </ErpSection>

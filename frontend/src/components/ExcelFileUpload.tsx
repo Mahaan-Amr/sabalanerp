@@ -1,5 +1,5 @@
-﻿'use client';
-
+'use client';
+import { ErpInput, ErpPressable } from '@/components/erp';
 import React, { useState, useRef } from 'react';
 import { FaUpload, FaFileExcel, FaTimes, FaCheck } from 'react-icons/fa';
 
@@ -98,9 +98,9 @@ const ExcelFileUpload: React.FC<ExcelFileUploadProps> = ({
         <div
           className={`
             relative border-2 border-dashed rounded-lg p-6 text-center transition-colors
-            ${dragActive 
-              ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20' 
-              : 'border-slate-300 dark:border-slate-600 hover:border-teal-400'
+            ${dragActive
+              ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] dark:bg-[var(--sds-accent-surface)]'
+              : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] hover:border-[var(--sds-border-strong)]'
             }
             ${loading ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}
           `}
@@ -108,9 +108,8 @@ const ExcelFileUpload: React.FC<ExcelFileUploadProps> = ({
           onDragLeave={handleDrag}
           onDragOver={handleDrag}
           onDrop={handleDrop}
-          onClick={() => !loading && fileInputRef.current?.click()}
         >
-          <input
+          <ErpInput
             ref={fileInputRef}
             type="file"
             accept={accept}
@@ -118,63 +117,65 @@ const ExcelFileUpload: React.FC<ExcelFileUploadProps> = ({
             className="hidden"
             disabled={loading}
           />
-          
-          <div className="flex flex-col items-center space-y-3">
-            <div className="p-3 rounded-full bg-slate-100 dark:bg-slate-700">
-              <FaFileExcel className="w-8 h-8 text-green-600 dark:text-green-400" />
+
+          <ErpPressable
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading}
+            aria-label="انتخاب فایل اکسل"
+            className="flex w-full flex-col items-center space-y-3 p-2"
+          >
+            <div className="p-3 rounded-full bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)]">
+              <FaFileExcel className="w-8 h-8 text-[var(--sds-success)] dark:text-[var(--sds-success)]" />
             </div>
-            
+
             <div>
-              <p className="text-lg font-medium text-slate-700 dark:text-slate-300">
+              <p className="text-lg font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
                 فایل Excel را اینجا رها کنید یا انتخاب کنید
               </p>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+              <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mt-1">
                 فرمت مجاز: .xlsx, .xls (حداکثر {maxSize} مگابایت)
               </p>
             </div>
-            
-            <button
-              type="button"
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
-              disabled={loading}
-            >
+
+            <span className="inline-flex items-center rounded-md border border-transparent bg-[var(--sds-accent)] px-4 py-2 text-sm font-medium text-[var(--sds-text-on-accent)]">
               <FaUpload className="w-4 h-4 ml-2" />
               انتخاب فایل
-            </button>
-          </div>
+            </span>
+          </ErpPressable>
         </div>
       ) : (
-        <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-4 bg-slate-50 dark:bg-slate-800">
+        <div className="border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg p-4 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)]">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3 space-x-reverse">
-              <div className="p-2 rounded-full bg-green-100 dark:bg-green-900/30">
-                <FaFileExcel className="w-5 h-5 text-green-600 dark:text-green-400" />
+              <div className="p-2 rounded-full bg-[var(--sds-success-surface)] dark:bg-[var(--sds-success-surface)]">
+                <FaFileExcel className="w-5 h-5 text-[var(--sds-success)] dark:text-[var(--sds-success)]" />
               </div>
               <div>
-                <p className="font-medium text-slate-700 dark:text-slate-300">
+                <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
                   {selectedFile.name}
                 </p>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+                <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                   {formatFileSize(selectedFile.size)}
                 </p>
               </div>
             </div>
-            
-            <button
+
+            <ErpPressable
               type="button"
               onClick={handleRemoveFile}
-              className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+              className="p-2 text-[var(--sds-text-muted)] hover:text-[var(--sds-danger)] transition-colors"
               disabled={loading}
             >
               <FaTimes className="w-4 h-4" />
-            </button>
+            </ErpPressable>
           </div>
         </div>
       )}
 
       {error && (
-        <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <div className="mt-3 p-3 bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)] rounded-md">
+          <p className="text-sm text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">{error}</p>
         </div>
       )}
     </div>

@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
 import { useEffect, useState } from 'react';
 import { FaCalendarAlt, FaClock, FaFileAlt, FaUser, FaPhone } from 'react-icons/fa';
 import PersianCalendarComponent from './PersianCalendar';
@@ -84,17 +85,15 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
   const isSickLeave = formData.exceptionType === 'SICK_LEAVE';
 
   return (
-    <div className="glass-liquid-card p-6">
-      <h2 className="text-2xl font-bold text-primary mb-6 text-right">{initialData ? 'ویرایش استثنای حضور و غیاب' : 'ثبت استثنای حضور و غیاب'}</h2>
-      
+    <div>
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">پرسنل *</label>
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">پرسنل *</label>
           <EnhancedDropdown value={formData.personnelId} onChange={(value) => handleInputChange('personnelId', value)} placeholder="انتخاب پرسنل" options={personnel.map((person) => ({ value: person.id, label: `${person.firstName} ${person.lastName} (${person.department?.namePersian || 'بدون بخش'})` }))} searchable required error={errors.personnelId} />
         </div>
         {/* Exception Type */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             نوع استثناء *
           </label>
           <EnhancedDropdown
@@ -107,30 +106,30 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
             error={errors.exceptionType}
           />
           {errors.exceptionType && (
-            <p className="text-red-500 text-sm mt-1 text-right">{errors.exceptionType}</p>
+            <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.exceptionType}</p>
           )}
         </div>
 
         {/* Start Date */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             تاریخ شروع *
           </label>
           <PersianCalendarComponent
             value={formData.startDate}
             onChange={(date) => handleInputChange('startDate', date)}
             placeholder="انتخاب تاریخ شروع"
-            className={errors.startDate ? 'border-red-500' : ''}
+            className={errors.startDate ? 'border-[var(--sds-danger)]' : ''}
             disablePastDates
           />
           {errors.startDate && (
-            <p className="text-red-500 text-sm mt-1 text-right">{errors.startDate}</p>
+            <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.startDate}</p>
           )}
         </div>
 
         {/* End Date (Optional) */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             تاریخ پایان
           </label>
           <PersianCalendarComponent
@@ -145,31 +144,31 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
         {isHourlyLeave && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-primary mb-2 text-right">
+              <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
                 زمان شروع *
               </label>
-              <input
+              <ErpInput
                 type="time"
                 value={formData.startTime}
                 onChange={(e) => handleInputChange('startTime', e.target.value)}
-                className={`glass-liquid-input w-full ${errors.startTime ? 'border-red-500' : ''}`}
+                className={`sds-field w-full ${errors.startTime ? 'border-[var(--sds-danger)]' : ''}`}
               />
               {errors.startTime && (
-                <p className="text-red-500 text-sm mt-1 text-right">{errors.startTime}</p>
+                <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.startTime}</p>
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium text-primary mb-2 text-right">
+              <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
                 زمان پایان *
               </label>
-              <input
+              <ErpInput
                 type="time"
                 value={formData.endTime}
                 onChange={(e) => handleInputChange('endTime', e.target.value)}
-                className={`glass-liquid-input w-full ${errors.endTime ? 'border-red-500' : ''}`}
+                className={`sds-field w-full ${errors.endTime ? 'border-[var(--sds-danger)]' : ''}`}
               />
               {errors.endTime && (
-                <p className="text-red-500 text-sm mt-1 text-right">{errors.endTime}</p>
+                <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.endTime}</p>
               )}
             </div>
           </div>
@@ -177,44 +176,44 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
 
         {/* Duration */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             مدت (دقیقه)
           </label>
-          <input
+          <ErpInput
             type="number"
             min="1"
             value={formData.duration}
             onChange={(e) => handleInputChange('duration', e.target.value)}
-            className="glass-liquid-input w-full"
+            className="sds-field w-full"
             placeholder="مدت زمان به دقیقه"
           />
         </div>
 
         {/* Reason */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             دلیل *
           </label>
-          <textarea
+          <ErpTextarea
             value={formData.reason}
             onChange={(e) => handleInputChange('reason', e.target.value)}
-            className={`glass-liquid-input w-full h-24 resize-none ${errors.reason ? 'border-red-500' : ''}`}
+            className={`sds-field w-full h-24 resize-none ${errors.reason ? 'border-[var(--sds-danger)]' : ''}`}
             placeholder="دلیل درخواست را وارد کنید"
           />
           {errors.reason && (
-            <p className="text-red-500 text-sm mt-1 text-right">{errors.reason}</p>
+            <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.reason}</p>
           )}
         </div>
 
         {/* Description */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             توضیحات
           </label>
-          <textarea
+          <ErpTextarea
             value={formData.description}
             onChange={(e) => handleInputChange('description', e.target.value)}
-            className="glass-liquid-input w-full h-20 resize-none"
+            className="sds-field w-full h-20 resize-none"
             placeholder="توضیحات اضافی (اختیاری)"
           />
         </div>
@@ -222,39 +221,41 @@ export default function ExceptionRequestForm({ onSubmit, onCancel, loading = fal
         {/* Emergency Contact for Sick Leave */}
         {isSickLeave && (
           <div>
-            <label className="block text-sm font-medium text-primary mb-2 text-right">
+            <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
               تماس اضطراری *
             </label>
-            <input
+            <ErpInput
               type="text"
               value={formData.emergencyContact}
               onChange={(e) => handleInputChange('emergencyContact', e.target.value)}
-              className={`glass-liquid-input w-full ${errors.emergencyContact ? 'border-red-500' : ''}`}
+              className={`sds-field w-full ${errors.emergencyContact ? 'border-[var(--sds-danger)]' : ''}`}
               placeholder="شماره تماس اضطراری"
             />
             {errors.emergencyContact && (
-              <p className="text-red-500 text-sm mt-1 text-right">{errors.emergencyContact}</p>
+              <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.emergencyContact}</p>
             )}
           </div>
         )}
 
         {/* Action Buttons */}
         <div className="flex justify-end space-x-4 space-x-reverse pt-4">
-          <button
+          <ErpPressable
             type="button"
             onClick={onCancel}
-            className="glass-liquid-btn px-6 py-3"
+            className="px-6 py-3"
             disabled={loading}
           >
             انصراف
-          </button>
-          <button
+          </ErpPressable>
+          <ErpPressable
             type="submit"
-            className="glass-liquid-btn-primary px-6 py-3"
+            tone="primary"
+            variant="solid"
+            className="px-6 py-3"
             disabled={loading}
           >
             {loading ? 'در حال ذخیره...' : initialData ? 'ذخیره تغییرات' : 'ثبت استثنا'}
-          </button>
+          </ErpPressable>
         </div>
       </form>
     </div>

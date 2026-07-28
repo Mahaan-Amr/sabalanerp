@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput, ErpSelect } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTimes, FaTrash, FaUserCheck, FaUserTimes, FaUsers } from 'react-icons/fa';
@@ -316,9 +316,9 @@ export default function UsersManagementPage() {
   const columns: ErpColumn<User>[] = [
     {
       id: 'selection',
-      header: <input aria-label="انتخاب همه کاربران" type="checkbox" checked={filteredUsers.length > 0 && filteredUsers.every((item) => selectedIds.includes(item.id))} onChange={(event) => setSelectedIds(event.target.checked ? filteredUsers.map((item) => item.id) : [])} />,
+      header: <ErpInput aria-label="انتخاب همه کاربران" type="checkbox" checked={filteredUsers.length > 0 && filteredUsers.every((item) => selectedIds.includes(item.id))} onChange={(event) => setSelectedIds(event.target.checked ? filteredUsers.map((item) => item.id) : [])} />,
       priority: 'secondary',
-      cell: (user) => <input aria-label={`انتخاب ${user.firstName} ${user.lastName}`} type="checkbox" checked={selectedIds.includes(user.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? Array.from(new Set([...current, user.id])) : current.filter((id) => id !== user.id))} />,
+      cell: (user) => <ErpInput aria-label={`انتخاب ${user.firstName} ${user.lastName}`} type="checkbox" checked={selectedIds.includes(user.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? Array.from(new Set([...current, user.id])) : current.filter((id) => id !== user.id))} />,
     },
     {
       id: 'user',
@@ -326,9 +326,9 @@ export default function UsersManagementPage() {
       priority: 'primary',
       cell: (user) => (
         <div>
-          <p className="font-semibold text-slate-900 dark:text-white">{user.firstName} {user.lastName}</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{user.email}</p>
-          <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">@{user.username}</p>
+          <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{user.firstName} {user.lastName}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{user.email}</p>
+          <p className="mt-1 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-secondary)]">@{user.username}</p>
         </div>
       ),
     },
@@ -354,7 +354,7 @@ export default function UsersManagementPage() {
       cell: (user) => {
         const userPermissions = getEffectiveWorkspacePermissions(user);
         if (userPermissions.length === 0) {
-          return <span className="text-xs text-slate-500 dark:text-slate-400">بدون دسترسی</span>;
+          return <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">بدون دسترسی</span>;
         }
         return (
           <div className="flex max-w-lg flex-wrap gap-1.5">
@@ -486,7 +486,7 @@ export default function UsersManagementPage() {
         footer={
           totalPages > 1 ? (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-sm text-slate-500 dark:text-slate-400">
+              <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                 صفحه {currentPage.toLocaleString('fa-IR')} از {totalPages.toLocaleString('fa-IR')}
               </span>
               <div className="flex items-center gap-2">
@@ -499,23 +499,23 @@ export default function UsersManagementPage() {
       >
         <ErpSection title="عملیات گروهی کاربران" description="اجرای نهایی فقط پس از پیش‌نمایش و بررسی تعارض‌ها انجام می‌شود.">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <select className="min-h-12 rounded-lg border border-slate-200 bg-slate-50 px-3" value={bulkOperation} onChange={(e) => { setBulkOperation(e.target.value); setBulkValue(''); setBulkPreview(null); setBulkResult(null); }}><option value="ACTIVATE">فعال‌سازی</option><option value="DEACTIVATE">غیرفعال‌سازی</option><option value="ASSIGN_DEPARTMENT">تخصیص بخش</option>{currentUserRole === 'ADMIN' && <><option value="ASSIGN_ROLE">تخصیص نقش</option><option value="APPLY_WORKSPACE_PERMISSIONS">اعمال دسترسی فضاهای کاری</option></>}</select>
-            {bulkOperation === 'ASSIGN_DEPARTMENT' && <select className="min-h-12 rounded-lg border border-slate-200 bg-slate-50 px-3" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}><option value="">بدون بخش</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.namePersian}</option>)}</select>}
-            {bulkOperation === 'ASSIGN_ROLE' && <select className="min-h-12 rounded-lg border border-slate-200 bg-slate-50 px-3" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}><option value="USER">کاربر</option><option value="SALES">فروش</option><option value="MODERATOR">ناظر</option><option value="MANAGER">مدیر</option><option value="ADMIN">مدیر سیستم</option></select>}
+            <ErpSelect className="min-h-12 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3" value={bulkOperation} onChange={(e) => { setBulkOperation(e.target.value); setBulkValue(''); setBulkPreview(null); setBulkResult(null); }}><option value="ACTIVATE">فعال‌سازی</option><option value="DEACTIVATE">غیرفعال‌سازی</option><option value="ASSIGN_DEPARTMENT">تخصیص بخش</option>{currentUserRole === 'ADMIN' && <><option value="ASSIGN_ROLE">تخصیص نقش</option><option value="APPLY_WORKSPACE_PERMISSIONS">اعمال دسترسی فضاهای کاری</option></>}</ErpSelect>
+            {bulkOperation === 'ASSIGN_DEPARTMENT' && <ErpSelect className="min-h-12 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}><option value="">بدون بخش</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.namePersian}</option>)}</ErpSelect>}
+            {bulkOperation === 'ASSIGN_ROLE' && <ErpSelect className="min-h-12 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}><option value="USER">کاربر</option><option value="SALES">فروش</option><option value="MODERATOR">ناظر</option><option value="MANAGER">مدیر</option><option value="ADMIN">مدیر سیستم</option></ErpSelect>}
             <div className="flex flex-wrap items-center gap-2 md:col-span-2"><ErpBadge tone="info">{selectedIds.length.toLocaleString('fa-IR')} انتخاب</ErpBadge><ErpButton label="پیش‌نمایش" disabled={!selectedIds.length} onClick={async () => { const workspacePermissions = Object.entries(bulkWorkspacePermissions).filter(([, level]) => level).map(([workspace, permissionLevel]) => ({ workspace, permissionLevel })); const response = await usersAPI.previewBulk({ ids: selectedIds, operation: bulkOperation, departmentId: bulkOperation === 'ASSIGN_DEPARTMENT' ? bulkValue || null : undefined, role: bulkOperation === 'ASSIGN_ROLE' ? bulkValue || 'USER' : undefined, workspacePermissions: bulkOperation === 'APPLY_WORKSPACE_PERMISSIONS' ? workspacePermissions : undefined }); setBulkPreview(response.data.data); setBulkResult(null); }} /></div>
           </div>
-          {bulkOperation === 'APPLY_WORKSPACE_PERMISSIONS' && <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">{Object.values(WORKSPACE_CONFIG).map((workspace) => <label key={workspace.id} className="flex items-center justify-between gap-3 rounded-lg border p-3"><span>{workspace.namePersian}</span><select className="rounded-lg border px-2 py-1" value={bulkWorkspacePermissions[workspace.id] || ''} onChange={(event) => setBulkWorkspacePermissions((current) => ({ ...current, [workspace.id]: event.target.value }))}><option value="">بدون دسترسی مستقیم</option><option value="view">مشاهده</option><option value="edit">ویرایش</option><option value="admin">مدیریت</option></select></label>)}</div>}
+          {bulkOperation === 'APPLY_WORKSPACE_PERMISSIONS' && <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">{Object.values(WORKSPACE_CONFIG).map((workspace) => <label key={workspace.id} className="flex items-center justify-between gap-3 rounded-lg border p-3"><span>{workspace.namePersian}</span><ErpSelect className="rounded-lg border px-2 py-1" value={bulkWorkspacePermissions[workspace.id] || ''} onChange={(event) => setBulkWorkspacePermissions((current) => ({ ...current, [workspace.id]: event.target.value }))}><option value="">بدون دسترسی مستقیم</option><option value="view">مشاهده</option><option value="edit">ویرایش</option><option value="admin">مدیریت</option></ErpSelect></label>)}</div>}
           {bulkPreview && <div className="mt-4 rounded-xl border p-4"><div className="flex flex-wrap gap-2"><ErpBadge tone="success">قابل اجرا: {bulkPreview.eligible.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="neutral">ردشده: {bulkPreview.skipped.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="danger">متعارض: {bulkPreview.conflicting.length.toLocaleString('fa-IR')}</ErpBadge></div><div className="mt-3"><ErpButton label="تایید و اجرا" tone="success" disabled={!bulkPreview.eligible.length} onClick={async () => { const response = await usersAPI.executeBulk({ previewToken: bulkPreview.previewToken }); setBulkResult(response.data.data); setBulkPreview(null); setSelectedIds([]); await fetchData(); }} /></div></div>}
-          {bulkResult && <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4"><div className="flex flex-wrap gap-2"><ErpBadge tone="success">اعمال‌شده: {bulkResult.applied.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="neutral">ردشده: {bulkResult.skipped.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="danger">متعارض: {bulkResult.conflicting.length.toLocaleString('fa-IR')}</ErpBadge></div><div className="mt-3"><ErpButton label="دانلود نتیجه" icon={FaDownload} variant="outline" onClick={() => { const blob = new Blob([JSON.stringify(bulkResult, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `user-bulk-${Date.now()}.json`; anchor.click(); URL.revokeObjectURL(url); }} /></div></div>}
+          {bulkResult && <div className="mt-4 rounded-xl border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-4"><div className="flex flex-wrap gap-2"><ErpBadge tone="success">اعمال‌شده: {bulkResult.applied.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="neutral">ردشده: {bulkResult.skipped.length.toLocaleString('fa-IR')}</ErpBadge><ErpBadge tone="danger">متعارض: {bulkResult.conflicting.length.toLocaleString('fa-IR')}</ErpBadge></div><div className="mt-3"><ErpButton label="دانلود نتیجه" icon={FaDownload} variant="outline" onClick={() => { const blob = new Blob([JSON.stringify(bulkResult, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `user-bulk-${Date.now()}.json`; anchor.click(); URL.revokeObjectURL(url); }} /></div></div>}
         </ErpSection>
         {createdUserId && (
           <ErpCard tone="primary" className="p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="font-semibold text-slate-900 dark:text-white">
+                <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                   کاربر {createdUser ? `${createdUser.firstName} ${createdUser.lastName}` : 'جدید'} ایجاد شد
                 </p>
-                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                   برای موارد خاص، می‌توانید مجوزهای جزئی و استثناها را مدیریت کنید.
                 </p>
               </div>
@@ -529,26 +529,26 @@ export default function UsersManagementPage() {
       </ErpListPage>
 
       {showDeleteModal && userToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-raised)] p-4 backdrop-blur-sm">
           <ErpSection className="w-full max-w-md">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">تأیید حذف حساب استفاده‌نشده</h2>
+              <h2 className="text-lg font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">تأیید حذف حساب استفاده‌نشده</h2>
               <ErpButton label="بستن" onClick={() => setShowDeleteModal(false)} icon={FaTimes} variant="ghost" tone="neutral" disabled={deleting} />
             </div>
-            <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
-              حساب <span className="font-semibold text-slate-900 dark:text-white">{userToDelete.firstName} {userToDelete.lastName}</span> فقط در صورتی حذف می‌شود که هیچ سابقه عملیاتی نداشته باشد. برای حساب‌های استفاده‌شده، از صفحه جزئیات و جریان حذف هویت ممیزی‌شده استفاده کنید.
+            <p className="text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+              حساب <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{userToDelete.firstName} {userToDelete.lastName}</span> فقط در صورتی حذف می‌شود که هیچ سابقه عملیاتی نداشته باشد. برای حساب‌های استفاده‌شده، از صفحه جزئیات و جریان حذف هویت ممیزی‌شده استفاده کنید.
             </p>
-            <label className="mt-4 block text-sm font-medium text-slate-700 dark:text-slate-200">
+            <label className="mt-4 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
               برای تأیید، نام کاربری <span dir="ltr" className="font-bold">{userToDelete.username}</span> را وارد کنید.
-              <input
+              <ErpInput
                 dir="ltr"
                 autoComplete="off"
                 value={deleteConfirmation}
                 onChange={(event) => setDeleteConfirmation(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-left text-sm outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 dark:border-slate-700 dark:bg-slate-900"
+                className="mt-2 w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-left text-sm outline-none focus:border-[var(--sds-danger-border)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
               />
             </label>
-            {deleteError && <p className="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{deleteError}</p>}
+            {deleteError && <p className="mt-3 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">{deleteError}</p>}
             <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <ErpButton label={deleting ? 'در حال حذف...' : 'حذف قطعی حساب'} onClick={confirmDeleteUser} tone="danger" variant="solid" disabled={deleting || deleteConfirmation !== userToDelete.username} />
               <ErpButton label="لغو" onClick={() => setShowDeleteModal(false)} tone="neutral" variant="outline" disabled={deleting} />

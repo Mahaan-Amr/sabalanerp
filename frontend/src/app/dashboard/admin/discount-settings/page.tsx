@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpInput } from '@/components/erp';
 import { useEffect, useState } from 'react';
 import { FaPercent, FaPlus, FaSave, FaTrash, FaUndo } from 'react-icons/fa';
 import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
@@ -22,8 +22,8 @@ const emptyForm = {
   isActive: true
 };
 
-const inputClass = 'min-h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
-const labelClass = 'mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300';
+const inputClass = 'min-h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3 py-2 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
+const labelClass = 'mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]';
 
 export default function ContractDiscountSettingsPage() {
   const [ranges, setRanges] = useState<DiscountRange[]>([]);
@@ -117,8 +117,8 @@ export default function ContractDiscountSettingsPage() {
       ]}
     >
       {error && (
-        <ErpSection className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20">
-          <p className="text-sm font-medium text-red-700 dark:text-red-200">{error}</p>
+        <ErpSection className="border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)]">
+          <p className="text-sm font-medium text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">{error}</p>
         </ErpSection>
       )}
 
@@ -136,9 +136,9 @@ export default function ContractDiscountSettingsPage() {
             <label className={labelClass}>حداکثر درصد تخفیف</label>
             <FormattedNumberInput value={form.maxDiscountPercent} onChange={(value) => setForm({ ...form, maxDiscountPercent: value || 0 })} min={0} max={100} step={0.1} className={inputClass} />
           </div>
-          <label className="flex min-h-10 items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 md:mt-5">
+          <label className="flex min-h-10 items-center justify-between rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3 py-2 text-sm font-semibold text-[var(--sds-text-primary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] md:mt-5">
             <span>فعال</span>
-            <input type="checkbox" checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} className="h-4 w-4 rounded border-slate-300 text-[#074747] focus:ring-[#074747]" />
+            <ErpInput type="checkbox" checked={form.isActive} onChange={(event) => setForm({ ...form, isActive: event.target.checked })} className="h-4 w-4 rounded border-[var(--sds-border-default)] text-[var(--sds-accent)] focus:ring-[var(--sds-accent)]" />
           </label>
         </div>
       </ErpSection>
@@ -150,7 +150,7 @@ export default function ContractDiscountSettingsPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-right text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                <tr className="border-b border-[var(--sds-border-default)] text-right text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:text-[var(--sds-text-muted)]">
                   <th className="py-2">بازه</th>
                   <th className="py-2">سقف تخفیف</th>
                   <th className="py-2">وضعیت</th>
@@ -159,12 +159,12 @@ export default function ContractDiscountSettingsPage() {
               </thead>
               <tbody>
                 {ranges.map((range) => (
-                  <tr key={range.id} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="py-3 text-slate-800 dark:text-slate-100">
+                  <tr key={range.id} className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+                    <td className="py-3 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                       {formatPrice(range.minAmount, 'تومان')} تا {range.maxAmount ? formatPrice(range.maxAmount, 'تومان') : 'بدون سقف'}
                     </td>
-                    <td className="py-3 text-slate-800 dark:text-slate-100">{formatDisplayNumber(range.maxDiscountPercent)}٪</td>
-                    <td className="py-3 text-slate-800 dark:text-slate-100">{range.isActive ? 'فعال' : 'غیرفعال'}</td>
+                    <td className="py-3 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{formatDisplayNumber(range.maxDiscountPercent)}٪</td>
+                    <td className="py-3 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{range.isActive ? 'فعال' : 'غیرفعال'}</td>
                     <td className="py-3">
                       <div className="flex flex-wrap gap-2">
                         <ErpButton label="ویرایش" onClick={() => handleEdit(range)} icon={FaSave} tone="neutral" variant="outline" />

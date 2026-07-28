@@ -40,6 +40,7 @@ import {
 } from 'react-icons/fa';
 import { useWorkspace, WORKSPACES, WORKSPACE_CONFIG, WORKSPACE_PERMISSIONS } from '@/contexts/WorkspaceContext';
 import { dashboardAPI, securityAPI } from '@/lib/api';
+import { ErpPressable } from '@/components/erp';
 
 interface NavigationItem {
   name: string;
@@ -726,27 +727,29 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
     if (!item.show) return null;
 
     return (
-      <div key={itemKey} className={item.separatorBefore && !collapsed ? 'mt-3 border-t border-slate-200 pt-3 dark:border-slate-800' : undefined}>
+      <div key={itemKey} className={item.separatorBefore && !collapsed ? 'mt-3 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-subtle)]' : undefined}>
         <div
           className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
             level > 0 ? 'mr-4' : ''
           } ${
             isActive
-              ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30'
-              : 'text-slate-950 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white'
+              ? 'bg-[var(--sds-accent-soft)] text-[var(--sds-accent)] border border-[var(--sds-accent)]'
+              : 'text-[var(--sds-text-primary)] hover:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-secondary)] dark:hover:bg-[var(--sds-surface-raised)] dark:hover:text-[var(--sds-text-inverse)]'
           }`}
         >
           {hasChildren ? (
-            <button
+            <ErpPressable
+              type="button"
+              aria-expanded={isExpanded}
               onClick={() => toggleExpanded(itemKey)}
-              className="flex items-center gap-3 flex-1"
+              className="flex flex-1 items-center gap-3"
             >
               <Icon className="h-5 w-5" />
               {!collapsed && <span className="flex-1 text-right">{item.namePersian}</span>}
               {!collapsed && (
                 isExpanded ? <FaChevronLeft className="h-4 w-4" /> : <FaChevronRight className="h-4 w-4" />
               )}
-            </button>
+            </ErpPressable>
           ) : (
             <Link
               href={item.href}
@@ -773,34 +776,36 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
   return (
     <div className={`flex min-h-0 flex-col lg:h-full ${className}`}>
       {/* Collapse Toggle */}
-      <div className="hidden flex-shrink-0 border-b border-slate-200 p-3 dark:border-gray-700/50 lg:block">
-        <button
+      <div className="hidden flex-shrink-0 border-b border-[var(--sds-border-default)] p-3 lg:block">
+        <ErpPressable
+          type="button"
+          aria-label={collapsed ? 'بازکردن منو' : 'جمع‌کردن منو'}
           onClick={handleToggleCollapse}
-          className="glass-liquid-btn flex w-full items-center justify-center gap-2 text-sm"
+          className="sds-action sds-action-ghost flex w-full items-center justify-center gap-2 text-sm"
         >
           {collapsed ? <FaChevronRight className="h-4 w-4" /> : <FaChevronLeft className="h-4 w-4" />}
           {!collapsed && <span>جمع‌کردن منو</span>}
-        </button>
+        </ErpPressable>
       </div>
 
       {/* Navigation Items */}
-      <nav className="scrollbar-thin flex-none space-y-1 overflow-visible p-3 text-sm scrollbar-thumb-slate-300 scrollbar-track-slate-100 dark:scrollbar-thumb-gray-600 dark:scrollbar-track-gray-800 lg:flex-1 lg:space-y-2 lg:overflow-y-auto lg:p-4">
+      <nav aria-label="ناوبری فضای کاری" className="scrollbar-thin flex-none space-y-1 overflow-visible p-3 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:flex-1 lg:space-y-2 lg:overflow-y-auto lg:p-4">
         {navigationItems.map(item => renderNavigationItem(item))}
       </nav>
 
       {/* Workspace Info */}
       {!collapsed && currentWorkspace && (
-        <div className="flex-shrink-0 border-t border-slate-200 p-4 dark:border-gray-700/50">
-          <div className="glass-liquid-card p-3">
+        <div className="flex-shrink-0 border-t border-[var(--sds-border-default)] p-4">
+          <div className="sds-workspace-surface p-3">
             <div className="flex items-center gap-3">
-              <div className="glass-liquid-card p-2">
-                <FaShieldAlt className="h-4 w-4 text-teal-400" />
+              <div className="sds-workspace-surface p-2">
+                <FaShieldAlt className="h-4 w-4 text-[var(--sds-accent)]" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="truncate text-sm font-medium text-slate-950 dark:text-white">
+                <p className="truncate text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
                   {WORKSPACE_CONFIG[currentWorkspace].namePersian}
                 </p>
-                <p className="truncate text-xs text-slate-900 dark:text-slate-300">
+                <p className="truncate text-xs text-[var(--sds-text-primary)] dark:text-[var(--sds-text-secondary)]">
                   {WORKSPACE_CONFIG[currentWorkspace].description}
                 </p>
               </div>

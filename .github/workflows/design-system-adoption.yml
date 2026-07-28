@@ -1,0 +1,32 @@
+name: Sabalan Design System adoption
+
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "docs/design-system/**"
+      - "scripts/design-system-adoption.mjs"
+      - "tests/design-system-adoption/**"
+      - "tests/design-system-foundation/**"
+      - "package.json"
+      - ".github/workflows/design-system-adoption.yml"
+  workflow_dispatch:
+
+jobs:
+  adoption:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm run test:design-system-adoption
+      - run: npm run test:design-system-foundation
+      - run: npm run design-system:report
+      - if: github.event_name == 'pull_request'
+        run: node scripts/design-system-adoption.mjs check --changed --base "origin/${{ github.base_ref }}"
+      - if: github.event_name != 'pull_request'
+        run: npm run design-system:check

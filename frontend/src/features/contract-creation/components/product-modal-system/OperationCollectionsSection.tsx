@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ErpPressable, ErpInput, ErpSelect } from '@/components/erp';
 import {
   calculateProductOperations,
   parseCanonicalDecimal,
@@ -81,30 +82,30 @@ function CatalogResults({
     ? items.filter(item => item.name.toLocaleLowerCase('fa').includes(normalized))
     : items;
   return (
-    <div className="border-y border-slate-100 py-2 dark:border-slate-800">
+    <div className="border-y border-[var(--sds-border-subtle)] py-2 dark:border-[var(--sds-border-subtle)]">
       <label className="mb-1 block text-xs font-semibold">
         {kind === 'tool' ? 'جستجوی ابزار' : 'جستجوی پرداخت'}
       </label>
-      <input
+      <ErpInput
         value={query}
         onChange={event => setQuery(event.target.value)}
-        className="min-h-9 w-full rounded-lg border border-slate-300 bg-transparent px-3 text-sm outline-none focus:border-teal-500 dark:border-slate-700"
+        className="min-h-9 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-default)]"
       />
-      <div className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+      <div className="mt-2 divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">
         {results.map(item => (
-          <button
+          <ErpPressable
             key={`${item.catalogItemId}:${item.catalogSnapshotVersion}`}
             type="button"
             onClick={() => onSelect(item)}
             className="flex min-h-9 w-full items-center justify-between gap-3 py-1.5 text-start text-xs"
           >
             <span className="font-semibold">{item.name}</span>
-            <span className="text-slate-500">
+            <span className="text-[var(--sds-text-muted)]">
               {item.rateToman === undefined || item.rateToman === null
                 ? 'نرخ ثبت نشده'
                 : `${item.rateToman} تومان / ${operationUnitLabel(item.unit)}`}
             </span>
-          </button>
+          </ErpPressable>
         ))}
       </div>
     </div>
@@ -343,7 +344,7 @@ export function OperationCollectionsSection({
           toolCatalog.loading
             ? <ReservedRowsSkeleton rows={3} rowHeight={36} />
             : toolCatalog.error
-              ? <div className="min-h-9 py-2 text-xs text-red-600">دریافت ابزار انجام نشد</div>
+              ? <div className="min-h-9 py-2 text-xs text-[var(--sds-danger)]">دریافت ابزار انجام نشد</div>
               : (
                   <CatalogResults
                     kind="tool"
@@ -353,7 +354,7 @@ export function OperationCollectionsSection({
                 )
         )}
         {!addingTool && input.tools.length === 0 && (
-          <div className="min-h-9 border-y border-slate-100 py-2 dark:border-slate-800">
+          <div className="min-h-9 border-y border-[var(--sds-border-subtle)] py-2 dark:border-[var(--sds-border-subtle)]">
             ابزاری انتخاب نشده
           </div>
         )}
@@ -364,12 +365,12 @@ export function OperationCollectionsSection({
           return (
             <div
               key={tool.toolSelectionId}
-              className="border-t border-slate-100 py-2 text-xs dark:border-slate-800"
+              className="border-t border-[var(--sds-border-subtle)] py-2 text-xs dark:border-[var(--sds-border-subtle)]"
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-bold">{tool.name}</span>
                 {tool.outsideCurrentCatalog && (
-                  <span className="text-slate-500">خارج از کاتالوگ فعلی</span>
+                  <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(tool.unit)}</span>
                 <span>{tool.rateToman === undefined ? 'نرخ ثبت نشده' : `${tool.rateToman} تومان`}</span>
@@ -377,7 +378,7 @@ export function OperationCollectionsSection({
                 {input.groups.length > 1 && (
                   <label className="inline-flex items-center gap-1">
                     اعمال روی
-                    <select
+                    <ErpSelect
                       value={tool.operationGroupId}
                       onChange={event => updateTool(tool.toolSelectionId, current => ({
                         ...current,
@@ -386,7 +387,7 @@ export function OperationCollectionsSection({
                           event.target.value
                         )
                       }))}
-                      className="min-h-7 rounded-md border border-slate-300 bg-transparent px-1 dark:border-slate-700"
+                      className="min-h-7 rounded-md border border-[var(--sds-border-default)] bg-transparent px-1 dark:border-[var(--sds-border-default)]"
                     >
                       {input.groups.map((group, index) => (
                         <option key={group.operationGroupId} value={group.operationGroupId}>
@@ -394,19 +395,19 @@ export function OperationCollectionsSection({
                           {input.quantity === undefined ? 'm' : ' قطعه'}
                         </option>
                       ))}
-                    </select>
+                    </ErpSelect>
                   </label>
                 )}
-                <button
+                <ErpPressable
                   type="button"
                   onClick={() => setOverrideEditing(
                     overrideEditing === tool.toolSelectionId ? null : tool.toolSelectionId
                   )}
-                  className="text-teal-700 dark:text-teal-300"
+                  className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"
                 >
                   تغییر مقدار
-                </button>
-                <button
+                </ErpPressable>
+                <ErpPressable
                   type="button"
                   onClick={() => setSplitDraft({
                     kind: 'tool',
@@ -414,11 +415,11 @@ export function OperationCollectionsSection({
                     sourceOperationGroupId: tool.operationGroupId,
                     scope: ''
                   })}
-                  className="text-teal-700 dark:text-teal-300"
+                  className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"
                 >
                   بخشی از گروه
-                </button>
-                <button
+                </ErpPressable>
+                <ErpPressable
                   type="button"
                   onClick={() => onChange({
                     ...input,
@@ -426,15 +427,15 @@ export function OperationCollectionsSection({
                       item => item.toolSelectionId !== tool.toolSelectionId
                     )
                   })}
-                  className="text-red-600"
+                  className="text-[var(--sds-danger)]"
                 >
                   حذف
-                </button>
+                </ErpPressable>
               </div>
               {tool.unit === 'meter' && (
                 <div className="mt-2 flex flex-wrap items-center gap-1">
                   {(['front', 'back', 'left', 'right'] as const).map(edge => (
-                    <button
+                    <ErpPressable
                       key={edge}
                       type="button"
                       aria-pressed={selectedEdges.has(edge)}
@@ -446,38 +447,38 @@ export function OperationCollectionsSection({
                       }))}
                       className={`min-h-7 rounded-md border px-2 ${
                         selectedEdges.has(edge)
-                          ? 'border-teal-600 bg-teal-50 text-teal-700 dark:bg-teal-950'
-                          : 'border-slate-300 dark:border-slate-700'
+                          ? 'border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] text-[var(--sds-accent)] dark:bg-[var(--sds-accent-soft)]'
+                          : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]'
                       }`}
                     >
                       {getPersianOperationEdgeLabel(edge)}
-                    </button>
+                    </ErpPressable>
                   ))}
-                  <button
+                  <ErpPressable
                     type="button"
                     onClick={() => updateTool(tool.toolSelectionId, current => ({
                       ...current,
                       edges: ['front', 'back']
                     }))}
-                    className="min-h-7 px-2 text-teal-700"
+                    className="min-h-7 px-2 text-[var(--sds-accent)]"
                   >
                     دو طول
-                  </button>
-                  <button
+                  </ErpPressable>
+                  <ErpPressable
                     type="button"
                     onClick={() => updateTool(tool.toolSelectionId, current => ({
                       ...current,
                       edges: ['front', 'back', 'left', 'right']
                     }))}
-                    className="min-h-7 px-2 text-teal-700"
+                    className="min-h-7 px-2 text-[var(--sds-accent)]"
                   >
                     محیط کامل
-                  </button>
+                  </ErpPressable>
                 </div>
               )}
               {overrideEditing === tool.toolSelectionId && calculated && (
                 <div className="mt-2 flex items-center gap-2">
-                  <input
+                  <ErpInput
                     defaultValue={tool.quantityOverride?.value ?? calculated.finalQuantity}
                     inputMode="decimal"
                     onBlur={event => {
@@ -494,9 +495,9 @@ export function OperationCollectionsSection({
                         event.currentTarget.focus();
                       }
                     }}
-                    className="min-h-8 w-24 rounded-md border border-slate-300 bg-transparent px-2"
+                    className="min-h-8 w-24 rounded-md border border-[var(--sds-border-default)] bg-transparent px-2"
                   />
-                  <span className="text-slate-500">
+                  <span className="text-[var(--sds-text-muted)]">
                     محاسبه: {calculated.automaticQuantity}{operationUnitLabel(tool.unit)}
                   </span>
                 </div>
@@ -504,7 +505,7 @@ export function OperationCollectionsSection({
               {splitDraft?.kind === 'tool' &&
                 splitDraft.selectionId === tool.toolSelectionId && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <input
+                    <ErpInput
                       value={splitDraft.scope}
                       onChange={event => setSplitDraft({
                         ...splitDraft,
@@ -512,22 +513,22 @@ export function OperationCollectionsSection({
                         error: undefined
                       })}
                       inputMode="decimal"
-                      className="min-h-8 w-24 rounded-md border border-slate-300 bg-transparent px-2"
+                      className="min-h-8 w-24 rounded-md border border-[var(--sds-border-default)] bg-transparent px-2"
                     />
                     <span>{input.quantity === undefined ? 'متر طول' : 'تعداد قطعه'}</span>
-                    <button type="button" onClick={commitSplit}>اعمال</button>
-                    <button type="button" onClick={() => setSplitDraft(null)}>انصراف</button>
+                    <ErpPressable type="button" onClick={commitSplit}>اعمال</ErpPressable>
+                    <ErpPressable type="button" onClick={() => setSplitDraft(null)}>انصراف</ErpPressable>
                     {splitDraft.error && (
-                      <span className="text-red-600">{splitDraft.error}</span>
+                      <span className="text-[var(--sds-danger)]">{splitDraft.error}</span>
                     )}
                   </div>
                 )}
               {conflict && (
-                <div className="mt-1 text-red-600">
+                <div className="mt-1 text-[var(--sds-danger)]">
                   {conflictMessage(conflict)}
                   {conflict.code === 'manual-override-stale' && (
                     <span className="ms-2 inline-flex gap-2">
-                      <button
+                      <ErpPressable
                         type="button"
                         onClick={() => updateTool(tool.toolSelectionId, current => ({
                           ...current,
@@ -537,8 +538,8 @@ export function OperationCollectionsSection({
                         }))}
                       >
                         حفظ مقدار دستی
-                      </button>
-                      <button
+                      </ErpPressable>
+                      <ErpPressable
                         type="button"
                         onClick={() => updateTool(tool.toolSelectionId, current => ({
                           ...current,
@@ -551,7 +552,7 @@ export function OperationCollectionsSection({
                         }))}
                       >
                         استفاده از محاسبه
-                      </button>
+                      </ErpPressable>
                     </span>
                   )}
                 </div>
@@ -571,7 +572,7 @@ export function OperationCollectionsSection({
           finishingCatalog.loading
             ? <ReservedRowsSkeleton rows={3} rowHeight={36} />
             : finishingCatalog.error
-              ? <div className="min-h-9 py-2 text-xs text-red-600">دریافت پرداخت انجام نشد</div>
+              ? <div className="min-h-9 py-2 text-xs text-[var(--sds-danger)]">دریافت پرداخت انجام نشد</div>
               : (
                   <CatalogResults
                     kind="finishing"
@@ -581,7 +582,7 @@ export function OperationCollectionsSection({
                 )
         )}
         {!addingFinishing && input.finishings.length === 0 && (
-          <div className="min-h-9 border-y border-slate-100 py-2 dark:border-slate-800">
+          <div className="min-h-9 border-y border-[var(--sds-border-subtle)] py-2 dark:border-[var(--sds-border-subtle)]">
             پرداختی انتخاب نشده
           </div>
         )}
@@ -591,12 +592,12 @@ export function OperationCollectionsSection({
           return (
             <div
               key={finishing.finishingSelectionId}
-              className="border-t border-slate-100 py-2 text-xs dark:border-slate-800"
+              className="border-t border-[var(--sds-border-subtle)] py-2 text-xs dark:border-[var(--sds-border-subtle)]"
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-bold">{finishing.name}</span>
                 {finishing.outsideCurrentCatalog && (
-                  <span className="text-slate-500">خارج از کاتالوگ فعلی</span>
+                  <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(finishing.unit)}</span>
                 <span>{finishing.rateToman === undefined ? 'نرخ ثبت نشده' : `${finishing.rateToman} تومان`}</span>
@@ -604,7 +605,7 @@ export function OperationCollectionsSection({
                 {input.groups.length > 1 && (
                   <label className="inline-flex items-center gap-1">
                     اعمال روی
-                    <select
+                    <ErpSelect
                       value={finishing.operationGroupId}
                       onChange={event => updateFinishing(
                         finishing.finishingSelectionId,
@@ -616,7 +617,7 @@ export function OperationCollectionsSection({
                           )
                         })
                       )}
-                      className="min-h-7 rounded-md border border-slate-300 bg-transparent px-1 dark:border-slate-700"
+                      className="min-h-7 rounded-md border border-[var(--sds-border-default)] bg-transparent px-1 dark:border-[var(--sds-border-default)]"
                     >
                       {input.groups.map((group, index) => (
                         <option key={group.operationGroupId} value={group.operationGroupId}>
@@ -624,21 +625,21 @@ export function OperationCollectionsSection({
                           {input.quantity === undefined ? 'm' : ' قطعه'}
                         </option>
                       ))}
-                    </select>
+                    </ErpSelect>
                   </label>
                 )}
-                <button
+                <ErpPressable
                   type="button"
                   onClick={() => setOverrideEditing(
                     overrideEditing === finishing.finishingSelectionId
                       ? null
                       : finishing.finishingSelectionId
                   )}
-                  className="text-teal-700 dark:text-teal-300"
+                  className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"
                 >
                   تغییر مقدار
-                </button>
-                <button
+                </ErpPressable>
+                <ErpPressable
                   type="button"
                   onClick={() => setSplitDraft({
                     kind: 'finishing',
@@ -646,11 +647,11 @@ export function OperationCollectionsSection({
                     sourceOperationGroupId: finishing.operationGroupId,
                     scope: ''
                   })}
-                  className="text-teal-700 dark:text-teal-300"
+                  className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"
                 >
                   بخشی از گروه
-                </button>
-                <button
+                </ErpPressable>
+                <ErpPressable
                   type="button"
                   onClick={() => onChange({
                     ...input,
@@ -659,14 +660,14 @@ export function OperationCollectionsSection({
                         finishing.finishingSelectionId
                     )
                   })}
-                  className="text-red-600"
+                  className="text-[var(--sds-danger)]"
                 >
                   حذف
-                </button>
+                </ErpPressable>
               </div>
               {overrideEditing === finishing.finishingSelectionId && calculated && (
                 <div className="mt-2 flex items-center gap-2">
-                  <input
+                  <ErpInput
                     defaultValue={
                       finishing.quantityOverride?.value ?? calculated.finalQuantity
                     }
@@ -688,9 +689,9 @@ export function OperationCollectionsSection({
                         event.currentTarget.focus();
                       }
                     }}
-                    className="min-h-8 w-24 rounded-md border border-slate-300 bg-transparent px-2"
+                    className="min-h-8 w-24 rounded-md border border-[var(--sds-border-default)] bg-transparent px-2"
                   />
-                  <span className="text-slate-500">
+                  <span className="text-[var(--sds-text-muted)]">
                     محاسبه: {calculated.automaticQuantity}
                     {operationUnitLabel(finishing.unit)}
                   </span>
@@ -699,7 +700,7 @@ export function OperationCollectionsSection({
               {splitDraft?.kind === 'finishing' &&
                 splitDraft.selectionId === finishing.finishingSelectionId && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <input
+                    <ErpInput
                       value={splitDraft.scope}
                       onChange={event => setSplitDraft({
                         ...splitDraft,
@@ -707,22 +708,22 @@ export function OperationCollectionsSection({
                         error: undefined
                       })}
                       inputMode="decimal"
-                      className="min-h-8 w-24 rounded-md border border-slate-300 bg-transparent px-2"
+                      className="min-h-8 w-24 rounded-md border border-[var(--sds-border-default)] bg-transparent px-2"
                     />
                     <span>{input.quantity === undefined ? 'متر طول' : 'تعداد قطعه'}</span>
-                    <button type="button" onClick={commitSplit}>اعمال</button>
-                    <button type="button" onClick={() => setSplitDraft(null)}>انصراف</button>
+                    <ErpPressable type="button" onClick={commitSplit}>اعمال</ErpPressable>
+                    <ErpPressable type="button" onClick={() => setSplitDraft(null)}>انصراف</ErpPressable>
                     {splitDraft.error && (
-                      <span className="text-red-600">{splitDraft.error}</span>
+                      <span className="text-[var(--sds-danger)]">{splitDraft.error}</span>
                     )}
                   </div>
                 )}
               {conflict && (
-                <div className="mt-1 text-red-600">
+                <div className="mt-1 text-[var(--sds-danger)]">
                   {conflictMessage(conflict)}
                   {conflict.code === 'manual-override-stale' && (
                     <span className="ms-2 inline-flex gap-2">
-                      <button
+                      <ErpPressable
                         type="button"
                         onClick={() => updateFinishing(
                           finishing.finishingSelectionId,
@@ -735,8 +736,8 @@ export function OperationCollectionsSection({
                         )}
                       >
                         حفظ مقدار دستی
-                      </button>
-                      <button
+                      </ErpPressable>
+                      <ErpPressable
                         type="button"
                         onClick={() => updateFinishing(
                           finishing.finishingSelectionId,
@@ -752,7 +753,7 @@ export function OperationCollectionsSection({
                         )}
                       >
                         استفاده از محاسبه
-                      </button>
+                      </ErpPressable>
                     </span>
                   )}
                 </div>
@@ -765,13 +766,13 @@ export function OperationCollectionsSection({
       {!presentation.complete && (
         <div
           data-operation-total-incomplete
-          className="border-t border-amber-300 bg-amber-50 px-2 py-2 text-xs font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+          className="border-t border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-2 py-2 text-xs font-semibold text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]"
         >
           جمع عملیات ناقص است؛ خطاهای مشخص‌شده را برطرف کنید
         </div>
       )}
       {calculation.ok && Number(calculation.result.noOperationScope) > 0 && (
-        <div className="border-t border-slate-200 py-2 text-xs dark:border-slate-800">
+        <div className="border-t border-[var(--sds-border-default)] py-2 text-xs dark:border-[var(--sds-border-subtle)]">
           بدون عملیات — {calculation.result.noOperationScope}
           {input.quantity === undefined ? 'm' : ' قطعه'}
         </div>

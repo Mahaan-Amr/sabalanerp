@@ -1,5 +1,4 @@
-﻿'use client';
-
+'use client';
 import { useEffect, useState } from 'react';
 import { FaClipboardList, FaPlus, FaSync, FaTruck, FaUsers } from 'react-icons/fa';
 import { ErpActionGrid, ErpLoading, ErpPage, ErpSection, type ErpMetric } from '@/components/erp';
@@ -55,18 +54,18 @@ export default function LogisticsDashboardPage() {
       <ErpSection title="آخرین بارگیری‌ها">
         <div className="space-y-3">
           {(data?.recent || []).map((loading: any) => (
-            <div key={loading.id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between">
+            <div key={loading.id} className="flex flex-col gap-3 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <a href={`/dashboard/logistics/loadings/${loading.id}`} className="font-semibold text-[#074747] dark:text-teal-200">{loading.loadingNumber}</a>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{loading.customerName} · {loading.projectName} · {dateFa(loading.loadingDate)}</p>
+                <a href={`/dashboard/logistics/loadings/${loading.id}`} className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{loading.loadingNumber}</a>
+                <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{loading.customerName} · {loading.projectName} · {dateFa(loading.loadingDate)}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={loading.status} />
-                <span className="text-xs text-slate-500">{(loading.lineCount || 0).toLocaleString('fa-IR')} ردیف</span>
+                <span className="text-xs text-[var(--sds-text-secondary)]">{(loading.lineCount || 0).toLocaleString('fa-IR')} ردیف</span>
               </div>
             </div>
           ))}
-          {(!data?.recent || data.recent.length === 0) && <p className="text-sm text-slate-500">هنوز بارگیری ثبت نشده است.</p>}
+          {(!data?.recent || data.recent.length === 0) && <p className="text-sm text-[var(--sds-text-secondary)]">هنوز بارگیری ثبت نشده است.</p>}
         </div>
       </ErpSection>
     </ErpPage>

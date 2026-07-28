@@ -57,7 +57,7 @@ export default function Home() {
     <div className="public-site">
       <PublicHeader />
 
-      <main>
+      <main className="sds-workspace">
         <section className="public-grid-band overflow-hidden">
           <div className="public-container grid min-h-[calc(100vh-84px)] items-center gap-12 py-14 lg:grid-cols-[0.95fr_1.05fr]">
             <div>
@@ -89,22 +89,22 @@ export default function Home() {
             <Reveal className="grid gap-6 md:grid-cols-4">
               {stats.map((item) => (
                 <div key={item.label} className="public-card p-6">
-                  <p className="text-3xl font-black text-stone-950">{item.value}</p>
-                  <p className="mt-2 text-sm leading-7 text-stone-500">{item.label}</p>
+                  <p className="text-3xl font-black text-[var(--sds-text-primary)]">{item.value}</p>
+                  <p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">{item.label}</p>
                 </div>
               ))}
             </Reveal>
           </div>
         </section>
 
-        <section id="features" className="public-section bg-stone-950 text-white">
+        <section id="features" className="public-section bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)]">
           <div className="public-container">
             <Reveal className="max-w-3xl">
-              <p className="mb-3 text-sm font-black text-teal-300">امکانات اصلی</p>
-              <h2 className="text-3xl font-black leading-snug text-white md:text-5xl">
+              <p className="mb-3 text-sm font-black text-[var(--sds-accent)]">امکانات اصلی</p>
+              <h2 className="text-3xl font-black leading-snug text-[var(--sds-text-primary)] md:text-5xl">
                 ابزارهایی که مستقیما از نیاز عملیاتی صنعت سنگ آمده اند
               </h2>
-              <p className="mt-5 text-lg leading-9 text-stone-300">
+              <p className="mt-5 text-lg leading-9 text-[var(--sds-text-muted)]">
                 سامانه برای نمایش تبلیغاتی ساخته نشده؛ برای کاهش خطا، سرعت دادن به تصمیم گیری و ثبت دقیق مسیر فروش و تحویل طراحی شده است.
               </p>
             </Reveal>
@@ -114,10 +114,10 @@ export default function Home() {
                 const Icon = feature.icon;
                 return (
                   <Reveal key={feature.title} delay={index * 0.04}>
-                    <article className="h-full rounded-lg border border-white/10 bg-white/[0.04] p-6">
-                      <Icon className="mb-5 h-7 w-7 text-teal-300" />
-                      <h3 className="text-xl font-extrabold text-white">{feature.title}</h3>
-                      <p className="mt-3 leading-8 text-stone-300">{feature.text}</p>
+                    <article className="h-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)]/[0.04] p-6">
+                      <Icon className="mb-5 h-7 w-7 text-[var(--sds-accent)]" />
+                      <h3 className="text-xl font-extrabold text-[var(--sds-text-primary)]">{feature.title}</h3>
+                      <p className="mt-3 leading-8 text-[var(--sds-text-muted)]">{feature.text}</p>
                     </article>
                   </Reveal>
                 );
@@ -140,11 +140,11 @@ export default function Home() {
               <div className="public-card p-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   {['مشتری', 'پروژه', 'محصول', 'قرارداد', 'تحویل', 'پرداخت'].map((item, index) => (
-                    <div key={item} className="rounded-lg border border-stone-200 bg-stone-50 p-4">
-                      <span className="text-xs font-black text-teal-700">۰{index + 1}</span>
-                      <p className="mt-2 text-lg font-extrabold text-stone-950">{item}</p>
-                      <div className="mt-4 h-1.5 rounded-full bg-stone-200">
-                        <div className="h-full rounded-full bg-teal-700" style={{ width: `${48 + index * 8}%` }} />
+                    <div key={item} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4">
+                      <span className="text-xs font-black text-[var(--sds-accent)]">۰{index + 1}</span>
+                      <p className="mt-2 text-lg font-extrabold text-[var(--sds-text-primary)]">{item}</p>
+                      <div className="mt-4 h-1.5 rounded-full bg-[var(--sds-surface-subtle)]">
+                        <div className="h-full rounded-full bg-[var(--sds-accent)]" style={{ width: `${48 + index * 8}%` }} />
                       </div>
                     </div>
                   ))}
@@ -154,7 +154,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="roadmap" className="public-section bg-stone-100">
+        <section id="roadmap" className="public-section bg-[var(--sds-surface-subtle)]">
           <div className="public-container grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
             <Reveal>
               <p className="public-eyebrow">مسیر توسعه سامانه</p>
@@ -164,12 +164,12 @@ export default function Home() {
               {roadmap.map((item, index) => (
                 <Reveal key={item} delay={index * 0.05}>
                   <div className="public-card flex h-full items-start gap-4 p-5">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-stone-950 text-sm font-black text-white">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--sds-surface-raised)] text-sm font-black text-[var(--sds-text-primary)]">
                       {index + 1}
                     </span>
                     <div>
-                      <p className="font-extrabold text-stone-950">{item}</p>
-                      <p className="mt-2 text-sm leading-7 text-stone-500">در حال توسعه و تکمیل بر اساس نیازهای عملیاتی.</p>
+                      <p className="font-extrabold text-[var(--sds-text-primary)]">{item}</p>
+                      <p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">در حال توسعه و تکمیل بر اساس نیازهای عملیاتی.</p>
                     </div>
                   </div>
                 </Reveal>
@@ -183,8 +183,8 @@ export default function Home() {
             <Reveal>
               <div className="public-card grid gap-8 p-8 lg:grid-cols-[1fr_auto] lg:items-center">
                 <div>
-                  <FaRoute className="mb-4 h-8 w-8 text-teal-700" />
-                  <h2 className="text-2xl font-black text-stone-950 md:text-4xl">دسترسی به سامانه برای کاربران مجاز</h2>
+                  <FaRoute className="mb-4 h-8 w-8 text-[var(--sds-accent)]" />
+                  <h2 className="text-2xl font-black text-[var(--sds-text-primary)] md:text-4xl">دسترسی به سامانه برای کاربران مجاز</h2>
                   <p className="public-lead mt-4 max-w-3xl">
                     ورود به بخش های عملیاتی فقط برای کاربران تعریف شده در سازمان امکان پذیر است. برای دسترسی یا پشتیبانی، با مدیر سامانه در سنگ سبلان هماهنگ کنید.
                   </p>

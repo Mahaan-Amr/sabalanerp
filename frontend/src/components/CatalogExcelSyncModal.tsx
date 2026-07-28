@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpPressable } from '@/components/erp';
 import React, { useState } from 'react';
 import { FaDownload, FaExclamationTriangle, FaFileExcel, FaSpinner, FaTimes, FaUpload } from 'react-icons/fa';
 import ExcelFileUpload from './ExcelFileUpload';
@@ -50,19 +50,19 @@ const downloadBlob = (response: any, filename: string) => {
 };
 
 const PreviewList = ({ title, items, tone }: { title: string; items: any[]; tone: string }) => (
-  <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+  <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
     <div className={`mb-2 text-sm font-semibold ${tone}`}>{title}</div>
     {items.length === 0 ? (
-      <p className="text-sm text-slate-500 dark:text-slate-400">موردی وجود ندارد</p>
+      <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">موردی وجود ندارد</p>
     ) : (
-      <div className="max-h-36 space-y-1 overflow-y-auto text-sm text-slate-700 dark:text-slate-300">
+      <div className="max-h-36 space-y-1 overflow-y-auto text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
         {items.slice(0, 30).map((item, index) => (
-          <div key={`${item.key || index}-${index}`} className="flex items-start justify-between gap-3 border-b border-slate-100 py-1 last:border-0 dark:border-slate-800">
+          <div key={`${item.key || index}-${index}`} className="flex items-start justify-between gap-3 border-b border-[var(--sds-border-default)] py-1 last:border-0 dark:border-[var(--sds-border-strong)]">
             <span className="min-w-0 truncate">{item.label || item.error || item.warning}</span>
-            <span className="shrink-0 text-xs text-slate-400">{item.action === 'hardDelete' ? 'حذف کامل' : item.action === 'deactivate' ? 'غیرفعال' : item.rowNumber ? `ردیف ${item.rowNumber}` : item.row ? `ردیف ${item.row}` : ''}</span>
+            <span className="shrink-0 text-xs text-[var(--sds-text-muted)]">{item.action === 'hardDelete' ? 'حذف کامل' : item.action === 'deactivate' ? 'غیرفعال' : item.rowNumber ? `ردیف ${item.rowNumber}` : item.row ? `ردیف ${item.row}` : ''}</span>
           </div>
         ))}
-        {items.length > 30 && <div className="text-xs text-slate-400">و {items.length - 30} مورد دیگر...</div>}
+        {items.length > 30 && <div className="text-xs text-[var(--sds-text-muted)]">و {items.length - 30} مورد دیگر...</div>}
       </div>
     )}
   </div>
@@ -160,36 +160,36 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-lg bg-white shadow-xl dark:bg-slate-800">
-        <div className="flex items-center justify-between border-b border-slate-200 p-5 dark:border-slate-700">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h2>
-          <button onClick={close} className="rounded p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-overlay)] p-4">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-lg bg-[var(--sds-surface-raised)] shadow-xl dark:bg-[var(--sds-surface-raised)]">
+        <div className="flex items-center justify-between border-b border-[var(--sds-border-default)] p-5 dark:border-[var(--sds-border-strong)]">
+          <h2 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2>
+          <ErpPressable type="submit" onClick={close} className="rounded p-2 text-[var(--sds-text-muted)] hover:text-[var(--sds-text-secondary)] dark:hover:text-[var(--sds-text-primary)]">
             <FaTimes />
-          </button>
+          </ErpPressable>
         </div>
 
-        <div className="flex border-b border-slate-200 dark:border-slate-700">
-          <button onClick={() => setActiveTab('import')} className={`flex-1 px-4 py-3 text-sm font-medium ${activeTab === 'import' ? 'border-b-2 border-teal-600 text-teal-600' : 'text-slate-500'}`}>
+        <div className="flex border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+          <ErpPressable type="submit" onClick={() => setActiveTab('import')} className={`flex-1 px-4 py-3 text-sm font-medium ${activeTab === 'import' ? 'border-b-2 border-[var(--sds-border-strong)] text-[var(--sds-accent)]' : 'text-[var(--sds-text-secondary)]'}`}>
             <FaUpload className="ml-2 inline" /> ورود اطلاعات
-          </button>
-          <button onClick={() => setActiveTab('export')} className={`flex-1 px-4 py-3 text-sm font-medium ${activeTab === 'export' ? 'border-b-2 border-teal-600 text-teal-600' : 'text-slate-500'}`}>
+          </ErpPressable>
+          <ErpPressable type="submit" onClick={() => setActiveTab('export')} className={`flex-1 px-4 py-3 text-sm font-medium ${activeTab === 'export' ? 'border-b-2 border-[var(--sds-border-strong)] text-[var(--sds-accent)]' : 'text-[var(--sds-text-secondary)]'}`}>
             <FaDownload className="ml-2 inline" /> خروج اطلاعات
-          </button>
+          </ErpPressable>
         </div>
 
         <div className="max-h-[65vh] overflow-y-auto p-5">
           {activeTab === 'import' ? (
             <div className="space-y-5">
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+              <div className="rounded-lg border border-[var(--sds-info-border)] bg-[var(--sds-info-surface)] p-4 dark:border-[var(--sds-info-border)] dark:bg-[var(--sds-info-surface)]">
                 <div className="flex items-start gap-3">
-                  <FaFileExcel className="mt-1 text-blue-600 dark:text-blue-300" />
+                  <FaFileExcel className="mt-1 text-[var(--sds-info)] dark:text-[var(--sds-info)]" />
                   <div className="flex-1">
-                    <div className="font-medium text-blue-900 dark:text-blue-100">قالب اختصاصی اکسل</div>
-                    <p className="mt-1 text-sm text-blue-700 dark:text-blue-300">ابتدا قالب همین کاتالوگ را دانلود کنید یا خروجی فعلی را ویرایش و دوباره بارگذاری کنید.</p>
-                    <button onClick={handleTemplate} disabled={loading} className="mt-3 rounded-md bg-blue-100 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-200 disabled:opacity-50">
+                    <div className="font-medium text-[var(--sds-info)] dark:text-[var(--sds-info)]">قالب اختصاصی اکسل</div>
+                    <p className="mt-1 text-sm text-[var(--sds-info)] dark:text-[var(--sds-info)]">ابتدا قالب همین کاتالوگ را دانلود کنید یا خروجی فعلی را ویرایش و دوباره بارگذاری کنید.</p>
+                    <ErpPressable type="submit" onClick={handleTemplate} disabled={loading} className="mt-3 rounded-md bg-[var(--sds-info-surface)] px-3 py-2 text-sm font-medium text-[var(--sds-info)] hover:bg-[var(--sds-info-surface)] disabled:opacity-50">
                       دانلود قالب
-                    </button>
+                    </ErpPressable>
                   </div>
                 </div>
               </div>
@@ -202,72 +202,72 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
               />
 
               <div className="flex justify-end">
-                <button onClick={handlePreview} disabled={loading || !selectedFile} className="inline-flex items-center rounded-md bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">
+                <ErpPressable type="submit" onClick={handlePreview} disabled={loading || !selectedFile} className="inline-flex items-center rounded-md bg-[var(--sds-accent)] px-5 py-2.5 text-sm font-medium text-[var(--sds-text-inverse)] hover:bg-[var(--sds-accent)] disabled:opacity-50">
                   {loading ? <FaSpinner className="ml-2 animate-spin" /> : <FaUpload className="ml-2" />}
                   بررسی و پیش‌نمایش
-                </button>
+                </ErpPressable>
               </div>
 
               {plan && (
-                <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/50">
+                <div className="space-y-4 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
                   <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-6">
-                    <div><div className="text-xl font-bold">{plan.summary.totalRows}</div><div className="text-xs text-slate-500">ردیف</div></div>
-                    <div><div className="text-xl font-bold text-green-600">{plan.summary.creates}</div><div className="text-xs text-slate-500">ایجاد</div></div>
-                    <div><div className="text-xl font-bold text-blue-600">{plan.summary.updates}</div><div className="text-xs text-slate-500">به‌روزرسانی</div></div>
-                    <div><div className="text-xl font-bold text-amber-600">{plan.summary.removals}</div><div className="text-xs text-slate-500">حذف/غیرفعال</div></div>
-                    <div><div className="text-xl font-bold text-orange-600">{plan.summary.warnings || 0}</div><div className="text-xs text-slate-500">هشدار</div></div>
-                    <div><div className="text-xl font-bold text-red-600">{plan.summary.errors}</div><div className="text-xs text-slate-500">خطا</div></div>
+                    <div><div className="text-xl font-bold">{plan.summary.totalRows}</div><div className="text-xs text-[var(--sds-text-secondary)]">ردیف</div></div>
+                    <div><div className="text-xl font-bold text-[var(--sds-success)]">{plan.summary.creates}</div><div className="text-xs text-[var(--sds-text-secondary)]">ایجاد</div></div>
+                    <div><div className="text-xl font-bold text-[var(--sds-info)]">{plan.summary.updates}</div><div className="text-xs text-[var(--sds-text-secondary)]">به‌روزرسانی</div></div>
+                    <div><div className="text-xl font-bold text-[var(--sds-warning)]">{plan.summary.removals}</div><div className="text-xs text-[var(--sds-text-secondary)]">حذف/غیرفعال</div></div>
+                    <div><div className="text-xl font-bold text-[var(--sds-warning)]">{plan.summary.warnings || 0}</div><div className="text-xs text-[var(--sds-text-secondary)]">هشدار</div></div>
+                    <div><div className="text-xl font-bold text-[var(--sds-danger)]">{plan.summary.errors}</div><div className="text-xs text-[var(--sds-text-secondary)]">خطا</div></div>
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-2">
-                    <PreviewList title="رکوردهای جدید" items={plan.creates} tone="text-green-600" />
-                    <PreviewList title="رکوردهای قابل به‌روزرسانی" items={plan.updates} tone="text-blue-600" />
-                    <PreviewList title="رکوردهای حذف یا غیرفعال" items={plan.removals} tone="text-amber-600" />
-                    <PreviewList title="هشدارها" items={plan.warnings || []} tone="text-orange-600" />
-                    <PreviewList title="خطاهای اعتبارسنجی" items={plan.errors} tone="text-red-600" />
+                    <PreviewList title="رکوردهای جدید" items={plan.creates} tone="text-[var(--sds-success)]" />
+                    <PreviewList title="رکوردهای قابل به‌روزرسانی" items={plan.updates} tone="text-[var(--sds-info)]" />
+                    <PreviewList title="رکوردهای حذف یا غیرفعال" items={plan.removals} tone="text-[var(--sds-warning)]" />
+                    <PreviewList title="هشدارها" items={plan.warnings || []} tone="text-[var(--sds-warning)]" />
+                    <PreviewList title="خطاهای اعتبارسنجی" items={plan.errors} tone="text-[var(--sds-danger)]" />
                   </div>
 
                   {plan.removals.length > 0 && (
-                    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                    <div className="flex items-start gap-2 rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 text-sm text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
                       <FaExclamationTriangle className="mt-0.5 shrink-0" />
                       <span>با تأیید، رکوردهای حذف‌شده از فایل اکسل طبق پیش‌نمایش حذف کامل یا غیرفعال می‌شوند.</span>
                     </div>
                   )}
 
                   <div className="flex justify-end">
-                    <button onClick={handleApply} disabled={loading || !plan.canApply} className="inline-flex items-center rounded-md bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
+                    <ErpPressable type="submit" onClick={handleApply} disabled={loading || !plan.canApply} className="inline-flex items-center rounded-md bg-[var(--sds-success)] px-5 py-2.5 text-sm font-medium text-[var(--sds-text-inverse)] hover:bg-[var(--sds-success)] disabled:opacity-50">
                       {loading ? <FaSpinner className="ml-2 animate-spin" /> : null}
                       تأیید و اعمال تغییرات
-                    </button>
+                    </ErpPressable>
                   </div>
                 </div>
               )}
             </div>
           ) : (
             <div className="space-y-5">
-              <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-200">
+              <div className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-4 text-sm text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
                 خروجی فعلی همین کاتالوگ دانلود می‌شود و بعد از ویرایش قابل ورود دوباره است.
               </div>
               <div className="flex justify-end">
-                <button onClick={handleExport} disabled={loading} className="inline-flex items-center rounded-md bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">
+                <ErpPressable type="submit" onClick={handleExport} disabled={loading} className="inline-flex items-center rounded-md bg-[var(--sds-accent)] px-5 py-2.5 text-sm font-medium text-[var(--sds-text-inverse)] hover:bg-[var(--sds-accent)] disabled:opacity-50">
                   {loading ? <FaSpinner className="ml-2 animate-spin" /> : <FaDownload className="ml-2" />}
                   دانلود خروجی
-                </button>
+                </ErpPressable>
               </div>
             </div>
           )}
 
           {error && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+            <div className="mt-4 rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
               {error}
             </div>
           )}
         </div>
 
-        <div className="flex justify-end border-t border-slate-200 p-4 dark:border-slate-700">
-          <button onClick={close} className="rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">
+        <div className="flex justify-end border-t border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-strong)]">
+          <ErpPressable type="submit" onClick={close} className="rounded-md bg-[var(--sds-surface-subtle)] px-4 py-2 text-sm font-medium text-[var(--sds-text-primary)] hover:bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:hover:bg-[var(--sds-surface-subtle)]">
             بستن
-          </button>
+          </ErpPressable>
         </div>
       </div>
     </div>

@@ -3,12 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { FaBan, FaCamera, FaCarSide, FaCheck, FaClipboardList, FaClock, FaEdit, FaPlus, FaRedo, FaSearch, FaTrash, FaTruck, FaUserShield } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpSection, ErpSegmentedControl, ErpSkeleton, ErpWorkspacePage } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpEmptyState, ErpInlineState, ErpInput, ErpPressable, ErpSection, ErpSegmentedControl, ErpSelect, ErpSkeleton, ErpWorkspacePage, erpFieldLabelClassName } from '@/components/erp';
 import { crmAPI, securityAPI } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
 
-const inputClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
-const labelClass = 'mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200';
+const labelClass = erpFieldLabelClassName;
 
 const emptyPair = {
   firstName: '',
@@ -36,13 +35,13 @@ function StoredPhotoThumbnail({ photo, onOpen, onDelete }: { photo: any; onOpen:
     });
     return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [photo.id]);
-  return <div className="relative aspect-video overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-700">{url ? <button type="button" onClick={() => onOpen(url)} className="h-full w-full"><img src={url} alt={photo.originalName} className="h-full w-full object-cover" /></button> : <span className="grid h-full place-items-center text-xs">در حال بارگذاری</span>}<button type="button" onClick={onDelete} className="absolute left-1 top-1 rounded bg-white/90 p-1 text-red-600"><FaTrash /></button></div>;
+  return <div className="relative aspect-video overflow-hidden rounded-lg bg-[var(--sds-surface-subtle)]">{url ? <ErpPressable onClick={() => onOpen(url)} className="h-full w-full rounded-none p-0"><img src={url} alt={photo.originalName} className="h-full w-full object-cover" /></ErpPressable> : <span className="grid h-full place-items-center text-xs">در حال بارگذاری</span>}<ErpPressable onClick={onDelete} aria-label={`حذف ${photo.originalName}`} tone="danger" variant="solid" className="absolute left-1 top-1 h-11 w-11 p-1"><FaTrash /></ErpPressable></div>;
 }
 
 function LocalPhotoThumbnail({ file, onOpen, onDelete }: { file: File; onOpen: (url: string) => void; onDelete: () => void }) {
   const [url, setUrl] = useState('');
   useEffect(() => { const objectUrl = URL.createObjectURL(file); setUrl(objectUrl); return () => URL.revokeObjectURL(objectUrl); }, [file]);
-  return <div className="relative aspect-video overflow-hidden rounded-lg bg-slate-200">{url && <button type="button" onClick={() => onOpen(url)} className="h-full w-full"><img src={url} alt={file.name} className="h-full w-full object-cover" /></button>}<button type="button" onClick={onDelete} className="absolute left-1 top-1 rounded bg-white/90 p-1 text-red-600"><FaTrash /></button></div>;
+  return <div className="relative aspect-video overflow-hidden rounded-lg bg-[var(--sds-surface-subtle)]">{url && <ErpPressable onClick={() => onOpen(url)} className="h-full w-full rounded-none p-0"><img src={url} alt={file.name} className="h-full w-full object-cover" /></ErpPressable>}<ErpPressable onClick={onDelete} aria-label={`حذف ${file.name}`} tone="danger" variant="solid" className="absolute left-1 top-1 h-11 w-11 p-1"><FaTrash /></ErpPressable></div>;
 }
 
 const photoCategories = [
@@ -335,7 +334,7 @@ export default function SecurityVehiclesPage() {
   };
 
   return (
-    <ErpWorkspacePage title="خودرویی" primaryAction={{ label: 'ثبت راننده و خودرو', icon: FaPlus, onClick: () => setActiveSection('registry'), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData }]}>
+    <ErpWorkspacePage title="تردد خودروها" primaryAction={{ label: 'ثبت راننده و خودرو', icon: FaPlus, onClick: () => setActiveSection('registry'), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData }]}>
       {loading && !pairs.length && !movements.length ? <ErpSkeleton lines={6} /> : <>
       {message && <ErpInlineState kind="success" title={message} />}
       {error && <ErpInlineState kind={pairs.length || movements.length ? 'stale' : 'error'} title={error} action={{ label: 'تلاش مجدد', onClick: loadData }} />}
@@ -357,21 +356,21 @@ export default function SecurityVehiclesPage() {
           {!showQueueHistory && <>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
             {activePairs.filter((pair) => pair.informationComplete && !queuedPairIds.has(pair.id)).map((pair) => (
-              <button key={pair.id} type="button" onClick={() => enqueueDriver(pair.id)} className="rounded-lg border border-slate-200 p-3 text-right hover:border-teal-500 dark:border-slate-700">
-                <span className="font-semibold">{pair.firstName} {pair.lastName}</span><span className="block text-xs text-slate-500">{pair.vehiclePlate} · {pair.vehicleType}</span><span className="mt-2 block text-xs font-semibold text-teal-700">افزودن به صف</span>
-              </button>
+              <ErpPressable key={pair.id} onClick={() => enqueueDriver(pair.id)} variant="outline" className="h-auto p-3 text-right">
+                <span className="font-semibold">{pair.firstName} {pair.lastName}</span><span className="block text-xs sds-text-muted">{pair.vehiclePlate} · {pair.vehicleType}</span><span className="mt-2 block text-xs font-semibold text-[var(--sds-accent)]">افزودن به صف</span>
+              </ErpPressable>
             ))}
           </div>
           <div className="mt-5 space-y-3">
             {queueTurns.map((turn, index) => (
               <ErpCard key={turn.id} className="p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold">نوبت {(index + 1).toLocaleString('fa-IR')} · {turn.vehiclePair.firstName} {turn.vehiclePair.lastName}</p><p className="mt-1 text-sm text-slate-500">{turn.vehiclePair.vehiclePlate} · {turn.vehiclePair.vehicleType}</p><p className="mt-1 text-xs text-slate-500">ورود: {new Date(turn.enteredAt).toLocaleString('fa-IR')} · انتظار: {Math.max(0, Math.floor((now - new Date(turn.enteredAt).getTime()) / 60000)).toLocaleString('fa-IR')} دقیقه{turn.loadingAreaEnteredAt ? ` · ورود برای بارگیری: ${new Date(turn.loadingAreaEnteredAt).toLocaleString('fa-IR')}` : ''}{turn.returnToQueueReason ? ` · بازگشت: ${turn.returnToQueueReason}` : ''}</p></div><div className="flex flex-wrap gap-2"><ErpBadge tone={turn.status === 'WAITING' ? 'success' : turn.status === 'ENTERED_LOADING_AREA' ? 'info' : 'warning'}>{queueStatusLabel[turn.status] || turn.status}</ErpBadge>{turn.status === 'WAITING' && <ErpButton label="ورود برای بارگیری" icon={FaTruck} tone="success" variant="soft" onClick={() => enterLoadingArea(turn)} />}{turn.status === 'ENTERED_LOADING_AREA' && <ErpButton label="بازگشت به صف" icon={FaRedo} tone="neutral" variant="soft" onClick={() => returnToWaiting(turn)} />}{turn.status !== 'RESERVED' && <ErpButton label="خارج از صف" icon={FaBan} tone="danger" variant="soft" onClick={() => removeFromQueue(turn)} />}</div></div>
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold">نوبت {(index + 1).toLocaleString('fa-IR')} · {turn.vehiclePair.firstName} {turn.vehiclePair.lastName}</p><p className="mt-1 text-sm sds-text-muted">{turn.vehiclePair.vehiclePlate} · {turn.vehiclePair.vehicleType}</p><p className="mt-1 text-xs sds-text-muted">ورود: {new Date(turn.enteredAt).toLocaleString('fa-IR')} · انتظار: {Math.max(0, Math.floor((now - new Date(turn.enteredAt).getTime()) / 60000)).toLocaleString('fa-IR')} دقیقه{turn.loadingAreaEnteredAt ? ` · ورود برای بارگیری: ${new Date(turn.loadingAreaEnteredAt).toLocaleString('fa-IR')}` : ''}{turn.returnToQueueReason ? ` · بازگشت: ${turn.returnToQueueReason}` : ''}</p></div><div className="flex flex-wrap gap-2"><ErpBadge tone={turn.status === 'WAITING' ? 'success' : turn.status === 'ENTERED_LOADING_AREA' ? 'info' : 'warning'}>{queueStatusLabel[turn.status] || turn.status}</ErpBadge>{turn.status === 'WAITING' && <ErpButton label="ورود برای بارگیری" icon={FaTruck} tone="success" variant="soft" onClick={() => enterLoadingArea(turn)} />}{turn.status === 'ENTERED_LOADING_AREA' && <ErpButton label="بازگشت به صف" icon={FaRedo} tone="neutral" variant="soft" onClick={() => returnToWaiting(turn)} />}{turn.status !== 'RESERVED' && <ErpButton label="خارج از صف" icon={FaBan} tone="danger" variant="soft" onClick={() => removeFromQueue(turn)} />}</div></div>
               </ErpCard>
             ))}
             {!queueTurns.length && <ErpEmptyState icon={FaClock} title="راننده‌ای در صف نیست" />}
           </div>
           </>}
-          {showQueueHistory && <div className="space-y-3">{queueHistory.map((turn) => <ErpCard key={turn.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold">{turn.vehiclePair.firstName} {turn.vehiclePair.lastName} · {turn.vehiclePair.vehiclePlate}</p><p className="mt-1 text-xs text-slate-500">ورود: {new Date(turn.enteredAt).toLocaleString('fa-IR')}{turn.reservedPosition ? ` · جایگاه هنگام انتخاب ${turn.reservedPosition.toLocaleString('fa-IR')}` : ''}{turn.loading ? ` · بارگیری ${turn.loading.loadingNumber}` : ''}{turn.removedAt ? ` · خروج ${new Date(turn.removedAt).toLocaleString('fa-IR')}` : ''}{turn.removalReason ? ` · ${turn.removalReason}` : ''}</p></div><ErpBadge tone={turn.status === 'DISPATCHED' ? 'success' : turn.status === 'OUT_OF_QUEUE' ? 'danger' : 'warning'}>{queueStatusLabel[turn.status] || turn.status}</ErpBadge></div></ErpCard>)}</div>}
+          {showQueueHistory && <div className="space-y-3">{queueHistory.map((turn) => <ErpCard key={turn.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold">{turn.vehiclePair.firstName} {turn.vehiclePair.lastName} · {turn.vehiclePair.vehiclePlate}</p><p className="mt-1 text-xs sds-text-muted">ورود: {new Date(turn.enteredAt).toLocaleString('fa-IR')}{turn.reservedPosition ? ` · جایگاه هنگام انتخاب ${turn.reservedPosition.toLocaleString('fa-IR')}` : ''}{turn.loading ? ` · بارگیری ${turn.loading.loadingNumber}` : ''}{turn.removedAt ? ` · خروج ${new Date(turn.removedAt).toLocaleString('fa-IR')}` : ''}{turn.removalReason ? ` · ${turn.removalReason}` : ''}</p></div><ErpBadge tone={turn.status === 'DISPATCHED' ? 'success' : turn.status === 'OUT_OF_QUEUE' ? 'danger' : 'warning'}>{queueStatusLabel[turn.status] || turn.status}</ErpBadge></div></ErpCard>)}</div>}
         </ErpSection>
       )}
 
@@ -381,18 +380,18 @@ export default function SecurityVehiclesPage() {
           {Object.entries({ firstName: 'نام', lastName: 'نام خانوادگی', vehicleType: 'نوع خودرو', phone: 'شماره موبایل', nationalCode: 'کد ملی', homeAddress: 'آدرس منزل', relativePhone: 'شماره موبایل بستگان' }).map(([field, label]) => (
             <label key={field}>
               <span className={labelClass}>{label}</span>
-              <input className={inputClass} value={(pairForm as any)[field]} onChange={(event) => setPairForm((current) => ({ ...current, [field]: event.target.value }))} />
+              <ErpInput value={(pairForm as any)[field]} onChange={(event) => setPairForm((current) => ({ ...current, [field]: event.target.value }))} />
             </label>
           ))}
-          <div className="md:col-span-3"><div className="mb-2 flex items-center justify-between"><span className={labelClass}>پلاک خودرو</span><label className="text-sm"><input type="checkbox" checked={pairForm.vehiclePlateKind === 'SPECIAL'} onChange={(event) => { const special = event.target.checked; setPairForm((current) => ({ ...current, vehiclePlateKind: special ? 'SPECIAL' : 'STANDARD', vehiclePlate: '' })); setPlateParts({ left: '', letter: 'ط', middle: '', iran: '' }); }} /> پلاک ویژه</label></div>{pairForm.vehiclePlateKind === 'SPECIAL' ? <input className={inputClass} value={pairForm.vehiclePlate} onChange={(event) => setPairForm((current) => ({ ...current, vehiclePlate: event.target.value }))} placeholder="پلاک ویژه" /> : <div dir="ltr" className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_1.4fr_auto_1fr]"><input className={inputClass} inputMode="numeric" value={plateParts.left} onChange={(event) => updatePlatePart('left', event.target.value)} placeholder="17" /><select className={inputClass} value={plateParts.letter} onChange={(event) => updatePlatePart('letter', event.target.value)}>{plateLetters.map((letter) => <option key={letter}>{letter}</option>)}</select><input className={inputClass} inputMode="numeric" value={plateParts.middle} onChange={(event) => updatePlatePart('middle', event.target.value)} placeholder="574" /><span className="grid min-h-12 place-items-center rounded-lg border border-slate-200 px-3">ایران</span><input className={inputClass} inputMode="numeric" value={plateParts.iran} onChange={(event) => updatePlatePart('iran', event.target.value)} placeholder="63" /></div>}</div>
+          <div className="md:col-span-3"><div className="mb-2 flex items-center justify-between"><span className={labelClass}>پلاک خودرو</span><ErpCheckbox label="پلاک ویژه" checked={pairForm.vehiclePlateKind === 'SPECIAL'} onChange={(event) => { const special = event.target.checked; setPairForm((current) => ({ ...current, vehiclePlateKind: special ? 'SPECIAL' : 'STANDARD', vehiclePlate: '' })); setPlateParts({ left: '', letter: 'ط', middle: '', iran: '' }); }} /></div>{pairForm.vehiclePlateKind === 'SPECIAL' ? <ErpInput value={pairForm.vehiclePlate} onChange={(event) => setPairForm((current) => ({ ...current, vehiclePlate: event.target.value }))} placeholder="پلاک ویژه" /> : <div dir="ltr" className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_1.4fr_auto_1fr]"><ErpInput inputMode="numeric" value={plateParts.left} onChange={(event) => updatePlatePart('left', event.target.value)} placeholder="17" /><ErpSelect value={plateParts.letter} onChange={(event) => updatePlatePart('letter', event.target.value)}>{plateLetters.map((letter) => <option key={letter}>{letter}</option>)}</ErpSelect><ErpInput inputMode="numeric" value={plateParts.middle} onChange={(event) => updatePlatePart('middle', event.target.value)} placeholder="574" /><span className="grid min-h-12 place-items-center rounded-lg border border-[var(--sds-border-default)] px-3">ایران</span><ErpInput inputMode="numeric" value={plateParts.iran} onChange={(event) => updatePlatePart('iran', event.target.value)} placeholder="63" /></div>}</div>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
           {photoCategories.map(({ field, label }) => (
-            <label key={field} className="rounded-lg border border-dashed border-slate-300 p-4 dark:border-slate-700">
+            <label key={field} className="sds-divider rounded-lg border border-dashed p-4">
               <span className={labelClass}>{label} *</span>
-              <span className="mb-2 block text-xs text-slate-500">JPEG، PNG یا WebP؛ حداکثر ۱۰ مگابایت برای هر تصویر</span>
-              <span className="flex flex-col gap-2"><span>انتخاب فایل</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setPairPhotos((current) => ({ ...current, [field]: [...current[field], ...Array.from(event.target.files || [])] }))} /><span className="flex items-center gap-2"><FaCamera /> ثبت با دوربین</span><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => setPairPhotos((current) => ({ ...current, [field]: [...current[field], ...Array.from(event.target.files || [])] }))} /></span>
-              <span className="mt-2 block text-xs font-semibold text-teal-700">{pairPhotos[field].length.toLocaleString('fa-IR')} تصویر جدید</span>
+              <span className="mb-2 block text-xs sds-text-muted">JPEG، PNG یا WebP؛ حداکثر ۱۰ مگابایت برای هر تصویر</span>
+              <span className="flex flex-col gap-2"><span>انتخاب فایل</span><ErpInput type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setPairPhotos((current) => ({ ...current, [field]: [...current[field], ...Array.from(event.target.files || [])] }))} /><span className="flex items-center gap-2"><FaCamera /> ثبت با دوربین</span><ErpInput type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => setPairPhotos((current) => ({ ...current, [field]: [...current[field], ...Array.from(event.target.files || [])] }))} /></span>
+              <span className="mt-2 block text-xs font-semibold text-[var(--sds-accent)]">{pairPhotos[field].length.toLocaleString('fa-IR')} تصویر جدید</span>
               <div className="mt-2 grid grid-cols-2 gap-2">{pairPhotos[field].map((file, index) => <LocalPhotoThumbnail key={`${file.name}-${index}`} file={file} onOpen={setPreviewUrl} onDelete={() => setPairPhotos((current) => ({ ...current, [field]: current[field].filter((_, itemIndex) => itemIndex !== index) }))} />)}</div>
             </label>
           ))}
@@ -406,10 +405,10 @@ export default function SecurityVehiclesPage() {
             <ErpCard key={pair.id} className="p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-semibold text-slate-900 dark:text-white">{pair.firstName} {pair.lastName}</p>
-                  <p className="mt-1 text-sm text-slate-500">{pair.vehicleType} · {pair.vehiclePlate}</p>
-                  <p className="mt-1 text-xs text-slate-500">{pair.phone} · {pair.nationalCode}</p>
-                  <p className="mt-1 text-xs text-slate-500">{pair.homeAddress || 'آدرس تکمیل نشده'} · {pair.relativePhone || 'موبایل بستگان تکمیل نشده'}</p>
+                  <p className="font-semibold sds-text-primary">{pair.firstName} {pair.lastName}</p>
+                  <p className="mt-1 text-sm sds-text-muted">{pair.vehicleType} · {pair.vehiclePlate}</p>
+                  <p className="mt-1 text-xs sds-text-muted">{pair.phone} · {pair.nationalCode}</p>
+                  <p className="mt-1 text-xs sds-text-muted">{pair.homeAddress || 'آدرس تکمیل نشده'} · {pair.relativePhone || 'موبایل بستگان تکمیل نشده'}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <ErpBadge tone={pair.isActive ? 'success' : 'neutral'}>{pair.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>
@@ -418,7 +417,7 @@ export default function SecurityVehiclesPage() {
               </div>
               <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {photoCategories.map(({ category, label }) => (
-                  <div key={category} className="rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-800">
+                  <div key={category} className="rounded-lg bg-[var(--sds-surface-subtle)] p-2 text-xs">
                     <p className="font-semibold">{label}</p>
                     <div className="mt-2 grid grid-cols-2 gap-2">{(pair.photos || []).filter((photo: any) => photo.category === category).map((photo: any) => <StoredPhotoThumbnail key={photo.id} photo={photo} onOpen={setPreviewUrl} onDelete={() => deletePhoto(pair, photo.id)} />)}</div>
                   </div>
@@ -440,24 +439,24 @@ export default function SecurityVehiclesPage() {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <label>
             <span className={labelClass}>نوع ورود</span>
-            <select className={inputClass} value={inboundForm.purpose} onChange={(event) => setInboundForm((current: any) => ({ ...current, purpose: event.target.value }))}>
+            <ErpSelect value={inboundForm.purpose} onChange={(event) => setInboundForm((current: any) => ({ ...current, purpose: event.target.value }))}>
               <option value="OUTSIDE_PURCHASE">خرید بیرونی</option>
               <option value="SALES_RETURN">برگشت از فروش</option>
               <option value="CONSIGNMENT" disabled>امانی - در دست تعریف</option>
-            </select>
+            </ErpSelect>
           </label>
           <label>
             <span className={labelClass}>ثبت راننده و خودرو</span>
-            <select className={inputClass} value={inboundForm.vehiclePairId} onChange={(event) => selectInboundPair(event.target.value)}>
+            <ErpSelect value={inboundForm.vehiclePairId} onChange={(event) => selectInboundPair(event.target.value)}>
               <option value="">تردد متفرقه</option>
               {activePairs.map((pair) => <option key={pair.id} value={pair.id}>{pair.firstName} {pair.lastName} · {pair.vehiclePlate}</option>)}
-            </select>
+            </ErpSelect>
           </label>
           {inboundForm.purpose === 'SALES_RETURN' && (
             <label>
               <span className={labelClass}>مشتری برگشت از فروش</span>
               <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-                <input className={inputClass} value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} />
+                <ErpInput value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} />
                 <ErpButton label="جستجو" icon={FaSearch} onClick={searchCustomers} />
               </div>
             </label>
@@ -467,10 +466,10 @@ export default function SecurityVehiclesPage() {
         {inboundForm.purpose === 'SALES_RETURN' && customers.length > 0 && (
           <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
             {customers.map((customer) => (
-              <button key={customer.id} type="button" onClick={() => setInboundForm((current: any) => ({ ...current, customerId: customer.id }))} className={`rounded-lg border p-3 text-right text-sm ${inboundForm.customerId === customer.id ? 'border-[#074747] bg-[#074747]/10' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'}`}>
+              <ErpPressable key={customer.id} onClick={() => setInboundForm((current: any) => ({ ...current, customerId: customer.id }))} variant={inboundForm.customerId === customer.id ? 'soft' : 'outline'} tone="primary" className="h-auto p-3 text-right text-sm">
                 <span className="font-semibold">{customer.firstName} {customer.lastName}</span>
-                <span className="block text-xs text-slate-500">{customer.companyName || 'بدون شرکت'}</span>
-              </button>
+                <span className="block text-xs sds-text-muted">{customer.companyName || 'بدون شرکت'}</span>
+              </ErpPressable>
             ))}
           </div>
         )}
@@ -479,12 +478,12 @@ export default function SecurityVehiclesPage() {
           {!inboundForm.vehiclePairId && Object.entries({ firstName: 'نام راننده', lastName: 'نام خانوادگی', vehiclePlate: 'پلاک', vehicleType: 'نوع خودرو', phone: 'موبایل', nationalCode: 'کد ملی' }).map(([field, label]) => (
             <label key={field}>
               <span className={labelClass}>{label}</span>
-              <input className={inputClass} value={inboundForm.driverSnapshot[field] || ''} onChange={(event) => setInboundForm((current: any) => ({ ...current, driverSnapshot: { ...current.driverSnapshot, [field]: event.target.value } }))} />
+              <ErpInput value={inboundForm.driverSnapshot[field] || ''} onChange={(event) => setInboundForm((current: any) => ({ ...current, driverSnapshot: { ...current.driverSnapshot, [field]: event.target.value } }))} />
             </label>
           ))}
-          <label><span className={labelClass}>شماره فاکتور خرید</span><input className={inputClass} value={inboundForm.documentSnapshot.purchaseInvoiceNumber} disabled={inboundForm.purpose === 'SALES_RETURN'} onChange={(event) => setInboundForm((current: any) => ({ ...current, documentSnapshot: { ...current.documentSnapshot, hasPurchaseInvoice: Boolean(event.target.value), purchaseInvoiceNumber: event.target.value } }))} /></label>
-          <label><span className={labelClass}>شماره بارنامه</span><input className={inputClass} value={inboundForm.documentSnapshot.waybillNumber} onChange={(event) => setInboundForm((current: any) => ({ ...current, documentSnapshot: { ...current.documentSnapshot, hasWaybill: Boolean(event.target.value), waybillNumber: event.target.value } }))} /></label>
-          <label><span className={labelClass}>مبلغ تسویه بارنامه</span><input className={inputClass} value={inboundForm.settlementSnapshot.amount} onChange={(event) => setInboundForm((current: any) => ({ ...current, settlementSnapshot: { ...current.settlementSnapshot, amount: event.target.value } }))} /></label>
+          <label><span className={labelClass}>شماره فاکتور خرید</span><ErpInput value={inboundForm.documentSnapshot.purchaseInvoiceNumber} disabled={inboundForm.purpose === 'SALES_RETURN'} onChange={(event) => setInboundForm((current: any) => ({ ...current, documentSnapshot: { ...current.documentSnapshot, hasPurchaseInvoice: Boolean(event.target.value), purchaseInvoiceNumber: event.target.value } }))} /></label>
+          <label><span className={labelClass}>شماره بارنامه</span><ErpInput value={inboundForm.documentSnapshot.waybillNumber} onChange={(event) => setInboundForm((current: any) => ({ ...current, documentSnapshot: { ...current.documentSnapshot, hasWaybill: Boolean(event.target.value), waybillNumber: event.target.value } }))} /></label>
+          <label><span className={labelClass}>مبلغ تسویه بارنامه</span><ErpInput value={inboundForm.settlementSnapshot.amount} onChange={(event) => setInboundForm((current: any) => ({ ...current, settlementSnapshot: { ...current.settlementSnapshot, amount: event.target.value } }))} /></label>
         </div>
         <div className="mt-3">
           <ErpButton label="ثبت ورود" icon={FaTruck} onClick={recordInbound} disabled={saving || (inboundForm.purpose === 'SALES_RETURN' && !inboundForm.customerId)} variant="solid" />
@@ -502,9 +501,9 @@ export default function SecurityVehiclesPage() {
               <ErpCard key={loading.id} className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="font-semibold text-slate-900 dark:text-white">{loading.loadingNumber}</p>
-                    <p className="mt-1 text-sm text-slate-500">{loading.customer?.firstName} {loading.customer?.lastName} · {loading.project?.projectName || loading.project?.address}</p>
-                    <p className="mt-1 text-xs text-slate-500">{loading.driverSnapshot?.firstName || 'بدون راننده'} {loading.driverSnapshot?.lastName || ''} · {loading.driverSnapshot?.vehiclePlate || 'بدون پلاک'}</p>
+                    <p className="font-semibold sds-text-primary">{loading.loadingNumber}</p>
+                    <p className="mt-1 text-sm sds-text-muted">{loading.customer?.firstName} {loading.customer?.lastName} · {loading.project?.projectName || loading.project?.address}</p>
+                    <p className="mt-1 text-xs sds-text-muted">{loading.driverSnapshot?.firstName || 'بدون راننده'} {loading.driverSnapshot?.lastName || ''} · {loading.driverSnapshot?.vehiclePlate || 'بدون پلاک'}</p>
                   </div>
                   <ErpBadge tone="warning">آماده خروج</ErpBadge>
                 </div>
@@ -526,8 +525,8 @@ export default function SecurityVehiclesPage() {
             <ErpCard key={movement.id} className="p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <p className="font-semibold text-slate-900 dark:text-white">{movement.movementNumber} · {purposeLabel[movement.purpose] || movement.purpose}</p>
-                  <p className="mt-1 text-sm text-slate-500">{movement.vehiclePair ? `${movement.vehiclePair.firstName} ${movement.vehiclePair.lastName} · ${movement.vehiclePair.vehiclePlate}` : movement.customer ? `${movement.customer.firstName} ${movement.customer.lastName}` : 'تردد متفرقه'}</p>
+                  <p className="font-semibold sds-text-primary">{movement.movementNumber} · {purposeLabel[movement.purpose] || movement.purpose}</p>
+                  <p className="mt-1 text-sm sds-text-muted">{movement.vehiclePair ? `${movement.vehiclePair.firstName} ${movement.vehiclePair.lastName} · ${movement.vehiclePair.vehiclePlate}` : movement.customer ? `${movement.customer.firstName} ${movement.customer.lastName}` : 'تردد متفرقه'}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <ErpBadge tone={movement.direction === 'INBOUND' ? 'info' : 'purple'}>{movement.direction === 'INBOUND' ? 'ورود' : 'خروج'}</ErpBadge>
@@ -544,7 +543,7 @@ export default function SecurityVehiclesPage() {
         </div>
       </ErpSection>
       )}
-      {previewUrl && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[100] grid place-items-center bg-black/80 p-4" onClick={() => setPreviewUrl('')}><div className="relative max-h-full max-w-5xl" onClick={(event) => event.stopPropagation()}><img src={previewUrl} alt="پیش‌نمایش تصویر" className="max-h-[90vh] max-w-full rounded-xl object-contain" /><button type="button" onClick={() => setPreviewUrl('')} className="absolute left-2 top-2 rounded-lg bg-white px-3 py-2 font-semibold text-slate-900">بستن</button></div></div>}
+      {previewUrl && <div role="dialog" aria-modal="true" aria-label="پیش‌نمایش تصویر" className="fixed inset-0 z-[100] grid place-items-center bg-[var(--sds-surface-overlay)] p-4"><ErpPressable aria-label="بستن پیش‌نمایش" onClick={() => setPreviewUrl('')} className="absolute inset-0 h-full w-full cursor-default rounded-none bg-transparent" /><div className="relative z-10 max-h-full max-w-5xl"><img src={previewUrl} alt="پیش‌نمایش تصویر" className="max-h-[90vh] max-w-full rounded-xl object-contain" /><ErpPressable onClick={() => setPreviewUrl('')} tone="primary" variant="solid" className="absolute left-2 top-2 px-3 py-2 font-semibold">بستن</ErpPressable></div></div>}
       </>}
     </ErpWorkspacePage>
   );

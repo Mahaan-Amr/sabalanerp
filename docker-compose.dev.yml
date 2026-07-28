@@ -1,0 +1,90 @@
+services:
+  backend:
+    build:
+      dockerfile: backend/Dockerfile.dev
+    command: ["sh", "-c", "cd /packages/contract-product-graph && npm run build && cd /app && npx prisma generate && npx prisma migrate deploy && exec npm run dev"]
+    environment:
+      NODE_ENV: development
+    develop:
+      watch:
+        - action: sync
+          path: ./backend/src
+          target: /app/src
+          initial_sync: true
+        - action: sync+restart
+          path: ./backend/prisma
+          target: /app/prisma
+          initial_sync: true
+        - action: sync
+          path: ./backend/public
+          target: /app/public
+          initial_sync: true
+        - action: sync
+          path: ./backend/scripts
+          target: /app/scripts
+          initial_sync: true
+        - action: sync
+          path: ./backend/excel
+          target: /app/excel
+          initial_sync: true
+        - action: sync+restart
+          path: ./packages/contract-product-graph
+          target: /packages/contract-product-graph
+          initial_sync: true
+          ignore:
+            - node_modules/
+            - dist/
+        - action: rebuild
+          path: ./backend/package.json
+        - action: rebuild
+          path: ./backend/package-lock.json
+
+  frontend:
+    build:
+      dockerfile: frontend/Dockerfile.dev
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: /api
+      BACKEND_API_ORIGIN: http://backend:5000
+    develop:
+      watch:
+        - action: sync
+          path: ./frontend/src
+          target: /app/src
+          initial_sync: true
+        - action: sync
+          path: ./frontend/public
+          target: /app/public
+          initial_sync: true
+        - action: sync+restart
+          path: ./frontend/next.config.js
+          target: /app/next.config.js
+          initial_sync: true
+        - action: sync
+          path: ./packages/contract-product-graph/src
+          target: /packages/contract-product-graph/src
+          initial_sync: true
+        - action: rebuild
+          path: ./frontend/package.json
+        - action: rebuild
+          path: ./frontend/package-lock.json
+
+  inquiry:
+    command: ["sh", "-c", "npm run db:push && npm run db:seed && exec npm run dev -- --hostname 0.0.0.0 --port 3001"]
+    environment:
+      NODE_ENV: development
+    develop:
+      watch:
+        - action: sync
+          path: ./apps/sabalan-inquiry
+          target: /app
+          initial_sync: true
+          ignore:
+            - node_modules/
+            - .next/
+            - package.json
+            - package-lock.json
+        - action: rebuild
+          path: ./apps/sabalan-inquiry/package.json
+        - action: rebuild
+          path: ./apps/sabalan-inquiry/package-lock.json

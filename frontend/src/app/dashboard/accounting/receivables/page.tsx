@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { FaReceipt, FaSync } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
@@ -48,10 +47,10 @@ export default function AccountingReceivablesPage() {
   }, [loadRows]);
 
   const columns: ErpColumn<any>[] = [
-    { id: 'receivable', header: 'دریافتنی', priority: 'primary', cell: (row) => <div><p className="font-semibold">{row.contract?.contractNumber || 'دریافتنی قرارداد'}</p><p className="mt-1 text-xs text-slate-500">{row.contract?.customer?.displayName || row.contractId || '—'}</p></div> },
+    { id: 'receivable', header: 'دریافتنی', priority: 'primary', cell: (row) => <div><p className="font-semibold">{row.contract?.contractNumber || 'دریافتنی قرارداد'}</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{row.contract?.customer?.displayName || row.contractId || '—'}</p></div> },
     { id: 'original', header: 'اصل مبلغ', mobileLabel: 'اصل مبلغ', priority: 'secondary', align: 'end', cell: (row) => money(row.originalAmount, row.currency) },
     { id: 'paid', header: 'پرداخت شده', mobileLabel: 'پرداخت شده', priority: 'secondary', align: 'end', cell: (row) => money(row.paidAmount, row.currency) },
-    { id: 'remaining', header: 'مانده', mobileLabel: 'مانده', priority: 'secondary', align: 'end', cell: (row) => <span className="font-semibold text-[#074747] dark:text-teal-200">{money(row.remainingAmount, row.currency)}</span> },
+    { id: 'remaining', header: 'مانده', mobileLabel: 'مانده', priority: 'secondary', align: 'end', cell: (row) => <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{money(row.remainingAmount, row.currency)}</span> },
     { id: 'due', header: 'سررسید', mobileLabel: 'سررسید', priority: 'meta', cell: (row) => dateFa(row.dueDate) },
     { id: 'status', header: 'وضعیت', mobileLabel: 'وضعیت', priority: 'meta', cell: (row) => <StatusBadge status={row.status} /> },
   ];

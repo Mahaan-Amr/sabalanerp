@@ -1,11 +1,11 @@
 'use client';
-
+import { ErpInput } from '@/components/erp';
 import { useEffect, useState } from 'react';
 import { FaCog, FaSave, FaSync } from 'react-icons/fa';
 import { ErpButton, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 
-const fieldClass = 'min-h-12 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-[#074747] focus:bg-white focus:ring-2 focus:ring-[#074747]/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-teal-500 dark:focus:bg-slate-900';
+const fieldClass = 'min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
 
 export default function AccountingSettingsPage() {
   const [settings, setSettings] = useState<any>(null);
@@ -59,20 +59,20 @@ export default function AccountingSettingsPage() {
       <ErpSection title="پروفایل مالیاتی شرکت">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">کد اقتصادی</span>
-            <input className={fieldClass} value={settings?.companyEconomicCode || ''} onChange={(event) => updateField('companyEconomicCode', event.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">کد اقتصادی</span>
+            <ErpInput className={fieldClass} value={settings?.companyEconomicCode || ''} onChange={(event) => updateField('companyEconomicCode', event.target.value)} />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">شناسه ملی</span>
-            <input className={fieldClass} value={settings?.companyNationalId || ''} onChange={(event) => updateField('companyNationalId', event.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">شناسه ملی</span>
+            <ErpInput className={fieldClass} value={settings?.companyNationalId || ''} onChange={(event) => updateField('companyNationalId', event.target.value)} />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">کد شعبه</span>
-            <input className={fieldClass} value={settings?.branchCode || ''} onChange={(event) => updateField('branchCode', event.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">کد شعبه</span>
+            <ErpInput className={fieldClass} value={settings?.branchCode || ''} onChange={(event) => updateField('branchCode', event.target.value)} />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">شناسه یکتای حافظه مالیاتی</span>
-            <input className={fieldClass} value={settings?.fiscalMemoryId || ''} onChange={(event) => updateField('fiscalMemoryId', event.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">شناسه یکتای حافظه مالیاتی</span>
+            <ErpInput className={fieldClass} value={settings?.fiscalMemoryId || ''} onChange={(event) => updateField('fiscalMemoryId', event.target.value)} />
           </label>
         </div>
       </ErpSection>
@@ -80,27 +80,27 @@ export default function AccountingSettingsPage() {
       <ErpSection title="پیش‌فرض‌های صورتحساب و دریافتنی">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">نرخ ارزش افزوده پیش‌فرض</span>
-            <input className={fieldClass} type="number" value={settings?.defaultVatRate || ''} onChange={(event) => updateField('defaultVatRate', event.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">نرخ ارزش افزوده پیش‌فرض</span>
+            <ErpInput className={fieldClass} type="number" value={settings?.defaultVatRate || ''} onChange={(event) => updateField('defaultVatRate', event.target.value)} />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">واحد پول پیش‌فرض</span>
-            <input className={fieldClass} value={settings?.defaultCurrency || 'TOMAN'} onChange={(event) => updateField('defaultCurrency', event.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">واحد پول پیش‌فرض</span>
+            <ErpInput className={fieldClass} value={settings?.defaultCurrency || 'TOMAN'} onChange={(event) => updateField('defaultCurrency', event.target.value)} />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">پیشوند شماره صورتحساب</span>
-            <input className={fieldClass} value={settings?.invoiceNumberPrefix || ''} onChange={(event) => updateField('invoiceNumberPrefix', event.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">پیشوند شماره صورتحساب</span>
+            <ErpInput className={fieldClass} value={settings?.invoiceNumberPrefix || ''} onChange={(event) => updateField('invoiceNumberPrefix', event.target.value)} />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">مهلت پیش‌فرض دریافتنی</span>
-            <input className={fieldClass} type="number" value={settings?.defaultInvoiceDueDays || 0} onChange={(event) => updateField('defaultInvoiceDueDays', event.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">مهلت پیش‌فرض دریافتنی</span>
+            <ErpInput className={fieldClass} type="number" value={settings?.defaultInvoiceDueDays || 0} onChange={(event) => updateField('defaultInvoiceDueDays', event.target.value)} />
           </label>
         </div>
       </ErpSection>
 
       <ErpSection title="آماده‌سازی سند حسابداری">
-        <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm leading-7 text-slate-600 dark:border-slate-700 dark:text-slate-300">
-          <FaCog className="mb-3 h-5 w-5 text-[#074747] dark:text-teal-200" />
+        <div className="rounded-lg border border-dashed border-[var(--sds-border-default)] p-4 text-sm leading-7 text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:text-[var(--sds-text-muted)]">
+          <FaCog className="mb-3 h-5 w-5 text-[var(--sds-accent)] dark:text-[var(--sds-accent)]" />
           پیش‌فرض حساب‌های کل، معین و تفصیلی در مدل داده آماده است. در فاز اول این بخش فقط پایه نگهداری تنظیمات را فراهم می‌کند و UI کامل صدور سند بعد از تایید چارت حساب‌ها فعال می‌شود.
         </div>
       </ErpSection>

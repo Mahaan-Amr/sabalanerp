@@ -1,12 +1,12 @@
-"use client";
-
+'use client';
+import { ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import { useEffect, useState } from "react";
 import { FaPlus, FaSync } from "react-icons/fa";
 import { ErpButton, ErpCard, ErpLoading, ErpPage } from "@/components/erp";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 
 const field =
-  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900";
+  "w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]";
 
 export default function CollateralTemplatesPage() {
   const [rows, setRows] = useState<any[]>([]);
@@ -65,10 +65,10 @@ export default function CollateralTemplatesPage() {
       actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: load }]}
     >
       {error && (
-        <p className="rounded-xl bg-rose-50 p-3 text-rose-700">{error}</p>
+        <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)]">{error}</p>
       )}
       <ErpCard className="space-y-3 p-4">
-        <input
+        <ErpInput
           className={field}
           placeholder="نام قالب"
           value={name}
@@ -76,7 +76,7 @@ export default function CollateralTemplatesPage() {
         />
         {items.map((item, index) => (
           <div key={index} className="grid gap-2 md:grid-cols-4">
-            <select
+            <ErpSelect
               className={field}
               value={item.type}
               onChange={(e) =>
@@ -92,8 +92,8 @@ export default function CollateralTemplatesPage() {
               <option value="GUARANTEE">ضمانت‌نامه</option>
               <option value="UNDERTAKING">تعهدنامه</option>
               <option value="OTHER">سایر</option>
-            </select>
-            <input
+            </ErpSelect>
+            <ErpInput
               className={field}
               placeholder="عنوان قلم"
               value={item.label}
@@ -105,7 +105,7 @@ export default function CollateralTemplatesPage() {
                 )
               }
             />
-            <input
+            <ErpInput
               className={field}
               inputMode="numeric"
               placeholder="مبلغ پیش‌فرض ریال"
@@ -124,7 +124,7 @@ export default function CollateralTemplatesPage() {
               }
             />
             <label className="flex items-center gap-2">
-              <input
+              <ErpInput
                 type="checkbox"
                 checked={item.required}
                 onChange={(e) =>
@@ -170,13 +170,13 @@ export default function CollateralTemplatesPage() {
               <b>{row.name}</b>
               <span className="flex items-center gap-2">
                 نسخه {row.version}
-                <button
+                <ErpPressable type="submit"
                   disabled={busy}
                   onClick={() => toggle(row)}
                   className="rounded border px-2 py-1 text-xs"
                 >
                   {row.isActive ? "غیرفعال‌کردن" : "فعال‌کردن"}
-                </button>
+                </ErpPressable>
               </span>
             </div>
             <ul className="mt-2 text-sm">

@@ -1,8 +1,6 @@
-// Wizard Progress Bar Component
-// Displays the progress indicator with step icons
-
 import React from 'react';
 import { FaCheck } from 'react-icons/fa';
+import { ErpPressable } from '@/components/erp';
 
 export interface WizardStep {
   id: number;
@@ -19,124 +17,77 @@ interface WizardProgressBarProps {
   clickable?: boolean;
 }
 
-export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({ currentStep, steps, onStepClick, clickable = false }) => {
+export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({
+  currentStep,
+  steps,
+  onStepClick,
+  clickable = false
+}) => {
   if (!steps.length) return null;
 
-  const currentStepInfo = steps.find((step) => step.id === currentStep) || steps[0];
-  const currentStepIndex = Math.max(0, steps.findIndex((step) => step.id === currentStep));
-  const visibleStepNumber = currentStepIndex + 1;
-  const CurrentIcon = currentStepInfo.icon;
+  const currentIndex = Math.max(0, steps.findIndex(step => step.id === currentStep));
+  const active = steps[currentIndex] ?? steps[0];
+  const ActiveIcon = active.icon;
+  const progress = ((currentIndex + 1) / steps.length) * 100;
 
   return (
-    <div className="mb-8">
-      <div className="sm:hidden">
-        <div className="mb-4 rounded-lg border border-slate-700/70 bg-slate-900/70 p-4">
-          <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-teal-500/40 bg-teal-500/15 text-teal-300">
-              <CurrentIcon className="h-5 w-5" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-teal-300">
-                مرحله {visibleStepNumber.toLocaleString('fa-IR')} از {steps.length.toLocaleString('fa-IR')}
-              </p>
-              <h2 className="mt-1 text-base font-bold text-white">{currentStepInfo.title}</h2>
-            </div>
-          </div>
-          <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-800">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-teal-500 to-teal-300 transition-all duration-500 ease-out"
-              style={{ width: `${(visibleStepNumber / steps.length) * 100}%` }}
-            />
+    <nav aria-label="مراحل ایجاد قرارداد" className="mb-6">
+      <div className="sds-workspace-surface p-4 sm:hidden">
+        <div className="flex items-center gap-3">
+          <span className="sds-tone-primary sds-tone-surface flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--sds-radius-control)]">
+            <ActiveIcon className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="sds-text-muted text-xs">
+              مرحله {(currentIndex + 1).toLocaleString('fa-IR')} از {steps.length.toLocaleString('fa-IR')}
+            </p>
+            <h2 className="sds-text-primary mt-1 truncate text-base font-bold">{active.title}</h2>
           </div>
         </div>
-
-        <div className="-mx-4 overflow-x-auto px-4 pb-2">
-          <div className="flex min-w-max items-stretch gap-2">
-            {steps.map((step, index) => {
-              const Icon = step.icon;
-              const isActive = currentStep === step.id;
-              const isCompleted = currentStepIndex > index;
-
-              return (
-                <button
-                  type="button"
-                  key={step.id}
-                  aria-current={isActive ? 'step' : undefined}
-                  onClick={() => clickable && onStepClick?.(step.id)}
-                  disabled={!clickable}
-                  className={`flex w-20 flex-shrink-0 flex-col items-center rounded-lg border px-2 py-3 text-center transition disabled:cursor-default ${
-                    isActive
-                      ? 'border-teal-500 bg-teal-500/15 text-teal-200'
-                      : isCompleted
-                        ? 'border-teal-700/60 bg-teal-900/20 text-teal-300'
-                        : 'border-slate-700 bg-slate-900/60 text-slate-400'
-                  }`}
-                >
-                  <span className={`mb-2 flex h-9 w-9 items-center justify-center rounded-full ${
-                    isActive ? 'bg-teal-500 text-white' : isCompleted ? 'bg-teal-700 text-white' : 'bg-slate-800 text-slate-400'
-                  }`}>
-                    {isCompleted ? <FaCheck className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
-                  </span>
-                  <span className="line-clamp-2 text-[11px] font-semibold leading-4">{step.title}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      <div className="relative z-0 hidden items-center justify-between sm:flex">
-        {/* Progress Line */}
-        <div className="absolute top-6 left-6 right-6 h-0.5 bg-gray-200 dark:bg-gray-700 -z-10">
-          <div 
-            className="h-full bg-gradient-to-r from-teal-500 to-teal-400 transition-all duration-500 ease-out"
-            style={{ width: `${steps.length > 1 ? (currentStepIndex / (steps.length - 1)) * 100 : 100}%` }}
+        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--sds-border-subtle)]">
+          <div
+            className="h-full rounded-full bg-[var(--sds-accent)] transition-[width] duration-[var(--sds-motion-standard)] motion-reduce:transition-none"
+            style={{ width: `${progress}%` }}
           />
         </div>
-        
-        {steps.map((step) => {
+      </div>
+
+      <ol className="hidden items-start sm:flex">
+        {steps.map((step, index) => {
           const Icon = step.icon;
-          const isActive = currentStep === step.id;
-          const stepIndex = steps.findIndex((candidate) => candidate.id === step.id);
-          const isCompleted = currentStepIndex > stepIndex;
-          const isUpcoming = currentStepIndex < stepIndex;
-          
+          const isActive = index === currentIndex;
+          const completed = index < currentIndex;
           return (
-            <button
-              key={step.id}
-              type="button"
-              onClick={() => clickable && onStepClick?.(step.id)}
-              disabled={!clickable}
-              className="flex flex-col items-center relative z-0 disabled:cursor-default"
-              aria-current={isActive ? 'step' : undefined}
-            >
-              <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-3 transition-all duration-300 transform ${
-                isCompleted 
-                  ? 'bg-gradient-to-br from-teal-500 to-teal-600 text-white shadow-lg shadow-teal-500/25 scale-105' 
-                  : isActive 
-                    ? 'bg-gradient-to-br from-teal-100 to-teal-200 dark:from-teal-900/50 dark:to-teal-800/50 text-teal-600 dark:text-teal-400 border-2 border-teal-500 shadow-lg shadow-teal-500/20 scale-110' 
-                    : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-2 border-gray-200 dark:border-gray-600 shadow-sm hover:shadow-md transition-shadow'
-              }`}>
-                {isCompleted ? (
-                  <FaCheck className="w-5 h-5" />
-                ) : (
-                  <Icon className={`w-5 h-5 ${isActive ? 'animate-pulse' : ''}`} />
-                )}
-              </div>
-              <span className={`text-xs font-medium text-center max-w-20 leading-tight ${
-                isActive 
-                  ? 'text-teal-600 dark:text-teal-400 font-semibold' 
-                  : isCompleted
-                    ? 'text-teal-500 dark:text-teal-400'
-                    : 'text-gray-500 dark:text-gray-400'
-              }`}>
+            <li key={step.id} className="relative flex min-w-0 flex-1 flex-col items-center">
+              {index > 0 && (
+                <span
+                  aria-hidden="true"
+                  className={`absolute left-1/2 right-[-50%] top-5 h-0.5 ${
+                    completed || isActive
+                      ? 'bg-[var(--sds-accent)]'
+                      : 'bg-[var(--sds-border-default)]'
+                  }`}
+                />
+              )}
+              <ErpPressable
+                type="button"
+                aria-current={isActive ? 'step' : undefined}
+                disabled={!clickable}
+                onClick={() => onStepClick?.(step.id)}
+                tone={isActive || completed ? 'primary' : 'neutral'}
+                variant={isActive ? 'solid' : completed ? 'soft' : 'outline'}
+                className="relative z-10 h-11 w-11 rounded-full p-0 disabled:cursor-default disabled:opacity-100"
+              >
+                {completed ? <FaCheck className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+                <span className="sr-only">{step.title}</span>
+              </ErpPressable>
+              <span className={`mt-2 max-w-24 text-center text-xs ${isActive ? 'font-bold text-[var(--sds-accent)]' : 'sds-text-muted'}`}>
                 {step.title}
               </span>
-            </button>
+            </li>
           );
         })}
-      </div>
-    </div>
+      </ol>
+    </nav>
   );
 };
-

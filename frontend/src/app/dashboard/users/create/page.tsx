@@ -1,12 +1,12 @@
 'use client';
-
+import { ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  FaUserPlus, 
-  FaArrowRight, 
-  FaBuilding, 
+import {
+  FaUserPlus,
+  FaArrowRight,
+  FaBuilding,
   FaShieldAlt,
   FaCheck,
   FaTimes,
@@ -188,7 +188,7 @@ export default function CreateUserPage() {
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -263,8 +263,8 @@ export default function CreateUserPage() {
         if (permissionLevel === 'none') {
           return prev.filter(p => p.workspace !== workspace);
         } else {
-          return prev.map(p => 
-            p.workspace === workspace 
+          return prev.map(p =>
+            p.workspace === workspace
               ? { ...p, permissionLevel }
               : p
           );
@@ -359,7 +359,7 @@ export default function CreateUserPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) {
       return;
     }
@@ -403,12 +403,12 @@ export default function CreateUserPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <main className="sds-workspace space-y-6">
       {/* Header */}
-      <div className="glass-liquid-card p-6">
+      <div className="sds-workspace-surface p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4 space-x-reverse">
-            <FaUserPlus className="h-8 w-8 text-teal-500" />
+            <FaUserPlus className="h-8 w-8 text-[var(--sds-accent)]" />
             <div>
               <h1 className="text-2xl font-bold text-primary">ایجاد کاربر جدید</h1>
               <p className="text-secondary">اطلاعات کاربر و نقش سازمانی را تکمیل کنید</p>
@@ -416,7 +416,7 @@ export default function CreateUserPage() {
           </div>
           <Link
             href="/dashboard/users"
-            className="glass-liquid-btn px-6 py-2 flex items-center space-x-2 space-x-reverse"
+            className="sds-action px-6 py-2 flex items-center space-x-2 space-x-reverse"
           >
             <FaArrowRight />
             <span>بازگشت به لیست</span>
@@ -425,66 +425,66 @@ export default function CreateUserPage() {
       </div>
 
       {error && (
-        <div className="glass-liquid-card p-4 bg-red-500/20 border border-red-500/30">
+        <div className="sds-workspace-surface p-4 bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)]">
           <div className="flex items-center space-x-2 space-x-reverse">
-            <FaTimes className="text-red-500" />
-            <p className="text-red-400">{error}</p>
+            <FaTimes className="text-[var(--sds-danger)]" />
+            <p className="text-[var(--sds-danger)]">{error}</p>
           </div>
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Basic Information */}
-        <div className="glass-liquid-card p-6">
+        <div className="sds-workspace-surface p-6">
           <h2 className="text-xl font-bold text-primary mb-4">اطلاعات پایه</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-sm text-secondary mb-2">نام *</label>
-              <input
+              <ErpInput
                 type="text"
                 name="firstName"
                 value={formData.firstName}
                 onChange={handleInputChange}
-                className="glass-liquid-input w-full"
+                className="sds-field w-full"
                 placeholder="نام"
                 required
               />
             </div>
-            
+
             <div>
               <label className="block text-sm text-secondary mb-2">نام خانوادگی *</label>
-              <input
+              <ErpInput
                 type="text"
                 name="lastName"
                 value={formData.lastName}
                 onChange={handleInputChange}
-                className="glass-liquid-input w-full"
+                className="sds-field w-full"
                 placeholder="نام خانوادگی"
                 required
               />
             </div>
-            
+
             <div>
               <label className="block text-sm text-secondary mb-2">ایمیل *</label>
-              <input
+              <ErpInput
                 type="email"
                 name="email"
                 value={formData.email}
                 onChange={handleInputChange}
-                className="glass-liquid-input w-full"
+                className="sds-field w-full"
                 placeholder="example@domain.com"
                 required
               />
             </div>
-            
+
             <div>
               <label className="block text-sm text-secondary mb-2">نام کاربری *</label>
-              <input
+              <ErpInput
                 type="text"
                 name="username"
                 value={formData.username}
                 onChange={handleInputChange}
-                className="glass-liquid-input w-full"
+                className="sds-field w-full"
                 placeholder="نام کاربری"
                 required
               />
@@ -492,74 +492,74 @@ export default function CreateUserPage() {
 
             <div>
               <label className="block text-sm text-secondary mb-2">شماره تماس</label>
-              <input
+              <ErpInput
                 type="tel"
                 name="phone"
                 value={formData.phone}
                 onChange={handleInputChange}
-                className="glass-liquid-input w-full"
+                className="sds-field w-full"
                 placeholder="09123456789"
                 dir="ltr"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm text-secondary mb-2">رمز عبور *</label>
               <div className="relative">
-                <input
+                <ErpInput
                   type={showPassword ? 'text' : 'password'}
                   name="password"
                   value={formData.password}
                   onChange={handleInputChange}
-                  className="glass-liquid-input w-full pr-10"
+                  className="sds-field w-full pr-10"
                   placeholder="رمز عبور"
                   required
                 />
-                <button
+                <ErpPressable
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-600 dark:text-slate-400"
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]"
                 >
                   {showPassword ? <FaEyeSlash /> : <FaEye />}
-                </button>
+                </ErpPressable>
               </div>
             </div>
-            
+
             <div>
               <label className="block text-sm text-secondary mb-2">تکرار رمز عبور *</label>
               <div className="relative">
-                <input
+                <ErpInput
                   type={showConfirmPassword ? 'text' : 'password'}
                   name="confirmPassword"
                   value={formData.confirmPassword}
                   onChange={handleInputChange}
-                  className="glass-liquid-input w-full pr-10"
+                  className="sds-field w-full pr-10"
                   placeholder="تکرار رمز عبور"
                   required
                 />
-                <button
+                <ErpPressable
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-600 dark:text-slate-400"
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]"
                 >
                   {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
-                </button>
+                </ErpPressable>
               </div>
             </div>
           </div>
         </div>
 
         {/* Role and Department */}
-        <div className="glass-liquid-card p-6">
+        <div className="sds-workspace-surface p-6">
           <h2 className="text-xl font-bold text-primary mb-4">نقش و دپارتمان</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-sm text-secondary mb-2">نقش</label>
-              <select
+              <ErpSelect
                 name="role"
                 value={formData.role}
                 onChange={handleInputChange}
-                className="glass-liquid-input w-full"
+                className="sds-field w-full"
               >
                 <option value="USER">کاربر</option>
                 <option value="MODERATOR">ناظر</option>
@@ -570,16 +570,16 @@ export default function CreateUserPage() {
                     <option value="ADMIN">مدیر سیستم</option>
                   </>
                 )}
-              </select>
+              </ErpSelect>
             </div>
-            
+
             <div>
               <label className="block text-sm text-secondary mb-2">دپارتمان</label>
-              <select
+              <ErpSelect
                 name="departmentId"
                 value={formData.departmentId}
                 onChange={handleInputChange}
-                className="glass-liquid-input w-full"
+                className="sds-field w-full"
               >
                 <option value="">انتخاب دپارتمان</option>
                 {departments.map(dept => (
@@ -587,18 +587,18 @@ export default function CreateUserPage() {
                     {dept.namePersian}
                   </option>
                 ))}
-              </select>
+              </ErpSelect>
             </div>
           </div>
-          
+
           <div className="mt-4">
             <label className="flex items-center space-x-2 space-x-reverse">
-              <input
+              <ErpInput
                 type="checkbox"
                 name="isActive"
                 checked={formData.isActive}
                 onChange={handleInputChange}
-                className="rounded border-slate-300 bg-white text-[#074747] focus:ring-[#074747] dark:border-slate-600 dark:bg-slate-800 dark:text-teal-400 dark:focus:ring-teal-500"
+                className="rounded border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-accent)] focus:ring-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent)] dark:focus:ring-[var(--sds-focus-ring)]"
               />
               <span className="text-secondary">کاربر فعال</span>
             </label>
@@ -606,7 +606,7 @@ export default function CreateUserPage() {
         </div>
 
         {/* Workspace Permissions */}
-        <div className="glass-liquid-card p-6">
+        <div className="sds-workspace-surface p-6">
           <h2 className="text-xl font-bold text-primary mb-4">دسترسی‌های فضای کاری</h2>
           <p className="text-secondary mb-6">
             دسترسی‌های انتخاب‌شده همزمان با ایجاد کاربر ذخیره می‌شوند.
@@ -615,76 +615,76 @@ export default function CreateUserPage() {
           <div className="mb-6">
             <div className="flex items-center justify-between gap-4 mb-3">
               <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
-                <FaShieldAlt className="text-teal-500" />
+                <FaShieldAlt className="text-[var(--sds-accent)]" />
                 الگوی دسترسی
               </h3>
               {workspacePermissions.length > 0 && (
-                <button
+                <ErpPressable
                   type="button"
                   onClick={clearWorkspacePermissions}
-                  className="glass-liquid-btn px-4 py-2 text-sm"
+                  className="sds-action px-4 py-2 text-sm"
                 >
                   پاک کردن دسترسی‌ها
-                </button>
+                </ErpPressable>
               )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {availablePermissionPresets.map((preset) => (
-                <button
+                <ErpPressable
                   key={preset.id}
                   type="button"
                   onClick={() => applyPermissionPreset(preset.id)}
                   className={`text-right p-4 rounded-lg border transition-all duration-200 ${
                     selectedPresetId === preset.id
-                      ? 'border-[#074747]/50 bg-[#074747]/10 text-[#074747] dark:border-teal-400/60 dark:bg-teal-500/20 dark:text-teal-100'
-                      : 'border-slate-200 bg-white text-slate-950 hover:border-[#074747]/40 hover:bg-[#074747]/5 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-200 dark:hover:border-teal-500/40 dark:hover:bg-teal-500/10'
+                      ? 'border-[var(--sds-accent)]/50 bg-[var(--sds-accent)]/10 text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]'
+                      : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-accent)]/40 hover:bg-[var(--sds-accent)]/5 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-inverse)] dark:hover:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-accent-surface)]'
                   }`}
                 >
                   <span className="block text-primary font-medium mb-1">{preset.label}</span>
                   <span className="block text-sm text-secondary">{preset.description}</span>
-                  <span className="mt-3 block text-xs font-semibold text-[#074747] dark:text-teal-300">
+                  <span className="mt-3 block text-xs font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
                     نقش پیشنهادی: {preset.recommendedRole}
                   </span>
-                </button>
+                </ErpPressable>
               ))}
             </div>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {Object.entries(WORKSPACES).map(([key, workspace]) => (
-              <div key={workspace} className="glass-liquid-card p-4">
+              <div key={workspace} className="sds-workspace-surface p-4">
                 <h3 className="font-medium text-primary mb-3">
                   {WORKSPACE_LABELS[workspace as keyof typeof WORKSPACE_LABELS]}
                 </h3>
-                
+
                 <div className="space-y-2">
                   {availableWorkspacePermissionEntries.map(([permKey, permission]) => (
                     <label key={permission} className="flex items-center space-x-2 space-x-reverse">
-                      <input
+                      <ErpInput
                         type="radio"
                         name={`workspace_${workspace}`}
                         value={permission}
                         checked={getCurrentPermission(workspace) === permission}
                         onChange={() => handleWorkspacePermissionChange(workspace, permission)}
-                        className="text-[#074747] focus:ring-[#074747] dark:text-teal-400 dark:focus:ring-teal-500"
+                        className="text-[var(--sds-accent)] focus:ring-[var(--sds-accent)] dark:text-[var(--sds-accent)] dark:focus:ring-[var(--sds-focus-ring)]"
                       />
                       <span className="text-secondary text-sm">
                         {PERMISSION_LABELS[permission as keyof typeof PERMISSION_LABELS]}
                       </span>
                     </label>
                   ))}
-                  
+
                   <label className="flex items-center space-x-2 space-x-reverse">
-                    <input
+                    <ErpInput
                       type="radio"
                       name={`workspace_${workspace}`}
                       value="none"
                       checked={getCurrentPermission(workspace) === 'none'}
                       onChange={() => handleWorkspacePermissionChange(workspace, 'none')}
-                      className="text-slate-500 focus:ring-slate-500"
+                      className="text-[var(--sds-text-secondary)] focus:ring-[var(--sds-focus-ring)]"
                     />
-                    <span className="text-sm text-slate-900 dark:text-slate-300">بدون دسترسی</span>
+                    <span className="text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">بدون دسترسی</span>
                   </label>
                 </div>
               </div>
@@ -693,31 +693,31 @@ export default function CreateUserPage() {
         </div>
 
         {/* Personnel Link */}
-        <div className="glass-liquid-card p-6">
+        <div className="sds-workspace-surface p-6">
           <h2 className="text-xl font-bold text-primary mb-4">پرسنل مرتبط</h2>
           <p className="text-secondary mb-4">
             حساب کاربری برای ورود به سیستم است؛ پرسنل برای حضور و غیاب و عملیات سازمانی استفاده می‌شود.
           </p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className={`rounded-lg border p-4 transition ${personnelMode === 'none' ? 'border-[#074747]/50 bg-[#074747]/10 dark:border-teal-500/50 dark:bg-teal-500/15' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/40'}`}>
+            <label className={`rounded-lg border p-4 transition ${personnelMode === 'none' ? 'border-[var(--sds-accent)]/50 bg-[var(--sds-accent)]/10 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)]' : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]'}`}>
               <span className="flex items-center gap-2">
-                <input
+                <ErpInput
                   type="radio"
                   checked={personnelMode === 'none'}
                   onChange={() => setPersonnelMode('none')}
-                  className="text-[#074747] focus:ring-[#074747]"
+                  className="text-[var(--sds-accent)] focus:ring-[var(--sds-accent)]"
                 />
                 <span className="font-semibold text-primary">بدون اتصال پرسنلی</span>
               </span>
               <span className="mt-2 block text-sm text-secondary">حساب فقط هویت دسترسی است؛ HR می‌تواند بعداً آن را به پرونده پرسنلی متصل کند.</span>
             </label>
-            <label className={`rounded-lg border p-4 transition ${personnelMode === 'existing' ? 'border-[#074747]/50 bg-[#074747]/10 dark:border-teal-500/50 dark:bg-teal-500/15' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/40'}`}>
+            <label className={`rounded-lg border p-4 transition ${personnelMode === 'existing' ? 'border-[var(--sds-accent)]/50 bg-[var(--sds-accent)]/10 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)]' : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]'}`}>
               <span className="flex items-center gap-2">
-                <input
+                <ErpInput
                   type="radio"
                   checked={personnelMode === 'existing'}
                   onChange={() => setPersonnelMode('existing')}
-                  className="text-[#074747] focus:ring-[#074747]"
+                  className="text-[var(--sds-accent)] focus:ring-[var(--sds-accent)]"
                 />
                 <span className="font-semibold text-primary">اتصال به پرسنل موجود</span>
               </span>
@@ -727,13 +727,13 @@ export default function CreateUserPage() {
           {personnelMode === 'existing' && (
             <div className="mt-4">
               <label className="block text-sm text-secondary mb-2">پرسنل موجود</label>
-              <select
+              <ErpSelect
                 value={selectedPersonnelId}
                   onChange={(event) => {
                     const nextId = event.target.value;
                     setSelectedPersonnelId(nextId);
                   }}
-                className="glass-liquid-input w-full"
+                className="sds-field w-full"
               >
                 <option value="">انتخاب پرسنل</option>
                 {personnel.filter((person) => !person.user || person.id === selectedPersonnelId).map((person) => (
@@ -741,16 +741,16 @@ export default function CreateUserPage() {
                     {person.firstName} {person.lastName} - {person.department?.namePersian || 'بدون بخش'}{person.user ? ' (متصل)' : ''}
                   </option>
                 ))}
-              </select>
+              </ErpSelect>
             </div>
           )}
         </div>
 
         {/* Review */}
-        <div className="glass-liquid-card p-6">
+        <div className="sds-workspace-surface p-6">
           <h2 className="text-xl font-bold text-primary mb-4">بازبینی نهایی</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/40">
+            <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
               <p className="text-secondary mb-2">کاربر</p>
               <p className="text-primary font-medium">
                 {formData.firstName || 'نام'} {formData.lastName || 'نام خانوادگی'}
@@ -761,28 +761,28 @@ export default function CreateUserPage() {
                 پرسنل مرتبط: {personnelMode === 'none' ? 'بدون اتصال؛ قابل تکمیل توسط HR' : personnel.find((person) => person.id === selectedPersonnelId) ? `${personnel.find((person) => person.id === selectedPersonnelId)?.firstName} ${personnel.find((person) => person.id === selectedPersonnelId)?.lastName}` : 'انتخاب نشده'}
               </p>
               {selectedPreset && selectedPreset.recommendedRole !== formData.role && (
-                <p className="mt-2 font-medium text-amber-700 dark:text-amber-300">
+                <p className="mt-2 font-medium text-[var(--sds-warning)] dark:text-[var(--sds-warning)]">
                   نقش پیشنهادی این الگو: {selectedPreset.recommendedRole}
                 </p>
               )}
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/40">
+            <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
               <p className="text-secondary mb-2">دسترسی‌ها</p>
               {workspacePermissions.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {workspacePermissions.map((permission) => (
                     <span
                       key={permission.workspace}
-                      className="rounded-full border border-[#074747]/25 bg-[#074747]/10 px-3 py-1 text-[#074747] dark:border-teal-500/30 dark:bg-teal-500/15 dark:text-teal-200"
+                      className="rounded-full border border-[var(--sds-accent)]/25 bg-[var(--sds-accent)]/10 px-3 py-1 text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]"
                     >
                       {getWorkspacePermissionLabel(permission)}
                     </span>
                   ))}
                 </div>
               ) : (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-                  <p className="font-medium text-amber-800 dark:text-amber-200">هیچ دسترسی فضای کاری انتخاب نشده است</p>
-                  <p className="mt-1 text-amber-700 dark:text-amber-100/80">
+                <div className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3">
+                  <p className="font-medium text-[var(--sds-warning)] dark:text-[var(--sds-warning)]">هیچ دسترسی فضای کاری انتخاب نشده است</p>
+                  <p className="mt-1 text-[var(--sds-warning)] dark:text-[var(--sds-warning)]">
                     کاربر ایجاد می‌شود، اما تا زمان افزودن دسترسی مستقیم یا نقش مناسب، دسترسی عملی محدودی خواهد داشت.
                   </p>
                 </div>
@@ -792,29 +792,29 @@ export default function CreateUserPage() {
         </div>
 
         {/* Submit Buttons */}
-        <div className="glass-liquid-card p-6">
+        <div className="sds-workspace-surface p-6">
           <div className="flex items-center justify-end space-x-4 space-x-reverse">
             <Link
               href="/dashboard/users"
-              className="glass-liquid-btn px-6 py-2"
+              className="sds-action px-6 py-2"
             >
               انصراف
             </Link>
-            <button
+            <ErpPressable
               type="submit"
               disabled={loading}
-              className="glass-liquid-btn-primary px-6 py-2 flex items-center space-x-2 space-x-reverse disabled:opacity-50"
+              className="sds-action sds-tone-primary sds-action-solid px-6 py-2 flex items-center space-x-2 space-x-reverse disabled:opacity-50"
             >
               {loading ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--sds-border-default)]"></div>
               ) : (
                 <FaCheck />
               )}
               <span>{loading ? 'در حال ایجاد...' : 'ایجاد کاربر'}</span>
-            </button>
+            </ErpPressable>
           </div>
         </div>
       </form>
-    </div>
+    </main>
   );
 }

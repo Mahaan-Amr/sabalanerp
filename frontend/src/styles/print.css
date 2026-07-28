@@ -1,0 +1,59 @@
+/*
+ * Interactive UI migration intentionally excludes generated and printed
+ * document design. Keep print-only color decisions isolated in this adapter.
+ */
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  [data-dashboard-overlay],
+  [data-dashboard-sidebar],
+  [data-dashboard-topbar],
+  .profile-dropdown-container {
+    display: none !important;
+  }
+
+  [data-dashboard-content] {
+    margin-right: 0 !important;
+    transition: none !important;
+  }
+
+  [data-dashboard-main] {
+    padding: 0 !important;
+  }
+
+  [data-dashboard-main] button,
+  [data-dashboard-main] a[href],
+  [data-print-hide='true'] {
+    display: none !important;
+  }
+
+  .accounting-print-view,
+  .accounting-print-view * {
+    box-shadow: none !important;
+  }
+
+  .accounting-print-view {
+    direction: rtl;
+    max-width: none !important;
+    width: 100% !important;
+  }
+
+  .accounting-print-view > div {
+    display: block !important;
+  }
+
+  .accounting-print-view aside,
+  .accounting-print-view .space-y-5 {
+    position: static !important;
+  }
+
+  .accounting-print-view > div > div,
+  .accounting-print-view aside {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+}

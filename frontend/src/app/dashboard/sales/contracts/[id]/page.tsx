@@ -1,5 +1,5 @@
 'use client';
-
+import { ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
@@ -478,22 +478,22 @@ export default function ContractDetailPage() {
       metrics={metrics}
     >
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+        <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {error}
         </div>
       )}
 
       <ErpSection title="خروجی چاپ قرارداد" description="نوع خروجی فروش را انتخاب کنید و سپس دانلود یا پرینت بگیرید.">
-        <label className="flex max-w-md flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+        <label className="flex max-w-md flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
           نسخه چاپ
-          <select
+          <ErpSelect
             value={printVariant}
             onChange={(event) => setPrintVariant(event.target.value as SalesContractPrintVariant)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] shadow-sm outline-none transition focus:border-[var(--sds-border-strong)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]"
           >
             <option value="original">{salesContractPrintVariantLabels.original}</option>
             <option value="summary">{salesContractPrintVariantLabels.summary}</option>
-          </select>
+          </ErpSelect>
         </label>
       </ErpSection>
 
@@ -523,7 +523,7 @@ export default function ContractDetailPage() {
                 <ErpFieldView label="آخرین بروزرسانی" value={PersianCalendar.formatForDisplay(contract.updatedAt)} />
               </div>
               {contract.notes && (
-                <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                <div className="mt-3 rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-sm leading-6 text-[var(--sds-text-primary)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]">
                   {sanitizeUiText(contract.notes, '—')}
                 </div>
               )}
@@ -556,7 +556,7 @@ export default function ContractDetailPage() {
 
             <ErpSection title="اقلام قرارداد" description="محصولات، متراژ و قیمت‌های ثبت شده در قرارداد.">
               {products.length === 0 ? (
-                <p className="text-sm text-slate-500 dark:text-slate-400">اقلامی برای این قرارداد ثبت نشده است.</p>
+                <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">اقلامی برای این قرارداد ثبت نشده است.</p>
               ) : (
                 <div className="space-y-3">
                   {products.map((item: any, index: number) => {
@@ -573,11 +573,11 @@ export default function ContractDetailPage() {
                     const preparedQuantity = isPreparedRow ? getPreparedQuantity(item) : quantity;
 
                     return (
-                      <div key={`${productName}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
+                      <div key={`${productName}-${index}`} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div>
-                            <p className="font-semibold text-slate-900 dark:text-white">{productName}</p>
-                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{productName}</p>
+                            <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                               {product.widthValue && product.thicknessValue ? `${product.widthValue} × ${product.thicknessValue} cm` : 'ابعاد نامشخص'}
                             </p>
                           </div>
@@ -590,11 +590,11 @@ export default function ContractDetailPage() {
                                 key={`${image}-${imageIndex}`}
                                 src={resolveBackendAssetUrl(image)}
                                 alt={productName}
-                                className="h-14 w-14 rounded-md border border-slate-200 object-cover dark:border-slate-700"
+                                className="h-14 w-14 rounded-md border border-[var(--sds-border-default)] object-cover dark:border-[var(--sds-border-strong)]"
                               />
                             ))}
                             {rowImages.length > 3 && (
-                              <span className="inline-flex h-14 min-w-14 items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                              <span className="inline-flex h-14 min-w-14 items-center justify-center rounded-md border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 text-xs font-semibold text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]">
                                 +{rowImages.length - 3}
                               </span>
                             )}
@@ -607,7 +607,7 @@ export default function ContractDetailPage() {
                           <ErpFieldView label="جمع" value={toFiniteNumber(itemTotal) > 0 ? formatPrice(itemTotal, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} tone="primary" />
                         </div>
                         {finishing && finishing.cost > 0 && (
-                          <div className="mt-3 rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs leading-5 text-teal-800 dark:border-teal-800 dark:bg-teal-900/20 dark:text-teal-200">
+                          <div className="mt-3 rounded-md border border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] px-3 py-2 text-xs leading-5 text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
                             <span className="font-semibold">{sanitizeUiText(item.finishingName || finishing.name || 'پرداخت سنگ')}</span>
                             <span className="mx-1">•</span>
                             <span>{finishing.amountLabel}</span>
@@ -634,12 +634,12 @@ export default function ContractDetailPage() {
                   {serviceRows.map((row: any, index: number) => {
                     const rowImages = Array.isArray(row.images) ? row.images : [];
                     return (
-                      <div key={`${row.id || row.title}-${index}`} className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-800 dark:bg-emerald-900/10">
+                      <div key={`${row.id || row.title}-${index}`} className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)]">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div>
-                            <p className="font-semibold text-slate-900 dark:text-white">{sanitizeUiText(row.title, `خدمت ${index + 1}`)}</p>
+                            <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{sanitizeUiText(row.title, `خدمت ${index + 1}`)}</p>
                             {row.description && (
-                              <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{sanitizeUiText(row.description)}</p>
+                              <p className="mt-1 text-xs leading-5 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{sanitizeUiText(row.description)}</p>
                             )}
                           </div>
                           <ErpBadge tone="success">{formatCurrency(row.totalPrice || 0, sanitizeUiText(row.currency || contract.currency, 'تومان'))}</ErpBadge>
@@ -651,11 +651,11 @@ export default function ContractDetailPage() {
                                 key={`${image}-${imageIndex}`}
                                 src={resolveBackendAssetUrl(image)}
                                 alt={sanitizeUiText(row.title, 'تصویر خدمت')}
-                                className="h-14 w-14 rounded-md border border-emerald-200 object-cover dark:border-emerald-800"
+                                className="h-14 w-14 rounded-md border border-[var(--sds-success-border)] object-cover dark:border-[var(--sds-success-border)]"
                               />
                             ))}
                             {rowImages.length > 3 && (
-                              <span className="inline-flex h-14 min-w-14 items-center justify-center rounded-md border border-emerald-200 bg-white px-2 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-200">
+                              <span className="inline-flex h-14 min-w-14 items-center justify-center rounded-md border border-[var(--sds-success-border)] bg-[var(--sds-surface-raised)] px-2 text-xs font-semibold text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-success)]">
                                 +{rowImages.length - 3}
                               </span>
                             )}
@@ -677,24 +677,24 @@ export default function ContractDetailPage() {
             <ErpSection title="تحویل و پرداخت" description="برنامه‌های تحویل و اطلاعات پرداخت مرتبط با قرارداد.">
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">برنامه تحویل</h3>
+                  <h3 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">برنامه تحویل</h3>
                   {deliveries.length === 0 ? (
-                    <p className="text-sm text-slate-500 dark:text-slate-400">برنامه تحویلی ثبت نشده است.</p>
+                    <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">برنامه تحویلی ثبت نشده است.</p>
                   ) : (
                     deliveries.map((delivery: any, index: number) => (
-                      <div key={index} className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
-                        <p className="font-medium text-slate-900 dark:text-white">{delivery.deliveryDate || delivery.date || 'تاریخ نامشخص'}</p>
-                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{sanitizeUiText(delivery.notes || delivery.deliveryAddress, 'بدون توضیحات')}</p>
+                      <div key={index} className="rounded-lg border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]">
+                        <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{delivery.deliveryDate || delivery.date || 'تاریخ نامشخص'}</p>
+                        <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{sanitizeUiText(delivery.notes || delivery.deliveryAddress, 'بدون توضیحات')}</p>
                       </div>
                     ))
                   )}
                 </div>
                 <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">پرداخت</h3>
+                  <h3 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">پرداخت</h3>
                   <ErpFieldView label="روش پرداخت" value={sanitizeUiText(contract.contractData?.payment?.method, 'ثبت نشده')} tone="primary" />
                   <ErpFieldView label="مبلغ پرداخت" value={formatCurrency(contract.contractData?.payment?.totalAmount || totalAmount, sanitizeUiText(contract.currency, 'تومان'))} tone="success" />
                   {payments.length > 0 && (
-                    <p className="text-xs text-slate-500 dark:text-slate-400">{payments.length.toLocaleString('fa-IR')} قسط/پرداخت ثبت شده است.</p>
+                    <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{payments.length.toLocaleString('fa-IR')} قسط/پرداخت ثبت شده است.</p>
                   )}
                 </div>
               </div>
@@ -732,13 +732,13 @@ export default function ContractDetailPage() {
             {canManageSellers && (
               <ErpSection title="تغییر مسئول فروش قرارداد" description="تغییر مسئول فقط روی پایپ‌لاین فعلی اثر دارد و اعتبار فروش قطعی گذشته را بازنویسی نمی‌کند.">
                 <div className="space-y-3">
-                  <select value={nextSellerId} onChange={(event) => setNextSellerId(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900">
+                  <ErpSelect value={nextSellerId} onChange={(event) => setNextSellerId(event.target.value)} className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
                     <option value="">انتخاب فروشنده جدید</option>
                     {sellerOptions.map((seller) => <option key={seller.id} value={seller.id}>{`${seller.firstName || ''} ${seller.lastName || ''}`.trim() || seller.username}</option>)}
-                  </select>
-                  <textarea value={sellerChangeReason} onChange={(event) => setSellerChangeReason(event.target.value)} placeholder="دلیل تغییر مسئول (الزامی)" className="min-h-20 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
-                  <button disabled={changingSeller || !nextSellerId || !sellerChangeReason.trim()} onClick={handleSellerChange} className="w-full rounded-lg bg-teal-800 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">{changingSeller ? 'در حال ثبت...' : 'ثبت تغییر مسئول با سابقه حسابرسی'}</button>
-                  {contract.realizedAt && !contract.realizedSeller && <button disabled={changingSeller || !nextSellerId || !sellerChangeReason.trim()} onClick={handleLegacyCreditAssignment} className="w-full rounded-lg border border-amber-500 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900 disabled:opacity-50">انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی</button>}
+                  </ErpSelect>
+                  <ErpTextarea value={sellerChangeReason} onChange={(event) => setSellerChangeReason(event.target.value)} placeholder="دلیل تغییر مسئول (الزامی)" className="min-h-20 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]" />
+                  <ErpPressable type="submit" disabled={changingSeller || !nextSellerId || !sellerChangeReason.trim()} onClick={handleSellerChange} className="w-full rounded-lg bg-[var(--sds-accent)] px-3 py-2 text-sm font-bold text-[var(--sds-text-inverse)] disabled:opacity-50">{changingSeller ? 'در حال ثبت...' : 'ثبت تغییر مسئول با سابقه حسابرسی'}</ErpPressable>
+                  {contract.realizedAt && !contract.realizedSeller && <ErpPressable type="submit" disabled={changingSeller || !nextSellerId || !sellerChangeReason.trim()} onClick={handleLegacyCreditAssignment} className="w-full rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-warning)] disabled:opacity-50">انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی</ErpPressable>}
                 </div>
               </ErpSection>
             )}
@@ -760,12 +760,12 @@ export default function ContractDetailPage() {
 function TimelineItem({ icon: Icon, label, value }: { icon: typeof FaCalendarAlt; label: string; value: string; tone: ErpTone }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#074747]/10 text-[#074747] dark:bg-teal-900/30 dark:text-teal-100">
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--sds-accent)]/10 text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
         <Icon className="h-4 w-4" />
       </span>
       <div>
-        <p className="text-sm font-medium text-slate-900 dark:text-white">{label}</p>
-        <p className="text-xs text-slate-500 dark:text-slate-400">{value}</p>
+        <p className="text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{label}</p>
+        <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{value}</p>
       </div>
     </div>
   );

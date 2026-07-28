@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
 import { useState, useEffect } from 'react';
 import { FaMapMarkerAlt, FaUser, FaCalendarAlt, FaClock, FaFileAlt } from 'react-icons/fa';
 import PersianCalendarComponent from './PersianCalendar';
@@ -78,13 +79,11 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
   };
 
   return (
-    <div className="glass-liquid-card p-6">
-      <h2 className="text-2xl font-bold text-primary mb-6 text-right">{initialData ? 'ویرایش ماموریت' : 'ثبت ماموریت'}</h2>
-      
+    <div>
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Employee Selection */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             کارمند *
           </label>
           <EnhancedDropdown
@@ -101,13 +100,13 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
             noOptionsText="کارمندی پیدا نشد"
           />
           {errors.personnelId && (
-            <p className="text-red-500 text-sm mt-1 text-right">{errors.personnelId}</p>
+            <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.personnelId}</p>
           )}
         </div>
 
         {/* Mission Type */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             نوع ماموریت *
           </label>
           <EnhancedDropdown
@@ -120,62 +119,62 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
             error={errors.missionType}
           />
           {errors.missionType && (
-            <p className="text-red-500 text-sm mt-1 text-right">{errors.missionType}</p>
+            <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.missionType}</p>
           )}
         </div>
 
         {/* Mission Location */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             محل ماموریت *
           </label>
-          <input
+          <ErpInput
             type="text"
             value={formData.missionLocation}
             onChange={(e) => handleInputChange('missionLocation', e.target.value)}
-            className={`glass-liquid-input w-full ${errors.missionLocation ? 'border-red-500' : ''}`}
+            className={`sds-field w-full ${errors.missionLocation ? 'border-[var(--sds-danger)]' : ''}`}
             placeholder="محل ماموریت را وارد کنید"
           />
           {errors.missionLocation && (
-            <p className="text-red-500 text-sm mt-1 text-right">{errors.missionLocation}</p>
+            <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.missionLocation}</p>
           )}
         </div>
 
         {/* Mission Purpose */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             هدف ماموریت *
           </label>
-          <textarea
+          <ErpTextarea
             value={formData.missionPurpose}
             onChange={(e) => handleInputChange('missionPurpose', e.target.value)}
-            className={`glass-liquid-input w-full h-24 resize-none ${errors.missionPurpose ? 'border-red-500' : ''}`}
+            className={`sds-field w-full h-24 resize-none ${errors.missionPurpose ? 'border-[var(--sds-danger)]' : ''}`}
             placeholder="هدف و شرح ماموریت را وارد کنید"
           />
           {errors.missionPurpose && (
-            <p className="text-red-500 text-sm mt-1 text-right">{errors.missionPurpose}</p>
+            <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.missionPurpose}</p>
           )}
         </div>
 
         {/* Date Fields */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-primary mb-2 text-right">
+            <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
               تاریخ شروع *
             </label>
             <PersianCalendarComponent
               value={formData.startDate}
               onChange={(date) => handleInputChange('startDate', date)}
               placeholder="انتخاب تاریخ شروع"
-              className={errors.startDate ? 'border-red-500' : ''}
+              className={errors.startDate ? 'border-[var(--sds-danger)]' : ''}
               disablePastDates
             />
             {errors.startDate && (
-              <p className="text-red-500 text-sm mt-1 text-right">{errors.startDate}</p>
+              <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.startDate}</p>
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium text-primary mb-2 text-right">
+            <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
               تاریخ پایان
             </label>
             <PersianCalendarComponent
@@ -190,63 +189,65 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
         {/* Time Fields */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-primary mb-2 text-right">
+            <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
               زمان شروع *
             </label>
-            <input
+            <ErpInput
               type="time"
               value={formData.startTime}
               onChange={(e) => handleInputChange('startTime', e.target.value)}
-              className={`glass-liquid-input w-full ${errors.startTime ? 'border-red-500' : ''}`}
+              className={`sds-field w-full ${errors.startTime ? 'border-[var(--sds-danger)]' : ''}`}
             />
             {errors.startTime && (
-              <p className="text-red-500 text-sm mt-1 text-right">{errors.startTime}</p>
+              <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.startTime}</p>
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium text-primary mb-2 text-right">
+            <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
               زمان پایان *
             </label>
-            <input
+            <ErpInput
               type="time"
               value={formData.endTime}
               onChange={(e) => handleInputChange('endTime', e.target.value)}
-              className={`glass-liquid-input w-full ${errors.endTime ? 'border-red-500' : ''}`}
+              className={`sds-field w-full ${errors.endTime ? 'border-[var(--sds-danger)]' : ''}`}
             />
-            {errors.endTime && <p className="text-red-500 text-sm mt-1 text-right">{errors.endTime}</p>}
+            {errors.endTime && <p className="text-[var(--sds-danger)] text-sm mt-1 text-right">{errors.endTime}</p>}
           </div>
         </div>
 
         {/* Notes */}
         <div>
-          <label className="block text-sm font-medium text-primary mb-2 text-right">
+          <label className="block text-sm font-medium sds-text-primary mb-2 text-right">
             توضیحات
           </label>
-          <textarea
+          <ErpTextarea
             value={formData.notes}
             onChange={(e) => handleInputChange('notes', e.target.value)}
-            className="glass-liquid-input w-full h-20 resize-none"
+            className="sds-field w-full h-20 resize-none"
             placeholder="توضیحات اضافی (اختیاری)"
           />
         </div>
 
         {/* Action Buttons */}
         <div className="flex justify-end space-x-4 space-x-reverse pt-4">
-          <button
+          <ErpPressable
             type="button"
             onClick={onCancel}
-            className="glass-liquid-btn px-6 py-3"
+            className="px-6 py-3"
             disabled={loading}
           >
             انصراف
-          </button>
-          <button
+          </ErpPressable>
+          <ErpPressable
             type="submit"
-            className="glass-liquid-btn-primary px-6 py-3"
+            tone="primary"
+            variant="solid"
+            className="px-6 py-3"
             disabled={loading}
           >
             {loading ? 'در حال ذخیره...' : initialData ? 'ذخیره تغییرات' : 'ثبت ماموریت'}
-          </button>
+          </ErpPressable>
         </div>
       </form>
     </div>

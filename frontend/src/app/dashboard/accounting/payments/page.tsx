@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { FaMoneyCheckAlt, FaSync } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
@@ -69,7 +68,7 @@ export default function AccountingPaymentsPage() {
   };
 
   const columns: ErpColumn<any>[] = [
-    { id: 'payment', header: 'دریافت / چک', priority: 'primary', cell: (row) => <div><p className="font-semibold">{row.method === 'CHECK' ? `چک ${row.checkNumber || ''}` : 'دریافت'}</p><p className="mt-1 text-xs text-slate-500">{row.contract?.contractNumber || row.contractId || '—'} · {row.contract?.customer?.displayName || 'مشتری ثبت نشده'}</p></div> },
+    { id: 'payment', header: 'دریافت / چک', priority: 'primary', cell: (row) => <div><p className="font-semibold">{row.method === 'CHECK' ? `چک ${row.checkNumber || ''}` : 'دریافت'}</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{row.contract?.contractNumber || row.contractId || '—'} · {row.contract?.customer?.displayName || 'مشتری ثبت نشده'}</p></div> },
     { id: 'amount', header: 'مبلغ', mobileLabel: 'مبلغ', priority: 'secondary', align: 'end', cell: (row) => money(row.amount, row.currency) },
     { id: 'due', header: 'سررسید چک', mobileLabel: 'سررسید چک', priority: 'meta', cell: (row) => dateFa(row.checkDueDate) },
     { id: 'status', header: 'وضعیت', mobileLabel: 'وضعیت', priority: 'secondary', cell: (row) => <StatusBadge status={row.checkStatus || row.status} /> },

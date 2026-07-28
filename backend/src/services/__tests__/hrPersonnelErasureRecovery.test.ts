@@ -15,7 +15,10 @@ const tx = {
   authSession: { updateMany: async () => { actions.push('sessions'); } },
   user: { updateMany: async () => { actions.push('user'); } },
   hrDeletionFileCleanup: { deleteMany: async () => { actions.push('cleanup'); } },
-  hrDeletionReceipt: { update: async ({ data }: { data: { status: string } }) => { actions.push(`receipt:${data.status}`); } },
+  hrDeletionReceipt: { updateMany: async ({ data }: { data: { status?: string } }) => {
+    actions.push(data.status ? `receipt:${data.status}` : 'renew');
+    return { count: 1 };
+  } },
 };
 const fakePrisma = {
   hrDeletionReceipt: {
@@ -23,7 +26,10 @@ const fakePrisma = {
       id: 'receipt-1', actorUserId: 'admin-1', status: 'ACCESS_PREPARED', operationToken: 'operation-1',
       recordCounts: { accessRecovery: { users: [{ id: 'user-1', isActive: true }], sessionIds: ['session-1'] } }
     }],
-    updateMany: async () => { actions.push('claim'); return { count: 1 }; },
+    updateMany: async ({ data }: { data: { status?: string } }) => {
+      actions.push(data.status === 'RECOVERING' ? 'claim' : 'renew');
+      return { count: 1 };
+    },
     update: async () => undefined,
   },
   hrDeletionFileCleanup: { findMany: async () => staged },
@@ -33,7 +39,7 @@ const fakePrisma = {
 const run = async () => {
   assert.equal(await recoverInterruptedPersonnelErasures(fakePrisma), 1);
   assert.equal(fs.readFileSync(path.join(root, 'evidence.pdf'), 'utf8'), 'evidence');
-  assert.deepEqual(actions, ['claim', 'sessions', 'user', 'cleanup', 'receipt:ABORTED']);
+  assert.deepEqual(actions, ['claim', 'renew', 'renew', 'sessions', 'user', 'cleanup', 'receipt:ABORTED']);
   fs.rmSync(root, { recursive: true, force: true });
   console.log('HR Personnel erasure recovery tests passed.');
 };

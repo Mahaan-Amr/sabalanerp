@@ -44,26 +44,41 @@ export const recoverInterruptedPersonnelErasures = async (prisma: PrismaClient, 
       data: { status: 'RECOVERING', operationToken: recoveryToken, leaseExpiresAt: new Date(now.getTime() + PERSONNEL_ERASURE_LEASE_MS) }
     });
     if (claimed.count !== 1) continue;
+    let recoveryOwned = true;
     try {
       const cleanupRows = await prisma.hrDeletionFileCleanup.findMany({ where: { receiptId: receipt.id } });
-      restoreStagedHiringFiles(cleanupRows.map((row) => ({ storageName: row.storageName, originalPath: row.originalPath, stagedPath: row.stagedPath })));
+      for (const row of cleanupRows) {
+        const renewed = await prisma.hrDeletionReceipt.updateMany({
+          where: { id: receipt.id, status: 'RECOVERING', operationToken: recoveryToken },
+          data: { leaseExpiresAt: new Date(Date.now() + PERSONNEL_ERASURE_LEASE_MS) }
+        });
+        if (renewed.count !== 1) { recoveryOwned = false; throw new Error('Personnel erasure recovery lease was lost.'); }
+        restoreStagedHiringFiles([{ storageName: row.storageName, originalPath: row.originalPath, stagedPath: row.stagedPath }]);
+      }
       const snapshot = accessSnapshot(receipt.recordCounts);
       await prisma.$transaction(async (tx) => {
+        const renewed = await tx.hrDeletionReceipt.updateMany({
+          where: { id: receipt.id, status: 'RECOVERING', operationToken: recoveryToken },
+          data: { leaseExpiresAt: new Date(Date.now() + PERSONNEL_ERASURE_LEASE_MS) }
+        });
+        if (renewed.count !== 1) { recoveryOwned = false; throw new Error('Personnel erasure recovery lease was lost.'); }
         if (snapshot?.sessionIds.length) await tx.authSession.updateMany({
           where: { id: { in: snapshot.sessionIds }, revocationReason: 'PERMANENT_PERSONNEL_ERASURE', revokedById: receipt.actorUserId },
           data: { revokedAt: null, revokedById: null, revocationReason: null }
         });
         for (const user of snapshot?.users || []) await tx.user.updateMany({ where: { id: user.id }, data: { isActive: user.isActive } });
         await tx.hrDeletionFileCleanup.deleteMany({ where: { receiptId: receipt.id } });
-        await tx.hrDeletionReceipt.update({
-          where: { id: receipt.id },
+        const completed = await tx.hrDeletionReceipt.updateMany({
+          where: { id: receipt.id, status: 'RECOVERING', operationToken: recoveryToken },
           data: { status: 'ABORTED', operationToken: null, leaseExpiresAt: null, recordCounts: { aborted: true }, fileCounts: { restored: cleanupRows.length } }
         });
+        if (completed.count !== 1) { recoveryOwned = false; throw new Error('Personnel erasure recovery lease was lost.'); }
       });
       recovered += 1;
     } catch (error) {
-      await prisma.hrDeletionReceipt.update({
-        where: { id: receipt.id },
+      if (!recoveryOwned) continue;
+      await prisma.hrDeletionReceipt.updateMany({
+        where: { id: receipt.id, status: 'RECOVERING', operationToken: recoveryToken },
         data: {
           status: 'RECOVERY_FAILED', operationToken: recoveryToken,
           leaseExpiresAt: new Date(Date.now() + PERSONNEL_ERASURE_LEASE_MS),

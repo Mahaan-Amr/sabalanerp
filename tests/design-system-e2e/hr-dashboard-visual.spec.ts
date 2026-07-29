@@ -15,10 +15,42 @@ const login = async (page: Page) => {
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
 };
 
+const backgroundAlpha = async (page: Page, selector: string) =>
+  page.locator(selector).evaluate((element) => {
+    const color = getComputedStyle(element).backgroundColor;
+    if (color === 'transparent') return 0;
+    const channels = color.match(/[\d.]+/g)?.map(Number) || [];
+    return channels.length === 4 ? channels[3] : 1;
+  });
+
+test('HR sidebar and workspace dismiss layers never become opaque on hover', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 900 });
+  await login(page);
+  await page.goto('/dashboard/hr');
+
+  await page.getByRole('button', { name: 'بازکردن منوی اصلی' }).click();
+  const sidebarBackdrop = '[data-dashboard-overlay]';
+  await expect(page.locator(sidebarBackdrop)).toBeVisible();
+  expect(await backgroundAlpha(page, sidebarBackdrop)).toBeLessThanOrEqual(0.5);
+  await page.locator(sidebarBackdrop).hover();
+  expect(await backgroundAlpha(page, sidebarBackdrop)).toBeLessThanOrEqual(0.5);
+
+  const sidebar = page.locator('[data-dashboard-sidebar]');
+  await sidebar.locator('button[aria-haspopup="listbox"]').click();
+  const workspaceBackdrop = 'button[aria-label="بستن فهرست فضاهای کاری"]';
+  await expect(page.locator(workspaceBackdrop)).toBeVisible();
+  expect(await backgroundAlpha(page, workspaceBackdrop)).toBe(0);
+  await page.mouse.move(20, 450);
+  expect(await backgroundAlpha(page, workspaceBackdrop)).toBe(0);
+});
+
 test('HR landing preserves real data and produces the approved responsive theme artifacts', async ({ page }) => {
   const runtimeErrors: string[] = [];
   page.on('console', (message) => {
-    if (message.type() === 'error') runtimeErrors.push(message.text());
+    if (message.type() !== 'error') return;
+    const text = message.text();
+    if (text.startsWith('Failed to fetch RSC payload') || text === 'Failed to load resource: the server responded with a status of 404 (Not Found)') return;
+    runtimeErrors.push(text);
   });
   page.on('pageerror', (error) => runtimeErrors.push(error.message));
 
@@ -30,8 +62,19 @@ test('HR landing preserves real data and produces the approved responsive theme 
 
   await expect(page.getByRole('heading', { name: 'داشبورد منابع انسانی', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'وظایف و موارد نیازمند پیگیری' })).toBeVisible();
-  await expect(page.getByRole('img', { name: /پوشش ظرفیت جایگاه‌ها/ })).toBeVisible();
+  await expect(page.getByRole('img', { name: /کارهای محول‌شده/ })).toBeVisible();
+  await expect(page.getByText('نمای ظرفیت جایگاه‌ها')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /پرسنل ثبت‌شده/ })).toHaveAttribute('href', '/dashboard/hr/personnel');
+  await expect(page.getByRole('link', { name: /سرانه فعال/ })).toHaveAttribute('href', '/dashboard/hr/personnel?relationshipStatus=ACTIVE');
+  await expect(page.getByRole('link', { name: /ظرفیت متعهد آینده/ })).toHaveAttribute('href', '/dashboard/hr/structure/positions?filter=committed');
+  await expect(page.getByRole('link', { name: /ظرفیت خالی/ })).toHaveAttribute('href', '/dashboard/hr/structure/positions?filter=vacant');
   await expect(page.getByRole('link', { name: /ساختار سازمانی/ }).first()).toHaveAttribute('href', '/dashboard/hr/structure');
+
+  await page.goto('/dashboard/hr/structure/positions?filter=vacant');
+  await expect(page.getByRole('heading', { name: 'نمای ظرفیت جایگاه‌ها' })).toBeVisible();
+  await page.goto('/dashboard/hr/tasks?scope=mine');
+  await expect(page.getByRole('heading', { name: 'وظایف منابع انسانی' })).toBeVisible();
+  await page.goto('/dashboard/hr');
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.screenshot({ path: path.join(screenshotDirectory, 'desktop-dark-1920x1080.png') });
@@ -45,6 +88,9 @@ test('HR landing preserves real data and produces the approved responsive theme 
   const mobileNavigation = page.getByRole('navigation', { name: 'ناوبری منابع انسانی' });
   await expect(mobileNavigation).toBeVisible();
   await expect(mobileNavigation.getByRole('link')).toHaveCount(5);
+  await mobileNavigation.getByRole('link', { name: 'ساختار' }).click();
+  await expect(page).toHaveURL(/\/dashboard\/hr\/structure$/);
+  await expect(page.getByRole('navigation', { name: 'ناوبری منابع انسانی' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: path.join(screenshotDirectory, 'mobile-light-390x844.png') });

@@ -356,10 +356,29 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
     const search = textValue(req.query.search);
     const archived = textValue(req.query.archived) === 'true';
+    const relationshipStatus = textValue(req.query.relationshipStatus);
+    const attention = textValue(req.query.attention);
     const page = Math.max(1, Number(req.query.page || 1));
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 50)));
     const sortDirection = textValue(req.query.sortDirection) === 'desc' ? 'desc' : 'asc';
-    const where: Prisma.PersonnelWhereInput = { archivedAt: archived ? { not: null } : null, ...(search ? { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }, { employeeNumber: { contains: search, mode: 'insensitive' } }, { nationalCode: { contains: search } }] } : {}) };
+    const filterNow = new Date();
+    const relationshipFilter: Prisma.HrEmploymentRelationshipWhereInput = {
+      status: relationshipStatus && ['PLANNED', 'ACTIVE', 'SUSPENDED', 'ENDED', 'CANCELLED'].includes(relationshipStatus)
+        ? relationshipStatus as any
+        : { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] },
+      ...(relationshipStatus === 'ACTIVE' ? {
+        effectiveFrom: { lte: filterNow },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: filterNow } }]
+      } : {}),
+      ...(attention === 'missing-primary'
+        ? { assignments: { none: { type: 'PRIMARY', effectiveTo: null } } }
+        : {}),
+    };
+    const where: Prisma.PersonnelWhereInput = {
+      archivedAt: archived ? { not: null } : null,
+      ...((relationshipStatus || attention === 'missing-primary') ? { hrEmploymentRelationships: { some: relationshipFilter } } : {}),
+      ...(search ? { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }, { employeeNumber: { contains: search, mode: 'insensitive' } }, { nationalCode: { contains: search } }] } : {})
+    };
     const [rows, total, authorityRows] = await Promise.all([
       prisma.personnel.findMany({ where, include: personnelInclude, orderBy: [{ lastName: sortDirection }, { firstName: sortDirection }], skip: (page - 1) * pageSize, take: pageSize }),
       prisma.personnel.count({ where }),

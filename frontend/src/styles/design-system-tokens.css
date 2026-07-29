@@ -104,6 +104,7 @@
   --sds-surface-panel: #f5f8f9;
   --sds-surface-subtle: #e9eef0;
   --sds-surface-raised: #f8fafb;
+  --sds-surface-overlay: rgb(30 45 55 / 28%);
   --sds-text-primary: #111820;
   --sds-text-secondary: #5f6b78;
   --sds-text-muted: #7c8996;
@@ -126,6 +127,7 @@
   --sds-surface-panel: #15212c;
   --sds-surface-subtle: #111d27;
   --sds-surface-raised: #182631;
+  --sds-surface-overlay: rgb(0 0 0 / 42%);
   --sds-text-primary: #f4f7f8;
   --sds-text-secondary: #b9c2cb;
   --sds-text-muted: #7f8b97;

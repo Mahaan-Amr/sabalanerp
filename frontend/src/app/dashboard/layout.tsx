@@ -374,7 +374,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 <FaBars className="h-6 w-6" />
               </ErpPressable>
               <div>
-                <h1 className="text-xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] sm:text-2xl">
+                <h1 className={`text-xl font-bold text-[var(--sds-text-primary)] sm:text-2xl ${isHrLanding ? '' : 'dark:text-[var(--sds-text-inverse)]'}`}>
                   {currentWorkspace ? 
                     accessibleWorkspaces.find(w => w.id === currentWorkspace)?.namePersian || 'داشبورد اصلی' :
                     'داشبورد اصلی'

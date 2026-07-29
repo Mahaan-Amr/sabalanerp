@@ -13,8 +13,8 @@ import type {
   SubService
 } from '../types/contract.types';
 import { productSupportsContractType } from '../utils/productUtils';
-import { normalizeDigits } from '@/lib/numberFormat';
 import { resolveContractRowIndex } from '../components/steps/contractCartRows';
+import { filterStandaloneServiceCatalog } from '../services/standaloneServiceCatalog';
 
 type ProductCartType = Extract<ContractUsageType, 'longitudinal' | 'stair' | 'slab' | 'prepared'>;
 
@@ -123,9 +123,6 @@ const CATALOG_PRODUCT_TYPES = PRODUCT_TYPES.filter((type): type is typeof PRODUC
   type.id === 'longitudinal' || type.id === 'stair' || type.id === 'slab' || type.id === 'prepared'
 );
 
-const normalizeSearchText = (value: unknown): string =>
-  normalizeDigits(String(value ?? '')).toLowerCase();
-
 export const useContractProductCartController = ({
   wizardData,
   updateWizardData,
@@ -184,24 +181,12 @@ export const useContractProductCartController = ({
   }), [cuttingTypes.length, stoneFinishings.length, subServices.length]);
 
   const serviceRows = useMemo(() => {
-    const query = normalizeSearchText(serviceSearchTerm).trim();
-    const sourceRows =
-      serviceSourceType === 'tool'
-        ? subServices
-        : serviceSourceType === 'cutting'
-          ? cuttingTypes
-          : stoneFinishings;
-
-    if (!query) return [];
-    return sourceRows.filter((row) => {
-      const searchable = [
-        row.namePersian,
-        row.name,
-        'code' in row ? row.code : '',
-        row.description || ''
-      ].join(' ');
-      const normalizedSearchable = normalizeSearchText(searchable);
-      return normalizedSearchable.includes(query);
+    return filterStandaloneServiceCatalog({
+      sourceType: serviceSourceType,
+      query: serviceSearchTerm,
+      subServices,
+      cuttingTypes,
+      stoneFinishings
     });
   }, [cuttingTypes, serviceSearchTerm, serviceSourceType, stoneFinishings, subServices]);
 

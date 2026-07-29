@@ -3,6 +3,7 @@
 import React from 'react';
 import { ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
+import { formatPrice } from '@/lib/numberFormat';
 import {
   calculateLongitudinalProduct,
   parseCanonicalDecimal,
@@ -154,6 +155,44 @@ export function LongitudinalProductSection({
     [calculating, input, workerCalculation]
   );
   const calculation = workerCalculation ?? localCalculation;
+  const missingLongRate = calculation?.ok === false &&
+    calculation.conflicts.some(conflict =>
+      conflict.code === 'longitudinal-cut-rate-missing' ||
+      conflict.code === 'calibration-cut-rate-missing'
+    );
+  const cutRateErrorRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!showValidation || !missingLongRate) return;
+    const frame = requestAnimationFrame(() => {
+      const target = cutRateErrorRef.current;
+      target?.scrollIntoView({
+        block: 'center',
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth'
+      });
+      target?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [missingLongRate, showValidation]);
+  const geometryPreviewCalculation = React.useMemo(() => {
+    if (!missingLongRate) return null;
+    const zero = parseCanonicalDecimal('0');
+    const hasUsableBaseRate =
+      input.baseRateToman !== undefined && Number(input.baseRateToman) > 0;
+    return calculateLongitudinalProduct({
+      ...input,
+      ...(!hasUsableBaseRate
+        ? {
+            baseMaterialPricing: 'paid-source-zero' as const,
+            baseRateToman: zero,
+            mandatoryEnabled: false
+          }
+        : {}),
+      longitudinalCutRateToman: input.longitudinalCutRateToman ?? zero,
+      calibrationCutRateToman: input.calibrationCutRateToman ?? zero
+    });
+  }, [input, missingLongRate]);
   const rawConflictFor = (field: string) => calculation?.ok
     ? undefined
     : calculation?.conflicts.find(conflict => conflict.field === field)?.message;
@@ -194,14 +233,28 @@ export function LongitudinalProductSection({
     }
   };
   const effectiveWidth = input.widthMeters ?? input.motherWidthMeters;
-  const resolved = calculation?.ok ? calculation.result : undefined;
+  const resolved = calculation?.ok
+    ? calculation.result
+    : geometryPreviewCalculation?.ok
+      ? geometryPreviewCalculation.result
+      : undefined;
   const visibleLength = resolved?.lengthMeters ?? input.lengthMeters;
   const visibleWidth = resolved?.widthMeters ?? effectiveWidth;
   const visibleArea = resolved?.requestedAreaSquareMeters ??
     input.requestedAreaSquareMeters;
   const noPhysicalCut = effectiveWidth === input.motherWidthMeters;
-  const summaryRows = calculation?.ok
-    ? calculation.result.summary
+  const summaryRows = resolved
+    ? resolved.summary.map(row => row.key === 'cutting' &&
+        Number(resolved.packingPlan.longitudinalCutMeters) > 0
+      ? {
+          ...row,
+          value: `عادی ${resolved.packingPlan.longitudinalCutMeters}m · ${formatPrice(
+            resolved.longitudinalCutAmountToman
+          )} | کالیبر ${resolved.packingPlan.calibrationMeters}m · ${formatPrice(
+            resolved.calibrationCutAmountToman
+          )}`
+        }
+      : row)
     : [
         { key: 'layout', label: 'چیدمان', value: '—' },
         { key: 'stone', label: 'سنگ', value: '—' },
@@ -341,10 +394,8 @@ export function LongitudinalProductSection({
         <label className="inline-flex items-center gap-2 text-xs font-semibold">
           <CompactSwitch
             label="برش کالیبر"
-            checked={calculation?.ok
-              ? calculation.result.calibrationEnabled
-              : input.calibrationEnabled}
-            disabled={noPhysicalCut}
+            checked={resolved?.calibrationEnabled ?? input.calibrationEnabled}
+            disabled={noPhysicalCut || missingLongRate}
             onChange={calibrationEnabled => onChange({
               ...input,
               calibrationEnabled,
@@ -355,7 +406,19 @@ export function LongitudinalProductSection({
         </label>
       </div>
 
-      {!calculation?.ok && showValidation && conflictFor('summary') && (
+      {missingLongRate && (
+        <div
+          ref={cutRateErrorRef}
+          id="longitudinal-cut-rate-error"
+          role="alert"
+          tabIndex={-1}
+          className="rounded-lg border border-[var(--sds-danger)] px-3 py-2 text-xs font-semibold text-[var(--sds-danger)] outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
+        >
+          نرخ برش طولی در کاتالوگ تعریف نشده است
+        </div>
+      )}
+
+      {!missingLongRate && !calculation?.ok && showValidation && conflictFor('summary') && (
         <div tabIndex={-1} className="text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">
           {conflictFor('summary')}
         </div>

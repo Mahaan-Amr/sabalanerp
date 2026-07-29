@@ -1,4 +1,8 @@
 import { normalizeDigits } from '@/lib/numberFormat';
+import {
+  parseCanonicalDecimal,
+  type CanonicalDecimal
+} from '@sabalanerp/contract-product-graph';
 
 export type ProductModalView =
   | 'main'
@@ -106,3 +110,17 @@ export const convertCompactLengthUnit = (
 export const currentProductModalView = <Draft>(
   state: ProductModalDraftState<Draft>
 ): ProductModalView => state.viewStack[state.viewStack.length - 1];
+
+export const longitudinalCutRateSnapshot = (
+  rateToman: number | null
+): {
+  readonly longitudinalCutRateToman?: CanonicalDecimal;
+  readonly calibrationCutRateToman?: CanonicalDecimal;
+} => {
+  if (rateToman === null) return {};
+  const rate = parseCanonicalDecimal(String(rateToman));
+  return {
+    longitudinalCutRateToman: rate,
+    calibrationCutRateToman: rate
+  };
+};

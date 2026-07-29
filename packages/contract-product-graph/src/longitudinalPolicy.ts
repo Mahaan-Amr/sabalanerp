@@ -432,7 +432,7 @@ export const calculateLongitudinalProduct = (
       }]
     };
   }
-  if (!baseRate || !mandatoryPercentage || !kerf) {
+  if (!mandatoryPercentage || !kerf) {
     return { ok: false, conflicts };
   }
 
@@ -483,7 +483,7 @@ export const calculateLongitudinalProduct = (
       ? input.calibrationEnabled
       : automaticCalibration;
   const calibrationMeters = calibrationEnabled
-    ? packing.plan.longitudinalCutMeters
+    ? canonical(length.times(packing.plan.consumedSources.length))
     : canonical(new Decimal(0));
 
   const operationConflicts = [...conflicts];
@@ -509,12 +509,12 @@ export const calculateLongitudinalProduct = (
     {
       lineId: 'base-material',
       quantity: canonical(area),
-      rateToman: canonical(baseRate)
+      rateToman: canonical(baseRate!)
     },
     ...(input.mandatoryEnabled
       ? [{
           lineId: 'mandatory',
-          quantity: canonical(area.times(baseRate)),
+          quantity: canonical(area.times(baseRate!)),
           rateToman: canonical(mandatoryPercentage.div(100))
         }]
       : []),

@@ -1,7 +1,14 @@
 ﻿// useStairSystemV2 Hook
 // Manages all stair system v2 state and logic
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  type Dispatch,
+  type SetStateAction
+} from 'react';
 import type {
   StairStepperPart,
   StairPartDraftV2,
@@ -115,7 +122,10 @@ export const useStairSystemV2 = (options: UseStairSystemV2Options = {}) => {
   }, []);
 
   // Helper: Get active draft and setter
-  const getActiveDraft = useCallback((): [StairPartDraftV2, (d: StairPartDraftV2) => void] => {
+  const getActiveDraft = useCallback((): [
+    StairPartDraftV2,
+    Dispatch<SetStateAction<StairPartDraftV2>>
+  ] => {
     if (stairActivePart === 'tread') return [draftTread, setDraftTread];
     if (stairActivePart === 'riser') return [draftRiser, setDraftRiser];
     return [draftLanding, setDraftLanding];

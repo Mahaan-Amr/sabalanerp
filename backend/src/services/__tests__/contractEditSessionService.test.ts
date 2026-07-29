@@ -120,6 +120,53 @@ const released = await releaseContractEditSession(store, {
 assert.equal(released.ok, true);
 assert.equal(store.record, null);
 
+const staleRevisionStore = new MemoryStore();
+const staleLease = await acquireContractEditSession(staleRevisionStore, {
+  draftId: 'contract-committed',
+  contractId: 'contract-committed',
+  userId: 'seller-1',
+  browserSessionId: 'browser-before-commit',
+  schemaVersion: 2,
+  baseRevision: 0,
+  takeover: false,
+  now,
+  createToken: () => 'lease-before-commit'
+});
+assert.equal(staleLease.ok, true);
+if (!staleLease.ok) throw new Error('Expected stale pre-commit lease');
+
+await checkpointContractRecovery(staleRevisionStore, {
+  draftId: 'contract-committed',
+  userId: 'seller-1',
+  browserSessionId: 'browser-before-commit',
+  leaseToken: staleLease.session.leaseToken,
+  baseRevision: 0,
+  schemaVersion: 2,
+  recovery: { currentStep: 4, products: ['stale-before-commit'] },
+  now: new Date('2026-07-25T08:04:00.000Z')
+});
+
+const editAfterCommit = await acquireContractEditSession(staleRevisionStore, {
+  draftId: 'contract-committed',
+  contractId: 'contract-committed',
+  userId: 'seller-1',
+  browserSessionId: 'browser-after-commit',
+  schemaVersion: 2,
+  baseRevision: 1,
+  takeover: false,
+  now: new Date('2026-07-25T08:05:00.000Z'),
+  createToken: () => 'lease-after-commit'
+});
+assert.equal(
+  editAfterCommit.ok,
+  true,
+  'a lease from an older committed revision must expire instead of blocking the next edit'
+);
+if (!editAfterCommit.ok) throw new Error('Expected a fresh post-commit lease');
+assert.equal(editAfterCommit.recovery, null, 'stale recovery must not cross canonical revisions');
+assert.equal(editAfterCommit.session.baseRevision, 1);
+assert.equal(editAfterCommit.session.leaseToken, 'lease-after-commit');
+
 console.log('contractEditSessionService tests passed');
 };
 

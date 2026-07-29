@@ -120,11 +120,47 @@ export const acquireContractEditSession = async (
     }
   }
 
-  if (existing.baseRevision !== input.baseRevision) {
+  if (existing.baseRevision < input.baseRevision) {
+    const replacement: ContractEditSessionRecord = {
+      draftId: existing.draftId,
+      contractId: input.contractId ?? existing.contractId,
+      ownerUserId: input.userId,
+      browserSessionId: input.browserSessionId,
+      leaseToken: (input.createToken ?? randomUUID)(),
+      schemaVersion: input.schemaVersion,
+      baseRevision: input.baseRevision,
+      recovery: null,
+      createdAt: now,
+      updatedAt: now,
+      takenOverAt: null
+    };
+    const replaced = await store.replace(existing.leaseToken, replacement);
+    if (replaced) {
+      return {
+        ok: true,
+        session: replaced,
+        recovery: null,
+        takenOver: false
+      };
+    }
+    const current = await store.load(input.draftId);
+    return {
+      ok: false,
+      code: current?.baseRevision === input.baseRevision
+        ? 'edit-session-owned-elsewhere'
+        : 'revision-conflict',
+      recovery: null,
+      ownerUserId: current?.ownerUserId ?? existing.ownerUserId,
+      updatedAt: current?.updatedAt ?? existing.updatedAt,
+      currentBaseRevision: current?.baseRevision ?? existing.baseRevision
+    };
+  }
+
+  if (existing.baseRevision > input.baseRevision) {
     return {
       ok: false,
       code: 'revision-conflict',
-      recovery: existing.recovery,
+      recovery: null,
       ownerUserId: existing.ownerUserId,
       updatedAt: existing.updatedAt,
       currentBaseRevision: existing.baseRevision

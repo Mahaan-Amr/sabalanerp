@@ -57,14 +57,30 @@ const rejectContractGraphWritesWhenReadOnly = (_req: any, res: Response, next: (
   }
   next();
 };
-const assertRequestContractEditOwnership = async (req: any, fallbackBaseRevision = 0) =>
-  assertSalesContractEditOwnership({
+const getRequestContractEditSession = (req: any, fallbackBaseRevision = 0) => ({
     draftId: String(req.headers['x-contract-draft-id'] || ''),
     userId: req.user.id,
     browserSessionId: String(req.headers['x-contract-browser-session-id'] || ''),
     leaseToken: String(req.headers['x-contract-lease-token'] || ''),
     baseRevision: Number(req.headers['x-contract-base-revision'] ?? fallbackBaseRevision)
   });
+const assertRequestContractEditOwnership = async (req: any, fallbackBaseRevision = 0) =>
+  assertSalesContractEditOwnership(getRequestContractEditSession(req, fallbackBaseRevision));
+const releaseCommittedContractEditSession = async (req: any, fallbackBaseRevision = 0) => {
+  try {
+    const result = await releaseSalesContractEditSession(
+      getRequestContractEditSession(req, fallbackBaseRevision)
+    );
+    if (!result.ok && result.code !== 'edit-session-missing') {
+      console.error('Committed contract edit session cleanup was rejected:', {
+        code: result.code,
+        draftId: String(req.headers['x-contract-draft-id'] || '')
+      });
+    }
+  } catch (error) {
+    console.error('Committed contract edit session cleanup failed:', error);
+  }
+};
 const userHasCancelAfterApprovalPermission = async (user: any): Promise<boolean> => {
   if (!user || user.role === 'ADMIN') {
     return true;
@@ -372,13 +388,43 @@ router.post(
       const browserSessionId = String(req.body.browserSessionId || '').trim();
       const draftId = String(req.params.draftId || '').trim();
       const schemaVersion = Number(req.body.schemaVersion);
-      const baseRevision = Number(req.body.baseRevision);
-      if (!draftId || !browserSessionId || !Number.isInteger(schemaVersion) || !Number.isInteger(baseRevision)) {
+      const requestedBaseRevision = Number(req.body.baseRevision);
+      const contractId = typeof req.body.contractId === 'string'
+        ? req.body.contractId.trim()
+        : null;
+      if (!draftId || !browserSessionId || !Number.isInteger(schemaVersion) || !Number.isInteger(requestedBaseRevision)) {
         return res.status(400).json({ success: false, error: 'Invalid edit session request' });
+      }
+      let baseRevision = requestedBaseRevision;
+      if (contractId) {
+        const contract = await prisma.salesContract.findUnique({
+          where: { id: contractId },
+          select: {
+            departmentId: true,
+            productGraphState: { select: { revision: true } }
+          }
+        });
+        if (!contract) {
+          return res.status(404).json({ success: false, error: 'Contract not found' });
+        }
+        if (!validateContractAccess(contract, req.user)) {
+          return res.status(403).json({ success: false, error: 'Access denied' });
+        }
+        baseRevision = contract.productGraphState?.revision ?? 0;
+        if (requestedBaseRevision !== baseRevision) {
+          return res.status(409).json({
+            success: false,
+            data: {
+              code: 'revision-conflict',
+              recovery: null,
+              currentBaseRevision: baseRevision
+            }
+          });
+        }
       }
       const result = await acquireSalesContractEditSession({
         draftId,
-        contractId: typeof req.body.contractId === 'string' ? req.body.contractId : null,
+        contractId,
         userId: req.user.id,
         browserSessionId,
         schemaVersion,
@@ -886,6 +932,7 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
       _relations
     }, req.user.id);
 
+    await releaseCommittedContractEditSession(req, 0);
     res.status(201).json({
       success: true,
       data: contract
@@ -1037,6 +1084,7 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
 
     const updatedContract = await updateContract(req.params.id, req.body, req.user.id);
 
+    await releaseCommittedContractEditSession(req, 0);
     res.json({
       success: true,
       data: updatedContract

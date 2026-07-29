@@ -103,6 +103,7 @@ import {
   useContractEditRecovery
 } from '@/features/contract-creation/hooks/useContractEditRecovery';
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
+import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
 
 // Import constants
 import { PRODUCT_TYPES, WIZARD_STEPS } from '@/features/contract-creation/constants/contract.constants';
@@ -2519,9 +2520,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   );
   const recoveryDraftId = useMemo(
     () => recoveryUserId
-      ? getOrCreateContractDraftId(recoveryUserId, contractId || wizardData.signature?.contractId)
+      ? getOrCreateContractDraftId(recoveryUserId, isContractEditMode ? contractId : null)
       : null,
-    [contractId, recoveryUserId, wizardData.signature?.contractId]
+    [contractId, isContractEditMode, recoveryUserId]
   );
   const recoveryScope = useMemo<ContractRecoveryScope | null>(
     () => recoveryUserId && recoveryDraftId
@@ -2536,11 +2537,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   );
   const editRecovery = useContractEditRecovery({
     scope: recoveryScope,
-    contractId: contractId || wizardData.signature?.contractId || null,
+    contractId: isContractEditMode ? contractId : null,
     onRestore: applyContractAutosaveDraft
   });
   const editRecoveryBlocked = editRecovery.blocked;
   const takeoverEditRecovery = editRecovery.takeover;
+  const [editRecoverySuccessMessage, setEditRecoverySuccessMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!editRecoverySuccessMessage) return;
+    const timer = window.setTimeout(() => setEditRecoverySuccessMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [editRecoverySuccessMessage]);
   useEffect(() => {
     const resolvedModalState = resolveProductModalRecoveryState({
       showProductModal,
@@ -2564,12 +2571,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     showProductModal
   ]);
   const handleEditRecoveryTakeover = useCallback(async () => {
+    const stepBeforeTakeover = currentStep;
+    const scrollPositionBeforeTakeover = typeof window !== 'undefined' ? window.scrollY : 0;
     closeProductModal();
     returnToProductModalAfterRemainderRef.current = false;
-    await takeoverEditRecovery();
+    const transferred = await takeoverEditRecovery();
     closeProductModal();
     returnToProductModalAfterRemainderRef.current = false;
-  }, [closeProductModal, takeoverEditRecovery]);
+    if (transferred) {
+      setCurrentStep(stepBeforeTakeover);
+      setEditRecoverySuccessMessage('اختیار ویرایش به این صفحه منتقل شد');
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: scrollPositionBeforeTakeover, behavior: 'auto' });
+      });
+    }
+  }, [closeProductModal, currentStep, setCurrentStep, takeoverEditRecovery]);
 
   // Product filtering hook provides all filtered lists
   const productFiltering = useProductFiltering({
@@ -5829,12 +5845,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       leaseToken: editRecovery.leaseToken,
       baseRevision: recoveryScope.baseRevision
     } : null,
-    onCommitted: editRecovery.release
+    onCommitted: editRecovery.release,
+    onEditSessionFailure: editRecovery.reportMutationFailure
   });
   const handleWizardSubmit = () => {
     if (!editRecovery.ready || !editRecovery.leaseToken || editRecovery.blocked) {
-      setErrors({ general: editRecovery.blocked
-        ? 'این قرارداد در محل دیگری در حال ویرایش است'
+      setErrors({ general: editRecovery.blockReason
+        ? getContractEditRecoveryMessage(editRecovery.blockReason)
         : 'اتصال ایمن ویرایش هنوز آماده نیست' });
       return;
     }
@@ -5984,17 +6001,38 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           </h1>
         </div>
 
-        {editRecovery.blocked && (
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-y border-[var(--sds-warning-border)] py-3 text-sm text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:text-[var(--sds-warning)]">
-            <span>این قرارداد در محل دیگری در حال ویرایش است</span>
-            <ErpPressable
-              type="button"
-              onClick={() => void handleEditRecoveryTakeover()}
-              className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]"
-            >
-              ادامه ویرایش در اینجا
-            </ErpPressable>
-          </div>
+        {editRecoverySuccessMessage && (
+          <ErpInlineState
+            kind="success"
+            title={editRecoverySuccessMessage}
+            className="mb-4"
+          />
+        )}
+
+        {editRecovery.blockReason && (
+          <ErpInlineState
+            kind={editRecovery.blockReason === 'permission'
+              ? 'permission'
+              : editRecovery.blockReason === 'takeover-failed'
+                ? 'error'
+                : 'stale'}
+            title={getContractEditRecoveryMessage(editRecovery.blockReason)}
+            className="mb-4"
+            action={editRecovery.blockReason === 'permission'
+              ? undefined
+              : editRecovery.blockReason === 'revision-conflict'
+                ? {
+                    label: 'بارگذاری آخرین نسخه',
+                    onClick: editRecovery.reloadLatestRevision
+                  }
+                : {
+                    label: editRecovery.takeoverPending
+                      ? 'در حال انتقال اختیار ویرایش…'
+                      : 'ادامه ویرایش در اینجا',
+                    onClick: () => void handleEditRecoveryTakeover(),
+                    disabled: editRecovery.takeoverPending
+                  }}
+          />
         )}
 
         <div

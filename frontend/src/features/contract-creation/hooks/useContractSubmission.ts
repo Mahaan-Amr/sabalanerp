@@ -42,6 +42,7 @@ interface UseContractSubmissionOptions {
     baseRevision: number;
   } | null;
   onCommitted?: () => Promise<void> | void;
+  onEditSessionFailure?: (error: unknown) => string | null;
 }
 
 const normalizeIranMobileNumber = (value?: string | null) => {
@@ -110,7 +111,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     mode = 'create',
     contractId,
     editSession,
-    onCommitted
+    onCommitted,
+    onEditSessionFailure
   } = options;
 
   const router = useRouter();
@@ -410,8 +412,11 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     } catch (error: any) {
       console.error('Error creating contract:', error);
       console.error('Error response:', error.response?.data);
-      
-      setErrors(mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد'));
+
+      const editSessionMessage = onEditSessionFailure?.(error);
+      setErrors(editSessionMessage
+        ? { general: editSessionMessage }
+        : mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد'));
     } finally {
       setIsSubmitting(false);
       setLoading(false);
@@ -431,6 +436,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     contractId,
     editSession,
     onCommitted,
+    onEditSessionFailure,
     router
   ]);
 

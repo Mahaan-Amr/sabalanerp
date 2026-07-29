@@ -8,6 +8,11 @@ import {
   type ContractRecoveryEnvelope,
   type ContractRecoveryScope
 } from '../utils/contractRecoveryJournal';
+import {
+  classifyContractEditRecoveryFailure,
+  getContractEditRecoveryMessage,
+  type ContractEditRecoveryBlockReason
+} from '../utils/contractEditRecoveryConflictPolicy';
 
 const BROWSER_SESSION_STORAGE_KEY = 'sabalan-contract-browser-session-id';
 const CHECKPOINT_DELAY_MS = 250;
@@ -63,14 +68,17 @@ export const useContractEditRecovery = <Payload>({
 }: UseContractEditRecoveryInput<Payload>) => {
   const [browserSessionId] = useState(getOrCreateContractBrowserSessionId);
   const [leaseToken, setLeaseToken] = useState<string | null>(null);
-  const [blocked, setBlocked] = useState(false);
+  const [blockReason, setBlockReason] = useState<ContractEditRecoveryBlockReason | null>(null);
   const [ready, setReady] = useState(false);
   const [checkpointError, setCheckpointError] = useState(false);
+  const [takeoverPending, setTakeoverPending] = useState(false);
   const sequenceRef = useRef(0);
   const pendingRef = useRef<ContractRecoveryEnvelope<Payload> | null>(null);
   const checkpointTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoredScopeRef = useRef<string | null>(null);
   const onRestoreRef = useRef(onRestore);
+  const deactivatedRef = useRef(false);
+  const blocked = blockReason !== null;
 
   useEffect(() => {
     onRestoreRef.current = onRestore;
@@ -95,12 +103,13 @@ export const useContractEditRecovery = <Payload>({
     onRestoreRef.current(newest.payload);
   }, [scope, scopeKey]);
 
-  const acquire = useCallback(async (takeover: boolean) => {
-    if (!scope || !scopeKey) return;
+  const acquire = useCallback(async (takeover: boolean): Promise<boolean> => {
+    if (!scope || !scopeKey || deactivatedRef.current) return false;
     const local = parseContractRecoveryEnvelope<Payload>(
       window.localStorage.getItem(scopeKey),
       scope
     );
+    if (takeover) setTakeoverPending(true);
     try {
       const response = await salesAPI.acquireContractEditSession(scope.draftId, {
         contractId,
@@ -112,29 +121,43 @@ export const useContractEditRecovery = <Payload>({
       const result = response.data.data;
       applyNewestRecovery(local, result.recovery);
       setLeaseToken(result.session.leaseToken);
-      setBlocked(false);
+      setBlockReason(null);
+      setCheckpointError(false);
       setReady(true);
+      return true;
     } catch (error: any) {
-      if (error?.response?.status === 409) {
-        const conflict = error.response.data?.data;
-        applyNewestRecovery(local, conflict?.recovery);
+      const status = error?.response?.status;
+      const conflict = error?.response?.data?.data;
+      if (status === 409 || status === 403 || takeover) {
+        const failure = classifyContractEditRecoveryFailure({
+          status,
+          code: conflict?.code,
+          phase: takeover ? 'takeover' : 'acquire'
+        });
+        if (failure.applyRecovery) {
+          applyNewestRecovery(local, conflict?.recovery);
+        }
         setLeaseToken(null);
-        setBlocked(true);
+        setBlockReason(failure.reason);
         setReady(true);
-        return;
+        return false;
       }
       // Offline startup keeps the local recovery visible and retries on reconnect.
       applyNewestRecovery(local, null);
       setReady(true);
       setCheckpointError(true);
+      return false;
+    } finally {
+      if (takeover) setTakeoverPending(false);
     }
   }, [applyNewestRecovery, browserSessionId, contractId, scope, scopeKey]);
 
   useEffect(() => {
     if (!scope || !scopeKey) return;
+    deactivatedRef.current = false;
     setReady(false);
     setLeaseToken(null);
-    setBlocked(false);
+    setBlockReason(null);
     // Restore the local journal synchronously before waiting for the network.
     // The lease response can still replace it with a newer server checkpoint.
     const local = parseContractRecoveryEnvelope<Payload>(
@@ -160,8 +183,14 @@ export const useContractEditRecovery = <Payload>({
       setCheckpointError(false);
     } catch (error: any) {
       if (error?.response?.status === 409) {
+        const conflict = error.response?.data?.data;
+        const failure = classifyContractEditRecoveryFailure({
+          status: error.response.status,
+          code: conflict?.code,
+          phase: 'checkpoint'
+        });
         setLeaseToken(null);
-        setBlocked(true);
+        setBlockReason(failure.reason);
       }
       setCheckpointError(true);
     }
@@ -186,6 +215,7 @@ export const useContractEditRecovery = <Payload>({
 
   useEffect(() => {
     const handleOnline = () => {
+      if (deactivatedRef.current) return;
       if (!leaseToken) {
         void acquire(false);
       } else {
@@ -201,7 +231,7 @@ export const useContractEditRecovery = <Payload>({
   }, []);
 
   const takeover = useCallback(async () => {
-    await acquire(true);
+    return acquire(true);
   }, [acquire]);
 
   const clearLocalRecovery = useCallback(() => {
@@ -210,26 +240,57 @@ export const useContractEditRecovery = <Payload>({
   }, [scopeKey]);
 
   const release = useCallback(async () => {
+    deactivatedRef.current = true;
     if (!scope || !leaseToken) {
       clearLocalRecovery();
       return;
     }
-    await salesAPI.releaseContractEditSession(scope.draftId, {
-      browserSessionId,
-      leaseToken,
-      baseRevision: scope.baseRevision
-    });
-    clearLocalRecovery();
-    setLeaseToken(null);
+    try {
+      await salesAPI.releaseContractEditSession(scope.draftId, {
+        browserSessionId,
+        leaseToken,
+        baseRevision: scope.baseRevision
+      });
+    } catch (error) {
+      console.error('Contract edit session cleanup failed after a successful commit:', error);
+    } finally {
+      clearLocalRecovery();
+      setLeaseToken(null);
+      setBlockReason(null);
+    }
   }, [browserSessionId, clearLocalRecovery, leaseToken, scope]);
+
+  const reloadLatestRevision = useCallback(() => {
+    clearLocalRecovery();
+    window.location.reload();
+  }, [clearLocalRecovery]);
+
+  const reportMutationFailure = useCallback((error: any): string | null => {
+    const status = error?.response?.status;
+    if (status !== 409 && status !== 403) return null;
+    const conflict = error?.response?.data?.conflict;
+    const failure = classifyContractEditRecoveryFailure({
+      status,
+      code: conflict?.code,
+      phase: 'checkpoint'
+    });
+    setLeaseToken(null);
+    setBlockReason(failure.reason);
+    setReady(true);
+    return getContractEditRecoveryMessage(failure.reason);
+  }, []);
 
   return {
     ready,
     blocked,
+    blockReason,
     checkpointError,
+    takeoverPending,
     browserSessionId,
     leaseToken,
     takeover,
+    reloadLatestRevision,
+    reportMutationFailure,
     queueRecovery,
     clearLocalRecovery,
     release

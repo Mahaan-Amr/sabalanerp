@@ -122,6 +122,13 @@ model User {
   approvedRecoveryOperations                 RecoveryOperation[]                  @relation("RecoveryOperationApprover")
   recoveryAuditEvents                        RecoveryAuditEvent[]                 @relation("RecoveryAuditActor")
   apiIdempotencyRecords                      ApiIdempotencyRecord[]
+  assignedHrWorkItems                        HrWorkItem[]                         @relation("HrWorkItemAssignee")
+  createdHrWorkItems                         HrWorkItem[]                         @relation("HrWorkItemCreator")
+  completedHrWorkItems                       HrWorkItem[]                         @relation("HrWorkItemCompleter")
+  waivedHrWorkItems                          HrWorkItem[]                         @relation("HrWorkItemWaiver")
+  ownedHiringAuthorities                     HrHiringAuthorityDefaultOwner[]      @relation("HrHiringAuthorityDefaultOwner")
+  configuredHiringAuthorityOwners            HrHiringAuthorityDefaultOwner[]      @relation("HrHiringAuthorityOwnerConfigurer")
+  hrWorkItemAudits                           HrWorkItemAudit[]                    @relation("HrWorkItemAuditActor")
 
   @@index([createdByUserId])
   @@index([erasedAt])
@@ -3630,6 +3637,19 @@ enum HrOnboardingTaskStatus {
   WAIVED
 }
 
+enum HrWorkItemStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETE
+  WAIVED
+}
+
+enum HrWorkItemSourceType {
+  MANUAL
+  HIRING_ACTION
+  QUALITY_FINDING
+}
+
 enum HrAssessmentType {
   DISC
   BIG_FIVE
@@ -4028,6 +4048,19 @@ model HrHiringAuthority {
   @@map("hr_hiring_authorities")
 }
 
+model HrHiringAuthorityDefaultOwner {
+  authority    HrHiringAuthorityType @id
+  userId       String
+  configuredBy String
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  user         User                  @relation("HrHiringAuthorityDefaultOwner", fields: [userId], references: [id], onDelete: Restrict)
+  configurer   User                  @relation("HrHiringAuthorityOwnerConfigurer", fields: [configuredBy], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@map("hr_hiring_authority_default_owners")
+}
+
 model HrHiringAuthorityAudit {
   id          String   @id @default(cuid())
   authorityId String
@@ -4357,6 +4390,52 @@ model HrOnboardingTask {
   @@index([applicationId, status, activationBlocker])
   @@index([assigneePersonnelId, status])
   @@map("hr_onboarding_tasks")
+}
+
+model HrWorkItem {
+  id                String               @id @default(cuid())
+  title             String
+  description       String?
+  status            HrWorkItemStatus     @default(PENDING)
+  sourceType        HrWorkItemSourceType
+  sourceKey         String?              @unique
+  destinationHref   String
+  dueDate           DateTime
+  assignedToUserId  String?
+  createdByUserId   String?
+  completedByUserId String?
+  completedAt       DateTime?
+  waivedByUserId    String?
+  waivedAt          DateTime?
+  waiverReason      String?
+  assignmentReason  String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  assignedTo        User?                @relation("HrWorkItemAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  createdBy         User?                @relation("HrWorkItemCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  completedBy       User?                @relation("HrWorkItemCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  waivedBy          User?                @relation("HrWorkItemWaiver", fields: [waivedByUserId], references: [id], onDelete: SetNull)
+  audits            HrWorkItemAudit[]
+
+  @@index([assignedToUserId, status, dueDate])
+  @@index([sourceType, status])
+  @@index([status, dueDate])
+  @@map("hr_work_items")
+}
+
+model HrWorkItemAudit {
+  id          String     @id @default(cuid())
+  workItemId  String
+  actorUserId String?
+  eventType   String
+  beforeJson  Json?
+  afterJson   Json?
+  createdAt   DateTime   @default(now())
+  workItem    HrWorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  actor       User?      @relation("HrWorkItemAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workItemId, createdAt])
+  @@map("hr_work_item_audits")
 }
 
 model HrHiringAudit {

@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import moment from "moment-jalaali";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   FaArchive,
   FaBriefcase,
@@ -81,6 +82,9 @@ const blankAssignment = () => ({
 });
 
 export default function HrPersonnelPage() {
+  const searchParams = useSearchParams();
+  const relationshipStatus = searchParams.get("relationshipStatus") || "";
+  const attention = searchParams.get("attention") || "";
   const [rows, setRows] = useState<any[]>([]);
   const [foundation, setFoundation] = useState<any>({
     positions: [],
@@ -116,6 +120,8 @@ export default function HrPersonnelPage() {
         hrAPI.getPersonnel({
           ...(search ? { search } : {}),
           archived: archiveView,
+          ...(relationshipStatus ? { relationshipStatus } : {}),
+          ...(attention ? { attention } : {}),
           page,
           pageSize: 50,
         }),
@@ -137,7 +143,7 @@ export default function HrPersonnelPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, archiveView, page]);
+  }, [search, archiveView, page, relationshipStatus, attention]);
 
   useEffect(() => {
     void load();
@@ -205,7 +211,13 @@ export default function HrPersonnelPage() {
     setRetentionTarget(person);
   };
 
-  const confirmRetentionAction = async ({ reason, effectiveDate }: { reason: string; effectiveDate?: string }) => {
+  const confirmRetentionAction = async ({
+    reason,
+    effectiveDate,
+  }: {
+    reason: string;
+    effectiveDate?: string;
+  }) => {
     if (!retentionTarget) return;
     if (retentionTarget.archivedAt) {
       await run(
@@ -216,7 +228,11 @@ export default function HrPersonnelPage() {
       return;
     }
     await run(
-      () => hrAPI.archivePersonnel(retentionTarget.id, { reason, effectiveDate: toIsoDate(effectiveDate || "") }),
+      () =>
+        hrAPI.archivePersonnel(retentionTarget.id, {
+          reason,
+          effectiveDate: toIsoDate(effectiveDate || ""),
+        }),
       "پرسنل بایگانی و دسترسی‌های مرتبط غیرفعال شد.",
       () => setRetentionTarget(null),
     );
@@ -507,6 +523,19 @@ export default function HrPersonnelPage() {
           { label: "جستجو", icon: FaSearch, onClick: load, tone: "neutral" },
         ]}
       >
+        {(relationshipStatus || attention) && (
+          <ErpCard className="mb-4 flex flex-wrap items-center justify-between gap-3 p-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--sds-text-primary)]">
+              <span>فیلتر فعال:</span>
+              <ErpBadge tone="info">
+                {attention === "missing-primary"
+                  ? "فاقد تخصیص اصلی"
+                  : employmentStatusLabel[relationshipStatus] || relationshipStatus}
+              </ErpBadge>
+            </div>
+            <ErpButton label="حذف فیلتر" href="/dashboard/hr/personnel" tone="neutral" variant="ghost" />
+          </ErpCard>
+        )}
         <div className="mb-4">
           <ErpInput
             className={fieldClass}
@@ -585,7 +614,11 @@ export default function HrPersonnelPage() {
       )}
       {retentionTarget && (
         <RetentionAction
-          title={retentionTarget.archivedAt ? "بازیابی پرسنل از بایگانی" : "بایگانی پرسنل"}
+          title={
+            retentionTarget.archivedAt
+              ? "بازیابی پرسنل از بایگانی"
+              : "بایگانی پرسنل"
+          }
           targetName={`${retentionTarget.firstName} ${retentionTarget.lastName}`}
           busy={saving}
           confirmLabel={retentionTarget.archivedAt ? "بازیابی" : "بایگانی"}

@@ -26,34 +26,64 @@ applicant.interceptors.request.use((config) => {
 export const hiringAPI = {
   list: (params?: Record<string, string>) =>
     internal.get("/applications", { params }),
-  archive: (id: string, reason: string) => internal.post(`/applications/${id}/archive`, { reason }),
-  restore: (id: string, reason: string) => internal.post(`/applications/${id}/restore`, { reason }),
-  getDeletionPreview: (id: string) => internal.get(`/applications/${id}/deletion-preview`),
-  permanentlyDelete: (id: string, data: any) => internal.post(`/applications/${id}/permanent-delete`, data),
+  archive: (id: string, reason: string) =>
+    internal.post(`/applications/${id}/archive`, { reason }),
+  restore: (id: string, reason: string) =>
+    internal.post(`/applications/${id}/restore`, { reason }),
+  getDeletionPreview: (id: string) =>
+    internal.get(`/applications/${id}/deletion-preview`),
+  permanentlyDelete: (id: string, data: any) =>
+    internal.post(`/applications/${id}/permanent-delete`, data),
   get: (id: string) => internal.get(`/applications/${id}`),
   myAuthorities: () => internal.get("/me/authorities"),
+  workItemSummary: () => internal.get("/work-items/summary"),
+  workItems: (params?: Record<string, string>) =>
+    internal.get("/work-items", { params }),
+  workItemUsers: () => internal.get("/work-items/users"),
+  createWorkItem: (data: any) => internal.post("/work-items", data),
+  updateWorkItem: (id: string, data: any) =>
+    internal.patch(`/work-items/${id}`, data),
+  workItemDefaultOwners: () => internal.get("/work-item-default-owners"),
+  setWorkItemDefaultOwner: (authority: string, userId: string) =>
+    internal.put(`/work-item-default-owners/${authority}`, { userId }),
   create: (data: any) => internal.post("/applications", data),
   invite: (id: string) => internal.post(`/applications/${id}/invitations`),
   refreshInvitationDelivery: (id: string, invitationId: string) =>
-    internal.post(`/applications/${id}/invitations/${invitationId}/delivery/refresh`),
+    internal.post(
+      `/applications/${id}/invitations/${invitationId}/delivery/refresh`,
+    ),
   recordDecision: (id: string, kind: string, data: any) =>
     internal.post(`/applications/${id}/decisions/${kind}`, data),
   preIdentityTemplates: () => internal.get("/pre-identity/templates"),
-  createPreIdentityTemplate: (data: any) => internal.post("/pre-identity/templates", data),
+  createPreIdentityTemplate: (data: any) =>
+    internal.post("/pre-identity/templates", data),
   applyPreIdentityTemplate: (id: string, templateId: string) =>
-    internal.post(`/applications/${id}/pre-identity/apply-template`, { templateId }),
+    internal.post(`/applications/${id}/pre-identity/apply-template`, {
+      templateId,
+    }),
   addPreIdentityItem: (id: string, data: any) =>
     internal.post(`/applications/${id}/pre-identity/items`, data),
   finalizePreIdentity: (id: string) =>
     internal.post(`/applications/${id}/pre-identity/finalize`),
   recordPreIdentityResult: (id: string, itemId: string, data: FormData) =>
-    internal.put(`/applications/${id}/pre-identity/items/${itemId}/result`, data),
+    internal.put(
+      `/applications/${id}/pre-identity/items/${itemId}/result`,
+      data,
+    ),
   correctPreIdentityItem: (id: string, itemId: string, reason: string) =>
-    internal.post(`/applications/${id}/pre-identity/items/${itemId}/correct`, { reason }),
+    internal.post(`/applications/${id}/pre-identity/items/${itemId}/correct`, {
+      reason,
+    }),
   downloadPreIdentityEvidence: (id: string, itemId: string) =>
-    internal.get(`/applications/${id}/pre-identity/items/${itemId}/evidence/download`, { responseType: "blob" }),
+    internal.get(
+      `/applications/${id}/pre-identity/items/${itemId}/evidence/download`,
+      { responseType: "blob" },
+    ),
   resolvePreIdentityNegative: (id: string, itemId: string, data: any) =>
-    internal.post(`/applications/${id}/pre-identity/items/${itemId}/resolve`, data),
+    internal.post(
+      `/applications/${id}/pre-identity/items/${itemId}/resolve`,
+      data,
+    ),
   releasePreIdentity: (id: string) =>
     internal.post(`/applications/${id}/pre-identity/release`),
   decideAssessment: (id: string, data: any) =>

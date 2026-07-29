@@ -62,6 +62,7 @@ import { commitStagedHiringFiles, restoreStagedHiringFiles, stageHiringFilesForD
 import { latestDecisionsByKind } from '../services/hrApplicationDecisionVersions';
 import { normalizeHiringDocumentTitle } from '../services/hrHiringDocumentEvidence';
 import { assertHiringAuthorityMutationAllowed } from '../services/hrHiringAuthorityPolicy';
+import { defaultOwnerForAction, personalHrWorkProgress } from '../services/hrWorkItems';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -404,6 +405,130 @@ const requireAuthorityAdministrator = asyncHandler(async (req: AuthRequest, res:
   next();
 });
 
+const canManageHrWork = async (req: AuthRequest) => {
+  if (req.user!.role === 'ADMIN') return true;
+  return Boolean(await prisma.hrHiringAuthority.findFirst({
+    where: { userId: actorId(req), authority: 'HR_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    select: { id: true }
+  }));
+};
+
+const requireHrWorkManager = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!(await canManageHrWork(req))) return res.status(403).json({ success: false, error: 'فقط مدیر منابع انسانی می‌تواند وظایف را تخصیص دهد.' });
+  next();
+});
+
+const workItemUserSelect = { id: true, firstName: true, lastName: true, username: true } as const;
+const workItemInclude = {
+  assignedTo: { select: workItemUserSelect },
+  completedBy: { select: workItemUserSelect },
+  waivedBy: { select: workItemUserSelect }
+} as const;
+
+const endOfToday = () => {
+  const dueDate = new Date();
+  dueDate.setHours(23, 59, 59, 999);
+  return dueDate;
+};
+
+const auditWorkItem = (workItemId: string, eventType: string, actorUserId: string | null, before: unknown, after: unknown) =>
+  prisma.hrWorkItemAudit.create({ data: {
+    workItemId,
+    eventType,
+    actorUserId,
+    beforeJson: before ? JSON.parse(JSON.stringify(before)) : Prisma.JsonNull,
+    afterJson: after ? JSON.parse(JSON.stringify(after)) : Prisma.JsonNull
+  } });
+
+const syncAutomaticHiringWorkItems = async () => {
+  const now = new Date();
+  const [defaults, grants, applications] = await Promise.all([
+    prisma.hrHiringAuthorityDefaultOwner.findMany({ include: { user: { select: { id: true, isActive: true } } } }),
+    prisma.hrHiringAuthority.findMany({
+      where: { isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+      select: { userId: true, authority: true }
+    }),
+    prisma.hrJobApplication.findMany({
+      where: { archivedAt: null, stage: { not: 'CLOSED' } },
+      include: applicationInclude
+    })
+  ]);
+  const activeGrantKeys = new Set(grants.map((grant) => `${grant.userId}:${grant.authority}`));
+  const ownerByAuthority = new Map(
+    defaults
+      .filter((owner) => owner.user.isActive && activeGrantKeys.has(`${owner.userId}:${owner.authority}`))
+      .map((owner) => [owner.authority, owner.userId])
+  );
+  const authoritiesByUser = new Map<string, Set<string>>();
+  grants.forEach((grant) => {
+    const authorities = authoritiesByUser.get(grant.userId) || new Set<string>();
+    authorities.add(grant.authority);
+    authoritiesByUser.set(grant.userId, authorities);
+  });
+  const allAuthorities = new Set(HIRING_AUTHORITY_TYPES);
+  const activeSourceKeys = new Set<string>();
+
+  for (const application of applications) {
+    const lifecycle = projectHiringLifecycle(application as any, allAuthorities, '__SYSTEM__');
+    const phase = lifecycle.phases.find((item) => item.id === lifecycle.currentPhaseId);
+    if (!phase || phase.status !== 'ACTION_REQUIRED') continue;
+    const candidateName = `${application.candidate.firstName} ${application.candidate.lastName}`.trim();
+    const actions = [phase.primaryAction, ...phase.secondaryActions].filter(Boolean) as Array<{ id: string; label: string; authorities: string[] }>;
+    for (const action of actions) {
+      const sourceKey = `HIRING:${application.id}:${action.id}`;
+      activeSourceKeys.add(sourceKey);
+      let assignedToUserId = defaultOwnerForAction(action.authorities, ownerByAuthority);
+      if (assignedToUserId) {
+        const personalized = projectHiringLifecycle(application as any, authoritiesByUser.get(assignedToUserId) || new Set(), assignedToUserId);
+        const personalizedPhase = personalized.phases.find((item) => item.id === personalized.currentPhaseId);
+        const permitted = [personalizedPhase?.primaryAction, ...(personalizedPhase?.secondaryActions || [])].filter(Boolean);
+        if (!permitted.some((item) => item!.id === action.id)) assignedToUserId = null;
+      }
+      const existing = await prisma.hrWorkItem.findUnique({ where: { sourceKey } });
+      if (existing?.assignmentReason) {
+        if (!existing.assignedToUserId) {
+          assignedToUserId = null;
+        } else {
+          const personalized = projectHiringLifecycle(application as any, authoritiesByUser.get(existing.assignedToUserId) || new Set(), existing.assignedToUserId);
+          const personalizedPhase = personalized.phases.find((item) => item.id === personalized.currentPhaseId);
+          const permitted = [personalizedPhase?.primaryAction, ...(personalizedPhase?.secondaryActions || [])].filter(Boolean);
+          assignedToUserId = permitted.some((item) => item!.id === action.id) ? existing.assignedToUserId : null;
+        }
+      }
+      const values = {
+        title: `${action.label}${candidateName ? ` — ${candidateName}` : ''}`,
+        description: `پرونده متقاضی · ${application.position.title}`,
+        sourceType: 'HIRING_ACTION' as const,
+        destinationHref: `/dashboard/hr/hiring/${application.id}`,
+        assignedToUserId
+      };
+      if (!existing) {
+        const created = await prisma.hrWorkItem.create({ data: { ...values, sourceKey, dueDate: endOfToday(), createdByUserId: null } });
+        await auditWorkItem(created.id, 'AUTOMATIC_TASK_CREATED', null, null, created);
+      } else if (existing.assignedToUserId !== assignedToUserId || existing.title !== values.title || !['PENDING', 'IN_PROGRESS'].includes(existing.status)) {
+        const reopened = !['PENDING', 'IN_PROGRESS'].includes(existing.status);
+        const updated = await prisma.hrWorkItem.update({ where: { id: existing.id }, data: {
+          ...values,
+          ...(reopened ? { status: 'PENDING', completedAt: null, completedByUserId: null, waivedAt: null, waivedByUserId: null, waiverReason: null } : {})
+        } });
+        await auditWorkItem(existing.id, reopened ? 'SOURCE_ACTION_REOPENED' : 'AUTOMATIC_TASK_UPDATED', null, existing, updated);
+      }
+    }
+  }
+
+  const stale = await prisma.hrWorkItem.findMany({
+    where: {
+      sourceType: 'HIRING_ACTION',
+      status: { in: ['PENDING', 'IN_PROGRESS'] },
+      ...(activeSourceKeys.size ? { sourceKey: { notIn: [...activeSourceKeys] } } : {})
+    }
+  });
+  for (const item of stale) {
+    const updated = await prisma.hrWorkItem.update({ where: { id: item.id }, data: { status: 'COMPLETE', completedAt: now, completedByUserId: null } });
+    await auditWorkItem(item.id, 'SOURCE_ACTION_COMPLETED', null, item, updated);
+  }
+};
+
 interface ApplicantRequest extends express.Request { applicant?: { applicationId: string; invitationId: string } }
 const applicantSession = async (req: ApplicantRequest, res: Response, next: NextFunction) => {
   const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : '';
@@ -727,6 +852,124 @@ router.use('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
 router.get('/me/authorities', asyncHandler(async (req: AuthRequest, res: Response) => {
   const rows = await prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } });
   res.json({ success: true, data: rows.map((row) => row.authority) });
+}));
+
+router.get('/work-items/summary', asyncHandler(async (req: AuthRequest, res: Response) => {
+  await syncAutomaticHiringWorkItems();
+  const rows = await prisma.hrWorkItem.findMany({
+    where: { assignedToUserId: actorId(req), status: { in: ['PENDING', 'IN_PROGRESS', 'COMPLETE'] } },
+    include: workItemInclude,
+    orderBy: [{ status: 'asc' }, { dueDate: 'asc' }]
+  });
+  const open = rows.filter((item) => item.status === 'PENDING' || item.status === 'IN_PROGRESS');
+  res.json({ success: true, data: {
+    progress: personalHrWorkProgress(rows),
+    items: open.slice(0, 5),
+    canManage: await canManageHrWork(req),
+    unassignedCount: await prisma.hrWorkItem.count({ where: { assignedToUserId: null, status: { in: ['PENDING', 'IN_PROGRESS'] } } })
+  } });
+}));
+
+router.get('/work-items', asyncHandler(async (req: AuthRequest, res: Response) => {
+  await syncAutomaticHiringWorkItems();
+  const scope = String(req.query.scope || 'mine');
+  const manager = await canManageHrWork(req);
+  if (scope !== 'mine' && !manager) return res.status(403).json({ success: false, error: 'مشاهده صف تیمی به مدیر منابع انسانی محدود است.' });
+  const status = String(req.query.status || 'OPEN');
+  const where: any = {
+    ...(scope === 'mine' ? { assignedToUserId: actorId(req) } : scope === 'unassigned' ? { assignedToUserId: null } : {}),
+    ...(status === 'OPEN' ? { status: { in: ['PENDING', 'IN_PROGRESS'] } } : status ? { status } : {})
+  };
+  const rows = await prisma.hrWorkItem.findMany({ where, include: workItemInclude, orderBy: [{ status: 'asc' }, { dueDate: 'asc' }, { createdAt: 'desc' }], take: 250 });
+  res.json({ success: true, data: rows, meta: { scope, status, canManage: manager, currentUserId: actorId(req) } });
+}));
+
+router.get('/work-items/users', requireHrWorkManager, asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const [rows, grants] = await Promise.all([
+    prisma.user.findMany({ where: { isActive: true }, select: workItemUserSelect, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
+    prisma.hrHiringAuthority.findMany({ where: { isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { userId: true, authority: true } })
+  ]);
+  res.json({ success: true, data: rows.map((user) => ({ ...user, authorities: grants.filter((grant) => grant.userId === user.id).map((grant) => grant.authority) })) });
+}));
+
+router.post('/work-items', requireHrWorkManager, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const title = String(req.body.title || '').trim();
+  const destinationHref = String(req.body.destinationHref || '').trim();
+  const assignedToUserId = String(req.body.assignedToUserId || '').trim() || null;
+  if (title.length < 3) throw new Error('عنوان وظیفه الزامی است.');
+  if (!destinationHref.startsWith('/dashboard/hr')) throw new Error('مقصد وظیفه باید داخل فضای کاری منابع انسانی باشد.');
+  const dueDate = parseDate(req.body.dueDate, 'مهلت وظیفه');
+  if (assignedToUserId && !(await prisma.user.findFirst({ where: { id: assignedToUserId, isActive: true }, select: { id: true } }))) throw new Error('مسئول فعال پیدا نشد.');
+  const row = await prisma.hrWorkItem.create({ data: {
+    title,
+    description: String(req.body.description || '').trim() || null,
+    sourceType: 'MANUAL',
+    destinationHref,
+    dueDate,
+    assignedToUserId,
+    assignmentReason: String(req.body.assignmentReason || '').trim() || null,
+    createdByUserId: actorId(req)
+  }, include: workItemInclude });
+  await auditWorkItem(row.id, 'MANUAL_TASK_CREATED', actorId(req), null, row);
+  res.status(201).json({ success: true, data: row });
+}));
+
+router.patch('/work-items/:id', asyncHandler(async (req: AuthRequest, res: Response) => {
+  const current = await prisma.hrWorkItem.findUniqueOrThrow({ where: { id: req.params.id } });
+  const manager = await canManageHrWork(req);
+  const isAssignee = current.assignedToUserId === actorId(req);
+  if (!manager && !isAssignee) return res.status(403).json({ success: false, error: 'این وظیفه به شما محول نشده است.' });
+  const requestedStatus = req.body.status ? String(req.body.status) : current.status;
+  if (!['PENDING', 'IN_PROGRESS', 'COMPLETE', 'WAIVED'].includes(requestedStatus)) throw new Error('وضعیت وظیفه معتبر نیست.');
+  if (current.sourceType === 'HIRING_ACTION' && ['COMPLETE', 'WAIVED'].includes(requestedStatus)) {
+    throw new Error('وظیفه خودکار فقط با تکمیل اقدام متناظر در پرونده جذب بسته می‌شود.');
+  }
+  if (requestedStatus !== current.status && ['IN_PROGRESS', 'COMPLETE'].includes(requestedStatus) && !isAssignee) {
+    return res.status(403).json({ success: false, error: 'شروع و تکمیل وظیفه فقط توسط مسئول فعلی آن ممکن است.' });
+  }
+  if (!manager && requestedStatus === 'WAIVED') return res.status(403).json({ success: false, error: 'صرف‌نظر از وظیفه فقط با تأیید مدیر منابع انسانی ممکن است.' });
+  const requestedAssignee = req.body.assignedToUserId === undefined ? current.assignedToUserId : String(req.body.assignedToUserId || '').trim() || null;
+  const reassigned = requestedAssignee !== current.assignedToUserId;
+  const reason = String(req.body.reason || '').trim();
+  if (reassigned && !manager) return res.status(403).json({ success: false, error: 'تغییر مسئول وظیفه به مدیر منابع انسانی محدود است.' });
+  if (reassigned && reason.length < 3) throw new Error('دلیل تغییر مسئول الزامی است.');
+  if (requestedStatus === 'WAIVED' && reason.length < 3) throw new Error('دلیل صرف‌نظر از وظیفه الزامی است.');
+  if (requestedAssignee && !(await prisma.user.findFirst({ where: { id: requestedAssignee, isActive: true }, select: { id: true } }))) throw new Error('مسئول فعال پیدا نشد.');
+  const completed = requestedStatus === 'COMPLETE';
+  const waived = requestedStatus === 'WAIVED';
+  const row = await prisma.hrWorkItem.update({ where: { id: current.id }, data: {
+    status: requestedStatus as any,
+    assignedToUserId: requestedAssignee,
+    assignmentReason: reassigned ? reason : current.assignmentReason,
+    completedAt: completed ? current.completedAt || new Date() : null,
+    completedByUserId: completed ? current.completedByUserId || actorId(req) : null,
+    waivedAt: waived ? current.waivedAt || new Date() : null,
+    waivedByUserId: waived ? current.waivedByUserId || actorId(req) : null,
+    waiverReason: waived ? reason : null
+  }, include: workItemInclude });
+  await auditWorkItem(row.id, reassigned ? 'TASK_REASSIGNED' : `TASK_${requestedStatus}`, actorId(req), current, row);
+  res.json({ success: true, data: row });
+}));
+
+router.get('/work-item-default-owners', requireHrWorkManager, asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const rows = await prisma.hrHiringAuthorityDefaultOwner.findMany({ include: { user: { select: workItemUserSelect } }, orderBy: { authority: 'asc' } });
+  res.json({ success: true, data: rows });
+}));
+
+router.put('/work-item-default-owners/:authority', requireHrWorkManager, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const authority = String(req.params.authority || '');
+  const userId = String(req.body.userId || '');
+  if (!HIRING_AUTHORITY_TYPES.has(authority)) throw new Error('اختیار استخدام معتبر نیست.');
+  const grant = await prisma.hrHiringAuthority.findFirst({ where: { userId, authority: authority as any, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } });
+  if (!grant) throw new Error('کاربر انتخاب‌شده این اختیار فعال را ندارد.');
+  const row = await prisma.hrHiringAuthorityDefaultOwner.upsert({
+    where: { authority: authority as any },
+    create: { authority: authority as any, userId, configuredBy: actorId(req) },
+    update: { userId, configuredBy: actorId(req) },
+    include: { user: { select: workItemUserSelect } }
+  });
+  await syncAutomaticHiringWorkItems();
+  res.json({ success: true, data: row });
 }));
 
 router.get('/authorities', requireAuthorityAdministrator, asyncHandler(async (_req: AuthRequest, res: Response) => {

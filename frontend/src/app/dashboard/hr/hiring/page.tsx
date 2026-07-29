@@ -249,8 +249,8 @@ export default function HiringCasesPage() {
       >
         <ErpCard className="mb-4 grid gap-3 p-4 md:grid-cols-4">
           <ErpInput
+            aria-label="جست‌وجوی پرونده‌های متقاضیان"
             className={field}
-            placeholder="جست‌وجوی نام، نام خانوادگی، موبایل یا کد ملی"
             value={filters.search || ""}
             onChange={(event) =>
               setFilters({ ...filters, search: event.target.value, page: 1 })

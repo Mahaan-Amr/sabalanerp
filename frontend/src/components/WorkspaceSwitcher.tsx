@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import React from 'react';
+import React from "react";
 import {
   FaCalculator,
   FaChartPie,
@@ -12,14 +12,14 @@ import {
   FaTruck,
   FaUserTie,
   FaUsers,
-  FaWarehouse
-} from 'react-icons/fa';
+  FaWarehouse,
+} from "react-icons/fa";
 import { ErpBadge, ErpPressable } from '@/components/erp';
 import {
   useWorkspace,
   WORKSPACE_CONFIG,
-  type WORKSPACES
-} from '@/contexts/WorkspaceContext';
+  type WORKSPACES,
+} from "@/contexts/WorkspaceContext";
 
 const iconMap = {
   FaFileContract,
@@ -29,33 +29,33 @@ const iconMap = {
   FaWarehouse,
   FaShieldAlt,
   FaChartPie,
-  FaTruck
+  FaTruck,
 };
 
 interface WorkspaceSwitcherProps {
   className?: string;
   showLabel?: boolean;
   compact?: boolean;
-  variant?: 'dropdown' | 'grid' | 'sidebar';
+  variant?: "dropdown" | "grid" | "sidebar";
 }
 
 const permissionPresentation = {
-  view: { text: 'مشاهده', tone: 'info' as const },
-  edit: { text: 'ویرایش', tone: 'success' as const },
-  admin: { text: 'مدیر', tone: 'purple' as const }
+  view: { text: "مشاهده", tone: "info" as const },
+  edit: { text: "ویرایش", tone: "success" as const },
+  admin: { text: "مدیر", tone: "purple" as const },
 };
 
 export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
-  className = '',
+  className = "",
   showLabel = true,
   compact = false,
-  variant = 'dropdown'
+  variant = "dropdown",
 }) => {
   const {
     currentWorkspace,
     accessibleWorkspaces,
     setCurrentWorkspace,
-    getWorkspacePermission
+    getWorkspacePermission,
   } = useWorkspace();
   const [isOpen, setIsOpen] = React.useState(false);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -63,13 +63,13 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
   React.useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setIsOpen(false);
         triggerRef.current?.focus();
       }
     };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, [isOpen]);
 
   const permissionBadge = (workspace: WORKSPACES) => {
@@ -88,9 +88,9 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
   const currentInfo = currentWorkspace
     ? WORKSPACE_CONFIG[currentWorkspace]
     : {
-        namePersian: 'داشبورد اصلی',
-        description: 'نمای کلی سیستم',
-        icon: 'FaHome'
+        namePersian: "داشبورد اصلی",
+        description: "نمای کلی سیستم",
+        icon: "FaHome",
       };
   const CurrentIcon = currentWorkspace
     ? iconMap[currentInfo.icon as keyof typeof iconMap] || FaFileContract
@@ -99,34 +99,34 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
   const choices = [
     {
       id: null,
-      namePersian: 'داشبورد اصلی',
-      description: 'نمای کلی سیستم',
-      icon: FaHome
+      namePersian: "داشبورد اصلی",
+      description: "نمای کلی سیستم",
+      icon: FaHome,
     },
-    ...accessibleWorkspaces.map(workspace => ({
+    ...accessibleWorkspaces.map((workspace) => ({
       ...workspace,
-      icon: iconMap[workspace.icon as keyof typeof iconMap] || FaFileContract
-    }))
+      icon: iconMap[workspace.icon as keyof typeof iconMap] || FaFileContract,
+    })),
   ];
 
   const choice = (
     workspace: (typeof choices)[number],
-    layout: 'card' | 'row'
+    layout: "card" | "row",
   ) => {
     const Icon = workspace.icon;
     const active = currentWorkspace === workspace.id;
     return (
       <ErpPressable
-        key={workspace.id ?? 'main'}
+        key={workspace.id ?? "main"}
         type="button"
         aria-pressed={active}
-        tone={active ? 'primary' : 'neutral'}
-        variant={active ? 'soft' : 'ghost'}
+        tone={active ? "primary" : "neutral"}
+        variant={active ? "soft" : "ghost"}
         onClick={() => selectWorkspace(workspace.id)}
         className={
-          layout === 'card'
-            ? 'min-h-28 w-full justify-start p-4 text-right'
-            : 'w-full justify-start gap-3 px-3 py-2 text-right'
+          layout === "card"
+            ? "min-h-28 w-full justify-start p-4 text-right"
+            : "w-full justify-start gap-3 px-3 py-2 text-right"
         }
       >
         <span className="sds-tone-primary sds-tone-surface inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--sds-radius-control)]">
@@ -136,7 +136,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
           <strong className="sds-text-primary block truncate text-sm">
             {workspace.namePersian}
           </strong>
-          {(layout === 'card' || !compact) && (
+          {(layout === "card" || !compact) && (
             <span className="sds-text-muted mt-1 block truncate text-xs">
               {workspace.description}
             </span>
@@ -147,18 +147,20 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
     );
   };
 
-  if (variant === 'grid') {
+  if (variant === "grid") {
     return (
-      <div className={`grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 ${className}`}>
-        {choices.map(workspace => choice(workspace, 'card'))}
+      <div
+        className={`grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 ${className}`}
+      >
+        {choices.map((workspace) => choice(workspace, "card"))}
       </div>
     );
   }
 
-  if (variant === 'sidebar') {
+  if (variant === "sidebar") {
     return (
       <div className={`space-y-1 ${className}`}>
-        {choices.map(workspace => choice(workspace, 'row'))}
+        {choices.map((workspace) => choice(workspace, "row"))}
       </div>
     );
   }
@@ -170,8 +172,8 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        onClick={() => setIsOpen(open => !open)}
-        className={`w-full justify-between gap-3 ${compact ? 'px-3 py-2 text-sm' : 'px-4 py-3'}`}
+        onClick={() => setIsOpen((open) => !open)}
+        className={`w-full justify-between gap-3 ${compact ? "px-3 py-2 text-sm" : "px-4 py-3"}`}
       >
         <span className="flex min-w-0 items-center gap-3">
           <span className="sds-tone-primary sds-tone-surface inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--sds-radius-control)]">
@@ -190,9 +192,11 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
             </span>
           )}
         </span>
-        {isOpen
-          ? <FaChevronUp className="h-4 w-4" aria-hidden="true" />
-          : <FaChevronDown className="h-4 w-4" aria-hidden="true" />}
+        {isOpen ? (
+          <FaChevronUp className="h-4 w-4" aria-hidden="true" />
+        ) : (
+          <FaChevronDown className="h-4 w-4" aria-hidden="true" />
+        )}
       </ErpPressable>
 
       {isOpen && (
@@ -200,15 +204,16 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
           <ErpPressable
             type="button"
             aria-label="بستن فهرست فضاهای کاری"
+            data-workspace-switcher-backdrop
             onClick={() => setIsOpen(false)}
-            className="fixed inset-0 z-10 min-h-0 rounded-none bg-transparent p-0"
+            className="fixed inset-0 z-10 min-h-0 rounded-none bg-transparent p-0 hover:!bg-transparent"
           />
           <div
             role="listbox"
             aria-label="فضای کاری"
             className="sds-workspace-surface absolute inset-x-0 top-full z-20 mt-2 max-h-96 space-y-1 overflow-y-auto p-2 shadow-[var(--sds-shadow-raised)]"
           >
-            {choices.map(workspace => choice(workspace, 'row'))}
+            {choices.map((workspace) => choice(workspace, "row"))}
           </div>
         </>
       )}

@@ -10,6 +10,7 @@ process.env.FRONTEND_URL ??= 'http://127.0.0.1:3101';
 process.env.PUBLIC_APP_URL ??= 'http://127.0.0.1:3101';
 process.env.NEXT_PUBLIC_API_URL ??= '/api';
 process.env.BACKEND_API_ORIGIN ??= 'http://127.0.0.1:5101';
+process.env.NEXT_PUBLIC_SOCKET_URL ??= 'http://127.0.0.1:5101';
 process.env.SMS_IR_ENVIRONMENT ??= 'sandbox';
 
 export default defineConfig({

@@ -249,6 +249,7 @@ const ContractRow: React.FC<{
   onDeleteCancel: () => void;
   onDeleteConfirm: (rowId: string) => void;
   editSaved?: boolean;
+  error?: string;
 }> = ({
   product,
   depth = 0,
@@ -258,7 +259,8 @@ const ContractRow: React.FC<{
   onDeleteRequest,
   onDeleteCancel,
   onDeleteConfirm,
-  editSaved = false
+  editSaved = false,
+  error
 }) => {
   const rowId = product.rowId;
   if (!rowId) return null;
@@ -278,7 +280,16 @@ const ContractRow: React.FC<{
     <div
       className={`border-b border-[var(--sds-border-subtle)] py-3 last:border-b-0 ${depth ? 'mr-5 border-r pr-4' : ''}`}
       data-contract-row-id={rowId}
+      tabIndex={error ? -1 : undefined}
+      aria-invalid={error ? true : undefined}
     >
+      {error && (
+        <ErpInlineState
+          kind="error"
+          title={error}
+          className="mb-2"
+        />
+      )}
       {editSaved && (
         <ErpInlineState
           kind="success"
@@ -475,6 +486,24 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   }, [highlightedIndex]);
 
   useEffect(() => {
+    const rowErrorKey = Object.keys(errors).find(key => key.startsWith('productRow:'));
+    if (!rowErrorKey) return;
+    const rowId = rowErrorKey.slice('productRow:'.length);
+    requestAnimationFrame(() => {
+      const row = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-contract-row-id]')
+      ).find(element => element.dataset.contractRowId === rowId);
+      row?.scrollIntoView({
+        block: 'center',
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth'
+      });
+      row?.focus({ preventScroll: true });
+    });
+  }, [errors]);
+
+  useEffect(() => {
     if (!saveFeedback) return;
     if (saveFeedback.mode === 'created') {
       requestAnimationFrame(() => {
@@ -553,6 +582,9 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
     <div className="sds-workspace space-y-5">
       {errors.products && (
         <ErpInlineState kind="error" title={errors.products} />
+      )}
+      {errors.deliveryReview && (
+        <ErpInlineState kind="stale" title={errors.deliveryReview} />
       )}
 
       <div ref={catalogStartRef} className="scroll-mt-4" />
@@ -687,6 +719,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                 saveFeedback?.mode === 'edited' &&
                 saveFeedback.rowId === product.rowId
               }
+              error={product.rowId ? errors[`productRow:${product.rowId}`] : undefined}
             />
             {children.map(child => (
               <ContractRow
@@ -703,6 +736,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                   saveFeedback?.mode === 'edited' &&
                   saveFeedback.rowId === child.rowId
                 }
+                error={child.rowId ? errors[`productRow:${child.rowId}`] : undefined}
               />
             ))}
           </React.Fragment>

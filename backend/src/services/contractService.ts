@@ -30,6 +30,81 @@ const getApprovedSalesCorrection = (contractId: string, tx: Prisma.TransactionCl
 
 const toJsonValue = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
+export interface ContractProductGraphValidationIssue {
+  readonly code: string;
+  readonly path: readonly string[];
+  readonly message: string;
+  readonly productRowId?: string;
+}
+
+interface ContractProductGraphConflictLike {
+  readonly code: string;
+  readonly path: readonly string[];
+  readonly message: string;
+}
+
+const DUPLICATE_DEPENDENCY_MESSAGE =
+  'وابستگی‌های محصول تکثیرشده قابل تشخیص نیست؛ محصول را باز کرده و دوباره ذخیره کنید';
+
+const productRecordsFrom = (contractData: unknown): Readonly<Record<string, unknown>>[] => {
+  if (!contractData || typeof contractData !== 'object' || Array.isArray(contractData)) return [];
+  const products = (contractData as Record<string, unknown>).products;
+  return Array.isArray(products)
+    ? products.filter((product): product is Readonly<Record<string, unknown>> =>
+        Boolean(product) && typeof product === 'object' && !Array.isArray(product))
+    : [];
+};
+
+const productIndexForConflict = (
+  conflict: ContractProductGraphConflictLike,
+  products: readonly Readonly<Record<string, unknown>>[]
+): number | undefined => {
+  if (conflict.path[0] === 'products') {
+    const index = Number(conflict.path[1]);
+    if (Number.isInteger(index) && products[index]) return index;
+  }
+  const identity = conflict.path.find((segment, index) =>
+    index > 0 && typeof segment === 'string' && segment.length > 0
+  );
+  if (!identity) return undefined;
+  const matches = products
+    .map((product, index) => JSON.stringify(product).includes(`"${identity}"`) ? index : -1)
+    .filter(index => index >= 0);
+  return matches.length > 0 ? matches[matches.length - 1] : undefined;
+};
+
+export class ContractProductGraphValidationError extends Error {
+  readonly code = 'contract-product-graph-validation-failed';
+  readonly issues: readonly ContractProductGraphValidationIssue[];
+
+  constructor(
+    conflicts: readonly ContractProductGraphConflictLike[],
+    contractData: unknown
+  ) {
+    super('Canonical product graph validation failed');
+    this.name = 'ContractProductGraphValidationError';
+    const products = productRecordsFrom(contractData);
+    this.issues = conflicts.map(conflict => {
+      const productIndex = productIndexForConflict(conflict, products);
+      const productRowId = productIndex === undefined
+        ? undefined
+        : typeof products[productIndex]?.rowId === 'string'
+          ? products[productIndex].rowId as string
+          : undefined;
+      return {
+        code: conflict.code,
+        path: productRowId ? [`productRow:${productRowId}`] : ['products'],
+        message: conflict.code.includes('duplicate') ||
+          conflict.code.includes('reference') ||
+          conflict.code.includes('ambiguous')
+          ? DUPLICATE_DEPENDENCY_MESSAGE
+          : 'اطلاعات محصول برای ثبت معتبر نیست؛ محصول را باز کرده و دوباره ذخیره کنید',
+        productRowId
+      };
+    });
+  }
+}
+
 const writeCanonicalGraphSnapshot = async (
   tx: Prisma.TransactionClient,
   input: {
@@ -46,10 +121,7 @@ const writeCanonicalGraphSnapshot = async (
     contractData: input.contractData
   }, input.revision);
   if (!plan.ok) {
-    const detail = plan.conflicts.map(conflict =>
-      `${conflict.code}:${conflict.path.join('.')}:${conflict.message}`
-    ).join(', ');
-    throw new Error(`Canonical product graph validation failed: ${detail}`);
+    throw new ContractProductGraphValidationError(plan.conflicts, input.contractData);
   }
   const graph = toJsonValue(JSON.parse(serializeCanonicalProductGraph(plan.graph)));
   await tx.salesContractProductGraphState.upsert({

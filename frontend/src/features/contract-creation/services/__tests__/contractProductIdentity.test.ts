@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
 import type { ContractProduct, ContractWizardData, DeliverySchedule } from '../../types/contract.types';
 import {
+  duplicateContractProductForIndependentEditing,
   normalizeContractProductRowIdentities,
   prepareStairEditReplacementRowIdentities,
   resolveEditedContractProductRowId
 } from '../../utils/contractProductIdentity';
+import {
+  parseCanonicalDecimal,
+  parseStableIdentity,
+  planLegacyProductGraphMigration
+} from '@sabalanerp/contract-product-graph';
 import {
   reconcileDeliveryProductReferences,
   removeInvalidDeliveryProductReference,
@@ -137,6 +143,163 @@ const product = (
   assert.equal(
     reconcileContractProductGraph(result.products).some((conflict) => conflict.rowId === 'ambiguous-parent-row'),
     true
+  );
+}
+
+{
+  const source = product('source-row', 3, 936_300, {
+    productType: 'longitudinal',
+    longitudinalPolicyInput: {
+      calculationPolicyVersion: 'calculation-v1',
+      packingPolicyVersion: 'packing-v1',
+      pricingPolicyVersion: 'pricing-v1',
+      roundingPolicyVersion: 'rounding-v1',
+      sourceBatchId: parseStableIdentity('source-batch', 'source-batch:source-row'),
+      motherWidthMeters: parseCanonicalDecimal('0.6'),
+      lengthMeters: parseCanonicalDecimal('1.5'),
+      widthMeters: parseCanonicalDecimal('0.2'),
+      quantity: 3,
+      lastManualField: 'width',
+      lastManualDimension: 'width',
+      lengthDisplayUnit: 'm',
+      widthDisplayUnit: 'cm',
+      baseMaterialPricing: 'manual-positive',
+      baseRateToman: parseCanonicalDecimal('1000000'),
+      mandatoryEnabled: false,
+      mandatoryPercentage: parseCanonicalDecimal('20'),
+      rememberedMandatoryPercentage: parseCanonicalDecimal('20'),
+      sawKerfEnabled: false,
+      sawKerfMeters: parseCanonicalDecimal('0'),
+      calibrationEnabled: false,
+      calibrationSelection: 'manual',
+      longitudinalCutRateToman: parseCanonicalDecimal('10000'),
+      calibrationCutRateToman: parseCanonicalDecimal('10000')
+    },
+    operationPolicyInput: {
+      policyVersion: 'calculation-v1',
+      pricingPolicyVersion: 'pricing-v1',
+      roundingPolicyVersion: 'rounding-v1',
+      productRowId: parseStableIdentity('product-row', 'source-row'),
+      lengthMeters: parseCanonicalDecimal('1.5'),
+      widthMeters: parseCanonicalDecimal('0.2'),
+      quantity: 3,
+      groups: [{
+        operationGroupId: parseStableIdentity('operation-group', 'source-group'),
+        scope: parseCanonicalDecimal('3')
+      }],
+      tools: [{
+        toolSelectionId: parseStableIdentity('tool-selection', 'source-tool'),
+        operationGroupId: parseStableIdentity('operation-group', 'source-group'),
+        catalogItemId: 'tool-1',
+        catalogSnapshotVersion: 'catalog-v1',
+        name: 'ابزار تست',
+        unit: 'meter',
+        rateToman: parseCanonicalDecimal('1000'),
+        edges: ['front']
+      }],
+      finishings: [{
+        finishingSelectionId: parseStableIdentity('finishing-selection', 'source-finishing'),
+        operationGroupId: parseStableIdentity('operation-group', 'source-group'),
+        catalogItemId: 'finishing-1',
+        catalogSnapshotVersion: 'catalog-v1',
+        name: 'پرداخت تست',
+        unit: 'squareMeter',
+        rateToman: parseCanonicalDecimal('2000'),
+        incompatibleCatalogItemIds: []
+      }]
+    },
+    appliedSubServices: [{
+      id: 'source-tool',
+      subServiceId: 'tool-1',
+      meter: 1.5,
+      cost: 1_500,
+      calculationBase: 'length'
+    } as any],
+    finishings: [{
+      selectionId: 'source-finishing',
+      finishingId: 'finishing-1',
+      name: 'پرداخت تست',
+      calculationBase: 'squareMeters',
+      unitPrice: 2_000,
+      automaticQuantity: 0.9,
+      quantity: 0.9,
+      quantityMode: 'auto',
+      overrideStatus: 'current',
+      cost: 1_800
+    }]
+  });
+
+  const duplicate = duplicateContractProductForIndependentEditing(source, 0);
+
+  assert.notEqual(duplicate.rowId, source.rowId);
+  assert.equal(duplicate.totalPrice, source.totalPrice);
+  assert.notEqual(
+    duplicate.longitudinalPolicyInput?.sourceBatchId,
+    source.longitudinalPolicyInput?.sourceBatchId
+  );
+  assert.equal(duplicate.operationPolicyInput?.productRowId, duplicate.rowId);
+  assert.notEqual(
+    duplicate.operationPolicyInput?.groups[0]?.operationGroupId,
+    source.operationPolicyInput?.groups[0]?.operationGroupId
+  );
+  assert.equal(
+    duplicate.operationPolicyInput?.tools[0]?.operationGroupId,
+    duplicate.operationPolicyInput?.groups[0]?.operationGroupId
+  );
+  assert.notEqual(
+    duplicate.operationPolicyInput?.tools[0]?.toolSelectionId,
+    source.operationPolicyInput?.tools[0]?.toolSelectionId
+  );
+  assert.notEqual(
+    duplicate.operationPolicyInput?.finishings[0]?.finishingSelectionId,
+    source.operationPolicyInput?.finishings[0]?.finishingSelectionId
+  );
+  assert.equal(
+    duplicate.appliedSubServices[0]?.id,
+    duplicate.operationPolicyInput?.tools[0]?.toolSelectionId
+  );
+  assert.equal(
+    duplicate.finishings?.[0]?.selectionId,
+    duplicate.operationPolicyInput?.finishings[0]?.finishingSelectionId
+  );
+
+  const recoveredDraft = normalizeContractProductRowIdentities([
+    source,
+    {
+      ...structuredClone(source),
+      rowId: 'already-independent-row'
+    }
+  ]);
+  assert.equal(recoveredDraft.products[0].rowId, 'source-row');
+  assert.equal(recoveredDraft.products[1].rowId, 'already-independent-row');
+  assert.equal(
+    recoveredDraft.products[1].operationPolicyInput?.productRowId,
+    'already-independent-row'
+  );
+  assert.notEqual(
+    recoveredDraft.products[1].operationPolicyInput?.tools[0]?.toolSelectionId,
+    source.operationPolicyInput?.tools[0]?.toolSelectionId
+  );
+  assert.notEqual(
+    recoveredDraft.products[1].longitudinalPolicyInput?.sourceBatchId,
+    source.longitudinalPolicyInput?.sourceBatchId
+  );
+
+  const canonicalSave = planLegacyProductGraphMigration({
+    contractId: 'duplicated-longitudinal-contract',
+    revision: 0,
+    calculationPolicy: {
+      calculation: 'calculation-v1',
+      packing: 'packing-v1',
+      pricing: 'pricing-v1',
+      rounding: 'rounding-v1'
+    },
+    products: JSON.parse(JSON.stringify([source, duplicate])) as Readonly<Record<string, unknown>>[]
+  });
+  assert.equal(
+    canonicalSave.ok,
+    true,
+    canonicalSave.ok ? undefined : JSON.stringify(canonicalSave.conflicts)
   );
 }
 

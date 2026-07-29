@@ -166,6 +166,7 @@ import {
 } from '@/features/contract-creation/utils/productConfigurationController';
 import {
   createContractProductRowId,
+  duplicateContractProductForIndependentEditing,
   ensureContractProductRowIds,
   normalizeContractProductRowIdentities,
   prepareStairEditReplacementRowIdentities,
@@ -3996,36 +3997,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     const cloneProduct = (product: ContractProduct, sourceIndex: number, stairSystemId?: string): ContractProduct => {
-      const duplicate = JSON.parse(JSON.stringify(product)) as ContractProduct;
-      duplicate.rowId = createContractProductRowId();
-      duplicate.finishingEnabled = !!(
-        duplicate.finishingEnabled ||
-        duplicate.finishingId ||
-        duplicate.finishingCost ||
-        (duplicate.meta as any)?.finishing?.id ||
-        (duplicate.meta as any)?.finishing?.cost
+      const duplicate = duplicateContractProductForIndependentEditing(
+        product,
+        sourceIndex,
+        stairSystemId
       );
-      duplicate.calibrationCutEnabled = duplicate.calibrationCutEnabled ?? (duplicate.productType === 'longitudinal' || duplicate.productType === 'stair');
-      if (stairSystemId) {
-        duplicate.stairSystemId = stairSystemId;
-      } else {
-        delete duplicate.stairSystemId;
-      }
-      delete duplicate.parentProductIndex;
-      delete duplicate.parentProductRowId;
-      delete duplicate.remainingStoneAllocationOrder;
-      duplicate.usedRemainingStones = [];
-      duplicate.totalUsedRemainingWidth = 0;
-      duplicate.totalUsedRemainingLength = 0;
       duplicate.remainingStones = normalizeRemainingStoneCollection(
         duplicate.remainingStoneSourceInventory || duplicate.smartCutPlan?.remainingStones || duplicate.remainingStones || []
       );
       duplicate.remainingStoneSourceInventory = normalizeRemainingStoneCollection(duplicate.remainingStones);
-      duplicate.meta = {
-        ...(duplicate.meta || {}),
-        duplicatedFromProductIndex: sourceIndex,
-        remainingSource: undefined
-      };
       return duplicate;
     };
 
@@ -4068,6 +4048,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     updateWizardData({
       products: [...productsWithRowIds, ...duplicateProducts]
     });
+    setErrors(previous => ({
+      ...previous,
+      deliveryReview: 'محصول تکثیر شد؛ برنامه تحویل آن را مشخص کنید'
+    }));
   };
 
   const handleUpdateProductImages = (index: number, images: string[]) => {

@@ -129,7 +129,27 @@ if (packedPieces.ok) {
   assert.equal(packedPieces.result.remainders.length, 7);
   assert.equal(packedPieces.result.remainders[6]?.widthMeters, '0.16');
   assert.equal(packedPieces.result.requestedAreaSquareMeters, '3.6');
-  assert.equal(packedPieces.result.mandatoryAmountToman, '900000');
+  assert.equal(packedPieces.result.baseAmountToman, '4200000');
+  assert.equal(packedPieces.result.mandatoryAmountToman, '1050000');
+}
+
+const paidRemainderKeepsConsumedMotherAreaBillable = calculateLongitudinalProduct(baseInput({
+  widthMeters: c('0.18'),
+  quantity: 2,
+  longitudinalCutRateToman: c('20000')
+}));
+assert.equal(paidRemainderKeepsConsumedMotherAreaBillable.ok, true);
+if (paidRemainderKeepsConsumedMotherAreaBillable.ok) {
+  assert.equal(
+    paidRemainderKeepsConsumedMotherAreaBillable.result.requestedAreaSquareMeters,
+    '0.54'
+  );
+  assert.equal(paidRemainderKeepsConsumedMotherAreaBillable.result.baseAmountToman, '600000');
+  assert.equal(
+    paidRemainderKeepsConsumedMotherAreaBillable.result.longitudinalCutAmountToman,
+    '60000'
+  );
+  assert.equal(paidRemainderKeepsConsumedMotherAreaBillable.result.totalAmountToman, '660000');
 }
 
 const exactWidthUse = calculateLongitudinalProduct(baseInput({

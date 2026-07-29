@@ -1,4 +1,5 @@
 import express, { Response } from 'express';
+import { randomUUID } from 'node:crypto';
 import {
   parseCanonicalProductGraph,
   projectCanonicalGraphToLegacyProducts,
@@ -12,7 +13,15 @@ import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middlewa
 import { createContractItem } from '../services/contractItemService';
 import { createDelivery, getDeliveries } from '../services/deliveryService';
 import { createPayment, getPayments, validatePaymentData } from '../services/paymentService';
-import { createContract, updateContract, getContract, validateContractAccess, approveContract, rejectContract } from '../services/contractService';
+import {
+  ContractProductGraphValidationError,
+  createContract,
+  updateContract,
+  getContract,
+  validateContractAccess,
+  approveContract,
+  rejectContract
+} from '../services/contractService';
 import { getNextContractNumberPreview } from '../services/contractNumberService';
 import { contractConfirmationService } from '../services/contractConfirmationService';
 import { buildAccountingSummaryForContracts } from '../services/accountingService';
@@ -957,6 +966,19 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     return;
   } catch (error: any) {
     console.error('Create sales contract error:', error);
+    if (error instanceof ContractProductGraphValidationError) {
+      return res.status(422).json({
+        success: false,
+        code: error.code,
+        error: 'اطلاعات محصولات قرارداد نیاز به بازبینی دارد',
+        details: error.issues.map(issue => ({
+          code: issue.code,
+          path: issue.path[0],
+          message: issue.message,
+          productRowId: issue.productRowId
+        }))
+      });
+    }
     if (error.message === 'User not found' || error.message === 'CRM potential project not found') {
       return res.status(404).json({
         success: false,
@@ -966,9 +988,12 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     if (error.message === 'CRM potential project customer does not match contract customer' || error.message === 'CRM potential project is already linked to a sales contract') {
       return res.status(400).json({ success: false, error: error.message });
     }
+    const trackingId = randomUUID();
+    console.error('Unexpected create sales contract failure:', { trackingId, error });
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: `ثبت قرارداد انجام نشد؛ لطفاً با پشتیبانی تماس بگیرید. کد پیگیری: ${trackingId}`,
+      trackingId
     });
     return;
   }
@@ -1109,6 +1134,19 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
     return;
   } catch (error: any) {
     console.error('Update sales contract error:', error);
+    if (error instanceof ContractProductGraphValidationError) {
+      return res.status(422).json({
+        success: false,
+        code: error.code,
+        error: 'اطلاعات محصولات قرارداد نیاز به بازبینی دارد',
+        details: error.issues.map(issue => ({
+          code: issue.code,
+          path: issue.path[0],
+          message: issue.message,
+          productRowId: issue.productRowId
+        }))
+      });
+    }
     if (error.message === 'Contract not found') {
       return res.status(404).json({
         success: false,
@@ -1125,9 +1163,12 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
         error: error.message
       });
     }
+    const trackingId = randomUUID();
+    console.error('Unexpected update sales contract failure:', { trackingId, error });
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: `ذخیره تغییرات قرارداد انجام نشد؛ لطفاً با پشتیبانی تماس بگیرید. کد پیگیری: ${trackingId}`,
+      trackingId
     });
     return;
   }

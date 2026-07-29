@@ -21,6 +21,7 @@ import {
   hasUnconfirmedProductQuantityOverride,
   normalizeProductFinishingCollection
 } from '../utils/productFinishingCollections';
+import { normalizeContractProductRowIdentities } from '../utils/contractProductIdentity';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -131,25 +132,44 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       return;
     }
 
-    const unresolvedLegacyAddOnRows = wizardData.products.filter(hasUnresolvedLegacyRemainingChildAddOns);
+    const identityNormalization = normalizeContractProductRowIdentities(wizardData.products);
+    if (identityNormalization.blockedDuplicateRowIds.length > 0) {
+      const blockedRowId = identityNormalization.blockedDuplicateRowIds[0];
+      const blockedIndex = wizardData.products.findIndex(product => product.rowId === blockedRowId);
+      const message = 'وابستگی‌های محصول تکثیرشده قابل تشخیص نیست؛ محصول را باز کرده و دوباره ذخیره کنید';
+      setErrors({
+        products: message,
+        ...(blockedIndex >= 0 && wizardData.products[blockedIndex]?.rowId
+          ? { [`productRow:${wizardData.products[blockedIndex].rowId}`]: message }
+          : {})
+      });
+      setCurrentStep(4);
+      return;
+    }
+    const submissionProducts = identityNormalization.products;
+    if (submissionProducts.some((product, index) => product !== wizardData.products[index])) {
+      updateWizardData({ products: submissionProducts });
+    }
+
+    const unresolvedLegacyAddOnRows = submissionProducts.filter(hasUnresolvedLegacyRemainingChildAddOns);
     if (unresolvedLegacyAddOnRows.length > 0) {
       setErrors({
         products: `${unresolvedLegacyAddOnRows.length} محصول باقی‌مانده دارای افزونه قدیمی تعیین‌تکلیف‌نشده است. در مرحله انتخاب محصولات، برای هر مورد «پذیرش و محاسبه مجدد» یا «حذف» را انتخاب کنید.`
       });
-      setCurrentStep(5);
+      setCurrentStep(4);
       return;
     }
 
-    const productGraphConflicts = reconcileContractProductGraph(wizardData.products);
+    const productGraphConflicts = reconcileContractProductGraph(submissionProducts);
     if (productGraphConflicts.length > 0) {
       setErrors({
         products: `ثبت قرارداد متوقف شد: ${productGraphConflicts.map((conflict) => conflict.message).join(' | ')}`
       });
-      setCurrentStep(5);
+      setCurrentStep(4);
       return;
     }
 
-    const currentDeliveryReferences = reconcileDeliveryProductReferences(wizardData.products, wizardData.deliveries);
+    const currentDeliveryReferences = reconcileDeliveryProductReferences(submissionProducts, wizardData.deliveries);
     if (currentDeliveryReferences.conflicts.length > 0) {
       setErrors({
         deliveries: `برنامه تحویل نیاز به بازبینی دارد: ${currentDeliveryReferences.conflicts.map((conflict) => conflict.message).join(' | ')}`
@@ -158,9 +178,9 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       return;
     }
 
-    if (wizardData.products.some(hasUnconfirmedProductQuantityOverride)) {
+    if (submissionProducts.some(hasUnconfirmedProductQuantityOverride)) {
       setErrors({ products: 'مقدار دستی ابزار یا پرداخت پس از تغییر هندسه نیاز به تأیید دارد.' });
-      setCurrentStep(5);
+      setCurrentStep(4);
       return;
     }
     
@@ -174,7 +194,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       }
 
       // Calculate total amount
-      const normalizedProducts = wizardData.products.map((originalProduct) => {
+      const normalizedProducts = submissionProducts.map((originalProduct) => {
         const normalizedProductType = normalizeContractProductType(originalProduct.productType) || originalProduct.productType;
         let productWithType = {
           ...originalProduct,
@@ -414,9 +434,13 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       console.error('Error response:', error.response?.data);
 
       const editSessionMessage = onEditSessionFailure?.(error);
-      setErrors(editSessionMessage
+      const mappedErrors = editSessionMessage
         ? { general: editSessionMessage }
-        : mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد'));
+        : mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد');
+      setErrors(mappedErrors);
+      if (error?.response?.status === 422 && Object.keys(mappedErrors).some(key => key.startsWith('productRow:'))) {
+        setCurrentStep(4);
+      }
     } finally {
       setIsSubmitting(false);
       setLoading(false);

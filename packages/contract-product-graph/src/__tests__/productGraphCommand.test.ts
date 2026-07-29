@@ -237,8 +237,8 @@ const addRowCommand = (
   assert.equal(commercial.requestedWidthMeters, '0.12');
   assert.equal(commercial.requestedQuantity, '20');
   assert.equal(commercial.requestedAreaSquareMeters, '3.6');
-  assert.equal(commercial.baseAmountToman, '3600000');
-  assert.equal(commercial.totalAmountToman, '4800000');
+  assert.equal(commercial.baseAmountToman, '4200000');
+  assert.equal(commercial.totalAmountToman, '5550000');
   assert.equal(commercial.calculationSnapshot?.sourcePiecesConsumed, '7');
   assert.equal(commercial.calculationSnapshot?.calibrationEnabled, false);
   assert.deepEqual(
@@ -268,7 +268,7 @@ const addRowCommand = (
   assert.equal(edited.graph.rows.length, 1);
   assert.equal(edited.graph.rows[0].commercial.requestedLengthMeters, '2');
   assert.equal(edited.graph.rows[0].commercial.requestedAreaSquareMeters, '4.8');
-  assert.equal(edited.graph.rows[0].commercial.totalAmountToman, '6400000');
+  assert.equal(edited.graph.rows[0].commercial.totalAmountToman, '7400000');
 
   const duplicated = executeProductGraphCommand({
     graph: edited.graph,

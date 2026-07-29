@@ -505,16 +505,20 @@ export const calculateLongitudinalProduct = (
     return { ok: false, conflicts: operationConflicts };
   }
 
+  const consumedMaterialArea = packing.plan.consumedSources.reduce(
+    total => total.plus(length.times(motherWidth)),
+    new Decimal(0)
+  );
   const pricingLines = [
     {
       lineId: 'base-material',
-      quantity: canonical(area),
+      quantity: canonical(consumedMaterialArea),
       rateToman: canonical(baseRate!)
     },
     ...(input.mandatoryEnabled
       ? [{
           lineId: 'mandatory',
-          quantity: canonical(area.times(baseRate!)),
+          quantity: canonical(consumedMaterialArea.times(baseRate!)),
           rateToman: canonical(mandatoryPercentage.div(100))
         }]
       : []),

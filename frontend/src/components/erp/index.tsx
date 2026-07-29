@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -1045,6 +1046,7 @@ export function ErpActionMenu({ label, actions }: { label: string; actions: ErpA
 }
 
 export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet' }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal' }) {
+  const [mounted, setMounted] = React.useState(false);
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
   const dialogRef = React.useRef<HTMLDivElement>(null);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
@@ -1052,6 +1054,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
   const titleId = React.useId();
   const reduceMotion = useReducedMotion();
   const isModal = presentation === 'modal';
+  React.useEffect(() => setMounted(true), []);
   React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   React.useEffect(() => {
     if (!open) return;
@@ -1075,7 +1078,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
       restoreFocusRef.current?.focus();
     };
   }, [open]);
-  return (
+  const sheet = (
     <AnimatePresence>
       {open && (
         <div className={isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"} role="presentation">
@@ -1104,6 +1107,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
       )}
     </AnimatePresence>
   );
+  return mounted ? createPortal(sheet, document.body) : null;
 }
 
 export * from './DashboardPrimitives';

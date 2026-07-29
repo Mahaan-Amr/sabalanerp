@@ -51,6 +51,8 @@ import publicContractsRoutes from "./routes/public-contracts";
 import uploadsRoutes from "./routes/uploads";
 import testHrHiringSmsRoutes from "./routes/test-hr-hiring-sms";
 import systemRecoveryRoutes from "./routes/system-recovery";
+import notificationRoutes from "./routes/notifications";
+import supportTicketRoutes from "./routes/support-tickets";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -67,6 +69,8 @@ import {
   initializeSystemRecovery,
   startSystemRecoveryMaintenance,
 } from "./services/systemRecoveryLifecycle";
+import { startNotificationOutboxDelivery } from "./services/notificationService";
+import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
 
 const prisma = new PrismaClient();
 initializeRecoveryRuntime();
@@ -87,6 +91,9 @@ const validateProductionEnvironment = () => {
     "JWT_SECRET",
     "FRONTEND_URL",
     "PUBLIC_APP_URL",
+    "WEB_PUSH_VAPID_SUBJECT",
+    "WEB_PUSH_VAPID_PUBLIC_KEY",
+    "WEB_PUSH_VAPID_PRIVATE_KEY",
     "SMS_IR_API_KEY",
     "SMS_IR_HIRING_INVITATION_TEMPLATE_ID",
     "SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS",
@@ -186,6 +193,8 @@ app.use(recoveryWriteGuard);
 // Routes
 app.use("/api/system-recovery", systemRecoveryRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/support-tickets", supportTicketRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/orders", orderRoutes);
@@ -345,6 +354,10 @@ initializeSystemRecovery(prisma).finally(() => {
     startHiringInvitationDeliveryPolling(prisma);
     startPersonnelErasureRecovery(prisma);
     startSystemRecoveryMaintenance(prisma);
+    startNotificationOutboxDelivery(prisma, (userId, notification) => {
+      io.to(`user-${userId}`).emit("notification.created", notification);
+    });
+    startSupportTicketMaintenance(prisma);
   }
   server.listen(PORT, () => {
     console.log(`? Server running on port ${PORT}`);

@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import hrHiringSmsGateway from './hrHiringSmsGateway';
 import { getRecoveryRuntimeState } from './recoveryRuntime';
+import { publishNotificationEvent } from './notificationService';
 
 const POLL_INTERVAL_MS = 5 * 60_000;
 const REPORT_WINDOW_MS = 24 * 60 * 60_000;
@@ -31,30 +32,34 @@ export const pollHiringInvitationDelivery = async (prisma: PrismaClient, now = n
   for (const invitation of rows) {
     const report = await hrHiringSmsGateway.getDeliveryReport(Number(invitation.providerMessageId));
     const state = report.success ? mapSmsIrDeliveryState(report.deliveryState) : 'UNKNOWN';
-    await prisma.hrCandidateInvitation.update({
-      where: { id: invitation.id },
-      data: {
-        providerDeliveryState: state,
-        providerDeliveryAt: report.deliveryDateTime ? new Date(report.deliveryDateTime * 1000) : null,
-        providerLastCheckedAt: now
+    await prisma.$transaction(async (tx) => {
+      await tx.hrCandidateInvitation.update({
+        where: { id: invitation.id },
+        data: {
+          providerDeliveryState: state,
+          providerDeliveryAt: report.deliveryDateTime ? new Date(report.deliveryDateTime * 1000) : null,
+          providerLastCheckedAt: now
+        }
+      });
+      if (state === 'FAILED' && invitation.providerDeliveryState !== 'FAILED') {
+        const recipients = await tx.hrHiringAuthority.findMany({
+          where: { authority: { in: ['HR_PROCESSOR', 'HR_MANAGER'] }, isActive: true },
+          select: { userId: true },
+          distinct: ['userId']
+        });
+        if (recipients.length) await publishNotificationEvent(tx, {
+          type: 'HIRING_INVITATION_SMS_FAILED',
+          deduplicationKey: `hiring-invitation-sms-failed:${invitation.id}`,
+          recipientIds: recipients.map(({ userId }) => userId),
+          workspace: 'hr',
+          feature: 'hr_hiring',
+          resourceType: 'HrJobApplication',
+          resourceId: invitation.applicationId,
+          referenceId: invitation.applicationId,
+          actionUrl: `/dashboard/hr/hiring/${invitation.applicationId}`,
+        });
       }
     });
-    if (state === 'FAILED' && invitation.providerDeliveryState !== 'FAILED') {
-      const recipients = await prisma.hrHiringAuthority.findMany({
-        where: { authority: { in: ['HR_PROCESSOR', 'HR_MANAGER'] }, isActive: true },
-        select: { userId: true },
-        distinct: ['userId']
-      });
-      if (recipients.length) await prisma.securityNotification.createMany({
-        data: recipients.map(({ userId }) => ({
-          userId,
-          type: 'HIRING_INVITATION_SMS_FAILED',
-          title: 'عدم تحویل پیامک دعوت استخدام',
-          message: 'SMS.ir عدم تحویل پیامک دعوت متقاضی را گزارش کرده است.',
-          referenceId: invitation.applicationId
-        }))
-      });
-    }
     updated += 1;
   }
   return { checked: rows.length, updated };
@@ -76,14 +81,25 @@ export const notifyOverduePreIdentityChecklist = async (prisma: PrismaClient, no
     select: { userId: true }, distinct: ['userId']
   });
   for (const item of items) {
-    await prisma.$transaction([
-      ...(recipients.length ? [prisma.securityNotification.createMany({ data: recipients.map(({ userId }) => ({
-        userId, type: 'HIRING_CHECKLIST_OVERDUE', title: 'پیگیری الزام معوق جذب',
-        message: `الزام «${item.title}» برای ${item.application.candidate.firstName} ${item.application.candidate.lastName} در جایگاه ${item.application.position.title} معوق شده است.`,
-        referenceId: item.applicationId
-      })) })] : []),
-      prisma.hrPreIdentityChecklistItem.update({ where: { id: item.id }, data: { overdueNotifiedAt: now } })
-    ]);
+    await prisma.$transaction(async (tx) => {
+      if (recipients.length) await publishNotificationEvent(tx, {
+        type: 'HIRING_CHECKLIST_OVERDUE',
+        deduplicationKey: `hiring-checklist-overdue:${item.id}`,
+        recipientIds: recipients.map(({ userId }) => userId),
+        workspace: 'hr',
+        feature: 'hr_hiring',
+        resourceType: 'HrJobApplication',
+        resourceId: item.applicationId,
+        referenceId: item.applicationId,
+        actionUrl: `/dashboard/hr/hiring/${item.applicationId}`,
+        payload: {
+          itemTitle: item.title,
+          candidateName: `${item.application.candidate.firstName} ${item.application.candidate.lastName}`,
+          positionTitle: item.application.position.title,
+        },
+      });
+      await tx.hrPreIdentityChecklistItem.update({ where: { id: item.id }, data: { overdueNotifiedAt: now } });
+    });
   }
   return { notified: items.length };
 };

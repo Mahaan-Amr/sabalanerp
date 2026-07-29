@@ -58,6 +58,7 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   openssl \
   clamdscan \
+  ffmpeg \
   postgresql-client \
   sqlite3 \
   tar \

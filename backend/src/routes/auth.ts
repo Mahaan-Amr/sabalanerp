@@ -6,6 +6,7 @@ import { protect, AuthRequest } from '../middleware/auth';
 import { failedLoginAlertKind } from '../services/identitySecurityPolicy';
 import { createAuthoritativeSession, cookieOptions, DEVICE_COOKIE, parseCookies, revokeSessions, serializeSession, SESSION_COOKIE } from '../services/identitySessionService';
 import { describeClient, privateNetworkLabel } from '../services/sessionClientMetadata';
+import { publishNotificationEvent } from '../services/notificationService';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -44,9 +45,18 @@ const recordFailedLogin = async (req: Request, attemptedIdentifier: string, user
   });
   if (duplicate) return;
   await prisma.$transaction(async (tx) => {
-    await tx.authenticationEvent.create({ data: { type: 'FAILED_LOGIN_ALERT', safeCategory: kind, attemptedIdentifier: alertKey, ipAddress: context.ipAddress, details: { identifierFailures, ipFailures } } });
+    const alert = await tx.authenticationEvent.create({ data: { type: 'FAILED_LOGIN_ALERT', safeCategory: kind, attemptedIdentifier: alertKey, ipAddress: context.ipAddress, details: { identifierFailures, ipFailures } } });
     const admins = await tx.user.findMany({ where: { role: 'ADMIN', isActive: true, erasedAt: null }, select: { id: true } });
-    if (admins.length) await tx.securityNotification.createMany({ data: admins.map((admin) => ({ userId: admin.id, type: 'FAILED_LOGIN_ALERT', title: 'هشدار تلاش ورود ناموفق', message: `تلاش‌های ورود ناموفق مشکوک برای ${alertKey}`, referenceId: alertKey })) });
+    if (admins.length) await publishNotificationEvent(tx, {
+      type: 'FAILED_LOGIN_ALERT',
+      deduplicationKey: `authentication-event:${alert.id}`,
+      recipientIds: admins.map((admin) => admin.id),
+      resourceType: 'AuthenticationEvent',
+      resourceId: alert.id,
+      referenceId: alertKey,
+      actionUrl: '/dashboard/admin/security',
+      payload: { alertKey },
+    });
   });
 };
 
@@ -85,7 +95,20 @@ router.post('/login', [
     const created = await prisma.$transaction(async (tx) => {
       const authoritativeSession = await createAuthoritativeSession(tx, user.id, { ...context, devicePublicId: cookies[DEVICE_COOKIE] });
       await tx.authenticationEvent.create({ data: { type: 'LOGIN_SUCCEEDED', userId: user.id, attemptedIdentifier: canonicalIdentifier, sessionIdSnapshot: authoritativeSession.session.id, ...context } });
-      if (authoritativeSession.isNewBrowser) await tx.securityNotification.create({ data: { userId: user.id, type: 'NEW_BROWSER_LOGIN', title: 'ورود از مرورگر جدید', message: `${context.browser} · ${context.operatingSystem} · ${context.ipAddress || 'IP نامشخص'}`, referenceId: authoritativeSession.session.id } });
+      if (authoritativeSession.isNewBrowser) await publishNotificationEvent(tx, {
+        type: 'NEW_BROWSER_LOGIN',
+        deduplicationKey: `new-browser-login:${authoritativeSession.session.id}`,
+        recipientIds: [user.id],
+        resourceType: 'AuthSession',
+        resourceId: authoritativeSession.session.id,
+        referenceId: authoritativeSession.session.id,
+        actionUrl: '/dashboard/personal',
+        payload: {
+          browser: context.browser,
+          operatingSystem: context.operatingSystem,
+          ipAddress: context.ipAddress || 'IP نامشخص',
+        },
+      });
       return authoritativeSession;
     });
     res.cookie(SESSION_COOKIE, created.token, cookieOptions());
@@ -146,12 +169,12 @@ router.post('/change-password', protect, [body('currentPassword').isString(), bo
 });
 
 router.get('/security-notifications', protect, async (req: AuthRequest, res) => {
-  const data = await prisma.securityNotification.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' }, take: 50 });
+  const data = await prisma.notification.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' }, take: 50 });
   res.json({ success: true, data });
 });
 
 router.put('/security-notifications/:id/read', protect, async (req: AuthRequest, res) => {
-  const result = await prisma.securityNotification.updateMany({ where: { id: req.params.id, userId: req.user!.id }, data: { readAt: new Date() } });
+  const result = await prisma.notification.updateMany({ where: { id: req.params.id, userId: req.user!.id }, data: { readAt: new Date() } });
   if (!result.count) return res.status(404).json({ success: false, error: 'Notification not found' });
   res.json({ success: true });
 });

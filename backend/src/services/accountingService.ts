@@ -43,6 +43,34 @@ type Actor = {
   role: string;
 };
 
+export type AccountingActionNotificationHook = (
+  tx: Prisma.TransactionClient,
+  context: {
+    kind: string;
+    contractId: string;
+    contractNumber: string;
+    recipientIds: string[];
+    recordIdentity: string;
+  },
+) => Promise<void>;
+
+const publishAccountingActionWithinTransaction = async (
+  hook: AccountingActionNotificationHook | undefined,
+  tx: Prisma.TransactionClient,
+  kind: string,
+  contract: any,
+  recordIdentity: string,
+) => {
+  if (!hook) return;
+  await hook(tx, {
+    kind,
+    contractId: contract.id,
+    contractNumber: contract.contractNumber,
+    recipientIds: [...new Set([contract.createdBy, contract.responsibleSellerId].filter(Boolean))] as string[],
+    recordIdentity,
+  });
+};
+
 type ListContractsQuery = {
   search?: string;
   status?: string;
@@ -970,7 +998,11 @@ const ensureEligibleContract = async (contractId: string) => {
   return contract;
 };
 
-export const executeAccountingAction = async (command: AccountingActionRequest, actor: Actor) => {
+export const executeAccountingAction = async (
+  command: AccountingActionRequest,
+  actor: Actor,
+  notificationHook?: AccountingActionNotificationHook,
+) => {
   const period = command.periodId
     ? await prisma.accountingPeriod.findUnique({ where: { id: command.periodId } })
     : await getOrCreateCurrentPeriod();
@@ -979,15 +1011,15 @@ export const executeAccountingAction = async (command: AccountingActionRequest, 
 
   switch (command.kind) {
     case 'CREATE_INVOICE':
-      return createInvoiceCandidate(command, actor, period.id);
+      return createInvoiceCandidate(command, actor, period.id, notificationHook);
     case 'CREATE_REPLACEMENT_INVOICE':
-      return createReplacementInvoiceCandidate(command, actor, period.id);
+      return createReplacementInvoiceCandidate(command, actor, period.id, notificationHook);
     case 'CREATE_RECEIVABLE':
-      return createReceivable(command, actor, period.id);
+      return createReceivable(command, actor, period.id, notificationHook);
     case 'APPROVE_FINANCIAL_INVOICE':
-      return approveFinancialInvoice(command, actor);
+      return approveFinancialInvoice(command, actor, notificationHook);
     case 'REGISTER_RECEIPT':
-      return registerReceipt(command, actor);
+      return registerReceipt(command, actor, notificationHook);
     case 'UPDATE_CHECK_STATUS':
       return updateCheckStatus(command, actor);
     case 'MARK_TAX_READY':
@@ -997,7 +1029,7 @@ export const executeAccountingAction = async (command: AccountingActionRequest, 
     case 'REQUEST_CORRECTION':
       return requestCorrection(command, actor);
     case 'APPROVE_CORRECTION_FOR_SALES_EDIT':
-      return approveCorrectionForSalesEdit(command, actor);
+      return approveCorrectionForSalesEdit(command, actor, notificationHook);
     case 'DECLINE_CORRECTION':
       return declineCorrectionRequest(command, actor);
     case 'FLAG_CONTRACT':
@@ -1017,7 +1049,7 @@ export const executeAccountingAction = async (command: AccountingActionRequest, 
   }
 };
 
-const createInvoiceCandidate = async (command: AccountingActionRequest, actor: Actor, periodId: string) => {
+const createInvoiceCandidate = async (command: AccountingActionRequest, actor: Actor, periodId: string, notificationHook?: AccountingActionNotificationHook) => {
   if (!command.contractId) throw new Error('contractId is required');
   const contract = await ensureEligibleContract(command.contractId);
   const settings = await getDefaultSettings();
@@ -1098,13 +1130,14 @@ const createInvoiceCandidate = async (command: AccountingActionRequest, actor: A
       note: command.note || null
     });
 
+    await publishAccountingActionWithinTransaction(notificationHook, tx, command.kind, contract, invoice.id);
     return invoice;
   });
 
   return actionResponse('APPLIED', 'پیش‌نویس صورتحساب ایجاد شد', { contractId: contract.id, financialRecordIds: [record.id] });
 };
 
-const createReplacementInvoiceCandidate = async (command: AccountingActionRequest, actor: Actor, periodId: string) => {
+const createReplacementInvoiceCandidate = async (command: AccountingActionRequest, actor: Actor, periodId: string, notificationHook?: AccountingActionNotificationHook) => {
   if (!command.contractId) throw new Error('contractId is required');
   if (!command.correctionRequestId) throw new Error('correctionRequestId is required');
   if (!command.replacesRecordId) throw new Error('replacesRecordId is required');
@@ -1216,13 +1249,14 @@ const createReplacementInvoiceCandidate = async (command: AccountingActionReques
       note: command.note || null
     });
 
+    await publishAccountingActionWithinTransaction(notificationHook, tx, command.kind, contract, invoice.id);
     return invoice;
   });
 
   return actionResponse('APPLIED', 'Replacement invoice draft created', { contractId: contract.id, financialRecordIds: [record.id] });
 };
 
-const approveFinancialInvoice = async (command: AccountingActionRequest, actor: Actor) => {
+const approveFinancialInvoice = async (command: AccountingActionRequest, actor: Actor, notificationHook?: AccountingActionNotificationHook) => {
   const invoiceId = command.invoiceId || command.recordId;
   if (!invoiceId) throw new Error('invoiceId is required');
 
@@ -1317,13 +1351,17 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       note: [command.note, replacementNumberReuseNote].filter(Boolean).join(' | ') || null
     });
 
+    if (updated.contractId) {
+      const contract = await tx.salesContract.findUnique({ where: { id: updated.contractId } });
+      if (contract) await publishAccountingActionWithinTransaction(notificationHook, tx, command.kind, contract, updated.id);
+    }
     return updated;
   });
 
   return actionResponse('APPLIED', 'تایید مالی ثبت شد', { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
 };
 
-const createReceivable = async (command: AccountingActionRequest, actor: Actor, periodId: string) => {
+const createReceivable = async (command: AccountingActionRequest, actor: Actor, periodId: string, notificationHook?: AccountingActionNotificationHook) => {
   if (!command.contractId) throw new Error('contractId is required');
   const contract = await ensureEligibleContract(command.contractId);
   const settings = await getDefaultSettings();
@@ -1398,13 +1436,14 @@ const createReceivable = async (command: AccountingActionRequest, actor: Actor, 
       note: command.note || null
     });
 
+    await publishAccountingActionWithinTransaction(notificationHook, tx, command.kind, contract, record.id);
     return { record, receivable };
   });
 
   return actionResponse('APPLIED', 'دریافتنی ایجاد شد', { contractId: contract.id, financialRecordIds: [result.record.id], receivableIds: [result.receivable.id] });
 };
 
-const registerReceipt = async (command: AccountingActionRequest, actor: Actor) => {
+const registerReceipt = async (command: AccountingActionRequest, actor: Actor, notificationHook?: AccountingActionNotificationHook) => {
   if (!command.contractId) throw new Error('contractId is required');
   const contract = await ensureEligibleContract(command.contractId);
   const method = command.method && command.method in AccountingPaymentMethod
@@ -1450,6 +1489,7 @@ const registerReceipt = async (command: AccountingActionRequest, actor: Actor) =
       note: command.note || null
     });
 
+    await publishAccountingActionWithinTransaction(notificationHook, tx, command.kind, contract, event.id);
     return event;
   });
 
@@ -1655,7 +1695,7 @@ const requestCorrection = async (command: AccountingActionRequest, actor: Actor)
   return actionResponse('APPLIED', 'درخواست اصلاح ثبت شد', { contractId: correction.contractId || undefined });
 };
 
-const approveCorrectionForSalesEdit = async (command: AccountingActionRequest, actor: Actor) => {
+const approveCorrectionForSalesEdit = async (command: AccountingActionRequest, actor: Actor, notificationHook?: AccountingActionNotificationHook) => {
   const correctionRequestId = command.correctionRequestId || command.recordId;
   if (!correctionRequestId) throw new Error('correctionRequestId is required');
 
@@ -1697,6 +1737,8 @@ const approveCorrectionForSalesEdit = async (command: AccountingActionRequest, a
       note: command.note || command.resolutionNote || null
     });
 
+    const contract = await tx.salesContract.findUnique({ where: { id: updated.contractId! } });
+    if (contract) await publishAccountingActionWithinTransaction(notificationHook, tx, command.kind, contract, updated.id);
     return updated;
   });
 

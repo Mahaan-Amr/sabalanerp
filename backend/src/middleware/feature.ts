@@ -235,7 +235,8 @@ export const FEATURES = {
   SECURITY_MISSIONS_APPROVE: 'security_missions_approve',
   SECURITY_SIGNATURE_UPDATE: 'security_signature_update',
   SECURITY_SIGNATURE_VIEW: 'security_signature_view',
-  SECURITY_SIGNATURE_VALIDATE: 'security_signature_validate'
+  SECURITY_SIGNATURE_VALIDATE: 'security_signature_validate',
+  SUPPORT_SECURITY_INCIDENT_HANDLE: 'support_security_incident_handle'
 } as const;
 
 export type Feature = typeof FEATURES[keyof typeof FEATURES];
@@ -465,7 +466,8 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.SECURITY_MISSIONS_APPROVE]: 'security',
   [FEATURES.SECURITY_SIGNATURE_UPDATE]: 'security',
   [FEATURES.SECURITY_SIGNATURE_VIEW]: 'security',
-  [FEATURES.SECURITY_SIGNATURE_VALIDATE]: 'security'
+  [FEATURES.SECURITY_SIGNATURE_VALIDATE]: 'security',
+  [FEATURES.SUPPORT_SECURITY_INCIDENT_HANDLE]: 'security'
 };
 
 export const FEATURE_LABELS: Record<Feature, string> = {
@@ -668,7 +670,8 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   [FEATURES.SECURITY_MISSIONS_APPROVE]: 'Security Missions - Approve',
   [FEATURES.SECURITY_SIGNATURE_UPDATE]: 'Security Signature - Update',
   [FEATURES.SECURITY_SIGNATURE_VIEW]: 'Security Signature - View',
-  [FEATURES.SECURITY_SIGNATURE_VALIDATE]: 'Security Signature - Validate'
+  [FEATURES.SECURITY_SIGNATURE_VALIDATE]: 'Security Signature - Validate',
+  [FEATURES.SUPPORT_SECURITY_INCIDENT_HANDLE]: 'Support - Designated Security Incident Handler'
 };
 
 /**

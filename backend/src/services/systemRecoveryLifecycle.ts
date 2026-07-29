@@ -9,6 +9,7 @@ import {
 } from './systemRecoveryEngine';
 import { RECOVERY_FRESHNESS_MS } from './systemRecoveryPolicy';
 import { setRecoveryRuntimeState } from './recoveryRuntime';
+import { publishNotificationEvent } from './notificationService';
 
 const recoverInterruptedRestore = async (prisma: PrismaClient) => {
   const journal = await readRestoreJournal();
@@ -55,19 +56,18 @@ const notifyStaleBackup = async (prisma: PrismaClient) => {
   });
   if (latest?.downloadedAt && Date.now() - latest.downloadedAt.getTime() < RECOVERY_FRESHNESS_MS) return;
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const duplicate = await prisma.securityNotification.findFirst({
+  const duplicate = await prisma.notification.findFirst({
     where: { type: 'RECOVERY_BACKUP_STALE', createdAt: { gte: since } },
   });
   if (duplicate) return;
   const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isActive: true, erasedAt: null }, select: { id: true } });
   if (!admins.length) return;
-  await prisma.securityNotification.createMany({
-    data: admins.map((admin) => ({
-      userId: admin.id,
-      type: 'RECOVERY_BACKUP_STALE',
-      title: 'نسخه پشتیبان بازیابی به‌روز نیست',
-      message: 'بیش از هفت روز است که نسخه پشتیبان کامل دانلود نشده است. فایل باقی‌مانده روی همین سرور محافظت در برابر خرابی سرور نیست.',
-    })),
+  await publishNotificationEvent(prisma, {
+    type: 'RECOVERY_BACKUP_STALE',
+    deduplicationKey: `recovery-backup-stale:${new Date().toISOString().slice(0, 10)}`,
+    recipientIds: admins.map((admin) => admin.id),
+    resourceType: 'RecoveryCoverage',
+    actionUrl: '/dashboard/admin/system-recovery',
   });
 };
 

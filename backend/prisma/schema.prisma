@@ -102,16 +102,48 @@ model User {
   browserProfiles                            RecognizedBrowserProfile[]
   authenticationEvents                       AuthenticationEvent[]                @relation("AuthenticationEventUser")
   authenticationActions                      AuthenticationEvent[]                @relation("AuthenticationEventActor")
-  securityNotifications                      SecurityNotification[]
+  notifications                              Notification[]
+  actedNotificationEvents                    NotificationEvent[]                  @relation("NotificationEventActor")
+  createdNotificationPolicies                NotificationPolicyVersion[]          @relation("NotificationPolicyCreator")
+  webPushSubscriptions                       WebPushSubscription[]
+  notificationPreference                     NotificationPreference?
+  notificationPreferenceAudits               NotificationPreferenceAudit[]
+  reportedSupportTickets                     SupportTicket[]                      @relation("SupportTicketReporter")
+  supportTicketParticipants                  SupportTicketParticipant[]
+  supportTicketEntries                       SupportTicketEntry[]                 @relation("SupportTicketEntryAuthor")
+  supportTicketAuditEvents                   SupportTicketAuditEvent[]            @relation("SupportTicketAuditActor")
+  supportTicketAttachmentActions             SupportTicketAttachmentAccess[]
+  supportTicketLegalHolds                    SupportTicketLegalHold[]             @relation("SupportTicketLegalHoldActor")
+  supportTicketDiagnosticBundles             SupportTicketDiagnosticBundle[]      @relation("SupportTicketDiagnosticBundleActor")
+  createdSupportSlaPolicies                  SupportSlaPolicyVersion[]            @relation("SupportSlaPolicyCreator")
   personnelBulkOperations                    PersonnelBulkOperation[]             @relation("PersonnelBulkOperationActor")
   userBulkOperations                         UserBulkOperation[]                  @relation("UserBulkOperationActor")
   createdRecoveryOperations                  RecoveryOperation[]                  @relation("RecoveryOperationCreator")
   approvedRecoveryOperations                 RecoveryOperation[]                  @relation("RecoveryOperationApprover")
   recoveryAuditEvents                        RecoveryAuditEvent[]                 @relation("RecoveryAuditActor")
+  apiIdempotencyRecords                      ApiIdempotencyRecord[]
 
   @@index([createdByUserId])
   @@index([erasedAt])
   @@map("users")
+}
+
+model ApiIdempotencyRecord {
+  id             String   @id @default(cuid())
+  userId         String
+  key            String
+  scope          String
+  status         String   @default("PENDING")
+  responseStatus Int?
+  responseBody   Json?
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key, scope])
+  @@index([expiresAt])
+  @@map("api_idempotency_records")
 }
 
 enum UserCreationSource {
@@ -204,19 +236,349 @@ model AuthenticationEvent {
   @@map("authentication_events")
 }
 
-model SecurityNotification {
+model NotificationEvent {
+  id               String              @id @default(cuid())
+  type             String
+  actorId          String?
+  workspace        String?
+  feature          String?
+  resourceType     String?
+  resourceId       String?
+  payload          Json?
+  deduplicationKey String              @unique
+  createdAt        DateTime            @default(now())
+  actor            User?               @relation("NotificationEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+  notifications    Notification[]
+  outbox           NotificationOutbox?
+
+  @@index([type, createdAt])
+  @@index([resourceType, resourceId, createdAt])
+  @@map("notification_events")
+}
+
+model NotificationPolicyVersion {
+  id                 String         @id @default(cuid())
+  eventType          String
+  version            Int
+  enabled            Boolean        @default(true)
+  mandatory          Boolean        @default(false)
+  titleTemplate      String
+  messageTemplate    String
+  priority           String         @default("NORMAL")
+  channels           Json
+  recipientResolvers Json
+  batching           String         @default("IMMEDIATE")
+  createdById        String?
+  changeReason       String?
+  createdAt          DateTime       @default(now())
+  createdBy          User?          @relation("NotificationPolicyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  notifications      Notification[]
+
+  @@unique([eventType, version])
+  @@index([eventType, createdAt])
+  @@map("notification_policy_versions")
+}
+
+model Notification {
+  id               String                        @id @default(cuid())
+  eventId          String?
+  userId           String
+  policyVersionId  String?
+  type             String
+  title            String
+  message          String
+  priority         String                        @default("NORMAL")
+  actionUrl        String?
+  referenceId      String?
+  readAt           DateTime?
+  createdAt        DateTime                      @default(now())
+  event            NotificationEvent?            @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  policyVersion    NotificationPolicyVersion?    @relation(fields: [policyVersionId], references: [id], onDelete: SetNull)
+  user             User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveryAttempts NotificationDeliveryAttempt[]
+
+  @@unique([eventId, userId])
+  @@index([userId, readAt, createdAt])
+  @@index([type, createdAt])
+  @@map("security_notifications")
+}
+
+model NotificationOutbox {
+  id          String            @id @default(cuid())
+  eventId     String            @unique
+  status      String            @default("PENDING")
+  attempts    Int               @default(0)
+  availableAt DateTime          @default(now())
+  claimedAt   DateTime?
+  processedAt DateTime?
+  lastError   String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  event       NotificationEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt])
+  @@map("notification_outbox")
+}
+
+model NotificationDeliveryAttempt {
+  id             String       @id @default(cuid())
+  notificationId String
+  channel        String
+  status         String
+  error          String?
+  createdAt      DateTime     @default(now())
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId, channel, createdAt])
+  @@index([status, createdAt])
+  @@map("notification_delivery_attempts")
+}
+
+model WebPushSubscription {
   id          String    @id @default(cuid())
   userId      String
-  type        String
-  title       String
-  message     String
-  referenceId String?
-  readAt      DateTime?
+  endpoint    String    @unique
+  p256dh      String
+  auth        String
+  deviceLabel String?
+  userAgent   String?
+  disabledAt  DateTime?
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
   createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, readAt, createdAt])
-  @@map("security_notifications")
+  @@index([userId, disabledAt, createdAt])
+  @@map("web_push_subscriptions")
+}
+
+model NotificationPreference {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  webPushEnabled      Boolean  @default(false)
+  mutedCategories     Json
+  lowPriorityDelivery String   @default("IMMEDIATE")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+model NotificationPreferenceAudit {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String
+  beforeData Json?
+  afterData  Json?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notification_preference_audits")
+}
+
+model SupportTicket {
+  id                         String                          @id @default(cuid())
+  referenceCode              String                          @unique
+  idempotencyKey             String?                         @unique
+  reporterId                 String
+  title                      String
+  type                       String
+  impact                     String
+  workaroundExists           Boolean
+  reportedWorkspace          String?
+  reportedFeature            String?
+  originRoute                String
+  diagnosticSnapshot         Json
+  releaseBuild               String?
+  effectiveAccessSnapshot    Json
+  sensitiveEvidenceConsent   Boolean                         @default(false)
+  sensitiveEvidenceSnapshot  Json?
+  sensitiveEvidenceDeletedAt DateTime?
+  restrictedIncident         Boolean                         @default(false)
+  status                     String                          @default("NEW")
+  suggestedPriority          String
+  confirmedPriority          String?
+  priorityReason             String?
+  acknowledgedAt             DateTime?
+  waitingForReporterAt       DateTime?
+  resolvedAt                 DateTime?
+  closedAt                   DateTime?
+  reopenUntil                DateTime?
+  canonicalTicketId          String?
+  previousTicketId           String?                         @unique
+  slaPolicyVersion           Int?
+  acknowledgmentDueAt        DateTime?
+  resolutionDueAt            DateTime?
+  createdAt                  DateTime                        @default(now())
+  updatedAt                  DateTime                        @updatedAt
+  reporter                   User                            @relation("SupportTicketReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  participants               SupportTicketParticipant[]
+  entries                    SupportTicketEntry[]
+  attachments                SupportTicketAttachment[]
+  auditEvents                SupportTicketAuditEvent[]
+  legalHolds                 SupportTicketLegalHold[]
+  diagnosticBundles          SupportTicketDiagnosticBundle[]
+  canonicalTicket            SupportTicket?                  @relation("SupportTicketDuplicates", fields: [canonicalTicketId], references: [id], onDelete: SetNull)
+  duplicateTickets           SupportTicket[]                 @relation("SupportTicketDuplicates")
+  previousTicket             SupportTicket?                  @relation("SupportTicketFollowUps", fields: [previousTicketId], references: [id], onDelete: SetNull)
+  followUpTickets            SupportTicket[]                 @relation("SupportTicketFollowUps")
+
+  @@index([reporterId, createdAt])
+  @@index([reportedWorkspace, status, createdAt])
+  @@index([restrictedIncident, status, createdAt])
+  @@index([sensitiveEvidenceDeletedAt])
+  @@index([canonicalTicketId])
+  @@map("support_tickets")
+}
+
+model SupportTicketParticipant {
+  id         String        @id @default(cuid())
+  ticketId   String
+  userId     String
+  role       String
+  assignedAt DateTime      @default(now())
+  removedAt  DateTime?
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user       User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([ticketId, userId])
+  @@index([userId, removedAt, assignedAt])
+  @@map("support_ticket_participants")
+}
+
+model SupportTicketEntry {
+  id                 String                    @id @default(cuid())
+  ticketId           String
+  authorId           String?
+  kind               String                    @default("COMMENT")
+  body               String?
+  correctionOfId     String?
+  transcriptOriginal String?
+  transcriptCurrent  String?
+  transcriptVersion  Int                       @default(0)
+  redactedAt         DateTime?
+  redactionReason    String?
+  createdAt          DateTime                  @default(now())
+  ticket             SupportTicket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author             User?                     @relation("SupportTicketEntryAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  correctionOf       SupportTicketEntry?       @relation("SupportTicketCorrections", fields: [correctionOfId], references: [id], onDelete: SetNull)
+  corrections        SupportTicketEntry[]      @relation("SupportTicketCorrections")
+  attachments        SupportTicketAttachment[]
+
+  @@index([ticketId, createdAt])
+  @@index([correctionOfId])
+  @@map("support_ticket_entries")
+}
+
+model SupportTicketAttachment {
+  id                String                          @id @default(cuid())
+  ticketId          String
+  entryId           String?
+  kind              String
+  storageName       String?                         @unique
+  originalName      String
+  mimeType          String
+  size              Int
+  sha256            String
+  durationSeconds   Int?
+  sensitive         Boolean                         @default(false)
+  malwareScanStatus String                          @default("PENDING")
+  retentionClass    String
+  redactedAt        DateTime?
+  redactionReason   String?
+  redactedById      String?
+  deletedAt         DateTime?
+  deletionPolicy    String?
+  createdAt         DateTime                        @default(now())
+  ticket            SupportTicket                   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  entry             SupportTicketEntry?             @relation(fields: [entryId], references: [id], onDelete: SetNull)
+  accesses          SupportTicketAttachmentAccess[]
+
+  @@index([ticketId, sensitive, createdAt])
+  @@index([redactedAt])
+  @@index([deletedAt])
+  @@map("support_ticket_attachments")
+}
+
+model SupportTicketAttachmentAccess {
+  id           String                  @id @default(cuid())
+  attachmentId String
+  userId       String
+  action       String
+  reason       String?
+  createdAt    DateTime                @default(now())
+  attachment   SupportTicketAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  user         User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([attachmentId, createdAt])
+  @@index([userId, createdAt])
+  @@map("support_ticket_attachment_accesses")
+}
+
+model SupportTicketAuditEvent {
+  id         String        @id @default(cuid())
+  ticketId   String
+  actorId    String?
+  action     String
+  reason     String?
+  beforeData Json?
+  afterData  Json?
+  createdAt  DateTime      @default(now())
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor      User?         @relation("SupportTicketAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, createdAt])
+  @@map("support_ticket_audit_events")
+}
+
+model SupportTicketLegalHold {
+  id         String        @id @default(cuid())
+  ticketId   String
+  actorId    String
+  reason     String
+  releasedAt DateTime?
+  createdAt  DateTime      @default(now())
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor      User          @relation("SupportTicketLegalHoldActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, releasedAt])
+  @@map("support_ticket_legal_holds")
+}
+
+model SupportTicketDiagnosticBundle {
+  id                             String        @id @default(cuid())
+  ticketId                       String
+  generatedById                  String
+  status                         String        @default("PREVIEW")
+  markdown                       String
+  json                           Json
+  selectedSensitiveAttachmentIds Json
+  confirmationReason             String?
+  confirmedAt                    DateTime?
+  createdAt                      DateTime      @default(now())
+  ticket                         SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  generatedBy                    User          @relation("SupportTicketDiagnosticBundleActor", fields: [generatedById], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, createdAt])
+  @@index([generatedById, createdAt])
+  @@map("support_ticket_diagnostic_bundles")
+}
+
+model SupportSlaPolicyVersion {
+  id           String   @id @default(cuid())
+  version      Int      @unique
+  calendar     Json
+  targets      Json
+  createdById  String?
+  changeReason String
+  createdAt    DateTime @default(now())
+  createdBy    User?    @relation("SupportSlaPolicyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("support_sla_policy_versions")
 }
 
 model PersonnelBulkOperation {
@@ -264,7 +626,7 @@ model RecoveryOperation {
   storageName           String?
   originalName          String?
   encryptedSha256       String?
-  size                   BigInt?
+  size                  BigInt?
   formatVersion         Int                  @default(1)
   sourceAppVersion      String?
   sourceCommit          String?
@@ -3649,16 +4011,16 @@ model HrApplicationFormRevision {
 }
 
 model HrHiringAuthority {
-  id        String                @id @default(cuid())
-  userId    String
-  authority HrHiringAuthorityType
-  isActive  Boolean               @default(true)
-  expiresAt DateTime?
-  createdBy String
-  createdAt DateTime              @default(now())
-  updatedAt DateTime              @updatedAt
-  revokedAt DateTime?
-  revokedBy String?
+  id               String                @id @default(cuid())
+  userId           String
+  authority        HrHiringAuthorityType
+  isActive         Boolean               @default(true)
+  expiresAt        DateTime?
+  createdBy        String
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  revokedAt        DateTime?
+  revokedBy        String?
   revocationReason String?
 
   @@unique([userId, authority])

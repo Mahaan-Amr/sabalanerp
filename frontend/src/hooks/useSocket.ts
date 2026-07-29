@@ -13,9 +13,9 @@ export const useSocket = () => {
   useEffect(() => {
     if (isAuthenticated && user) {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
-      const socketUrl = apiUrl.startsWith('/')
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (apiUrl.startsWith('/')
         ? window.location.origin
-        : apiUrl.replace(/\/api\/?$/, '');
+        : apiUrl.replace(/\/api\/?$/, ''));
 
       // Initialize socket connection
       const newSocket = io(socketUrl, { withCredentials: true });

@@ -36,7 +36,8 @@ import {
   FaUserShield,
   FaChartPie,
   FaMoneyBillWave,
-  FaTruck
+  FaTruck,
+  FaBell
 } from 'react-icons/fa';
 import { useWorkspace, WORKSPACES, WORKSPACE_CONFIG, WORKSPACE_PERMISSIONS } from '@/contexts/WorkspaceContext';
 import { dashboardAPI, securityAPI } from '@/lib/api';
@@ -232,6 +233,20 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             href: '/dashboard/admin/settings',
             icon: FaCog,
             show: true
+          },
+          {
+            name: 'Notification Policies',
+            namePersian: 'سیاست‌های اعلان',
+            href: '/dashboard/admin/notification-policies',
+            icon: FaBell,
+            show: currentUser?.role === 'ADMIN'
+          },
+          {
+            name: 'Support Targets',
+            namePersian: 'اهداف زمانی پشتیبانی',
+            href: '/dashboard/admin/support-targets',
+            icon: FaClock,
+            show: currentUser?.role === 'ADMIN'
           },
           {
             name: 'Sabalan Calendar',

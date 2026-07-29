@@ -1,0 +1,313 @@
+export type NotificationPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+export type NotificationChannel = 'IN_APP' | 'REALTIME' | 'WEB_PUSH';
+export type NotificationRecipientResolver =
+  | 'DIRECT_USER'
+  | 'ACTIVE_ADMINS'
+  | 'SECURITY_INCIDENT_HANDLERS'
+  | 'WORKSPACE_USERS'
+  | 'HR_AUTHORITIES'
+  | 'WORKSPACE_MANAGERS'
+  | 'RESOURCE_OWNER'
+  | 'EXPLICIT_WATCHERS';
+
+export interface RegisteredNotificationEvent {
+  type: string;
+  mandatory: boolean;
+  titleTemplate: string;
+  messageTemplate: string;
+  priority: NotificationPriority;
+  allowedVariables: readonly string[];
+  allowedChannels: readonly NotificationChannel[];
+  allowedRecipientResolvers: readonly NotificationRecipientResolver[];
+}
+
+export interface NotificationPolicyDraft {
+  enabled: boolean;
+  titleTemplate: string;
+  messageTemplate: string;
+  priority: NotificationPriority;
+  channels: NotificationChannel[];
+  recipientResolvers: NotificationRecipientResolver[];
+}
+
+const REGISTERED_NOTIFICATION_EVENTS = {
+  FAILED_LOGIN_ALERT: {
+    type: 'FAILED_LOGIN_ALERT',
+    mandatory: true,
+    titleTemplate: 'هشدار تلاش ورود ناموفق',
+    messageTemplate: 'تلاش‌های ورود ناموفق مشکوک برای {{alertKey}}',
+    priority: 'URGENT',
+    allowedVariables: ['alertKey'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['ACTIVE_ADMINS'],
+  },
+  HIRING_CHECKLIST_OVERDUE: {
+    type: 'HIRING_CHECKLIST_OVERDUE',
+    mandatory: false,
+    titleTemplate: 'پیگیری الزام معوق جذب',
+    messageTemplate: 'الزام «{{itemTitle}}» برای {{candidateName}} در جایگاه {{positionTitle}} معوق شده است.',
+    priority: 'HIGH',
+    allowedVariables: ['itemTitle', 'candidateName', 'positionTitle'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['HR_AUTHORITIES'],
+  },
+  HIRING_INVITATION_SMS_FAILED: {
+    type: 'HIRING_INVITATION_SMS_FAILED',
+    mandatory: true,
+    titleTemplate: 'عدم تحویل پیامک دعوت استخدام',
+    messageTemplate: 'SMS.ir عدم تحویل پیامک دعوت متقاضی را گزارش کرده است.',
+    priority: 'HIGH',
+    allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['HR_AUTHORITIES'],
+  },
+  HIRING_OFFER_DECLINED: {
+    type: 'HIRING_OFFER_DECLINED',
+    mandatory: true,
+    titleTemplate: 'رد پیشنهاد همکاری',
+    messageTemplate: '{{candidateName}} پیشنهاد جایگاه {{positionTitle}} را رد کرد.',
+    priority: 'HIGH',
+    allowedVariables: ['candidateName', 'positionTitle'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['HR_AUTHORITIES'],
+  },
+  NEW_BROWSER_LOGIN: {
+    type: 'NEW_BROWSER_LOGIN',
+    mandatory: true,
+    titleTemplate: 'ورود از مرورگر جدید',
+    messageTemplate: '{{browser}} · {{operatingSystem}} · {{ipAddress}}',
+    priority: 'URGENT',
+    allowedVariables: ['browser', 'operatingSystem', 'ipAddress'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  RECOVERY_BACKUP_STALE: {
+    type: 'RECOVERY_BACKUP_STALE',
+    mandatory: true,
+    titleTemplate: 'نسخه پشتیبان بازیابی به‌روز نیست',
+    messageTemplate: 'بیش از هفت روز است که نسخه پشتیبان کامل دانلود نشده است. فایل باقی‌مانده روی همین سرور محافظت در برابر خرابی سرور نیست.',
+    priority: 'URGENT',
+    allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['ACTIVE_ADMINS'],
+  },
+  SYSTEM_RECOVERY_COMPLETED: {
+    type: 'SYSTEM_RECOVERY_COMPLETED',
+    mandatory: true,
+    titleTemplate: 'بازیابی کامل سامانه انجام شد',
+    messageTemplate: 'بازیابی توسط {{actorDisplay}} تکمیل شد. ورود دوباره برای همه کاربران الزامی است.',
+    priority: 'URGENT',
+    allowedVariables: ['actorDisplay'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['ACTIVE_ADMINS'],
+  },
+  SYSTEM_RECOVERY_STARTED: {
+    type: 'SYSTEM_RECOVERY_STARTED',
+    mandatory: true,
+    titleTemplate: 'بازیابی کامل سامانه آغاز شد',
+    messageTemplate: 'بازیابی توسط {{actorDisplay}} آغاز شد.',
+    priority: 'URGENT',
+    allowedVariables: ['actorDisplay'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['ACTIVE_ADMINS'],
+  },
+  SUPPORT_TICKET_CREATED: {
+    type: 'SUPPORT_TICKET_CREATED',
+    mandatory: true,
+    titleTemplate: 'تیکت پشتیبانی جدید',
+    messageTemplate: 'تیکت {{referenceCode}} توسط {{reporterName}} ثبت شد.',
+    priority: 'HIGH',
+    allowedVariables: ['referenceCode', 'reporterName'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['ACTIVE_ADMINS', 'SECURITY_INCIDENT_HANDLERS', 'WORKSPACE_MANAGERS'],
+  },
+  SUPPORT_TICKET_ASSIGNED: {
+    type: 'SUPPORT_TICKET_ASSIGNED',
+    mandatory: true,
+    titleTemplate: 'تیکت پشتیبانی به شما ارجاع شد',
+    messageTemplate: 'رسیدگی به تیکت {{referenceCode}} به شما واگذار شد.',
+    priority: 'HIGH',
+    allowedVariables: ['referenceCode'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  SUPPORT_TICKET_RESPONSE: {
+    type: 'SUPPORT_TICKET_RESPONSE',
+    mandatory: true,
+    titleTemplate: 'پاسخ جدید به تیکت',
+    messageTemplate: 'برای تیکت {{referenceCode}} پاسخ جدیدی ثبت شد.',
+    priority: 'HIGH',
+    allowedVariables: ['referenceCode'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER', 'EXPLICIT_WATCHERS'],
+  },
+  SUPPORT_TICKET_REPORTER_REMINDER: {
+    type: 'SUPPORT_TICKET_REPORTER_REMINDER',
+    mandatory: true,
+    titleTemplate: 'تیکت منتظر پاسخ شماست',
+    messageTemplate: 'برای ادامه رسیدگی به تیکت {{referenceCode}} پاسخ دهید.',
+    priority: 'HIGH',
+    allowedVariables: ['referenceCode'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  SUPPORT_TICKET_SLA_WARNING: {
+    type: 'SUPPORT_TICKET_SLA_WARNING',
+    mandatory: true,
+    titleTemplate: 'در آستانه تأخیر',
+    messageTemplate: 'تیکت {{referenceCode}} به زمان هدف نزدیک شده است.',
+    priority: 'URGENT',
+    allowedVariables: ['referenceCode'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  SUPPORT_TICKET_SLA_BREACHED: {
+    type: 'SUPPORT_TICKET_SLA_BREACHED',
+    mandatory: true,
+    titleTemplate: 'تأخیر در رسیدگی',
+    messageTemplate: 'زمان هدف تیکت {{referenceCode}} گذشته است.',
+    priority: 'URGENT',
+    allowedVariables: ['referenceCode'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['WORKSPACE_MANAGERS', 'ACTIVE_ADMINS'],
+  },
+  SALES_CONTRACT_READY_FOR_ACCOUNTING: {
+    type: 'SALES_CONTRACT_READY_FOR_ACCOUNTING',
+    mandatory: true,
+    titleTemplate: 'قرارداد قابل بررسی',
+    messageTemplate: 'قرارداد قابل بررسی از {{actorName}}',
+    priority: 'HIGH',
+    allowedVariables: ['actorName'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['WORKSPACE_USERS'],
+  },
+  ACCOUNTING_RECORD_SUBMITTED: {
+    type: 'ACCOUNTING_RECORD_SUBMITTED',
+    mandatory: true,
+    titleTemplate: 'رکورد مالی جدید',
+    messageTemplate: 'رکورد مالی قرارداد {{contractNumber}} توسط {{actorName}} ثبت شد.',
+    priority: 'HIGH',
+    allowedVariables: ['contractNumber', 'actorName'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['RESOURCE_OWNER'],
+  },
+  ACCOUNTING_CORRECTION_REQUIRED: {
+    type: 'ACCOUNTING_CORRECTION_REQUIRED',
+    mandatory: true,
+    titleTemplate: 'نیازمند اصلاح',
+    messageTemplate: 'قرارداد {{contractNumber}} نیازمند اصلاح فروش است.',
+    priority: 'URGENT',
+    allowedVariables: ['contractNumber'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['RESOURCE_OWNER'],
+  },
+} as const satisfies Record<string, RegisteredNotificationEvent>;
+
+export type RegisteredNotificationEventType = keyof typeof REGISTERED_NOTIFICATION_EVENTS;
+
+export const notificationEventDefinition = (
+  type: RegisteredNotificationEventType,
+): RegisteredNotificationEvent => REGISTERED_NOTIFICATION_EVENTS[type];
+
+export const registeredNotificationEventTypes = (): RegisteredNotificationEventType[] =>
+  (Object.keys(REGISTERED_NOTIFICATION_EVENTS) as RegisteredNotificationEventType[]).sort();
+
+export const registeredNotificationEventDefinitions = (): RegisteredNotificationEvent[] =>
+  registeredNotificationEventTypes().map((type) => notificationEventDefinition(type));
+
+const templateVariables = (template: string): string[] =>
+  [...template.matchAll(/\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}/g)].map((match) => match[1]);
+
+export const validateNotificationPolicyDraft = (
+  definition: RegisteredNotificationEvent,
+  draft: NotificationPolicyDraft,
+): { valid: boolean; errors: string[] } => {
+  const errors: string[] = [];
+  if (definition.mandatory && !draft.enabled) {
+    errors.push('اعلان الزامی را نمی‌توان غیرفعال کرد.');
+  }
+
+  const variables = [...templateVariables(draft.titleTemplate), ...templateVariables(draft.messageTemplate)];
+  for (const variable of variables) {
+    if (!definition.allowedVariables.includes(variable)) {
+      errors.push(`متغیر «${variable}» برای این رویداد مجاز نیست.`);
+    }
+  }
+
+  for (const channel of draft.channels) {
+    if (!definition.allowedChannels.includes(channel)) {
+      errors.push(`کانال «${channel}» برای این رویداد مجاز نیست.`);
+    }
+  }
+
+  for (const resolver of draft.recipientResolvers) {
+    if (!definition.allowedRecipientResolvers.includes(resolver)) {
+      errors.push(`مخاطب «${resolver}» برای این رویداد مجاز نیست.`);
+    }
+  }
+
+  return { valid: errors.length === 0, errors: [...new Set(errors)] };
+};
+
+const renderTemplate = (template: string, payload: Record<string, unknown>): string =>
+  template.replace(/\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}/g, (_match, variable: string) => {
+    const value = payload[variable];
+    return value === null || value === undefined ? 'نامشخص' : String(value);
+  });
+
+export const renderNotificationPolicy = ({
+  definition,
+  payload,
+  policy,
+}: {
+  definition: RegisteredNotificationEvent;
+  payload: Record<string, unknown>;
+  policy?: Partial<Pick<NotificationPolicyDraft, 'titleTemplate' | 'messageTemplate' | 'priority'>>;
+}): { title: string; message: string; priority: NotificationPriority } => ({
+  title: renderTemplate(policy?.titleTemplate || definition.titleTemplate, payload),
+  message: renderTemplate(policy?.messageTemplate || definition.messageTemplate, payload),
+  priority: policy?.priority || definition.priority,
+});
+
+export const materializeNotificationEvent = ({
+  definition,
+  actorId,
+  recipientIds,
+  payload,
+  actionUrl,
+  policy,
+}: {
+  definition: RegisteredNotificationEvent;
+  actorId?: string | null;
+  recipientIds: string[];
+  payload: Record<string, unknown>;
+  actionUrl?: string | null;
+  policy?: Partial<Pick<NotificationPolicyDraft, 'titleTemplate' | 'messageTemplate' | 'priority'>>;
+}): {
+  recipientIds: string[];
+  title: string;
+  message: string;
+  priority: NotificationPriority;
+  actionUrl: string | null;
+} => {
+  if (actionUrl && (!actionUrl.startsWith('/') || actionUrl.startsWith('//'))) {
+    throw new Error('پیوند اعلان باید داخلی باشد.');
+  }
+  const rendered = renderNotificationPolicy({ definition, payload, policy });
+  return {
+    ...rendered,
+    recipientIds: [...new Set(recipientIds)].filter((userId) => userId !== actorId),
+    actionUrl: actionUrl || null,
+  };
+};
+
+export const privacySafeWebPushPayload = (actionUrl?: string | null) => {
+  if (actionUrl && (!actionUrl.startsWith('/') || actionUrl.startsWith('//'))) {
+    throw new Error('پیوند اعلان باید داخلی باشد.');
+  }
+  return {
+    title: 'سبلان ERP',
+    body: 'یک اعلان جدید در سبلان دارید.',
+    url: actionUrl || '/dashboard',
+  };
+};

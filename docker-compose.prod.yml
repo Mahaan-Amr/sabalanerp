@@ -66,6 +66,9 @@ services:
       PORT: 5000
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       JWT_SECRET: ${JWT_SECRET}
+      WEB_PUSH_VAPID_SUBJECT: ${WEB_PUSH_VAPID_SUBJECT}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY}
+      WEB_PUSH_VAPID_PRIVATE_KEY: ${WEB_PUSH_VAPID_PRIVATE_KEY}
       FRONTEND_URL: ${FRONTEND_URL}
       SMS_IR_API_KEY: ${SMS_IR_API_KEY}
       SMS_IR_API_URL: ${SMS_IR_API_URL}
@@ -99,6 +102,7 @@ services:
       - backend_storage_contracts:/app/storage/contracts
       - backend_storage_hr_hiring:/app/storage/hr-hiring
       - backend_storage_accounting_contracts:/app/storage/accounting-contracts
+      - backend_storage_support_tickets:/app/storage/support-tickets
       - backend_uploads:/app/uploads
       - backend_recovery:/app/storage/recovery
       - recovery_coordination:/app/recovery-coordination
@@ -216,6 +220,7 @@ volumes:
   backend_storage_contracts:
   backend_storage_hr_hiring:
   backend_storage_accounting_contracts:
+  backend_storage_support_tickets:
   backend_uploads:
   backend_recovery:
   recovery_coordination:

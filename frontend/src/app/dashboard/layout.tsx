@@ -17,7 +17,9 @@ import {
   FaUser,
   FaFileAlt,
   FaPercent,
-  FaShieldAlt
+  FaShieldAlt,
+  FaLifeRing,
+  FaHistory
 } from 'react-icons/fa';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
@@ -25,7 +27,8 @@ import { WorkspaceNavigation } from '@/components/WorkspaceNavigation';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { authAPI, dashboardAPI, systemRecoveryAPI } from '@/lib/api';
 import { SecurityNoticeHost } from '@/components/SecurityNoticeHost';
-import { ErpPressable } from '@/components/erp';
+import { ErpButton, ErpCheckbox, ErpPressable, ErpSheet } from '@/components/erp';
+import { NotificationCenter } from '@/components/NotificationCenter';
 
 interface User {
   id: string;
@@ -57,6 +60,56 @@ interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
+const captureSupportOrigin = () => {
+  return {
+    route: `${window.location.pathname}${window.location.search}`,
+    pageTitle: document.title,
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    buildCommit: process.env.NEXT_PUBLIC_BUILD_COMMIT || 'local',
+  };
+};
+
+type SensitiveCandidateItem = {
+  id: string;
+  label: string;
+  kind: 'PAGE_TEXT' | 'FORM_VALUE' | 'FILE_METADATA';
+  key?: string;
+  value: string | boolean;
+  metadata?: { name: string; size: number; type: string };
+};
+
+const captureSensitiveCandidateItems = (): SensitiveCandidateItem[] => {
+  const secretName = /(password|passcode|token|cookie|secret|authorization|otp|credential|private.?key|api.?key|recovery.?code|رمز|گذرواژه|توکن|کوکی|کلید|کد.?بازیابی|کد.?تأیید|کد.?تایید)/i;
+  const items: SensitiveCandidateItem[] = [];
+  const main = document.querySelector('main');
+  const safeClone = main?.cloneNode(true) as HTMLElement | undefined;
+  safeClone?.querySelectorAll(
+    'input, textarea, select, option, script, style, [contenteditable="true"], [data-sensitive="true"], [data-support-private="true"]',
+  ).forEach((element) => element.remove());
+  const pageText = safeClone?.textContent?.replace(/\s+/g, ' ').trim().slice(0, 20_000);
+  if (pageText) items.push({ id: 'page-text', label: 'متن قابل‌مشاهده صفحه', kind: 'PAGE_TEXT', value: pageText });
+  document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('main input, main select, main textarea')
+    .forEach((element, index) => {
+      const key = element.name || element.id || element.getAttribute('aria-label') || `field-${index + 1}`;
+      if (secretName.test(key) || (element instanceof HTMLInputElement && ['password', 'hidden'].includes(element.type))) return;
+      if (element instanceof HTMLInputElement && element.type === 'file') {
+        Array.from(element.files || []).forEach((file, fileIndex) => items.push({
+          id: `file-${index}-${fileIndex}`,
+          label: `مشخصات فایل: ${file.name}`,
+          kind: 'FILE_METADATA',
+          value: `${file.name} · ${file.type || 'نامشخص'} · ${file.size.toLocaleString('fa-IR')} بایت`,
+          metadata: { name: file.name, size: file.size, type: file.type },
+        }));
+        return;
+      }
+      const value = element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)
+        ? element.checked
+        : element.value.slice(0, 2_000);
+      if (value !== '') items.push({ id: `field-${index}`, label: key, kind: 'FORM_VALUE', key, value });
+    });
+  return items;
+};
+
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [user, setUser] = useState<User | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -66,9 +119,31 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [sanitizedEnvironment, setSanitizedEnvironment] = useState(false);
+  const [supportCaptureOpen, setSupportCaptureOpen] = useState(false);
+  const [sensitiveCaptureConsent, setSensitiveCaptureConsent] = useState(false);
+  const [sensitiveCandidateItems, setSensitiveCandidateItems] = useState<SensitiveCandidateItem[]>([]);
+  const [selectedSensitiveItemIds, setSelectedSensitiveItemIds] = useState<string[]>([]);
   const router = useRouter();
   const pathname = usePathname();
   const { currentWorkspace, accessibleWorkspaces } = useWorkspace();
+
+  const continueToSupportTicket = () => {
+    const origin = captureSupportOrigin() as ReturnType<typeof captureSupportOrigin> & { sensitiveCandidate?: Record<string, unknown> };
+    if (sensitiveCaptureConsent) {
+      const selected = sensitiveCandidateItems.filter((item) => selectedSensitiveItemIds.includes(item.id));
+      origin.sensitiveCandidate = {
+        pageText: selected.find((item) => item.kind === 'PAGE_TEXT')?.value || '',
+        formValues: Object.fromEntries(
+          selected.filter((item) => item.kind === 'FORM_VALUE' && item.key).map((item) => [item.key!, item.value]),
+        ),
+        uploadedFileMetadata: selected.filter((item) => item.kind === 'FILE_METADATA').map((item) => item.metadata),
+      };
+    }
+    sessionStorage.setItem('support-ticket-origin', JSON.stringify(origin));
+    setSupportCaptureOpen(false);
+    setProfileDropdownOpen(false);
+    router.push('/dashboard/support/new');
+  };
 
   useEffect(() => {
     checkAuth();
@@ -143,6 +218,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       setSanitizedEnvironment(Boolean(recoveryEnvironment.data.data.sanitizedEnvironment));
     } catch (error) {
       console.error('Auth check error:', error);
+      if (typeof window !== 'undefined') {
+        const returnTo = `${window.location.pathname}${window.location.search}`;
+        if (returnTo.startsWith('/dashboard')) sessionStorage.setItem('post-login-return-to', returnTo);
+      }
       router.push('/login');
     } finally {
       setLoading(false);
@@ -389,6 +468,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
             
             <div className="flex items-center gap-4">
+              <NotificationCenter />
               <div className="relative profile-dropdown-container">
                 <ErpPressable
                   type="button"
@@ -437,6 +517,36 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <FaUser className="h-4 w-4" />
               امور شخص
             </Link>
+            <div className="my-1 rounded-lg border border-[var(--sds-border-subtle)] p-1" role="group" aria-label="پشتیبانی">
+              <div className="flex min-h-9 items-center gap-2 px-2 text-sm font-bold text-[var(--sds-text-secondary)]">
+                <FaLifeRing className="h-4 w-4" />
+                پشتیبانی
+              </div>
+              <ErpPressable
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setProfileDropdownOpen(false);
+                  setSensitiveCaptureConsent(false);
+                  setSensitiveCandidateItems([]);
+                  setSelectedSensitiveItemIds([]);
+                  setSupportCaptureOpen(true);
+                }}
+                className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-[var(--sds-text-secondary)] transition-colors hover:bg-[var(--sds-accent-soft)] hover:text-[var(--sds-accent)]"
+              >
+                <FaLifeRing className="h-4 w-4" />
+                ثبت تیکت جدید
+              </ErpPressable>
+              <Link
+                href="/dashboard/support/history"
+                role="menuitem"
+                onClick={() => setProfileDropdownOpen(false)}
+                className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-[var(--sds-text-secondary)] transition-colors hover:bg-[var(--sds-accent-soft)] hover:text-[var(--sds-accent)]"
+              >
+                <FaHistory className="h-4 w-4" />
+                تاریخچه
+              </Link>
+            </div>
             <ErpPressable
               type="button"
               role="menuitem"
@@ -451,6 +561,62 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </div>,
         document.body
       )}
+      <ErpSheet
+        open={supportCaptureOpen}
+        onClose={() => setSupportCaptureOpen(false)}
+        title="اطلاعات همراه تیکت"
+        presentation="modal"
+        footer={(
+          <div className="flex flex-wrap justify-end gap-2">
+            <ErpButton label="انصراف" onClick={() => setSupportCaptureOpen(false)} tone="neutral" variant="outline" />
+            <ErpButton label="ادامه به ثبت تیکت" onClick={continueToSupportTicket} tone="primary" />
+          </div>
+        )}
+      >
+        <div className="space-y-4" dir="rtl">
+          <p className="text-sm leading-7 text-[var(--sds-text-secondary)]">
+            مسیر، نسخه و اطلاعات فنی امن همیشه ثبت می‌شوند. اطلاعات خام فقط پس از اجازهٔ شما جمع‌آوری می‌شوند و پیش از ادامه قابل حذف‌اند.
+          </p>
+          <ErpCheckbox
+            checked={sensitiveCaptureConsent}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setSensitiveCaptureConsent(checked);
+              if (checked) {
+                const items = captureSensitiveCandidateItems();
+                setSensitiveCandidateItems(items);
+                setSelectedSensitiveItemIds(items.map((item) => item.id));
+              } else {
+                setSensitiveCandidateItems([]);
+                setSelectedSensitiveItemIds([]);
+              }
+            }}
+            label="اطلاعات خام این صفحه را برای انتخاب و پیش‌نمایش جمع‌آوری کن"
+          />
+          {sensitiveCaptureConsent && (
+            sensitiveCandidateItems.length ? (
+              <div className="space-y-2">
+                {sensitiveCandidateItems.map((item) => (
+                  <div key={item.id} className="rounded-xl border border-[var(--sds-border-subtle)] p-3">
+                    <ErpCheckbox
+                      checked={selectedSensitiveItemIds.includes(item.id)}
+                      onChange={(event) => setSelectedSensitiveItemIds((current) => event.target.checked
+                        ? (current.includes(item.id) ? current : [...current, item.id])
+                        : current.filter((id) => id !== item.id))}
+                      label={item.label}
+                    />
+                    <p className="mt-2 max-h-24 overflow-auto break-words text-xs leading-6 text-[var(--sds-text-muted)]">
+                      {String(item.value).slice(0, 800)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-[var(--sds-text-muted)]">مورد خام قابل‌اشتراکی در این صفحه پیدا نشد.</p>
+            )
+          )}
+        </div>
+      </ErpSheet>
     </div>
   );
 }

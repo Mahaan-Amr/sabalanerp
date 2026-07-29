@@ -9,6 +9,7 @@ import bcrypt from 'bcryptjs';
 import { decryptRecoveryArchive, encryptRecoveryArchive, sha256File } from './recoveryCrypto';
 import { RECOVERY_FORMAT_VERSION, recoveryCompatibility, RecoveryPackageType } from './systemRecoveryPolicy';
 import { RECOVERY_COORDINATION_DIR, RECOVERY_ROOT } from './recoveryRuntime';
+import { publishNotificationEvent } from './notificationService';
 
 const execFileAsync = promisify(execFile);
 const PACKAGES_DIR = path.join(RECOVERY_ROOT, 'packages');
@@ -201,17 +202,31 @@ const sanitizedPlaceholder = (fileName: string) => {
   return Buffer.from('Sanitized test placeholder\n', 'utf8');
 };
 
-const copyComponent = async (source: string, destination: string, sanitized: boolean) => {
+const copyComponent = async (
+  source: string,
+  destination: string,
+  sanitized: boolean,
+  exclude?: (relativePath: string) => boolean,
+) => {
   if (!fs.existsSync(source)) {
     await fs.promises.mkdir(destination, { recursive: true });
     return;
   }
   if (!sanitized) {
-    await fs.promises.cp(source, destination, { recursive: true, force: false, errorOnExist: true });
+    await fs.promises.cp(source, destination, {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+      filter: (candidate) => {
+        const relative = path.relative(source, candidate);
+        return !relative || !exclude?.(relative);
+      },
+    });
     return;
   }
   await fs.promises.mkdir(destination, { recursive: true });
   for (const relative of await regularFiles(source)) {
+    if (exclude?.(relative)) continue;
     const target = path.join(destination, relative);
     await fs.promises.mkdir(path.dirname(target), { recursive: true });
     await fs.promises.writeFile(target, sanitizedPlaceholder(relative), { mode: 0o600 });
@@ -298,6 +313,12 @@ export const createRecoveryPackage = async (input: {
       copyComponent(path.join(process.cwd(), 'storage', 'contracts'), path.join(payloadRoot, 'files', 'contracts'), sanitized),
       copyComponent(path.join(process.cwd(), 'storage', 'hr-hiring'), path.join(payloadRoot, 'files', 'hr-hiring'), sanitized),
       copyComponent(path.join(process.cwd(), 'storage', 'accounting-contracts'), path.join(payloadRoot, 'files', 'accounting-contracts'), sanitized),
+      copyComponent(
+        path.join(process.cwd(), 'storage', 'support-tickets'),
+        path.join(payloadRoot, 'files', 'support-tickets'),
+        sanitized,
+        (relative) => path.basename(relative).startsWith('staged-'),
+      ),
       copyComponent(path.join(process.cwd(), 'uploads'), path.join(payloadRoot, 'files', 'uploads'), sanitized),
       backupInquiry(path.join(payloadRoot, 'inquiry'), sanitized),
     ]);
@@ -515,6 +536,8 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
       if (!storageName) continue;
       const candidates = column.tableName.startsWith('hr_')
         ? [path.join(payloadRoot, 'files', 'hr-hiring', storageName)]
+        : column.tableName === 'support_ticket_attachments'
+          ? [path.join(payloadRoot, 'files', 'support-tickets', storageName)]
         : [
             path.join(payloadRoot, 'files', 'uploads', 'security-vehicle-pairs', storageName),
             path.join(payloadRoot, 'files', 'uploads', 'security-shift-log', storageName),
@@ -612,6 +635,7 @@ export const stageAndPromoteRecovery = async (input: {
       ['files/contracts', path.join(process.cwd(), 'storage', 'contracts'), 'contracts'],
       ['files/hr-hiring', path.join(process.cwd(), 'storage', 'hr-hiring'), 'hr-hiring'],
       ['files/accounting-contracts', path.join(process.cwd(), 'storage', 'accounting-contracts'), 'accounting-contracts'],
+      ['files/support-tickets', path.join(process.cwd(), 'storage', 'support-tickets'), 'support-tickets'],
       ['files/uploads', path.join(process.cwd(), 'uploads'), 'uploads'],
       ['inquiry', INQUIRY_SOURCE_DIR, 'inquiry'],
     ] as const;
@@ -659,6 +683,7 @@ export const stageAndPromoteRecovery = async (input: {
         ['contracts', path.join(process.cwd(), 'storage', 'contracts')],
         ['hr-hiring', path.join(process.cwd(), 'storage', 'hr-hiring')],
         ['accounting-contracts', path.join(process.cwd(), 'storage', 'accounting-contracts')],
+        ['support-tickets', path.join(process.cwd(), 'storage', 'support-tickets')],
         ['uploads', path.join(process.cwd(), 'uploads')],
         ['inquiry', INQUIRY_SOURCE_DIR],
       ] as const;
@@ -739,14 +764,16 @@ export const finalizePromotedRecovery = async (prisma: PrismaClient, journal: Re
   }
   const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isActive: true, erasedAt: null }, select: { id: true } });
   if (admins.length) {
-    await prisma.securityNotification.createMany({
-      data: admins.map((admin) => ({
-        userId: admin.id,
-        type: 'SYSTEM_RECOVERY_COMPLETED',
-        title: 'بازیابی کامل سامانه انجام شد',
-        message: `بازیابی توسط ${journal.actorDisplay} تکمیل شد. ورود دوباره برای همه کاربران الزامی است.`,
-        referenceId: journal.operationId,
-      })),
+    await publishNotificationEvent(prisma, {
+      type: 'SYSTEM_RECOVERY_COMPLETED',
+      deduplicationKey: `system-recovery-completed:${journal.operationId}`,
+      recipientIds: admins.map((admin) => admin.id),
+      actorId: actorExists?.id,
+      resourceType: 'RecoveryOperation',
+      resourceId: journal.operationId,
+      referenceId: journal.operationId,
+      actionUrl: '/dashboard/admin/system-recovery',
+      payload: { actorDisplay: journal.actorDisplay },
     });
   }
   await dropDatabase(process.env.DATABASE_URL || '', journal.safetyDatabase);
@@ -762,6 +789,7 @@ export const rollbackInterruptedRecovery = async (journal: RestoreJournal) => {
     ['contracts', path.join(process.cwd(), 'storage', 'contracts')],
     ['hr-hiring', path.join(process.cwd(), 'storage', 'hr-hiring')],
     ['accounting-contracts', path.join(process.cwd(), 'storage', 'accounting-contracts')],
+    ['support-tickets', path.join(process.cwd(), 'storage', 'support-tickets')],
     ['uploads', path.join(process.cwd(), 'uploads')],
     ['inquiry', INQUIRY_SOURCE_DIR],
   ] as const;

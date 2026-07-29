@@ -1,7 +1,7 @@
 'use client';
 import { ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
-import { FaCalendarAlt, FaCheck, FaDesktop, FaEdit, FaPlus, FaShieldAlt, FaTimes, FaUser, FaUserClock } from 'react-icons/fa';
+import { FaCalendarAlt, FaCheck, FaDesktop, FaEdit, FaPlus, FaTimes, FaUser, FaUserClock } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
@@ -43,7 +43,6 @@ export default function PersonalPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [sessions, setSessions] = useState<any[]>([]);
-  const [securityNotifications, setSecurityNotifications] = useState<any[]>([]);
 
   const isManager = currentUser?.role === 'ADMIN' || currentUser?.role === 'MANAGER';
   const pendingCount = requests.filter((item) => item.status === 'PENDING').length;
@@ -61,16 +60,14 @@ export default function PersonalPage() {
       const profileResponse = await dashboardAPI.getProfile();
       const profile = profileResponse.data.data;
       setCurrentUser(profile);
-      const [requestsResponse, usersResponse, sessionsResponse, notificationsResponse] = await Promise.all([
+      const [requestsResponse, usersResponse, sessionsResponse] = await Promise.all([
         personalAPI.getLeaveRequests(),
         ['ADMIN', 'MANAGER'].includes(profile.role) ? personalAPI.getLeaveUsers() : Promise.resolve({ data: { success: true, data: [] } }),
         authAPI.getSessions(),
-        authAPI.getSecurityNotifications(),
       ]);
       if (requestsResponse.data.success) setRequests(requestsResponse.data.data || []);
       if (usersResponse.data.success) setUsers(usersResponse.data.data || []);
       if (sessionsResponse.data.success) setSessions(sessionsResponse.data.data || []);
-      if (notificationsResponse.data.success) setSecurityNotifications(notificationsResponse.data.data || []);
     } catch (err: any) {
       setError(err.response?.data?.error || 'دریافت اطلاعات امور شخص ناموفق بود.');
     } finally {
@@ -194,10 +191,6 @@ export default function PersonalPage() {
       {error && <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)]">{error}</div>}
 
       <ErpSection title="دستگاه‌ها و نشست‌های فعال" description="هر ردیف یک نشست مرورگر است؛ نام سخت‌افزار از مرورگر قابل تشخیص قطعی نیست.">
-        {securityNotifications.filter((item) => !item.readAt).map((item) => <div key={item.id} className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 text-sm text-[var(--sds-warning)]">
-          <span><FaShieldAlt className="ml-2 inline" />{item.title}: {item.message}</span>
-          <div className="flex gap-2">{item.type === 'NEW_BROWSER_LOGIN' && item.referenceId && <ErpButton label="این من نبودم" tone="danger" variant="outline" onClick={async () => { await authAPI.revokeSession(item.referenceId); await authAPI.markSecurityNotificationRead(item.id); const change = window.confirm('نشست لغو شد. آیا مایلید اکنون رمز عبور خود را نیز تغییر دهید؟'); if (change) window.location.href = '/change-password'; else await loadData(); }} />}<ErpButton label="خواندم" tone="warning" variant="outline" onClick={async () => { await authAPI.markSecurityNotificationRead(item.id); await loadData(); }} /></div>
-        </div>)}
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {sessions.filter((item) => !item.revokedAt).map((session) => <ErpCard key={session.id} className="p-4">
             <div className="flex items-start justify-between gap-3">

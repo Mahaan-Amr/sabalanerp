@@ -183,7 +183,8 @@ const toNullableDate = (value: unknown): Date | null => {
  */
 export async function createContract(
   data: CreateContractData,
-  userId: string
+  userId: string,
+  onCreated?: (tx: Prisma.TransactionClient, contract: any) => Promise<void>,
 ) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -324,6 +325,7 @@ export async function createContract(
             data: { wonSalesContractId: contract.id }
           });
         }
+        await onCreated?.(tx, contract);
         return contract;
       });
     } catch (error) {

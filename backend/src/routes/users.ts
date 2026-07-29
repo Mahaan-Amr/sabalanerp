@@ -893,7 +893,7 @@ router.post('/:id/erase', protect, authorize('ADMIN'), [body('reason').isString(
     await revokeSessions(tx, { userId: target.id, actorId: req.user!.id, reason: 'ACCOUNT_ERASURE' });
     await tx.authSession.deleteMany({ where: { userId: target.id } });
     await tx.recognizedBrowserProfile.deleteMany({ where: { userId: target.id } });
-    await tx.securityNotification.deleteMany({ where: { userId: target.id } });
+    await tx.notification.deleteMany({ where: { userId: target.id } });
     await tx.authenticationEvent.deleteMany({ where: { userId: target.id, type: { in: ['LOGIN_FAILED', 'LOGIN_SUCCEEDED'] } } });
     await tx.workspacePermission.deleteMany({ where: { userId: target.id } });
     await tx.featurePermission.deleteMany({ where: { userId: target.id } });

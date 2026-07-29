@@ -61,7 +61,12 @@ export default function LoginPage() {
       const data = response.data;
 
       if (data.success) {
-        router.push(data.data.mustChangePassword ? '/change-password' : '/dashboard');
+        const storedReturnTo = sessionStorage.getItem('post-login-return-to');
+        const returnTo = storedReturnTo?.startsWith('/dashboard') && !storedReturnTo.startsWith('//')
+          ? storedReturnTo
+          : '/dashboard';
+        sessionStorage.removeItem('post-login-return-to');
+        router.push(data.data.mustChangePassword ? '/change-password' : returnTo);
       } else {
         setErrors({ general: data.error || 'ورود ناموفق بود' });
       }
@@ -201,4 +206,3 @@ export default function LoginPage() {
     </main>
   );
 }
-

@@ -9,6 +9,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
 import hrHiringSmsGateway from '../services/hrHiringSmsGateway';
 import { mapSmsIrDeliveryState } from '../services/hrHiringDeliveryPollingService';
+import { publishNotificationEvent } from '../services/notificationService';
 import {
   ensureHrHiringStorage,
   HR_HIRING_ALLOWED_MIME,
@@ -212,14 +213,20 @@ const notifyOfferDecline = async (
     : [];
   const userIds = [...new Set(recipients.map((item) => item.userId))];
   if (!userIds.length) return;
-  await tx.securityNotification.createMany({
-    data: userIds.map((userId) => ({
-      userId,
-      type: 'HIRING_OFFER_DECLINED',
-      title: 'رد پیشنهاد همکاری',
-      message: `${application.candidate.firstName} ${application.candidate.lastName} پیشنهاد جایگاه ${application.position.title} را رد کرد.`,
-      referenceId: applicationId
-    }))
+  await publishNotificationEvent(tx, {
+    type: 'HIRING_OFFER_DECLINED',
+    deduplicationKey: `hiring-offer-declined:${applicationId}`,
+    recipientIds: userIds,
+    workspace: 'hr',
+    feature: 'hr_hiring',
+    resourceType: 'HrJobApplication',
+    resourceId: applicationId,
+    referenceId: applicationId,
+    actionUrl: `/dashboard/hr/hiring/${applicationId}`,
+    payload: {
+      candidateName: `${application.candidate.firstName} ${application.candidate.lastName}`,
+      positionTitle: application.position.title,
+    },
   });
 };
 

@@ -31,6 +31,7 @@ import {
   setRecoveryRuntimeState,
   waitForActiveWrites,
 } from '../services/recoveryRuntime';
+import { publishNotificationEvent } from '../services/notificationService';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -334,29 +335,32 @@ router.post('/:id/restore', async (req: AuthRequest, res) => {
     const bootstrapPassword = operation.packageType === 'SANITIZED_TEST'
       ? `Local-${crypto.randomBytes(9).toString('base64url')}9`
       : undefined;
-    await prisma.recoveryOperation.update({
-      where: { id: operation.id },
-      data: {
-        status: 'RESTORING',
-        progress: 0,
-        restoreStartedAt: new Date(),
-        breakGlassReason: authorization.mode === 'BREAK_GLASS' ? String(req.body.breakGlassReason).trim() : null,
-      },
-    });
-    const actor = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { firstName: true, lastName: true, username: true } });
-    const actorDisplay = actor ? `${actor.firstName} ${actor.lastName} (${actor.username})` : req.user!.id;
-    const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isActive: true, erasedAt: null }, select: { id: true } });
-    if (admins.length) {
-      await prisma.securityNotification.createMany({
-        data: admins.map((admin) => ({
-          userId: admin.id,
-          type: 'SYSTEM_RECOVERY_STARTED',
-          title: 'بازیابی کامل سامانه آغاز شد',
-          message: `بازیابی توسط ${actorDisplay} آغاز شد.`,
-          referenceId: operation.id,
-        })),
+    let actorDisplay = req.user!.id;
+    await prisma.$transaction(async (tx) => {
+      await tx.recoveryOperation.update({
+        where: { id: operation.id },
+        data: {
+          status: 'RESTORING',
+          progress: 0,
+          restoreStartedAt: new Date(),
+          breakGlassReason: authorization.mode === 'BREAK_GLASS' ? String(req.body.breakGlassReason).trim() : null,
+        },
       });
-    }
+      const actor = await tx.user.findUnique({ where: { id: req.user!.id }, select: { firstName: true, lastName: true, username: true } });
+      actorDisplay = actor ? `${actor.firstName} ${actor.lastName} (${actor.username})` : req.user!.id;
+      const admins = await tx.user.findMany({ where: { role: 'ADMIN', isActive: true, erasedAt: null }, select: { id: true } });
+      if (admins.length) await publishNotificationEvent(tx, {
+        type: 'SYSTEM_RECOVERY_STARTED',
+        deduplicationKey: `system-recovery-started:${operation.id}`,
+        recipientIds: admins.map((admin) => admin.id),
+        actorId: req.user!.id,
+        resourceType: 'RecoveryOperation',
+        resourceId: operation.id,
+        referenceId: operation.id,
+        actionUrl: '/dashboard/admin/system-recovery',
+        payload: { actorDisplay },
+      });
+    });
     await audit(operation.id, req.user!.id, 'RECOVERY_RESTORE_STARTED', operation.encryptedSha256, { authorizationMode: authorization.mode });
     setRecoveryRuntimeState('MAINTENANCE', operation.id, 'A validated system recovery is being promoted.');
     res.status(202).json({

@@ -4,6 +4,7 @@ import '../styles/print.css'
 import './globals.css'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { WorkspaceProvider } from '@/contexts/WorkspaceContext'
+import { AuthProvider } from '@/contexts/AuthContext'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://sabalanerp.com'),
@@ -46,11 +47,13 @@ export default function RootLayout({
       </head>
       <body className="font-vazir">
         <ThemeProvider>
-          <WorkspaceProvider>
-            <div className="min-h-screen">
-              {children}
-            </div>
-          </WorkspaceProvider>
+          <AuthProvider>
+            <WorkspaceProvider>
+              <div className="min-h-screen">
+                {children}
+              </div>
+            </WorkspaceProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

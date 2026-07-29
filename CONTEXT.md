@@ -2544,3 +2544,27 @@ _Avoid_: creator self-approval when another admin is available, reusable approva
 **Recovery Backup Freshness**:
 The age of the most recent Complete Recovery Backup confirmed as downloaded beyond the application server; after seven days without one, administrators are warned that server-only or absent packages do not provide disaster protection.
 _Avoid_: creation time alone, treating temporary server retention as offsite protection, silently stale recovery coverage
+
+**Support Ticket**:
+An append-only, access-controlled record through which a Sabalan ERP user reports a problem or improvement from an immutable originating route, with reporter-provided impact, optional media, a sanitized diagnostic snapshot, assignments, responses, resolution, operational targets, and permanent accountability history.
+_Avoid_: treating support as editable notes, exposing one reporter's ticket through a duplicate link, or granting access merely because a user received an assignment without the required workspace or feature permission
+
+**Sensitive Support Evidence**:
+Optional raw form values, page text, uploaded-document metadata, customer, Human Resources, financial, image, document, or voice evidence that a reporter explicitly consents to share. It remains protected by originating workspace or feature access, is excluded from Codex diagnostic packages by default, and follows a shorter evidence-retention policy.
+_Avoid_: capturing secrets, credentials, cookies, tokens, or passwords; showing sensitive evidence back to the reporter as diagnostic data; or allowing assignment alone to bypass workspace access
+
+**Restricted Security or Privacy Incident**:
+A Support Ticket type routed initially only to ADMIN and designated incident handlers, with privacy-safe notifications, protected reporter identity during approved collaboration, ADMIN-approved delegation, minimum-necessary evidence, no automatic closure, and permanent access and delegation accountability.
+_Avoid_: placing an incident in ordinary manager queues, lock-screen details, automatic delegation, or the ordinary waiting-for-reporter closure workflow
+
+**Unified Notification Center**:
+The durable Persian-first application inbox that is the source of truth for direct assignments, mentions, approvals, security events, support responses, and registered business workflow notifications. Realtime socket delivery and opt-in privacy-safe Web Push are delivery channels, not replacement stores.
+_Avoid_: creating separate feature inboxes, placing ticket details on a lock screen, or relying on online socket delivery as durable notification storage
+
+**Notification Policy Registry**:
+The code-owned catalog of registered domain events and their immutable trigger conditions, permission checks, safe recipient resolvers, protected fields, deep links, and deduplication identity. ADMIN may version validated choices among registered safe recipients, approved Persian template variables, priority, channel, and timing, while mandatory accountability policies remain enabled.
+_Avoid_: arbitrary database-trigger policies, administrator-authored permission logic, unversioned policy mutation, or changing notifications already produced by an earlier version
+
+**Support Operational Target**:
+A versioned acknowledgment and resolution goal measured using the explicit Asia/Tehran support calendar and fixed to a ticket at triage. Waiting for genuine reporter information pauses only the resolution clock; approaching and missed targets notify and escalate without automatically closing or reassigning the ticket.
+_Avoid_: assuming 24/7 elapsed time, treating targets as promises, rewriting existing tickets when policy changes, or hiding the full elapsed timeline

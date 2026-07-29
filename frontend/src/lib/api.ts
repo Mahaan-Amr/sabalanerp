@@ -1,5 +1,7 @@
 ﻿import axios from 'axios';
 
+import type { InternalAxiosRequestConfig } from 'axios';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
 export const API_ORIGIN = API_BASE.endsWith('/api') ? API_BASE.slice(0, -4) : API_BASE;
@@ -19,9 +21,94 @@ const api = axios.create({
   },
 });
 
+type RetryAwareConfig = InternalAxiosRequestConfig & { supportMutationFingerprint?: string };
+const retryKeys = new Map<string, { key: string; expiresAt: number }>();
+const retryStorageKey = 'sabalan.mutation-retry-keys.v1';
+const loadRetryKeys = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(retryStorageKey) || '{}') as Record<
+      string,
+      { key: string; expiresAt: number }
+    >;
+    for (const [fingerprint, value] of Object.entries(stored)) {
+      if (value.expiresAt > Date.now()) retryKeys.set(fingerprint, value);
+    }
+  } catch {
+    try {
+      window.localStorage.removeItem(retryStorageKey);
+    } catch {
+      // Storage can be disabled; the in-memory retry guard remains available.
+    }
+  }
+};
+const persistRetryKeys = () => {
+  if (typeof window === 'undefined') return;
+  const active: Record<string, { key: string; expiresAt: number }> = {};
+  retryKeys.forEach((value, fingerprint) => {
+    if (value.expiresAt > Date.now()) active[fingerprint] = value;
+    else retryKeys.delete(fingerprint);
+  });
+  try {
+    window.localStorage.setItem(retryStorageKey, JSON.stringify(active));
+  } catch {
+    // Quota/security failures must not block the underlying business mutation.
+  }
+};
+const mutationFingerprint = async (config: InternalAxiosRequestConfig) => {
+  const method = String(config.method || 'get').toUpperCase();
+  const url = `${config.baseURL || ''}${config.url || ''}`;
+  let body = '';
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    const parts: string[] = [];
+    config.data.forEach((value, key) => {
+      parts.push(`${key}:${typeof value === 'string' ? value : `${value.name}:${value.size}:${value.type}`}`);
+    });
+    body = parts.join('|');
+  } else if (typeof config.data === 'string') {
+    body = config.data;
+  } else if (config.data != null) {
+    body = JSON.stringify(config.data);
+  }
+  const input = `${method}:${url}:${JSON.stringify(config.params || {})}:${body}`;
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash = Math.imul(hash ^ input.charCodeAt(index), 16777619);
+  }
+  return `${input.length}:${hash >>> 0}`;
+};
+const clearRetryKey = (config?: RetryAwareConfig) => {
+  if (config?.supportMutationFingerprint) {
+    retryKeys.delete(config.supportMutationFingerprint);
+    persistRetryKeys();
+  }
+};
+
+api.interceptors.request.use(async (config) => {
+  const method = String(config.method || 'get').toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !config.headers['x-idempotency-key']) {
+    loadRetryKeys();
+    const fingerprint = await mutationFingerprint(config);
+    const cached = retryKeys.get(fingerprint);
+    const key = cached && cached.expiresAt > Date.now() ? cached.key : crypto.randomUUID();
+    retryKeys.set(fingerprint, { key, expiresAt: Date.now() + 24 * 60 * 60 * 1_000 });
+    persistRetryKeys();
+    config.headers['x-idempotency-key'] = key;
+    (config as RetryAwareConfig).supportMutationFingerprint = fingerprint;
+  }
+  return config;
+});
+
 // Response interceptor to handle errors
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    clearRetryKey(response.config as RetryAwareConfig);
+    return response;
+  },
   (error) => {
     if (error.response?.status === 401) {
       if (
@@ -29,6 +116,10 @@ api.interceptors.response.use(
         && !window.location.pathname.startsWith('/login')
         && !window.location.pathname.startsWith('/apply')
       ) window.location.href = '/login';
+    }
+    const status = Number(error.response?.status || 0);
+    if (status > 0 && status !== 409 && status < 500) {
+      clearRetryKey(error.config as RetryAwareConfig | undefined);
     }
     return Promise.reject(error);
   }
@@ -47,6 +138,87 @@ export const authAPI = {
   changePassword: (data: { currentPassword: string; newPassword: string }) => api.post('/auth/change-password', data),
   getSecurityNotifications: () => api.get('/auth/security-notifications'),
   markSecurityNotificationRead: (id: string) => api.put(`/auth/security-notifications/${id}/read`),
+};
+
+export const notificationsAPI = {
+  list: (params?: { cursor?: string; limit?: number }) =>
+    api.get('/notifications', { params }),
+  getUnreadCount: () => api.get('/notifications/unread-count'),
+  markRead: (id: string) => api.put(`/notifications/${id}/read`),
+  markAllRead: () => api.put('/notifications/read-all'),
+  getPolicies: () => api.get('/notifications/admin/policies'),
+  createPolicyVersion: (eventType: string, data: {
+    enabled: boolean;
+    titleTemplate: string;
+    messageTemplate: string;
+    priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+    channels: Array<'IN_APP' | 'REALTIME' | 'WEB_PUSH'>;
+    recipientResolvers: string[];
+    batching: 'IMMEDIATE' | 'DAILY';
+    changeReason: string;
+  }) => api.post(`/notifications/admin/policies/${eventType}/versions`, data),
+  getPreferences: () => api.get('/notifications/settings/preferences'),
+  updatePreferences: (data: { webPushEnabled: boolean; mutedCategories: string[]; lowPriorityDelivery: 'IMMEDIATE' | 'DAILY' }) =>
+    api.put('/notifications/settings/preferences', data),
+  registerDevice: (data: { endpoint: string; keys: { p256dh: string; auth: string }; deviceLabel?: string }) =>
+    api.post('/notifications/settings/devices', data),
+  disableDevice: (deviceId: string) => api.delete(`/notifications/settings/devices/${deviceId}`),
+  disableAllDevices: () => api.delete('/notifications/settings/devices'),
+};
+
+export const supportTicketsAPI = {
+  getContext: () => api.get('/support-tickets/context'),
+  list: (params?: Record<string, string | number | undefined>) => api.get('/support-tickets', { params }),
+  get: (id: string) => api.get(`/support-tickets/${id}`),
+  create: (data: {
+    title: string;
+    type: string;
+    impact: string;
+    workaroundExists: boolean;
+    reportedWorkspace?: string | null;
+    reportedFeature?: string | null;
+    originRoute: string;
+    description?: string;
+    steps?: string;
+    expectedResult?: string;
+    stagedAttachmentTokens?: string[];
+    sensitiveEvidenceConsent: boolean;
+    sensitiveEvidenceSnapshot?: Record<string, unknown> | null;
+    diagnosticSnapshot: Record<string, unknown>;
+  }, idempotencyKey: string) => api.post('/support-tickets', data, {
+    headers: { 'x-idempotency-key': idempotencyKey },
+  }),
+  stageAttachment: (data: FormData) =>
+    api.post('/support-tickets/attachments/stage', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  addEntry: (id: string, body: string) => api.post(`/support-tickets/${id}/entries`, { body }),
+  assignParticipant: (id: string, data: { userId: string; role: 'HANDLER' | 'COLLABORATOR' | 'WATCHER'; reason: string }) =>
+    api.post(`/support-tickets/${id}/participants`, data),
+  setPriority: (id: string, priority: string, reason: string) =>
+    api.put(`/support-tickets/${id}/priority`, { priority, reason }),
+  setStatus: (id: string, status: string, reason: string) =>
+    api.put(`/support-tickets/${id}/status`, { status, reason }),
+  markDuplicate: (id: string, canonicalTicketId: string, reason: string) =>
+    api.post(`/support-tickets/${id}/duplicate`, { canonicalTicketId, reason }),
+  reopen: (id: string, reason: string) => api.post(`/support-tickets/${id}/reopen`, { reason }),
+  uploadAttachment: (id: string, data: FormData) =>
+    api.post(`/support-tickets/${id}/attachments`, data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  updateTranscript: (id: string, entryId: string, transcript: string) =>
+    api.put(`/support-tickets/${id}/entries/${entryId}/transcript`, { transcript }),
+  previewDiagnosticBundle: (id: string) => api.post(`/support-tickets/${id}/diagnostic-bundles/preview`),
+  confirmDiagnosticBundle: (id: string, bundleId: string, data: { sensitiveAttachmentIds: string[]; reason: string }) =>
+    api.post(`/support-tickets/${id}/diagnostic-bundles/${bundleId}/confirm`, data),
+  diagnosticBundleDownloadUrl: (id: string, bundleId: string, format: 'markdown' | 'json') =>
+    `${API_ORIGIN}/api/support-tickets/${id}/diagnostic-bundles/${bundleId}/download?format=${format}`,
+  getSlaPolicies: () => api.get('/support-tickets/admin/sla-policies'),
+  createSlaPolicy: (data: { calendar: Record<string, unknown>; targets: Record<string, unknown>; changeReason: string }) =>
+    api.post('/support-tickets/admin/sla-policies', data),
+  redactEntry: (id: string, entryId: string, reason: string) =>
+    api.post(`/support-tickets/${id}/entries/${entryId}/redact`, { reason }),
+  redactAttachment: (id: string, attachmentId: string, reason: string) =>
+    api.post(`/support-tickets/${id}/attachments/${attachmentId}/redact`, { reason }),
+  placeLegalHold: (id: string, reason: string) => api.post(`/support-tickets/${id}/legal-holds`, { reason }),
+  releaseLegalHold: (id: string, holdId: string, reason: string) =>
+    api.post(`/support-tickets/${id}/legal-holds/${holdId}/release`, { reason }),
 };
 
 export const systemRecoveryAPI = {

@@ -170,6 +170,12 @@
       "reason": "Personal leave, session, and security workflows use canonical responsive controls without changing permissions or persisted state."
     },
     {
+      "pattern": "frontend/src/app/dashboard/support/**/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "Support reporting, scoped queues, collaboration, evidence, and timeline workflows use canonical RTL controls and responsive semantic surfaces with permission-aware behavior."
+    },
+    {
       "pattern": "frontend/src/app/dashboard/personnel/**/page.tsx",
       "status": "migrated",
       "acceptanceStatus": "accepted",

@@ -33,6 +33,7 @@ import {
   updateAccountingSettings
 } from '../services/accountingService';
 import type { ContractCustomPrintOptions, ContractPrintVariant } from '../utils/printTemplate';
+import { publishNotificationEvent } from '../services/notificationService';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -525,6 +526,27 @@ router.post(
       const result = await executeAccountingAction(req.body, {
         userId: req.user!.id,
         role: req.user!.role
+      }, async (tx, notification) => {
+        const correctionRequired = notification.kind === 'APPROVE_CORRECTION_FOR_SALES_EDIT';
+        await publishNotificationEvent(tx, {
+          type: correctionRequired ? 'ACCOUNTING_CORRECTION_REQUIRED' : 'ACCOUNTING_RECORD_SUBMITTED',
+          deduplicationKey: correctionRequired
+            ? `accounting-correction-required:${notification.contractId}:${notification.recordIdentity}`
+            : `accounting-record:${notification.kind}:${notification.contractId}:${notification.recordIdentity}`,
+          recipientIds: notification.recipientIds,
+          actorId: req.user!.id,
+          workspace: WORKSPACES.SALES,
+          feature: correctionRequired ? FEATURES.SALES_CONTRACTS_EDIT : FEATURES.SALES_CONTRACTS_VIEW,
+          resourceType: 'sales-contract',
+          resourceId: notification.contractId,
+          referenceId: notification.contractNumber,
+          actionUrl: correctionRequired
+            ? `/dashboard/sales/contracts/${notification.contractId}/edit`
+            : `/dashboard/sales/contracts/${notification.contractId}`,
+          payload: correctionRequired
+            ? { contractNumber: notification.contractNumber }
+            : { contractNumber: notification.contractNumber, actorName: req.user!.username },
+        });
       });
       res.json({ success: true, data: result });
     } catch (error: any) {

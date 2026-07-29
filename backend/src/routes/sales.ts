@@ -44,6 +44,8 @@ import {
   releaseSalesContractEditSession
 } from '../services/contractEditSessionService';
 import salesReportsRouter from './salesReports';
+import { publishNotificationEvent } from '../services/notificationService';
+import { resolveWorkspaceRecipientIds } from '../services/domainNotificationRecipients';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -930,7 +932,22 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
       contractData,
       potentialProjectId,
       _relations
-    }, req.user.id);
+    }, req.user.id, async (tx, createdContract) => {
+      const accountingRecipients = await resolveWorkspaceRecipientIds(tx, WORKSPACES.ACCOUNTING, 'view');
+      await publishNotificationEvent(tx, {
+        type: 'SALES_CONTRACT_READY_FOR_ACCOUNTING',
+        deduplicationKey: `sales-contract-ready-for-accounting:${createdContract.id}:${createdContract.updatedAt.toISOString()}`,
+        recipientIds: accountingRecipients,
+        actorId: req.user.id,
+        workspace: WORKSPACES.ACCOUNTING,
+        feature: FEATURES.ACCOUNTING_CONTRACTS_VIEW,
+        resourceType: 'sales-contract',
+        resourceId: createdContract.id,
+        referenceId: createdContract.contractNumber,
+        actionUrl: `/dashboard/accounting/contracts/${createdContract.id}`,
+        payload: { actorName: req.user.username },
+      });
+    });
 
     await releaseCommittedContractEditSession(req, 0);
     res.status(201).json({

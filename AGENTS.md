@@ -12,6 +12,12 @@ The repository uses the standard five-role triage vocabulary. See `docs/agents/t
 
 This is a single-context repository using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
 
+### Local Docker environment
+
+Use the existing Docker Compose project named `sabalanerp-local` for all local runtime, migration, integration, and visual QA work. Its source configuration is `docker-compose.local.yml`, and the normal commands are the root `docker:local:*` and `docker:verify` scripts.
+
+Do not create or start a second Compose project, disposable PostgreSQL container, parallel test stack, or ad-hoc replacement service when `sabalanerp-local` is available. Run migrations and tests against the existing local services with isolated test data or transactions where needed, without creating another Docker stack. Before any Docker action, verify the target with `docker compose -f docker-compose.local.yml ps` or `npm run docker:local:ps`.
+
 ### Sabalan Design System
 
 Every interactive frontend change must use the platform-owned Sabalan Design System. Read `docs/design-system/catalog.md` before changing UI and use `frontend/src/components/erp` plus `frontend/src/styles/design-system-tokens.css`; Guard and Contract Product Selection are references, not sources of domain-specific shared concepts.

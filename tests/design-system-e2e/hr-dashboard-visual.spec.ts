@@ -16,9 +16,16 @@ const login = async (page: Page) => {
 };
 
 test('HR landing preserves real data and produces the approved responsive theme artifacts', async ({ page }) => {
+  const runtimeErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') runtimeErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => runtimeErrors.push(error.message));
+
   fs.mkdirSync(screenshotDirectory, { recursive: true });
   await page.setViewportSize({ width: 1920, height: 1080 });
   await login(page);
+  runtimeErrors.length = 0;
   await page.goto('/dashboard/hr');
 
   await expect(page.getByRole('heading', { name: 'داشبورد منابع انسانی', exact: true })).toBeVisible();
@@ -52,4 +59,6 @@ test('HR landing preserves real data and produces the approved responsive theme 
   await expect(page.locator('[data-dashboard-overlay]')).toHaveCount(0);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: path.join(screenshotDirectory, 'mobile-dark-390x844.png') });
+
+  expect(runtimeErrors).toEqual([]);
 });

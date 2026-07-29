@@ -158,7 +158,7 @@ export function ErpCapacityProgress({
         </div>
         <div className="text-center sm:text-right">
           <p className="text-lg font-black text-[var(--sds-text-primary)]">{label}</p>
-          <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">{committed.toLocaleString('fa-IR')} از {total.toLocaleString('fa-IR')} ظرفیت متعهد</p>
+          <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">{committed.toLocaleString('fa-IR')} ظرفیت متعهد از {total.toLocaleString('fa-IR')} ظرفیت جایگاه</p>
         </div>
       </div>
     </ErpNeumorphicCard>

@@ -176,7 +176,10 @@ export const hiringAPI = {
   close: (id: string, data: any) =>
     internal.post(`/applications/${id}/close`, data),
   authorities: () => internal.get("/authorities"),
+  authorityUsers: () => internal.get("/authorities/users"),
   setAuthority: (data: any) => internal.post("/authorities", data),
+  revokeAuthority: (id: string, reason: string) =>
+    internal.post(`/authorities/${id}/revoke`, { reason }),
 };
 
 export const applicantHiringAPI = {

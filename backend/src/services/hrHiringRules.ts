@@ -54,6 +54,34 @@ export const validateHiringCorrection = (data: any, fields: string[]) => {
   return true;
 };
 
+const COMPENSATION_CATEGORY_LABELS: Record<string, string> = {
+  BASE_SALARY: 'حقوق پایه',
+  FIXED_BENEFIT: 'مزایای ثابت',
+  VARIABLE_BENEFIT: 'مزایای متغیر',
+  ALLOWANCE: 'کمک‌هزینه',
+};
+
+export type CompensationComponentInput = {
+  category?: string;
+  label?: string;
+  amountRials: string | number;
+};
+
+export const normalizeCompensationComponents = (components: CompensationComponentInput[]) => {
+  if (!Array.isArray(components) || !components.length) throw new Error('حداقل یک ردیف جبران خدمات لازم است.');
+  return components.map((component) => {
+    const category = String(component.category || '');
+    if (category === 'OTHER') {
+      const label = String(component.label || '').trim();
+      if (!label) throw new Error('عنوان مورد سایر الزامی است.');
+      return { category, label, amountRials: component.amountRials };
+    }
+    const label = COMPENSATION_CATEGORY_LABELS[category];
+    if (!label) throw new Error('طبقه‌بندی ساختاریافته همه ردیف‌های جبران خدمات الزامی است.');
+    return { category, label, amountRials: component.amountRials };
+  });
+};
+
 export const compensationTotalRials = (components: Array<{ label?: string; amountRials: string | number }>) => {
   if (!Array.isArray(components) || !components.length) throw new Error('حداقل یک ردیف جبران خدمات لازم است.');
   return components.reduce((sum, item) => {

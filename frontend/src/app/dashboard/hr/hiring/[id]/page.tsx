@@ -13,7 +13,14 @@ import {
   useSearchParams,
 } from "next/navigation";
 import Link from "next/link";
-import { FaCheck, FaFileUpload, FaSync } from "react-icons/fa";
+import {
+  FaArchive,
+  FaCheck,
+  FaFileUpload,
+  FaSync,
+  FaTrash,
+  FaUndo,
+} from "react-icons/fa";
 import {
   ErpBadge,
   ErpButton,
@@ -31,6 +38,8 @@ import {
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
+import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
+import RetentionAction from "@/features/hr/RetentionActionSheet";
 import {
   dateTimeFa,
   dateFa,
@@ -135,6 +144,8 @@ export default function HiringCasePage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deletionTarget, setDeletionTarget] = useState<any>(null);
+  const [retentionTarget, setRetentionTarget] = useState<any>(null);
   const [authorities, setAuthorities] = useState<string[]>([]);
   const [correctionExplanations, setCorrectionExplanations] = useState<
     Record<string, string>
@@ -142,12 +153,14 @@ export default function HiringCasePage() {
   const [document, setDocument] = useState<any>({
     category: "BIRTH_CERTIFICATE_ALL_PAGES",
     side: "",
+    customTitle: "",
     inspectionSource: "ORIGINAL_SEEN",
+    note: "",
     file: null,
   });
   const [components, setComponents] = useState([
     { label: "حقوق پایه", category: "BASE_SALARY", amountRials: "" },
-    { label: "مزایا", category: "FIXED_BENEFIT", amountRials: "" },
+    { label: "مزایای ثابت", category: "FIXED_BENEFIT", amountRials: "" },
   ]);
   const [collateral, setCollateral] = useState<any>({
     itemId: "",
@@ -278,6 +291,52 @@ export default function HiringCasePage() {
       setBusy(false);
     }
   };
+  const confirmRetentionAction = async ({ reason }: { reason: string }) => {
+    if (!retentionTarget) return;
+    try {
+      setBusy(true);
+      setError("");
+      if (retentionTarget.archivedAt)
+        await hiringAPI.restore(retentionTarget.id, reason);
+      else await hiringAPI.archive(retentionTarget.id, reason);
+      setRetentionTarget(null);
+      setMessage(
+        retentionTarget.archivedAt
+          ? "پرونده از بایگانی بازیابی شد."
+          : "پرونده بایگانی شد.",
+      );
+      await load();
+    } catch (cause) {
+      setError(hiringError(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const beginPermanentDeletion = async () => {
+    try {
+      setBusy(true);
+      setError("");
+      const preview = (await hiringAPI.getDeletionPreview(id)).data.data;
+      setDeletionTarget({ row: data, preview });
+    } catch (cause) {
+      setError(hiringError(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirmPermanentDeletion = async (payload: any) => {
+    if (!deletionTarget) return;
+    try {
+      setBusy(true);
+      setError("");
+      await hiringAPI.permanentlyDelete(id, payload);
+      router.replace("/dashboard/hr/hiring");
+    } catch (cause) {
+      setError(hiringError(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
   if (!data) return <ErpLoading />;
   const form = data.formRevisions?.[0]?.dataJson || {};
   const compensation = data.compensationSnapshots?.find(
@@ -338,13 +397,29 @@ export default function HiringCasePage() {
       : requiredAssessmentScores.every(
           ({ key }) => assessmentScoreValidation[key]?.value !== undefined,
         );
+  const compensationRowsValid =
+    components.length > 0 &&
+    components.every(
+      (item) =>
+        Boolean(item.category) &&
+        /^\d+$/.test(String(item.amountRials || "")) &&
+        (item.category !== "OTHER" || Boolean(item.label.trim())),
+    );
   const uploadDocument = () => {
     const fd = new FormData();
     fd.append("category", document.category);
     if (document.side) fd.append("side", document.side);
+    if (document.customTitle) fd.append("customTitle", document.customTitle);
     fd.append("inspectionSource", document.inspectionSource);
-    fd.append("file", document.file);
-    return run(() => hiringAPI.uploadDocument(id, fd), "سند هویتی ثبت شد.");
+    if (document.note) fd.append("note", document.note);
+    if (document.inspectionSource === "COPY_RECEIVED" && document.file)
+      fd.append("file", document.file);
+    return run(
+      () => hiringAPI.uploadDocument(id, fd),
+      document.inspectionSource === "ORIGINAL_SEEN"
+        ? "مشاهده اصل سند ثبت شد."
+        : "کپی سند ثبت شد.",
+    );
   };
   const addCollateral = () => {
     const fd = new FormData();
@@ -437,7 +512,34 @@ export default function HiringCasePage() {
       title={`${data.candidate.firstName} ${data.candidate.lastName}`}
       description={`${data.position.title} · ${data.candidate.mobile}`}
       backHref="/dashboard/hr/hiring"
-      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: load }]}
+      actions={[
+        { label: "به‌روزرسانی", icon: FaSync, onClick: load, disabled: busy },
+        ...(data.retentionCapabilities?.canArchive ||
+        data.retentionCapabilities?.canRestore
+          ? [
+              {
+                label: data.archivedAt ? "بازیابی از بایگانی" : "بایگانی",
+                icon: data.archivedAt ? FaUndo : FaArchive,
+                tone: "warning" as const,
+                variant: "outline" as const,
+                onClick: () => setRetentionTarget(data),
+                disabled: busy,
+              },
+            ]
+          : []),
+        ...(data.retentionCapabilities?.canPermanentlyDelete
+          ? [
+              {
+                label: "حذف دائمی",
+                icon: FaTrash,
+                tone: "danger" as const,
+                variant: "outline" as const,
+                onClick: beginPermanentDeletion,
+                disabled: busy,
+              },
+            ]
+          : []),
+      ]}
     >
       {error && (
         <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)]">
@@ -660,7 +762,11 @@ export default function HiringCasePage() {
                         className={field}
                         value={document.category}
                         onChange={(e) =>
-                          setDocument({ ...document, category: e.target.value })
+                          setDocument({
+                            ...document,
+                            category: e.target.value,
+                            customTitle: e.target.value === "OTHER" ? document.customTitle : "",
+                          })
                         }
                       >
                         {documentCategories.map((x) => (
@@ -669,6 +775,17 @@ export default function HiringCasePage() {
                           </option>
                         ))}
                       </ErpSelect>
+                      {document.category === "OTHER" && (
+                        <ErpInput
+                          className={field}
+                          aria-label="عنوان سند"
+                          placeholder="عنوان سند"
+                          value={document.customTitle}
+                          onChange={(e) =>
+                            setDocument({ ...document, customTitle: e.target.value })
+                          }
+                        />
+                      )}
                       <ErpSelect
                         className={field}
                         value={document.inspectionSource}
@@ -676,6 +793,7 @@ export default function HiringCasePage() {
                           setDocument({
                             ...document,
                             inspectionSource: e.target.value,
+                            file: null,
                           })
                         }
                       >
@@ -683,20 +801,40 @@ export default function HiringCasePage() {
                         <option value="COPY_RECEIVED">کپی دریافت شد</option>
                       </ErpSelect>
                       <ErpInput
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
                         className={field}
+                        aria-label="یادداشت سند"
+                        placeholder="یادداشت اختیاری"
+                        value={document.note}
                         onChange={(e) =>
-                          setDocument({
-                            ...document,
-                            file: e.target.files?.[0],
-                          })
+                          setDocument({ ...document, note: e.target.value })
                         }
                       />
+                      {document.inspectionSource === "COPY_RECEIVED" && (
+                        <ErpInput
+                          type="file"
+                          aria-label="فایل کپی سند"
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          className={field}
+                          onChange={(e) =>
+                            setDocument({
+                              ...document,
+                              file: e.target.files?.[0],
+                            })
+                          }
+                        />
+                      )}
                       <ErpButton
-                        label="بارگذاری سند"
+                        label={
+                          document.inspectionSource === "ORIGINAL_SEEN"
+                            ? "ثبت مشاهده اصل"
+                            : "بارگذاری کپی"
+                        }
                         icon={FaFileUpload}
-                        disabled={busy || !document.file}
+                        disabled={
+                          busy ||
+                          (document.category === "OTHER" && !document.customTitle.trim()) ||
+                          (document.inspectionSource === "COPY_RECEIVED" && !document.file)
+                        }
                         onClick={uploadDocument}
                       />
                     </div>
@@ -708,21 +846,26 @@ export default function HiringCasePage() {
                         className="flex justify-between rounded-lg border p-2 text-xs"
                       >
                         <span>
-                          {hrDisplayLabel(doc.category)} · نسخه {doc.version}
+                          {doc.category === "OTHER"
+                            ? doc.customTitle
+                            : hrDisplayLabel(doc.category)}{" "}
+                          · نسخه {doc.version}
                         </span>
                         <span className="flex gap-2">
-                          <ErpPressable
-                            type="submit"
-                            onClick={() =>
-                              download(
-                                () => hiringAPI.downloadDocument(id, doc.id),
-                                doc.originalName,
-                              )
-                            }
-                            className="text-[var(--sds-info)]"
-                          >
-                            دریافت
-                          </ErpPressable>
+                          {doc.originalName && (
+                            <ErpPressable
+                              type="submit"
+                              onClick={() =>
+                                download(
+                                  () => hiringAPI.downloadDocument(id, doc.id),
+                                  doc.originalName,
+                                )
+                              }
+                              className="text-[var(--sds-info)]"
+                            >
+                              دریافت
+                            </ErpPressable>
+                          )}
                           <ErpBadge>{hrDisplayLabel(doc.status)}</ErpBadge>
                         </span>
                       </div>
@@ -1223,25 +1366,20 @@ export default function HiringCasePage() {
               <ErpCard className="p-4">
                 <div className="space-y-2">
                   {components.map((item, i) => (
-                    <div key={i} className="grid gap-2 md:grid-cols-3">
-                      <ErpInput
-                        className={field}
-                        value={item.label}
-                        onChange={(e) =>
-                          setComponents(
-                            components.map((x, j) =>
-                              j === i ? { ...x, label: e.target.value } : x,
-                            ),
-                          )
-                        }
-                      />
+                    <div key={i} className={`grid gap-2 ${item.category === "OTHER" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
                       <ErpSelect
                         className={field}
                         value={item.category || ""}
                         onChange={(e) =>
                           setComponents(
                             components.map((x, j) =>
-                              j === i ? { ...x, category: e.target.value } : x,
+                              j === i
+                                ? {
+                                    ...x,
+                                    category: e.target.value,
+                                    label: e.target.value === "OTHER" ? "" : x.label,
+                                  }
+                                : x,
                             ),
                           )
                         }
@@ -1253,6 +1391,21 @@ export default function HiringCasePage() {
                         <option value="ALLOWANCE">کمک‌هزینه</option>
                         <option value="OTHER">سایر</option>
                       </ErpSelect>
+                      {item.category === "OTHER" && (
+                        <ErpInput
+                          className={field}
+                          aria-label="عنوان مورد سایر"
+                          placeholder="عنوان مورد سایر"
+                          value={item.label}
+                          onChange={(e) =>
+                            setComponents(
+                              components.map((x, j) =>
+                                j === i ? { ...x, label: e.target.value } : x,
+                              ),
+                            )
+                          }
+                        />
+                      )}
                       <ErpInput
                         className={field}
                         inputMode="numeric"
@@ -1302,7 +1455,7 @@ export default function HiringCasePage() {
                           "پیشنهاد ثبت شد.",
                         )
                       }
-                      disabled={busy}
+                      disabled={busy || !compensationRowsValid}
                     />
                   )}
                   {hasAuthority("HR_PAYROLL_PROCESSOR") && (
@@ -1317,7 +1470,7 @@ export default function HiringCasePage() {
                           "نسخه توسط کارشناس حقوق و دستمزد آماده شد.",
                         )
                       }
-                      disabled={busy || !compensation}
+                      disabled={busy || !compensation || !compensationRowsValid}
                     />
                   )}
                   {hasAuthority("HR_PAYROLL_MANAGER") && (
@@ -2493,6 +2646,30 @@ export default function HiringCasePage() {
           run={run}
         />
       )}
+      {deletionTarget && (
+        <PermanentDeletionDialog
+          title="حذف دائمی پرونده متقاضی"
+          preview={deletionTarget.preview}
+          busy={busy}
+          onClose={() => setDeletionTarget(null)}
+          onConfirm={confirmPermanentDeletion}
+        />
+      )}
+      {retentionTarget && (
+        <RetentionAction
+          title={
+            retentionTarget.archivedAt
+              ? "بازیابی پرونده از بایگانی"
+              : "بایگانی پرونده متقاضی"
+          }
+          targetName={`${retentionTarget.candidate.firstName} ${retentionTarget.candidate.lastName}`}
+          busy={busy}
+          confirmLabel={retentionTarget.archivedAt ? "بازیابی" : "بایگانی"}
+          confirmTone={retentionTarget.archivedAt ? "success" : "warning"}
+          onClose={() => setRetentionTarget(null)}
+          onConfirm={confirmRetentionAction}
+        />
+      )}
     </ErpPage>
   );
 }
@@ -3132,7 +3309,6 @@ function CollateralRequirementPanel({
   const [draft, setDraft] = useState({
     type: current?.type || "PROMISSORY_NOTE",
     amountRials: current?.amountRials || "",
-    obligation: current?.obligation || "",
     dueTiming: current?.dueTiming || "",
     candidateExplanation: current?.candidateExplanation || "",
   });
@@ -3146,7 +3322,7 @@ function CollateralRequirementPanel({
           </p>
         )}
       </div>
-      <div className="grid gap-2 md:grid-cols-5">
+      <div className="grid gap-2 md:grid-cols-4">
         <ErpSelect
           className={field}
           value={draft.type}
@@ -3164,14 +3340,6 @@ function CollateralRequirementPanel({
           value={draft.amountRials}
           onChange={(event) =>
             setDraft({ ...draft, amountRials: event.target.value })
-          }
-        />
-        <ErpInput
-          className={field}
-          placeholder="تعهد"
-          value={draft.obligation}
-          onChange={(event) =>
-            setDraft({ ...draft, obligation: event.target.value })
           }
         />
         <ErpInput

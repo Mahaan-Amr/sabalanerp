@@ -21,7 +21,7 @@ const assessmentLabels: Record<string, string> = {
 };
 const label = (value?: string | null) => value ? labels[value] || 'سایر' : '';
 const identityTitle = (row: any) =>
-  [label(row.category), label(row.side)].filter(Boolean).join(' - ');
+  [row.category === 'OTHER' ? row.customTitle : label(row.category), label(row.side)].filter(Boolean).join(' - ');
 
 const restricted = (entry: any) => ({
   id: entry.id,
@@ -59,7 +59,7 @@ export const buildHiringDocumentIndex = (
       id: row.id, title: identityTitle(row), category: 'IDENTITY', version: row.version,
       uploader: row.uploadedBy, date: row.createdAt, reviewStatus: row.status,
       safeOwner: 'منابع انسانی', originalName: row.originalName,
-      downloadKind: 'DOCUMENT', canOpen: canHr, restricted: !canHr,
+      downloadKind: 'DOCUMENT', canOpen: canHr && Boolean(row.originalName), restricted: !canHr,
     };
     entries.push(canHr ? entry : restricted(entry));
   }

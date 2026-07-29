@@ -8,7 +8,6 @@ import {
   FaFilter,
   FaPlus,
   FaSync,
-  FaTrash,
   FaUndo,
 } from "react-icons/fa";
 import {
@@ -23,7 +22,6 @@ import { hrAPI } from "@/lib/api";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { dateTimeFa } from "@/features/hr/hrUi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
-import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
 import {
   hiringLifecyclePhaseOptions,
   hiringLifecycleStatusLabel,
@@ -74,7 +72,6 @@ export default function HiringCasesPage() {
   const [meta, setMeta] = useState({ page: 1, totalPages: 1, total: 0 });
   const [decisionDetail, setDecisionDetail] = useState<any>(null);
   const [archiveView, setArchiveView] = useState(false);
-  const [deletionTarget, setDeletionTarget] = useState<any>(null);
 
   const load = async (nextFilters: HiringQueueFilters = filters) => {
     try {
@@ -141,55 +138,6 @@ export default function HiringCasesPage() {
     }
   };
 
-  const changeArchiveState = async (row: any) => {
-    const reason = window.prompt(
-      row.archivedAt ? "دلیل بازیابی از بایگانی" : "دلیل بایگانی پرونده",
-    );
-    if (!reason?.trim()) return;
-    try {
-      setBusy(true);
-      setError("");
-      if (row.archivedAt) await hiringAPI.restore(row.id, reason.trim());
-      else await hiringAPI.archive(row.id, reason.trim());
-      setMessage(
-        row.archivedAt ? "پرونده از بایگانی بازیابی شد." : "پرونده بایگانی شد.",
-      );
-      await load();
-    } catch (cause) {
-      setError(hiringError(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const permanentlyDelete = async (row: any) => {
-    try {
-      setBusy(true);
-      setError("");
-      const preview = (await hiringAPI.getDeletionPreview(row.id)).data.data;
-      setDeletionTarget({ row, preview });
-    } catch (cause) {
-      setError(hiringError(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const confirmPermanentDeletion = async (payload: any) => {
-    if (!deletionTarget) return;
-    try {
-      setBusy(true);
-      setError("");
-      await hiringAPI.permanentlyDelete(deletionTarget.row.id, payload);
-      setDeletionTarget(null);
-      setMessage("پرونده به‌صورت دائمی حذف شد.");
-      await load();
-    } catch (cause) {
-      setError(hiringError(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   if (loading && !rows.length) return <ErpLoading />;
 
@@ -589,27 +537,6 @@ export default function HiringCasesPage() {
                             ارسال مجدد دعوت
                           </ErpPressable>
                         )}
-                        {(row.retentionCapabilities?.canArchive ||
-                          row.retentionCapabilities?.canRestore) && (
-                          <ErpPressable
-                            type="button"
-                            disabled={busy}
-                            onClick={() => changeArchiveState(row)}
-                            className="rounded-lg border border-[var(--sds-warning)] px-3 py-2 font-bold text-[var(--sds-warning)] disabled:opacity-50"
-                          >
-                            {row.archivedAt ? "بازیابی از بایگانی" : "بایگانی"}
-                          </ErpPressable>
-                        )}
-                        {row.retentionCapabilities?.canPermanentlyDelete && (
-                          <ErpPressable
-                            type="button"
-                            disabled={busy}
-                            onClick={() => permanentlyDelete(row)}
-                            className="rounded-lg border border-[var(--sds-danger)] px-3 py-2 font-bold text-[var(--sds-danger)] disabled:opacity-50"
-                          >
-                            <FaTrash className="ml-1 inline" /> حذف دائمی
-                          </ErpPressable>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -738,15 +665,6 @@ export default function HiringCasesPage() {
             )}
           </ErpCard>
         </div>
-      )}
-      {deletionTarget && (
-        <PermanentDeletionDialog
-          title="حذف دائمی پرونده متقاضی"
-          preview={deletionTarget.preview}
-          busy={busy}
-          onClose={() => setDeletionTarget(null)}
-          onConfirm={confirmPermanentDeletion}
-        />
       )}
     </ErpPage>
   );

@@ -3657,6 +3657,9 @@ model HrHiringAuthority {
   createdBy String
   createdAt DateTime              @default(now())
   updatedAt DateTime              @updatedAt
+  revokedAt DateTime?
+  revokedBy String?
+  revocationReason String?
 
   @@unique([userId, authority])
   @@index([authority, isActive, expiresAt])
@@ -3681,15 +3684,16 @@ model HrHiringDocument {
   applicationId     String
   category          String
   side              String?
+  customTitle       String?
   version           Int
   status            HrEvidenceStatus   @default(RECEIVED)
   inspectionSource  HrInspectionSource
-  storageName       String
-  originalName      String
-  mimeType          String
-  size              Int
-  sha256            String
-  malwareScanStatus String
+  storageName       String?
+  originalName      String?
+  mimeType          String?
+  size              Int?
+  sha256            String?
+  malwareScanStatus String?
   note              String?
   uploadedBy        String
   verifiedBy        String?
@@ -3697,7 +3701,7 @@ model HrHiringDocument {
   createdAt         DateTime           @default(now())
   application       HrJobApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
-  @@unique([applicationId, category, side, version])
+  @@unique([applicationId, category, side, customTitle, version])
   @@index([applicationId, category, status])
   @@map("hr_hiring_documents")
 }

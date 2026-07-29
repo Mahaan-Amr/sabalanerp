@@ -20,7 +20,7 @@ import {
   validateHiringFileSignature
 } from '../services/hrHiringFileStorage';
 import { normalizeCandidateAssessmentResult } from '../services/hrCandidateAssessment';
-import { compensationTotalRials, isValidIranianNationalCode, validateHiringCorrection, validateHiringQuestionnaire } from '../services/hrHiringRules';
+import { compensationTotalRials, isValidIranianNationalCode, normalizeCompensationComponents, validateHiringCorrection, validateHiringQuestionnaire } from '../services/hrHiringRules';
 import {
   applicantOtpHash,
   applicantSubjectHash,
@@ -52,12 +52,15 @@ import { buildEmploymentActivationReadiness } from '../services/hrEmploymentActi
 import {
   assertArchiveReason,
   assertArchivedRecordMutable,
+  assertJobApplicationArchivable,
   assertPermanentDeletionConfirmation,
   stableDeletionFingerprint,
   projectRecordRetentionCapabilities
 } from '../services/hrRecordRetentionPolicy';
 import { commitStagedHiringFiles, restoreStagedHiringFiles, stageHiringFilesForDeletion } from '../services/hrDeletionFileTransaction';
 import { latestDecisionsByKind } from '../services/hrApplicationDecisionVersions';
+import { normalizeHiringDocumentTitle } from '../services/hrHiringDocumentEvidence';
+import { assertHiringAuthorityMutationAllowed } from '../services/hrHiringAuthorityPolicy';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -71,6 +74,7 @@ const THROTTLED_ACCESS_ERROR = 'تعداد تلاش‌ها بیش از حد مج
 const CONTACT_HR_ACCESS_ERROR = 'تعداد تلاش‌های ناموفق به حد مجاز رسیده است. لطفاً برای دریافت کد ورود جدید با منابع انسانی تماس بگیرید.';
 const DOCUMENT_CATEGORIES = new Set(['BIRTH_CERTIFICATE_ALL_PAGES', 'BIRTH_CERTIFICATE_EXPLANATIONS', 'NATIONAL_ID_FRONT', 'NATIONAL_ID_BACK', 'MILITARY', 'EDUCATION', 'PHOTO', 'OTHER']);
 const COLLATERAL_TYPES = new Set(['PROMISSORY_NOTE', 'CHEQUE', 'GUARANTEE', 'UNDERTAKING', 'OTHER']);
+const HIRING_AUTHORITY_TYPES = new Set(['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HR_PAYROLL_PROCESSOR', 'HR_PAYROLL_MANAGER', 'FINANCE_RECORDER', 'FINANCE_MANAGER', 'HIRING_MANAGER']);
 const permissionRank: Record<string, number> = { view: 1, edit: 2, admin: 3 };
 
 ensureHrHiringStorage();
@@ -297,6 +301,7 @@ const hasWorkspace = async (req: AuthRequest, workspace: string, minimum = 'view
 };
 
 const requireHiringRead = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (req.user!.role === 'ADMIN') return next();
   const [hr, accounting, authority] = await Promise.all([
     hasWorkspace(req, 'hr'),
     hasWorkspace(req, 'accounting'),
@@ -382,17 +387,13 @@ const applicationDeletionImpact = async (applicationId: string, client: PrismaCl
   };
 };
 
-const requireHrAdmin = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const [direct, role] = await Promise.all([
-    prisma.workspacePermission.findUnique({ where: { userId_workspace: { userId: req.user!.id, workspace: 'hr' } } }),
-    prisma.roleWorkspacePermission.findUnique({ where: { role_workspace: { role: req.user!.role as any, workspace: 'hr' } } })
-  ]);
-  const now = Date.now();
-  const explicitAdmin = [direct, role].some((permission) => {
-    const expiry = (permission as any)?.expiresAt as Date | null | undefined;
-    return permission?.isActive && permission.permissionLevel === 'admin' && (!expiry || expiry.getTime() > now);
+const requireAuthorityAdministrator = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (req.user!.role === 'ADMIN') return next();
+  const companyManager = await prisma.hrHiringAuthority.findFirst({
+    where: { userId: actorId(req), authority: 'COMPANY_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    select: { id: true }
   });
-  if (!explicitAdmin) return res.status(403).json({ success: false, error: 'دسترسی صریح مدیریت منابع انسانی لازم است؛ نقش مدیریت سامانه به‌تنهایی کافی نیست.' });
+  if (!companyManager) return res.status(403).json({ success: false, error: 'اختیار مدیریت شرکت یا نقش مدیر سامانه الزامی است.' });
   next();
 });
 
@@ -721,29 +722,70 @@ router.get('/me/authorities', asyncHandler(async (req: AuthRequest, res: Respons
   res.json({ success: true, data: rows.map((row) => row.authority) });
 }));
 
-router.get('/authorities', requireHrAdmin, asyncHandler(async (_req: AuthRequest, res: Response) => {
-  const rows = await prisma.hrHiringAuthority.findMany({ orderBy: [{ authority: 'asc' }, { createdAt: 'asc' }] });
+router.get('/authorities', requireAuthorityAdministrator, asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const rows = await prisma.hrHiringAuthority.findMany({
+    where: { isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    orderBy: [{ authority: 'asc' }, { createdAt: 'asc' }]
+  });
   res.json({ success: true, data: rows });
 }));
 
-router.get('/authorities/audit', requireHrAdmin, asyncHandler(async (_req: AuthRequest, res: Response) => {
+router.get('/authorities/users', requireAuthorityAdministrator, asyncHandler(async (_req: AuthRequest, res: Response) => {
+  const rows = await prisma.user.findMany({
+    where: { isActive: true },
+    select: { id: true, firstName: true, lastName: true, username: true, role: true },
+    orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }]
+  });
+  res.json({ success: true, data: rows });
+}));
+
+router.get('/authorities/audit', requireSystemAdmin, asyncHandler(async (_req: AuthRequest, res: Response) => {
   const rows = await prisma.hrHiringAuthorityAudit.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
   res.json({ success: true, data: rows });
 }));
 
-router.post('/authorities', requireHrAdmin, asyncHandler(async (req: AuthRequest, res: Response) => {
+router.post('/authorities', requireAuthorityAdministrator, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const targetUserId = String(req.body.userId || '');
+  const authority = String(req.body.authority || '');
+  if (!targetUserId || !HIRING_AUTHORITY_TYPES.has(authority)) throw new Error('کاربر یا اختیار استخدام نامعتبر است.');
+  const [actorAuthorities, activeCompanyManagerCount, targetUser] = await Promise.all([
+    prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } }),
+    prisma.hrHiringAuthority.count({ where: { authority: 'COMPANY_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } }),
+    prisma.user.findFirst({ where: { id: targetUserId, isActive: true }, select: { id: true, role: true } })
+  ]);
+  if (!targetUser) throw new Error('کاربر فعال پیدا نشد.');
+  assertHiringAuthorityMutationAllowed({ actorRole: req.user!.role, actorUserId: actorId(req), actorAuthorities: actorAuthorities.map((item) => item.authority), action: 'GRANT', targetUserId, targetRole: targetUser.role, authority, activeCompanyManagerCount });
   const previous = await prisma.hrHiringAuthority.findUnique({ where: { userId_authority: { userId: req.body.userId, authority: req.body.authority } } });
   const row = await prisma.hrHiringAuthority.upsert({
-    where: { userId_authority: { userId: req.body.userId, authority: req.body.authority } },
-    create: { userId: req.body.userId, authority: req.body.authority, createdBy: actorId(req), isActive: req.body.isActive !== false, expiresAt: req.body.expiresAt ? parseDate(req.body.expiresAt, 'انقضای اختیار') : null },
-    update: { isActive: req.body.isActive !== false, expiresAt: req.body.expiresAt ? parseDate(req.body.expiresAt, 'انقضای اختیار') : null }
+    where: { userId_authority: { userId: targetUserId, authority: authority as any } },
+    create: { userId: targetUserId, authority: authority as any, createdBy: actorId(req), isActive: true, expiresAt: req.body.expiresAt ? parseDate(req.body.expiresAt, 'انقضای اختیار') : null },
+    update: { isActive: true, expiresAt: req.body.expiresAt ? parseDate(req.body.expiresAt, 'انقضای اختیار') : null, revokedAt: null, revokedBy: null, revocationReason: null }
   });
   await prisma.hrHiringAuthorityAudit.create({ data: {
-    authorityId: row.id, actorUserId: actorId(req), eventType: previous ? 'AUTHORITY_UPDATED' : 'AUTHORITY_ASSIGNED',
+    authorityId: row.id, actorUserId: actorId(req), eventType: previous?.isActive ? 'AUTHORITY_UPDATED' : previous ? 'AUTHORITY_REACTIVATED' : 'AUTHORITY_ASSIGNED',
     beforeJson: previous ? JSON.parse(JSON.stringify(previous)) : Prisma.JsonNull,
     afterJson: JSON.parse(JSON.stringify(row))
   }});
   res.status(201).json({ success: true, data: row });
+}));
+
+router.post('/authorities/:id/revoke', requireAuthorityAdministrator, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const reason = String(req.body.reason || '').trim();
+  if (reason.length < 3) throw new Error('دلیل سلب اختیار الزامی است.');
+  const row = await prisma.$transaction(async (tx) => {
+    const current = await tx.hrHiringAuthority.findUniqueOrThrow({ where: { id: req.params.id } });
+    if (!current.isActive || (current.expiresAt && current.expiresAt <= new Date())) throw new Error('این اختیار فعال نیست.');
+    const [actorAuthorities, activeCompanyManagerCount, targetUser] = await Promise.all([
+      tx.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } }),
+      tx.hrHiringAuthority.count({ where: { authority: 'COMPANY_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } }),
+      tx.user.findUniqueOrThrow({ where: { id: current.userId }, select: { role: true } })
+    ]);
+    assertHiringAuthorityMutationAllowed({ actorRole: req.user!.role, actorUserId: actorId(req), actorAuthorities: actorAuthorities.map((item) => item.authority), action: 'REVOKE', targetUserId: current.userId, targetRole: targetUser.role, authority: current.authority, activeCompanyManagerCount });
+    const updated = await tx.hrHiringAuthority.update({ where: { id: current.id }, data: { isActive: false, revokedAt: new Date(), revokedBy: actorId(req), revocationReason: reason } });
+    await tx.hrHiringAuthorityAudit.create({ data: { authorityId: updated.id, actorUserId: actorId(req), eventType: 'AUTHORITY_REVOKED', beforeJson: JSON.parse(JSON.stringify(current)), afterJson: JSON.parse(JSON.stringify(updated)) } });
+    return updated;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  res.json({ success: true, data: row });
 }));
 
 router.get('/pre-identity/templates', requireAuthority('COMPANY_MANAGER'), asyncHandler(async (_req: AuthRequest, res: Response) => {
@@ -872,7 +914,12 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
     const row = {
       ...source,
       archivedByDisplayName: source.archivedBy ? archivedActorNames.get(source.archivedBy) || source.archivedBy : null,
-      retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities, archived: Boolean(source.archivedAt) }),
+      retentionCapabilities: projectRecordRetentionCapabilities({
+        role: req.user!.role,
+        authorities,
+        archived: Boolean(source.archivedAt),
+        archiveEligible: source.stage === 'CLOSED' && Boolean(source.outcome),
+      }),
       decisionDetailsVisible: canSeeDecisionDetails,
       candidate: { ...source.candidate, mobile: canSeeFullMobile ? source.candidate.mobile : `${source.candidate.mobile.slice(0, 4)}***${source.candidate.mobile.slice(-2)}` },
       hiringDecisions: source.hiringDecisions.map((decision) => canSeeDecisionDetails ? decision : ({ kind: decision.kind, outcome: decision.outcome, version: decision.version }))
@@ -913,7 +960,12 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const canSeeFinanceSensitive = authorities.has('FINANCE_RECORDER') || authorities.has('FINANCE_MANAGER');
   const canSeeCompensation = canSeeFinanceSensitive || authorities.has('HIRING_MANAGER') || authorities.has('HR_PROCESSOR') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
   const data: any = row;
-  data.retentionCapabilities = projectRecordRetentionCapabilities({ role: req.user!.role, authorities: [...authorities], archived: Boolean(row.archivedAt) });
+  data.retentionCapabilities = projectRecordRetentionCapabilities({
+    role: req.user!.role,
+    authorities: [...authorities],
+    archived: Boolean(row.archivedAt),
+    archiveEligible: row.stage === 'CLOSED' && Boolean(row.outcome),
+  });
   data.readOnlyArchived = Boolean(row.archivedAt);
   data.lifecycle = projectHiringLifecycle(row, authorities, actorId(req));
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities, actorId(req));
@@ -1005,8 +1057,9 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
 
 router.post('/applications/:id/archive', requireArchiveManager, asyncHandler(async (req: AuthRequest, res: Response) => {
   const reason = assertArchiveReason(req.body.reason);
-  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, select: { archivedAt: true } });
+  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, select: { archivedAt: true, stage: true, outcome: true } });
   if (application.archivedAt) return res.status(409).json({ success: false, error: 'پرونده قبلاً بایگانی شده است.' });
+  assertJobApplicationArchivable(application.stage, application.outcome);
   const archivedAt = new Date();
   const row = await prisma.$transaction(async (tx) => {
     const updated = await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { archivedAt, archivedBy: actorId(req), archiveReason: reason } });
@@ -1364,29 +1417,32 @@ router.post('/applications/:id/form/correction/retry', requireAuthority('HR_PROC
 }));
 
 router.post('/applications/:id/documents', requireAuthority('HR_PROCESSOR'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
-  if (!req.file) throw new Error('فایل الزامی است.');
   try {
     const gate = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, select: { preIdentityReleasedAt: true, preIdentityGrandfatheredAt: true } });
     if (!gate.preIdentityReleasedAt && !gate.preIdentityGrandfatheredAt) throw new Error('چک‌لیست پیش از احراز هویت هنوز آزاد نشده است.');
     if (!DOCUMENT_CATEGORIES.has(req.body.category) || !['ORIGINAL_SEEN', 'COPY_RECEIVED'].includes(req.body.inspectionSource)) throw new Error('دسته یا منبع مشاهده سند نامعتبر است.');
-    validateHiringFileSignature(req.file.path, req.file.mimetype);
-    const scanStatus = await scanHiringFile(req.file.path);
-    const digest = await sha256File(req.file.path);
-    const aggregate = await prisma.hrHiringDocument.aggregate({ where: { applicationId: req.params.id, category: req.body.category, side: req.body.side || null }, _max: { version: true } });
+    const customTitle = normalizeHiringDocumentTitle(req.body.category, req.body.customTitle);
+    const copyReceived = req.body.inspectionSource === 'COPY_RECEIVED';
+    if (copyReceived && !req.file) throw new Error('فایل کپی دریافت‌شده الزامی است.');
+    if (!copyReceived && req.file) throw new Error('برای ثبت مشاهده اصل نباید فایل بارگذاری شود.');
+    if (req.file) validateHiringFileSignature(req.file.path, req.file.mimetype);
+    const scanStatus = req.file ? await scanHiringFile(req.file.path) : null;
+    const digest = req.file ? await sha256File(req.file.path) : null;
+    const aggregate = await prisma.hrHiringDocument.aggregate({ where: { applicationId: req.params.id, category: req.body.category, side: req.body.side || null, customTitle }, _max: { version: true } });
     const row = await prisma.hrHiringDocument.create({ data: {
-      applicationId: req.params.id, category: req.body.category, side: req.body.side || null,
+      applicationId: req.params.id, category: req.body.category, side: req.body.side || null, customTitle,
       version: (aggregate._max.version || 0) + 1, inspectionSource: req.body.inspectionSource,
-      storageName: req.file.filename, originalName: req.file.originalname, mimeType: req.file.mimetype, size: req.file.size,
+      storageName: req.file?.filename || null, originalName: req.file?.originalname || null, mimeType: req.file?.mimetype || null, size: req.file?.size || null,
       sha256: digest, malwareScanStatus: scanStatus, note: req.body.note || null, uploadedBy: actorId(req)
     }});
-    await audit(req.params.id, 'IDENTITY_DOCUMENT_UPLOADED', req, { documentId: row.id, category: row.category, version: row.version });
+    await audit(req.params.id, copyReceived ? 'IDENTITY_DOCUMENT_UPLOADED' : 'IDENTITY_DOCUMENT_ORIGINAL_INSPECTED', req, { documentId: row.id, category: row.category, customTitle: row.customTitle, version: row.version });
     res.status(201).json({ success: true, data: row });
-  } catch (error) { removeHiringFile(req.file.path); throw error; }
+  } catch (error) { removeHiringFile(req.file?.path); throw error; }
 }));
 
 router.get('/applications/:id/documents/:documentId/download', requireAuthority('HR_PROCESSOR', 'HR_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const document = await prisma.hrHiringDocument.findFirst({ where: { id: req.params.documentId, applicationId: req.params.id } });
-  if (!document) return res.status(404).json({ success: false, error: 'سند پیدا نشد.' });
+  if (!document?.storageName || !document.originalName) return res.status(404).json({ success: false, error: 'فایل سند پیدا نشد.' });
   await audit(req.params.id, 'IDENTITY_DOCUMENT_DOWNLOADED', req, { documentId: document.id });
   await audit(req.params.id, 'SENSITIVE_RECRUITMENT_EVIDENCE_ACCESSED', req, { evidenceType: 'IDENTITY', evidenceId: document.id, action: 'DOWNLOAD' });
   res.download(safeHiringStoragePath(document.storageName), document.originalName);
@@ -1417,7 +1473,7 @@ router.post('/applications/:id/identity/approve', requireAuthority('HR_MANAGER')
   if (requiredVerifiedChecks.some((fieldKey) => !checks.some((item) => item.fieldKey === fieldKey && item.status === 'VERIFIED'))) throw new Error('همه کنترل‌های الزامی هویتی باید مطابق باشند.');
   if (['militaryStatus', 'birthCertificateExplanations'].some((fieldKey) => !checks.some((item) => item.fieldKey === fieldKey && ['VERIFIED', 'NOT_APPLICABLE'].includes(item.status)))) throw new Error('وضعیت نظام وظیفه و توضیحات شناسنامه باید تعیین تکلیف شوند.');
   const latestDocuments = Array.from(docs.reduce((byCategory, document) => {
-    const key = `${document.category}:${document.side || ''}`;
+    const key = `${document.category}:${document.side || ''}:${document.customTitle || ''}`;
     const current = byCategory.get(key);
     if (!current || document.version > current.version) byCategory.set(key, document);
     return byCategory;
@@ -1438,7 +1494,7 @@ router.post('/applications/:id/compensation', requireAuthority('HIRING_MANAGER')
   if (application.identityClearance !== 'APPROVED') throw new Error('پیشنهاد جبران خدمات پس از تأیید هویت ثبت می‌شود.');
   if (!application.assessmentCompletedAt || application.assessmentDecision !== 'APPROVED' || application.assessmentReviewRequired) throw new Error('مرحله ارزیابی باید تکمیل و توسط مدیریت شرکت تأیید شده باشد.');
   if (application.acceptedOfferAt) throw new Error('پس از پذیرش متقاضی، تغییر پیشنهاد نیازمند فرایند اصلاح قرارداد است.');
-  const components = Array.isArray(req.body.components) ? req.body.components : [];
+  const components = normalizeCompensationComponents(Array.isArray(req.body.components) ? req.body.components : []);
   const total = compensationTotalRials(components);
   const aggregate = await prisma.hrCompensationSnapshot.aggregate({ where: { applicationId: req.params.id }, _max: { version: true } });
   const row = await prisma.hrCompensationSnapshot.create({ data: {
@@ -1455,9 +1511,7 @@ router.put('/applications/:id/compensation/:snapshotId/prepare', requireAuthorit
   if (latest?.id !== row.id) throw new Error('فقط آخرین نسخه پیشنهاد قابل پردازش است.');
   if (row.applicationId !== req.params.id || row.proposedBy === actorId(req)) throw new Error('کارشناس حقوق و دستمزد باید مستقل از پیشنهاددهنده باشد.');
   if (row.hrApprovedAt || row.financeApprovedAt || row.candidateAcceptedAt) throw new Error('نسخه تأییدشده قابل آماده‌سازی مجدد نیست.');
-  const components = Array.isArray(req.body.components) ? req.body.components : row.componentsJson as any[];
-  const allowedCategories = ['BASE_SALARY', 'FIXED_BENEFIT', 'VARIABLE_BENEFIT', 'ALLOWANCE', 'OTHER'];
-  if (components.some((component: any) => !allowedCategories.includes(component.category))) throw new Error('طبقه‌بندی ساختاریافته همه ردیف‌های جبران خدمات الزامی است.');
+  const components = normalizeCompensationComponents(Array.isArray(req.body.components) ? req.body.components : row.componentsJson as any[]);
   const total = compensationTotalRials(components);
   const updated = await prisma.hrCompensationSnapshot.update({ where: { id: row.id }, data: { componentsJson: components, totalRials: total.toString(), preparedBy: actorId(req), preparedAt: new Date() } });
   await audit(req.params.id, 'COMPENSATION_PAYROLL_PREPARED', req, { snapshotId: row.id });
@@ -1945,7 +1999,7 @@ router.get('/applications/:id/pre-identity/items/:itemId/evidence/download', req
 router.post('/applications/:id/pre-identity/release', requireAuthority('HR_PROCESSOR'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { preIdentityChecklistItems: true } });
   const decisions = await prisma.hrApplicationDecision.findMany({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' } });
-  const latestDecision = new Map(decisions.map((decision) => [decision.kind, decision]));
+  const latestDecision = latestDecisionsByKind(decisions);
   if (['HR_INTERVIEW', 'HR_PRELIMINARY_APPROVAL', 'COMPANY_APPROVAL'].some((kind) => latestDecision.get(kind as any)?.outcome !== 'POSITIVE')) throw new Error('سه تصمیم مرحله پیش از احراز هویت باید در آخرین نسخه مثبت باشند.');
   if (!application.preIdentityRequirementsFinalizedAt || !application.preIdentityManagementApprovedAt) throw new Error('نهایی‌سازی الزامات و تأیید مدیریت برای ادامه الزامی است.');
   if (application.preIdentityChecklistItems.some((item) => ['PENDING', 'IN_PROGRESS'].includes(item.status) || (item.status === 'NEGATIVE' && !item.managementResolution))) throw new Error('چک‌لیست هنوز مورد تعیین‌تکلیف‌نشده دارد.');
@@ -2041,7 +2095,7 @@ router.post('/applications/:id/collateral-requirements', requireAuthority('COMPA
   const latestOffer = await prisma.hrCompensationSnapshot.findFirst({ where: { applicationId: req.params.id, obsoleteAt: null }, orderBy: { version: 'desc' } });
   const row = await prisma.$transaction(async (tx) => {
     if (latest) await tx.hrCollateralRequirement.update({ where: { id: latest.id }, data: { status: 'SUPERSEDED' } });
-    const created = await tx.hrCollateralRequirement.create({ data: { applicationId: req.params.id, version: (latest?.version || 0) + 1, type, amountRials: req.body.amountRials || null, obligation: String(req.body.obligation || '').trim() || null, dueTiming: String(req.body.dueTiming || '').trim() || null, candidateExplanation: explanation, proposedBy: actorId(req), supersedesId: latest?.id || null } });
+    const created = await tx.hrCollateralRequirement.create({ data: { applicationId: req.params.id, version: (latest?.version || 0) + 1, type, amountRials: req.body.amountRials || null, obligation: null, dueTiming: String(req.body.dueTiming || '').trim() || null, candidateExplanation: explanation, proposedBy: actorId(req), supersedesId: latest?.id || null } });
     if (latestOffer?.candidateAcceptedAt) {
       await tx.hrCompensationSnapshot.update({ where: { id: latestOffer.id }, data: { obsoleteAt: new Date(), obsoleteBy: actorId(req), obsoleteReason: 'تغییر الزام وثیقه پس از پذیرش؛ نسخه جدید پیشنهاد الزامی است.' } });
       await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { acceptedOfferAt: null, compensationClearance: 'NOT_STARTED' } });
@@ -2075,7 +2129,7 @@ router.post('/applications/:id/collateral/apply-template', requireAuthority('FIN
   if (existing) throw new Error('پرونده وثیقه قبلاً برای دریافت توسط امور مالی ساخته شده است.');
   await prisma.$transaction([
     prisma.hrJobApplication.update({ where: { id: application.id }, data: { collateralTemplateId: null, collateralClearance: 'IN_PROGRESS' } }),
-    prisma.hrCollateralItem.create({ data: { applicationId: application.id, type: requirement.type, required: true, amountRials: requirement.amountRials, status: 'MISSING', note: requirement.obligation || requirement.candidateExplanation, recordedBy: actorId(req) } })
+    prisma.hrCollateralItem.create({ data: { applicationId: application.id, type: requirement.type, required: true, amountRials: requirement.amountRials, status: 'MISSING', note: requirement.candidateExplanation, recordedBy: actorId(req) } })
   ]);
   await audit(req.params.id, 'COLLATERAL_RECEIPT_OPENED', req, { requirementId: requirement.id, requirementVersion: requirement.version });
   res.status(201).json({ success: true });

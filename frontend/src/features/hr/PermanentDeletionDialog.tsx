@@ -124,7 +124,7 @@ export default function PermanentDeletionWorkflow({
   );
 
   return (
-    <ErpSheet open onClose={busy ? () => undefined : onClose} title={title} footer={footer}>
+    <ErpSheet open presentation="modal" onClose={busy ? () => undefined : onClose} title={title} footer={footer}>
       <div className="space-y-4">
         <p className="mt-2 text-sm">
           این عملیات برگشت‌پذیر نیست. پیش‌نمایش زیر باید پیش از اجرا دوباره در

@@ -1044,13 +1044,14 @@ export function ErpActionMenu({ label, actions }: { label: string; actions: ErpA
   );
 }
 
-export function ErpSheet({ open, onClose, title, children, footer }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode }) {
+export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet' }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal' }) {
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
   const dialogRef = React.useRef<HTMLDivElement>(null);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
   const onCloseRef = React.useRef(onClose);
   const titleId = React.useId();
   const reduceMotion = useReducedMotion();
+  const isModal = presentation === 'modal';
   React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   React.useEffect(() => {
     if (!open) return;
@@ -1077,15 +1078,27 @@ export function ErpSheet({ open, onClose, title, children, footer }: WithChildre
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-stretch sm:justify-start" role="presentation">
-          <motion.button type="button" aria-label="بستن" onClick={onClose} className="absolute inset-0 bg-[var(--sds-surface-raised)] backdrop-blur-[1px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
-          <motion.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} initial={reduceMotion ? false : { opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24 }} transition={{ duration: reduceMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }} className="relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:mr-auto sm:h-full sm:max-h-none sm:max-w-lg sm:rounded-none sm:rounded-r-3xl">
-            <header className="flex min-h-16 items-center justify-between gap-3 border-b border-[var(--sds-border-default)] px-4 dark:border-[var(--sds-border-strong)]">
+        <div className={isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"} role="presentation">
+          <motion.button type="button" aria-label="بستن" onClick={onClose} className={isModal ? "absolute inset-0 bg-[var(--sds-surface-overlay)] backdrop-blur-sm" : "absolute inset-0 bg-[var(--sds-surface-raised)] backdrop-blur-[1px]"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
+          <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            initial={reduceMotion ? false : isModal ? { opacity: 0, scale: 0.96, y: 12 } : { opacity: 0, y: 32 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={isModal ? { opacity: 0, scale: 0.97, y: 8 } : { opacity: 0, y: 24 }}
+            transition={{ duration: reduceMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
+            className={isModal
+              ? "relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:max-h-[calc(100dvh-2rem)]"
+              : "relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:mr-auto sm:h-full sm:max-h-none sm:max-w-lg sm:rounded-none sm:rounded-r-3xl"}
+          >
+            <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-[var(--sds-border-default)] px-4 dark:border-[var(--sds-border-strong)]">
               <h2 id={titleId} className="text-base font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2>
               <button ref={closeButtonRef} type="button" onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-[var(--sds-text-secondary)] outline-none transition hover:bg-[var(--sds-surface-subtle)] focus-visible:ring-2 focus-visible:ring-[var(--sds-accent)] dark:hover:bg-[var(--sds-surface-raised)]" aria-label="بستن"><FaTimes /></button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
-            {footer && <footer className="border-t border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-strong)]">{footer}</footer>}
+            {footer && <footer className="shrink-0 border-t border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-strong)]">{footer}</footer>}
           </motion.div>
         </div>
       )}

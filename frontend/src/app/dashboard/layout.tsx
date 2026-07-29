@@ -69,6 +69,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { currentWorkspace, accessibleWorkspaces } = useWorkspace();
+  const isHrLanding = pathname === '/dashboard/hr';
 
   useEffect(() => {
     checkAuth();
@@ -258,7 +259,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   return (
-    <div className="dashboard-shell min-h-screen bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)]">
+    <div className={`dashboard-shell min-h-screen bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)] ${isHrLanding ? 'sds-neumorphic-scope' : ''}`}>
       <SecurityNoticeHost />
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
@@ -407,7 +408,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </header>
 
         {/* Page Content */}
-        <main data-dashboard-main className="p-4 sm:p-6">
+        <main data-dashboard-main className={isHrLanding ? 'p-4 pb-28 sm:p-6 sm:pb-28 xl:p-8' : 'p-4 sm:p-6'}>
           {sanitizedEnvironment && (
                 <div dir="rtl" className="mb-4 rounded-xl border-2 border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 text-center font-bold text-[var(--sds-warning)]">
               محیط آزمایشی با داده‌های پاک‌سازی‌شده — استفاده عملیاتی ممنوع

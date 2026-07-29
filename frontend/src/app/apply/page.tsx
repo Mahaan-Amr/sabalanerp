@@ -228,8 +228,8 @@ export default function ApplicantFormPage() {
 
   if (!verified)
     return (
-      <main dir="rtl" className="sds-workspace hr-applicant-shell min-h-screen bg-[var(--sds-surface-subtle)] px-4 py-16 dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]">
-        <section className="mx-auto max-w-md rounded-3xl bg-[var(--sds-surface-raised)] p-7 shadow-xl">
+      <main dir="rtl" lang="fa" className="sds-workspace sds-neumorphic-applicant-shell hr-applicant-shell min-h-screen px-4 py-16 text-[var(--sds-text-primary)]">
+        <section className="sds-neumorphic-applicant-card mx-auto max-w-md p-7">
           <div className="mb-4 flex justify-end"><ThemeToggle /></div>
           <h1 className="text-2xl font-black">فرم استخدام سبلان</h1>
           <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">
@@ -279,9 +279,9 @@ export default function ApplicantFormPage() {
     );
 
   return (
-    <main dir="rtl" className="sds-workspace hr-applicant-shell min-h-screen bg-[var(--sds-surface-subtle)] px-3 py-6 text-[var(--sds-text-primary)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] sm:px-6">
+    <main dir="rtl" lang="fa" className="sds-workspace sds-neumorphic-applicant-shell hr-applicant-shell min-h-screen px-3 py-6 text-[var(--sds-text-primary)] sm:px-6">
       <div className="mx-auto max-w-6xl">
-        <header className="rounded-3xl bg-[var(--sds-surface-raised)] p-6 text-[var(--sds-text-primary)] shadow-xl">
+        <header className="sds-neumorphic-applicant-card p-6 text-[var(--sds-text-primary)]">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs text-[var(--sds-success)]">پرسشنامه استخدام</p>
@@ -397,7 +397,7 @@ export default function ApplicantFormPage() {
           disabled={submitted || busy || isCorrection}
           className="mt-5 space-y-5 disabled:opacity-70"
         >
-          <Section title="مشخصات فردی">
+          <Section title="مشخصات فردی" emphasis="neumorphic">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <Field label="نام">
                 <ErpInput
@@ -994,12 +994,14 @@ export default function ApplicantFormPage() {
 function Section({
   title,
   children,
+  emphasis = "default",
 }: {
   title: string;
   children: React.ReactNode;
+  emphasis?: "default" | "neumorphic";
 }) {
   return (
-    <section className="rounded-3xl bg-[var(--sds-surface-raised)] p-5 shadow-sm">
+    <section className={emphasis === "neumorphic" ? "sds-neumorphic-applicant-card p-5 sm:p-6" : "rounded-3xl bg-[var(--sds-surface-raised)] p-5 shadow-sm"}>
       <h2 className="mb-4 text-lg font-black">{title}</h2>
       {children}
     </section>

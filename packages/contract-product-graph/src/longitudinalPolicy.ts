@@ -440,6 +440,13 @@ export const calculateLongitudinalProduct = (
   const piecesAcross = Decimal.floor(
     motherWidth.plus(packingKerf).div(width.plus(packingKerf))
   ).toNumber();
+  const totalLinearMetersMode = input.quantity === undefined;
+  const packingQuantity = totalLinearMetersMode
+    ? Math.max(1, piecesAcross)
+    : input.quantity;
+  const packingLength = totalLinearMetersMode
+    ? length.div(packingQuantity)
+    : length;
   const requiredSourcePieces = input.quantity === undefined
     ? 1
     : Math.ceil(input.quantity / Math.max(1, piecesAcross));
@@ -449,15 +456,15 @@ export const calculateLongitudinalProduct = (
     calibrationEnabled: false,
     sources: [{
       sourceBatchId: input.sourceBatchId,
-      lengthMeters: canonical(length),
+      lengthMeters: canonical(packingLength),
       widthMeters: canonical(motherWidth),
       quantity: requiredSourcePieces
     }],
     demands: [{
       demandId: 'finished-longitudinal-piece',
-      lengthMeters: canonical(length),
+      lengthMeters: canonical(packingLength),
       widthMeters: canonical(width),
-      quantity: input.quantity ?? 1
+      quantity: packingQuantity
     }]
   });
   if (!packing.ok) {
@@ -483,7 +490,7 @@ export const calculateLongitudinalProduct = (
       ? input.calibrationEnabled
       : automaticCalibration;
   const calibrationMeters = calibrationEnabled
-    ? canonical(length.times(packing.plan.consumedSources.length))
+    ? canonical(packingLength.times(packing.plan.consumedSources.length))
     : canonical(new Decimal(0));
 
   const operationConflicts = [...conflicts];
@@ -506,7 +513,7 @@ export const calculateLongitudinalProduct = (
   }
 
   const consumedMaterialArea = packing.plan.consumedSources.reduce(
-    total => total.plus(length.times(motherWidth)),
+    total => total.plus(packingLength.times(motherWidth)),
     new Decimal(0)
   );
   const pricingLines = [
@@ -590,7 +597,7 @@ export const calculateLongitudinalProduct = (
         label: 'سنگ',
         value: `درخواست ${display(canonical(area))}m² · مصرف ${display(canonical(
           packing.plan.consumedSources.reduce(
-            total => total.plus(length.times(motherWidth)),
+            total => total.plus(packingLength.times(motherWidth)),
             new Decimal(0)
           )
         ))}m²`

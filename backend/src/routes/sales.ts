@@ -916,6 +916,7 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
       notes,
       contractData,
       operationIdentityRepairEvidence,
+      productSemanticRepairEvidence,
       potentialProjectId,
       _relations
     } = req.body;
@@ -941,6 +942,7 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
       notes,
       contractData,
       operationIdentityRepairEvidence,
+      productSemanticRepairEvidence,
       potentialProjectId,
       _relations
     }, req.user.id, async (tx, createdContract) => {

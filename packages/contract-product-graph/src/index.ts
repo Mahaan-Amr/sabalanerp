@@ -36,6 +36,7 @@ export {
 
 export {
   calculateProductOperations,
+  refreshProductOperationsGeometry,
   convertOperationGroupBasis,
   parseProductOperationsInput,
   splitOperationGroup
@@ -163,9 +164,13 @@ export {
 } from './legacyReadAdapter';
 export {
   planLegacyProductGraphMigration,
+  repairRecoverableLegacyProductSemantics,
   type LegacyMigrationPlan,
   type LegacyMigrationReconciliation
 } from './legacyMigration';
+export type {
+  LegacyProductSemanticRepairEvidence
+} from './legacySemanticRepair';
 export {
   repairLegacyProductOperationIdentities,
   type OperationIdentityCollisionKind,

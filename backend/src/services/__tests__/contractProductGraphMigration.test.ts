@@ -110,4 +110,26 @@ assert.deepEqual(globalGraphError.issues, [{
   productRowId: undefined
 }]);
 
+const rowFinancialDriftError = new ContractProductGraphValidationError(
+  [{
+    code: 'legacy-financial-drift',
+    path: ['products', '1', 'totalAmount'],
+    productRowId: 'financial-drift-row',
+    message: 'Legacy and canonical product totals differ by 1 toman.'
+  }],
+  {
+    products: [
+      { rowId: 'valid-row' },
+      { rowId: 'financial-drift-row' }
+    ]
+  }
+);
+assert.deepEqual(rowFinancialDriftError.issues, [{
+  code: 'legacy-financial-drift',
+  path: ['productRow:financial-drift-row'],
+  message:
+    'مبلغ ذخیره‌شده این محصول با محاسبه معتبر آن یکسان نیست؛ محصول را بازبینی و دوباره ذخیره کنید',
+  productRowId: 'financial-drift-row'
+}]);
+
 console.log('contract product graph migration tests passed');

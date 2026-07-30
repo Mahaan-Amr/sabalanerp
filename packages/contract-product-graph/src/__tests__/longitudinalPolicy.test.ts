@@ -83,6 +83,29 @@ if (totalMeters.ok) {
   assert.equal(totalMeters.result.baseAmountToman, '600000');
 }
 
+const optimizedTotalMeters = calculateLongitudinalProduct(baseInput({
+  motherWidthMeters: c('0.35'),
+  widthMeters: c('0.12'),
+  lengthMeters: c('6.5'),
+  requestedAreaSquareMeters: c('0.78'),
+  baseRateToman: c('1700000'),
+  longitudinalCutRateToman: c('20000'),
+  calibrationEnabled: false,
+  calibrationSelection: 'manual'
+}));
+assert.equal(optimizedTotalMeters.ok, true);
+if (optimizedTotalMeters.ok) {
+  assert.equal(optimizedTotalMeters.result.quantityMode, 'total-linear-meters');
+  assert.equal(optimizedTotalMeters.result.lengthMeters, '6.5');
+  assert.equal(optimizedTotalMeters.result.requestedAreaSquareMeters, '0.78');
+  assert.equal(optimizedTotalMeters.result.packingPlan.placements.length, 2);
+  assert.equal(optimizedTotalMeters.result.packingPlan.placements[0]?.lengthMeters, '3.25');
+  assert.equal(optimizedTotalMeters.result.sourcePiecesConsumed, 1);
+  assert.equal(optimizedTotalMeters.result.baseAmountToman, '1933750');
+  assert.equal(optimizedTotalMeters.result.longitudinalCutAmountToman, '130000');
+  assert.equal(optimizedTotalMeters.result.totalAmountToman, '2063750');
+}
+
 const areaFirst = calculateLongitudinalProduct(baseInput({
   lengthMeters: undefined,
   requestedAreaSquareMeters: c('10'),

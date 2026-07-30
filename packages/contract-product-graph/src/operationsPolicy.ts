@@ -58,6 +58,38 @@ export interface ProductOperationsInput {
   readonly finishings: readonly FinishingSelectionDraft[];
 }
 
+export const refreshProductOperationsGeometry = ({
+  input,
+  lengthMeters,
+  widthMeters,
+  quantity
+}: {
+  readonly input: ProductOperationsInput;
+  readonly lengthMeters: CanonicalDecimal;
+  readonly widthMeters: CanonicalDecimal;
+  readonly quantity?: number;
+}): ProductOperationsInput => {
+  const previousWholeScope = input.quantity === undefined
+    ? input.lengthMeters
+    : parseCanonicalDecimal(String(input.quantity));
+  const nextWholeScope = quantity === undefined
+    ? lengthMeters
+    : parseCanonicalDecimal(String(quantity));
+  const followsWholeProduct =
+    input.groups.length === 1 &&
+    input.groups[0]?.scope === previousWholeScope;
+
+  return {
+    ...input,
+    lengthMeters,
+    widthMeters,
+    ...(quantity === undefined ? { quantity: undefined } : { quantity }),
+    groups: followsWholeProduct
+      ? [{ ...input.groups[0], scope: nextWholeScope }]
+      : input.groups
+  };
+};
+
 export interface CalculatedOperationGroup extends OperationGroupDraft {
   readonly basis: OperationGroupBasis;
   readonly automaticNoOperations: boolean;

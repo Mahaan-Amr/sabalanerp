@@ -3,6 +3,7 @@ import { parseCanonicalDecimal as c } from '../canonicalDecimal';
 import {
   calculateProductOperations,
   convertOperationGroupBasis,
+  refreshProductOperationsGeometry,
   splitOperationGroup,
   type ProductOperationsInput
 } from '../operationsPolicy';
@@ -292,6 +293,72 @@ if (split.ok) {
   assert.equal(split.input.finishings.length, 2);
   assert.equal(split.input.tools[1]?.operationGroupId, 'group-selected');
   assert.equal(split.input.finishings[1]?.operationGroupId, 'group-selected');
+}
+
+const resizedWholeRow = refreshProductOperationsGeometry({
+  input: input({
+    quantity: undefined,
+    lengthMeters: c('4'),
+    widthMeters: c('0.23'),
+    groups: [group('group-whole', '4')],
+    tools: [tool('tool-whole', 'group-whole')],
+    finishings: []
+  }),
+  lengthMeters: c('6.5'),
+  widthMeters: c('0.23')
+});
+assert.equal(resizedWholeRow.lengthMeters, '6.5');
+assert.equal(resizedWholeRow.groups[0]?.scope, '6.5');
+assert.equal(resizedWholeRow.tools[0]?.operationGroupId, 'group-whole');
+
+const preservedSplitScopes = refreshProductOperationsGeometry({
+  input: input({
+    quantity: undefined,
+    lengthMeters: c('4'),
+    widthMeters: c('0.23'),
+    groups: [group('group-a', '1.5'), group('group-b', '2.5')],
+    tools: [tool('tool-a', 'group-a'), tool('tool-b', 'group-b')],
+    finishings: []
+  }),
+  lengthMeters: c('6.5'),
+  widthMeters: c('0.23')
+});
+assert.deepEqual(
+  preservedSplitScopes.groups.map(item => item.scope),
+  ['1.5', '2.5']
+);
+
+const preservedManualOverride = refreshProductOperationsGeometry({
+  input: input({
+    quantity: undefined,
+    lengthMeters: c('4'),
+    widthMeters: c('0.23'),
+    groups: [group('group-whole', '4')],
+    tools: [tool('tool-whole', 'group-whole', {
+      quantityOverride: {
+        value: c('3'),
+        automaticQuantitySnapshot: c('4')
+      }
+    })],
+    finishings: []
+  }),
+  lengthMeters: c('6.5'),
+  widthMeters: c('0.23')
+});
+assert.equal(preservedManualOverride.groups[0]?.scope, '6.5');
+assert.deepEqual(
+  preservedManualOverride.tools[0]?.quantityOverride,
+  {
+    value: '3',
+    automaticQuantitySnapshot: '4'
+  }
+);
+const staleOverrideAfterResize = calculateProductOperations(
+  preservedManualOverride
+);
+assert.equal(staleOverrideAfterResize.ok, false);
+if (!staleOverrideAfterResize.ok) {
+  assert.equal(staleOverrideAfterResize.conflicts[0]?.code, 'manual-override-stale');
 }
 
 console.log('product operations policy tests passed');

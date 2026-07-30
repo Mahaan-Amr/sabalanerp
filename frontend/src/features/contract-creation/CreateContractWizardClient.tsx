@@ -259,6 +259,7 @@ import {
   materializePaidRemainderStocks,
   parseCanonicalDecimal,
   parseStableIdentity,
+  refreshProductOperationsGeometry,
   resolveStaircaseQuantity,
   type ProductOperationsInput
 } from '@sabalanerp/contract-product-graph';
@@ -270,12 +271,18 @@ const refreshOperationGeometry = (
   width: number,
   widthUnit: 'cm' | 'm',
   quantity: number
-): ProductOperationsInput | undefined => input ? {
-  ...input,
-  lengthMeters: parseCanonicalDecimal(String(lengthUnit === 'cm' ? length / 100 : length)),
-  widthMeters: parseCanonicalDecimal(String(widthUnit === 'cm' ? width / 100 : width)),
-  ...(quantity > 0 ? { quantity: Math.trunc(quantity) } : { quantity: undefined })
-} : undefined;
+): ProductOperationsInput | undefined => input
+  ? refreshProductOperationsGeometry({
+      input,
+      lengthMeters: parseCanonicalDecimal(
+        String(lengthUnit === 'cm' ? length / 100 : length)
+      ),
+      widthMeters: parseCanonicalDecimal(
+        String(widthUnit === 'cm' ? width / 100 : width)
+      ),
+      ...(quantity > 0 ? { quantity: Math.trunc(quantity) } : {})
+    })
+  : undefined;
 
 const materializeOperationSnapshots = (
   input: ProductOperationsInput | undefined
@@ -5263,7 +5270,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       } as any
     };
 
-    if (smartCutPlan.derivedQuantity) {
+    if (smartCutPlan.derivedQuantity && !finalProduct.operationPolicyInput) {
       const recalculatedAddOns = recalculateRemainingChildAddOns(finalProduct);
       if (!recalculatedAddOns.ok) {
         setErrors({ products: 'افزونه‌های محصول با خروجی بهینه‌سازی‌شده سازگار نیستند.' });

@@ -3,7 +3,7 @@
 
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import type { ContractWizardData } from '../types/contract.types';
+import type { ContractProduct, ContractWizardData } from '../types/contract.types';
 import { salesAPI } from '@/lib/api';
 import { PersianCalendar } from '@/lib/persian-calendar';
 import { sumNumericValues } from '@/lib/numberFormat';
@@ -11,7 +11,10 @@ import { mapAxiosFormErrors } from '@/lib/formErrors';
 import { CONTRACT_DRAFT_STORAGE_KEY } from '../utils/contractDraftStorage';
 import { normalizeProductFinishing } from '../utils/finishingUtils';
 import { getPreparedQuantity, getPreparedUnit, isPreparedProductType, normalizeContractProductType } from '../utils/preparedProductUtils';
-import { calculateProductOperations } from '@sabalanerp/contract-product-graph';
+import {
+  calculateProductOperations,
+  repairRecoverableLegacyProductSemantics
+} from '@sabalanerp/contract-product-graph';
 import { getDeliverableProductEntries, reconcileDeliveryProductReferences } from '../utils/deliveryScheduleController';
 import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
 import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
@@ -167,9 +170,32 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       setCurrentStep(4);
       return;
     }
-    const submissionProducts = identityNormalization.products;
+    const semanticRepair = repairRecoverableLegacyProductSemantics({
+      contractId: editContractId || 'contract-create-draft',
+      revision: editSession?.baseRevision ?? 0,
+      calculationPolicy: {
+        calculation: 'calculation-v1',
+        packing: 'packing-v1',
+        pricing: 'pricing-v1',
+        rounding: 'rounding-v1'
+      },
+      products: identityNormalization.products as unknown as
+        Readonly<Record<string, unknown>>[]
+    });
+    const submissionProducts =
+      semanticRepair.products as unknown as ContractProduct[];
     if (submissionProducts.some((product, index) => product !== wizardData.products[index])) {
       updateWizardData({ products: submissionProducts });
+    }
+    if (semanticRepair.evidence.length > 0) {
+      console.info('[contract-product-semantic-repair]', {
+        stage: 'client-final-preflight',
+        affectedProductRowIds:
+          semanticRepair.evidence.map(evidence => evidence.productRowId),
+        repairKinds: Array.from(new Set(
+          semanticRepair.evidence.flatMap(evidence => evidence.repairKinds)
+        ))
+      });
     }
 
     const unresolvedLegacyAddOnRows = submissionProducts.filter(hasUnresolvedLegacyRemainingChildAddOns);
@@ -342,6 +368,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         currency: 'تومان',
         operationIdentityRepairEvidence:
           identityNormalization.operationRepairEvidence,
+        productSemanticRepairEvidence: semanticRepair.evidence,
         potentialProjectId: typeof window !== 'undefined'
           ? new URLSearchParams(window.location.search).get('potentialProjectId') || undefined
           : undefined,

@@ -9,6 +9,7 @@ import {
   parseCanonicalProductGraph,
   projectCanonicalProductGraph,
   serializeCanonicalProductGraph,
+  type LegacyProductSemanticRepairEvidence,
   type OperationIdentityRepairEvidence
 } from '@sabalanerp/contract-product-graph';
 import {
@@ -16,6 +17,7 @@ import {
   CURRENT_CONTRACT_PRODUCT_POLICY
 } from './contractProductGraphMigration';
 import { repairContractDataOperationIdentities } from './contractOperationIdentityRepair';
+import { repairContractDataProductSemantics } from './contractProductSemanticRepair';
 
 const prisma = new PrismaClient();
 
@@ -37,6 +39,15 @@ const OPERATION_REPAIR_COLLISION_KINDS = new Set([
   'duplicate-tool-selection',
   'duplicate-finishing-selection',
   'derived-no-operation-group-collision'
+]);
+const PRODUCT_SEMANTIC_REPAIR_KINDS = new Set([
+  'longitudinal-customer-geometry',
+  'unsplit-whole-row-operation-scope'
+]);
+const PRODUCT_SEMANTIC_REPAIR_FIELDS = new Set([
+  'longitudinalPolicyInput.lengthMeters',
+  'longitudinalPolicyInput.requestedAreaSquareMeters',
+  'operationPolicyInput.groups.0.scope'
 ]);
 
 const sanitizeReportedOperationRepairEvidence = (
@@ -78,6 +89,56 @@ const sanitizeReportedOperationRepairEvidence = (
   });
 };
 
+const sanitizeReportedProductSemanticRepairEvidence = (
+  value: unknown,
+  contractData: unknown
+): LegacyProductSemanticRepairEvidence[] => {
+  if (!Array.isArray(value)) return [];
+  const productRowIds = new Set(
+    productRecordsFrom(contractData)
+      .map(product => product.rowId ?? product.productRowId)
+      .filter((rowId): rowId is string =>
+        typeof rowId === 'string' && rowId.length > 0
+      )
+  );
+  return value.slice(0, productRowIds.size).flatMap(candidate => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      return [];
+    }
+    const record = candidate as Record<string, unknown>;
+    if (
+      typeof record.productRowId !== 'string' ||
+      !productRowIds.has(record.productRowId) ||
+      !Array.isArray(record.repairKinds) ||
+      !Array.isArray(record.repairedFields) ||
+      String(record.legacyTotalAmountToman) !==
+        String(record.canonicalTotalAmountToman)
+    ) {
+      return [];
+    }
+    const repairKinds = Array.from(new Set(
+      record.repairKinds.filter(
+        (kind): kind is LegacyProductSemanticRepairEvidence['repairKinds'][number] =>
+          typeof kind === 'string' && PRODUCT_SEMANTIC_REPAIR_KINDS.has(kind)
+      )
+    ));
+    const repairedFields = Array.from(new Set(
+      record.repairedFields.filter(
+        (field): field is string =>
+          typeof field === 'string' && PRODUCT_SEMANTIC_REPAIR_FIELDS.has(field)
+      )
+    ));
+    if (repairKinds.length === 0 || repairedFields.length === 0) return [];
+    return [{
+      productRowId: record.productRowId,
+      repairKinds,
+      repairedFields,
+      legacyTotalAmountToman: String(record.legacyTotalAmountToman),
+      canonicalTotalAmountToman: String(record.canonicalTotalAmountToman)
+    }];
+  });
+};
+
 export interface ContractProductGraphValidationIssue {
   readonly code: string;
   readonly causeCode?: string;
@@ -98,6 +159,8 @@ const DUPLICATE_DEPENDENCY_MESSAGE =
   'وابستگی‌های محصول تکثیرشده قابل تشخیص نیست؛ محصول را باز کرده و دوباره ذخیره کنید';
 const OPERATION_STRUCTURE_MESSAGE =
   'ساختار عملیات این محصول قابل تشخیص نیست؛ ابزارها و پرداخت‌ها را بازبینی و دوباره ذخیره کنید';
+const PRODUCT_FINANCIAL_DRIFT_MESSAGE =
+  'مبلغ ذخیره‌شده این محصول با محاسبه معتبر آن یکسان نیست؛ محصول را بازبینی و دوباره ذخیره کنید';
 const GLOBAL_PRODUCT_GRAPH_MESSAGE =
   'ساختار محصولات قرارداد قابل تشخیص نیست؛ محصولات را بازبینی و دوباره ذخیره کنید';
 
@@ -157,7 +220,9 @@ export class ContractProductGraphValidationError extends Error {
         ...(conflict.causeCode ? { causeCode: conflict.causeCode } : {}),
         path: productRowId ? [`productRow:${productRowId}`] : ['products'],
         message:
-          conflict.code === 'legacy-canonical-input-invalid' &&
+          conflict.code === 'legacy-financial-drift' && productRowId
+            ? PRODUCT_FINANCIAL_DRIFT_MESSAGE
+            : conflict.code === 'legacy-canonical-input-invalid' &&
           ['operationGroups', 'toolSelections', 'finishingSelections']
             .includes(conflict.path[0])
             ? OPERATION_STRUCTURE_MESSAGE
@@ -203,6 +268,8 @@ const writeCanonicalGraphSnapshot = async (
     readonly revision: number;
     readonly operationIdentityRepairEvidence?: readonly OperationIdentityRepairEvidence[];
     readonly operationIdentityRepairStages?: readonly string[];
+    readonly productSemanticRepairEvidence?: readonly LegacyProductSemanticRepairEvidence[];
+    readonly productSemanticRepairStages?: readonly string[];
   }
 ) => {
   const plan = buildLegacyContractMigrationPlan({
@@ -270,6 +337,31 @@ const writeCanonicalGraphSnapshot = async (
                 )
               }
             }
+          : {}),
+        ...(input.productSemanticRepairEvidence?.length
+          ? {
+              productSemanticRepair: {
+                correlationId:
+                  `wizard-save:${input.contractId}:${input.revision}`,
+                stages: input.productSemanticRepairStages?.length
+                  ? [...input.productSemanticRepairStages]
+                  : ['server-write-boundary'],
+                affectedProductRowIds:
+                  input.productSemanticRepairEvidence.map(
+                    evidence => evidence.productRowId
+                  ),
+                repairKinds: Array.from(new Set(
+                  input.productSemanticRepairEvidence.flatMap(
+                    evidence => evidence.repairKinds
+                  )
+                )),
+                repairedFields: Array.from(new Set(
+                  input.productSemanticRepairEvidence.flatMap(
+                    evidence => evidence.repairedFields
+                  )
+                ))
+              }
+            }
           : {})
       }),
       resultGraph: graph,
@@ -293,6 +385,7 @@ export interface CreateContractData {
   contractData?: any;
   potentialProjectId?: string;
   operationIdentityRepairEvidence?: unknown;
+  productSemanticRepairEvidence?: unknown;
   _relations?: UpdateContractData['_relations'];
 }
 
@@ -305,6 +398,7 @@ export interface UpdateContractData {
   notes?: string;
   contractData?: any;
   operationIdentityRepairEvidence?: unknown;
+  productSemanticRepairEvidence?: unknown;
   _relations?: {
     items?: Array<{
       productId: string;
@@ -399,7 +493,12 @@ export async function createContract(
           contractNumber,
           creatorSequenceNumber
         });
-        const contractData = operationIdentityRepair.contractData as any;
+        const productSemanticRepair = repairContractDataProductSemantics(
+          operationIdentityRepair.contractData,
+          `new-contract:${contractNumber}`,
+          0
+        );
+        const contractData = productSemanticRepair.contractData as any;
         assertNoAmbiguousOperationIdentityRepair(
           operationIdentityRepair.blockedProductRowIds,
           contractData
@@ -412,6 +511,15 @@ export async function createContract(
         const operationIdentityRepairEvidence = [
           ...reportedOperationRepairEvidence,
           ...operationIdentityRepair.evidence
+        ];
+        const reportedProductSemanticRepairEvidence =
+          sanitizeReportedProductSemanticRepairEvidence(
+            data.productSemanticRepairEvidence,
+            contractData
+          );
+        const productSemanticRepairEvidence = [
+          ...reportedProductSemanticRepairEvidence,
+          ...productSemanticRepair.evidence
         ];
         const content = previousContractNumber
           ? String(data.content).split(String(previousContractNumber)).join(contractNumber)
@@ -528,6 +636,15 @@ export async function createContract(
             ...(operationIdentityRepair.evidence.length
               ? ['server-write-boundary']
               : [])
+          ],
+          productSemanticRepairEvidence,
+          productSemanticRepairStages: [
+            ...(reportedProductSemanticRepairEvidence.length
+              ? ['client-final-preflight']
+              : []),
+            ...(productSemanticRepair.evidence.length
+              ? ['server-write-boundary']
+              : [])
           ]
         });
         if (potentialProject) {
@@ -601,10 +718,19 @@ export async function updateContract(
 
   // Update contract and relation snapshots atomically.
   const updatedContract = await prisma.$transaction(async (tx) => {
+    const existingGraph = await tx.salesContractProductGraphState.findUnique({
+      where: { contractId },
+      select: { revision: true }
+    });
     const operationIdentityRepair = repairContractDataOperationIdentities(
       data.contractData ?? contract.contractData
     );
-    const nextContractData = operationIdentityRepair.contractData as any;
+    const productSemanticRepair = repairContractDataProductSemantics(
+      operationIdentityRepair.contractData,
+      contractId,
+      (existingGraph?.revision ?? 0) + 1
+    );
+    const nextContractData = productSemanticRepair.contractData as any;
     assertNoAmbiguousOperationIdentityRepair(
       operationIdentityRepair.blockedProductRowIds,
       nextContractData
@@ -618,10 +744,15 @@ export async function updateContract(
       ...reportedOperationRepairEvidence,
       ...operationIdentityRepair.evidence
     ];
-    const existingGraph = await tx.salesContractProductGraphState.findUnique({
-      where: { contractId },
-      select: { revision: true }
-    });
+    const reportedProductSemanticRepairEvidence =
+      sanitizeReportedProductSemanticRepairEvidence(
+        data.productSemanticRepairEvidence,
+        nextContractData
+      );
+    const productSemanticRepairEvidence = [
+      ...reportedProductSemanticRepairEvidence,
+      ...productSemanticRepair.evidence
+    ];
     if (relations) {
       await tx.deliveryProduct.deleteMany({
         where: {
@@ -752,6 +883,15 @@ export async function updateContract(
           ? ['client-final-preflight']
           : []),
         ...(operationIdentityRepair.evidence.length
+          ? ['server-write-boundary']
+          : [])
+      ],
+      productSemanticRepairEvidence,
+      productSemanticRepairStages: [
+        ...(reportedProductSemanticRepairEvidence.length
+          ? ['client-final-preflight']
+          : []),
+        ...(productSemanticRepair.evidence.length
           ? ['server-write-boundary']
           : [])
       ]

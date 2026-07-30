@@ -9,6 +9,7 @@ import {
   createNewLongitudinalProductInput,
   parseCanonicalDecimal,
   parseStableIdentity,
+  refreshProductOperationsGeometry,
   type LongitudinalProductInput,
   type ProductOperationsInput,
   type SlabPolicyInput
@@ -84,18 +85,30 @@ const operationsForGeometry = ({
   lengthMeters: string;
   widthMeters: string;
   quantity?: number;
-}): ProductOperationsInput => ({
-  policyVersion: 'calculation-v1',
-  pricingPolicyVersion: 'pricing-v1',
-  roundingPolicyVersion: 'rounding-v1',
-  productRowId: parseStableIdentity('product-row', productRowId),
-  lengthMeters: parseCanonicalDecimal(lengthMeters),
-  widthMeters: parseCanonicalDecimal(widthMeters),
-  ...(quantity === undefined ? {} : { quantity }),
-  groups: current?.groups ?? [],
-  tools: current?.tools ?? [],
-  finishings: current?.finishings ?? []
-});
+}): ProductOperationsInput => {
+  const nextLength = parseCanonicalDecimal(lengthMeters);
+  const nextWidth = parseCanonicalDecimal(widthMeters);
+  if (current) {
+    return refreshProductOperationsGeometry({
+      input: current,
+      lengthMeters: nextLength,
+      widthMeters: nextWidth,
+      quantity
+    });
+  }
+  return {
+    policyVersion: 'calculation-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v1',
+    productRowId: parseStableIdentity('product-row', productRowId),
+    lengthMeters: nextLength,
+    widthMeters: nextWidth,
+    ...(quantity === undefined ? {} : { quantity }),
+    groups: [],
+    tools: [],
+    finishings: []
+  };
+};
 
 const operationCatalogFromTools = (
   tools: readonly SubService[]

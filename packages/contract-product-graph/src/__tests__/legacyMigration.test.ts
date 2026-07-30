@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import Decimal from 'decimal.js';
 import { planLegacyProductGraphMigration } from '../legacyMigration';
 import {
   calculateLongitudinalProduct,
@@ -33,6 +34,40 @@ const product = {
   name: 'Stone',
   totalPrice: 1250
 };
+
+const longitudinalPolicyInput = ({
+  sourceBatchId,
+  lengthMeters,
+  widthMeters
+}: {
+  sourceBatchId: string;
+  lengthMeters: string;
+  widthMeters: string;
+}) => ({
+  calculationPolicyVersion: policy.calculation,
+  packingPolicyVersion: policy.packing,
+  pricingPolicyVersion: policy.pricing,
+  roundingPolicyVersion: policy.rounding,
+  sourceBatchId,
+  motherWidthMeters: '0.35',
+  lengthMeters,
+  widthMeters,
+  requestedAreaSquareMeters: new Decimal(lengthMeters).times(widthMeters).toFixed(),
+  lastManualField: 'length',
+  lastManualDimension: 'length',
+  lengthDisplayUnit: 'm',
+  widthDisplayUnit: 'cm',
+  baseRateToman: '1700000',
+  mandatoryEnabled: false,
+  mandatoryPercentage: '20',
+  rememberedMandatoryPercentage: '20',
+  sawKerfEnabled: false,
+  sawKerfMeters: '0.003',
+  calibrationEnabled: false,
+  calibrationSelection: 'manual',
+  longitudinalCutRateToman: '20000',
+  calibrationCutRateToman: '20000'
+});
 
 {
   const derivedGroupIdentity = 'derived-owner:no-operations';
@@ -572,6 +607,147 @@ const product = {
     ),
     true
   );
+}
+
+{
+  const optimizedRow = {
+    rowId: 'optimized-total-length',
+    productRowId: 'optimized-total-length',
+    productId: 'catalog-1',
+    productType: 'longitudinal',
+    name: 'Optimized total length',
+    length: 6.5,
+    lengthUnit: 'm',
+    width: 12,
+    widthUnit: 'cm',
+    quantity: 0,
+    squareMeters: 0.78,
+    smartCutDerivedQuantity: true,
+    smartCutPlan: {
+      derivedQuantity: true,
+      totalRequestedLengthM: 6.5,
+      requestedAreaSqm: 0.78
+    },
+    totalPrice: 2063750,
+    longitudinalPolicyInput: longitudinalPolicyInput({
+      sourceBatchId: 'source-optimized',
+      lengthMeters: '6.5',
+      widthMeters: '0.12'
+    }),
+    operationPolicyInput: {
+      policyVersion: policy.calculation,
+      pricingPolicyVersion: policy.pricing,
+      roundingPolicyVersion: policy.rounding,
+      productRowId: 'optimized-total-length',
+      lengthMeters: '6.5',
+      widthMeters: '0.12',
+      groups: [],
+      tools: [],
+      finishings: []
+    }
+  };
+  const staleWholeOperationRow = {
+    rowId: 'stale-whole-operation',
+    productRowId: 'stale-whole-operation',
+    productId: 'catalog-1',
+    productType: 'longitudinal',
+    name: 'Stale whole operation',
+    length: 6.5,
+    lengthUnit: 'm',
+    width: 23,
+    widthUnit: 'cm',
+    quantity: 0,
+    squareMeters: 1.495,
+    smartCutDerivedQuantity: true,
+    smartCutPlan: {
+      derivedQuantity: true,
+      totalRequestedLengthM: 6.5,
+      requestedAreaSqm: 1.495
+    },
+    totalPrice: 4322500,
+    longitudinalPolicyInput: {
+      ...longitudinalPolicyInput({
+        sourceBatchId: 'source-stale',
+        lengthMeters: '4',
+        widthMeters: '0.23'
+      }),
+      lastManualField: 'width',
+      lastManualDimension: 'width',
+      requestedAreaSquareMeters: undefined
+    },
+    operationPolicyInput: {
+      policyVersion: policy.calculation,
+      pricingPolicyVersion: policy.pricing,
+      roundingPolicyVersion: policy.rounding,
+      productRowId: 'stale-whole-operation',
+      lengthMeters: '6.5',
+      widthMeters: '0.23',
+      groups: [{
+        operationGroupId: 'stale-whole-group',
+        scope: '4'
+      }],
+      tools: [{
+        toolSelectionId: 'stale-whole-tool',
+        operationGroupId: 'stale-whole-group',
+        catalogItemId: 'tool-half-round',
+        catalogSnapshotVersion: 'catalog-v1',
+        name: 'Half round',
+        unit: 'meter',
+        rateToman: '50000',
+        edges: ['front']
+      }],
+      finishings: []
+    }
+  };
+
+  const repaired = planLegacyProductGraphMigration({
+    contractId: 'reported-four-row-regression',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [optimizedRow, staleWholeOperationRow]
+  });
+  assert.equal(
+    repaired.ok,
+    true,
+    repaired.ok ? undefined : JSON.stringify(repaired.conflicts)
+  );
+  if (repaired.ok) {
+    assert.equal(repaired.reconciliation.canonicalTotalAmountToman, '6386250');
+    assert.equal(repaired.reconciliation.differenceToman, '0');
+    assert.deepEqual(repaired.semanticRepairEvidence, [{
+      productRowId: 'stale-whole-operation',
+      repairKinds: [
+        'longitudinal-customer-geometry',
+        'unsplit-whole-row-operation-scope'
+      ],
+      repairedFields: [
+        'longitudinalPolicyInput.lengthMeters',
+        'longitudinalPolicyInput.requestedAreaSquareMeters',
+        'operationPolicyInput.groups.0.scope'
+      ],
+      legacyTotalAmountToman: '4322500',
+      canonicalTotalAmountToman: '4322500'
+    }]);
+  }
+
+  const moneyChanging = planLegacyProductGraphMigration({
+    contractId: 'money-changing-repair-blocked',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      ...staleWholeOperationRow,
+      totalPrice: 4322501
+    }]
+  });
+  assert.equal(moneyChanging.ok, false);
+  if (!moneyChanging.ok) {
+    assert.equal(moneyChanging.semanticRepairEvidence, undefined);
+    assert.equal(moneyChanging.conflicts[0]?.code, 'legacy-financial-drift');
+    assert.equal(
+      (moneyChanging.conflicts[0] as { productRowId?: string }).productRowId,
+      'stale-whole-operation'
+    );
+  }
 }
 
 console.log('legacy migration tests passed');

@@ -1,6 +1,8 @@
 import type { ContractProduct } from '../types/contract.types';
 import {
   parseStableIdentity,
+  repairLegacyProductOperationIdentities,
+  type OperationIdentityRepairEvidence,
   type ProductOperationsInput,
   type StableIdentity
 } from '@sabalanerp/contract-product-graph';
@@ -266,6 +268,7 @@ export interface ContractProductRowIdentityNormalization {
   blockedDuplicateRowIds: string[];
   repairedOperationRowIds: string[];
   blockedOperationRowIds: string[];
+  operationRepairEvidence: OperationIdentityRepairEvidence[];
 }
 
 const analyzeOperationIdentities = (
@@ -396,13 +399,25 @@ export const normalizeContractProductRowIdentities = (
     dependentIdsFor(nextProduct).forEach(identity => claimedDependentIds.add(identity));
     return nextProduct;
   });
+  const sharedOperationRepair = repairLegacyProductOperationIdentities(
+    productsWithIndependentDependencies
+  );
+  const combinedRepairedOperationRowIds = Array.from(new Set([
+    ...repairedOperationRowIds,
+    ...sharedOperationRepair.repairedProductRowIds
+  ]));
+  const combinedBlockedOperationRowIds = Array.from(new Set([
+    ...blockedOperationRowIds,
+    ...sharedOperationRepair.blockedProductRowIds
+  ]));
 
   return {
-    products: productsWithIndependentDependencies,
+    products: sharedOperationRepair.products,
     repairedDuplicateRowIds,
     blockedDuplicateRowIds,
-    repairedOperationRowIds,
-    blockedOperationRowIds
+    repairedOperationRowIds: combinedRepairedOperationRowIds,
+    blockedOperationRowIds: combinedBlockedOperationRowIds,
+    operationRepairEvidence: sharedOperationRepair.evidence
   };
 };
 

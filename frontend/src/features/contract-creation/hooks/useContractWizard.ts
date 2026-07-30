@@ -159,9 +159,28 @@ export const useContractWizard = () => {
   // Update wizard data
   const updateWizardData = useCallback((updates: Partial<ContractWizardData>) => {
     setWizardData(prev => {
-      const products = updates.products
-        ? normalizeContractProductRowIdentities(updates.products).products
-        : prev.products;
+      const identityNormalization = updates.products
+        ? normalizeContractProductRowIdentities(updates.products)
+        : null;
+      if (identityNormalization?.operationRepairEvidence.length) {
+        console.info('[contract-operation-identity-repair]', {
+          stage: 'product-save',
+          affectedProductRowIds:
+            identityNormalization.operationRepairEvidence.map(
+              evidence => evidence.productRowId
+            ),
+          collisionKinds: Array.from(new Set(
+            identityNormalization.operationRepairEvidence.flatMap(
+              evidence => evidence.collisionKinds
+            )
+          )),
+          collisionCount: identityNormalization.operationRepairEvidence.reduce(
+            (total, evidence) => total + evidence.collisionCount,
+            0
+          )
+        });
+      }
+      const products = identityNormalization?.products ?? prev.products;
       const deliveryInput = updates.deliveries ?? prev.deliveries;
       const deliveries = (updates.products || updates.deliveries)
         ? reconcileDeliveryProductReferences(products, deliveryInput).deliveries

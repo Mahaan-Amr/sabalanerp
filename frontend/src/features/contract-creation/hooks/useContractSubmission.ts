@@ -340,6 +340,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         },
         totalAmount,
         currency: 'تومان',
+        operationIdentityRepairEvidence:
+          identityNormalization.operationRepairEvidence,
         potentialProjectId: typeof window !== 'undefined'
           ? new URLSearchParams(window.location.search).get('potentialProjectId') || undefined
           : undefined,

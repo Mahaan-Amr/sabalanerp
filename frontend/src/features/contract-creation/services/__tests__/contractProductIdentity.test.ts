@@ -399,6 +399,102 @@ const product = (
   const blockedOperations = normalizeContractProductRowIdentities([contradictoryGroups]);
   assert.deepEqual(blockedOperations.repairedOperationRowIds, []);
   assert.deepEqual(blockedOperations.blockedOperationRowIds, ['ambiguous-operation-row']);
+
+  const derivedNoOperationOwner = structuredClone(source);
+  derivedNoOperationOwner.rowId = 'derived-no-operation-owner';
+  derivedNoOperationOwner.longitudinalPolicyInput = undefined;
+  derivedNoOperationOwner.operationPolicyInput = {
+    ...structuredClone(source.operationPolicyInput!),
+    productRowId: parseStableIdentity(
+      'product-row',
+      'derived-no-operation-owner'
+    ),
+    groups: [],
+    tools: [],
+    finishings: []
+  };
+  derivedNoOperationOwner.appliedSubServices = [];
+  derivedNoOperationOwner.finishings = [];
+  derivedNoOperationOwner.totalSubServiceCost = 0;
+
+  const explicitCollisionOwner = structuredClone(source);
+  explicitCollisionOwner.rowId = 'explicit-operation-owner';
+  explicitCollisionOwner.longitudinalPolicyInput = undefined;
+  explicitCollisionOwner.operationPolicyInput = {
+    ...structuredClone(source.operationPolicyInput!),
+    productRowId: parseStableIdentity(
+      'product-row',
+      'explicit-operation-owner'
+    ),
+    groups: [{
+      ...structuredClone(source.operationPolicyInput!.groups[0]),
+      operationGroupId: parseStableIdentity(
+        'operation-group',
+        'derived-no-operation-owner:no-operations'
+      )
+    }],
+    tools: [{
+      ...structuredClone(source.operationPolicyInput!.tools[0]),
+      operationGroupId: parseStableIdentity(
+        'operation-group',
+        'derived-no-operation-owner:no-operations'
+      )
+    }],
+    finishings: []
+  };
+  explicitCollisionOwner.appliedSubServices = [{
+    ...structuredClone(source.appliedSubServices[0]),
+    id: explicitCollisionOwner.operationPolicyInput.tools[0].toolSelectionId
+  }];
+  explicitCollisionOwner.finishings = [];
+
+  const repairedDerivedCollision = normalizeContractProductRowIdentities([
+    derivedNoOperationOwner,
+    explicitCollisionOwner
+  ]);
+  assert.deepEqual(repairedDerivedCollision.blockedOperationRowIds, []);
+  assert.deepEqual(
+    repairedDerivedCollision.repairedOperationRowIds,
+    ['explicit-operation-owner']
+  );
+  assert.notEqual(
+    repairedDerivedCollision.products[1].operationPolicyInput?.groups[0]
+      ?.operationGroupId,
+    'derived-no-operation-owner:no-operations'
+  );
+
+  const stableRetry = normalizeContractProductRowIdentities(
+    repairedDerivedCollision.products
+  );
+  assert.deepEqual(stableRetry.repairedOperationRowIds, []);
+  assert.equal(
+    stableRetry.products[1].operationPolicyInput?.groups[0]?.operationGroupId,
+    repairedDerivedCollision.products[1].operationPolicyInput?.groups[0]
+      ?.operationGroupId
+  );
+
+  const repairedDerivedCanonicalSave = planLegacyProductGraphMigration({
+    contractId: 'repaired-derived-no-operation-collision',
+    revision: 0,
+    calculationPolicy: {
+      calculation: 'calculation-v1',
+      packing: 'packing-v1',
+      pricing: 'pricing-v1',
+      rounding: 'rounding-v1'
+    },
+    products: JSON.parse(JSON.stringify(repairedDerivedCollision.products)) as
+      Readonly<Record<string, unknown>>[]
+  }, repairedDerivedCollision.products.reduce(
+    (total, candidate) => total + Number(candidate.totalPrice || 0),
+    0
+  ) + 4_500);
+  assert.equal(
+    repairedDerivedCanonicalSave.ok,
+    true,
+    repairedDerivedCanonicalSave.ok
+      ? undefined
+      : JSON.stringify(repairedDerivedCanonicalSave.conflicts)
+  );
 }
 
 console.log('contract product identity tests passed');

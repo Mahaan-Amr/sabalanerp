@@ -2415,7 +2415,32 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   const applyContractAutosaveDraft = useCallback((draft: ReturnType<typeof createContractAutosaveDraft>) => {
     setCurrentStep(clampContractDraftStep(draft.currentStep, WIZARD_STEPS.length));
-    setWizardData(normalizeWizardFinishingProducts(draft.wizardData));
+    const normalizedWizardData = normalizeWizardFinishingProducts(draft.wizardData);
+    const identityNormalization = normalizeContractProductRowIdentities(
+      normalizedWizardData.products
+    );
+    if (identityNormalization.operationRepairEvidence.length > 0) {
+      console.info('[contract-operation-identity-repair]', {
+        stage: 'draft-recovery',
+        affectedProductRowIds:
+          identityNormalization.operationRepairEvidence.map(
+            evidence => evidence.productRowId
+          ),
+        collisionKinds: Array.from(new Set(
+          identityNormalization.operationRepairEvidence.flatMap(
+            evidence => evidence.collisionKinds
+          )
+        )),
+        collisionCount: identityNormalization.operationRepairEvidence.reduce(
+          (total, evidence) => total + evidence.collisionCount,
+          0
+        )
+      });
+    }
+    setWizardData({
+      ...normalizedWizardData,
+      products: identityNormalization.products
+    });
     setCustomerSearchTerm(draft.searches?.customerSearchTerm || '');
     setProductSearchTerm(draft.searches?.productSearchTerm || '');
     setTreadProductSearchTerm(draft.searches?.treadProductSearchTerm || '');

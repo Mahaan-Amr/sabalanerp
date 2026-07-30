@@ -167,6 +167,12 @@ export {
   type LegacyMigrationReconciliation
 } from './legacyMigration';
 export {
+  repairLegacyProductOperationIdentities,
+  type OperationIdentityCollisionKind,
+  type OperationIdentityRepairEvidence,
+  type OperationIdentityRepairResult
+} from './operationIdentityRepair';
+export {
   projectCanonicalGraphToLegacyProducts,
   projectCanonicalProductGraph,
   type CanonicalContractProjection,

@@ -8,12 +8,14 @@ import { recordRealizedAdjustment } from './salesAttributionService';
 import {
   parseCanonicalProductGraph,
   projectCanonicalProductGraph,
-  serializeCanonicalProductGraph
+  serializeCanonicalProductGraph,
+  type OperationIdentityRepairEvidence
 } from '@sabalanerp/contract-product-graph';
 import {
   buildLegacyContractMigrationPlan,
   CURRENT_CONTRACT_PRODUCT_POLICY
 } from './contractProductGraphMigration';
+import { repairContractDataOperationIdentities } from './contractOperationIdentityRepair';
 
 const prisma = new PrismaClient();
 
@@ -29,6 +31,52 @@ const getApprovedSalesCorrection = (contractId: string, tx: Prisma.TransactionCl
   });
 
 const toJsonValue = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
+const OPERATION_REPAIR_COLLISION_KINDS = new Set([
+  'operation-owner-mismatch',
+  'duplicate-operation-group',
+  'duplicate-tool-selection',
+  'duplicate-finishing-selection',
+  'derived-no-operation-group-collision'
+]);
+
+const sanitizeReportedOperationRepairEvidence = (
+  value: unknown,
+  contractData: unknown
+): OperationIdentityRepairEvidence[] => {
+  if (!Array.isArray(value)) return [];
+  const productRowIds = new Set(
+    productRecordsFrom(contractData)
+      .map(product => product.rowId ?? product.productRowId)
+      .filter((rowId): rowId is string =>
+        typeof rowId === 'string' && rowId.length > 0
+      )
+  );
+  return value.slice(0, productRowIds.size).flatMap(candidate => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      return [];
+    }
+    const record = candidate as Record<string, unknown>;
+    if (
+      typeof record.productRowId !== 'string' ||
+      !productRowIds.has(record.productRowId) ||
+      !Array.isArray(record.collisionKinds)
+    ) {
+      return [];
+    }
+    const collisionKinds = Array.from(new Set(
+      record.collisionKinds.filter(
+        (kind): kind is OperationIdentityRepairEvidence['collisionKinds'][number] =>
+          typeof kind === 'string' && OPERATION_REPAIR_COLLISION_KINDS.has(kind)
+      )
+    ));
+    if (collisionKinds.length === 0) return [];
+    return [{
+      productRowId: record.productRowId,
+      collisionKinds,
+      collisionCount: collisionKinds.length
+    }];
+  });
+};
 
 export interface ContractProductGraphValidationIssue {
   readonly code: string;
@@ -128,6 +176,23 @@ export class ContractProductGraphValidationError extends Error {
   }
 }
 
+const assertNoAmbiguousOperationIdentityRepair = (
+  blockedProductRowIds: readonly string[],
+  contractData: unknown
+) => {
+  if (blockedProductRowIds.length === 0) return;
+  throw new ContractProductGraphValidationError(
+    blockedProductRowIds.map(productRowId => ({
+      code: 'legacy-canonical-input-invalid',
+      causeCode: 'ambiguous-operation-ownership',
+      path: ['operationGroups', productRowId],
+      productRowId,
+      message: OPERATION_STRUCTURE_MESSAGE
+    })),
+    contractData
+  );
+};
+
 const writeCanonicalGraphSnapshot = async (
   tx: Prisma.TransactionClient,
   input: {
@@ -136,6 +201,8 @@ const writeCanonicalGraphSnapshot = async (
     readonly contractData: unknown;
     readonly totalAmount: Prisma.Decimal | number | string | null;
     readonly revision: number;
+    readonly operationIdentityRepairEvidence?: readonly OperationIdentityRepairEvidence[];
+    readonly operationIdentityRepairStages?: readonly string[];
   }
 ) => {
   const plan = buildLegacyContractMigrationPlan({
@@ -179,7 +246,31 @@ const writeCanonicalGraphSnapshot = async (
       command: toJsonValue({
         kind: 'canonical-wizard-save',
         policy: CURRENT_CONTRACT_PRODUCT_POLICY,
-        provenanceHash: plan.provenanceHash
+        provenanceHash: plan.provenanceHash,
+        ...(input.operationIdentityRepairEvidence?.length
+          ? {
+              operationIdentityRepair: {
+                correlationId:
+                  `wizard-save:${input.contractId}:${input.revision}`,
+                stages: input.operationIdentityRepairStages?.length
+                  ? [...input.operationIdentityRepairStages]
+                  : ['server-write-boundary'],
+                affectedProductRowIds:
+                  input.operationIdentityRepairEvidence.map(
+                    evidence => evidence.productRowId
+                  ),
+                collisionKinds: Array.from(new Set(
+                  input.operationIdentityRepairEvidence.flatMap(
+                    evidence => evidence.collisionKinds
+                  )
+                )),
+                collisionCount: input.operationIdentityRepairEvidence.reduce(
+                  (total, evidence) => total + evidence.collisionCount,
+                  0
+                )
+              }
+            }
+          : {})
       }),
       resultGraph: graph,
       inputHash: plan.provenanceHash,
@@ -201,6 +292,7 @@ export interface CreateContractData {
   notes?: string;
   contractData?: any;
   potentialProjectId?: string;
+  operationIdentityRepairEvidence?: unknown;
   _relations?: UpdateContractData['_relations'];
 }
 
@@ -212,6 +304,7 @@ export interface UpdateContractData {
   currency?: string;
   notes?: string;
   contractData?: any;
+  operationIdentityRepairEvidence?: unknown;
   _relations?: {
     items?: Array<{
       productId: string;
@@ -301,11 +394,25 @@ export async function createContract(
           throw new Error('CRM potential project is already linked to a sales contract');
         }
         const previousContractNumber = data.contractData?.contractNumber;
-        const contractData = {
+        const operationIdentityRepair = repairContractDataOperationIdentities({
           ...(data.contractData || {}),
           contractNumber,
           creatorSequenceNumber
-        };
+        });
+        const contractData = operationIdentityRepair.contractData as any;
+        assertNoAmbiguousOperationIdentityRepair(
+          operationIdentityRepair.blockedProductRowIds,
+          contractData
+        );
+        const reportedOperationRepairEvidence =
+          sanitizeReportedOperationRepairEvidence(
+            data.operationIdentityRepairEvidence,
+            contractData
+          );
+        const operationIdentityRepairEvidence = [
+          ...reportedOperationRepairEvidence,
+          ...operationIdentityRepair.evidence
+        ];
         const content = previousContractNumber
           ? String(data.content).split(String(previousContractNumber)).join(contractNumber)
           : data.content;
@@ -412,7 +519,16 @@ export async function createContract(
           actorId: userId,
           contractData,
           totalAmount: data.totalAmount ?? null,
-          revision: 1
+          revision: 1,
+          operationIdentityRepairEvidence,
+          operationIdentityRepairStages: [
+            ...(reportedOperationRepairEvidence.length
+              ? ['client-final-preflight']
+              : []),
+            ...(operationIdentityRepair.evidence.length
+              ? ['server-write-boundary']
+              : [])
+          ]
         });
         if (potentialProject) {
           await tx.crmPotentialProject.update({
@@ -485,6 +601,23 @@ export async function updateContract(
 
   // Update contract and relation snapshots atomically.
   const updatedContract = await prisma.$transaction(async (tx) => {
+    const operationIdentityRepair = repairContractDataOperationIdentities(
+      data.contractData ?? contract.contractData
+    );
+    const nextContractData = operationIdentityRepair.contractData as any;
+    assertNoAmbiguousOperationIdentityRepair(
+      operationIdentityRepair.blockedProductRowIds,
+      nextContractData
+    );
+    const reportedOperationRepairEvidence =
+      sanitizeReportedOperationRepairEvidence(
+        data.operationIdentityRepairEvidence,
+        nextContractData
+      );
+    const operationIdentityRepairEvidence = [
+      ...reportedOperationRepairEvidence,
+      ...operationIdentityRepair.evidence
+    ];
     const existingGraph = await tx.salesContractProductGraphState.findUnique({
       where: { contractId },
       select: { revision: true }
@@ -610,9 +743,18 @@ export async function updateContract(
     await writeCanonicalGraphSnapshot(tx, {
       contractId,
       actorId: userId,
-      contractData: data.contractData ?? contract.contractData,
+      contractData: nextContractData,
       totalAmount: data.totalAmount ?? contract.totalAmount,
-      revision: (existingGraph?.revision ?? 0) + 1
+      revision: (existingGraph?.revision ?? 0) + 1,
+      operationIdentityRepairEvidence,
+      operationIdentityRepairStages: [
+        ...(reportedOperationRepairEvidence.length
+          ? ['client-final-preflight']
+          : []),
+        ...(operationIdentityRepair.evidence.length
+          ? ['server-write-boundary']
+          : [])
+      ]
     });
 
     return tx.salesContract.update({
@@ -624,7 +766,7 @@ export async function updateContract(
         totalAmount: data.totalAmount !== undefined ? parseFloat(String(data.totalAmount)) : contract.totalAmount,
         currency: data.currency,
         notes: data.notes,
-        contractData: data.contractData,
+        contractData: nextContractData,
       },
       include: {
         customer: {

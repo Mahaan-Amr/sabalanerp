@@ -8,7 +8,7 @@
     "build": "tsc",
     "test:contract-print": "tsx src/utils/__tests__/printTemplateLongitudinalOptimizer.test.ts && tsx src/utils/__tests__/printTemplateProjectName.test.ts && tsx src/utils/__tests__/printTemplateStairLayer.test.ts && tsx src/utils/__tests__/printTemplateOperationLookup.test.ts",
     "test:product-graph-persistence": "tsx src/services/__tests__/contractProductGraphPersistence.test.ts",
-    "test:product-graph-migration": "tsx src/services/__tests__/contractProductGraphMigration.test.ts",
+    "test:product-graph-migration": "tsx src/services/__tests__/contractProductGraphMigration.test.ts && tsx src/services/__tests__/contractOperationIdentityRepair.test.ts",
     "test:contract-edit-session": "tsx src/services/__tests__/contractEditSessionService.test.ts",
     "test:seller-product-history": "tsx src/services/__tests__/sellerProductHistory.test.ts",
     "migration:product-graph:dry": "node dist/scripts/dry-run-contract-product-graph-migration.js",

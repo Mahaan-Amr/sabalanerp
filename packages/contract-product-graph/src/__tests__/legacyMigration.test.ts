@@ -17,6 +17,7 @@ import {
 } from '../stairLayerPolicy';
 import { materializePaidRemainderStocks } from '../remainderPolicy';
 import { calculateProductOperations } from '../operationsPolicy';
+import { repairLegacyProductOperationIdentities } from '../operationIdentityRepair';
 
 const policy = {
   calculation: 'calculation-v1',
@@ -32,6 +33,142 @@ const product = {
   name: 'Stone',
   totalPrice: 1250
 };
+
+{
+  const derivedGroupIdentity = 'derived-owner:no-operations';
+  const operationInput = (
+    productRowId: string,
+    groups: Readonly<Record<string, unknown>>[],
+    tools: Readonly<Record<string, unknown>>[]
+  ) => ({
+    policyVersion: policy.calculation,
+    pricingPolicyVersion: policy.pricing,
+    roundingPolicyVersion: policy.rounding,
+    productRowId,
+    lengthMeters: '4',
+    widthMeters: '0.23',
+    groups,
+    tools,
+    finishings: []
+  });
+  const products = [{
+    rowId: 'derived-owner',
+    productRowId: 'derived-owner',
+    productId: 'catalog-1',
+    productType: 'longitudinal',
+    name: 'No operations',
+    totalPrice: 0,
+    operationPolicyInput: operationInput('derived-owner', [], [])
+  }, {
+    rowId: 'explicit-owner',
+    productRowId: 'explicit-owner',
+    productId: 'catalog-1',
+    productType: 'longitudinal',
+    name: 'Half round',
+    totalPrice: 200000,
+    operationPolicyInput: operationInput('explicit-owner', [{
+      operationGroupId: derivedGroupIdentity,
+      scope: '4'
+    }], [{
+      toolSelectionId: 'explicit-tool',
+      operationGroupId: derivedGroupIdentity,
+      catalogItemId: 'tool-1',
+      catalogSnapshotVersion: 'catalog-v1',
+      name: 'Half round',
+      unit: 'meter',
+      rateToman: '50000',
+      edges: ['front']
+    }]),
+    appliedSubServices: [{
+      id: 'explicit-tool',
+      subServiceId: 'tool-1',
+      meter: 4,
+      cost: 200000
+    }]
+  }];
+
+  const repair = repairLegacyProductOperationIdentities(products);
+  assert.deepEqual(repair.blockedProductRowIds, []);
+  assert.deepEqual(repair.repairedProductRowIds, ['explicit-owner']);
+  assert.deepEqual(repair.evidence, [{
+    productRowId: 'explicit-owner',
+    collisionKinds: ['derived-no-operation-group-collision'],
+    collisionCount: 1
+  }]);
+  assert.notEqual(
+    repair.products[1].operationPolicyInput.groups[0]?.operationGroupId,
+    derivedGroupIdentity
+  );
+  assert.equal(
+    repair.products[1].appliedSubServices?.[0]?.id,
+    repair.products[1].operationPolicyInput.tools[0]?.toolSelectionId
+  );
+
+  const retry = repairLegacyProductOperationIdentities(repair.products);
+  assert.deepEqual(retry.repairedProductRowIds, []);
+  assert.equal(
+    retry.products[1].operationPolicyInput.groups[0]?.operationGroupId,
+    repair.products[1].operationPolicyInput.groups[0]?.operationGroupId
+  );
+  const graphRead = readLegacyProductGraph({
+    contractId: 'repaired-derived-operation-identity',
+    revision: 0,
+    calculationPolicy: policy,
+    products: repair.products
+  });
+  assert.equal(
+    graphRead.ok,
+    true,
+    graphRead.ok ? undefined : JSON.stringify(graphRead.conflicts)
+  );
+
+  const ambiguous = structuredClone(products[1]);
+  ambiguous.rowId = 'ambiguous-owner';
+  ambiguous.productRowId = 'ambiguous-owner';
+  ambiguous.operationPolicyInput = {
+    ...ambiguous.operationPolicyInput,
+    productRowId: 'ambiguous-owner',
+    groups: [
+      {
+        operationGroupId: 'contradictory-group',
+        scope: '1'
+      },
+      {
+        operationGroupId: 'contradictory-group',
+        scope: '2'
+      }
+    ],
+    tools: [{
+      ...ambiguous.operationPolicyInput.tools[0],
+      operationGroupId: 'contradictory-group'
+    }]
+  };
+  const blocked = repairLegacyProductOperationIdentities([ambiguous]);
+  assert.deepEqual(blocked.repairedProductRowIds, []);
+  assert.deepEqual(blocked.blockedProductRowIds, ['ambiguous-owner']);
+
+  const orphanedSnapshot = structuredClone(products[1]);
+  orphanedSnapshot.rowId = 'orphaned-snapshot-owner';
+  orphanedSnapshot.productRowId = 'orphaned-snapshot-owner';
+  orphanedSnapshot.operationPolicyInput = {
+    ...orphanedSnapshot.operationPolicyInput,
+    productRowId: 'orphaned-snapshot-owner'
+  };
+  orphanedSnapshot.appliedSubServices = [{
+    id: 'tool-selection-without-an-owner',
+    subServiceId: 'tool-1',
+    meter: 4,
+    cost: 200000
+  }];
+  const blockedSnapshot = repairLegacyProductOperationIdentities([
+    orphanedSnapshot
+  ]);
+  assert.deepEqual(blockedSnapshot.repairedProductRowIds, []);
+  assert.deepEqual(
+    blockedSnapshot.blockedProductRowIds,
+    ['orphaned-snapshot-owner']
+  );
+}
 
 {
   const result = planLegacyProductGraphMigration({

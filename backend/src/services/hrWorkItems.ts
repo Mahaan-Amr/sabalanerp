@@ -57,7 +57,29 @@ export const personalHrWorkProgress = (items: HrWorkProgressItem[], now = new Da
   };
 };
 
-export const defaultOwnerForAction = (
+export const eligibleUsersForHiringAction = (
   actionAuthorities: string[],
-  owners: Map<string, string>
-) => actionAuthorities.map((authority) => owners.get(authority)).find(Boolean) || null;
+  authoritiesByUser: Map<string, Set<string>>
+) => [...authoritiesByUser.entries()]
+  .filter(([, authorities]) => actionAuthorities.some((authority) => authorities.has(authority)))
+  .map(([userId]) => userId)
+  .sort();
+
+export const automaticHiringWorkItemBaseKey = (applicationId: string, actionId: string) =>
+  `HIRING:${applicationId}:${actionId}`;
+
+export const automaticHiringWorkItemSourceKey = (
+  applicationId: string,
+  actionId: string,
+  userId: string | null
+) => `${automaticHiringWorkItemBaseKey(applicationId, actionId)}:${userId ? `USER:${userId}` : 'UNASSIGNED'}`;
+
+export const automaticHiringWorkItemBaseKeyFromSource = (sourceKey: string) =>
+  sourceKey.replace(/:(?:USER:[^:]+|UNASSIGNED)$/, '');
+
+export const staleAutomaticHiringWorkItemStatus = (
+  sourceKey: string,
+  activeActionBaseKeys: Set<string>
+): 'COMPLETE' | 'WAIVED' => activeActionBaseKeys.has(automaticHiringWorkItemBaseKeyFromSource(sourceKey))
+  ? 'WAIVED'
+  : 'COMPLETE';

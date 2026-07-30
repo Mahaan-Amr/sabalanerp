@@ -27,16 +27,6 @@ import {
 import { dateFa, HrField, HrMessage, toIsoDate } from "@/features/hr/hrUi";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 
-const authorityLabels: Record<string, string> = {
-  HR_PROCESSOR: "کارشناس منابع انسانی",
-  HR_MANAGER: "مدیریت منابع انسانی",
-  COMPANY_MANAGER: "مدیریت شرکت",
-  HR_PAYROLL_PROCESSOR: "کارشناس حقوق و دستمزد",
-  HR_PAYROLL_MANAGER: "مدیریت حقوق و دستمزد",
-  FINANCE_RECORDER: "کارشناس امور مالی",
-  FINANCE_MANAGER: "مدیریت امور مالی",
-  HIRING_MANAGER: "مدیر استخدام‌کننده",
-};
 const statusLabels: Record<string, string> = {
   PENDING: "در انتظار",
   IN_PROGRESS: "در حال انجام",
@@ -53,7 +43,6 @@ export default function HrTasksPage() {
   const scope = searchParams.get("scope") || "mine";
   const [items, setItems] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
-  const [defaults, setDefaults] = useState<any[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [currentUserId, setCurrentUserId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -82,17 +71,12 @@ export default function HrTasksPage() {
           status: "OPEN",
         }),
       ];
-      if (manager)
-        requests.push(
-          hiringAPI.workItemUsers(),
-          hiringAPI.workItemDefaultOwners(),
-        );
-      const [work, userRows, ownerRows] = await Promise.all(requests);
+      if (manager) requests.push(hiringAPI.workItemUsers());
+      const [work, userRows] = await Promise.all(requests);
       setItems(work.data.data);
       setCurrentUserId(work.data.meta.currentUserId);
       if (manager) {
         setUsers(userRows.data.data);
-        setDefaults(ownerRows.data.data);
       }
     } catch (cause) {
       setError(hiringError(cause));
@@ -285,14 +269,6 @@ export default function HrTasksPage() {
         </ErpSection>
       )}
 
-      {canManage && (
-        <DefaultOwners
-          users={users}
-          defaults={defaults}
-          busy={busy}
-          run={run}
-        />
-      )}
     </ErpPage>
   );
 }
@@ -363,7 +339,7 @@ function HrWorkItemRow({ item, users, canManage, currentUserId, busy, run }: any
           )}
         </div>
       </div>
-      {canManage && (
+      {canManage && item.sourceType !== "HIRING_ACTION" && (
         <div className="mt-4 grid gap-2 border-t border-[var(--sds-border-subtle)] pt-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
           <ErpSelect
             aria-label="مسئول جدید"
@@ -400,81 +376,25 @@ function HrWorkItemRow({ item, users, canManage, currentUserId, busy, run }: any
               )
             }
           />
-          {item.sourceType !== "HIRING_ACTION" && (
-            <ErpButton
-              label="صرف‌نظر"
-              tone="danger"
-              variant="outline"
-              disabled={busy || reason.trim().length < 3}
-              onClick={async () => {
-                const confirmed = await askSecurityAction({
-                  title: "صرف‌نظر از وظیفه؟",
-                  description: `این اقدام با دلیل «${reason.trim()}» در سابقه ممیزی ثبت می‌شود.`,
-                });
-                if (!confirmed) return;
-                await run(
-                  () => hiringAPI.updateWorkItem(item.id, { status: "WAIVED", reason }),
-                  "وظیفه با ثبت دلیل کنار گذاشته شد.",
-                );
-              }}
-            />
-          )}
+          <ErpButton
+            label="صرف‌نظر"
+            tone="danger"
+            variant="outline"
+            disabled={busy || reason.trim().length < 3}
+            onClick={async () => {
+              const confirmed = await askSecurityAction({
+                title: "صرف‌نظر از وظیفه؟",
+                description: `این اقدام با دلیل «${reason.trim()}» در سابقه ممیزی ثبت می‌شود.`,
+              });
+              if (!confirmed) return;
+              await run(
+                () => hiringAPI.updateWorkItem(item.id, { status: "WAIVED", reason }),
+                "وظیفه با ثبت دلیل کنار گذاشته شد.",
+              );
+            }}
+          />
         </div>
       )}
     </ErpCard>
-  );
-}
-
-function DefaultOwners({ users, defaults, busy, run }: any) {
-  const initial = Object.fromEntries(
-    defaults.map((item: any) => [item.authority, item.userId]),
-  );
-  const [owners, setOwners] = useState<Record<string, string>>(initial);
-  return (
-    <ErpSection title="مسئول پیش‌فرض اختیارهای استخدام">
-      <ErpCard className="divide-y divide-[var(--sds-border-subtle)] p-4">
-        {Object.entries(authorityLabels).map(([authority, label]) => {
-          const eligible = users.filter((user: any) =>
-            user.authorities?.includes(authority),
-          );
-          return (
-            <div
-              key={authority}
-              className="grid gap-3 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-center"
-            >
-              <span className="font-semibold">{label}</span>
-              <ErpSelect
-                aria-label={`مسئول پیش‌فرض ${label}`}
-                value={owners[authority] || ""}
-                onChange={(event) =>
-                  setOwners({ ...owners, [authority]: event.target.value })
-                }
-              >
-                <option value="">انتخاب نشده</option>
-                {eligible.map((user: any) => (
-                  <option key={user.id} value={user.id}>
-                    {userName(user)}
-                  </option>
-                ))}
-              </ErpSelect>
-              <ErpButton
-                label="ذخیره"
-                disabled={busy || !owners[authority]}
-                onClick={() =>
-                  run(
-                    () =>
-                      hiringAPI.setWorkItemDefaultOwner(
-                        authority,
-                        owners[authority],
-                      ),
-                    "مسئول پیش‌فرض ذخیره شد.",
-                  )
-                }
-              />
-            </div>
-          );
-        })}
-      </ErpCard>
-    </ErpSection>
   );
 }

@@ -11,12 +11,8 @@ The share of current organizational position capacity that is already committed,
 _Avoid_: presenting a fictional workflow-completion percentage, using active headcount alone as the numerator, or treating an undefined zero-capacity ratio as complete
 
 **HR Work Item**:
-A concrete Human Resources duty assigned to one responsible system user, with a due date, lifecycle status, destination, and preserved completion history. It may be created manually or derived automatically from actionable hiring and HR conditions, while organization-wide quality findings remain unassigned until converted or assigned.
-_Avoid_: treating a role-wide opportunity to act as a personal assignment, counting the same duty for every qualified user, or presenting an organizational issue as completed merely because it was reassigned
-
-**Default Hiring Authority Owner**:
-The configured user who receives automatically generated HR Work Items for one Hiring Authority when a Candidate Recruitment Case requires that authority's action. When no eligible default owner exists, the duty remains visibly unassigned for manager triage rather than being silently assigned or duplicated.
-_Avoid_: selecting an arbitrary authority holder, assigning one duty to every authority holder, or losing the duty when its configured owner becomes unavailable
+A concrete Human Resources duty assigned to one responsible system user, with a due date, lifecycle status, destination, and preserved completion history. It may be created manually or derived automatically from actionable hiring and HR conditions. A recruitment action produces one linked personal copy for every active user whose queue shows “Action required by you”; resolving the source action closes every linked copy. If nobody is eligible, one unassigned copy remains visible for manager triage. Losing eligibility waives that user's still-open copy rather than counting it as completed.
+_Avoid_: selecting one arbitrary authority holder, allowing linked automatic copies to be reassigned manually, or leaving linked copies open after their shared source action is resolved
 
 **Personal HR Work Progress**:
 The signed-in user's completion rate for assigned HR Work Items, calculated as items completed during the current Persian month divided by those completed during that month plus every currently open assigned item, including older overdue work. Waived or cancelled items do not count as completed, and an empty workload has no percentage.

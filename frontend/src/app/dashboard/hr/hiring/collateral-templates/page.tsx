@@ -2,7 +2,7 @@
 import { ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import { useEffect, useState } from "react";
 import { FaPlus, FaSync } from "react-icons/fa";
-import { ErpButton, ErpCard, ErpLoading, ErpPage } from "@/components/erp";
+import { ErpButton, ErpCard, ErpLoading, ErpPage, ErpSheet } from "@/components/erp";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 
 const field =
@@ -21,6 +21,7 @@ export default function CollateralTemplatesPage() {
   ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const load = async () => {
     try {
       setRows((await hiringAPI.collateralTemplates()).data.data);
@@ -37,6 +38,7 @@ export default function CollateralTemplatesPage() {
       setError("");
       await hiringAPI.createCollateralTemplate({ name, items });
       setName("");
+      setCreateOpen(false);
       await load();
     } catch (e) {
       setError(hiringError(e));
@@ -62,11 +64,19 @@ export default function CollateralTemplatesPage() {
       title="قالب‌های چک‌لیست وثیقه"
       description="هر تغییر یک نسخه جدید و غیرقابل بازنویسی می‌سازد."
       backHref="/dashboard/hr/hiring"
-      actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: load }]}
+      metrics={[
+        { label: "قالب ثبت‌شده", value: rows.length.toLocaleString("fa-IR"), tone: "primary" },
+        { label: "قالب فعال", value: rows.filter((row) => row.isActive).length.toLocaleString("fa-IR"), tone: "success" },
+      ]}
+      actions={[
+        { label: "قالب جدید", icon: FaPlus, onClick: () => setCreateOpen(true), tone: "success" },
+        { label: "به‌روزرسانی", icon: FaSync, onClick: load },
+      ]}
     >
       {error && (
         <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)]">{error}</p>
       )}
+      <ErpSheet open={createOpen} onClose={() => setCreateOpen(false)} title="قالب جدید وثیقه">
       <ErpCard className="space-y-3 p-4">
         <ErpInput
           className={field}
@@ -163,6 +173,7 @@ export default function CollateralTemplatesPage() {
           />
         </div>
       </ErpCard>
+      </ErpSheet>
       <div className="grid gap-3 md:grid-cols-2">
         {rows.map((row) => (
           <ErpCard key={row.id} className="p-4">

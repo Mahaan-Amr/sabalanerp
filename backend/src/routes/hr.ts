@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
 import { normalizeWorkSchedule } from '../utils/personnelWorkSchedule';
-import { assertSubsequentEmploymentRelationship } from '../services/hrPersonnelBoundary';
+import { archiveRosterMembershipEnd, assertSubsequentEmploymentRelationship, personnelSearchWhere } from '../services/hrPersonnelBoundary';
 import { assertWorkScheduleAction } from '../services/hrWorkScheduleGovernance';
 import { dateOnlyRangeIncludes, plannedStartHasArrived } from '../services/hrEmploymentActivation';
 import { assertArchiveReason, assertArchivedRecordMutable, assertPermanentDeletionConfirmation, assertPersonnelErasureTarget, projectRecordRetentionCapabilities } from '../services/hrRecordRetentionPolicy';
@@ -377,7 +377,7 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
     const where: Prisma.PersonnelWhereInput = {
       archivedAt: archived ? { not: null } : null,
       ...((relationshipStatus || attention === 'missing-primary') ? { hrEmploymentRelationships: { some: relationshipFilter } } : {}),
-      ...(search ? { OR: [{ firstName: { contains: search, mode: 'insensitive' } }, { lastName: { contains: search, mode: 'insensitive' } }, { employeeNumber: { contains: search, mode: 'insensitive' } }, { nationalCode: { contains: search } }] } : {})
+      ...(personnelSearchWhere(search) || {})
     };
     const [rows, total, authorityRows] = await Promise.all([
       prisma.personnel.findMany({ where, include: personnelInclude, orderBy: [{ lastName: sortDirection }, { firstName: sortDirection }], skip: (page - 1) * pageSize, take: pageSize }),
@@ -457,11 +457,25 @@ router.post('/personnel/:id/archive', viewAccess, requireHrManagerAuthority, asy
         where: { personnelId: person.id, status: { in: ['PROPOSED', 'DRAFT', 'SUBMITTED', 'RETURNED'] } },
         data: { status: 'CANCELLED', returnedBy: actorId(req), returnedAt: now, returnReason: `بایگانی پرسنل: ${reason}` }
       });
+      const rosterMemberships = await tx.securityAttendanceRosterMembership.findMany({
+        where: { personnelId: person.id },
+        select: { id: true, effectiveFrom: true, effectiveTo: true }
+      });
+      let endedRosterMembershipCount = 0;
+      for (const membership of rosterMemberships) {
+        const effectiveTo = archiveRosterMembershipEnd(membership.effectiveFrom, membership.effectiveTo, effectiveDate);
+        if (!effectiveTo) continue;
+        await tx.securityAttendanceRosterMembership.update({
+          where: { id: membership.id },
+          data: { effectiveTo, endedBy: actorId(req) }
+        });
+        endedRosterMembershipCount += 1;
+      }
       if (person.user) {
         await tx.authSession.updateMany({ where: { userId: person.user.id, revokedAt: null }, data: { revokedAt: now, revokedById: actorId(req), revocationReason: `بایگانی پرسنل: ${reason}` } });
         await tx.user.update({ where: { id: person.user.id }, data: { isActive: false } });
       }
-      await tx.hrPersonnelAudit.create({ data: { personnelId: person.id, actorUserId: actorId(req), eventType: 'PERSONNEL_ARCHIVED', sourceCategory: 'PERSONNEL_ARCHIVE', reason, payloadJson: { effectiveDate: effectiveDate.toISOString(), linkedUserDeactivated: Boolean(person.user), endedRelationshipCount: relationshipIds.length } } });
+      await tx.hrPersonnelAudit.create({ data: { personnelId: person.id, actorUserId: actorId(req), eventType: 'PERSONNEL_ARCHIVED', sourceCategory: 'PERSONNEL_ARCHIVE', reason, payloadJson: { effectiveDate: effectiveDate.toISOString(), linkedUserDeactivated: Boolean(person.user), endedRelationshipCount: relationshipIds.length, endedRosterMembershipCount } } });
       return tx.personnel.update({ where: { id: person.id }, data: { isActive: false, archivedAt: now, archivedBy: actorId(req), archiveReason: reason, archiveEffectiveDate: effectiveDate } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.json({ success: true, data: result });
@@ -972,6 +986,93 @@ router.get('/migration/preview', adminAccess, async (_req, res) => {
     const duplicates = await prisma.$queryRaw<Array<{ firstName: string; lastName: string; count: bigint }>>`SELECT lower(trim("firstName")) AS "firstName", lower(trim("lastName")) AS "lastName", count(*) AS count FROM "personnel" GROUP BY 1, 2 HAVING count(*) > 1`;
     res.json({ success: true, data: { counts: { activePersonnel, inactivePersonnel, linkedUsers, unlinkedUsers, departments: departments.length, schedules, migrated }, departments, exceptions: exceptions.map((row) => ({ type: row.exceptionType, count: row._count })), conflicts: { duplicateNames: duplicates.map((row) => ({ ...row, count: Number(row.count) })), inactivePersonnelNeedReview: inactivePersonnel } } });
   } catch (error) { handleError(res, error, 'HR migration preview'); }
+});
+
+const migrationRecordTitles: Record<string, string> = {
+  'active-personnel': 'پرسنل فعال',
+  'inactive-personnel': 'پرسنل غیرفعال',
+  'linked-users': 'کاربران متصل به پرسنل',
+  'unlinked-users': 'کاربران بدون پرسنل',
+  departments: 'دپارتمان‌های قدیمی',
+  schedules: 'برنامه‌های کاری قدیمی',
+  migrated: 'رکوردهای قبلاً مهاجرت‌شده',
+};
+
+router.get('/migration/records/:category', adminAccess, async (req, res) => {
+  try {
+    const category = textValue(req.params.category);
+    const title = migrationRecordTitles[category];
+    if (!title) return res.status(404).json({ success: false, error: 'دسته مهاجرت پیدا نشد.' });
+
+    let records: Array<{ id: string; title: string; subtitle?: string; detail?: string; status?: string }> = [];
+    if (category === 'active-personnel' || category === 'inactive-personnel') {
+      const isActive = category === 'active-personnel';
+      const rows = await prisma.personnel.findMany({
+        where: { isActive },
+        include: { department: true },
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      });
+      records = rows.map((row) => ({
+        id: row.id,
+        title: `${row.firstName} ${row.lastName}`,
+        subtitle: row.employeeNumber || 'بدون شماره پرسنلی',
+        detail: row.department?.namePersian || row.department?.name || 'بدون دپارتمان',
+        status: isActive ? 'فعال' : 'غیرفعال',
+      }));
+    } else if (category === 'linked-users' || category === 'unlinked-users') {
+      const linked = category === 'linked-users';
+      const rows = await prisma.user.findMany({
+        where: linked ? { personnelId: { not: null } } : { personnelId: null },
+        include: { personnel: true, department: true },
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      });
+      records = rows.map((row) => ({
+        id: row.id,
+        title: `${row.firstName} ${row.lastName}`,
+        subtitle: row.email,
+        detail: row.personnel
+          ? `پرسنل: ${row.personnel.firstName} ${row.personnel.lastName}`
+          : row.department?.namePersian || row.department?.name || 'بدون دپارتمان',
+        status: linked ? 'متصل' : 'بدون پرسنل',
+      }));
+    } else if (category === 'departments') {
+      const rows = await prisma.department.findMany({ orderBy: { name: 'asc' } });
+      records = rows.map((row) => ({
+        id: row.id,
+        title: row.namePersian || row.name,
+        subtitle: row.name,
+        detail: row.description || undefined,
+        status: row.isActive ? 'فعال' : 'غیرفعال',
+      }));
+    } else if (category === 'schedules') {
+      const rows = await prisma.personnelWorkSchedule.findMany({
+        include: { personnel: true, days: true },
+        orderBy: { effectiveFrom: 'desc' },
+      });
+      records = rows.map((row) => ({
+        id: row.id,
+        title: `${row.personnel.firstName} ${row.personnel.lastName}`,
+        subtitle: `از ${row.effectiveFrom.toISOString().slice(0, 10)}`,
+        detail: `${row.days.length.toLocaleString('fa-IR')} روز کاری تعریف‌شده`,
+        status: 'قدیمی',
+      }));
+    } else {
+      const rows = await prisma.hrEmploymentRelationship.findMany({
+        where: { sourceSystem: 'LEGACY_PERSONNEL' },
+        include: { personnel: true },
+        orderBy: { migratedAt: 'desc' },
+      });
+      records = rows.map((row) => ({
+        id: row.id,
+        title: `${row.personnel.firstName} ${row.personnel.lastName}`,
+        subtitle: row.sourceId || 'بدون شناسه منبع',
+        detail: row.migratedAt ? row.migratedAt.toISOString() : undefined,
+        status: row.status,
+      }));
+    }
+
+    res.json({ success: true, data: { category, title, count: records.length, records } });
+  } catch (error) { handleError(res, error, 'HR migration records'); }
 });
 
 router.post('/migration/apply', adminAccess, async (req: WorkspaceRequest, res) => {

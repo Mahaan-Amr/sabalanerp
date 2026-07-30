@@ -776,6 +776,12 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
     if (href === "/dashboard") {
       return pathname === "/dashboard";
     }
+    const workspaceRoot = currentWorkspace
+      ? WORKSPACE_CONFIG[currentWorkspace].path
+      : null;
+    if (workspaceRoot && href === workspaceRoot) {
+      return pathname === workspaceRoot;
+    }
     return pathname.startsWith(href);
   };
 
@@ -799,11 +805,11 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         }
       >
         <div
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
+          className={`flex items-center rounded-xl transition-all duration-200 ${collapsed ? "min-h-14 gap-3 px-4 py-3 lg:min-h-20 lg:justify-center lg:px-1.5 lg:py-2" : "min-h-14 gap-3 px-4 py-3"} ${
             level > 0 ? "mr-4" : ""
           } ${
             isActive
-              ? "bg-[var(--sds-accent-soft)] text-[var(--sds-accent)] border border-[var(--sds-accent)]"
+              ? "sds-dashboard-nav-active border border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] text-[var(--sds-accent)]"
               : "text-[var(--sds-text-primary)] hover:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-secondary)] dark:hover:bg-[var(--sds-surface-raised)] dark:hover:text-[var(--sds-text-inverse)]"
           }`}
         >
@@ -811,13 +817,12 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             <ErpPressable
               type="button"
               aria-expanded={isExpanded}
+              aria-current={isActive ? "page" : undefined}
               onClick={() => toggleExpanded(itemKey)}
-              className="flex flex-1 items-center gap-3"
+              className={`flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:flex-col lg:justify-center lg:gap-1" : "gap-3"}`}
             >
-              <Icon className="h-5 w-5" />
-              {!collapsed && (
-                <span className="flex-1 text-right">{item.namePersian}</span>
-              )}
+              <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
+              <span className={collapsed ? "flex-1 text-right font-bold lg:sr-only" : "flex-1 text-right font-bold"}>{item.namePersian}</span>
               {!collapsed &&
                 (isExpanded ? (
                   <FaChevronLeft className="h-4 w-4" />
@@ -828,13 +833,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
           ) : (
             <Link
               href={item.href}
+              aria-current={isActive ? "page" : undefined}
+              title={collapsed ? item.namePersian : undefined}
               onClick={() => onNavigate?.(item.href)}
-              className="flex items-center gap-3 flex-1"
+              className={`flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:flex-col lg:justify-center lg:gap-1" : "gap-3"}`}
             >
-              <Icon className="h-5 w-5" />
-              {!collapsed && (
-                <span className="flex-1 text-right">{item.namePersian}</span>
-              )}
+              <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
+              <span className={collapsed ? "flex-1 text-right font-bold lg:sr-only" : "flex-1 text-right font-bold"}>{item.namePersian}</span>
             </Link>
           )}
         </div>
@@ -874,7 +879,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
       {/* Navigation Items */}
       <nav
         aria-label="ناوبری فضای کاری"
-        className="scrollbar-thin flex-none space-y-1 overflow-visible p-3 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:flex-1 lg:space-y-2 lg:overflow-y-auto lg:p-4"
+        className="scrollbar-thin flex-none space-y-1 overflow-visible p-3 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:flex-1 lg:space-y-2 lg:overflow-y-auto lg:p-3"
       >
         {navigationItems.map((item) => renderNavigationItem(item))}
       </nav>

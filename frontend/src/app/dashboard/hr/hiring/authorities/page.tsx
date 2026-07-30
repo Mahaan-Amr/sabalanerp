@@ -7,6 +7,7 @@ import {
   ErpPage,
   ErpSection,
   ErpSelect,
+  ErpSheet,
 } from "@/components/erp";
 import { authorityLabel } from "@/features/hr/hrDisplay";
 import RetentionAction from "@/features/hr/RetentionActionSheet";
@@ -34,6 +35,7 @@ export default function HiringAuthoritiesPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<any>(null);
+  const [assignOpen, setAssignOpen] = useState(false);
   const availableAuthorities =
     user?.role === "ADMIN"
       ? authorityTypes
@@ -65,6 +67,7 @@ export default function HiringAuthoritiesPage() {
       setError("");
       await hiringAPI.setAuthority({ userId, authority });
       setMessage("اختیار سازمانی ثبت شد.");
+      setAssignOpen(false);
       await load();
     } catch (cause) {
       setError(hiringError(cause));
@@ -102,6 +105,14 @@ export default function HiringAuthoritiesPage() {
       title="اختیارهای تأیید استخدام"
       description="اختیار کسب‌وکاری مستقل از دسترسی عمومی سامانه است."
       backHref="/dashboard/hr/hiring"
+      metrics={[
+        { label: "اختیار فعال", value: rows.length.toLocaleString("fa-IR"), tone: "primary" },
+        { label: "کاربر قابل انتخاب", value: users.length.toLocaleString("fa-IR"), tone: "neutral" },
+      ]}
+      actions={[{
+        label: "واگذاری اختیار",
+        onClick: () => setAssignOpen(true),
+      }]}
     >
       {message && (
         <p className="sds-tone-success sds-tone-surface rounded-xl p-3">{message}</p>
@@ -109,7 +120,13 @@ export default function HiringAuthoritiesPage() {
       {error && (
         <p className="sds-tone-danger sds-tone-surface rounded-xl p-3">{error}</p>
       )}
-      <ErpSection title="واگذاری اختیار">
+      <ErpSheet
+        open={assignOpen}
+        onClose={() => { if (!busy) setAssignOpen(false); }}
+        title="واگذاری اختیار"
+        presentation="modal"
+        dismissible={!busy}
+      >
         <ErpCard className="grid gap-3 p-4 md:grid-cols-3">
           <ErpSelect aria-label="کاربر دریافت‌کننده اختیار" value={userId} onChange={(event) => setUserId(event.target.value)}>
             <option value="">انتخاب کاربر</option>
@@ -132,7 +149,7 @@ export default function HiringAuthoritiesPage() {
             onClick={save}
           />
         </ErpCard>
-      </ErpSection>
+      </ErpSheet>
       <ErpSection title="اختیارهای فعال">
         <div className="grid gap-2 md:grid-cols-2">
           {rows.map((row) => {

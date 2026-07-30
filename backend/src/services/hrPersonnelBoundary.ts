@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { normalizePersianFullName } from './hrOfferDecision';
 
 export type PersonnelLinkClient = Pick<Prisma.TransactionClient, 'personnel'>;
 
@@ -32,4 +33,31 @@ export const assertSubsequentEmploymentRelationship = (existingRelationshipCount
   if (existingRelationshipCount < 1) {
     throw new Error('رابطه استخدامی اولیه باید از پرونده جذب یا مسیر صریح ثبت استثنایی ایجاد شود.');
   }
+};
+
+export const personnelSearchTokens = (value: unknown) =>
+  normalizePersianFullName(value).split(' ').filter(Boolean);
+
+export const personnelSearchWhere = (value: unknown): Prisma.PersonnelWhereInput | undefined => {
+  const tokens = personnelSearchTokens(value);
+  if (!tokens.length) return undefined;
+  return {
+    AND: tokens.map((token) => ({
+      OR: [
+        { firstName: { contains: token, mode: 'insensitive' } },
+        { lastName: { contains: token, mode: 'insensitive' } },
+        { employeeNumber: { contains: token, mode: 'insensitive' } },
+        { nationalCode: { contains: token } }
+      ]
+    }))
+  };
+};
+
+export const archiveRosterMembershipEnd = (
+  effectiveFrom: Date,
+  currentEffectiveTo: Date | null,
+  archiveEffectiveDate: Date
+) => {
+  if (currentEffectiveTo && currentEffectiveTo <= archiveEffectiveDate) return null;
+  return effectiveFrom > archiveEffectiveDate ? effectiveFrom : archiveEffectiveDate;
 };

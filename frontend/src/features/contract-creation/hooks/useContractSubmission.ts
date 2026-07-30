@@ -22,6 +22,14 @@ import {
   normalizeProductFinishingCollection
 } from '../utils/productFinishingCollections';
 import { normalizeContractProductRowIdentities } from '../utils/contractProductIdentity';
+import {
+  isContractProductValidationFailure,
+  mapProductValidationFailure
+} from '../utils/contractSubmissionErrors';
+import {
+  clearContractSubmissionDiagnostic,
+  storeContractSubmissionDiagnostic
+} from '../utils/contractSubmissionDiagnostics';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -44,6 +52,7 @@ interface UseContractSubmissionOptions {
   } | null;
   onCommitted?: () => Promise<void> | void;
   onEditSessionFailure?: (error: unknown) => string | null;
+  draftStorageKey?: string;
 }
 
 const normalizeIranMobileNumber = (value?: string | null) => {
@@ -113,7 +122,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     contractId,
     editSession,
     onCommitted,
-    onEditSessionFailure
+    onEditSessionFailure,
+    draftStorageKey = CONTRACT_DRAFT_STORAGE_KEY
   } = options;
 
   const router = useRouter();
@@ -142,6 +152,17 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         ...(blockedIndex >= 0 && wizardData.products[blockedIndex]?.rowId
           ? { [`productRow:${wizardData.products[blockedIndex].rowId}`]: message }
           : {})
+      });
+      setCurrentStep(4);
+      return;
+    }
+    if (identityNormalization.blockedOperationRowIds.length > 0) {
+      const blockedRowId = identityNormalization.blockedOperationRowIds[0];
+      const message =
+        'ساختار عملیات این محصول قابل تشخیص نیست؛ ابزارها و پرداخت‌ها را بازبینی و دوباره ذخیره کنید';
+      setErrors({
+        products: message,
+        [`productRow:${blockedRowId}`]: message
       });
       setCurrentStep(4);
       return;
@@ -385,6 +406,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         : await salesAPI.createContract(contractData, editSession || undefined);
       
       if (response.data.success) {
+        clearContractSubmissionDiagnostic();
         if (isEditMode) {
           await onCommitted?.();
           router.push(`/dashboard/sales/contracts/${editContractId}`);
@@ -422,7 +444,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         
         // Move to final step (Digital Signature) instead of redirecting
         if (typeof window !== 'undefined') {
-          localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+          localStorage.removeItem(draftStorageKey);
         }
         await onCommitted?.();
         setCurrentStep(7);
@@ -434,11 +456,16 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       console.error('Error response:', error.response?.data);
 
       const editSessionMessage = onEditSessionFailure?.(error);
-      const mappedErrors = editSessionMessage
+      const initialMappedErrors = editSessionMessage
         ? { general: editSessionMessage }
         : mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد');
+      const mappedErrors = mapProductValidationFailure(
+        error,
+        initialMappedErrors
+      );
       setErrors(mappedErrors);
-      if (error?.response?.status === 422 && Object.keys(mappedErrors).some(key => key.startsWith('productRow:'))) {
+      storeContractSubmissionDiagnostic(error);
+      if (isContractProductValidationFailure(error, mappedErrors)) {
         setCurrentStep(4);
       }
     } finally {
@@ -461,6 +488,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
     editSession,
     onCommitted,
     onEditSessionFailure,
+    draftStorageKey,
     router
   ]);
 

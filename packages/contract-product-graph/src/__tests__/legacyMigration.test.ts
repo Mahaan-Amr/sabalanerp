@@ -207,6 +207,54 @@ const product = {
     true,
     JSON.stringify(stairWithOperationsMigration)
   );
+  const sharedToolSelectionId = stairOperations.tools[0].toolSelectionId;
+  const repeatedToolIdentity = readLegacyProductGraph({
+    contractId: 'legacy-operation-identity-conflict',
+    revision: 0,
+    calculationPolicy: policy,
+    products: ['first', 'second'].map(label => {
+      const rowId = parseStableIdentity('product-row', `${label}-row`);
+      const groupId = parseStableIdentity('operation-group', `${label}-group`);
+      return {
+        productRowId: rowId,
+        productId: 'catalog-1',
+        productType: 'longitudinal',
+        name: `${label} row with repeated tool identity`,
+        totalPrice: 50000,
+        operationPolicyInput: {
+          policyVersion: policy.calculation,
+          pricingPolicyVersion: policy.pricing,
+          roundingPolicyVersion: policy.rounding,
+          productRowId: rowId,
+          lengthMeters: parseCanonicalDecimal('1'),
+          widthMeters: parseCanonicalDecimal('0.4'),
+          quantity: 1,
+          groups: [{
+            operationGroupId: groupId,
+            scope: parseCanonicalDecimal('1')
+          }],
+          tools: [{
+            ...stairOperations.tools[0],
+            toolSelectionId: sharedToolSelectionId,
+            operationGroupId: groupId
+          }],
+          finishings: []
+        }
+      };
+    })
+  });
+  assert.equal(repeatedToolIdentity.ok, false);
+  if (repeatedToolIdentity.ok) {
+    throw new Error('expected repeated tool identity conflict');
+  }
+  assert.deepEqual(repeatedToolIdentity.conflicts[0]?.path, [
+    'toolSelections',
+    sharedToolSelectionId
+  ]);
+  assert.equal(
+    repeatedToolIdentity.conflicts[0]?.causeCode,
+    'duplicate-stable-identity'
+  );
 
   const layerConfigurationId = parseStableIdentity(
     'layer-configuration',

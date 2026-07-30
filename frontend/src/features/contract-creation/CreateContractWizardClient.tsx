@@ -99,6 +99,7 @@ import { useProductFiltering } from '@/features/contract-creation/hooks/useProdu
 import { useContractProductCartController } from '@/features/contract-creation/hooks/useContractProductCartController';
 import { useSellerProductHistory } from '@/features/contract-creation/hooks/useSellerProductHistory';
 import {
+  createFreshContractDraftId,
   getOrCreateContractDraftId,
   useContractEditRecovery
 } from '@/features/contract-creation/hooks/useContractEditRecovery';
@@ -185,6 +186,7 @@ import {
   CONTRACT_DRAFT_STORAGE_KEY,
   clampContractDraftStep,
   createContractAutosaveDraft,
+  getContractDraftStorageKey,
   parseContractAutosaveDraft
 } from '@/features/contract-creation/utils/contractDraftStorage';
 import {
@@ -2536,6 +2538,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       : null,
     [recoveryBaseRevision, recoveryDraftId, recoveryUserId]
   );
+  const contractDraftStorageKey = useMemo(
+    () => getContractDraftStorageKey(recoveryDraftId),
+    [recoveryDraftId]
+  );
   const editRecovery = useContractEditRecovery({
     scope: recoveryScope,
     contractId: isContractEditMode ? contractId : null,
@@ -2587,6 +2593,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       });
     }
   }, [closeProductModal, currentStep, setCurrentStep, takeoverEditRecovery]);
+  const handleCreateFreshContract = useCallback(() => {
+    closeProductModal();
+    returnToProductModalAfterRemainderRef.current = false;
+    if (recoveryUserId) {
+      createFreshContractDraftId(recoveryUserId);
+    }
+    router.push('/dashboard/sales/contracts/create?fresh=1');
+  }, [closeProductModal, recoveryUserId, router]);
 
   // Product filtering hook provides all filtered lists
   const productFiltering = useProductFiltering({
@@ -2613,6 +2627,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       setAutosaveHydrated(true);
       return;
     }
+    if (!recoveryDraftId || autosaveHydrated) return;
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('returnTo') === 'contract') {
       if (!urlParams.get('step')) {
@@ -2621,16 +2636,33 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
 
-    const draft = parseContractAutosaveDraft(localStorage.getItem(CONTRACT_DRAFT_STORAGE_KEY));
-    if (!draft) {
-      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+    const freshRequested = urlParams.get('fresh') === '1';
+    if (freshRequested) {
       setAutosaveHydrated(true);
       return;
+    }
+    const scopedRaw = localStorage.getItem(contractDraftStorageKey);
+    const legacyRaw = localStorage.getItem(CONTRACT_DRAFT_STORAGE_KEY);
+    const draft = parseContractAutosaveDraft(scopedRaw || legacyRaw);
+    if (!draft) {
+      localStorage.removeItem(contractDraftStorageKey);
+      setAutosaveHydrated(true);
+      return;
+    }
+    if (!scopedRaw && legacyRaw) {
+      localStorage.setItem(contractDraftStorageKey, legacyRaw);
+      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
     }
 
     applyContractAutosaveDraft(draft);
     setAutosaveHydrated(true);
-  }, []);
+  }, [
+    applyContractAutosaveDraft,
+    autosaveHydrated,
+    contractDraftStorageKey,
+    isContractEditMode,
+    recoveryDraftId
+  ]);
 
   const buildContractAutosaveDraft = useCallback(() => {
     const hasMeaningfulDraftProgress =
@@ -2752,20 +2784,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     if (typeof window === 'undefined') return;
     if (isContractEditMode || !autosaveHydrated) return;
     if (wizardData.signature?.contractId) {
-      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      localStorage.removeItem(contractDraftStorageKey);
       return;
     }
 
     const draft = buildContractAutosaveDraft();
     if (!draft) {
-      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      localStorage.removeItem(contractDraftStorageKey);
       return;
     }
 
-    localStorage.setItem(CONTRACT_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    localStorage.setItem(contractDraftStorageKey, JSON.stringify(draft));
   }, [
     autosaveHydrated,
     buildContractAutosaveDraft,
+    contractDraftStorageKey,
     isContractEditMode,
     wizardData.signature?.contractId
   ]);
@@ -5830,7 +5863,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       baseRevision: recoveryScope.baseRevision
     } : null,
     onCommitted: editRecovery.release,
-    onEditSessionFailure: editRecovery.reportMutationFailure
+    onEditSessionFailure: editRecovery.reportMutationFailure,
+    draftStorageKey: contractDraftStorageKey
   });
   const handleWizardSubmit = () => {
     if (!editRecovery.ready || !editRecovery.leaseToken || editRecovery.blocked) {
@@ -6016,6 +6050,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     onClick: () => void handleEditRecoveryTakeover(),
                     disabled: editRecovery.takeoverPending
                   }}
+            actions={editRecovery.blockReason === 'permission' ||
+              editRecovery.blockReason === 'revision-conflict'
+              ? []
+              : [{
+                  label: 'ایجاد قرارداد جدید',
+                  onClick: handleCreateFreshContract,
+                  variant: 'outline'
+                }]}
           />
         )}
 

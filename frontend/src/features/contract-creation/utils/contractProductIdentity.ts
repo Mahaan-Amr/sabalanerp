@@ -29,59 +29,82 @@ const rekeyOperations = (
   productRowId: string
 ): {
   input?: ProductOperationsInput;
-  toolIds: Map<string, string>;
-  finishingIds: Map<string, string>;
+  toolIds: string[];
+  finishingIds: string[];
+  toolIdsByOriginal: Map<string, string[]>;
+  finishingIdsByOriginal: Map<string, string[]>;
 } => {
   if (!input) {
     return {
       input: undefined,
-      toolIds: new Map(),
-      finishingIds: new Map()
+      toolIds: [],
+      finishingIds: [],
+      toolIdsByOriginal: new Map(),
+      finishingIdsByOriginal: new Map()
     };
   }
 
-  const groupIds = new Map(
-    input.groups.map(group => [
-      group.operationGroupId,
-      createIndependentIdentity('operation-group', productRowId)
-    ])
+  const groups = input.groups.filter((group, index, collection) =>
+    collection.findIndex(candidate =>
+      candidate.operationGroupId === group.operationGroupId
+    ) === index
   );
-  const toolIds = new Map(
-    input.tools.map(tool => [
-      tool.toolSelectionId,
-      createIndependentIdentity('tool-selection', productRowId)
-    ])
+  const groupIds = new Map(groups.map(group => [
+    group.operationGroupId,
+    createIndependentIdentity('operation-group', productRowId)
+  ]));
+  const toolIds = input.tools.map(() =>
+    createIndependentIdentity('tool-selection', productRowId)
   );
-  const finishingIds = new Map(
-    input.finishings.map(finishing => [
-      finishing.finishingSelectionId,
-      createIndependentIdentity('finishing-selection', productRowId)
-    ])
+  const finishingIds = input.finishings.map(() =>
+    createIndependentIdentity('finishing-selection', productRowId)
   );
+  const groupRekeyedIds = <T>(
+    items: readonly T[],
+    originalId: (item: T) => string,
+    rekeyedIds: readonly string[]
+  ) => {
+    const grouped = new Map<string, string[]>();
+    items.forEach((item, index) => {
+      const key = originalId(item);
+      grouped.set(key, [...(grouped.get(key) || []), rekeyedIds[index]]);
+    });
+    return grouped;
+  };
 
   return {
     input: {
       ...input,
       productRowId: parseStableIdentity('product-row', productRowId),
-      groups: input.groups.map(group => ({
+      groups: groups.map(group => ({
         ...group,
         operationGroupId: groupIds.get(group.operationGroupId)!
       })),
-      tools: input.tools.map(tool => ({
+      tools: input.tools.map((tool, index) => ({
         ...tool,
-        toolSelectionId: toolIds.get(tool.toolSelectionId)!,
+        toolSelectionId: toolIds[index],
         operationGroupId: groupIds.get(tool.operationGroupId) ??
           createIndependentIdentity('operation-group', productRowId)
       })),
-      finishings: input.finishings.map(finishing => ({
+      finishings: input.finishings.map((finishing, index) => ({
         ...finishing,
-        finishingSelectionId: finishingIds.get(finishing.finishingSelectionId)!,
+        finishingSelectionId: finishingIds[index],
         operationGroupId: groupIds.get(finishing.operationGroupId) ??
           createIndependentIdentity('operation-group', productRowId)
       }))
     },
     toolIds,
-    finishingIds
+    finishingIds,
+    toolIdsByOriginal: groupRekeyedIds(
+      input.tools,
+      tool => tool.toolSelectionId,
+      toolIds
+    ),
+    finishingIdsByOriginal: groupRekeyedIds(
+      input.finishings,
+      finishing => finishing.finishingSelectionId,
+      finishingIds
+    )
   };
 };
 
@@ -120,17 +143,37 @@ const rekeyProductDependentIdentities = (
         sourceBatchId: createIndependentIdentity('source-batch', productRowId)
       }
     : undefined;
+  const claimedToolIds = new Map<string, number>();
+  const claimedFinishingIds = new Map<string, number>();
+  const claimRekeyedId = (
+    originalId: string,
+    idsByOriginal: Map<string, string[]>,
+    claimed: Map<string, number>,
+    fallback: string
+  ) => {
+    const occurrence = claimed.get(originalId) || 0;
+    claimed.set(originalId, occurrence + 1);
+    return idsByOriginal.get(originalId)?.[occurrence] || fallback;
+  };
   product.appliedSubServices = (product.appliedSubServices || []).map((tool, index) => ({
     ...tool,
-    id: operations.toolIds.get(tool.id) ||
+    id: claimRekeyedId(
+      tool.id,
+      operations.toolIdsByOriginal,
+      claimedToolIds,
       operations.input?.tools[index]?.toolSelectionId ||
-      createIndependentIdentity('tool-selection', productRowId)
+        createIndependentIdentity('tool-selection', productRowId)
+    )
   }));
   product.finishings = (product.finishings || []).map((finishing, index) => ({
     ...finishing,
-    selectionId: operations.finishingIds.get(finishing.selectionId) ||
+    selectionId: claimRekeyedId(
+      finishing.selectionId,
+      operations.finishingIdsByOriginal,
+      claimedFinishingIds,
       operations.input?.finishings[index]?.finishingSelectionId ||
-      createIndependentIdentity('finishing-selection', productRowId)
+        createIndependentIdentity('finishing-selection', productRowId)
+    )
   }));
   return product;
 };
@@ -221,7 +264,47 @@ export interface ContractProductRowIdentityNormalization {
   products: ContractProduct[];
   repairedDuplicateRowIds: string[];
   blockedDuplicateRowIds: string[];
+  repairedOperationRowIds: string[];
+  blockedOperationRowIds: string[];
 }
+
+const analyzeOperationIdentities = (
+  product: ContractProduct
+): { repairable: boolean; blocked: boolean } => {
+  const input = product.operationPolicyInput;
+  if (!input) return { repairable: false, blocked: false };
+
+  const groupsById = new Map<string, typeof input.groups>();
+  input.groups.forEach(group => {
+    groupsById.set(
+      group.operationGroupId,
+      [...(groupsById.get(group.operationGroupId) || []), group]
+    );
+  });
+  const duplicateGroups = Array.from(groupsById.values())
+    .filter(groups => groups.length > 1);
+  const contradictoryGroup = duplicateGroups.some(groups =>
+    groups.some(group => group.scope !== groups[0].scope)
+  );
+  const knownGroupIds = new Set(input.groups.map(group => group.operationGroupId));
+  const orphanSelection = [
+    ...input.tools.map(tool => tool.operationGroupId),
+    ...input.finishings.map(finishing => finishing.operationGroupId)
+  ].some(groupId => !knownGroupIds.has(groupId));
+  if (contradictoryGroup || orphanSelection) {
+    return { repairable: false, blocked: true };
+  }
+
+  const hasDuplicate = (identities: string[]) =>
+    new Set(identities).size !== identities.length;
+  return {
+    repairable:
+      duplicateGroups.length > 0 ||
+      hasDuplicate(input.tools.map(tool => tool.toolSelectionId)) ||
+      hasDuplicate(input.finishings.map(finishing => finishing.finishingSelectionId)),
+    blocked: false
+  };
+};
 
 const getReferencedParentRowIds = (products: ContractProduct[]): Set<string> => {
   const referencedRowIds = new Set<string>();
@@ -269,6 +352,14 @@ export const normalizeContractProductRowIdentities = (
   const rekeyedProducts = normalizedProducts.map((product) => repairedSet.has(product.rowId as string)
     ? { ...product, rowId: nextUniqueRowId() }
     : product);
+  const operationIdentityAnalysis = rekeyedProducts.map(analyzeOperationIdentities);
+  const blockedOperationRowIds = rekeyedProducts
+    .filter((_, index) => operationIdentityAnalysis[index].blocked)
+    .map(product => product.rowId as string);
+  const repairedOperationRowIds = rekeyedProducts
+    .filter((_, index) => operationIdentityAnalysis[index].repairable)
+    .map(product => product.rowId as string);
+  const repairedOperationSet = new Set(repairedOperationRowIds);
   const claimedDependentIds = new Set<string>();
   const dependentIdsFor = (product: ContractProduct): string[] => {
     const identities: Array<string | undefined> = [
@@ -290,7 +381,12 @@ export const normalizeContractProductRowIdentities = (
       product.operationPolicyInput.productRowId !== product.rowId
     );
     const hasCollision = dependentIds.some(identity => claimedDependentIds.has(identity));
-    const nextProduct = rowIdentityChanged || operationOwnerMismatch || hasCollision
+    const nextProduct =
+      !operationIdentityAnalysis[index].blocked &&
+      (rowIdentityChanged ||
+        operationOwnerMismatch ||
+        hasCollision ||
+        repairedOperationSet.has(product.rowId as string))
       ? rekeyProductDependentIdentities(
           product,
           product.rowId as string,
@@ -304,7 +400,9 @@ export const normalizeContractProductRowIdentities = (
   return {
     products: productsWithIndependentDependencies,
     repairedDuplicateRowIds,
-    blockedDuplicateRowIds
+    blockedDuplicateRowIds,
+    repairedOperationRowIds,
+    blockedOperationRowIds
   };
 };
 

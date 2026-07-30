@@ -25,6 +25,7 @@ import {
 import { parseStableIdentity, type StableIdentity } from './stableIdentity';
 import { parseCanonicalDecimal } from './canonicalDecimal';
 import { parseCanonicalProductGraph } from './productGraphSerialization';
+import { findGraphIntegrityConflicts } from './graphIntegrity';
 import {
   calculateLongitudinalProduct,
   parseLongitudinalProductInput
@@ -62,6 +63,8 @@ export interface LegacyProductGraphConflict {
     | 'legacy-product-type-invalid';
   readonly path: readonly string[];
   readonly message: string;
+  readonly productRowId?: string;
+  readonly causeCode?: string;
 }
 
 export type LegacyProductGraphRead =
@@ -755,6 +758,28 @@ export const readLegacyProductGraph = ({
     toolSelections,
     finishingSelections
   };
+  const integrityConflicts = findGraphIntegrityConflicts(
+    graph as CanonicalProductGraph
+  );
+  if (integrityConflicts.length > 0) {
+    return {
+      ok: false,
+      source: 'legacy-read',
+      contractId,
+      revision,
+      migrationRequired: true,
+      legacyView,
+      conflicts: integrityConflicts.map(conflict => ({
+        code: 'legacy-canonical-input-invalid',
+        causeCode: conflict.code,
+        path: conflict.path,
+        message: conflict.message,
+        ...(conflict.productRowId
+          ? { productRowId: conflict.productRowId }
+          : {})
+      }))
+    };
+  }
   let canonicalGraph: CanonicalProductGraph;
   try {
     canonicalGraph = parseCanonicalProductGraph(graph);

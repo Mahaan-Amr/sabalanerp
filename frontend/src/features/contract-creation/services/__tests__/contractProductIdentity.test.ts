@@ -7,6 +7,7 @@ import {
   resolveEditedContractProductRowId
 } from '../../utils/contractProductIdentity';
 import {
+  calculateProductOperations,
   parseCanonicalDecimal,
   parseStableIdentity,
   planLegacyProductGraphMigration
@@ -301,6 +302,103 @@ const product = (
     true,
     canonicalSave.ok ? undefined : JSON.stringify(canonicalSave.conflicts)
   );
+
+  const repeatedGroup = structuredClone(source);
+  repeatedGroup.rowId = 'repeatable-operation-row';
+  repeatedGroup.operationPolicyInput = {
+    ...structuredClone(source.operationPolicyInput!),
+    productRowId: parseStableIdentity('product-row', 'repeatable-operation-row'),
+    groups: [
+      structuredClone(source.operationPolicyInput!.groups[0]),
+      structuredClone(source.operationPolicyInput!.groups[0])
+    ],
+    tools: [
+      structuredClone(source.operationPolicyInput!.tools[0]),
+      structuredClone(source.operationPolicyInput!.tools[0])
+    ]
+  };
+  repeatedGroup.appliedSubServices = [
+    structuredClone(source.appliedSubServices[0]),
+    structuredClone(source.appliedSubServices[0])
+  ];
+  repeatedGroup.totalSubServiceCost = 3_000;
+  repeatedGroup.totalPrice = source.totalPrice;
+  const repairedOperations = normalizeContractProductRowIdentities([repeatedGroup]);
+  const repairedInput = repairedOperations.products[0].operationPolicyInput!;
+
+  assert.deepEqual(repairedOperations.blockedOperationRowIds, []);
+  assert.deepEqual(repairedOperations.repairedOperationRowIds, ['repeatable-operation-row']);
+  assert.equal(repairedInput.groups.length, 1);
+  assert.equal(repairedInput.tools.length, 2);
+  assert.notEqual(
+    repairedInput.tools[0].toolSelectionId,
+    repairedInput.tools[1].toolSelectionId
+  );
+  assert.equal(
+    repairedInput.tools[0].operationGroupId,
+    repairedInput.groups[0].operationGroupId
+  );
+  assert.equal(
+    repairedInput.tools[1].operationGroupId,
+    repairedInput.groups[0].operationGroupId
+  );
+  assert.equal(
+    repairedOperations.products[0].appliedSubServices[0].id,
+    repairedInput.tools[0].toolSelectionId
+  );
+  assert.equal(
+    repairedOperations.products[0].appliedSubServices[1].id,
+    repairedInput.tools[1].toolSelectionId
+  );
+  const originalOperationTotal = calculateProductOperations(
+    source.operationPolicyInput!
+  );
+  const repairedOperationTotal = calculateProductOperations(repairedInput);
+  assert.equal(originalOperationTotal.ok, true);
+  assert.equal(repairedOperationTotal.ok, true);
+  if (!originalOperationTotal.ok || !repairedOperationTotal.ok) {
+    throw new Error('Expected operation calculations to remain valid.');
+  }
+  repairedOperations.products[0].totalPrice =
+    source.totalPrice +
+    Number(repairedOperationTotal.result.totalAmountToman) -
+    Number(originalOperationTotal.result.totalAmountToman);
+  const repairedCanonicalSave = planLegacyProductGraphMigration({
+    contractId: 'repaired-operation-identities',
+    revision: 0,
+    calculationPolicy: {
+      calculation: 'calculation-v1',
+      packing: 'packing-v1',
+      pricing: 'pricing-v1',
+      rounding: 'rounding-v1'
+    },
+    products: JSON.parse(JSON.stringify(repairedOperations.products)) as
+      Readonly<Record<string, unknown>>[]
+  });
+  assert.equal(
+    repairedCanonicalSave.ok,
+    true,
+    repairedCanonicalSave.ok
+      ? undefined
+      : JSON.stringify(repairedCanonicalSave.conflicts)
+  );
+
+  const contradictoryGroups = structuredClone(repeatedGroup);
+  contradictoryGroups.rowId = 'ambiguous-operation-row';
+  contradictoryGroups.operationPolicyInput = {
+    ...contradictoryGroups.operationPolicyInput!,
+    productRowId: parseStableIdentity('product-row', 'ambiguous-operation-row'),
+    groups: [
+      structuredClone(source.operationPolicyInput!.groups[0]),
+      {
+        ...structuredClone(source.operationPolicyInput!.groups[0]),
+        scope: parseCanonicalDecimal('2')
+      }
+    ]
+  };
+  const blockedOperations = normalizeContractProductRowIdentities([contradictoryGroups]);
+  assert.deepEqual(blockedOperations.repairedOperationRowIds, []);
+  assert.deepEqual(blockedOperations.blockedOperationRowIds, ['ambiguous-operation-row']);
 }
 
 console.log('contract product identity tests passed');

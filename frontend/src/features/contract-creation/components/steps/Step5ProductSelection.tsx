@@ -475,6 +475,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   const catalogStartRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const serviceSearchRef = useRef<HTMLInputElement | null>(null);
+  const productErrorRef = useRef<HTMLDivElement | null>(null);
   const projectedRows = useMemo(() => buildContractCartRows(cart.items), [cart.items]);
 
   useEffect(() => {
@@ -487,7 +488,19 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
 
   useEffect(() => {
     const rowErrorKey = Object.keys(errors).find(key => key.startsWith('productRow:'));
-    if (!rowErrorKey) return;
+    if (!rowErrorKey) {
+      if (!errors.products) return;
+      requestAnimationFrame(() => {
+        productErrorRef.current?.scrollIntoView({
+          block: 'start',
+          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'auto'
+            : 'smooth'
+        });
+        productErrorRef.current?.focus({ preventScroll: true });
+      });
+      return;
+    }
     const rowId = rowErrorKey.slice('productRow:'.length);
     requestAnimationFrame(() => {
       const row = Array.from(
@@ -581,7 +594,9 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
   return (
     <div className="sds-workspace space-y-5">
       {errors.products && (
-        <ErpInlineState kind="error" title={errors.products} />
+        <div ref={productErrorRef} tabIndex={-1} className="scroll-mt-4">
+          <ErpInlineState kind="error" title={errors.products} />
+        </div>
       )}
       {errors.deliveryReview && (
         <ErpInlineState kind="stale" title={errors.deliveryReview} />

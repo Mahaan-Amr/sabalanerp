@@ -984,11 +984,13 @@ export function ErpInlineState({
   kind,
   title,
   action,
+  actions = [],
   className,
 }: {
   kind: 'empty' | 'success' | 'error' | 'stale' | 'permission';
   title: React.ReactNode;
   action?: ErpAction;
+  actions?: ErpAction[];
   className?: string;
 }) {
   const config = {
@@ -1002,7 +1004,19 @@ export function ErpInlineState({
   return (
     <div className={cx('sds-tone-surface flex min-h-12 items-center justify-between gap-3 border-y px-3 py-3 text-sm', config.classes, className)} role={kind === 'error' ? 'alert' : 'status'}>
       <span className="inline-flex items-center gap-2 font-semibold"><Icon className="h-3.5 w-3.5" aria-hidden="true" />{title}</span>
-      {action && <ErpButton {...action} variant={action.variant || 'ghost'} className={cx('min-h-11', action.className)} />}
+      {(action || actions.length > 0) && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {action && <ErpButton {...action} variant={action.variant || 'ghost'} className={cx('min-h-11', action.className)} />}
+          {actions.map(item => (
+            <ErpButton
+              {...item}
+              key={item.label}
+              variant={item.variant || 'ghost'}
+              className={cx('min-h-11', item.className)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

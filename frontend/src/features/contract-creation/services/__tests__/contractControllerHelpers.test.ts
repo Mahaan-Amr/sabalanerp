@@ -10,6 +10,7 @@ import {
   clampContractDraftStep,
   CONTRACT_DRAFT_TTL_MS,
   createContractAutosaveDraft,
+  getContractDraftStorageKey,
   isContractDraftExpired,
   parseContractAutosaveDraft
 } from '../../utils/contractDraftStorage';
@@ -489,6 +490,11 @@ assert.equal(validateOptionalIranianMobile('\u06F0\u06F2\u06F1\u06F1\u06F2\u06F3
   assert.equal(clampContractDraftStep('8', 7), 7);
   assert.equal(clampContractDraftStep(0, 7), 1);
   assert.equal(clampContractDraftStep('bad', 7), 1);
+  assert.equal(
+    getContractDraftStorageKey('draft-user-1'),
+    'contractWizardAutosaveDraft:draft-user-1'
+  );
+  assert.equal(getContractDraftStorageKey(null), 'contractWizardAutosaveDraft');
 }
 
 console.log('contractControllerHelpers tests passed');

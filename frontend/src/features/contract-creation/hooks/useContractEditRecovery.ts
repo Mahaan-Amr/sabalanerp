@@ -24,6 +24,9 @@ const createStableClientId = (prefix: string): string => {
   return `${prefix}-${randomId}`;
 };
 
+const activeDraftStorageKey = (userId: string) =>
+  `sabalan-contract-active-draft:${userId}`;
+
 export const getOrCreateContractBrowserSessionId = (): string => {
   if (typeof window === 'undefined') return 'server-render';
   const existing = window.sessionStorage.getItem(BROWSER_SESSION_STORAGE_KEY);
@@ -47,11 +50,19 @@ export const getOrCreateContractDraftId = (
 ): string => {
   if (contractId) return `contract-${contractId}`;
   if (typeof window === 'undefined') return `draft-${userId}`;
-  const key = `sabalan-contract-active-draft:${userId}`;
+  const key = activeDraftStorageKey(userId);
   const existing = window.localStorage.getItem(key);
   if (existing) return existing;
   const created = createStableClientId('draft');
   window.localStorage.setItem(key, created);
+  return created;
+};
+
+export const createFreshContractDraftId = (userId: string): string => {
+  const created = createStableClientId('draft');
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(activeDraftStorageKey(userId), created);
+  }
   return created;
 };
 

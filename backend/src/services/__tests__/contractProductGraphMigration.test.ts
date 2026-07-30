@@ -71,4 +71,43 @@ assert.deepEqual(duplicateDependencyError.issues, [{
   productRowId: 'duplicated-row'
 }]);
 
+const operationStructureError = new ContractProductGraphValidationError(
+  [{
+    code: 'legacy-canonical-input-invalid',
+    causeCode: 'duplicate-stable-identity',
+    path: ['toolSelections', 'repeated-tool-selection'],
+    message: 'Canonical product graph contains a duplicate stable identity.'
+  }],
+  {
+    products: [{
+      rowId: 'operation-row',
+      operationPolicyInput: {
+        tools: [{ toolSelectionId: 'repeated-tool-selection' }]
+      }
+    }]
+  }
+);
+assert.deepEqual(operationStructureError.issues, [{
+  code: 'legacy-canonical-input-invalid',
+  causeCode: 'duplicate-stable-identity',
+  path: ['productRow:operation-row'],
+  message: 'ساختار عملیات این محصول قابل تشخیص نیست؛ ابزارها و پرداخت‌ها را بازبینی و دوباره ذخیره کنید',
+  productRowId: 'operation-row'
+}]);
+
+const globalGraphError = new ContractProductGraphValidationError(
+  [{
+    code: 'legacy-canonical-input-invalid',
+    path: ['graph'],
+    message: 'Internal graph parsing failed.'
+  }],
+  { products: [{ rowId: 'unresolved-row' }] }
+);
+assert.deepEqual(globalGraphError.issues, [{
+  code: 'legacy-canonical-input-invalid',
+  path: ['products'],
+  message: 'ساختار محصولات قرارداد قابل تشخیص نیست؛ محصولات را بازبینی و دوباره ذخیره کنید',
+  productRowId: undefined
+}]);
+
 console.log('contract product graph migration tests passed');

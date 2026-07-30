@@ -973,6 +973,7 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
         error: 'اطلاعات محصولات قرارداد نیاز به بازبینی دارد',
         details: error.issues.map(issue => ({
           code: issue.code,
+          causeCode: issue.causeCode,
           path: issue.path[0],
           message: issue.message,
           productRowId: issue.productRowId

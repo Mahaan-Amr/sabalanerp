@@ -4,6 +4,12 @@ export const CONTRACT_DRAFT_STORAGE_KEY = 'contractWizardAutosaveDraft';
 export const CONTRACT_DRAFT_VERSION = 1;
 export const CONTRACT_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+export const getContractDraftStorageKey = (
+  draftId?: string | null
+): string => draftId
+  ? `${CONTRACT_DRAFT_STORAGE_KEY}:${draftId}`
+  : CONTRACT_DRAFT_STORAGE_KEY;
+
 export interface ContractAutosaveDraft {
   version: number;
   updatedAt: number;

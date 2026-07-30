@@ -37,6 +37,7 @@ import {
   ErpSheet,
 } from '@/components/erp';
 import { NotificationCenter } from "@/components/NotificationCenter";
+import { readContractSubmissionDiagnostic } from "@/features/contract-creation/utils/contractSubmissionDiagnostics";
 
 interface User {
   id: string;
@@ -69,11 +70,32 @@ interface DashboardLayoutProps {
 }
 
 const captureSupportOrigin = () => {
+  const contractSubmission = readContractSubmissionDiagnostic();
+  const recordIdentifiers = contractSubmission
+    ? Object.fromEntries(
+        Object.entries({
+          httpStatus: contractSubmission.httpStatus?.toString(),
+          errorCode: contractSubmission.errorCode,
+          causeCode: contractSubmission.causeCode,
+          errorPath: contractSubmission.errorPath,
+          productRowId: contractSubmission.productRowId,
+          trackingId: contractSubmission.trackingId
+        }).filter((entry): entry is [string, string] =>
+          typeof entry[1] === 'string' && entry[1].length > 0
+        )
+      )
+    : undefined;
   return {
     route: `${window.location.pathname}${window.location.search}`,
     pageTitle: document.title,
     viewport: { width: window.innerWidth, height: window.innerHeight },
     buildCommit: process.env.NEXT_PUBLIC_BUILD_COMMIT || 'local',
+    ...(recordIdentifiers && Object.keys(recordIdentifiers).length > 0
+      ? {
+          errors: ['شکست ثبت قرارداد'],
+          recordIdentifiers
+        }
+      : {})
   };
 };
 

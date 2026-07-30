@@ -32,6 +32,7 @@ const toJsonValue = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.s
 
 export interface ContractProductGraphValidationIssue {
   readonly code: string;
+  readonly causeCode?: string;
   readonly path: readonly string[];
   readonly message: string;
   readonly productRowId?: string;
@@ -39,12 +40,18 @@ export interface ContractProductGraphValidationIssue {
 
 interface ContractProductGraphConflictLike {
   readonly code: string;
+  readonly causeCode?: string;
   readonly path: readonly string[];
   readonly message: string;
+  readonly productRowId?: string;
 }
 
 const DUPLICATE_DEPENDENCY_MESSAGE =
   'وابستگی‌های محصول تکثیرشده قابل تشخیص نیست؛ محصول را باز کرده و دوباره ذخیره کنید';
+const OPERATION_STRUCTURE_MESSAGE =
+  'ساختار عملیات این محصول قابل تشخیص نیست؛ ابزارها و پرداخت‌ها را بازبینی و دوباره ذخیره کنید';
+const GLOBAL_PRODUCT_GRAPH_MESSAGE =
+  'ساختار محصولات قرارداد قابل تشخیص نیست؛ محصولات را بازبینی و دوباره ذخیره کنید';
 
 const productRecordsFrom = (contractData: unknown): Readonly<Record<string, unknown>>[] => {
   if (!contractData || typeof contractData !== 'object' || Array.isArray(contractData)) return [];
@@ -59,6 +66,12 @@ const productIndexForConflict = (
   conflict: ContractProductGraphConflictLike,
   products: readonly Readonly<Record<string, unknown>>[]
 ): number | undefined => {
+  if (conflict.productRowId) {
+    const directIndex = products.findIndex(product =>
+      product.rowId === conflict.productRowId
+    );
+    if (directIndex >= 0) return directIndex;
+  }
   if (conflict.path[0] === 'products') {
     const index = Number(conflict.path[1]);
     if (Number.isInteger(index) && products[index]) return index;
@@ -93,12 +106,22 @@ export class ContractProductGraphValidationError extends Error {
           : undefined;
       return {
         code: conflict.code,
+        ...(conflict.causeCode ? { causeCode: conflict.causeCode } : {}),
         path: productRowId ? [`productRow:${productRowId}`] : ['products'],
-        message: conflict.code.includes('duplicate') ||
-          conflict.code.includes('reference') ||
-          conflict.code.includes('ambiguous')
-          ? DUPLICATE_DEPENDENCY_MESSAGE
-          : 'اطلاعات محصول برای ثبت معتبر نیست؛ محصول را باز کرده و دوباره ذخیره کنید',
+        message:
+          conflict.code === 'legacy-canonical-input-invalid' &&
+          ['operationGroups', 'toolSelections', 'finishingSelections']
+            .includes(conflict.path[0])
+            ? OPERATION_STRUCTURE_MESSAGE
+            : conflict.code.includes('duplicate') ||
+                conflict.code.includes('reference') ||
+                conflict.code.includes('ambiguous') ||
+                conflict.causeCode?.includes('duplicate') ||
+                conflict.causeCode?.includes('reference')
+              ? DUPLICATE_DEPENDENCY_MESSAGE
+              : productRowId
+                ? 'اطلاعات محصول برای ثبت معتبر نیست؛ محصول را باز کرده و دوباره ذخیره کنید'
+                : GLOBAL_PRODUCT_GRAPH_MESSAGE,
         productRowId
       };
     });

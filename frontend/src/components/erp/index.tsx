@@ -1059,7 +1059,7 @@ export function ErpActionMenu({ label, actions }: { label: string; actions: ErpA
   );
 }
 
-export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet' }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal' }) {
+export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet', dismissible = true }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal'; dismissible?: boolean }) {
   const [mounted, setMounted] = React.useState(false);
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
   const dialogRef = React.useRef<HTMLDivElement>(null);
@@ -1077,7 +1077,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
     document.body.style.overflow = 'hidden';
     window.setTimeout(() => closeButtonRef.current?.focus(), 0);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCloseRef.current();
+      if (event.key === 'Escape' && dismissible) onCloseRef.current();
       if (event.key !== 'Tab' || !dialogRef.current) return;
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'));
       if (!focusable.length) return;
@@ -1091,12 +1091,12 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
       window.removeEventListener('keydown', onKeyDown);
       restoreFocusRef.current?.focus();
     };
-  }, [open]);
+  }, [dismissible, open]);
   const sheet = (
     <AnimatePresence>
       {open && (
         <div className={isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"} role="presentation">
-          <motion.button type="button" aria-label="بستن" onClick={onClose} className={isModal ? "absolute inset-0 bg-[var(--sds-surface-overlay)] backdrop-blur-sm" : "absolute inset-0 bg-[var(--sds-surface-raised)] backdrop-blur-[1px]"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
+          <motion.button type="button" aria-label="بستن" disabled={!dismissible} onClick={onClose} className="absolute inset-0 bg-[var(--sds-surface-overlay)] backdrop-blur-sm disabled:cursor-wait" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
           <motion.div
             ref={dialogRef}
             role="dialog"
@@ -1112,7 +1112,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
           >
             <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-[var(--sds-border-default)] px-4 dark:border-[var(--sds-border-strong)]">
               <h2 id={titleId} className="text-base font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2>
-              <button ref={closeButtonRef} type="button" onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-[var(--sds-text-secondary)] outline-none transition hover:bg-[var(--sds-surface-subtle)] focus-visible:ring-2 focus-visible:ring-[var(--sds-accent)] dark:hover:bg-[var(--sds-surface-raised)]" aria-label="بستن"><FaTimes /></button>
+              <button ref={closeButtonRef} type="button" disabled={!dismissible} onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-[var(--sds-text-secondary)] outline-none transition hover:bg-[var(--sds-surface-subtle)] focus-visible:ring-2 focus-visible:ring-[var(--sds-accent)] disabled:cursor-wait disabled:opacity-50 dark:hover:bg-[var(--sds-surface-raised)]" aria-label="بستن"><FaTimes /></button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
             {footer && <footer className="shrink-0 border-t border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-strong)]">{footer}</footer>}

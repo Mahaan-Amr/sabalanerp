@@ -17,6 +17,7 @@ import {
   ErpLoading,
   ErpPage,
   ErpSection,
+  ErpSheet,
 } from "@/components/erp";
 import { hrAPI } from "@/lib/api";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
@@ -72,6 +73,7 @@ export default function HiringCasesPage() {
   const [meta, setMeta] = useState({ page: 1, totalPages: 1, total: 0 });
   const [decisionDetail, setDecisionDetail] = useState<any>(null);
   const [archiveView, setArchiveView] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const load = async (nextFilters: HiringQueueFilters = filters) => {
     try {
@@ -116,6 +118,7 @@ export default function HiringCasesPage() {
         `پرونده و دعوت‌نامه ساخته شد.${invitation.data.data.debugOtp ? ` کد محیط آزمایشی: ${invitation.data.data.debugOtp}` : ""}`,
       );
       setForm(blank);
+      setCreateOpen(false);
       await load();
     } catch (cause) {
       setError(hiringError(cause));
@@ -147,7 +150,17 @@ export default function HiringCasesPage() {
       title="جذب و پرونده‌های متقاضیان"
       description="جریان یکپارچه متقاضی، بررسی، پیشنهاد همکاری، تبدیل به پرسنل و فعال‌سازی"
       backHref="/dashboard/hr"
+      metrics={[
+        { label: archiveView ? "پرونده بایگانی" : "پرونده در صف", value: meta.total.toLocaleString("fa-IR"), tone: archiveView ? "warning" : "primary" },
+        { label: "جایگاه فعال", value: positions.filter((item: any) => item.isActive).length.toLocaleString("fa-IR"), tone: "neutral" },
+      ]}
       actions={[
+        {
+          label: "ایجاد متقاضی",
+          icon: FaPlus,
+          onClick: () => setCreateOpen(true),
+          tone: "success",
+        },
         {
           label: archiveView ? "فهرست فعال" : "بایگانی متقاضیان",
           icon: archiveView ? FaUndo : FaArchive,
@@ -172,9 +185,10 @@ export default function HiringCasesPage() {
         </p>
       )}
 
-      <ErpSection
+      <ErpSheet
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
         title="ایجاد متقاضی و ارسال دعوت"
-        description="کد ورود شش‌رقمی و نشانی ثابت sabalanerp.com/apply برای شماره همراه ثبت‌شده ارسال می‌شود و هفت روز اعتبار دارد."
       >
         <ErpCard className="grid gap-3 p-4 md:grid-cols-5">
           <ErpInput
@@ -241,7 +255,7 @@ export default function HiringCasesPage() {
             />
           </div>
         </ErpCard>
-      </ErpSection>
+      </ErpSheet>
 
       <ErpSection
         title="صف جذب"
@@ -389,7 +403,7 @@ export default function HiringCasesPage() {
           </div>
         </ErpCard>
 
-        <ErpCard className="overflow-x-auto" aria-busy={loading}>
+        <ErpCard className="hidden overflow-x-auto md:block" aria-busy={loading}>
           <table className="min-w-[1250px] w-full text-right text-xs">
             <thead className="bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)]">
               <tr>
@@ -550,6 +564,104 @@ export default function HiringCasesPage() {
             </div>
           )}
         </ErpCard>
+        <div className="space-y-3 md:hidden" aria-busy={loading}>
+          {rows.map((row) => {
+            const summary = row.lifecycleSummary;
+            const decisionKinds = [
+              "HR_INTERVIEW",
+              "HR_PRELIMINARY_APPROVAL",
+              "COMPANY_APPROVAL",
+            ];
+            return (
+              <ErpCard key={row.id} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link
+                      className="font-black text-[var(--sds-text-primary)]"
+                      href={`/dashboard/hr/hiring/${row.id}`}
+                    >
+                      {row.candidate.firstName} {row.candidate.lastName}
+                    </Link>
+                    <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
+                      {row.position.job?.title || "—"} · {row.position.title}
+                    </p>
+                  </div>
+                  {summary && (
+                    <ErpBadge tone={badgeTone(summary.status)}>
+                      {hiringLifecycleStatusLabel[summary.status as HiringLifecycleStatus]}
+                    </ErpBadge>
+                  )}
+                </div>
+                <dl className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <dt className="text-[var(--sds-text-muted)]">مرحله</dt>
+                    <dd className="mt-1 font-bold text-[var(--sds-text-primary)]">
+                      {summary?.phaseTitle || hrDisplayLabel(row.stage)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[var(--sds-text-muted)]">اقدام بعدی</dt>
+                    <dd className="mt-1 font-bold text-[var(--sds-text-primary)]">
+                      {summary?.actionLabel || "—"}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--sds-border-subtle)] pt-3">
+                  <div className="flex gap-2" aria-label="تصمیم‌های پرونده">
+                    {decisionKinds.map((kind) => {
+                      const decision = row.decisions?.[kind];
+                      return (
+                        <ErpPressable
+                          key={kind}
+                          type="button"
+                          disabled={!decision || !row.decisionDetailsVisible}
+                          title={decision ? "نمایش تصمیم" : "تصمیم ثبت نشده"}
+                          onClick={() =>
+                            decision &&
+                            row.decisionDetailsVisible &&
+                            setDecisionDetail({
+                              ...decision,
+                              kind,
+                              history: row.decisionHistory?.[kind] || [],
+                              applicant: `${row.candidate.firstName} ${row.candidate.lastName}`,
+                            })
+                          }
+                          className={`h-9 w-9 rounded-full text-sm font-black ${decision?.outcome === "POSITIVE" ? "bg-[var(--sds-success-surface)] text-[var(--sds-success)]" : decision?.outcome === "NEGATIVE" ? "bg-[var(--sds-danger-surface)] text-[var(--sds-danger)]" : "bg-[var(--sds-surface-subtle)] text-[var(--sds-text-muted)]"}`}
+                        >
+                          {decision?.outcome === "POSITIVE"
+                            ? "✓"
+                            : decision?.outcome === "NEGATIVE"
+                              ? "✕"
+                              : "—"}
+                        </ErpPressable>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-2">
+                    <ErpButton
+                      label="بازکردن پرونده"
+                      href={`/dashboard/hr/hiring/${row.id}`}
+                      variant="soft"
+                    />
+                    {!row.archivedAt && (
+                      <ErpButton
+                        label="ارسال دعوت"
+                        disabled={busy || row.stage === "CLOSED"}
+                        onClick={() => invite(row.id)}
+                        variant="ghost"
+                      />
+                    )}
+                  </div>
+                </div>
+              </ErpCard>
+            );
+          })}
+          {!rows.length && (
+            <ErpCard className="p-8 text-center text-sm text-[var(--sds-text-secondary)]">
+              پرونده‌ای مطابق فیلترها وجود ندارد.
+            </ErpCard>
+          )}
+        </div>
         <div className="mt-3 flex items-center justify-between gap-3">
           <span className="text-xs text-[var(--sds-text-secondary)]">
             {meta.total.toLocaleString("fa-IR")} پرونده · صفحه{" "}

@@ -94,6 +94,7 @@ export default function HrPersonnelPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(blankPerson);
   const [supervisors, setSupervisors] = useState<any[]>([]);
@@ -110,6 +111,7 @@ export default function HrPersonnelPage() {
   const [meta, setMeta] = useState({ page: 1, total: 0, totalPages: 1 });
   const [deletionTarget, setDeletionTarget] = useState<any>(null);
   const [retentionTarget, setRetentionTarget] = useState<any>(null);
+  const [showExceptionalForm, setShowExceptionalForm] = useState(false);
   const canCreateExceptionalPersonnel = authorities.includes("HR_MANAGER");
 
   const load = useCallback(async () => {
@@ -148,6 +150,13 @@ export default function HrPersonnelPage() {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setPage(1);
+      setSearch(searchDraft.trim());
+    }, 400);
+    return () => window.clearTimeout(timeout);
+  }, [searchDraft]);
   useEffect(() => {
     const focus = new URLSearchParams(window.location.search).get("focus");
     if (focus) setExpanded(focus);
@@ -253,6 +262,13 @@ export default function HrPersonnelPage() {
     }
   };
 
+  const submitSearch = () => {
+    const nextSearch = searchDraft.trim();
+    setPage(1);
+    if (nextSearch === search) void load();
+    else setSearch(nextSearch);
+  };
+
   const confirmPermanentDeletion = async (payload: any) => {
     if (!deletionTarget) return;
     try {
@@ -277,7 +293,19 @@ export default function HrPersonnelPage() {
       eyebrow="منابع انسانی · پرسنل"
       title="پرسنل و روابط استخدامی"
       description="هویت فرد از دسترسی سامانه جداست؛ رابطه استخدامی و تخصیص جایگاه تاریخ خود را حفظ می‌کنند."
+      metrics={[
+        { label: archiveView ? "پرسنل بایگانی" : "پرسنل فهرست", value: meta.total.toLocaleString("fa-IR"), tone: archiveView ? "warning" : "primary" },
+        { label: "جایگاه فعال", value: foundation.positions.filter((item: any) => item.isActive).length.toLocaleString("fa-IR"), tone: "neutral" },
+      ]}
       actions={[
+        ...(canCreateExceptionalPersonnel
+          ? [{
+              label: "ثبت استثنایی پرسنل",
+              icon: FaUserPlus,
+              onClick: () => setShowExceptionalForm(true),
+              tone: "success" as const,
+            }]
+          : []),
         {
           label: archiveView ? "فهرست فعال" : "بایگانی پرسنل",
           icon: archiveView ? FaUndo : FaArchive,
@@ -294,7 +322,7 @@ export default function HrPersonnelPage() {
       {error && <HrMessage>{error}</HrMessage>}
       {success && <HrMessage tone="success">{success}</HrMessage>}
 
-      {canCreateExceptionalPersonnel ? (
+      {canCreateExceptionalPersonnel ? (showExceptionalForm ? (
         <ErpSection
           title="ثبت استثنایی پرسنل"
           description="فقط برای مهاجرت داده، اصلاح سابقه یا انتقال سازمانی؛ جذب عادی باید از پرونده متقاضی انجام شود."
@@ -489,14 +517,17 @@ export default function HrPersonnelPage() {
                         effectiveFrom: toIsoDate(form.effectiveFrom),
                       }),
                     "پرسنل استثنایی، رابطه استخدامی، تخصیص اصلی و رویداد ممیزی ثبت شد.",
-                    () => setForm(blankPerson()),
+                    () => {
+                      setForm(blankPerson());
+                      setShowExceptionalForm(false);
+                    },
                   )
                 }
               />
             </div>
           </ErpCard>
         </ErpSection>
-      ) : (
+      ) : null) : (
         <ErpSection
           title="ایجاد پرسنل جدید"
           description="مسیر عادی ایجاد پرسنل از پرونده جذب و پس از تکمیل کنترل‌های استخدام انجام می‌شود."
@@ -520,7 +551,12 @@ export default function HrPersonnelPage() {
         title={archiveView ? "بایگانی پرسنل" : "فهرست پرسنل"}
         description={`${meta.total.toLocaleString("fa-IR")} پرونده`}
         actions={[
-          { label: "جستجو", icon: FaSearch, onClick: load, tone: "neutral" },
+          {
+            label: "جستجو",
+            icon: FaSearch,
+            onClick: submitSearch,
+            tone: "neutral",
+          },
         ]}
       >
         {(relationshipStatus || attention) && (
@@ -538,12 +574,15 @@ export default function HrPersonnelPage() {
         )}
         <div className="mb-4">
           <ErpInput
+            aria-label="جستجوی پرسنل"
             className={fieldClass}
-            placeholder="نام، کد ملی یا شماره پرسنلی"
-            value={search}
+            value={searchDraft}
             onChange={(e) => {
-              setPage(1);
-              setSearch(e.target.value);
+              setSearchDraft(e.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              submitSearch();
             }}
           />
         </div>

@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
-import { defaultOwnerForAction, personalHrWorkProgress, startOfPersianMonth } from '../hrWorkItems';
+import {
+  automaticHiringWorkItemSourceKey,
+  eligibleUsersForHiringAction,
+  personalHrWorkProgress,
+  staleAutomaticHiringWorkItemStatus,
+  startOfPersianMonth
+} from '../hrWorkItems';
 
 const now = new Date('2026-07-29T12:00:00.000Z');
 const monthStart = startOfPersianMonth(now);
@@ -22,9 +28,36 @@ assert.deepEqual(personalHrWorkProgress([], now), {
   percentage: null
 });
 
-assert.equal(defaultOwnerForAction(
+assert.deepEqual(eligibleUsersForHiringAction(
   ['HR_PROCESSOR', 'HR_MANAGER'],
-  new Map([['HR_MANAGER', 'manager-user']])
-), 'manager-user');
+  new Map([
+    ['processor-user', new Set(['HR_PROCESSOR'])],
+    ['manager-user', new Set(['HR_MANAGER'])],
+    ['unrelated-user', new Set(['FINANCE_MANAGER'])]
+  ])
+), ['manager-user', 'processor-user']);
+
+assert.equal(
+  automaticHiringWorkItemSourceKey('application-1', 'review', 'processor-user'),
+  'HIRING:application-1:review:USER:processor-user'
+);
+assert.equal(
+  automaticHiringWorkItemSourceKey('application-1', 'review', null),
+  'HIRING:application-1:review:UNASSIGNED'
+);
+assert.equal(
+  staleAutomaticHiringWorkItemStatus(
+    'HIRING:application-1:review:USER:former-user',
+    new Set(['HIRING:application-1:review'])
+  ),
+  'WAIVED'
+);
+assert.equal(
+  staleAutomaticHiringWorkItemStatus(
+    'HIRING:application-1:review:USER:processor-user',
+    new Set()
+  ),
+  'COMPLETE'
+);
 
 console.log('HR work-item tests passed.');

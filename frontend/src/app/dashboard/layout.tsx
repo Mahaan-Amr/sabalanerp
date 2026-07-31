@@ -160,6 +160,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
   const { currentWorkspace, accessibleWorkspaces } = useWorkspace();
   const isHrWorkspace = pathname.startsWith("/dashboard/hr");
+  const isHrWorkspaceDetail = isHrWorkspace && pathname !== "/dashboard/hr";
   const hrMobileNavigation = [
     {
       id: "dashboard",
@@ -420,7 +421,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           type="button"
           aria-label="بستن منوی اصلی"
           data-dashboard-overlay
-          className="fixed inset-0 z-40 min-h-0 rounded-none bg-[var(--sds-surface-overlay)] p-0 hover:!bg-[var(--sds-surface-overlay)] lg:hidden"
+          className="fixed inset-0 z-40 min-h-0 rounded-none !bg-[var(--sds-surface-overlay)] p-0 hover:!bg-[var(--sds-surface-overlay)] lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -428,32 +429,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Sidebar */}
       <div
         data-dashboard-sidebar
-        className={`fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-y-auto border-l border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-xl backdrop-blur-xl transition-transform duration-300 ease-in-out dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)] lg:overflow-hidden ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-20" : "lg:w-64"}`}
+        className={`sds-neumorphic-scope sds-dashboard-sidebar fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-y-auto transition-[width,transform] duration-300 ease-in-out lg:overflow-hidden ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-28" : "lg:w-72"}`}
       >
         <div className="flex min-h-full flex-col lg:h-full">
-          {/* Sidebar Header */}
+          {/* Mobile drawer header. The company mark lives in the persistent site header. */}
           <div
-            className={`flex items-center border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-6 ${sidebarCollapsed ? "lg:justify-center lg:p-4" : "justify-between"}`}
+            className={`sds-dashboard-sidebar-header flex items-center justify-between p-4 lg:p-5 ${sidebarCollapsed ? "lg:hidden" : ""}`}
           >
-            <div
-              className={`flex items-center ${sidebarCollapsed ? "justify-center" : "gap-3"}`}
-            >
-              <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg border border-[var(--sds-accent)] bg-[var(--sds-surface-raised)] shadow-sm dark:border-[var(--sds-accent)] dark:bg-[var(--sds-surface-subtle)]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/brand/logo-project.png"
-                  alt="Sabalan ERP"
-                  className="h-full w-full object-cover"
-                />
-              </div>
-              {!sidebarCollapsed && (
-                <h1
-                  className={`text-xl font-bold ${isHrWorkspace ? "text-[var(--sds-text-primary)]" : "text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"}`}
-                >
-                  Sabalan ERP
-                </h1>
-              )}
-            </div>
+            <span className="text-sm font-bold text-[var(--sds-text-primary)]">منوی اصلی</span>
             <ErpPressable
               type="button"
               aria-label="بستن منوی اصلی"
@@ -465,8 +448,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
 
           {/* User Info */}
-          {!sidebarCollapsed && (
-            <div className="border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-5">
+          <div className={`border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-5 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
               <div className="flex items-center gap-3">
                 <div className="rounded-lg bg-[var(--sds-surface-subtle)] p-2.5 text-[var(--sds-accent)]">
                   <FaUser className="h-5 w-5" />
@@ -488,52 +470,49 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   </span>
                 )}
               </div>
-            </div>
-          )}
-
-          {/* Workspace Switcher */}
-          {!sidebarCollapsed && (
-            <div className="border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-5">
-              <WorkspaceSwitcher variant="dropdown" compact />
-            </div>
-          )}
-
-          {/* Workspace Navigation */}
-          <div className="flex-none lg:flex-1 lg:overflow-hidden">
-            <WorkspaceNavigation
-              collapsed={sidebarCollapsed}
-              onToggleCollapse={setSidebarCollapsed}
-              onNavigate={handleSidebarNavigate}
-            />
           </div>
 
-          {/* Sidebar Footer */}
-          <div
-            className={`${sidebarCollapsed ? "p-4" : "space-y-3 p-4 lg:p-5"} border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]`}
-          >
+          {/* Workspace Switcher */}
+          <div className={`border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-5 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+              <WorkspaceSwitcher variant="dropdown" compact />
+          </div>
+
+          <div className="sds-dashboard-rail flex min-h-0 flex-none flex-col lg:mx-3 lg:mb-3 lg:flex-1 lg:overflow-hidden">
+            {/* Workspace Navigation */}
+            <div className="flex-none lg:flex-1 lg:overflow-hidden">
+              <WorkspaceNavigation
+                collapsed={sidebarCollapsed}
+                onToggleCollapse={setSidebarCollapsed}
+                onNavigate={handleSidebarNavigate}
+              />
+            </div>
+
+            {/* Sidebar Footer */}
             <div
-              className={`flex ${sidebarCollapsed ? "flex-col items-center gap-2" : "items-center justify-between gap-3"}`}
+              className={`sds-dashboard-sidebar-footer ${sidebarCollapsed ? "space-y-3 p-4 lg:p-3" : "space-y-3 p-4 lg:p-5"}`}
             >
-              {!sidebarCollapsed && (
-                <span className="text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
+              <div
+                className={`flex ${sidebarCollapsed ? "items-center justify-between gap-3 lg:flex-col lg:justify-center lg:gap-2" : "items-center justify-between gap-3"}`}
+              >
+                <span className={`text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)] ${sidebarCollapsed ? "lg:sr-only" : ""}`}>
                   حالت نمایش
                 </span>
-              )}
-              <ThemeToggle />
+                <ThemeToggle />
+              </div>
+              <ErpPressable
+                type="button"
+                onClick={handleLogout}
+                tone="danger"
+                className={`sds-dashboard-footer-action flex items-center text-[var(--sds-text-secondary)] transition-all duration-200 hover:bg-[var(--sds-danger-surface)] hover:text-[var(--sds-danger)] dark:text-[var(--sds-text-secondary)] dark:hover:bg-[var(--sds-danger-surface)] dark:hover:text-[var(--sds-danger)] ${
+                  sidebarCollapsed
+                    ? "gap-3 w-full px-4 py-3 rounded-lg lg:mx-auto lg:h-12 lg:w-12 lg:justify-center lg:rounded-full lg:px-0 lg:py-0"
+                    : "gap-3 w-full px-4 py-3 rounded-lg"
+                }`}
+              >
+                <FaSignOutAlt className="h-5 w-5" />
+                <span className={sidebarCollapsed ? "lg:sr-only" : ""}>خروج</span>
+              </ErpPressable>
             </div>
-            <ErpPressable
-              type="button"
-              onClick={handleLogout}
-              tone="danger"
-              className={`flex items-center text-[var(--sds-text-secondary)] transition-all duration-200 hover:bg-[var(--sds-danger-surface)] hover:text-[var(--sds-danger)] dark:text-[var(--sds-text-secondary)] dark:hover:bg-[var(--sds-danger-surface)] dark:hover:text-[var(--sds-danger)] ${
-                sidebarCollapsed
-                  ? "justify-center w-12 h-12 rounded-full mx-auto"
-                  : "gap-3 w-full px-4 py-3 rounded-lg"
-              }`}
-            >
-              <FaSignOutAlt className="h-5 w-5" />
-              {!sidebarCollapsed && <span>خروج</span>}
-            </ErpPressable>
           </div>
         </div>
       </div>
@@ -541,15 +520,23 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Main Content */}
       <div
         data-dashboard-content
-        className={`transition-all duration-300 ${sidebarCollapsed ? "lg:mr-20" : "lg:mr-64"}`}
+        className={`transition-all duration-300 ${isHrWorkspaceDetail ? "hr-workspace-detail" : ""} ${sidebarCollapsed ? "lg:mr-28" : "lg:mr-72"}`}
       >
         {/* Top Bar */}
         <header
           data-dashboard-topbar
-          className="border-b border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-4 backdrop-blur-xl dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]"
+          className="sds-neumorphic-scope sds-dashboard-topbar p-4"
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
+              <div className="sds-dashboard-brand flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl sm:h-12 sm:w-12">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/brand/logo-project.png"
+                  alt="Sabalan ERP"
+                  className="h-full w-full object-cover"
+                />
+              </div>
               <ErpPressable
                 type="button"
                 aria-label="بازکردن منوی اصلی"

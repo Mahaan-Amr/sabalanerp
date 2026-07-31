@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
-import { assertSubsequentEmploymentRelationship, resolveExistingPersonnelLink, type PersonnelLinkClient } from '../hrPersonnelBoundary';
+import {
+  archiveRosterMembershipEnd,
+  assertSubsequentEmploymentRelationship,
+  personnelSearchTokens,
+  personnelSearchWhere,
+  resolveExistingPersonnelLink,
+  type PersonnelLinkClient
+} from '../hrPersonnelBoundary';
 
 const client = (record: { id: string; user: { id: string } | null } | null) => {
   let calls = 0;
@@ -15,6 +22,22 @@ const client = (record: { id: string; user: { id: string } | null } | null) => {
 };
 
 const run = async () => {
+  assert.deepEqual(personnelSearchTokens('  سليمان   رحيمي  '), ['سلیمان', 'رحیمی']);
+  assert.deepEqual(personnelSearchWhere('سلیمان رحیمی'), {
+    AND: ['سلیمان', 'رحیمی'].map((token) => ({ OR: [
+      { firstName: { contains: token, mode: 'insensitive' } },
+      { lastName: { contains: token, mode: 'insensitive' } },
+      { employeeNumber: { contains: token, mode: 'insensitive' } },
+      { nationalCode: { contains: token } }
+    ] }))
+  });
+  assert.equal(personnelSearchWhere('   '), undefined);
+
+  const archiveDate = new Date('2026-07-30T00:00:00.000Z');
+  assert.equal(archiveRosterMembershipEnd(new Date('2026-01-01T00:00:00.000Z'), null, archiveDate)?.toISOString(), archiveDate.toISOString());
+  assert.equal(archiveRosterMembershipEnd(new Date('2026-08-01T00:00:00.000Z'), null, archiveDate)?.toISOString(), '2026-08-01T00:00:00.000Z');
+  assert.equal(archiveRosterMembershipEnd(new Date('2026-01-01T00:00:00.000Z'), new Date('2026-07-01T00:00:00.000Z'), archiveDate), null);
+
   assert.throws(() => assertSubsequentEmploymentRelationship(0), /پرونده جذب یا مسیر صریح ثبت استثنایی/);
   assert.doesNotThrow(() => assertSubsequentEmploymentRelationship(1));
 

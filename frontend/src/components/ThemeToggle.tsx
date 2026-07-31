@@ -13,7 +13,7 @@ export const ThemeToggle: React.FC = () => {
       type="button"
       onClick={toggleTheme}
       variant="ghost"
-      className="theme-toggle animate-theme-transition h-11 w-11 p-0"
+      className="theme-toggle sds-dashboard-footer-action inline-flex h-12 w-12 items-center justify-center rounded-full p-0"
       aria-label={theme === 'dark' ? 'فعال‌کردن حالت روشن' : 'فعال‌کردن حالت تیره'}
     >
       {theme === 'dark' ? (

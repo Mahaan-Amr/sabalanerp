@@ -327,6 +327,7 @@ export const hrAPI = {
   endAssignment: (id: string, effectiveTo: string) => api.put(`/hr/assignments/${id}/end`, { effectiveTo }),
   getSupervisorCandidates: (params: any) => api.get('/hr/supervisor-candidates', { params }),
   getMigrationPreview: () => api.get('/hr/migration/preview'),
+  getMigrationRecords: (category: string) => api.get(`/hr/migration/records/${encodeURIComponent(category)}`),
   applyMigration: (data: any) => api.post('/hr/migration/apply', data),
 };
 

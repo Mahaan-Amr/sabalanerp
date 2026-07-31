@@ -121,6 +121,11 @@ export default function HrStructurePage() {
       eyebrow="منابع انسانی · پایه سازمان"
       title="ساختار سازمانی و جایگاه‌ها"
       description="شغل ماهیت کار است؛ جایگاه محل آن کار در ساختار و دارای ظرفیت مستقل است."
+      metrics={[
+        { label: "واحد سازمانی", value: data.organizationalUnits.length.toLocaleString("fa-IR"), tone: "primary" },
+        { label: "شغل", value: data.jobs.length.toLocaleString("fa-IR"), tone: "neutral" },
+        { label: "جایگاه", value: data.positions.length.toLocaleString("fa-IR"), tone: "neutral" },
+      ]}
       actions={[
         { label: "به‌روزرسانی", icon: FaSync, onClick: load, tone: "neutral" },
       ]}

@@ -18,7 +18,7 @@ import {
 
 const statusStyle: Record<HiringLifecycleStatus, string> = {
   COMPLETED:
-    "border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]",
+    "sds-hiring-phase-completed border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] text-[var(--sds-success)]",
   ACTION_REQUIRED:
     "border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]",
   WAITING:
@@ -67,7 +67,7 @@ const PhaseButton = ({
       aria-pressed={selected}
       aria-label={`مرحله ${phase.number}: ${phase.title}، ${hiringLifecycleStatusLabel[phase.status]}`}
       onClick={() => onSelect(phase.id)}
-      className={`group relative shrink-0 rounded-xl border text-right outline-none transition-[border-color,background-color,color,transform] duration-200 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950 ${statusStyle[phase.status]} ${selected ? "ring-2 ring-[var(--sds-focus-ring)] ring-offset-2 dark:ring-offset-slate-950" : ""} ${compact ? "w-36 p-3" : "min-h-32 w-full p-3"}`}
+      className={`group relative h-full shrink-0 rounded-xl border text-right outline-none transition-[border-color,background-color,color,transform] duration-200 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950 ${statusStyle[phase.status]} ${selected ? "ring-2 ring-[var(--sds-focus-ring)] ring-offset-2 dark:ring-offset-slate-950" : ""} ${compact ? "min-h-36 w-36 p-3" : "min-h-40 w-full p-3"}`}
     >
       <span className="flex items-center justify-between gap-2">
         <span className="text-xs font-black">{phase.number}</span>
@@ -125,7 +125,7 @@ export function HiringLifecycle({
         aria-label="مراحل جذب"
       >
         {projection.phases.map((phase) => (
-          <div role="listitem" key={phase.id}>
+          <div role="listitem" className="h-full" key={phase.id}>
             <PhaseButton
               phase={phase}
               selected={phase.id === focused.id}

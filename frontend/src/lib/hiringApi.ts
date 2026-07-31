@@ -43,9 +43,6 @@ export const hiringAPI = {
   createWorkItem: (data: any) => internal.post("/work-items", data),
   updateWorkItem: (id: string, data: any) =>
     internal.patch(`/work-items/${id}`, data),
-  workItemDefaultOwners: () => internal.get("/work-item-default-owners"),
-  setWorkItemDefaultOwner: (authority: string, userId: string) =>
-    internal.put(`/work-item-default-owners/${authority}`, { userId }),
   create: (data: any) => internal.post("/applications", data),
   invite: (id: string) => internal.post(`/applications/${id}/invitations`),
   refreshInvitationDelivery: (id: string, invitationId: string) =>

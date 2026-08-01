@@ -819,15 +819,17 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
               aria-expanded={isExpanded}
               aria-current={isActive ? "page" : undefined}
               onClick={() => toggleExpanded(itemKey)}
-              className={`flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:flex-col lg:justify-center lg:gap-1" : "gap-3"}`}
+              className={`flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:justify-center" : "justify-between gap-4"}`}
             >
-              <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
-              <span className={collapsed ? "flex-1 text-right font-bold lg:sr-only" : "flex-1 text-right font-bold"}>{item.namePersian}</span>
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
+                <span className={collapsed ? "min-w-0 flex-1 truncate text-right font-bold lg:sr-only" : "min-w-0 flex-1 truncate text-right font-bold"}>{item.namePersian}</span>
+              </span>
               {!collapsed &&
                 (isExpanded ? (
-                  <FaChevronLeft className="h-4 w-4" />
+                  <FaChevronLeft className="h-4 w-4 shrink-0" />
                 ) : (
-                  <FaChevronRight className="h-4 w-4" />
+                  <FaChevronRight className="h-4 w-4 shrink-0" />
                 ))}
             </ErpPressable>
           ) : (
@@ -836,10 +838,10 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
               aria-current={isActive ? "page" : undefined}
               title={collapsed ? item.namePersian : undefined}
               onClick={() => onNavigate?.(item.href)}
-              className={`flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:flex-col lg:justify-center lg:gap-1" : "gap-3"}`}
+              className={`flex min-w-0 flex-1 items-center gap-3 ${collapsed ? "lg:justify-center" : ""}`}
             >
               <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
-              <span className={collapsed ? "flex-1 text-right font-bold lg:sr-only" : "flex-1 text-right font-bold"}>{item.namePersian}</span>
+              <span className={collapsed ? "min-w-0 flex-1 truncate text-right font-bold lg:sr-only" : "min-w-0 flex-1 truncate text-right font-bold"}>{item.namePersian}</span>
             </Link>
           )}
         </div>

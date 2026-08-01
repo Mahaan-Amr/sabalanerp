@@ -429,9 +429,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Sidebar */}
       <div
         data-dashboard-sidebar
-        className={`sds-neumorphic-scope sds-dashboard-sidebar fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-y-auto transition-[width,transform] duration-300 ease-in-out lg:overflow-hidden ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-28" : "lg:w-72"}`}
+        className={`sds-neumorphic-scope sds-dashboard-sidebar fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-hidden transition-[width,transform] duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-28" : "lg:w-72"}`}
       >
-        <div className="flex min-h-full flex-col lg:h-full">
+        <div
+          data-dashboard-sidebar-surface
+          className="sds-dashboard-sidebar-surface flex min-h-full flex-col overflow-y-auto lg:m-3 lg:h-[calc(100%-1.5rem)] lg:min-h-0 lg:overflow-hidden"
+        >
           {/* Mobile drawer header. The company mark lives in the persistent site header. */}
           <div
             className={`sds-dashboard-sidebar-header flex items-center justify-between p-4 lg:p-5 ${sidebarCollapsed ? "lg:hidden" : ""}`}
@@ -477,7 +480,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <WorkspaceSwitcher variant="dropdown" compact />
           </div>
 
-          <div className="sds-dashboard-rail flex min-h-0 flex-none flex-col lg:mx-3 lg:mb-3 lg:flex-1 lg:overflow-hidden">
+          <div className="sds-dashboard-rail flex min-h-0 flex-none flex-col lg:flex-1 lg:overflow-hidden">
             {/* Workspace Navigation */}
             <div className="flex-none lg:flex-1 lg:overflow-hidden">
               <WorkspaceNavigation
@@ -529,14 +532,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="sds-dashboard-brand flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl sm:h-12 sm:w-12">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/brand/logo-project.png"
-                  alt="Sabalan ERP"
-                  className="h-full w-full object-cover"
-                />
-              </div>
               <ErpPressable
                 type="button"
                 aria-label="بازکردن منوی اصلی"
@@ -545,6 +540,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               >
                 <FaBars className="h-6 w-6" />
               </ErpPressable>
+              <div className="sds-dashboard-brand flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl sm:h-12 sm:w-12">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/brand/logo-project.png"
+                  alt="Sabalan ERP"
+                  className="h-full w-full object-cover"
+                />
+              </div>
               <div>
                 <h1
                   className={`text-xl font-bold text-[var(--sds-text-primary)] sm:text-2xl ${isHrWorkspace ? "" : "dark:text-[var(--sds-text-inverse)]"}`}

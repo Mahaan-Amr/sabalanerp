@@ -81,10 +81,9 @@ export default function AdminReportsPage() {
     <ErpPage
       eyebrow="مدیریت سیستم"
       title="گزارش‌ها"
-      description="مدیریت گزارش‌ها، تولید خروجی و دانلود فایل‌های مدیریتی."
       metrics={metrics}
     >
-      <ErpSection title="لیست گزارش‌ها" description="گزارش‌های آماده یا قابل تولید برای مدیران سیستم.">
+      <ErpSection title="لیست گزارش‌ها">
         {reports.length === 0 ? (
           <ErpEmptyState icon={FaChartLine} title="گزارشی موجود نیست" />
         ) : (

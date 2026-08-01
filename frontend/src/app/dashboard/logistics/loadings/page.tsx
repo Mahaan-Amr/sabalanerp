@@ -211,7 +211,6 @@ export default function LogisticsLoadingsPage() {
   return (
     <ErpPage
       title="بارگیری‌ها"
-      description="رجیستر عملیاتی بارگیری‌ها؛ مشاهده، ویرایش، چاپ، نهایی‌سازی، لغو و عملیات گروهی بر اساس وضعیت."
       actions={[
         { label: 'بارگیری جدید', href: '/dashboard/logistics/loadings/new', icon: FaPlus },
         { label: 'به‌روزرسانی', onClick: () => { void load(); }, icon: FaSync, tone: 'neutral' },

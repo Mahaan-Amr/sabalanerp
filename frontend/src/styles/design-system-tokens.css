@@ -273,21 +273,40 @@
   box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
 }
 
-.hr-workspace-detail .sds-workspace > .sds-card,
-.hr-workspace-detail .sds-workspace .sds-card {
+.dashboard-workspace-detail .sds-workspace > .sds-card,
+.dashboard-workspace-detail .sds-workspace .sds-card {
   border-color: var(--sds-border-subtle);
   border-radius: var(--sds-radius-card);
   background: var(--sds-surface-raised);
   box-shadow: var(--sds-neu-shadow-card);
 }
 
-.hr-workspace-detail .sds-workspace .sds-field {
+.dashboard-workspace-detail .sds-workspace .sds-field {
   background: var(--sds-surface-panel);
   box-shadow: var(--sds-neu-shadow-inset);
 }
 
-.hr-workspace-detail .sds-workspace .sds-action {
+.dashboard-workspace-detail .sds-workspace .sds-action {
   border-radius: 0.875rem;
+}
+
+.guard-workspace .sds-card {
+  border-color: var(--sds-border-subtle);
+  background: var(--sds-surface-raised);
+  box-shadow: var(--sds-neu-shadow-card);
+}
+
+.guard-workspace .sds-field {
+  background: var(--sds-surface-panel);
+  box-shadow: var(--sds-neu-shadow-inset);
+}
+
+.guard-workspace .sds-action {
+  border-radius: 0.875rem;
+}
+
+.guard-workspace :where(.sds-card, .sds-neumorphic-card) {
+  scroll-margin-top: 5.5rem;
 }
 
 @media (max-width: 1023px) {

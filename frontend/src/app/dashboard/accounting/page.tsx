@@ -62,7 +62,6 @@ export default function AccountingDashboardPage() {
     <ErpPage
       eyebrow="حسابداری"
       title="داشبورد حسابداری"
-      description="مرکز کنترل مالی قراردادها، دریافتنی‌ها، چک‌ها، پیش‌نویس صورتحساب و وضعیت سامانه مودیان."
       actions={[
         { label: 'به‌روزرسانی', icon: FaSync, onClick: loadWorkspace, tone: 'neutral' },
       ]}
@@ -72,16 +71,13 @@ export default function AccountingDashboardPage() {
         items={[
           {
             title: 'قراردادهای قابل بررسی',
-            description: 'نمایش همه قراردادها در هر وضعیت با اقدام‌های حسابداری مجاز.',
             href: '/dashboard/accounting/contracts',
             icon: FaClipboardCheck,
             tone: 'primary',
-            meta: 'ورود به رجیستر قراردادها',
             badge: <StatusBadge label={(queues.contracts?.length || 0).toLocaleString('fa-IR')} tone="primary" />,
           },
           {
             title: 'پیش‌نویس صورتحساب‌ها',
-            description: 'مرور پیش‌نویس‌های ایجاد شده از قراردادها و آمادگی صدور.',
             href: '/dashboard/accounting/invoice-candidates',
             icon: FaFileInvoice,
             tone: 'info',
@@ -89,7 +85,6 @@ export default function AccountingDashboardPage() {
           },
           {
             title: 'دریافت‌ها و چک‌ها',
-            description: 'پیگیری وصول، واگذاری، برگشت، جایگزینی و مغایرت دریافت‌ها.',
             href: '/dashboard/accounting/payments',
             icon: FaMoneyCheckAlt,
             tone: 'warning',
@@ -97,7 +92,6 @@ export default function AccountingDashboardPage() {
           },
           {
             title: 'دریافتنی‌ها',
-            description: 'سررسید، مانده، وصول بخشی و تسویه دریافتنی‌های قرارداد.',
             href: '/dashboard/accounting/receivables',
             icon: FaReceipt,
             tone: 'success',
@@ -105,21 +99,18 @@ export default function AccountingDashboardPage() {
           },
           {
             title: 'استخدام: وثیقه و قرارداد',
-            description: 'ثبت و تأیید وثیقه، تعهدات، جبران خدمات و قرارداد متقاضیان منتخب.',
             href: '/dashboard/hr/hiring',
             icon: FaUserPlus,
             tone: 'info',
           },
           {
             title: 'قالب وثیقه استخدام',
-            description: 'ساخت نسخه‌های چک‌لیست وثیقه و تعهدات توسط مدیر مالی.',
             href: '/dashboard/hr/hiring/collateral-templates',
             icon: FaClipboardCheck,
             tone: 'neutral',
           },
           {
             title: 'مالیات و سامانه مودیان',
-            description: 'آمادگی اطلاعات، ثبت دستی وضعیت ارسال و پیگیری رد یا پذیرش.',
             href: '/dashboard/accounting/tax',
             icon: FaBalanceScale,
             tone: 'purple',
@@ -127,7 +118,6 @@ export default function AccountingDashboardPage() {
           },
           {
             title: 'بررسی اصلاحات',
-            description: 'بررسی مدیریتی درخواست‌های اصلاح و پیگیری اصلاح‌های برگشته از فروش.',
             href: '/dashboard/accounting/correction-requests',
             icon: FaExclamationTriangle,
             tone: 'warning',
@@ -135,19 +125,15 @@ export default function AccountingDashboardPage() {
           },
           {
             title: 'سوابق عملیات',
-            description: 'ردیابی همه اقدام‌های حسابداری برای حسابرسی داخلی.',
             href: '/dashboard/accounting/audit',
             icon: FaHistory,
             tone: 'neutral',
-            meta: 'آخرین رویدادها',
           },
           {
             title: 'عملکرد حسابداران',
-            description: 'میانگین زمان اقدام، تایید مالی، ثبت دریافت و بستن اصلاحیه برای هر حسابدار.',
             href: '/dashboard/accounting/performance',
             icon: FaUserClock,
             tone: 'primary',
-            meta: 'گزارش عملکرد',
           },
         ]}
       />

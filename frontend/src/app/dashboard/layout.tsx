@@ -170,7 +170,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const showsSalesMobileNavigation = isSalesWorkspace || isSalesCustomerIndex;
   const isNeumorphicWorkspace = isHrWorkspace || isSalesLanding;
   const hasMobileBottomNavigation = isHrWorkspace || showsSalesMobileNavigation;
-  const isHrWorkspaceDetail = isHrWorkspace && pathname !== "/dashboard/hr";
+  const isWorkspaceDetail = pathname !== "/dashboard";
   const hrMobileNavigation = [
     {
       id: "dashboard",
@@ -458,7 +458,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <div
-      className={`dashboard-shell min-h-screen overflow-x-hidden bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)] ${isNeumorphicWorkspace ? "sds-neumorphic-scope" : ""}`}
+      className="dashboard-shell sds-neumorphic-scope min-h-screen overflow-x-hidden bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)]"
     >
       <SecurityNoticeHost />
       {/* Mobile Sidebar Overlay */}
@@ -483,21 +483,21 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         >
           {/* Mobile drawer header. The company mark lives in the persistent site header. */}
           <div
-            className={`sds-dashboard-sidebar-header flex items-center justify-between p-4 lg:p-5 ${sidebarCollapsed ? "lg:hidden" : ""}`}
+            className="sds-dashboard-sidebar-header flex items-center justify-between p-3 lg:hidden"
           >
-            <span className="text-sm font-bold text-[var(--sds-text-primary)]">منوی اصلی</span>
+            <span className="text-sm font-bold text-[var(--sds-text-primary)]">منو</span>
             <ErpPressable
               type="button"
               aria-label="بستن منوی اصلی"
               onClick={() => setSidebarOpen(false)}
-              className="text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
             >
               <FaTimes />
             </ErpPressable>
           </div>
 
           {/* User Info */}
-          <div className={`border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-5 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+          <div className={`border-b border-[var(--sds-border-subtle)] p-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
               <div className="flex items-center gap-3">
                 <div className="rounded-lg bg-[var(--sds-surface-subtle)] p-2.5 text-[var(--sds-accent)]">
                   <FaUser className="h-5 w-5" />
@@ -522,7 +522,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
 
           {/* Workspace Switcher */}
-          <div className={`border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-5 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+          <div className={`border-b border-[var(--sds-border-subtle)] p-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
               <WorkspaceSwitcher variant="dropdown" compact />
           </div>
 
@@ -538,14 +538,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
             {/* Sidebar Footer */}
             <div
-              className={`sds-dashboard-sidebar-footer ${sidebarCollapsed ? "space-y-3 p-4 lg:p-3" : "space-y-3 p-4 lg:p-5"}`}
+              className={`sds-dashboard-sidebar-footer ${sidebarCollapsed ? "space-y-2 p-3" : "space-y-2 p-3"}`}
             >
               <div
                 className={`flex ${sidebarCollapsed ? "items-center justify-between gap-3 lg:flex-col lg:justify-center lg:gap-2" : "items-center justify-between gap-3"}`}
               >
-                <span className={`text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)] ${sidebarCollapsed ? "lg:sr-only" : ""}`}>
-                  حالت نمایش
-                </span>
                 <ThemeToggle />
               </div>
               <ErpPressable
@@ -554,8 +551,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 tone="danger"
                 className={`sds-dashboard-footer-action flex items-center text-[var(--sds-text-secondary)] transition-all duration-200 hover:bg-[var(--sds-danger-surface)] hover:text-[var(--sds-danger)] dark:text-[var(--sds-text-secondary)] dark:hover:bg-[var(--sds-danger-surface)] dark:hover:text-[var(--sds-danger)] ${
                   sidebarCollapsed
-                    ? "gap-3 w-full px-4 py-3 rounded-lg lg:mx-auto lg:h-12 lg:w-12 lg:justify-center lg:rounded-full lg:px-0 lg:py-0"
-                    : "gap-3 w-full px-4 py-3 rounded-lg"
+                    ? "gap-3 w-full px-3 py-2 rounded-lg lg:mx-auto lg:h-11 lg:w-11 lg:justify-center lg:rounded-full lg:px-0 lg:py-0"
+                    : "gap-3 w-full px-3 py-2 rounded-lg"
                 }`}
               >
                 <FaSignOutAlt className="h-5 w-5" />
@@ -569,20 +566,20 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Main Content */}
       <div
         data-dashboard-content
-        className={`transition-all duration-300 ${isHrWorkspaceDetail ? "hr-workspace-detail" : ""} ${sidebarCollapsed ? "lg:mr-28" : "lg:mr-72"}`}
+        className={`transition-all duration-300 ${isWorkspaceDetail ? "dashboard-workspace-detail" : ""} ${sidebarCollapsed ? "lg:mr-28" : "lg:mr-72"}`}
       >
         {/* Top Bar */}
         <header
           data-dashboard-topbar
-          className="sds-neumorphic-scope sds-dashboard-topbar p-4"
+          className="sds-dashboard-topbar flex h-16 items-center px-3 sm:px-4"
         >
-          <div className="flex items-center justify-between">
+          <div className="flex w-full items-center justify-between">
             <div className="flex items-center gap-4">
               <ErpPressable
                 type="button"
                 aria-label="بازکردن منوی اصلی"
                 onClick={() => setSidebarOpen(true)}
-                className="text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
               >
                 <FaBars className="h-6 w-6" />
               </ErpPressable>
@@ -614,7 +611,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
               <NotificationCenter />
               <div className="relative profile-dropdown-container">
                 <ErpPressable

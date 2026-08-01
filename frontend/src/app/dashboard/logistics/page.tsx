@@ -36,7 +36,6 @@ export default function LogisticsDashboardPage() {
     <ErpPage
       eyebrow="لجستیک"
       title="داشبورد لجستیک"
-      description="مرکز کنترل بارگیری، راننده‌ها، مانده قابل ارسال پروژه‌ها و برگه‌های چاپی بارگیری."
       metrics={metrics}
       actions={[
         { label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' },
@@ -46,8 +45,8 @@ export default function LogisticsDashboardPage() {
       <ErpActionGrid
         columns={3}
         items={[
-          { title: 'بارگیری جدید', description: 'انتخاب پروژه، تخصیص دستی ردیف‌های قرارداد و ثبت راننده.', href: '/dashboard/logistics/loadings/new', icon: FaPlus, tone: 'primary' },
-          { title: 'رجیستر بارگیری‌ها', description: 'مشاهده پیش‌نویس‌ها، اسناد نهایی، لغوها و اصلاحات.', href: '/dashboard/logistics/loadings', icon: FaClipboardList, tone: 'info' },
+          { title: 'بارگیری جدید', href: '/dashboard/logistics/loadings/new', icon: FaPlus, tone: 'primary' },
+          { title: 'رجیستر بارگیری‌ها', href: '/dashboard/logistics/loadings', icon: FaClipboardList, tone: 'info' },
         ]}
       />
 

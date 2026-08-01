@@ -80,7 +80,6 @@ export default function PotentialProjectsPage() {
     <ErpListPage
       title="پروژه‌های احتمالی"
       eyebrow="CRM"
-      description="فرصت‌ها و پروژه‌هایی که هنوز به قرارداد فروش تبدیل نشده‌اند."
       actions={[
         { label: 'پروژه جدید', href: '/dashboard/crm/potential-projects/create', icon: FaPlus, tone: 'primary', variant: 'solid' },
       ]}

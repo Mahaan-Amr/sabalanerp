@@ -61,7 +61,6 @@ export default function AdminSettingsPage() {
     <ErpPage
       eyebrow="مدیریت سیستم"
       title="تنظیمات سیستم"
-      description="مدیریت تنظیمات عمومی شرکت، زبان، واحد پول، اعلان‌ها و امنیت نشست."
       actions={[
         { label: loading ? 'در حال ذخیره...' : 'ذخیره تنظیمات', onClick: handleSave, icon: FaSave, tone: 'primary', variant: 'solid', disabled: loading },
         { label: 'بازنشانی', onClick: handleReset, icon: FaUndo, tone: 'neutral', variant: 'outline' },
@@ -76,7 +75,7 @@ export default function AdminSettingsPage() {
         </ErpSection>
       )}
 
-      <ErpSection title="اطلاعات شرکت" description="نام‌ها و پیشوندهای رسمی مورد استفاده در قراردادها." actions={[]}>
+      <ErpSection title="اطلاعات شرکت" actions={[]}>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label className={labelClassName}>نام شرکت (انگلیسی)</label>
@@ -93,7 +92,7 @@ export default function AdminSettingsPage() {
         </div>
       </ErpSection>
 
-      <ErpSection title="تنظیمات سیستم" description="گزینه‌های پایه برای زبان، تاریخ، منطقه زمانی و واحد پول.">
+      <ErpSection title="تنظیمات سیستم">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div>
             <label className={labelClassName}>واحد پول</label>
@@ -128,7 +127,7 @@ export default function AdminSettingsPage() {
         </div>
       </ErpSection>
 
-      <ErpSection title="اعلان‌ها و امنیت" description="تنظیمات ارتباطی و مدت اعتبار نشست کاربران.">
+      <ErpSection title="اعلان‌ها و امنیت">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             {[

@@ -258,5 +258,5 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
   await page.getByRole('navigation', { name: 'ناوبری فروش' }).getByRole('link', { name: 'محصولات' }).click();
   await expect(page).toHaveURL(/\/dashboard\/sales\/products$/);
   await expect(page.getByRole('navigation', { name: 'ناوبری فروش' }).getByRole('link', { name: 'محصولات' })).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('.dashboard-shell')).not.toHaveClass(/sds-neumorphic-scope/);
+  await expect(page.locator('.dashboard-shell')).toHaveClass(/sds-neumorphic-scope/);
 });

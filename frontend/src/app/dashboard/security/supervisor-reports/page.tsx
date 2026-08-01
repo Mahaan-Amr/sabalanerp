@@ -182,7 +182,7 @@ export default function SecuritySupervisorReportsPage() {
   };
 
   return (
-    <ErpWorkspacePage title="گزارش شیفت" context={session ? `${dateTimeFa(session.slot?.startsAt)} تا ${dateTimeFa(session.slot?.endsAt)}` : undefined} primaryAction={!readOnly && session ? { label: 'ثبت گزارش', icon: FaPlus, onClick: () => setEntrySheetOpen(true), variant: 'solid' } : undefined} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: () => loadData() }]}>
+    <ErpWorkspacePage className="guard-workspace" title="گزارش شیفت" context={session ? `${dateTimeFa(session.slot?.startsAt)} تا ${dateTimeFa(session.slot?.endsAt)}` : undefined} primaryAction={!readOnly && session ? { label: 'ثبت گزارش', icon: FaPlus, onClick: () => setEntrySheetOpen(true), variant: 'solid' } : undefined} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: () => loadData() }]}>
       {loading && !session ? <ErpSkeleton lines={6} /> : <>
       {!readOnly && message && <ErpInlineState kind="success" title={message} />}
       {error && <ErpInlineState kind={session ? 'stale' : 'error'} title={session ? 'آخرین به‌روزرسانی ناموفق بود؛ گزارش قبلی نمایش داده می‌شود.' : error} action={{ label: 'تلاش مجدد', onClick: () => loadData() }} />}

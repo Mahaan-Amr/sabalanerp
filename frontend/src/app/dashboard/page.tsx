@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useState } from 'react';
+
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -13,19 +14,30 @@ import {
   FaEdit,
   FaExclamationTriangle,
   FaFileContract,
-  FaPlus,
   FaPercent,
+  FaPlus,
   FaPrint,
   FaShieldAlt,
   FaSignature,
+  FaSync,
   FaTimes,
   FaUserCog,
   FaUserShield,
   FaUsers,
 } from 'react-icons/fa';
-import { ErpActionGrid, ErpBadge, ErpEmptyState, ErpFieldView, ErpLoading, ErpPage, ErpSection, ErpTwoColumn, type ErpMetric, type ErpTone } from '@/components/erp';
+import {
+  ErpBadge,
+  ErpButton,
+  ErpEmptyState,
+  ErpInlineState,
+  ErpLoading,
+  ErpNeumorphicActionGrid,
+  ErpNeumorphicCard,
+  ErpNeumorphicMetricGrid,
+  type ErpTone,
+} from '@/components/erp';
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
-import { LAST_WORKSPACE_STORAGE_KEY, useWorkspace, WORKSPACE_CONFIG, WORKSPACES } from '@/contexts/WorkspaceContext';
+import { LAST_WORKSPACE_STORAGE_KEY, useWorkspace, WORKSPACES } from '@/contexts/WorkspaceContext';
 import { dashboardAPI } from '@/lib/api';
 import { formatPrice } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -42,20 +54,14 @@ interface DashboardStats {
     cancelled: number;
     expired: number;
   };
-  customers: {
+  customers: { total: number };
+  realizedSales: {
     total: number;
-  };
-  revenue: {
-    total: number | string | null;
-    average: number | string | null;
-    completionRate: number;
+    average: number | null;
+    successRate: number | null;
+    realizedContracts: number;
   };
   recentContracts: RecentContract[];
-  monthlyRevenue: Array<{
-    month: string;
-    amount: number | string | null;
-    count: number;
-  }>;
 }
 
 interface RecentContract {
@@ -65,18 +71,9 @@ interface RecentContract {
   status: string;
   totalAmount: number | string | null;
   currency: string;
-  customer: {
-    firstName: string;
-    lastName: string;
-    companyName: string | null;
-  };
-  department: {
-    namePersian: string;
-  };
-  createdByUser: {
-    firstName: string;
-    lastName: string;
-  };
+  customer: { firstName: string; lastName: string; companyName: string | null };
+  department: { namePersian: string };
+  createdByUser: { firstName: string; lastName: string };
   createdAt: string;
 }
 
@@ -99,27 +96,58 @@ const statusTone: Record<string, ErpTone> = {
   EXPIRED: 'neutral',
 };
 
+const statusIcon = (status: string) => {
+  switch (status) {
+    case 'DRAFT': return FaEdit;
+    case 'PENDING_APPROVAL': return FaClock;
+    case 'APPROVED': return FaCheck;
+    case 'SIGNED': return FaSignature;
+    case 'PRINTED': return FaPrint;
+    case 'CANCELLED': return FaTimes;
+    case 'EXPIRED': return FaExclamationTriangle;
+    default: return FaFileContract;
+  }
+};
+
 export default function DashboardPage() {
   const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { accessibleWorkspaces, currentWorkspace, loading: workspaceLoading } = useWorkspace();
-  const activeWorkspaceName = currentWorkspace ? WORKSPACE_CONFIG[currentWorkspace].namePersian : 'انتخاب نشده';
+  const { accessibleWorkspaces, loading: workspaceLoading } = useWorkspace();
+
+  const fetchDashboardData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await dashboardAPI.getStats();
+      if (!response.data.success) throw new Error('خطا در دریافت اطلاعات داشبورد');
+      setStats(response.data.data);
+    } catch (reason: any) {
+      setError(reason.response?.data?.error || reason.message || 'خطا در ارتباط با سرور');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    loadCurrentUser();
+    dashboardAPI.getProfile()
+      .then((response) => {
+        if (response.data.success) setCurrentUser(response.data.data);
+      })
+      .catch((reason) => {
+        setError(reason.response?.data?.error || 'خطا در دریافت اطلاعات کاربر');
+        setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
     if (!currentUser || workspaceLoading) return;
-
     if (accessibleWorkspaces.length === 1) {
       router.replace(accessibleWorkspaces[0].path);
       return;
     }
-
     if (accessibleWorkspaces.length > 1) {
       const lastWorkspace = localStorage.getItem(LAST_WORKSPACE_STORAGE_KEY) as WORKSPACES | null;
       const lastAccessibleWorkspace = accessibleWorkspaces.find((workspace) => workspace.id === lastWorkspace);
@@ -127,84 +155,17 @@ export default function DashboardPage() {
         router.replace(lastAccessibleWorkspace.path);
         return;
       }
-
       if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANAGER') {
         router.replace(accessibleWorkspaces[0].path);
         return;
       }
     }
+    if (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER') void fetchDashboardData();
+    else setLoading(false);
+  }, [accessibleWorkspaces, currentUser, fetchDashboardData, router, workspaceLoading]);
 
-    if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANAGER') {
-      setLoading(false);
-      return;
-    }
-
-    fetchDashboardData();
-  }, [currentUser, workspaceLoading, accessibleWorkspaces, router]);
-
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await dashboardAPI.getStats();
-
-      if (response.data.success) {
-        setStats(response.data.data);
-      } else {
-        setError('خطا در دریافت اطلاعات داشبورد');
-      }
-    } catch (error: any) {
-      console.error('Error fetching dashboard data:', error);
-      setError(error.response?.data?.error || 'خطا در ارتباط با سرور');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadCurrentUser = async () => {
-    try {
-      const response = await dashboardAPI.getProfile();
-      if (response.data.success) {
-        const user = response.data.data;
-        setCurrentUser(user);
-      }
-    } catch (error: any) {
-      console.error('Error loading user profile:', error);
-      setError(error.response?.data?.error || 'خطا در دریافت اطلاعات کاربر');
-      setLoading(false);
-    }
-  };
-
-  const formatAmount = (amount: number | string | null | undefined) => formatPrice(amount, 'ریال');
-  const formatDate = (dateString: string) => PersianCalendar.formatForDisplay(dateString);
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'DRAFT':
-        return <FaEdit className="h-4 w-4" />;
-      case 'PENDING_APPROVAL':
-        return <FaClock className="h-4 w-4" />;
-      case 'APPROVED':
-        return <FaCheck className="h-4 w-4" />;
-      case 'SIGNED':
-        return <FaSignature className="h-4 w-4" />;
-      case 'PRINTED':
-        return <FaPrint className="h-4 w-4" />;
-      case 'CANCELLED':
-        return <FaTimes className="h-4 w-4" />;
-      case 'EXPIRED':
-        return <FaExclamationTriangle className="h-4 w-4" />;
-      default:
-        return <FaFileContract className="h-4 w-4" />;
-    }
-  };
-
-  if (loading) {
-    return <ErpLoading />;
-  }
-
-  if (error) {
+  if (loading && !stats) return <ErpLoading />;
+  if (error && !stats) {
     return (
       <ErpEmptyState
         icon={FaExclamationTriangle}
@@ -214,145 +175,138 @@ export default function DashboardPage() {
       />
     );
   }
+  if (!stats) return <ErpEmptyState icon={FaFileContract} title="اطلاعاتی برای نمایش وجود ندارد" />;
 
-  if (!stats) {
-    return (
-      <ErpEmptyState
-        icon={FaFileContract}
-        title="اطلاعاتی یافت نشد"
-        description="هنوز داده‌ای برای نمایش وجود ندارد."
-      />
-    );
-  }
-
-  const metrics: ErpMetric[] = [
-    { label: 'کل قراردادها', value: stats.contracts.total.toLocaleString('fa-IR'), icon: FaFileContract, tone: 'primary' },
-    { label: 'در انتظار تایید', value: stats.contracts.pending.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
-    { label: 'امضا شده', value: stats.contracts.signed.toLocaleString('fa-IR'), icon: FaSignature, tone: 'success' },
-    { label: 'کل مشتریان', value: stats.customers.total.toLocaleString('fa-IR'), icon: FaUsers, tone: 'info' },
-  ];
+  const amount = (value: number | string | null | undefined) => formatPrice(value, 'تومان');
+  const count = (value: number) => value.toLocaleString('fa-IR');
 
   return (
-    <ErpPage
-      eyebrow="داشبورد ERP"
-      title="مرکز عملیات سبلان"
-      description="نمای کلی فروش، مشتریان، درآمد و دسترسی‌های مدیریتی در یک صفحه موبایل‌اول و قابل استفاده در حالت روشن و تاریک."
-      metrics={metrics}
-      actions={[
-        { label: 'قرارداد جدید', href: '/dashboard/contracts/create', icon: FaPlus, tone: 'primary', variant: 'solid' },
-        { label: 'مشاهده قراردادها', href: '/dashboard/contracts', icon: FaFileContract, tone: 'neutral', variant: 'outline' },
-      ]}
-    >
-      <ErpTwoColumn
-        main={
-          <>
-            <ErpSection title="فضاهای کاری" description={`فضای فعال: ${activeWorkspaceName} | ${accessibleWorkspaces.length.toLocaleString('fa-IR')} فضای کاری در دسترس`}>
-              <WorkspaceSwitcher variant="grid" />
-            </ErpSection>
+    <main dir="rtl" lang="fa" className="sds-workspace sds-neumorphic-scope mx-auto w-full max-w-7xl space-y-5">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-black tracking-tight text-[var(--sds-text-primary)] sm:text-3xl">داشبورد اصلی</h1>
+        <ErpButton
+          label={loading ? 'در حال به‌روزرسانی' : 'به‌روزرسانی'}
+          icon={FaSync}
+          onClick={fetchDashboardData}
+          disabled={loading}
+          tone="neutral"
+          variant="soft"
+        />
+      </header>
 
-            {currentUser?.role === 'ADMIN' && (
-              <ErpSection title="مدیریت سیستم" description="میانبرهای اصلی برای نگهداری ساختار سازمانی، کاربران، امنیت و گزارش‌های مدیریتی.">
-                <ErpActionGrid
-                  columns={3}
-                  items={[
-                    { title: 'مدیریت کاربران', description: 'ایجاد، ویرایش و کنترل وضعیت کاربران', href: '/dashboard/users', icon: FaUserCog, tone: 'info' },
-                    { title: 'مدیریت پرسنل', description: 'پرونده، استخدام و برنامه کاری در مرجع منابع انسانی', href: '/dashboard/hr/personnel', icon: FaUsers, tone: 'primary' },
-                    { title: 'مدیریت دسترسی‌ها', description: 'تنظیم مجوزها و نقش‌های سیستمی', href: '/dashboard/admin/permissions', icon: FaShieldAlt, tone: 'purple' },
-                    { title: 'مدیریت بخش‌ها', description: 'واحدهای سازمانی و ارتباط آنها با کاربران', href: '/dashboard/departments', icon: FaBuilding, tone: 'success' },
-                    { title: 'تنظیمات سیستم', description: 'پیکربندی عمومی ERP', href: '/dashboard/admin/settings', icon: FaCog, tone: 'warning' },
-                    { title: 'تنظیمات تخفیف قرارداد', description: 'تعریف بازه‌ها و سقف درصد تخفیف فروش', href: '/dashboard/admin/discount-settings', icon: FaPercent, tone: 'success' },
-                    { title: 'تقویم سالیانه سبلان', description: 'تعریف تعطیلی‌ها و رویدادهای شرکت', href: '/dashboard/admin/sabalan-calendar', icon: FaCalendarAlt, tone: 'info' },
-                    { title: 'امنیت سیستم', description: 'نظارت بر امنیت و فعالیت‌ها', href: '/dashboard/admin/security', icon: FaUserShield, tone: 'danger' },
-                    { title: 'گزارشات مدیریتی', description: 'گزارش‌های جامع و تحلیل‌های سیستم', href: '/dashboard/admin/reports', icon: FaChartLine, tone: 'primary' },
-                    { title: 'پشتیبان‌گیری و بازیابی', description: 'ساخت، دانلود، اعتبارسنجی و بازیابی امن کل سامانه', href: '/dashboard/admin/system-recovery', icon: FaDatabase, tone: 'warning' },
-                  ]}
-                />
-              </ErpSection>
-            )}
+      {error && <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: fetchDashboardData }} />}
 
-            <ErpSection
-              title="قراردادهای اخیر"
-              description="آخرین قراردادهای ثبت‌شده در سیستم."
-              actions={[{ label: 'مشاهده همه', href: '/dashboard/contracts', variant: 'outline', tone: 'neutral' }]}
-            >
-              {stats.recentContracts.length === 0 ? (
-                <ErpEmptyState title="هنوز قراردادی ایجاد نشده است" icon={FaFileContract} />
-              ) : (
-                <div className="space-y-3">
-                  {stats.recentContracts.map((contract) => (
-                    <Link
-                      key={contract.id}
-                      href={`/dashboard/contracts/${contract.id}`}
-                      className="block rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 transition hover:border-[var(--sds-accent)]/40 hover:bg-[var(--sds-surface-raised)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:hover:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]"
-                    >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="flex min-w-0 items-start gap-3">
-                          <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--sds-accent)]/10 text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
-                            {getStatusIcon(contract.status)}
-                          </span>
-                          <div className="min-w-0">
-                            <h3 className="truncate text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{contract.titlePersian}</h3>
-                            <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                              {contract.customer.firstName} {contract.customer.lastName}
-                              {contract.customer.companyName && ` (${contract.customer.companyName})`}
-                            </p>
-                            <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                              {contract.department.namePersian} | {contract.createdByUser.firstName} {contract.createdByUser.lastName} | {formatDate(contract.createdAt)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:text-left">
-                          <div>
-                            <p className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                              {contract.totalAmount ? formatAmount(contract.totalAmount) : 'نامشخص'}
-                            </p>
-                            <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{contract.contractNumber}</p>
-                          </div>
-                          <ErpBadge tone={statusTone[contract.status] || 'neutral'}>
-                            {CONTRACT_STATUS_LABELS[contract.status] || contract.status}
-                          </ErpBadge>
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </ErpSection>
-          </>
-        }
-        aside={
-          <>
-            <ErpSection title="عملیات سریع">
-              <ErpActionGrid
-                columns={1}
-                compact
-                items={[
-                  { title: 'ایجاد قرارداد جدید', href: '/dashboard/contracts/create', icon: FaPlus, tone: 'primary' },
-                  { title: 'افزودن مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaUsers, tone: 'info' },
-                  { title: 'مشاهده گزارشات', href: '/dashboard/admin/reports', icon: FaChartLine, tone: 'neutral' },
-                ]}
-              />
-            </ErpSection>
-
-            <ErpSection title="خلاصه قراردادها">
-              <div className="grid grid-cols-1 gap-3">
-                <ErpFieldView label="پیش‌نویس" value={stats.contracts.draft.toLocaleString('fa-IR')} tone="neutral" />
-                <ErpFieldView label="تایید شده" value={stats.contracts.approved.toLocaleString('fa-IR')} tone="info" />
-                <ErpFieldView label="چاپ شده" value={stats.contracts.printed.toLocaleString('fa-IR')} tone="purple" />
-                <ErpFieldView label="لغو یا منقضی" value={(stats.contracts.cancelled + stats.contracts.expired).toLocaleString('fa-IR')} tone="danger" />
-              </div>
-            </ErpSection>
-
-            <ErpSection title="درآمد">
-              <div className="space-y-3">
-                <ErpFieldView label="کل درآمد" value={formatAmount(stats.revenue.total)} hint="از قراردادهای امضا شده" tone="primary" />
-                <ErpFieldView label="میانگین قرارداد" value={formatAmount(stats.revenue.average)} hint="ارزش متوسط هر قرارداد" tone="warning" />
-                <ErpFieldView label="نرخ تکمیل" value={`${stats.revenue.completionRate.toLocaleString('fa-IR')}٪`} tone="success" />
-              </div>
-            </ErpSection>
-          </>
-        }
+      <ErpNeumorphicMetricGrid
+        items={[
+          { id: 'contracts', label: 'کل قراردادها', value: count(stats.contracts.total), icon: FaFileContract, tone: 'primary', href: '/dashboard/sales/contracts' },
+          { id: 'pending', label: 'در انتظار تأیید', value: count(stats.contracts.pending), icon: FaClock, tone: 'warning', href: '/dashboard/sales/contracts?status=PENDING_APPROVAL' },
+          { id: 'signed', label: 'امضا شده', value: count(stats.contracts.signed), icon: FaSignature, tone: 'success', href: '/dashboard/sales/contracts?status=SIGNED' },
+          { id: 'customers', label: 'کل مشتریان', value: count(stats.customers.total), icon: FaUsers, tone: 'info', href: '/dashboard/crm/customers' },
+        ]}
       />
-    </ErpPage>
+
+      <div className="space-y-5">
+        <section className="space-y-3" aria-labelledby="contract-summary-title">
+          <h2 id="contract-summary-title" className="text-lg font-black text-[var(--sds-text-primary)]">خلاصه قراردادها</h2>
+          <ErpNeumorphicMetricGrid
+            label="خلاصه وضعیت قراردادها"
+            columns={4}
+            items={[
+              { id: 'draft', label: 'پیش‌نویس', value: count(stats.contracts.draft), icon: FaEdit, tone: 'neutral', href: '/dashboard/sales/contracts?status=DRAFT' },
+              { id: 'approved', label: 'تأیید شده', value: count(stats.contracts.approved), icon: FaCheck, tone: 'info', href: '/dashboard/sales/contracts?status=APPROVED' },
+              { id: 'printed', label: 'چاپ شده', value: count(stats.contracts.printed), icon: FaPrint, tone: 'purple', href: '/dashboard/sales/contracts?status=PRINTED' },
+              { id: 'lost', label: 'لغو یا منقضی', value: count(stats.contracts.cancelled + stats.contracts.expired), icon: FaTimes, tone: 'danger', href: '/dashboard/sales/contracts?status=CANCELLED%2CEXPIRED' },
+            ]}
+          />
+        </section>
+
+        <section className="space-y-3" aria-labelledby="realized-sales-title">
+          <h2 id="realized-sales-title" className="text-lg font-black text-[var(--sds-text-primary)]">فروش قطعی</h2>
+          <ErpNeumorphicMetricGrid
+            label="شاخص‌های فروش قطعی از ابتدا تا امروز"
+            columns={3}
+            mobileColumns={1}
+            items={[
+              { id: 'realized-total', label: 'فروش قطعی خالص', value: amount(stats.realizedSales.total), hint: 'از ابتدا تا امروز', icon: FaChartLine, tone: 'primary', href: '/dashboard/sales/reports?period=all' },
+              { id: 'realized-average', label: 'میانگین قرارداد قطعی', value: stats.realizedSales.average == null ? '—' : amount(stats.realizedSales.average), icon: FaFileContract, tone: 'warning', href: '/dashboard/sales/reports?period=all' },
+              { id: 'success-rate', label: 'نرخ موفقیت', value: stats.realizedSales.successRate == null ? '—' : `${count(stats.realizedSales.successRate)}٪`, icon: FaCheck, tone: 'success', href: '/dashboard/sales/reports?period=all' },
+            ]}
+          />
+        </section>
+      </div>
+
+      <ErpNeumorphicActionGrid
+        title="عملیات سریع"
+        items={[
+          { id: 'new-contract', title: 'قرارداد جدید', href: '/dashboard/sales/contracts/create', icon: FaPlus },
+          { id: 'new-customer', title: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaUsers },
+          { id: 'reports', title: 'گزارش فروش', href: '/dashboard/sales/reports', icon: FaChartLine },
+        ]}
+      />
+
+      <section className="space-y-3" aria-labelledby="recent-contracts-title">
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="recent-contracts-title" className="text-lg font-black text-[var(--sds-text-primary)]">قراردادهای اخیر</h2>
+          <ErpButton label="مشاهده همه" href="/dashboard/sales/contracts" tone="neutral" variant="ghost" />
+        </div>
+        {stats.recentContracts.length === 0 ? (
+          <ErpNeumorphicCard className="p-5 text-center text-sm text-[var(--sds-text-muted)]">هنوز قراردادی ثبت نشده است</ErpNeumorphicCard>
+        ) : (
+          <ErpNeumorphicCard className="overflow-hidden">
+            <div className="divide-y divide-[var(--sds-border-subtle)]">
+              {stats.recentContracts.map((contract) => {
+                const Icon = statusIcon(contract.status);
+                return (
+                  <Link
+                    key={contract.id}
+                    href={`/dashboard/sales/contracts/${contract.id}`}
+                    className="sds-neumorphic-interactive flex min-h-16 items-center justify-between gap-3 px-4 py-3 outline-none"
+                  >
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className={`sds-neumorphic-icon sds-tone-${statusTone[contract.status] || 'neutral'} sds-tone-surface inline-flex h-10 w-10 shrink-0 items-center justify-center`}>
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <strong className="block truncate text-sm text-[var(--sds-text-primary)]">{contract.titlePersian || contract.contractNumber}</strong>
+                        <span className="mt-0.5 block truncate text-xs text-[var(--sds-text-muted)]">
+                          {contract.customer.companyName || `${contract.customer.firstName} ${contract.customer.lastName}`.trim()} · {PersianCalendar.formatForDisplay(contract.createdAt)}
+                        </span>
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-left">
+                      <strong className="block text-sm text-[var(--sds-text-primary)]">{contract.totalAmount == null ? '—' : amount(contract.totalAmount)}</strong>
+                      <ErpBadge tone={statusTone[contract.status] || 'neutral'}>{CONTRACT_STATUS_LABELS[contract.status] || contract.status}</ErpBadge>
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </ErpNeumorphicCard>
+        )}
+      </section>
+
+      <section className="space-y-3" aria-labelledby="workspaces-title">
+        <h2 id="workspaces-title" className="text-lg font-black text-[var(--sds-text-primary)]">فضاهای کاری</h2>
+        <WorkspaceSwitcher variant="grid" compact />
+      </section>
+
+      {currentUser?.role === 'ADMIN' && (
+        <ErpNeumorphicActionGrid
+          title="مدیریت سیستم"
+          items={[
+            { id: 'users', title: 'کاربران', href: '/dashboard/users', icon: FaUserCog },
+            { id: 'personnel', title: 'پرسنل', href: '/dashboard/hr/personnel', icon: FaUsers },
+            { id: 'permissions', title: 'دسترسی‌ها', href: '/dashboard/admin/permissions', icon: FaShieldAlt },
+            { id: 'departments', title: 'بخش‌ها', href: '/dashboard/departments', icon: FaBuilding },
+            { id: 'settings', title: 'تنظیمات', href: '/dashboard/admin/settings', icon: FaCog },
+            { id: 'discount-settings', title: 'تخفیف قرارداد', href: '/dashboard/admin/discount-settings', icon: FaPercent },
+            { id: 'calendar', title: 'تقویم سالیانه', href: '/dashboard/admin/sabalan-calendar', icon: FaCalendarAlt },
+            { id: 'security', title: 'امنیت سیستم', href: '/dashboard/admin/security', icon: FaUserShield },
+            { id: 'management-reports', title: 'گزارش‌های مدیریتی', href: '/dashboard/admin/reports', icon: FaChartLine },
+            { id: 'recovery', title: 'پشتیبان‌گیری و بازیابی', href: '/dashboard/admin/system-recovery', icon: FaDatabase },
+          ]}
+        />
+      )}
+    </main>
   );
 }

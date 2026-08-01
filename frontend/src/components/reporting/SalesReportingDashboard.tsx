@@ -2,6 +2,7 @@
 import { ErpInput, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import moment from 'moment-jalaali';
 import {
   FaBoxes, FaChartLine, FaDownload, FaFileContract, FaFilePdf, FaFilter,
@@ -21,7 +22,7 @@ type ExportConfig = {
 
 const rangeOptions = [
   ['today', 'امروز'], ['yesterday', 'دیروز'], ['week', '۷ روز اخیر'], ['month', 'ماه جاری'],
-  ['quarter', 'فصل جاری'], ['year', 'سال جاری'], ['last12', '۱۲ ماه اخیر'], ['custom', 'بازه سفارشی']
+  ['quarter', 'فصل جاری'], ['year', 'سال جاری'], ['last12', '۱۲ ماه اخیر'], ['all', 'از ابتدا تا امروز'], ['custom', 'بازه سفارشی']
 ] as const;
 
 const sectionOptions = [
@@ -58,6 +59,7 @@ const contractsForTrendPoint = (contracts: any[], row: any) => {
 };
 
 const resolveRange = (range: string, customFrom: string, customTo: string) => {
+  if (range === 'all') return { period: range };
   const now = moment();
   let from = moment().startOf('jMonth');
   let to = moment().endOf('day');
@@ -113,11 +115,13 @@ function Drilldown({ title, description, rows, onClose }: { title: string; descr
 }
 
 export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mode }) {
+  const searchParams = useSearchParams();
+  const requestedRange = searchParams.get('period');
   const storageKey = `sabalan-report-filters-${mode}`;
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [range, setRange] = useState('month');
+  const [range, setRange] = useState(rangeOptions.some(([id]) => id === requestedRange) ? requestedRange! : 'month');
   const [customFrom, setCustomFrom] = useState(PersianCalendar.now('jYYYY/jMM/jDD'));
   const [customTo, setCustomTo] = useState(PersianCalendar.now('jYYYY/jMM/jDD'));
   const [departmentId, setDepartmentId] = useState('');
@@ -136,8 +140,8 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
   });
 
   useEffect(() => {
-    try { const saved = JSON.parse(localStorage.getItem(storageKey) || '{}'); if (saved.range) setRange(saved.range); if (saved.customFrom) setCustomFrom(saved.customFrom); if (saved.customTo) setCustomTo(saved.customTo); if (saved.departmentId) setDepartmentId(saved.departmentId); if (saved.sellerId) setSellerId(saved.sellerId); } catch {}
-  }, [storageKey]);
+    try { const saved = JSON.parse(localStorage.getItem(storageKey) || '{}'); if (!requestedRange && saved.range) setRange(saved.range); if (saved.customFrom) setCustomFrom(saved.customFrom); if (saved.customTo) setCustomTo(saved.customTo); if (saved.departmentId) setDepartmentId(saved.departmentId); if (saved.sellerId) setSellerId(saved.sellerId); } catch {}
+  }, [requestedRange, storageKey]);
 
   const filters = useMemo(() => ({ ...resolveRange(range, customFrom, customTo), ...(departmentId ? { departmentId } : {}), ...(sellerId ? { sellerId } : {}) }), [range, customFrom, customTo, departmentId, sellerId]);
 
@@ -203,7 +207,7 @@ export default function SalesReportingDashboard({ mode = 'sales' }: { mode?: Mod
         {activeTab === 'overview' && <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Metric label="فروش قطعی ناخالص" value={money(report.cards.grossRealized)} hint="رویدادهای تحقق‌یافته در بازه" />
           <Metric label="تعدیلات فروش قطعی" value={money(report.cards.adjustments)} hint="اصلاح یا لغو مؤثر در همین بازه" tone="purple" />
-          <Metric label="فروش قطعی خالص" value={money(report.cards.netRealized)} hint={`مقایسه با ${report.period.previousLabel}`} tone="blue" />
+          <Metric label="فروش قطعی خالص" value={money(report.cards.netRealized)} hint={report.period.previousLabel ? `مقایسه با ${report.period.previousLabel}` : undefined} tone="blue" />
           <Metric label="پایپ‌لاین" value={money(report.cards.pipelineValue)} hint={`${count(report.cards.pipelineCount)} قرارداد باز`} tone="amber" />
           <Metric label="از دست رفته" value={money(report.cards.lostValue)} hint={`${count(report.cards.lostCount)} قرارداد لغو یا منقضی`} tone="red" />
           <Metric label="قرارداد قطعی" value={count(report.cards.realizedCount)} hint="امضا یا چاپ تجاری" />

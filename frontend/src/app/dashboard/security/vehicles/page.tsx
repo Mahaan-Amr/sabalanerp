@@ -334,7 +334,7 @@ export default function SecurityVehiclesPage() {
   };
 
   return (
-    <ErpWorkspacePage title="تردد خودروها" primaryAction={{ label: 'ثبت راننده و خودرو', icon: FaPlus, onClick: () => setActiveSection('registry'), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData }]}>
+    <ErpWorkspacePage className="guard-workspace" title="تردد خودروها" primaryAction={{ label: 'ثبت راننده و خودرو', icon: FaPlus, onClick: () => setActiveSection('registry'), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData }]}>
       {loading && !pairs.length && !movements.length ? <ErpSkeleton lines={6} /> : <>
       {message && <ErpInlineState kind="success" title={message} />}
       {error && <ErpInlineState kind={pairs.length || movements.length ? 'stale' : 'error'} title={error} action={{ label: 'تلاش مجدد', onClick: loadData }} />}

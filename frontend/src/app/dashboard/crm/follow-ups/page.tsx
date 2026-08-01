@@ -63,7 +63,6 @@ export default function FollowUpsPage() {
     <ErpListPage
       title="گزارش‌های پیگیری"
       eyebrow="CRM"
-      description="تاریخچه پیگیری‌های مشتریان و پروژه‌های احتمالی."
       actions={[{ label: 'ثبت گزارش', href: '/dashboard/crm/follow-ups/create', icon: FaPlus, tone: 'primary', variant: 'solid' }]}
       rows={rows}
       rowKey={(row) => row.id}

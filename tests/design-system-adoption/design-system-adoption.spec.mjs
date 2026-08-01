@@ -298,6 +298,48 @@ test('check discovers changed adoption files from git when files are not supplie
   }
 });
 
+test('changed-file checks stay scoped to frontend adoption sources', () => {
+  const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'sabalan-design-system-scope-'));
+  const pagePath = 'frontend/src/app/example/page.tsx';
+  const baselinePath = 'docs/design-system/adoption-baseline.json';
+
+  try {
+    writeFixture(
+      fixtureRoot,
+      pagePath,
+      'export default function ExamplePage() { return <main>نمونه</main>; }\n'
+    );
+    writeManifestFixture(fixtureRoot, {
+      rules: [
+        {
+          pattern: 'frontend/src/app/**/page.tsx',
+          status: 'legacy',
+          acceptanceStatus: 'not-started',
+          reason: 'Unmigrated routes remain supported.'
+        }
+      ]
+    });
+    assert.equal(runGit(fixtureRoot, 'init').status, 0);
+    assert.equal(runGit(fixtureRoot, 'config', 'user.name', 'Design System Test').status, 0);
+    assert.equal(runGit(fixtureRoot, 'config', 'user.email', 'design-system@example.test').status, 0);
+    assert.equal(runCli(fixtureRoot, 'baseline', '--output', baselinePath).status, 0);
+    assert.equal(runGit(fixtureRoot, 'add', '.').status, 0);
+    assert.equal(runGit(fixtureRoot, 'commit', '-m', 'baseline').status, 0);
+
+    writeFixture(
+      fixtureRoot,
+      'backend/src/report.ts',
+      'export const reportStyles = "background:#dc2626;color:#ffffff";\n'
+    );
+
+    const changed = runCli(fixtureRoot, 'check', '--baseline', baselinePath, '--changed');
+    assert.equal(changed.status, 0, changed.stderr);
+    assert.match(changed.stdout, /No new Sabalan Design System adoption violations/);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test('exceptions permit only an accountable signature and bounded allowance', () => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'sabalan-design-system-exception-'));
   const pagePath = 'frontend/src/app/example/page.tsx';

@@ -7,6 +7,7 @@ import {
   FaClock,
   FaFileAlt,
   FaPlane,
+  FaRedo,
   FaShieldAlt,
   FaTruck,
   FaUserClock,
@@ -17,6 +18,7 @@ import {
   ErpCurrentShiftPanel,
   ErpDashboardSkeleton,
   ErpInlineError,
+  ErpInlineState,
   ErpWorkspacePage,
   ErpQuickAccessGrid,
   ErpShiftTimeline,
@@ -44,6 +46,7 @@ interface AttendanceRow {
 
 interface DailyAttendance {
   attendanceSummary: AttendanceRow[];
+  stats?: { absent: number; late: number; mission: number; leave: number };
 }
 
 interface CurrentShiftAwareness {
@@ -86,49 +89,18 @@ export default function SecurityDashboardPage() {
   const { hasPermission, loading: permissionsLoading } = useWorkspace();
   const today = PersianCalendar.now();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [statsLoading, setStatsLoading] = useState(true);
-  const [statsError, setStatsError] = useState('');
   const [attendance, setAttendance] = useState<DailyAttendance | null>(null);
-  const [attendanceLoading, setAttendanceLoading] = useState(true);
-  const [attendanceError, setAttendanceError] = useState('');
   const [shiftAwareness, setShiftAwareness] = useState<CurrentShiftAwareness | null>(null);
-  const [shiftLoading, setShiftLoading] = useState(true);
   const [shiftRefreshing, setShiftRefreshing] = useState(false);
   const [shiftError, setShiftError] = useState('');
   const [shiftUpdatedAt, setShiftUpdatedAt] = useState<Date | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [dashboardError, setDashboardError] = useState('');
 
   const securityAdmin = hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN);
-  const showShiftShell = securityAdmin || Boolean(stats?.shiftAwarenessEligible);
-
-  const loadStats = useCallback(async () => {
-    setStatsLoading(true);
-    setStatsError('');
-    try {
-      const response = await securityAPI.getDashboardStats();
-      if (response.data.success) setStats(response.data.data);
-    } catch (error: any) {
-      setStatsError(error.response?.data?.error || 'دریافت وضعیت امروز ناموفق بود.');
-    } finally {
-      setStatsLoading(false);
-    }
-  }, []);
-
-  const loadAttendance = useCallback(async () => {
-    setAttendanceLoading(true);
-    setAttendanceError('');
-    try {
-      const response = await securityAPI.getDailyAttendance(PersianCalendar.toGregorianDateOnly(today));
-      if (response.data.success) setAttendance(response.data.data);
-    } catch (error: any) {
-      setAttendanceError(error.response?.data?.error || 'دریافت افراد نیازمند پیگیری ناموفق بود.');
-    } finally {
-      setAttendanceLoading(false);
-    }
-  }, [today]);
-
   const loadCurrentShift = useCallback(async ({ silent = false } = {}) => {
     if (silent) setShiftRefreshing(true);
-    else setShiftLoading(true);
     try {
       const response = await securityAPI.getDashboardCurrentShift();
       if (response.data.success) {
@@ -139,16 +111,48 @@ export default function SecurityDashboardPage() {
     } catch (error: any) {
       setShiftError(error.response?.data?.error || 'دریافت وضعیت شیفت جاری ناموفق بود.');
     } finally {
-      setShiftLoading(false);
       setShiftRefreshing(false);
     }
   }, []);
 
+  const loadDashboard = useCallback(async ({ refresh = false } = {}) => {
+    if (refresh) setRefreshing(true);
+    else setLoading(true);
+
+    const results = await Promise.allSettled([
+      securityAPI.getDashboardStats(),
+      securityAPI.getDailyAttendance(PersianCalendar.toGregorianDateOnly(today)),
+      securityAPI.getDashboardCurrentShift(),
+    ]);
+    const failures: string[] = [];
+    const [statsResult, attendanceResult, shiftResult] = results;
+
+    if (statsResult.status === 'fulfilled' && statsResult.value.data.success) {
+      setStats(statsResult.value.data.data);
+    } else {
+      failures.push('وضعیت امروز');
+    }
+    if (attendanceResult.status === 'fulfilled' && attendanceResult.value.data.success) {
+      setAttendance(attendanceResult.value.data.data);
+    } else {
+      failures.push('حضور و غیاب');
+    }
+    if (shiftResult.status === 'fulfilled' && shiftResult.value.data.success) {
+      setShiftAwareness(shiftResult.value.data.data);
+      setShiftUpdatedAt(new Date());
+      setShiftError('');
+    } else {
+      failures.push('شیفت جاری');
+    }
+
+    setDashboardError(failures.length ? `به‌روزرسانی ${failures.join('، ')} ناموفق بود.` : '');
+    setLoading(false);
+    setRefreshing(false);
+  }, [today]);
+
   useEffect(() => {
-    loadStats();
-    loadAttendance();
-    loadCurrentShift();
-  }, [loadAttendance, loadCurrentShift, loadStats]);
+    loadDashboard();
+  }, [loadDashboard]);
 
   useEffect(() => {
     if (!shiftAwareness?.authorized) return;
@@ -157,10 +161,10 @@ export default function SecurityDashboardPage() {
   }, [loadCurrentShift, shiftAwareness?.authorized]);
 
   const statusItems = useMemo(() => {
-    const counts = stats?.todayStats || { absent: 0, late: 0, mission: 0, leave: 0 };
+    const counts = attendance?.stats || stats?.todayStats || { absent: 0, late: 0, mission: 0, leave: 0 };
     const icons = { absent: FaUserTimes, late: FaUserClock, mission: FaPlane, leave: FaCalendarDay };
     return buildTodayStatusItems(counts, today).map((item) => ({ ...item, icon: icons[item.id] }));
-  }, [stats, today]);
+  }, [attendance?.stats, stats?.todayStats, today]);
 
   const attention = useMemo(() => getNeedsAttention(attendance?.attendanceSummary || []), [attendance]);
   const absentHref = statusItems.find((item) => item.id === 'absent')?.href || '/dashboard/security/attendance';
@@ -173,6 +177,7 @@ export default function SecurityDashboardPage() {
   }, [securityAdmin, shiftAwareness?.access, shiftAwareness?.overview?.state]);
 
   const overview = shiftAwareness?.overview;
+  const hasUsableData = Boolean(stats || attendance || shiftAwareness);
   const coverageLabel = overview?.coverageKind === 'REPLACEMENT'
     ? 'جانشین شیفت'
     : overview?.coverageKind === 'TEMPORARY'
@@ -180,9 +185,18 @@ export default function SecurityDashboardPage() {
       : null;
 
   return (
-    <ErpWorkspacePage title="گارد" context={PersianCalendar.formatForDisplay(today)}>
-      {!permissionsLoading && showShiftShell && shiftLoading && !shiftAwareness && <ErpDashboardSkeleton variant="panel" />}
-      {!permissionsLoading && showShiftShell && shiftError && !shiftAwareness && <ErpInlineError message={shiftError} onRetry={() => loadCurrentShift()} />}
+    <ErpWorkspacePage
+      className="guard-workspace"
+      title="گارد"
+      context={PersianCalendar.formatForDisplay(today)}
+      primaryAction={{ label: 'به‌روزرسانی', icon: FaRedo, onClick: () => loadDashboard({ refresh: true }), disabled: refreshing, variant: 'soft', tone: 'neutral' }}
+    >
+      {loading && !hasUsableData ? <ErpDashboardSkeleton variant="panel" /> : dashboardError && !hasUsableData ? (
+        <ErpInlineError message={dashboardError} onRetry={() => loadDashboard()} />
+      ) : dashboardError ? (
+        <ErpInlineState kind="stale" title={`${dashboardError} آخرین اطلاعات موفق نمایش داده می‌شود.`} action={{ label: 'تلاش مجدد', onClick: () => loadDashboard({ refresh: true }) }} />
+      ) : null}
+
       {shiftAwareness?.authorized && overview && (
         <ErpCurrentShiftPanel
           state={overview.state}
@@ -196,21 +210,14 @@ export default function SecurityDashboardPage() {
           updatedLabel={shiftUpdatedAt ? PersianCalendar.toPersian(shiftUpdatedAt, 'HH:mm:ss') : null}
           refreshing={shiftRefreshing}
           refreshFailed={Boolean(shiftError)}
-          onRefresh={() => loadCurrentShift({ silent: true })}
         />
       )}
 
-      {statsLoading && !stats ? <ErpDashboardSkeleton variant="summary" /> : statsError && !stats ? (
-        <ErpInlineError message={statsError} onRetry={loadStats} />
-      ) : (
-        <ErpStatusSummary title="وضعیت امروز" dateLabel={PersianCalendar.formatForDisplay(today)} items={statusItems} />
+      {!loading && hasUsableData && (
+        <ErpStatusSummary title="وضعیت امروز" items={statusItems} />
       )}
 
-      {permissionsLoading ? <ErpDashboardSkeleton variant="summary" /> : <ErpQuickAccessGrid title="دسترسی سریع" items={quickAccessItems} />}
-
-      {attendanceLoading && !attendance ? <ErpDashboardSkeleton variant="list" /> : attendanceError && !attendance ? (
-        <ErpInlineError message={attendanceError} onRetry={loadAttendance} />
-      ) : (
+      {!loading && hasUsableData && (
         <ErpAttentionList
           title="نیازمند پیگیری"
           groups={[
@@ -241,6 +248,8 @@ export default function SecurityDashboardPage() {
           ]}
         />
       )}
+
+      {permissionsLoading ? <ErpDashboardSkeleton variant="summary" /> : <ErpQuickAccessGrid title="دسترسی سریع" items={quickAccessItems} />}
 
       {shiftAwareness?.authorized && overview?.state === 'ACTIVE' && (
         <ErpShiftTimeline

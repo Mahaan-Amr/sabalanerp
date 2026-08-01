@@ -26,6 +26,7 @@ import { getNextContractNumberPreview } from '../services/contractNumberService'
 import { contractConfirmationService } from '../services/contractConfirmationService';
 import { buildAccountingSummaryForContracts } from '../services/accountingService';
 import { getRequestEvidence } from '../utils/requestEvidence';
+import { parseContractStatuses } from '../services/contractListQuery';
 import {
   buildSalesContractPdfDownloadName,
   buildSalesContractPdfFingerprint,
@@ -512,7 +513,7 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     const requestedLimit = parseInt(req.query.limit as string) || 10;
     const limit = Math.min(Math.max(requestedLimit, 1), 100);
     const skip = (page - 1) * limit;
-    const status = req.query.status as string;
+    const statuses = parseContractStatuses(req.query.status);
     const departmentId = req.query.departmentId as string;
     const search = String(req.query.search || '').trim();
 
@@ -521,14 +522,14 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     
     if (req.user.role === 'ADMIN') {
       // Admins can see all contracts
-      if (status) whereClause.status = status;
+      if (statuses.length) whereClause.status = { in: statuses };
       if (departmentId) whereClause.departmentId = departmentId;
     } else if (req.user.departmentId) {
       // Regular users can only see contracts from their department
       whereClause.departmentId = req.user.departmentId;
-      if (status) whereClause.status = status;
-    } else if (status) {
-      whereClause.status = status;
+      if (statuses.length) whereClause.status = { in: statuses };
+    } else if (statuses.length) {
+      whereClause.status = { in: statuses };
     }
 
     if (search) {

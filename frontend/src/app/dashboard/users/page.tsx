@@ -414,7 +414,6 @@ export default function UsersManagementPage() {
       <ErpListPage
         eyebrow="مدیریت سیستم"
         title="مدیریت کاربران"
-        description="مدیریت کاربران، نقش‌ها، وضعیت حساب و دسترسی‌های موثر در فضاهای کاری ERP."
         metrics={metrics}
         actions={[
           { label: 'کاربر جدید', href: '/dashboard/users/create', icon: FaPlus, tone: 'primary', variant: 'solid' },

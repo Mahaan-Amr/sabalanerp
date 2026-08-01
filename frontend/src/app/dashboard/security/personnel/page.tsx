@@ -98,7 +98,7 @@ export default function PersonnelPage() {
   };
 
   return (
-    <ErpWorkspacePage title="کارکنان گارد" primaryAction={{ label: 'افزودن نیرو', icon: FaPlus, onClick: () => setShowAssignForm(true), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load }]}>
+    <ErpWorkspacePage className="guard-workspace" title="کارکنان گارد" primaryAction={{ label: 'افزودن نیرو', icon: FaPlus, onClick: () => setShowAssignForm(true), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load }]}>
       {loading && personnel.length === 0 ? <ErpSkeleton lines={6} /> : error && personnel.length === 0 ? <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: load }} /> : <>
         {error && <ErpInlineState kind="stale" title="آخرین به‌روزرسانی ناموفق بود؛ فهرست قبلی نمایش داده می‌شود." action={{ label: 'تلاش مجدد', onClick: load }} />}
         <ErpSection>
@@ -110,7 +110,6 @@ export default function PersonnelPage() {
         </ErpSection>
 
         <ErpSection title="فهرست کارکنان">
-          <p className="mb-3 text-xs font-semibold sds-text-muted">{rows.length.toLocaleString('fa-IR')} نتیجه</p>
           {rows.length === 0 ? <ErpEmptyState icon={FaShieldAlt} title="نیرویی با این فیلترها پیدا نشد" action={{ label: 'پاک‌کردن فیلترها', onClick: () => { setSearch(''); setShiftFilter(''); setStateFilter('all'); } }} /> : <>
             <div className="divide-y divide-[var(--sds-border-subtle)] overflow-hidden rounded-xl border border-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)] dark:border-[var(--sds-border-subtle)] lg:hidden">
               {rows.map((person) => <article key={person.id} className="bg-[var(--sds-surface-panel)] p-4 dark:bg-[var(--sds-surface-panel)]"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate font-bold sds-text-primary ">{person.user.firstName} {person.user.lastName}</h2><p className="mt-1 truncate text-xs sds-text-muted">{person.position} · {person.shift.namePersian}</p></div><ErpStatus label={person.isActive ? 'فعال' : 'غیرفعال'} tone={person.isActive ? 'success' : 'neutral'} /></div><div className="mt-3 flex gap-2"><ErpButton label="جزئیات" onClick={() => setDetailPerson(person)} tone="neutral" variant="ghost" /><ErpButton label={person.isActive ? 'غیرفعال‌کردن' : 'فعال‌کردن'} onClick={() => toggleActive(person)} tone={person.isActive ? 'neutral' : 'success'} variant="soft" /></div></article>)}

@@ -432,7 +432,6 @@ const ServicesPage: React.FC = () => {
     <ErpPage
       eyebrow="انبار"
       title="مدیریت خدمات"
-      description="مدیریت خدمات، ابزارها، طول پله، نوع لایه و فرآوری سنگ برای محاسبات قرارداد."
       backHref="/dashboard/inventory"
       metrics={[
         { label: 'خدمات', value: services.length.toLocaleString('fa-IR'), icon: FaTools, tone: 'primary' },
@@ -441,11 +440,11 @@ const ServicesPage: React.FC = () => {
         { label: 'فرآوری سنگ', value: stoneFinishings.length.toLocaleString('fa-IR'), icon: FaPaintBrush, tone: 'neutral' },
       ]}
     >
-      <ErpSection title="بخش خدمات" description="یک بخش را انتخاب کنید و فهرست همان بخش را مدیریت کنید.">
+      <ErpSection title="بخش خدمات">
         <ErpQuickFilters value={activeTab} onChange={(value) => setActiveTab(value as ActiveTab)} items={tabOptions} />
       </ErpSection>
 
-      <ErpSection title={`فیلتر ${tabLabels[activeTab]}`} description="جستجو و ایجاد رکورد جدید برای بخش انتخاب‌شده.">
+      <ErpSection title={`فیلتر ${tabLabels[activeTab]}`}>
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="min-w-0 flex-1">
             <ErpInput
@@ -1192,4 +1191,3 @@ const ServicesPage: React.FC = () => {
 };
 
 export default ServicesPage;
-

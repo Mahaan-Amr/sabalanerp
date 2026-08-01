@@ -158,7 +158,6 @@ export default function ProductsPage() {
       <ErpListPage
         eyebrow="فروش"
         title="کاتالوگ محصولات"
-        description="مدیریت محصولات قابل استفاده در قراردادها با فیلترهای عملیاتی، وضعیت موجودی و خروجی اکسل."
         actions={[
           ...(canImportProducts(currentUser) || canExportProducts(currentUser)
             ? [{ label: 'وارد/صادر کردن', icon: FaFileExcel, tone: 'neutral' as const, variant: 'outline' as const, onClick: () => setShowImportExportModal(true) }]

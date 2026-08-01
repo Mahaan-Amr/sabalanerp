@@ -112,9 +112,11 @@ export interface ErpNeumorphicActionItem {
 export function ErpNeumorphicActionGrid({
   title,
   items,
+  desktopColumns = 4,
 }: {
   title: string;
   items: ErpNeumorphicActionItem[];
+  desktopColumns?: 4 | 5;
 }) {
   const titleId = useId();
   return (
@@ -125,7 +127,12 @@ export function ErpNeumorphicActionGrid({
       >
         {title}
       </h2>
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 xl:gap-4">
+      <div
+        className={cx(
+          "grid grid-cols-2 gap-3 xl:gap-4",
+          desktopColumns === 5 ? "xl:grid-cols-5" : "xl:grid-cols-4",
+        )}
+      >
         {items.map((item) => {
           const Icon = item.icon;
           return (
@@ -312,26 +319,30 @@ export interface ErpMobileNavigationItem {
   id: string;
   label: string;
   href: string;
+  activePath?: string;
   icon: IconType;
+  exact?: boolean;
 }
 
 export function ErpMobileBottomNavigation({
   items,
+  ariaLabel,
 }: {
   items: ErpMobileNavigationItem[];
+  ariaLabel: string;
 }) {
   const pathname = usePathname();
   return (
     <nav
-      aria-label="ناوبری منابع انسانی"
+      aria-label={ariaLabel}
       className="sds-neumorphic-bottom-nav fixed inset-x-3 bottom-[max(.75rem,env(safe-area-inset-bottom))] z-30 grid grid-cols-5 p-1.5 lg:hidden"
     >
       {items.map((item) => {
         const Icon = item.icon;
-        const active =
-          item.href === "/dashboard/hr"
-            ? pathname === item.href
-            : pathname.startsWith(item.href);
+        const activePath = item.activePath ?? item.href;
+        const active = item.exact
+          ? pathname === activePath
+          : pathname.startsWith(activePath);
         return (
           <Link
             key={item.id}

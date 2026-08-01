@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   FaHome,
@@ -22,6 +22,7 @@ import {
   FaHistory,
   FaUserPlus,
   FaClipboardList,
+  FaBox,
 } from "react-icons/fa";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
@@ -158,8 +159,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [selectedSensitiveItemIds, setSelectedSensitiveItemIds] = useState<string[]>([]);
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { currentWorkspace, accessibleWorkspaces } = useWorkspace();
   const isHrWorkspace = pathname.startsWith("/dashboard/hr");
+  const isSalesWorkspace = pathname.startsWith("/dashboard/sales");
+  const isSalesLanding = pathname === "/dashboard/sales";
+  const isSalesCustomerIndex =
+    pathname === "/dashboard/crm/customers" &&
+    searchParams.get("workspace") === "sales";
+  const showsSalesMobileNavigation = isSalesWorkspace || isSalesCustomerIndex;
+  const isNeumorphicWorkspace = isHrWorkspace || isSalesLanding;
+  const hasMobileBottomNavigation = isHrWorkspace || showsSalesMobileNavigation;
   const isHrWorkspaceDetail = isHrWorkspace && pathname !== "/dashboard/hr";
   const hrMobileNavigation = [
     {
@@ -167,6 +177,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       label: "داشبورد",
       href: "/dashboard/hr",
       icon: FaChartLine,
+      exact: true,
     },
     {
       id: "structure",
@@ -191,6 +202,41 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       label: "تطبیق",
       href: "/dashboard/hr/migration",
       icon: FaClipboardList,
+    },
+  ];
+  const salesMobileNavigation = [
+    {
+      id: "dashboard",
+      label: "داشبورد",
+      href: "/dashboard/sales",
+      icon: FaHome,
+      exact: true,
+    },
+    {
+      id: "contracts",
+      label: "قراردادها",
+      href: "/dashboard/sales/contracts",
+      icon: FaFileContract,
+    },
+    {
+      id: "customers",
+      label: "مشتریان",
+      href: "/dashboard/crm/customers?workspace=sales",
+      activePath: "/dashboard/crm/customers",
+      exact: true,
+      icon: FaUsers,
+    },
+    {
+      id: "products",
+      label: "محصولات",
+      href: "/dashboard/sales/products",
+      icon: FaBox,
+    },
+    {
+      id: "reports",
+      label: "گزارش‌ها",
+      href: "/dashboard/sales/reports",
+      icon: FaChartLine,
     },
   ];
 
@@ -412,7 +458,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <div
-      className={`dashboard-shell min-h-screen bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)] ${isHrWorkspace ? "sds-neumorphic-scope" : ""}`}
+      className={`dashboard-shell min-h-screen overflow-x-hidden bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)] ${isNeumorphicWorkspace ? "sds-neumorphic-scope" : ""}`}
     >
       <SecurityNoticeHost />
       {/* Mobile Sidebar Overlay */}
@@ -433,7 +479,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       >
         <div
           data-dashboard-sidebar-surface
-          className="sds-dashboard-sidebar-surface flex min-h-full flex-col overflow-y-auto lg:m-3 lg:h-[calc(100%-1.5rem)] lg:min-h-0 lg:overflow-hidden"
+          className="sds-dashboard-sidebar-surface flex h-full min-h-0 flex-col overflow-hidden lg:m-3 lg:h-[calc(100%-1.5rem)]"
         >
           {/* Mobile drawer header. The company mark lives in the persistent site header. */}
           <div
@@ -458,7 +504,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p
-                    className={`truncate text-sm font-semibold ${isHrWorkspace ? "text-[var(--sds-text-primary)]" : "text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"}`}
+                    className="truncate text-sm font-semibold text-[var(--sds-text-primary)]"
                   >
                     {user.firstName} {user.lastName}
                   </p>
@@ -480,9 +526,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <WorkspaceSwitcher variant="dropdown" compact />
           </div>
 
-          <div className="sds-dashboard-rail flex min-h-0 flex-none flex-col lg:flex-1 lg:overflow-hidden">
+          <div className="sds-dashboard-rail flex min-h-0 flex-1 flex-col overflow-hidden">
             {/* Workspace Navigation */}
-            <div className="flex-none lg:flex-1 lg:overflow-hidden">
+            <div className="flex min-h-0 flex-1 overflow-hidden">
               <WorkspaceNavigation
                 collapsed={sidebarCollapsed}
                 onToggleCollapse={setSidebarCollapsed}
@@ -550,7 +596,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               </div>
               <div>
                 <h1
-                  className={`text-xl font-bold text-[var(--sds-text-primary)] sm:text-2xl ${isHrWorkspace ? "" : "dark:text-[var(--sds-text-inverse)]"}`}
+                  className="text-xl font-bold text-[var(--sds-text-primary)] sm:text-2xl"
                 >
                   {currentWorkspace
                     ? accessibleWorkspaces.find(
@@ -591,7 +637,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <main
           data-dashboard-main
           className={
-            isHrWorkspace ? "p-4 pb-28 sm:p-6 sm:pb-28 xl:p-8" : "p-4 sm:p-6"
+            isNeumorphicWorkspace
+              ? "p-4 pb-28 sm:p-6 sm:pb-28 xl:p-8"
+              : hasMobileBottomNavigation
+                ? "p-4 pb-28 sm:p-6 sm:pb-28 lg:pb-6"
+                : "p-4 sm:p-6"
           }
         >
           {sanitizedEnvironment && (
@@ -606,7 +656,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </main>
       </div>
       {isHrWorkspace && (
-        <ErpMobileBottomNavigation items={hrMobileNavigation} />
+        <ErpMobileBottomNavigation
+          items={hrMobileNavigation}
+          ariaLabel="ناوبری منابع انسانی"
+        />
+      )}
+      {showsSalesMobileNavigation && (
+        <ErpMobileBottomNavigation
+          items={salesMobileNavigation}
+          ariaLabel="ناوبری فروش"
+        />
       )}
       {profileDropdownOpen && createPortal(
         <div

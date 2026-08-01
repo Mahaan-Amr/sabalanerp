@@ -792,6 +792,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
     const itemKey = item.href;
     const isExpanded = expandedItems.includes(itemKey);
     const showChildren = hasChildren && isExpanded;
+    const labelClassName = `min-w-0 flex-1 truncate text-right font-bold ${collapsed ? "lg:sr-only" : ""}`;
 
     if (!item.show) return null;
 
@@ -823,7 +824,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             >
               <span className="flex min-w-0 items-center gap-3">
                 <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
-                <span className={collapsed ? "min-w-0 flex-1 truncate text-right font-bold lg:sr-only" : "min-w-0 flex-1 truncate text-right font-bold"}>{item.namePersian}</span>
+                <span className={labelClassName}>{item.namePersian}</span>
               </span>
               {!collapsed &&
                 (isExpanded ? (
@@ -841,7 +842,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
               className={`flex min-w-0 flex-1 items-center gap-3 ${collapsed ? "lg:justify-center" : ""}`}
             >
               <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
-              <span className={collapsed ? "min-w-0 flex-1 truncate text-right font-bold lg:sr-only" : "min-w-0 flex-1 truncate text-right font-bold"}>{item.namePersian}</span>
+              <span className={labelClassName}>{item.namePersian}</span>
             </Link>
           )}
         </div>
@@ -860,7 +861,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   const navigationItems = getNavigationItems();
 
   return (
-    <div className={`flex min-h-0 flex-col lg:h-full ${className}`}>
+    <div className={`flex h-full min-h-0 flex-col ${className}`}>
       {/* Collapse Toggle */}
       <div className="hidden flex-shrink-0 border-b border-[var(--sds-border-default)] p-3 lg:block">
         <ErpPressable
@@ -881,7 +882,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
       {/* Navigation Items */}
       <nav
         aria-label="ناوبری فضای کاری"
-        className="scrollbar-thin flex-none space-y-1 overflow-visible p-3 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:flex-1 lg:space-y-2 lg:overflow-y-auto lg:p-3"
+        className="scrollbar-thin flex-1 space-y-1 overflow-y-auto p-3 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:space-y-2 lg:p-3"
       >
         {navigationItems.map((item) => renderNavigationItem(item))}
       </nav>
@@ -895,7 +896,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
                 <FaShieldAlt className="h-4 w-4 text-[var(--sds-accent)]" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="truncate text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                <p className="truncate text-sm font-medium text-[var(--sds-text-primary)]">
                   {WORKSPACE_CONFIG[currentWorkspace].namePersian}
                 </p>
                 <p className="truncate text-xs text-[var(--sds-text-primary)] dark:text-[var(--sds-text-secondary)]">

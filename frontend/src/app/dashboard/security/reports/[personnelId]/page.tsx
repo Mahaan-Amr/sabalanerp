@@ -39,6 +39,7 @@ export default function SecurityPersonnelHistoryPage() {
 
   return (
     <ErpWorkspacePage
+      className="guard-workspace"
       title={data?.personnel?.name || 'تاریخچه شیفت‌ها'}
       context={data?.personnel?.shift ? `گروه ${data.personnel.shift}` : personnelId}
       backHref="/dashboard/security/reports"

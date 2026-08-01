@@ -210,7 +210,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         },
         {
           name: "Security",
-          namePersian: "امنیت",
+          namePersian: "گارد",
           href: "/dashboard/security",
           icon: FaShieldAlt,
           show: true,

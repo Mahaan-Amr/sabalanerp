@@ -39,6 +39,7 @@ export default function SecurityPlannedShiftDetailPage() {
 
   return (
     <ErpWorkspacePage
+      className="guard-workspace"
       title="جزئیات برنامه شیفت"
       context={slot ? `${dateTime(slot.startsAt)} تا ${dateTime(slot.endsAt)}` : slotId}
       backHref="/dashboard/security/shifts"

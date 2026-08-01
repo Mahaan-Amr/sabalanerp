@@ -371,10 +371,10 @@ export default function AttendancePage() {
   const activeFilterCount = Number(Boolean(departmentId)) + Number(statusFilter !== 'ALL') + Number(Boolean(conditionFilter));
 
   return (
-    <ErpWorkspacePage title="حضور و غیاب" context={PersianCalendar.formatForDisplay(selectedDate)} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: fetchAttendanceData, tone: 'neutral' }]}>
+    <ErpWorkspacePage className="guard-workspace" title="حضور و غیاب" context={PersianCalendar.formatForDisplay(selectedDate)} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: fetchAttendanceData, tone: 'neutral' }]}>
       {loading && attendanceRecords.length === 0 ? <ErpSkeleton lines={6} /> : error && attendanceRecords.length === 0 ? <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: fetchAttendanceData }} /> : <>
       {error && attendanceRecords.length > 0 && <ErpInlineState kind="stale" title="آخرین به‌روزرسانی ناموفق بود؛ اطلاعات قبلی نمایش داده می‌شود." action={{ label: 'تلاش مجدد', onClick: fetchAttendanceData }} />}
-      <div className="overflow-hidden rounded-2xl border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-panel)]">
+      <div className="sds-neumorphic-card overflow-hidden">
         <div className="grid grid-cols-2 divide-x divide-x-reverse divide-y divide-[var(--sds-border-subtle)] sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
           {[
             ['کل کارکنان', stats?.totalEmployees || 0, 'neutral'], ['حاضر', stats?.present || 0, 'success'], ['غایب', stats?.absent || 0, 'danger'], ['تأخیر', stats?.late || 0, 'warning'], ['مأموریت', stats?.mission || 0, 'info'], ['مرخصی', stats?.leave || 0, 'purple'],
@@ -407,7 +407,6 @@ export default function AttendancePage() {
       </ErpSection>
 
       <ErpSection title="کارکنان" actions={[]}>
-        <p className="mb-3 text-xs font-semibold sds-text-muted">{filteredRecords.length.toLocaleString('fa-IR')} نتیجه</p>
         {filteredRecords.length === 0 && rosterScopeEmpty ? (
           <ErpEmptyState
             icon={FaUsers}
@@ -418,13 +417,13 @@ export default function AttendancePage() {
           <ErpEmptyState icon={FaUsers} title="رکوردی برای نمایش وجود ندارد" description="فیلترها را تغییر دهید یا تاریخ دیگری انتخاب کنید." />
         ) : (
           <>
-            <div className="overflow-hidden rounded-lg border sds-divider lg:hidden">
+            <div className="grid gap-3 lg:hidden">
               {filteredRecords.map((record) => {
                 const checkingIn = actionLoadingId === `checkin-${record.employee.id}`;
                 const checkingOut = actionLoadingId === `checkout-${record.employee.id}`;
                 const expanded = expandedRecordId === record.id;
                 return (
-                  <div key={record.id} className="border-b border-[var(--sds-border-subtle)] bg-[var(--sds-surface-panel)] p-3 last:border-b-0">
+                  <article key={record.id} className="sds-neumorphic-card p-3">
                     <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] items-center gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold sds-text-primary">
@@ -458,7 +457,7 @@ export default function AttendancePage() {
                     {(checkingIn || checkingOut) && <p className="mt-2 text-xs font-semibold text-[var(--sds-accent)]">در حال ثبت...</p>}
                     {isExceptionStatus(record.status) && <p className="mt-2 text-xs sds-text-muted">استثنای تأییدشده با تردد واقعی هم‌زمان نمایش داده می‌شود.</p>}
                     {record.entryTime && !record.presencePending && <p className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[var(--sds-success)]"><FaCheckCircle /> آخرین بازه تکمیل شده</p>}
-                  </div>
+                  </article>
                 );
               })}
             </div>

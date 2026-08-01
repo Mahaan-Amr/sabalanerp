@@ -449,6 +449,7 @@ const checkFiles = ({ root, baseline, files, manifest }) => {
 
   for (const requestedFile of files) {
     const file = normalizePath(requestedFile);
+    if (!file.startsWith('frontend/src/')) continue;
     const absoluteFile = path.resolve(root, requestedFile);
     if (!absoluteFile.startsWith(`${root}${path.sep}`) || !fs.existsSync(absoluteFile)) continue;
     if (!ADOPTION_EXTENSIONS.has(path.extname(absoluteFile))) continue;

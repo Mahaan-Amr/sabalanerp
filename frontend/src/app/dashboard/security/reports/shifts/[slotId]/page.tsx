@@ -39,6 +39,7 @@ export default function SecurityShiftReportDetailPage() {
 
   return (
     <ErpWorkspacePage
+      className="guard-workspace"
       title="گزارش شیفت"
       context={report ? `${dateTime(report.startsAt)} تا ${dateTime(report.endsAt)}` : slotId}
       backHref="/dashboard/security/reports"

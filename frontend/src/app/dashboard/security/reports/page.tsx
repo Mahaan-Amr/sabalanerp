@@ -101,7 +101,7 @@ export default function ReportsPage() {
 
   const exportLabel = kind === 'shifts' ? `دریافت PDF ${selectedShiftIds.length.toLocaleString('fa-IR')} شیفت` : `دریافت PDF ${selectedShiftIds.length.toLocaleString('fa-IR')} شیفت برای ${selectedPersonnelIds.length ? selectedPersonnelIds.length.toLocaleString('fa-IR') : 'همه'} نفر`;
 
-  return <ErpWorkspacePage title="گزارش‌ها" secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadShifts }]}>
+  return <ErpWorkspacePage className="guard-workspace" title="گزارش‌ها" secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: loadShifts }]}>
     <ErpSegmentedControl value={kind} onChange={(value) => { setKind(value); setSelectedPersonnelIds([]); }} options={[{ value: 'shifts', label: 'گزارش شیفت‌ها', icon: FaClock }, { value: 'attendance', label: 'گزارش حضور و غیاب گارد', icon: FaUsers }]} />
     <ErpSection>
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]"><label className="relative"><span className="sr-only">جستجوی شیفت</span><FaSearch className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 sds-text-muted" /><ErpInput className={`${inputClass} pr-10`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="شناسه شیفت، نام نگهبان یا تاریخ شمسی" /></label><ErpSelect value={status} onChange={(event) => setStatus(event.target.value)} className={inputClass} aria-label="وضعیت شیفت"><option value="">همه وضعیت‌ها</option><option value="CLOSED">تکمیل‌شده</option><option value="FORCE_CLOSED">بسته‌شده توسط مدیر</option></ErpSelect><ErpButton label="بازه اختیاری" icon={FaFilter} variant={showAdvanced ? 'soft' : 'outline'} onClick={() => setShowAdvanced((value) => !value)} /></div>

@@ -310,7 +310,7 @@ export default function SecurityShiftsPage() {
   };
 
   return (
-    <ErpWorkspacePage title="شیفت‌ها" primaryAction={defaults ? { label: 'برنامه جدید', icon: FaCalendarAlt, onClick: () => setView('plans'), variant: 'solid' } : undefined} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load }]}>
+    <ErpWorkspacePage className="guard-workspace" title="شیفت‌ها" primaryAction={defaults ? { label: 'برنامه جدید', icon: FaCalendarAlt, onClick: () => setView('plans'), variant: 'solid' } : undefined} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load }]}>
       {loading && !slots.length && !plans.length ? <ErpSkeleton lines={6} /> : <>
       {message && <ErpInlineState kind="success" title={message} />}
       {error && <ErpInlineState kind={slots.length || plans.length ? 'stale' : 'error'} title={error} action={{ label: 'تلاش مجدد', onClick: load }} />}

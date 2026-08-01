@@ -14,6 +14,8 @@ import { addSecurityDays, parseSecurityBusinessDate, securityNowTime, securityPe
 import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay, scheduledStartHasPassed } from '../utils/personnelWorkSchedule';
 import { buildDashboardRecentReports, buildSecurityDashboardAwareness } from '../services/securityDashboardAwareness';
 import { buildCombinedSecurityShiftTimeline, validateShiftSessionCorrectionPolicy } from '../services/securityShiftSessionPolicy';
+import { summarizeSecurityAttendance } from '../services/securityAttendanceSummary';
+import { renderCompletedSecurityShiftPdfHtml } from '../services/securityCompletedShiftPdf';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -394,17 +396,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
     };
   });
 
-  const expectedRows = attendanceSummary.filter((record) => record.status !== AttendanceStatus.NON_WORKING_DAY);
-  const stats = {
-    totalEmployees: expectedRows.length,
-    present: attendanceSummary.filter((record) => record.status === AttendanceStatus.PRESENT).length,
-    absent: attendanceSummary.filter((record) => record.status === AttendanceStatus.ABSENT).length,
-    late: attendanceSummary.filter((record) => record.status === AttendanceStatus.LATE).length,
-    mission: attendanceSummary.filter((record) => record.approvedMissions.length > 0).length,
-    leave: attendanceSummary.filter((record) => record.approvedLeaves.length > 0).length,
-    exception: attendanceSummary.filter((record) => record.status === AttendanceStatus.ABSENT || record.status === AttendanceStatus.LATE).length,
-    signed: attendanceRecords.filter((record) => Boolean(record.digitalSignature)).length
-  };
+  const stats = summarizeSecurityAttendance(attendanceSummary, attendanceRecords);
 
   return { targetDate, nextDay, attendanceRecords, attendanceSummary, stats };
 };
@@ -3542,7 +3534,13 @@ router.post('/reports/completed-shifts.pdf', protect, securityAdmin, async (req:
     if (!shiftIds.length) return res.status(400).json({ success: false, error: 'حداقل یک شیفت را انتخاب کنید.' });
     const slots = await selectedCompletedSecurityShifts(shiftIds) as any[];
     if (slots.length !== shiftIds.length) return res.status(400).json({ success: false, error: 'یک یا چند شیفت انتخاب‌شده در دسترس نیست.' });
-    const html = `${securityPdfStyles()}<div class="sheet"><header class="header"><div><h1>گزارش شیفت‌ها</h1><div class="meta">${slots.length.toLocaleString('fa-IR')} شیفت انتخاب‌شده · زمان تولید: ${formatSecurityDateTime(new Date())}</div></div></header>${slots.map(renderDetailedSecurityShift).join('')}</div>`;
+    const html = renderCompletedSecurityShiftPdfHtml(slots, {
+      baseStyles: securityPdfStyles(),
+      resolveAttachmentDataUri: (attachment) => securityFileToDataUri(
+        path.join(shiftLogPhotoDir, String(attachment.storageName || '')),
+        String(attachment.mimeType || 'application/octet-stream'),
+      ),
+    });
     const pdfPath = await generatePdfFromHtml({ fileName: `security-shifts-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">گزارش شیفت‌ها · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
     return res.download(pdfPath, 'security-shifts.pdf', () => fs.unlink(pdfPath, () => undefined));
   } catch (error: any) { console.error('Export selected security shifts error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش شیفت‌ها ناموفق بود.' }); }

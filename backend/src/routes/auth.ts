@@ -102,7 +102,7 @@ router.post('/login', [
         resourceType: 'AuthSession',
         resourceId: authoritativeSession.session.id,
         referenceId: authoritativeSession.session.id,
-        actionUrl: '/dashboard/personal',
+        actionUrl: `/dashboard/personal/security?session=${encodeURIComponent(authoritativeSession.session.id)}`,
         payload: {
           browser: context.browser,
           operatingSystem: context.operatingSystem,

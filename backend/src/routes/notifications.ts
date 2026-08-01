@@ -15,6 +15,12 @@ import {
   type NotificationRecipientResolver,
   validateNotificationPolicyDraft,
 } from '../services/notificationPolicy';
+import {
+  notificationCategory,
+  notificationMatchesSearch,
+  type NotificationCategory,
+} from '../services/notificationInboxQuery';
+import { revokeSessions } from '../services/identitySessionService';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -44,20 +50,34 @@ type NotificationListItem = {
   referenceId: string | null;
   readAt: Date | null;
   createdAt: Date;
+  workspace: string | null;
+  category: NotificationCategory;
+  sessionId: string | null;
 };
 router.get('/', async (req: AuthRequest, res) => {
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+  const state = ['UNREAD', 'READ', 'IMPORTANT'].includes(String(req.query.state || '').toUpperCase())
+    ? String(req.query.state).toUpperCase()
+    : 'ALL';
+  const workspace = typeof req.query.workspace === 'string' ? req.query.workspace.trim() : '';
+  const category = typeof req.query.category === 'string' ? req.query.category.trim().toUpperCase() : '';
+  const search = typeof req.query.search === 'string' ? req.query.search.slice(0, 160) : '';
   let scanCursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
   const data: NotificationListItem[] = [];
-  let nextCursor: string | null = null;
-  let hasMore = false;
+  const requestedCount = limit + 1;
 
   // Authorization may remove records after the database page is read. Scan raw
   // pages until an authorized page is full so inaccessible rows cannot make
   // older, accessible notifications unreachable.
-  while (data.length < limit) {
+  while (data.length < requestedCount) {
     const rows = await prisma.notification.findMany({
-      where: { userId: req.user!.id },
+      where: {
+        userId: req.user!.id,
+        ...(state === 'UNREAD' ? { readAt: null } : {}),
+        ...(state === 'READ' ? { readAt: { not: null } } : {}),
+        ...(state === 'IMPORTANT' ? { priority: { in: ['HIGH', 'URGENT'] } } : {}),
+        ...(workspace ? { event: { is: { workspace } } } : {}),
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 101,
       ...(scanCursor ? { cursor: { id: scanCursor }, skip: 1 } : {}),
@@ -86,19 +106,28 @@ router.get('/', async (req: AuthRequest, res) => {
     for (let index = 0; index < candidates.length; index += 1) {
       const row = candidates[index];
       if (!authorizedIds.has(row.id)) continue;
+      const safeCategory = notificationCategory(row.type);
+      if (category && safeCategory !== category) continue;
+      if (!notificationMatchesSearch(row, search)) continue;
       const { event: _event, ...notification } = row;
-      data.push(notification);
-      if (data.length === limit) {
-        const rawRowsRemain = index < candidates.length - 1 || rows.length > candidates.length;
-        nextCursor = rawRowsRemain ? row.id : null;
-        hasMore = rawRowsRemain;
-        break;
-      }
+      data.push({
+        ...notification,
+        workspace: row.event?.workspace || null,
+        category: safeCategory,
+        sessionId: row.type === 'NEW_BROWSER_LOGIN'
+          ? (row.event?.resourceType === 'AuthSession' ? row.event.resourceId : null) || row.referenceId
+          : null,
+      });
+      if (data.length === requestedCount) break;
     }
-    if (data.length === limit) break;
+    if (data.length === requestedCount) break;
     if (rows.length <= candidates.length) break;
     scanCursor = candidates[candidates.length - 1].id;
   }
+
+  const hasMore = data.length > limit;
+  if (hasMore) data.pop();
+  const nextCursor = hasMore && data.length ? data[data.length - 1].id : null;
 
   res.json({
     success: true,
@@ -119,22 +148,121 @@ router.get('/unread-count', async (req: AuthRequest, res) => {
   res.json({ success: true, data: { count: authorizedRows.length } });
 });
 
+router.get('/metadata', async (req: AuthRequest, res) => {
+  const rows = await prisma.notification.findMany({
+    where: { userId: req.user!.id },
+    select: {
+      id: true,
+      type: true,
+      event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } },
+    },
+  });
+  const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows);
+  res.json({
+    success: true,
+    data: {
+      categories: [...new Set(authorizedRows.map((row) => notificationCategory(row.type)))].sort(),
+      workspaces: [...new Set(authorizedRows.map((row) => row.event?.workspace).filter((value): value is string => Boolean(value)))].sort(),
+    },
+  });
+});
+
 router.put('/read-all', async (req: AuthRequest, res) => {
+  const rows = await prisma.notification.findMany({
+    where: { userId: req.user!.id, readAt: null, type: { not: 'NEW_BROWSER_LOGIN' } },
+    select: { id: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
+  });
+  const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows);
   const result = await prisma.notification.updateMany({
-    where: { userId: req.user!.id, readAt: null },
+    where: { id: { in: authorizedRows.map((row) => row.id) } },
     data: { readAt: new Date() },
   });
   res.json({ success: true, data: { updated: result.count } });
 });
 
 router.put('/:id/read', async (req: AuthRequest, res) => {
-  const result = await prisma.notification.updateMany({
+  const notification = await prisma.notification.findFirst({
     where: { id: req.params.id, userId: req.user!.id },
+    select: { id: true, type: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
+  });
+  if (!notification) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
+  const [authorized] = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, [notification]);
+  if (!authorized) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
+  if (notification.type === 'NEW_BROWSER_LOGIN') {
+    return res.status(409).json({ success: false, error: 'این هشدار باید در بخش امنیت حساب تعیین تکلیف شود.' });
+  }
+  await prisma.notification.update({
+    where: { id: notification.id },
     data: { readAt: new Date() },
   });
-  if (!result.count) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
   res.json({ success: true });
 });
+
+router.delete('/:id/read', async (req: AuthRequest, res) => {
+  const notification = await prisma.notification.findFirst({
+    where: { id: req.params.id, userId: req.user!.id },
+    select: { id: true, type: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
+  });
+  if (!notification) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
+  const [authorized] = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, [notification]);
+  if (!authorized) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
+  if (notification.type === 'NEW_BROWSER_LOGIN') {
+    return res.status(409).json({ success: false, error: 'وضعیت هشدار امنیتی فقط با تعیین تکلیف ورود تغییر می‌کند.' });
+  }
+  await prisma.notification.update({ where: { id: notification.id }, data: { readAt: null } });
+  res.json({ success: true });
+});
+
+router.post(
+  '/:id/security-resolution',
+  [body('decision').isIn(['MINE', 'NOT_MINE'])],
+  async (req: AuthRequest, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'تصمیم امنیتی معتبر نیست.' });
+    const notification = await prisma.notification.findFirst({
+      where: { id: req.params.id, userId: req.user!.id, type: 'NEW_BROWSER_LOGIN', readAt: null },
+      include: { event: true },
+    });
+    const sessionId = notification?.event?.resourceType === 'AuthSession'
+      ? notification.event.resourceId
+      : notification?.referenceId;
+    if (!notification || !sessionId) return res.status(404).json({ success: false, error: 'هشدار امنیتی پیدا نشد.' });
+
+    const decision = req.body.decision as 'MINE' | 'NOT_MINE';
+    const result = await prisma.$transaction(async (tx) => {
+      const session = await tx.authSession.findFirst({ where: { id: sessionId, userId: req.user!.id } });
+      if (!session) throw new Error('SESSION_NOT_FOUND');
+      let revoked = 0;
+      if (decision === 'NOT_MINE' && !session.revokedAt) {
+        revoked = await revokeSessions(tx, {
+          userId: req.user!.id,
+          actorId: req.user!.id,
+          sessionId,
+          reason: 'USER_REPORTED_UNRECOGNIZED_LOGIN',
+        });
+      }
+      await tx.notification.update({ where: { id: notification.id }, data: { readAt: new Date() } });
+      await tx.authenticationEvent.create({
+        data: {
+          type: decision === 'MINE' ? 'LOGIN_ACKNOWLEDGED' : 'UNRECOGNIZED_LOGIN_HANDLED',
+          userId: req.user!.id,
+          actorId: req.user!.id,
+          sessionIdSnapshot: sessionId,
+          reason: decision,
+        },
+      });
+      return { revoked };
+    }).catch((error) => {
+      if (error instanceof Error && error.message === 'SESSION_NOT_FOUND') return null;
+      throw error;
+    });
+    if (!result) return res.status(404).json({ success: false, error: 'نشست مرتبط پیدا نشد.' });
+    return res.json({
+      success: true,
+      data: { handled: true, revoked: result.revoked, passwordChangeRecommended: decision === 'NOT_MINE' },
+    });
+  },
+);
 
 router.get('/settings/preferences', async (req: AuthRequest, res) => {
   const [preference, devices] = await Promise.all([

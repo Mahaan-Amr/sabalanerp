@@ -1464,8 +1464,8 @@ _Avoid_: requiring patrol notes before the patrol happens, storing patrols as fr
 
 **رویدادهای خط زمانی گشت‌زنی گارد**:
 The two linked chronological events that expose one patrol inside its shift timeline: a start event at the exact patrol start and a finish event at the exact patrol end. The finish event identifies the guard and includes duration and the required completion description so reports recorded during the patrol remain correctly ordered between the two events.
-The same combined chronology appears in the guard's active timeline, the manager's live read-only timeline, completed shift details, report preview, and PDF; active patrol controls remain separate from the recorded evidence.
-_Avoid_: collapsing a patrol into one ambiguously placed range card, duplicating the patrol as an unlinked pair, hiding intervening shift reports, or letting live, completed, preview, and exported timelines disagree
+The same combined chronology appears in the guard's active timeline, the manager's live read-only timeline, and completed shift details; active patrol controls remain separate from the recorded evidence. In printable previews and PDF exports, each completed patrol pair becomes one completion-anchored evidence row with duration and description, without repeating the start and finish timestamps. An unfinished patrol may remain a single incomplete row when it is relevant to the export.
+_Avoid_: collapsing patrols in interactive timelines, duplicating one patrol as two PDF rows, hiding intervening shift reports, or shrinking the PDF description column to preserve redundant time and status columns
 
 **گزارش‌های گارد**:
 A manager-focused reporting workspace with exactly two report products: گزارش شیفت‌ها and گزارش حضور و غیاب گارد. It is separate from the active گزارش شیفت گارد workflow: managers search completed shifts directly, preview the selected evidence, and generate a scoped PDF instead of first choosing an analytical date range or report format.
@@ -2580,6 +2580,10 @@ _Avoid_: creation time alone, treating temporary server retention as offsite pro
 An append-only, access-controlled record through which a Sabalan ERP user reports a problem or improvement from an immutable originating route, with reporter-provided impact, optional media, a sanitized diagnostic snapshot, assignments, responses, resolution, operational targets, and permanent accountability history. A failed contract submission may attach only safe diagnostic metadata such as HTTP status, stable error code and path, affected product-row identity, and tracking code; it does not duplicate the raw contract payload, customer data, or complete pricing data.
 _Avoid_: treating support as editable notes, exposing one reporter's ticket through a duplicate link, or granting access merely because a user received an assignment without the required workspace or feature permission
 
+**Support Work Queue**:
+The role-aware, newest-first projection of Support Tickets already authorized for the viewer: requests they reported, tickets where they actively handle or collaborate, and—only for authorized managers or administrators—other tickets within their managed scope. Watch-only participation remains visible but is not presented as an actionable queue; search and filters narrow a selected projection without broadening its permission scope.
+_Avoid_: mixing personal requests and operational work into one unlabeled list, treating watchers as handlers, or changing access through a client-side filter
+
 **Sensitive Support Evidence**:
 Optional raw form values, page text, uploaded-document metadata, customer, Human Resources, financial, image, document, or voice evidence that a reporter explicitly consents to share. It remains protected by originating workspace or feature access, is excluded from Codex diagnostic packages by default, and follows a shorter evidence-retention policy.
 _Avoid_: capturing secrets, credentials, cookies, tokens, or passwords; showing sensitive evidence back to the reporter as diagnostic data; or allowing assignment alone to bypass workspace access
@@ -2589,11 +2593,27 @@ A Support Ticket type routed initially only to ADMIN and designated incident han
 _Avoid_: placing an incident in ordinary manager queues, lock-screen details, automatic delegation, or the ordinary waiting-for-reporter closure workflow
 
 **Unified Notification Center**:
-The durable Persian-first application inbox that is the source of truth for direct assignments, mentions, approvals, security events, support responses, and registered business workflow notifications. Realtime socket delivery and opt-in privacy-safe Web Push are delivery channels, not replacement stores.
-_Avoid_: creating separate feature inboxes, placing ticket details on a lock screen, or relying on online socket delivery as durable notification storage
+The durable Persian-first application inbox that is the source of truth for direct assignments, mentions, approvals, security events, support responses, and registered business workflow notifications. Its bell sheet is a compact recent/unread preview, while `/dashboard/personal/notifications` provides the complete history and secondary preferences; realtime socket delivery and opt-in privacy-safe Web Push are delivery channels, not replacement stores.
+_Avoid_: treating the bell sheet as the complete inbox, creating separate feature inboxes, placing ticket details on a lock screen, or relying on online socket delivery as durable notification storage
+
+**Notification Inbox State**:
+The recipient's durable, newest-first view of notification history, organized through All, Unread, Important, search, and relevant workspace or category filters. Important means only existing HIGH and URGENT priorities; users may change read state but cannot delete or archive notification records.
+_Avoid_: introducing a separate archive lifecycle, allowing user deletion of accountability history, or treating filtered-out notifications as removed
+
+**Notification Delivery Preferences**:
+The signed-in user's staged choices for optional category muting and low-priority delivery timing, committed together through one explicit save action. Browser-device activation and deactivation remain immediate subscription operations; deactivating every device requires an explicit confirmation dialog, and mandatory in-app accountability events cannot be disabled.
+_Avoid_: partially saving a preference form, presenting device subscriptions as unsaved form state, using browser-native confirmation prompts, or allowing preferences to suppress mandatory records
+
+**Self-Service Personal Area**:
+The signed-in user's own profile, account security, active sessions, password actions, personal leave requests, notification inbox, and notification preferences. `/dashboard/personal` is a compact read-only identity and destination hub; leave, security, and notifications each have their own focused route, while `/change-password` retains its established behavior. Administrative user creation, access management, and other-user profiles remain outside this area.
+_Avoid_: treating administrative user management as profile self-service, or mixing other users' identity administration into personal account tasks
+
+**Last Successful View**:
+The most recent complete, authorized dataset successfully loaded for a dashboard surface. Background or manual refresh failure preserves this usable view, its filters, pagination, scroll position, expanded sections, and unsaved form input while showing a small inline error; a full-page error is reserved for the absence of any usable data.
+_Avoid_: blanking a previously usable page after refresh failure, resetting user context when realtime data arrives, or replacing a focused form with a global loading state
 
 **Notification Policy Registry**:
-The code-owned catalog of registered domain events and their immutable trigger conditions, permission checks, safe recipient resolvers, protected fields, deep links, and deduplication identity. ADMIN may version validated choices among registered safe recipients, approved Persian template variables, priority, channel, and timing, while mandatory accountability policies remain enabled.
+The code-owned catalog of registered domain events and their immutable trigger conditions, permission checks, safe recipient resolvers, protected fields, deep links, and deduplication identity. ADMIN may version validated choices among registered safe recipients, approved Persian template variables, priority, channel, and timing, while mandatory accountability policies remain enabled. The administrative interface exposes current-version metadata and a before/after review when publishing the next version; prior versions remain durable for accountability but a full history browser is outside the current notification redesign.
 _Avoid_: arbitrary database-trigger policies, administrator-authored permission logic, unversioned policy mutation, or changing notifications already produced by an earlier version
 
 **Support Operational Target**:

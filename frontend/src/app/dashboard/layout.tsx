@@ -194,9 +194,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     },
   ];
 
-  const continueToSupportTicket = () => {
+  const continueToSupportTicket = (includeSensitive = false) => {
     const origin = captureSupportOrigin() as ReturnType<typeof captureSupportOrigin> & { sensitiveCandidate?: Record<string, unknown> };
-    if (sensitiveCaptureConsent) {
+    if (includeSensitive && sensitiveCaptureConsent) {
       const selected = sensitiveCandidateItems.filter((item) => selectedSensitiveItemIds.includes(item.id));
       origin.sensitiveCandidate = {
         pageText: selected.find((item) => item.kind === 'PAGE_TEXT')?.value || '',
@@ -599,7 +599,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-[var(--sds-text-secondary)] transition-colors hover:bg-[var(--sds-accent-soft)] hover:text-[var(--sds-accent)]"
             >
               <FaUser className="h-4 w-4" />
-              امور شخص
+              امور شخصی
             </Link>
             <div className="my-1 rounded-lg border border-[var(--sds-border-subtle)] p-1" role="group" aria-label="پشتیبانی">
               <div className="flex min-h-9 items-center gap-2 px-2 text-sm font-bold text-[var(--sds-text-secondary)]">
@@ -614,12 +614,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   setSensitiveCaptureConsent(false);
                   setSensitiveCandidateItems([]);
                   setSelectedSensitiveItemIds([]);
-                  setSupportCaptureOpen(true);
+                  continueToSupportTicket();
                 }}
                 className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-[var(--sds-text-secondary)] transition-colors hover:bg-[var(--sds-accent-soft)] hover:text-[var(--sds-accent)]"
               >
                 <FaLifeRing className="h-4 w-4" />
-                ثبت تیکت جدید
+                ثبت درخواست
               </ErpPressable>
               <Link
                 href="/dashboard/support/history"
@@ -628,7 +628,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-right text-sm text-[var(--sds-text-secondary)] transition-colors hover:bg-[var(--sds-accent-soft)] hover:text-[var(--sds-accent)]"
               >
                 <FaHistory className="h-4 w-4" />
-                تاریخچه
+                درخواست‌های پشتیبانی
               </Link>
             </div>
             <ErpPressable
@@ -653,7 +653,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         footer={(
           <div className="flex flex-wrap justify-end gap-2">
             <ErpButton label="انصراف" onClick={() => setSupportCaptureOpen(false)} tone="neutral" variant="outline" />
-            <ErpButton label="ادامه به ثبت تیکت" onClick={continueToSupportTicket} tone="primary" />
+            <ErpButton label="ادامه به ثبت درخواست" onClick={() => continueToSupportTicket(true)} tone="primary" />
           </div>
         )}
       >

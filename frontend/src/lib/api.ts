@@ -141,11 +141,15 @@ export const authAPI = {
 };
 
 export const notificationsAPI = {
-  list: (params?: { cursor?: string; limit?: number }) =>
+  list: (params?: { cursor?: string; limit?: number; state?: 'ALL' | 'UNREAD' | 'READ' | 'IMPORTANT'; search?: string; workspace?: string; category?: string }) =>
     api.get('/notifications', { params }),
   getUnreadCount: () => api.get('/notifications/unread-count'),
+  getMetadata: () => api.get('/notifications/metadata'),
   markRead: (id: string) => api.put(`/notifications/${id}/read`),
+  markUnread: (id: string) => api.delete(`/notifications/${id}/read`),
   markAllRead: () => api.put('/notifications/read-all'),
+  resolveSecurityAlert: (id: string, decision: 'MINE' | 'NOT_MINE') =>
+    api.post(`/notifications/${id}/security-resolution`, { decision }),
   getPolicies: () => api.get('/notifications/admin/policies'),
   createPolicyVersion: (eventType: string, data: {
     enabled: boolean;

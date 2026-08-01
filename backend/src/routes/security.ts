@@ -3244,6 +3244,7 @@ const securityPdfStyles = () => {
       table{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:8px}
       th,td{border:1px solid #d1d5db;padding:5px;vertical-align:top;word-break:break-word}
       th{background:#edf7f6;font-weight:700;color:#074747}
+      .timeline-table .event-col{width:18%}.timeline-table .people-col{width:17%}.timeline-table .description-col{width:44%}.timeline-table .status-col{width:9%}.timeline-table .time-col{width:12%}
       .shift{border:1px solid #d8dee9;border-radius:8px;padding:8px;margin-bottom:9px;break-inside:auto}
       .muted{color:#64748b}
       .badge{display:inline-block;border-radius:999px;padding:2px 7px;background:#e2e8f0;color:#334155;font-size:9px}
@@ -3260,6 +3261,15 @@ const securityPdfStyles = () => {
 
 const securityName = (value: any) => `${value?.firstName || ''} ${value?.lastName || ''}`.trim() || value?.username || '-';
 const formatSecurityDateTime = (value: unknown) => value ? new Date(String(value)).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' }) : '-';
+const securityPatrolDuration = (startedAt: unknown, endedAt: unknown) => {
+  if (!startedAt || !endedAt) return '-';
+  const minutes = Math.max(0, Math.round((new Date(String(endedAt)).getTime() - new Date(String(startedAt)).getTime()) / 60_000));
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (!hours) return `${remainingMinutes.toLocaleString('fa-IR')} دقیقه`;
+  if (!remainingMinutes) return `${hours.toLocaleString('fa-IR')} ساعت`;
+  return `${hours.toLocaleString('fa-IR')} ساعت و ${remainingMinutes.toLocaleString('fa-IR')} دقیقه`;
+};
 
 const detailedShiftInclude = {
   plan: { select: { title: true } },
@@ -3310,7 +3320,27 @@ const renderDetailedSecurityShift = (slot: any) => {
     patrolSessions: session.patrolSessions,
     defaultAuthor: securityName(session.personnel.user),
   });
-  const timelineRows = timelineEvents.map((event: any) => {
+  const displayTimeline = [
+    ...timelineEvents.filter((event: any) => event.kind === 'SHIFT_LOG'),
+    ...session.patrolSessions.map((patrol: any) => ({
+      id: `patrol-${patrol.id}`,
+      kind: 'PATROL',
+      rowNumber: null,
+      status: patrol.status,
+      title: 'گشت‌زنی',
+      typeDescription: null,
+      description: patrol.description || null,
+      participants: [],
+      startedAt: new Date(patrol.startedAt).toISOString(),
+      createdAt: new Date(patrol.endedAt || patrol.startedAt).toISOString(),
+      endedAt: patrol.endedAt ? new Date(patrol.endedAt).toISOString() : null,
+      author: securityName(patrol.personnel?.user || patrol.personnel),
+    })),
+  ].sort((left: any, right: any) => (
+    new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
+    || left.id.localeCompare(right.id)
+  ));
+  const timelineRows = displayTimeline.map((event: any) => {
     const entry = event.kind === 'SHIFT_LOG' ? logEntriesById.get(event.id) as any : null;
     const imageHtml = entry ? securityShiftImageHtml(entry) : '';
     const people = event.kind === 'SHIFT_LOG'
@@ -3320,21 +3350,24 @@ const renderDetailedSecurityShift = (slot: any) => {
       ? event.status === SecurityShiftLogStatus.VOIDED
         ? `<span class="badge voided">باطل‌شده</span>${event.voidReason ? `<div class="muted">دلیل: ${securityEscapeHtml(event.voidReason)}</div>` : ''}`
         : '<span class="badge">فعال</span>'
-      : `<span class="badge">${event.kind === 'PATROL_START' ? 'شروع' : 'پایان'}</span>`;
+      : `<span class="badge">${event.endedAt ? 'تکمیل‌شده' : 'ناتمام'}</span>`;
+    const timeOrDuration = event.kind === 'PATROL'
+      ? securityPatrolDuration(event.startedAt, event.endedAt)
+      : formatSecurityDateTime(event.createdAt);
     return `
       <tr>
         <td>${event.rowNumber != null ? `ردیف ${event.rowNumber.toLocaleString('fa-IR')} · ` : ''}${securityEscapeHtml(event.title)}${event.typeDescription ? `<div class="muted">${securityEscapeHtml(event.typeDescription)}</div>` : ''}</td>
         <td>${securityEscapeHtml(people)}</td>
         <td>${securityEscapeHtml(event.description || '-')}</td>
         <td>${statusHtml}</td>
-        <td>${formatSecurityDateTime(event.createdAt)}</td>
+        <td>${timeOrDuration}</td>
       </tr>
       ${imageHtml ? `<tr><td colspan="5">${imageHtml}</td></tr>` : ''}
     `;
   }).join('');
   const timelineSection = timelineRows ? `
     <h3>خط زمانی شیفت</h3>
-    <table><thead><tr><th>رویداد</th><th>نیرو / افراد مرتبط</th><th>شرح</th><th>وضعیت</th><th>زمان</th></tr></thead><tbody>${timelineRows}</tbody></table>
+    <table class="timeline-table"><colgroup><col class="event-col"/><col class="people-col"/><col class="description-col"/><col class="status-col"/><col class="time-col"/></colgroup><thead><tr><th>رویداد</th><th>نیرو / افراد مرتبط</th><th>شرح</th><th>وضعیت</th><th>زمان / مدت</th></tr></thead><tbody>${timelineRows}</tbody></table>
   ` : '';
 
   const attendanceRows = slot.attendance.map((attendance: any) => `

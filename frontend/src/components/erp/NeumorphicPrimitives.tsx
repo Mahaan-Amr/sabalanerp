@@ -44,30 +44,46 @@ export interface ErpNeumorphicMetric {
   icon: IconType;
   tone?: ErpTone;
   href?: string;
+  hint?: ReactNode;
 }
 
 export function ErpNeumorphicMetricGrid({
   items,
+  label = "شاخص‌های کلیدی",
+  columns = 4,
+  mobileColumns = 2,
 }: {
   items: ErpNeumorphicMetric[];
+  label?: string;
+  columns?: 2 | 3 | 4;
+  mobileColumns?: 1 | 2;
 }) {
   return (
     <section
-      aria-label="شاخص‌های منابع انسانی"
-      className="grid grid-cols-2 gap-3 xl:grid-cols-4 xl:gap-4"
+      aria-label={label}
+      className={cx(
+        "grid gap-3 xl:gap-4",
+        mobileColumns === 1 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2",
+        columns === 2 && "xl:grid-cols-2",
+        columns === 3 && "xl:grid-cols-3",
+        columns === 4 && "xl:grid-cols-4",
+      )}
     >
       {items.map((item) => {
         const Icon = item.icon;
         const tone = item.tone || "primary";
         const content = (
           <>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-xs leading-5 text-[var(--sds-text-secondary)] sm:text-sm">
                 {item.label}
               </p>
-              <p className="mt-1 text-2xl font-black tabular-nums text-[var(--sds-text-primary)] sm:text-3xl">
+              <p className="mt-1 break-words text-[clamp(1.25rem,2vw,1.875rem)] font-black leading-tight tabular-nums text-[var(--sds-text-primary)] [overflow-wrap:anywhere]">
                 {item.value}
               </p>
+              {item.hint && (
+                <p className="mt-1 text-xs text-[var(--sds-text-muted)]">{item.hint}</p>
+              )}
             </div>
             <span
               className={cx(
@@ -83,7 +99,7 @@ export function ErpNeumorphicMetricGrid({
           <Link
             key={item.id}
             href={item.href}
-            className="sds-neumorphic-card sds-neumorphic-interactive flex min-h-28 items-center justify-between gap-3 p-4 outline-none sm:min-h-32 sm:p-5"
+            className="sds-neumorphic-card sds-neumorphic-interactive flex min-h-24 items-center justify-between gap-3 p-4 outline-none"
           >
             {content}
           </Link>
@@ -91,7 +107,7 @@ export function ErpNeumorphicMetricGrid({
           <ErpNeumorphicCard
             key={item.id}
             as="article"
-            className="flex min-h-28 items-center justify-between gap-3 p-4 sm:min-h-32 sm:p-5"
+            className="flex min-h-24 items-center justify-between gap-3 p-4"
           >
             {content}
           </ErpNeumorphicCard>
@@ -132,7 +148,7 @@ export function ErpNeumorphicActionGrid({
             <Link
               key={item.id}
               href={item.href}
-              className="sds-neumorphic-card sds-neumorphic-interactive group flex min-h-28 flex-col items-center justify-center gap-3 p-4 text-center outline-none sm:min-h-32"
+              className="sds-neumorphic-card sds-neumorphic-interactive group flex min-h-24 flex-col items-center justify-center gap-2.5 p-4 text-center outline-none"
             >
               <span className="sds-neumorphic-icon inline-flex h-11 w-11 items-center justify-center text-[var(--sds-text-secondary)] transition-colors group-hover:text-[var(--sds-accent)]">
                 <Icon className="h-6 w-6" />

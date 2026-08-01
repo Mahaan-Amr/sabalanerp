@@ -159,7 +159,6 @@ export default function DepartmentsManagementPage() {
       <ErpListPage
         eyebrow="مدیریت سازمان"
         title="مدیریت دپارتمان‌ها"
-        description="مدیریت دپارتمان‌ها و واحدهای سازمانی با فهرست واکنش‌گرا و خوانا در حالت روشن و تاریک."
         metrics={metrics}
         actions={[
           { label: 'دپارتمان جدید', href: '/dashboard/departments/create', icon: FaPlus, tone: 'primary', variant: 'solid' },

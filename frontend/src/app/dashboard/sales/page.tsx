@@ -11,7 +11,6 @@ import { ErpBadge, ErpCard, ErpPage, type ErpTone } from '@/components/erp';
 
 const salesActions: Array<{
   title: string;
-  description: string;
   href: string;
   icon: typeof FaFileContract;
   tone: ErpTone;
@@ -19,7 +18,6 @@ const salesActions: Array<{
 }> = [
   {
     title: 'مشاهده قراردادها',
-    description: 'لیست قراردادها، وضعیت امضا، چاپ و تایید',
     href: '/dashboard/sales/contracts',
     icon: FaFileContract,
     tone: 'primary',
@@ -27,7 +25,6 @@ const salesActions: Array<{
   },
   {
     title: 'ایجاد قرارداد جدید',
-    description: 'شروع ثبت قرارداد با جریان موبایل‌فرست',
     href: '/dashboard/sales/contracts/create',
     icon: FaPlus,
     tone: 'success',
@@ -35,7 +32,6 @@ const salesActions: Array<{
   },
   {
     title: 'ایجاد مشتری',
-    description: 'ثبت مشتری جدید و تکمیل اطلاعات CRM',
     href: '/dashboard/crm/customers/create',
     icon: FaUsers,
     tone: 'info',
@@ -43,7 +39,6 @@ const salesActions: Array<{
   },
   {
     title: 'ایجاد محصول',
-    description: 'افزودن سنگ، ابعاد و قیمت پایه فروش',
     href: '/dashboard/sales/products/create',
     icon: FaBox,
     tone: 'purple',
@@ -51,7 +46,6 @@ const salesActions: Array<{
   },
   {
     title: 'گزارش فروش',
-    description: 'مرور عملکرد و وضعیت قراردادهای فروش',
     href: '/dashboard/sales/reports',
     icon: FaChartLine,
     tone: 'warning',
@@ -64,7 +58,6 @@ export default function SalesWorkspacePage() {
     <ErpPage
       eyebrow="فضای کاری"
       title="فروش"
-      description="مسیرهای اصلی فروش در یک صفحه فشرده و آماده برای کار روزانه تیم."
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {salesActions.map((action) => {
@@ -81,7 +74,6 @@ export default function SalesWorkspacePage() {
                   </div>
                   <div className="mt-auto">
                     <h2 className="text-base font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{action.title}</h2>
-                    <p className="mt-2 text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{action.description}</p>
                   </div>
                 </div>
               </ErpCard>

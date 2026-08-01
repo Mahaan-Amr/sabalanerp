@@ -65,26 +65,24 @@ const InventoryDashboard: React.FC = () => {
     <ErpPage
       eyebrow="انبار"
       title="مدیریت انبار"
-      description="مدیریت داده‌های پایه سنگ، کاتالوگ محصولات، خدمات و مسیرهای عملیاتی انبار."
       metrics={metrics}
     >
-      <ErpSection title="عملیات اصلی" description="ورود به بخش‌های اصلی انبار و سرویس‌ها با الگوی ERP جدید.">
+      <ErpSection title="عملیات اصلی">
         <ErpActionGrid
           columns={3}
           items={[
             {
               title: 'داده‌های پایه',
-              description: 'تعریف مشخصات سنگ، برش، ضخامت، معدن، رنگ و فرآوری',
               href: hasAnyMasterDataPermission ? '/dashboard/inventory/master-data' : undefined,
               icon: FaCog,
               tone: 'warning',
               disabled: !hasAnyMasterDataPermission,
               meta: hasAnyMasterDataPermission ? 'قابل دسترسی' : 'بدون دسترسی',
             },
-            { title: 'محصولات', description: 'مشاهده و مدیریت محصولات قابل استفاده در قراردادها', href: '/dashboard/sales/products', icon: FaBoxes, tone: 'primary', meta: 'کاتالوگ فروش' },
-            { title: 'گردش موجودی', description: 'ثبت ورود، خروج و انتقال موجودی', icon: FaClipboardList, tone: 'info', disabled: true, meta: 'به‌زودی' },
-            { title: 'خدمات', description: 'مدیریت خدمات، ابزارها و هزینه‌های وابسته', href: '/dashboard/inventory/services', icon: FaTools, tone: 'success' },
-            { title: 'گزارش‌ها', description: 'گزارش‌های موجودی، محصولات و خدمات', icon: FaChartLine, tone: 'purple', disabled: true, meta: 'به‌زودی' },
+            { title: 'محصولات', href: '/dashboard/sales/products', icon: FaBoxes, tone: 'primary', meta: 'کاتالوگ فروش' },
+            { title: 'گردش موجودی', icon: FaClipboardList, tone: 'info', disabled: true, meta: 'به‌زودی' },
+            { title: 'خدمات', href: '/dashboard/inventory/services', icon: FaTools, tone: 'success' },
+            { title: 'گزارش‌ها', icon: FaChartLine, tone: 'purple', disabled: true, meta: 'به‌زودی' },
           ]}
         />
       </ErpSection>
@@ -92,7 +90,6 @@ const InventoryDashboard: React.FC = () => {
       {hasAnyMasterDataPermission ? (
         <ErpSection
           title="بخش‌های داده‌های پایه"
-          description="نمای سریع از دسترسی شما به داده‌های پایه انبار."
           actions={[{ label: 'مشاهده همه', href: '/dashboard/inventory/master-data', tone: 'neutral', variant: 'outline' }]}
         >
           <ErpActionGrid

@@ -97,6 +97,7 @@ export const resolveSalesReportPeriod = (query: SalesReportQuery) => {
   let to = requestedTo || endDay(now);
   if (!requestedFrom || !requestedTo) {
     switch (String(query.period || 'month')) {
+      case 'all': from = startDay(now); break;
       case 'today': from = startDay(now); break;
       case 'yesterday': from = startDay(new Date(now.getTime() - DAY)); to = endDay(from); break;
       case 'week': from = startDay(new Date(now.getTime() - 6 * DAY)); break;
@@ -113,6 +114,28 @@ export const resolveSalesReportPeriod = (query: SalesReportQuery) => {
   const previousTo = new Date(from.getTime() - 1);
   const previousFrom = new Date(previousTo.getTime() - duration + 1);
   return { from, to, previousFrom: startDay(previousFrom), previousTo: endDay(previousTo) };
+};
+
+export const resolveAllTimeSalesReportPeriod = (
+  contracts: Array<{
+    createdAt: Date | string;
+    realizedAt?: Date | string | null;
+    lostAt?: Date | string | null;
+    reportingEvents?: Array<{ effectiveAt: Date | string }>;
+  }>,
+  now = new Date(),
+) => {
+  const earliestTime = contracts.reduce((earliest, contract) => {
+    const candidates = [
+      contract.createdAt,
+      contract.realizedAt,
+      contract.lostAt,
+      ...(contract.reportingEvents || []).map((event) => event.effectiveAt),
+    ].filter(Boolean).map((value) => new Date(value as Date | string).getTime());
+    return Math.min(earliest, ...candidates);
+  }, Number.POSITIVE_INFINITY);
+  const from = Number.isFinite(earliestTime) ? startDay(new Date(earliestTime)) : startDay(now);
+  return { from, to: endDay(now), previousFrom: from, previousTo: new Date(from.getTime() - 1) };
 };
 
 const inRange = (value: Date | string | null | undefined, from: Date, to: Date) => {
@@ -134,7 +157,7 @@ const statusInfo: Record<string, { label: string; bucket: string; description: s
   EXPIRED: { label: 'منقضی‌شده', bucket: 'lost', description: 'مهلت قرارداد بدون تحقق فروش پایان یافته است.' }
 };
 
-const buildScope = (access: SalesReportAccess, query: SalesReportQuery) => {
+export const buildSalesReportScope = (access: SalesReportAccess, query: SalesReportQuery) => {
   const requestedDepartment = typeof query.departmentId === 'string' && query.departmentId ? query.departmentId : null;
   const requestedSeller = typeof query.sellerId === 'string' && query.sellerId ? query.sellerId : null;
   if (!access.canManage && requestedSeller && requestedSeller !== access.userId) throw new Error('Seller scope is not permitted');
@@ -149,14 +172,12 @@ const buildScope = (access: SalesReportAccess, query: SalesReportQuery) => {
   };
 };
 
-const bucketKey = (date: Date, monthly: boolean) => monthly
-  ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-  : date.toISOString().slice(0, 10);
-
-export const buildSalesReport = async (access: SalesReportAccess, query: SalesReportQuery) => {
-  const period = resolveSalesReportPeriod(query);
-  const scope = buildScope(access, query);
-  const where: Prisma.SalesContractWhereInput = {
+export const buildSalesReportContractWhere = (
+  access: SalesReportAccess,
+  query: SalesReportQuery,
+): Prisma.SalesContractWhereInput => {
+  const scope = buildSalesReportScope(access, query);
+  return {
     ...(scope.departmentId ? { departmentId: scope.departmentId } : {}),
     ...(!access.canManage ? {
       OR: [
@@ -166,6 +187,77 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       ]
     } : {})
   };
+};
+
+type SalesHeadlineContract = {
+  id: string;
+  status: string;
+  createdBy: string;
+  responsibleSellerId: string;
+  realizedSellerId?: string | null;
+  lostAt?: Date | string | null;
+  updatedAt: Date | string;
+  reportingEvents: Array<{
+    contractId: string;
+    eventType: string;
+    amount: unknown;
+    sellerId?: string | null;
+    effectiveAt: Date | string;
+  }>;
+};
+
+export const buildRealizedSalesHeadline = ({
+  contracts,
+  sellerId,
+  from,
+  to,
+}: {
+  contracts: SalesHeadlineContract[];
+  sellerId?: string | null;
+  from?: Date;
+  to?: Date;
+}) => {
+  const insidePeriod = (value: Date | string | null | undefined) => !from || !to || inRange(value, from, to);
+  const metricContracts = sellerId
+    ? contracts.filter((contract) => contract.responsibleSellerId === sellerId || contract.realizedSellerId === sellerId || contract.createdBy === sellerId)
+    : contracts;
+  const events = metricContracts.flatMap((contract) => contract.reportingEvents)
+    .filter((event) => (!sellerId || event.sellerId === sellerId) && insidePeriod(event.effectiveAt));
+  const originalRealized = events.filter((event) => event.eventType === 'REALIZED');
+  const adjustments = events.filter((event) => event.eventType !== 'REALIZED');
+  const realizedContractIds = new Set(originalRealized.map((event) => event.contractId));
+  const lostContractIds = new Set(metricContracts
+    .filter((contract) => LOST.has(contract.status)
+      && insidePeriod(contract.lostAt || contract.updatedAt)
+      && (!sellerId || contract.responsibleSellerId === sellerId))
+    .map((contract) => contract.id));
+  const grossRealized = originalRealized.reduce((sum, event) => sum + n(event.amount), 0);
+  const adjustmentAmount = adjustments.reduce((sum, event) => sum + n(event.amount), 0);
+  const netRealized = grossRealized + adjustmentAmount;
+  const decidedCount = new Set([...realizedContractIds, ...lostContractIds]).size;
+
+  return {
+    grossRealized,
+    adjustmentAmount,
+    netRealized,
+    realizedCount: realizedContractIds.size,
+    averageRealizedValue: realizedContractIds.size ? Math.round(netRealized / realizedContractIds.size) : null,
+    successRate: decidedCount ? Math.round((realizedContractIds.size / decidedCount) * 100) : null,
+    originalRealized,
+    adjustments,
+    realizedContractIds,
+  };
+};
+
+const bucketKey = (date: Date, monthly: boolean) => monthly
+  ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+  : date.toISOString().slice(0, 10);
+
+export const buildSalesReport = async (access: SalesReportAccess, query: SalesReportQuery) => {
+  const allTime = String(query.period || '') === 'all';
+  let period = resolveSalesReportPeriod(query);
+  const scope = buildSalesReportScope(access, query);
+  const where = buildSalesReportContractWhere(access, query);
 
   const contracts = await prisma.salesContract.findMany({
     where,
@@ -182,6 +274,10 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       wonCrmPotentialProject: { select: { id: true, title: true } }
     }
   });
+
+  if (allTime) {
+    period = resolveAllTimeSalesReportPeriod(contracts);
+  }
 
   const contractIds = contracts.map((contract) => contract.id);
   const [accountingPayments, receivables, financialRecords, loadingLines] = contractIds.length ? await Promise.all([
@@ -200,19 +296,15 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   const events = metricContracts.flatMap((contract) => contract.reportingEvents)
     .filter((event) => !scope.sellerId || event.sellerId === scope.sellerId);
   const currentEvents = events.filter((event) => inRange(event.effectiveAt, period.from, period.to));
-  const previousEvents = events.filter((event) => inRange(event.effectiveAt, period.previousFrom, period.previousTo));
-  const originalRealized = currentEvents.filter((event) => event.eventType === 'REALIZED');
-  const adjustments = currentEvents.filter((event) => event.eventType !== 'REALIZED');
-  const grossRealized = originalRealized.reduce((sum, event) => sum + n(event.amount), 0);
-  const adjustmentAmount = adjustments.reduce((sum, event) => sum + n(event.amount), 0);
-  const netRealized = grossRealized + adjustmentAmount;
+  const previousEvents = allTime ? [] : events.filter((event) => inRange(event.effectiveAt, period.previousFrom, period.previousTo));
+  const headline = buildRealizedSalesHeadline({ contracts, sellerId: scope.sellerId, from: period.from, to: period.to });
+  const { originalRealized, adjustments, grossRealized, adjustmentAmount, netRealized, realizedContractIds } = headline;
   const previousNet = previousEvents.reduce((sum, event) => sum + n(event.amount), 0);
 
   const pipelineContracts = metricContracts.filter((contract) => PIPELINE.has(contract.status) && inRange(contract.createdAt, period.from, period.to) && (!scope.sellerId || contract.responsibleSellerId === scope.sellerId));
   const lostContracts = metricContracts.filter((contract) => LOST.has(contract.status) && inRange(contract.lostAt || contract.updatedAt, period.from, period.to) && (!scope.sellerId || contract.responsibleSellerId === scope.sellerId));
   const createdContracts = metricContracts.filter((contract) => inRange(contract.createdAt, period.from, period.to) && (!scope.sellerId || contract.createdBy === scope.sellerId));
-  const outcomeContracts = [...new Set([...originalRealized.map((event) => event.contractId), ...lostContracts.map((contract) => contract.id)])];
-  const successRate = outcomeContracts.length ? Math.round((new Set(originalRealized.map((event) => event.contractId)).size / outcomeContracts.length) * 100) : null;
+  const successRate = headline.successRate;
 
   const monthly = (period.to.getTime() - period.from.getTime()) / DAY > 62;
   const trendMap = new Map<string, { key: string; label: string; realized: number; adjustments: number; net: number; pipeline: number }>();
@@ -261,7 +353,6 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
 
   const customerMap = new Map<string, any>();
   const productMap = new Map<string, any>();
-  const realizedContractIds = new Set(originalRealized.map((event) => event.contractId));
   metricContracts.filter((contract) => realizedContractIds.has(contract.id)).forEach((contract) => {
     const customer = customerMap.get(contract.customerId) || { id: contract.customerId, name: customerName(contract.customer), value: 0, contracts: 0, firstRealizedAt: contract.realizedAt, allRealizedContracts: 0 };
     customer.value += n(contract.realizedAmount || contract.totalAmount);
@@ -341,19 +432,23 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     },
     period: {
       from: period.from.toISOString(), to: period.to.toISOString(),
-      previousFrom: period.previousFrom.toISOString(), previousTo: period.previousTo.toISOString(),
       label: `${faDate(period.from)} تا ${faDate(period.to)}`,
-      previousLabel: `${faDate(period.previousFrom)} تا ${faDate(period.previousTo)}`
+      ...(!allTime ? {
+        previousFrom: period.previousFrom.toISOString(),
+        previousTo: period.previousTo.toISOString(),
+        previousLabel: `${faDate(period.previousFrom)} تا ${faDate(period.previousTo)}`,
+      } : {}),
     },
     cards: {
       grossRealized, adjustments: adjustmentAmount, netRealized,
       previousNetRealized: previousNet,
-      growthPercent: previousNet === 0 ? (netRealized === 0 ? null : 100) : Math.round(((netRealized - previousNet) / Math.abs(previousNet)) * 100),
+      growthPercent: allTime ? null : previousNet === 0 ? (netRealized === 0 ? null : 100) : Math.round(((netRealized - previousNet) / Math.abs(previousNet)) * 100),
       pipelineValue: pipelineContracts.reduce((sum, contract) => sum + n(contract.totalAmount), 0),
       pipelineCount: pipelineContracts.length,
       lostValue: lostContracts.reduce((sum, contract) => sum + n(contract.totalAmount), 0),
       lostCount: lostContracts.length,
-      realizedCount: new Set(originalRealized.map((event) => event.contractId)).size,
+      realizedCount: headline.realizedCount,
+      averageRealizedValue: headline.averageRealizedValue,
       customerCount: new Set(originalRealized.map((event) => contracts.find((contract) => contract.id === event.contractId)?.customerId).filter(Boolean)).size,
       successRate
     },

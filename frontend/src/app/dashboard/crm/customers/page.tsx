@@ -317,7 +317,6 @@ export default function CustomersPage() {
     <ErpListPage
       eyebrow="CRM"
       title="مدیریت مشتریان"
-      description="جستجو، بررسی وضعیت همکاری، مشاهده اطلاعات تماس و مدیریت محدودیت‌های مشتریان."
       metrics={metrics}
       actions={crmPermissions.canCreateCustomers ? [{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaPlus, tone: 'primary', variant: 'solid' }] : []}
       filters={[

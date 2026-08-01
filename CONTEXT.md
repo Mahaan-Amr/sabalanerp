@@ -6,6 +6,10 @@ Sabalan ERP manages stone inventory, sales contracts, and related pricing data f
 The platform-wide visual, interaction, accessibility, and user-experience language for Sabalan ERP. The Guard workspace and the contract Product Selection flow are reference implementations that inform the shared system without contributing Guard- or contract-specific domain assumptions to generic components.
 _Avoid_: calling the platform system the Guard design system, copying reference-page styling without reusable behavior, or leaking workspace terminology and permissions into shared primitives
 
+**داشبورد اصلی**:
+The role-authorized operational overview that prioritizes current business state, items needing attention, and the user's next useful actions; workspace and administration navigation remains available with secondary emphasis.
+_Avoid_: treating the main dashboard as a flat application menu, giving every destination equal visual weight, or hiding operational truth behind decorative presentation
+
 **Position Capacity Coverage**:
 The share of current organizational position capacity that is already committed, calculated as committed capacity divided by committed capacity plus vacancies; when no capacity exists, coverage is zero.
 _Avoid_: presenting a fictional workflow-completion percentage, using active headcount alone as the numerator, or treating an undefined zero-capacity ratio as complete
@@ -920,6 +924,14 @@ _Avoid_: treating it as an embedded external BI tool or as a company-wide analyt
 The sales value counted as realized sales in BI, limited to sales contracts whose status is `SIGNED` or `PRINTED`.
 _Avoid_: counting draft, pending, approved, cancelled, or expired contracts as realized sales
 
+**فروش قطعی در داشبورد اصلی**:
+The realized Sales Contract value from the beginning of recorded history through the present, summarized within the viewer's authorized scope from the same authoritative realization events as Sales reporting.
+_Avoid_: calling it accounting income or collected payments, silently limiting it to the current month, reading the legacy Contract record set, or defining a second realization calculation for the dashboard
+
+**خلاصه قراردادها در داشبورد اصلی**:
+The authorized all-time Sales Contract counts shown as total, pending approval, signed, draft, approved, printed, and one combined cancelled-or-expired bucket.
+_Avoid_: counting legacy Contract records, changing the established status grouping without a separate decision, or linking a count to an unfiltered contract list
+
 **وضعیت قرارداد در گزارش فروش**:
 The actual lifecycle status of a sales contract, shown with a Persian label and a short explanation of what has happened and what is expected next. Reporting buckets such as pipeline, realized, and lost group contracts for analysis but do not replace or hide their real statuses.
 _Avoid_: showing only a vague reporting bucket, or presenting an aggregated category as though it were the contract's exact workflow status
@@ -953,8 +965,8 @@ Seller performance is a transparent set of contract creation, pipeline, realized
 _Avoid_: an opaque performance score, penalizing sellers for downstream work they do not own, or exposing sensitive comparisons to ordinary Sales users
 
 **نرخ موفقیت قراردادهای تعیین‌تکلیف‌شده**:
-The share of contracts reaching `SIGNED` or `PRINTED` among contracts that reached either a realized outcome or `CANCELLED`/`EXPIRED` during the selected period. Draft and active pipeline contracts are excluded, and CRM potential-project conversion remains a separately labeled metric.
-_Avoid_: calling open pipeline a failure, dividing by every newly created contract, or mixing CRM opportunity conversion with Sales contract outcomes
+The share of contracts reaching `SIGNED` or `PRINTED` among contracts that reached either a realized outcome or `CANCELLED`/`EXPIRED` during the selected period. Draft and active pipeline contracts are excluded, CRM potential-project conversion remains a separately labeled metric, and a period with no decided outcomes has no percentage.
+_Avoid_: calling open pipeline a failure, dividing by every newly created contract, showing zero percent when no outcome exists, or mixing CRM opportunity conversion with Sales contract outcomes
 
 **تعدیل فروش قطعی**:
 A dated positive or negative change to an already realized Sales Contract that preserves the original realized amount and date while recording the correction or cancellation delta in the period when it becomes effective. Gross realized sales and dated adjustments are shown separately and combine into net realized sales without silently rewriting closed periods.

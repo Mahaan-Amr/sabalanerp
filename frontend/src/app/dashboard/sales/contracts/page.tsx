@@ -1,6 +1,7 @@
 'use client';
 import { ErpPressable } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FaCheck,
   FaChevronDown,
@@ -32,6 +33,7 @@ import { formatPrice, sumNumericValues } from '@/lib/numberFormat';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitizer';
 import { sourceStatusLabels, StatusBadge } from '@/features/accounting/accountingUi';
+import { parseContractStatusQuery } from '@/features/sales/contractListQuery';
 
 interface Contract {
   id: string;
@@ -109,6 +111,7 @@ const statusOptions = [
   { label: 'چاپ شده', value: 'PRINTED' },
   { label: 'لغو شده', value: 'CANCELLED' },
   { label: 'منقضی شده', value: 'EXPIRED' },
+  { label: 'لغو یا منقضی', value: 'CANCELLED,EXPIRED' },
 ];
 
 const getStatusIcon = (status: string) => {
@@ -144,6 +147,9 @@ const getCustomerName = (contract: Contract) =>
 
 export default function ContractsPage() {
   useWorkspace();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedStatusFilter = parseContractStatusQuery(searchParams.get('status')).join(',') || 'ALL';
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [contractPermissions, setContractPermissions] = useState({
     canView: false,
@@ -158,7 +164,7 @@ export default function ContractsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState(requestedStatusFilter);
   const [pagination, setPagination] = useState<ContractPagination>({
     page: 1,
     limit: CONTRACTS_PAGE_SIZE,
@@ -171,6 +177,10 @@ export default function ContractsPage() {
   useEffect(() => {
     loadCurrentUser();
   }, []);
+
+  useEffect(() => {
+    setStatusFilter(requestedStatusFilter);
+  }, [requestedStatusFilter]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -231,6 +241,7 @@ export default function ContractsPage() {
 
   const filteredContracts = useMemo(() => {
     const normalizedSearch = debouncedSearchTerm.toLowerCase();
+    const selectedStatuses = parseContractStatusQuery(statusFilter);
     return contracts.filter((contract) => {
       const customerName = `${contract.customer.firstName} ${contract.customer.lastName}`.toLowerCase();
       const companyName = contract.customer.companyName?.toLowerCase() || '';
@@ -251,10 +262,19 @@ export default function ContractsPage() {
         accountingStatus.toLowerCase().includes(normalizedSearch) ||
         (sourceStatusLabels[accountingStatus] || '').toLowerCase().includes(normalizedSearch);
 
-      const matchesStatus = statusFilter === 'ALL' || contract.status === statusFilter;
+      const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(contract.status);
       return matchesSearch && matchesStatus;
     });
   }, [contracts, debouncedSearchTerm, statusFilter]);
+
+  const changeStatusFilter = (value: string) => {
+    setStatusFilter(value);
+    const params = new URLSearchParams(searchParams.toString());
+    if (value === 'ALL') params.delete('status');
+    else params.set('status', value);
+    const query = params.toString();
+    router.replace(query ? `/dashboard/sales/contracts?${query}` : '/dashboard/sales/contracts', { scroll: false });
+  };
 
   const hasMoreContracts = pagination.page < pagination.pages;
 
@@ -511,7 +531,6 @@ export default function ContractsPage() {
     <ErpListPage
       eyebrow="فروش"
       title="قراردادهای فروش"
-      description="مرور، جستجو، تایید، امضا و چاپ قراردادهای فروش با نمای موبایل‌فرست."
       actions={[
         { label: 'ثبت قرارداد', href: '/dashboard/sales/contracts/create', icon: FaPlus, tone: 'primary', variant: 'solid' },
         { label: 'ایجاد قرارداد همکاری', href: '/dashboard/sales/contracts/collaboration/create', icon: FaPlus, tone: 'info', variant: 'outline' }
@@ -531,7 +550,7 @@ export default function ContractsPage() {
           label: 'وضعیت',
           type: 'select',
           value: statusFilter,
-          onChange: setStatusFilter,
+          onChange: changeStatusFilter,
           options: statusOptions,
         },
       ]}

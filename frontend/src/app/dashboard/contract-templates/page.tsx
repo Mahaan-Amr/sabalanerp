@@ -137,7 +137,6 @@ export default function ContractTemplatesPage() {
     <ErpListPage
       eyebrow="قراردادها"
       title="قالب‌های قرارداد"
-      description="مدیریت، استفاده و نگهداری قالب‌های قرارداد."
       metrics={metrics}
       actions={[{ label: 'قالب جدید', href: '/dashboard/contract-templates/create', icon: FaPlus, tone: 'primary', variant: 'solid' }]}
       filters={[

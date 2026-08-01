@@ -99,7 +99,6 @@ export default function CrmWorkspacePage() {
     <ErpPage
       eyebrow="CRM"
       title="مدیریت ارتباط و پیگیری مشتری"
-      description="مخاطبین، پروژه‌های احتمالی، گزارش‌های پیگیری و اقدام‌های بعدی فروشندگان."
       metrics={metrics}
       actions={[{ label: 'مشتری جدید', href: '/dashboard/crm/customers/create', icon: FaUserPlus, tone: 'primary', variant: 'solid' }]}
     >
@@ -109,10 +108,10 @@ export default function CrmWorkspacePage() {
         <ErpActionGrid
           columns={4}
           items={[
-            { title: 'ثبت پروژه احتمالی', description: 'فرصت یا پروژه قبل از قرارداد', href: '/dashboard/crm/potential-projects/create', icon: FaProjectDiagram, tone: 'primary' },
-            { title: 'ثبت گزارش پیگیری', description: 'تماس، جلسه، بازدید و اقدام بعدی', href: '/dashboard/crm/follow-ups/create', icon: FaTasks, tone: 'success' },
-            { title: 'فهرست پروژه‌ها', description: 'وضعیت، مسئول و ارزش برآوردی', href: '/dashboard/crm/potential-projects', icon: FaChartLine, tone: 'info' },
-            { title: 'مشتریان', description: 'مخاطبین و سوابق CRM', href: '/dashboard/crm/customers', icon: FaUsers, tone: 'neutral' },
+            { title: 'ثبت پروژه احتمالی', href: '/dashboard/crm/potential-projects/create', icon: FaProjectDiagram, tone: 'primary' },
+            { title: 'ثبت گزارش پیگیری', href: '/dashboard/crm/follow-ups/create', icon: FaTasks, tone: 'success' },
+            { title: 'فهرست پروژه‌ها', href: '/dashboard/crm/potential-projects', icon: FaChartLine, tone: 'info' },
+            { title: 'مشتریان', href: '/dashboard/crm/customers', icon: FaUsers, tone: 'neutral' },
           ]}
         />
       </div>

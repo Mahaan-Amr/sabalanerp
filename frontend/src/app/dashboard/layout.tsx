@@ -158,9 +158,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [selectedSensitiveItemIds, setSelectedSensitiveItemIds] = useState<string[]>([]);
   const router = useRouter();
   const pathname = usePathname();
-  const { currentWorkspace, accessibleWorkspaces } = useWorkspace();
+  const { accessibleWorkspaces } = useWorkspace();
   const isHrWorkspace = pathname.startsWith("/dashboard/hr");
-  const isHrWorkspaceDetail = isHrWorkspace && pathname !== "/dashboard/hr";
+  const isWorkspaceDetail = pathname !== "/dashboard";
   const hrMobileNavigation = [
     {
       id: "dashboard",
@@ -412,7 +412,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <div
-      className={`dashboard-shell min-h-screen bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)] ${isHrWorkspace ? "sds-neumorphic-scope" : ""}`}
+      className="dashboard-shell sds-neumorphic-scope min-h-screen bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)]"
     >
       <SecurityNoticeHost />
       {/* Mobile Sidebar Overlay */}
@@ -429,34 +429,32 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Sidebar */}
       <div
         data-dashboard-sidebar
-        className={`sds-neumorphic-scope sds-dashboard-sidebar fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-y-auto transition-[width,transform] duration-300 ease-in-out lg:overflow-hidden ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-28" : "lg:w-72"}`}
+        className={`sds-dashboard-sidebar fixed inset-y-0 right-0 z-50 w-[min(86vw,288px)] transform overflow-y-auto transition-[width,transform] duration-300 ease-in-out lg:overflow-hidden ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-20" : "lg:w-64"}`}
       >
         <div className="flex min-h-full flex-col lg:h-full">
           {/* Mobile drawer header. The company mark lives in the persistent site header. */}
           <div
-            className={`sds-dashboard-sidebar-header flex items-center justify-between p-4 lg:p-5 ${sidebarCollapsed ? "lg:hidden" : ""}`}
+            className="sds-dashboard-sidebar-header flex items-center justify-between p-3 lg:hidden"
           >
-            <span className="text-sm font-bold text-[var(--sds-text-primary)]">منوی اصلی</span>
+            <span className="text-sm font-bold text-[var(--sds-text-primary)]">منو</span>
             <ErpPressable
               type="button"
               aria-label="بستن منوی اصلی"
               onClick={() => setSidebarOpen(false)}
-              className="text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
             >
               <FaTimes />
             </ErpPressable>
           </div>
 
           {/* User Info */}
-          <div className={`border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-5 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+          <div className={`border-b border-[var(--sds-border-subtle)] p-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
               <div className="flex items-center gap-3">
                 <div className="rounded-lg bg-[var(--sds-surface-subtle)] p-2.5 text-[var(--sds-accent)]">
                   <FaUser className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p
-                    className={`truncate text-sm font-semibold ${isHrWorkspace ? "text-[var(--sds-text-primary)]" : "text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"}`}
-                  >
+                  <p className="truncate text-sm font-semibold text-[var(--sds-text-primary)]">
                     {user.firstName} {user.lastName}
                   </p>
                   <p className="truncate text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
@@ -473,7 +471,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
 
           {/* Workspace Switcher */}
-          <div className={`border-b border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-subtle)] lg:p-5 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+          <div className={`border-b border-[var(--sds-border-subtle)] p-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
               <WorkspaceSwitcher variant="dropdown" compact />
           </div>
 
@@ -489,14 +487,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
             {/* Sidebar Footer */}
             <div
-              className={`sds-dashboard-sidebar-footer ${sidebarCollapsed ? "space-y-3 p-4 lg:p-3" : "space-y-3 p-4 lg:p-5"}`}
+              className={`sds-dashboard-sidebar-footer ${sidebarCollapsed ? "space-y-2 p-3" : "space-y-2 p-3"}`}
             >
               <div
                 className={`flex ${sidebarCollapsed ? "items-center justify-between gap-3 lg:flex-col lg:justify-center lg:gap-2" : "items-center justify-between gap-3"}`}
               >
-                <span className={`text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)] ${sidebarCollapsed ? "lg:sr-only" : ""}`}>
-                  حالت نمایش
-                </span>
                 <ThemeToggle />
               </div>
               <ErpPressable
@@ -505,8 +500,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 tone="danger"
                 className={`sds-dashboard-footer-action flex items-center text-[var(--sds-text-secondary)] transition-all duration-200 hover:bg-[var(--sds-danger-surface)] hover:text-[var(--sds-danger)] dark:text-[var(--sds-text-secondary)] dark:hover:bg-[var(--sds-danger-surface)] dark:hover:text-[var(--sds-danger)] ${
                   sidebarCollapsed
-                    ? "gap-3 w-full px-4 py-3 rounded-lg lg:mx-auto lg:h-12 lg:w-12 lg:justify-center lg:rounded-full lg:px-0 lg:py-0"
-                    : "gap-3 w-full px-4 py-3 rounded-lg"
+                    ? "gap-3 w-full px-3 py-2 rounded-lg lg:mx-auto lg:h-11 lg:w-11 lg:justify-center lg:rounded-full lg:px-0 lg:py-0"
+                    : "gap-3 w-full px-3 py-2 rounded-lg"
                 }`}
               >
                 <FaSignOutAlt className="h-5 w-5" />
@@ -520,16 +515,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Main Content */}
       <div
         data-dashboard-content
-        className={`transition-all duration-300 ${isHrWorkspaceDetail ? "hr-workspace-detail" : ""} ${sidebarCollapsed ? "lg:mr-28" : "lg:mr-72"}`}
+        className={`transition-all duration-300 ${isWorkspaceDetail ? "dashboard-workspace-detail" : ""} ${sidebarCollapsed ? "lg:mr-20" : "lg:mr-64"}`}
       >
         {/* Top Bar */}
         <header
           data-dashboard-topbar
-          className="sds-neumorphic-scope sds-dashboard-topbar p-4"
+          className="sds-dashboard-topbar flex h-16 items-center px-3 sm:px-4"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="sds-dashboard-brand flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl sm:h-12 sm:w-12">
+          <div className="flex w-full items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="sds-dashboard-brand flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src="/brand/logo-project.png"
@@ -541,31 +536,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 type="button"
                 aria-label="بازکردن منوی اصلی"
                 onClick={() => setSidebarOpen(true)}
-                className="text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
               >
                 <FaBars className="h-6 w-6" />
               </ErpPressable>
-              <div>
-                <h1
-                  className={`text-xl font-bold text-[var(--sds-text-primary)] sm:text-2xl ${isHrWorkspace ? "" : "dark:text-[var(--sds-text-inverse)]"}`}
-                >
-                  {currentWorkspace
-                    ? accessibleWorkspaces.find(
-                        (w) => w.id === currentWorkspace,
-                      )?.namePersian || "داشبورد اصلی"
-                    : "داشبورد اصلی"}
-                </h1>
-                <p className="text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
-                  {currentWorkspace
-                    ? accessibleWorkspaces.find(
-                        (w) => w.id === currentWorkspace,
-                      )?.description || ""
-                    : "خوش آمدید " + user.firstName + " " + user.lastName}
-                </p>
-              </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
               <NotificationCenter />
               <div className="relative profile-dropdown-container">
                 <ErpPressable
@@ -587,9 +564,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         {/* Page Content */}
         <main
           data-dashboard-main
-          className={
-            isHrWorkspace ? "p-4 pb-28 sm:p-6 sm:pb-28 xl:p-8" : "p-4 sm:p-6"
-          }
+          className={isHrWorkspace ? "p-4 pb-28 sm:p-5 sm:pb-28 xl:p-6" : "p-4 sm:p-5 xl:p-6"}
         >
           {sanitizedEnvironment && (
             <div

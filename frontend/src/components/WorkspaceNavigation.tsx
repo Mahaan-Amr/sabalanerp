@@ -805,7 +805,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         }
       >
         <div
-          className={`flex items-center rounded-xl transition-all duration-200 ${collapsed ? "min-h-14 gap-3 px-4 py-3 lg:min-h-20 lg:justify-center lg:px-1.5 lg:py-2" : "min-h-14 gap-3 px-4 py-3"} ${
+          className={`flex items-center rounded-xl transition-all duration-200 ${collapsed ? "min-h-11 gap-2 px-3 py-2 lg:min-h-12 lg:justify-center lg:px-1.5" : "min-h-11 gap-2 px-3 py-2"} ${
             level > 0 ? "mr-4" : ""
           } ${
             isActive
@@ -872,38 +872,17 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
           ) : (
             <FaChevronLeft className="h-4 w-4" />
           )}
-          {!collapsed && <span>جمع‌کردن منو</span>}
         </ErpPressable>
       </div>
 
       {/* Navigation Items */}
       <nav
         aria-label="ناوبری فضای کاری"
-        className="scrollbar-thin flex-none space-y-1 overflow-visible p-3 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:flex-1 lg:space-y-2 lg:overflow-y-auto lg:p-3"
+        className="scrollbar-thin flex-none space-y-1 overflow-visible p-2 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:flex-1 lg:overflow-y-auto lg:p-2"
       >
         {navigationItems.map((item) => renderNavigationItem(item))}
       </nav>
 
-      {/* Workspace Info */}
-      {!collapsed && currentWorkspace && (
-        <div className="flex-shrink-0 border-t border-[var(--sds-border-default)] p-4">
-          <div className="sds-workspace-surface p-3">
-            <div className="flex items-center gap-3">
-              <div className="sds-workspace-surface p-2">
-                <FaShieldAlt className="h-4 w-4 text-[var(--sds-accent)]" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="truncate text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
-                  {WORKSPACE_CONFIG[currentWorkspace].namePersian}
-                </p>
-                <p className="truncate text-xs text-[var(--sds-text-primary)] dark:text-[var(--sds-text-secondary)]">
-                  {WORKSPACE_CONFIG[currentWorkspace].description}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

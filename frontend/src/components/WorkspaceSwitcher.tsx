@@ -125,7 +125,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
         onClick={() => selectWorkspace(workspace.id)}
         className={
           layout === "card"
-            ? "min-h-28 w-full justify-start p-4 text-right"
+            ? "sds-neumorphic-card sds-neumorphic-interactive min-h-24 w-full justify-start p-4 text-right"
             : "w-full justify-start gap-3 px-3 py-2 text-right"
         }
       >
@@ -136,7 +136,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
           <strong className="sds-text-primary block truncate text-sm">
             {workspace.namePersian}
           </strong>
-          {(layout === "card" || !compact) && (
+          {!compact && (
             <span className="sds-text-muted mt-1 block truncate text-xs">
               {workspace.description}
             </span>

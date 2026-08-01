@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { snapshotRealizedSale, recordRealizedAdjustment, recordContractCancellation } from '../salesAttributionService';
-import { resolveSalesReportPeriod } from '../salesReportingService';
+import { buildRealizedSalesHeadline, buildSalesReportContractWhere, buildSalesReportScope, resolveAllTimeSalesReportPeriod, resolveSalesReportPeriod } from '../salesReportingService';
 
 const contract: any = {
   id: 'contract-1',
@@ -58,6 +58,61 @@ const run = async () => {
   const defaultPeriod = resolveSalesReportPeriod({ period: 'month' });
   const persianDay = Number(new Intl.DateTimeFormat('en-US-u-ca-persian', { day: 'numeric' }).format(defaultPeriod.from));
   assert.equal(persianDay, 1, 'default report begins on the first day of the current Jalali month');
+
+  const personalAccess = { userId: 'seller-1', role: 'USER', departmentId: 'sales-dept', canManage: false, canCompany: false };
+  assert.deepEqual(buildSalesReportContractWhere(personalAccess, {}), {
+    departmentId: 'sales-dept',
+    OR: [
+      { responsibleSellerId: 'seller-1' },
+      { realizedSellerId: 'seller-1' },
+      { createdBy: 'seller-1' },
+    ],
+  }, 'personal reporting scope is reusable by summary surfaces');
+  assert.equal(buildSalesReportScope(personalAccess, {}).sellerId, 'seller-1');
+
+  const companyAccess = { userId: 'admin-1', role: 'ADMIN', departmentId: null, canManage: true, canCompany: true };
+  assert.deepEqual(buildSalesReportContractWhere(companyAccess, {}), {}, 'company reporting scope remains company-wide');
+
+  const allTime = resolveAllTimeSalesReportPeriod([
+    { createdAt: '2024-01-10T12:00:00.000Z', reportingEvents: [{ effectiveAt: '2023-12-20T08:00:00.000Z' }] },
+  ], new Date('2026-08-01T12:00:00.000Z'));
+  assert.deepEqual(
+    [allTime.from.getFullYear(), allTime.from.getMonth() + 1, allTime.from.getDate()],
+    [2023, 12, 20],
+    'all-time reports begin at the earliest authorized fact',
+  );
+  assert.deepEqual([allTime.to.getFullYear(), allTime.to.getMonth() + 1, allTime.to.getDate()], [2026, 8, 1]);
+
+  const headline = buildRealizedSalesHeadline({
+    sellerId: 'seller-1',
+    contracts: [
+      {
+        id: 'won', status: 'SIGNED', createdBy: 'seller-1', responsibleSellerId: 'seller-1', realizedSellerId: 'seller-1', updatedAt: '2026-01-01',
+        reportingEvents: [
+          { contractId: 'won', eventType: 'REALIZED', amount: 120, sellerId: 'seller-1', effectiveAt: '2026-01-01' },
+          { contractId: 'won', eventType: 'ADJUSTMENT', amount: -20, sellerId: 'seller-1', effectiveAt: '2026-02-01' },
+        ],
+      },
+      {
+        id: 'lost', status: 'CANCELLED', createdBy: 'seller-1', responsibleSellerId: 'seller-1', updatedAt: '2026-03-01', lostAt: '2026-03-01', reportingEvents: [],
+      },
+      {
+        id: 'other', status: 'SIGNED', createdBy: 'seller-2', responsibleSellerId: 'seller-2', realizedSellerId: 'seller-2', updatedAt: '2026-01-01',
+        reportingEvents: [{ contractId: 'other', eventType: 'REALIZED', amount: 999, sellerId: 'seller-2', effectiveAt: '2026-01-01' }],
+      },
+      {
+        id: 'future', status: 'SIGNED', createdBy: 'seller-1', responsibleSellerId: 'seller-1', realizedSellerId: 'seller-1', updatedAt: '2027-01-01',
+        reportingEvents: [{ contractId: 'future', eventType: 'REALIZED', amount: 500, sellerId: 'seller-1', effectiveAt: '2027-01-01' }],
+      },
+    ],
+    from: new Date('2025-01-01T00:00:00.000Z'),
+    to: new Date('2026-12-31T23:59:59.999Z'),
+  });
+  assert.deepEqual(
+    { total: headline.netRealized, count: headline.realizedCount, average: headline.averageRealizedValue, successRate: headline.successRate },
+    { total: 100, count: 1, average: 100, successRate: 50 },
+    'dashboard and comprehensive reporting share one permission-scoped realized-sales projection',
+  );
 
   console.log('salesReportingFoundation tests passed');
 };

@@ -6,6 +6,13 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'pr
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
 export const API_ORIGIN = API_BASE.endsWith('/api') ? API_BASE.slice(0, -4) : API_BASE;
 
+const isPublicVerificationPath = (pathname: string) => (
+  pathname === '/apply'
+  || pathname.startsWith('/apply/')
+  || pathname === '/contracts/confirm'
+  || pathname.startsWith('/contracts/confirm/')
+);
+
 export const resolveBackendAssetUrl = (url?: string | null) => {
   if (!url) return '';
   if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
@@ -114,7 +121,7 @@ api.interceptors.response.use(
       if (
         typeof window !== 'undefined'
         && !window.location.pathname.startsWith('/login')
-        && !window.location.pathname.startsWith('/apply')
+        && !isPublicVerificationPath(window.location.pathname)
       ) window.location.href = '/login';
     }
     const status = Number(error.response?.status || 0);

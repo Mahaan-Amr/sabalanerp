@@ -7,11 +7,13 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
   type ButtonHTMLAttributes,
   type ComponentType,
   type DetailsHTMLAttributes,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { FaChevronLeft } from "react-icons/fa";
 import type { ErpTone } from "./index";
 
@@ -76,9 +78,12 @@ export function ErpNeumorphicDialog({
   children: ReactNode;
   className?: string;
 }) {
+  const [mounted, setMounted] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!open) return;
@@ -124,10 +129,10 @@ export function ErpNeumorphicDialog({
     };
   }, [open]);
 
-  if (!open) return null;
-  return (
+  if (!mounted) return null;
+  const dialog = (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--sds-surface-overlay)] p-3"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-[var(--sds-surface-overlay)] p-3"
       role="presentation"
     >
       <div
@@ -136,12 +141,16 @@ export function ErpNeumorphicDialog({
         aria-modal="true"
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        className={cx("sds-neumorphic-card", className)}
+        className={cx(
+          "sds-neumorphic-card max-h-[calc(100dvh-1.5rem)]",
+          className,
+        )}
       >
         {children}
       </div>
     </div>
   );
+  return createPortal(open ? dialog : null, document.body);
 }
 
 export function ErpNeumorphicDisclosure({

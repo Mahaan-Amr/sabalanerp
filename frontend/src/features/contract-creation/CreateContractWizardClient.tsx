@@ -6109,7 +6109,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           open={!editRecoveryBlocked && showProductModal && productConfig.productType === 'stair'}
           onClose={requestCloseStairConfiguration}
           labelledBy="stair-product-dialog-title"
-          className="stair-v2-modal z-[10000] flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)] text-[var(--sds-text-primary)]"
+          className="stair-v2-modal flex w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)] text-[var(--sds-text-primary)]"
         >
               <div className="stair-v2-header flex min-h-14 flex-shrink-0 items-center justify-between border-b border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4 dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
                 <h3 id="stair-product-dialog-title" className="text-base font-bold text-[var(--sds-text-primary)]">

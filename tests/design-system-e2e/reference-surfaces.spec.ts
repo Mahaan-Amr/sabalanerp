@@ -600,6 +600,59 @@ test('Product Selection restores into the shared interface without changing pers
     return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
   });
   expect(productStepFits).toBe(true);
+
+  const modalFooterActions = productDialog.locator('footer button');
+  expect(await modalFooterActions.count()).toBeGreaterThanOrEqual(2);
+  expect(await modalFooterActions.evaluateAll((actions) => actions.every((action) => {
+    const rect = action.getBoundingClientRect();
+    const topmost = document.elementFromPoint(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+    );
+    return rect.top >= 0 &&
+      rect.bottom <= window.innerHeight &&
+      Boolean(topmost && action.contains(topmost));
+  }))).toBe(true);
+
+  const salesBottomNavigation = page.getByRole('navigation', { name: 'ناوبری فروش' });
+  await expect(salesBottomNavigation).toBeVisible();
+  expect(await salesBottomNavigation.evaluate((navigation) => {
+    const rect = navigation.getBoundingClientRect();
+    const topmost = document.elementFromPoint(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+    );
+    return Boolean(topmost && !navigation.contains(topmost));
+  })).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 422 });
+  const zoomedFooterPresentation = await modalFooterActions.evaluateAll((actions) => actions.map((action) => {
+    const rect = action.getBoundingClientRect();
+    const topmost = document.elementFromPoint(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+    );
+    return {
+      label: action.textContent?.trim(),
+      top: rect.top,
+      bottom: rect.bottom,
+      viewportHeight: window.innerHeight,
+      withinViewport: rect.top >= 0 && rect.bottom <= window.innerHeight,
+      topmost: Boolean(topmost && action.contains(topmost)),
+    };
+  }));
+  for (const action of zoomedFooterPresentation) {
+    expect(action.withinViewport, JSON.stringify(action)).toBe(true);
+    expect(action.topmost, JSON.stringify(action)).toBe(true);
+  }
+  expect(await salesBottomNavigation.evaluate((navigation) => {
+    const rect = navigation.getBoundingClientRect();
+    const topmost = document.elementFromPoint(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+    );
+    return Boolean(topmost && !navigation.contains(topmost));
+  })).toBe(true);
 });
 
 test('Stair layer summary keeps its established values visible while recalculating', async ({ page }) => {

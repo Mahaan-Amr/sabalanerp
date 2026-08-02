@@ -61,7 +61,6 @@ interface NavigationItem {
 interface WorkspaceNavigationProps {
   className?: string;
   collapsed?: boolean;
-  onToggleCollapse?: (collapsed: boolean) => void;
   onNavigate?: (href: string) => void;
 }
 
@@ -76,28 +75,17 @@ interface User {
 export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   className = "",
   collapsed: collapsedProp,
-  onToggleCollapse,
   onNavigate,
 }) => {
   const { currentWorkspace, hasPermission, accessibleWorkspaces } =
     useWorkspace();
-  const [internalCollapsed, setInternalCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [canOpenSecurityShiftReport, setCanOpenSecurityShiftReport] =
     useState(false);
   const pathname = usePathname();
 
-  const isControlled = typeof collapsedProp === "boolean";
-  const collapsed = isControlled ? !!collapsedProp : internalCollapsed;
-
-  const handleToggleCollapse = () => {
-    if (isControlled && onToggleCollapse) {
-      onToggleCollapse(!collapsed);
-    } else {
-      setInternalCollapsed((prev) => !prev);
-    }
-  };
+  const collapsed = !!collapsedProp;
 
   useEffect(() => {
     loadCurrentUser();
@@ -862,26 +850,10 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
 
   return (
     <div className={`flex min-h-0 flex-col lg:h-full ${className}`}>
-      {/* Collapse Toggle */}
-      <div className="hidden flex-shrink-0 border-b border-[var(--sds-border-default)] p-3 lg:block">
-        <ErpPressable
-          type="button"
-          aria-label={collapsed ? "بازکردن منو" : "جمع‌کردن منو"}
-          onClick={handleToggleCollapse}
-          className="sds-action sds-action-ghost flex w-full items-center justify-center gap-2 text-sm"
-        >
-          {collapsed ? (
-            <FaChevronRight className="h-4 w-4" />
-          ) : (
-            <FaChevronLeft className="h-4 w-4" />
-          )}
-        </ErpPressable>
-      </div>
-
       {/* Navigation Items */}
       <nav
         aria-label="ناوبری فضای کاری"
-        className="scrollbar-thin flex-none space-y-1 overflow-visible p-2 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:flex-1 lg:overflow-y-auto lg:p-2"
+        className={`scrollbar-thin w-full flex-none space-y-1 overflow-x-hidden overflow-y-visible p-2 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:flex-1 lg:overflow-y-auto ${collapsed ? "lg:px-0 lg:pb-0 lg:pt-2" : "lg:p-2"}`}
       >
         {navigationItems.map((item) => renderNavigationItem(item))}
       </nav>

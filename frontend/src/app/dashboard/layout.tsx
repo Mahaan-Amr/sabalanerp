@@ -23,6 +23,8 @@ import {
   FaUserPlus,
   FaClipboardList,
   FaBox,
+  FaChevronLeft,
+  FaChevronRight,
 } from "react-icons/fa";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
@@ -475,10 +477,24 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Sidebar */}
       <div
         data-dashboard-sidebar
-        className={`sds-dashboard-sidebar fixed bottom-0 right-0 top-[4.5rem] z-50 w-[min(86vw,288px)] transform overflow-y-auto transition-[width,transform] duration-300 ease-in-out lg:overflow-hidden ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-20" : "lg:w-64"}`}
+        className={`sds-dashboard-sidebar fixed bottom-0 right-0 top-[4.5rem] z-50 w-[min(86vw,288px)] transform overflow-y-auto transition-[width,transform] duration-300 ease-in-out lg:overflow-visible ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-20" : "lg:w-64"}`}
       >
+        <ErpPressable
+          type="button"
+          aria-label={sidebarCollapsed ? "بازکردن منو" : "جمع‌کردن منو"}
+          title={sidebarCollapsed ? "بازکردن منو" : "جمع‌کردن منو"}
+          onClick={() => setSidebarCollapsed((current) => !current)}
+          variant="ghost"
+          className="sds-dashboard-sidebar-toggle absolute left-3 top-1/2 z-10 hidden h-12 w-12 -translate-x-full -translate-y-1/2 items-center justify-center rounded-none p-0 text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] lg:inline-flex"
+        >
+          {sidebarCollapsed ? (
+            <FaChevronLeft className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <FaChevronRight className="h-4 w-4" aria-hidden="true" />
+          )}
+        </ErpPressable>
         <div className="flex min-h-full flex-col lg:h-full">
-          <div className="sds-dashboard-rail flex min-h-0 flex-1 flex-col lg:mx-3 lg:mb-3 lg:overflow-hidden">
+          <div className={`sds-dashboard-rail flex min-h-0 flex-1 flex-col lg:mx-3 lg:mb-3 lg:overflow-hidden ${sidebarCollapsed ? "sds-dashboard-rail-collapsed" : ""}`}>
           {/* Mobile drawer header. The company mark lives in the persistent site header. */}
           <div
             data-sidebar-section
@@ -529,7 +545,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             <div data-sidebar-section className="flex-none lg:flex-1 lg:overflow-hidden">
               <WorkspaceNavigation
                 collapsed={sidebarCollapsed}
-                onToggleCollapse={setSidebarCollapsed}
                 onNavigate={handleSidebarNavigate}
               />
             </div>
@@ -537,16 +552,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             {/* Sidebar Footer */}
             <div
               data-sidebar-section
-              className={`sds-dashboard-sidebar-footer flex items-center gap-3 p-3 ${sidebarCollapsed ? "lg:flex-col lg:justify-center lg:gap-2" : ""}`}
+              className={`sds-dashboard-sidebar-footer flex items-center gap-3 p-3 ${sidebarCollapsed ? "sds-dashboard-sidebar-footer-collapsed lg:flex-col lg:items-center lg:justify-center lg:gap-2" : ""}`}
             >
               <ThemeToggle />
               <ErpPressable
                 type="button"
                 onClick={handleLogout}
                 tone="danger"
-                className={`sds-dashboard-footer-action flex items-center text-[var(--sds-text-secondary)] transition-all duration-200 hover:bg-[var(--sds-danger-surface)] hover:text-[var(--sds-danger)] dark:text-[var(--sds-text-secondary)] dark:hover:bg-[var(--sds-danger-surface)] dark:hover:text-[var(--sds-danger)] ${
+                className={`sds-dashboard-footer-action flex items-center text-[var(--sds-danger)] transition-all duration-200 hover:bg-[var(--sds-danger-surface)] hover:text-[var(--sds-danger)] dark:text-[var(--sds-danger)] dark:hover:bg-[var(--sds-danger-surface)] dark:hover:text-[var(--sds-danger)] ${
                   sidebarCollapsed
-                    ? "h-12 flex-1 gap-3 rounded-lg px-3 py-2 lg:mx-auto lg:w-12 lg:flex-none lg:justify-center lg:rounded-full lg:px-0 lg:py-0"
+                    ? "h-12 flex-1 gap-3 rounded-lg px-3 py-2 lg:w-12 lg:flex-none lg:justify-center lg:rounded-full lg:px-0 lg:py-0"
                     : "h-12 flex-1 justify-center gap-3 rounded-lg px-3 py-2"
                 }`}
               >

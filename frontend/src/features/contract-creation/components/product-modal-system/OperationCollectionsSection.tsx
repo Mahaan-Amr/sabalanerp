@@ -383,6 +383,15 @@ export function OperationCollectionsSection({
           const calculated = calculatedTool(tool.toolSelectionId);
           const conflict = conflictFor(tool.toolSelectionId);
           const selectedEdges = new Set(tool.edges ?? []);
+          const hasBothLongitudinalEdges =
+            selectedEdges.size === 2 &&
+            selectedEdges.has('front') &&
+            selectedEdges.has('back');
+          const hasFullPerimeter =
+            selectedEdges.size === 4 &&
+            (['front', 'back', 'left', 'right'] as const).every(edge =>
+              selectedEdges.has(edge)
+            );
           return (
             <div
               key={tool.toolSelectionId}
@@ -462,38 +471,42 @@ export function OperationCollectionsSection({
                       key={edge}
                       type="button"
                       aria-pressed={selectedEdges.has(edge)}
+                      tone={selectedEdges.has(edge) ? 'primary' : 'neutral'}
+                      variant={selectedEdges.has(edge) ? 'solid' : 'outline'}
                       onClick={() => updateTool(tool.toolSelectionId, current => ({
                         ...current,
                         edges: selectedEdges.has(edge)
                           ? (current.edges ?? []).filter(item => item !== edge)
                           : [...(current.edges ?? []), edge]
                       }))}
-                      className={`min-h-7 rounded-md border px-2 ${
-                        selectedEdges.has(edge)
-                          ? 'border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] text-[var(--sds-accent)] dark:bg-[var(--sds-accent-soft)]'
-                          : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]'
-                      }`}
+                      className="min-h-7 rounded-md px-2"
                     >
                       {getPersianOperationEdgeLabel(edge)}
                     </ErpPressable>
                   ))}
                   <ErpPressable
                     type="button"
+                    aria-pressed={hasBothLongitudinalEdges}
+                    tone={hasBothLongitudinalEdges ? 'primary' : 'neutral'}
+                    variant={hasBothLongitudinalEdges ? 'solid' : 'outline'}
                     onClick={() => updateTool(tool.toolSelectionId, current => ({
                       ...current,
                       edges: ['front', 'back']
                     }))}
-                    className="min-h-7 px-2 text-[var(--sds-accent)]"
+                    className="min-h-7 rounded-md px-2"
                   >
                     دو طول
                   </ErpPressable>
                   <ErpPressable
                     type="button"
+                    aria-pressed={hasFullPerimeter}
+                    tone={hasFullPerimeter ? 'primary' : 'neutral'}
+                    variant={hasFullPerimeter ? 'solid' : 'outline'}
                     onClick={() => updateTool(tool.toolSelectionId, current => ({
                       ...current,
                       edges: ['front', 'back', 'left', 'right']
                     }))}
-                    className="min-h-7 px-2 text-[var(--sds-accent)]"
+                    className="min-h-7 rounded-md px-2"
                   >
                     محیط کامل
                   </ErpPressable>

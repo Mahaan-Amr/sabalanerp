@@ -395,6 +395,21 @@ test('Sales contract visual regressions keep compact alignment, contrast, spacin
   assert.match(longitudinal, /grid grid-cols-1 items-start gap-3 sm:grid-cols-4/);
   assert.match(operations, /kind="finishing"[\s\S]{0,180}focusOnMount/);
   assert.match(operations, /min-h-11 w-full[^\n]+px-3 py-2/);
+  assert.match(
+    operations,
+    /tone=\{selectedEdges\.has\(edge\) \? 'primary' : 'neutral'\}[\s\S]{0,120}variant=\{selectedEdges\.has\(edge\) \? 'solid' : 'outline'\}/,
+    'selected front, back, left, and right tool edges must use the semantic accent state'
+  );
+  assert.match(
+    operations,
+    /aria-pressed=\{hasBothLongitudinalEdges\}[\s\S]{0,180}variant=\{hasBothLongitudinalEdges \? 'solid' : 'outline'\}/,
+    'the two-length tool shortcut must expose and display its selected state'
+  );
+  assert.match(
+    operations,
+    /aria-pressed=\{hasFullPerimeter\}[\s\S]{0,180}variant=\{hasFullPerimeter \? 'solid' : 'outline'\}/,
+    'the full-perimeter tool shortcut must expose and display its selected state'
+  );
 });
 
 test('the complete Contract Creation wizard uses the shared semantic and accessible interface', () => {

@@ -16,12 +16,23 @@ const slot = {
     endedAt: '2026-07-23T14:30:00.000Z',
     personnel: { user: { firstName: 'نیروی', lastName: 'مؤثر' } },
     corrections: [],
-    patrolSessions: [],
+    patrolSessions: [{
+      id: 'patrol-1',
+      status: 'COMPLETED',
+      startedAt: '2026-07-23T05:00:00.000Z',
+      endedAt: '2026-07-23T05:17:00.000Z',
+      description: 'محوطه و انبار بدون مورد خاص بررسی شد',
+      personnel: { firstName: 'نیروی', lastName: 'مؤثر' },
+    }],
     logEntries: [{
       id: 'entry', rowNumber: 1, status: SecurityShiftLogStatus.ACTIVE,
       categoryNameSnapshot: 'کنترل', reportTypeNameSnapshot: 'ورودی', description: 'ثبت معتبر',
       createdAt: '2026-07-23T04:00:00.000Z', participants: [], reportType: null,
       attachments: [{ id: 'image', originalName: 'evidence.png', dataUri: 'data:image/png;base64,AA==' }],
+    }, {
+      id: 'entry-during-patrol', rowNumber: 2, status: SecurityShiftLogStatus.ACTIVE,
+      categoryNameSnapshot: 'رویداد میان گشت', reportTypeNameSnapshot: null, description: 'در حین گشت ثبت شد',
+      createdAt: '2026-07-23T05:10:00.000Z', participants: [], reportType: null, attachments: [],
     }],
   },
 };
@@ -35,6 +46,12 @@ assert.match(html, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/, 'evidenc
 assert.match(html, /object-fit:contain/, 'evidence retains its complete aspect ratio without cropping');
 assert.match(html, /\.shift\+\.shift\{break-before:page\}/, 'subsequent shifts start on a fresh page');
 assert.match(html, /ردیف ۱ · evidence\.png/, 'evidence caption keeps its timeline row and filename');
+assert.equal((html.match(/<td>گشت‌زنی<\/td>/g) || []).length, 2, 'each shift renders one merged patrol row');
+assert.doesNotMatch(html, /شروع گشت‌زنی|پایان گشت‌زنی/, 'patrol start and finish are not rendered as separate rows');
+assert.match(html, /۱۷ دقیقه/, 'merged patrol row shows its duration');
+assert.ok(html.indexOf('رویداد میان گشت') < html.indexOf('<td>گشت‌زنی</td>'), 'merged patrol row is anchored at completion after intervening reports');
+assert.match(html, /description-col\{width:44%\}/, 'description receives the largest timeline column width');
+assert.match(html, /<th>زمان \/ مدت<\/th>/, 'the final timeline column distinguishes event time from patrol duration');
 assert.equal((html.match(/class="shift"/g) || []).length, 2);
 
 console.log('security completed shift PDF tests passed');

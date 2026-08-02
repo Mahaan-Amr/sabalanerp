@@ -1,0 +1,3 @@
+# Separate personal, notification, and support task surfaces
+
+The notification and self-service redesign keeps one durable notification history but separates its compact bell preview from the full inbox, and splits the personal area into a read-only hub plus focused leave, security, and notification routes. Internal support likewise separates reporter requests, handler work, and managed-scope queues while preserving one append-only ticket record and the existing permission model. This task-oriented information architecture replaces overloaded pages without creating parallel domain lifecycles, stores, or administrative identity workflows.

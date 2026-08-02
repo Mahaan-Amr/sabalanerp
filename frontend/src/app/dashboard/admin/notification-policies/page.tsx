@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { FaBell, FaEdit, FaSave } from 'react-icons/fa';
+import { FaBell, FaEdit, FaSave, FaSearch } from 'react-icons/fa';
 import { notificationsAPI } from '@/lib/api';
 import {
   ErpBadge,
@@ -11,10 +11,10 @@ import {
   ErpEmptyState,
   ErpInput,
   ErpLoading,
-  ErpPage,
   ErpSelect,
   ErpSheet,
   ErpTextarea,
+  ErpWorkspacePage,
 } from '@/components/erp';
 
 type Priority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
@@ -104,6 +104,32 @@ const priorityTone: Record<Priority, 'neutral' | 'info' | 'warning' | 'danger'> 
   URGENT: 'danger',
 };
 
+const policyGroup = (type: string) => {
+  if (type.includes('LOGIN') || type.includes('BROWSER')) return 'امنیت حساب';
+  if (type.startsWith('HIRING_')) return 'جذب و منابع انسانی';
+  if (type.startsWith('SUPPORT_')) return 'پشتیبانی';
+  if (type.startsWith('SALES_') || type.startsWith('ACCOUNTING_')) return 'فروش و مالی';
+  return 'سامانه و بازیابی';
+};
+const previewTemplate = (value: string) => value.replace(/\{\{[^}]+\}\}/g, 'نمونه');
+
+function PolicySnapshot({ label, value }: { label: string; value: Omit<FormState, 'changeReason'> }) {
+  return (
+    <ErpCard className="p-3">
+      <p className="text-xs font-bold sds-text-muted">{label}</p>
+      <dl className="mt-3 space-y-2 text-sm">
+        <div><dt className="text-xs sds-text-muted">وضعیت</dt><dd className="font-bold">{value.enabled ? 'فعال' : 'غیرفعال'}</dd></div>
+        <div><dt className="text-xs sds-text-muted">عنوان</dt><dd className="font-bold">{value.titleTemplate}</dd></div>
+        <div><dt className="text-xs sds-text-muted">متن</dt><dd className="leading-6">{value.messageTemplate}</dd></div>
+        <div><dt className="text-xs sds-text-muted">اهمیت</dt><dd>{priorityLabels[value.priority]}</dd></div>
+        <div><dt className="text-xs sds-text-muted">کانال‌ها</dt><dd>{value.channels.map((channel) => channelLabels[channel]).join('، ') || '—'}</dd></div>
+        <div><dt className="text-xs sds-text-muted">مخاطبان</dt><dd>{value.recipientResolvers.map((resolver) => resolverLabels[resolver] || resolver).join('، ') || '—'}</dd></div>
+        <div><dt className="text-xs sds-text-muted">زمان تحویل</dt><dd>{value.batching === 'IMMEDIATE' ? 'فوری' : 'خلاصه روزانه'}</dd></div>
+      </dl>
+    </ErpCard>
+  );
+}
+
 const toForm = (row: PolicyRow): FormState => ({
   enabled: row.definition.mandatory ? true : row.policy.enabled,
   titleTemplate: row.policy.titleTemplate,
@@ -123,6 +149,7 @@ export default function NotificationPoliciesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [search, setSearch] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -179,21 +206,25 @@ export default function NotificationPoliciesPage() {
     }
   };
 
+  const visibleRows = rows.filter((row) => `${eventLabels[row.definition.type] || ''} ${row.definition.type}`.toLocaleLowerCase('fa-IR').includes(search.trim().toLocaleLowerCase('fa-IR')));
+  const groupedRows = visibleRows.reduce<Record<string, PolicyRow[]>>((groups, row) => {
+    const group = policyGroup(row.definition.type);
+    groups[group] = [...(groups[group] || []), row];
+    return groups;
+  }, {});
+
   return (
-    <ErpPage
-      eyebrow="مدیریت سامانه"
-      title="سیاست‌های اعلان"
-      description="تنظیم نسخه‌دار اعلان‌های ثبت‌شده؛ رویداد، دسترسی و پیوند امن در کد سامانه محافظت می‌شود."
-      actions={[{ label: 'به‌روزرسانی', onClick: load, icon: FaBell, tone: 'neutral', variant: 'outline' }]}
-    >
+    <ErpWorkspacePage title="سیاست‌های اعلان" primaryAction={{ label: 'به‌روزرسانی', onClick: load, icon: FaBell, tone: 'neutral', variant: 'outline' }}>
       {message && <div role="status" className="rounded-xl border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)]">{message}</div>}
       {error && <div role="alert" className="rounded-xl border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)]">{error}</div>}
 
-      {loading ? <ErpLoading /> : rows.length === 0 ? (
+      <ErpCard className="p-3"><div className="relative max-w-xl"><FaSearch className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 sds-text-muted" /><ErpInput className="pr-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="جست‌وجوی رویداد اعلان" /></div></ErpCard>
+      {loading ? <ErpLoading /> : visibleRows.length === 0 ? (
         <ErpEmptyState icon={FaBell} title="رویداد اعلانی ثبت نشده است" />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {rows.map((row) => (
+        <div className="space-y-6">
+          {Object.entries(groupedRows).map(([group, groupRows]) => <section key={group} aria-labelledby={`policy-group-${group}`}><h2 id={`policy-group-${group}`} className="mb-3 text-lg font-black sds-text-primary">{group}</h2><div className="grid gap-4 lg:grid-cols-2">
+          {groupRows.map((row) => (
             <ErpCard key={row.definition.type} className="p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -221,7 +252,7 @@ export default function NotificationPoliciesPage() {
                 <ErpButton label="ویرایش سیاست" icon={FaEdit} variant="outline" onClick={() => edit(row)} />
               </div>
             </ErpCard>
-          ))}
+          ))}</div></section>)}
         </div>
       )}
 
@@ -251,6 +282,11 @@ export default function NotificationPoliciesPage() {
               <span className="mb-2 block text-sm font-semibold">عنوان فارسی</span>
               <ErpInput value={form.titleTemplate} onChange={(event) => setForm({ ...form, titleTemplate: event.target.value })} />
             </label>
+            <ErpCard className="p-3">
+              <p className="text-xs font-bold sds-text-muted">پیش‌نمایش زنده</p>
+              <p className="mt-2 font-bold sds-text-primary">{previewTemplate(form.titleTemplate) || 'عنوان اعلان'}</p>
+              <p className="mt-1 text-sm leading-6 sds-text-secondary">{previewTemplate(form.messageTemplate) || 'متن اعلان'}</p>
+            </ErpCard>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold">متن فارسی</span>
               <ErpTextarea className="min-h-28" value={form.messageTemplate} onChange={(event) => setForm({ ...form, messageTemplate: event.target.value })} />
@@ -313,9 +349,13 @@ export default function NotificationPoliciesPage() {
               <span className="mb-2 block text-sm font-semibold">دلیل تغییر</span>
               <ErpTextarea className="min-h-24" value={form.changeReason} onChange={(event) => setForm({ ...form, changeReason: event.target.value })} />
             </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <PolicySnapshot label="نسخه جاری" value={{ enabled: selected.policy.enabled, titleTemplate: selected.policy.titleTemplate, messageTemplate: selected.policy.messageTemplate, priority: selected.policy.priority, channels: selected.policy.channels, recipientResolvers: selected.policy.recipientResolvers, batching: selected.policy.batching }} />
+              <PolicySnapshot label="نسخه پیشنهادی" value={{ enabled: form.enabled, titleTemplate: form.titleTemplate, messageTemplate: form.messageTemplate, priority: form.priority, channels: form.channels, recipientResolvers: form.recipientResolvers, batching: form.batching }} />
+            </div>
           </div>
         )}
       </ErpSheet>
-    </ErpPage>
+    </ErpWorkspacePage>
   );
 }

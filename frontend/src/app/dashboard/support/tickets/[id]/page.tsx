@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { FaComments, FaEyeSlash, FaGavel, FaPaperPlane, FaPaperclip, FaShieldAlt, FaUserPlus } from 'react-icons/fa';
+import { FaComments, FaCogs, FaEyeSlash, FaGavel, FaPaperPlane, FaPaperclip, FaShieldAlt, FaUserPlus } from 'react-icons/fa';
 import { API_ORIGIN, authAPI, supportTicketsAPI, usersAPI } from '@/lib/api';
 import { featureLabelFa, workspaceLabelFa } from '@/lib/featureLabelsFa';
 import {
@@ -12,12 +12,13 @@ import {
   ErpCheckbox,
   ErpEmptyState,
   ErpInput,
+  ErpInlineState,
   ErpLoading,
-  ErpPage,
   ErpPressable,
   ErpSelect,
   ErpSheet,
   ErpTextarea,
+  ErpWorkspacePage,
   erpFieldLabelClassName,
 } from '@/components/erp';
 
@@ -67,6 +68,7 @@ export default function SupportTicketDetailPage() {
   const [bundlePreview, setBundlePreview] = useState<any>(null);
   const [selectedSensitive, setSelectedSensitive] = useState<string[]>([]);
   const [readyBundleId, setReadyBundleId] = useState('');
+  const [handlerActionsOpen, setHandlerActionsOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -166,22 +168,22 @@ export default function SupportTicketDetailPage() {
     `${API_ORIGIN}/api/support-tickets/attachments/${id}/download${inline ? '?inline=true' : ''}`;
 
   return (
-    <ErpPage
-      eyebrow={`پشتیبانی · ${ticket.referenceCode}`}
+    <ErpWorkspacePage
       title={ticket.title}
-      description={`${workspaceLabelFa(ticket.reportedWorkspace)}${ticket.reportedFeature ? ` / ${featureLabelFa(ticket.reportedFeature)}` : ''}`}
+      context={`${ticket.referenceCode} · ${workspaceLabelFa(ticket.reportedWorkspace)}${ticket.reportedFeature ? ` / ${featureLabelFa(ticket.reportedFeature)}` : ''}`}
       backHref="/dashboard/support/history"
+      primaryAction={canHandle ? { label: 'اقدامات رسیدگی', icon: FaCogs, onClick: () => setHandlerActionsOpen(true) } : undefined}
     >
       <div className="space-y-4" dir="rtl">
-        {error && <ErpCard tone="danger"><p role="alert" className="text-sm font-bold">{error}</p></ErpCard>}
-        <ErpCard>
+        {error && <ErpInlineState kind="error" title={error} />}
+        <ErpCard className="p-4">
           <div className="flex flex-wrap gap-2">
-            <ErpBadge tone={ticket.restrictedIncident ? 'danger' : 'info'}>{ticket.restrictedIncident ? 'رخداد حفاظت‌شده' : statusLabels[ticket.status] || ticket.status}</ErpBadge>
+            <ErpBadge tone={ticket.restrictedIncident ? 'neutral' : 'info'}>{ticket.restrictedIncident ? 'رخداد حفاظت‌شده' : statusLabels[ticket.status] || ticket.status}</ErpBadge>
             <ErpBadge tone={priority === 'URGENT' ? 'danger' : priority === 'HIGH' ? 'warning' : 'neutral'}>اولویت {priorityLabels[priority] || priority}</ErpBadge>
             <ErpBadge tone="neutral">{new Date(ticket.createdAt).toLocaleString('fa-IR')}</ErpBadge>
           </div>
           {ticket.restrictedIncident && (
-            <div className="mt-4 flex items-start gap-2 rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)]">
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] p-3 text-sm sds-text-secondary">
               <FaShieldAlt className="mt-0.5 shrink-0" />
               جزئیات این رخداد فقط در اختیار افراد مجاز قرار می‌گیرد و در اعلان قفل صفحه نمایش داده نمی‌شود.
             </div>
@@ -198,8 +200,7 @@ export default function SupportTicketDetailPage() {
         </ErpCard>
 
         {canHandle && (
-          <ErpCard tone="info">
-            <h2 className="mb-4 font-bold">کنترل رسیدگی</h2>
+          <ErpSheet open={handlerActionsOpen} onClose={() => setHandlerActionsOpen(false)} title="اقدامات رسیدگی">
             <div className="grid gap-4 lg:grid-cols-3">
               <label>
                 <span className={erpFieldLabelClassName}>وضعیت بعدی</span>
@@ -293,7 +294,7 @@ export default function SupportTicketDetailPage() {
                 )}
               </div>
             </div>
-          </ErpCard>
+          </ErpSheet>
         )}
 
         <ErpSheet open={Boolean(bundlePreview)} onClose={() => setBundlePreview(null)} title="پیش‌نمایش بسته تشخیصی">
@@ -366,6 +367,8 @@ export default function SupportTicketDetailPage() {
                         <p className="inline-flex items-center gap-2 text-xs font-bold"><FaPaperclip />{attachment.originalName}</p>
                         {attachment.redactedAt ? (
                           <p className="mt-2 text-sm text-[var(--sds-danger)]">این پیوست با ثبت دلیل پوشانده شده است.</p>
+                        ) : ticket.restrictedIncident ? (
+                          <p className="mt-2 text-sm sds-text-muted">برای مشاهده این شاهد حفاظت‌شده، دانلود را آگاهانه انتخاب کنید.</p>
                         ) : attachment.kind === 'AUDIO' ? (
                           <audio className="mt-3 w-full" controls preload="metadata" src={attachmentUrl(attachment.id, true)}>مرورگر شما پخش صوت را پشتیبانی نمی‌کند.</audio>
                         ) : attachment.kind === 'IMAGE' ? (
@@ -439,25 +442,26 @@ export default function SupportTicketDetailPage() {
             <div className="mt-3"><ErpButton label="بازگشایی" onClick={() => void reopenTicket()} disabled={busy || actionReason.trim().length < 3} /></div>
           </ErpCard>
         )}
+        {(ticket.originRoute || (canHandle && ticket.sensitiveEvidenceSnapshot)) && <details className="sds-card p-4">
+          <summary className="cursor-pointer font-bold sds-text-primary">اقدامات پیشرفته و اطلاعات فنی</summary>
         {ticket.originRoute && (
-          <ErpCard tone="neutral">
+          <div className="mt-4 rounded-xl border border-[var(--sds-border-subtle)] p-3">
             <h2 className="font-bold">اطلاعات فنی ثبت‌شده</h2>
             <p className="mt-2 text-sm" dir="ltr">{ticket.originRoute}</p>
             <p className="mt-1 text-xs text-[var(--sds-text-muted)]">نسخه: {ticket.releaseBuild || 'نامشخص'}</p>
-          </ErpCard>
+          </div>
         )}
         {canHandle && ticket.sensitiveEvidenceSnapshot && (
-          <ErpCard tone="warning">
+          <div className="mt-4 rounded-xl border border-[var(--sds-border-subtle)] p-3">
             <h2 className="font-bold">اطلاعات حساس اختیاری گزارشگر</h2>
             <p className="mt-1 text-sm text-[var(--sds-text-muted)]">
               این بخش با رضایت صریح گزارشگر ثبت شده و فقط برای رسیدگی مجاز نمایش داده می‌شود.
             </p>
-            <pre dir="ltr" className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] p-3 text-xs">
-              {JSON.stringify(ticket.sensitiveEvidenceSnapshot, null, 2)}
-            </pre>
-          </ErpCard>
+            <details className="mt-3"><summary className="cursor-pointer text-sm font-bold">نمایش آگاهانه اطلاعات</summary><pre dir="ltr" className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] p-3 text-xs">{JSON.stringify(ticket.sensitiveEvidenceSnapshot, null, 2)}</pre></details>
+          </div>
         )}
+        </details>}
       </div>
-    </ErpPage>
+    </ErpWorkspacePage>
   );
 }

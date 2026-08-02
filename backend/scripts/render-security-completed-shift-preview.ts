@@ -27,7 +27,24 @@ const fixture = [{
     logEntries: [
       { id: 'log-1', rowNumber: 1, status: SecurityShiftLogStatus.ACTIVE, categoryNameSnapshot: 'کنترل ورودی', reportTypeNameSnapshot: 'بازرسی خودرو', description: 'خودروی ورودی بررسی شد و مجوز بارگیری تطبیق داده شد.', createdAt: new Date('2026-07-23T04:10:00.000Z'), reportType: { description: 'ثبت کنترل خودرو و مدارک همراه' }, participants: [{ personnel: { firstName: 'علی', lastName: 'کاظمی' } }], attachments: [] },
     ],
-    patrolSessions: [],
+    patrolSessions: [
+      {
+        id: 'patrol-1',
+        status: 'COMPLETED',
+        startedAt: new Date('2026-07-23T05:00:00.000Z'),
+        endedAt: new Date('2026-07-23T05:17:00.000Z'),
+        description: 'محوطه بارگیری، انبار و مسیر پیرامونی بررسی شد و مورد غیرعادی مشاهده نشد.',
+        personnel: { firstName: 'سارا', lastName: 'محمدی' },
+      },
+      {
+        id: 'patrol-2',
+        status: 'COMPLETED',
+        startedAt: new Date('2026-07-23T09:30:00.000Z'),
+        endedAt: new Date('2026-07-23T10:41:00.000Z'),
+        description: 'گشت کامل محوطه انجام شد؛ روشنایی ضلع جنوبی برای پیگیری ثبت گردید.',
+        personnel: { firstName: 'سارا', lastName: 'محمدی' },
+      },
+    ],
   },
 }];
 

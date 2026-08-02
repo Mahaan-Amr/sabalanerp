@@ -331,6 +331,8 @@ router.post(
 
 router.get('/', async (req: AuthRequest, res) => {
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+  const requestedView = typeof req.query.view === 'string' ? req.query.view : '';
+  const search = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 160) : '';
   const workspaces = await workspaceAccess(req.user!.id, req.user!.role);
   const accessibleFeatures = await managedFeatureAccess(req.user!.id, req.user!.role);
   const filters: Prisma.SupportTicketWhereInput = {
@@ -353,6 +355,12 @@ router.get('/', async (req: AuthRequest, res) => {
     ...(Number(req.query.ageDays) > 0
       ? { createdAt: { lte: new Date(Date.now() - Number(req.query.ageDays) * 86_400_000) } }
       : {}),
+    ...(search ? {
+      AND: [{ OR: [
+        { title: { contains: search, mode: 'insensitive' } },
+        { referenceCode: { contains: search, mode: 'insensitive' } },
+      ] }],
+    } : {}),
   };
   let scope: Prisma.SupportTicketWhereInput = {};
   const designatedIncidentHandler = req.user!.role !== 'ADMIN'
@@ -385,8 +393,21 @@ router.get('/', async (req: AuthRequest, res) => {
       ],
     };
   }
+  let viewScope: Prisma.SupportTicketWhereInput = {};
+  if (requestedView === 'reported') {
+    viewScope = { reporterId: req.user!.id };
+  } else if (requestedView === 'handling') {
+    viewScope = { participants: { some: { userId: req.user!.id, removedAt: null } } };
+  } else if (requestedView === 'managed') {
+    viewScope = ['ADMIN', 'MANAGER'].includes(req.user!.role)
+      ? {
+          reporterId: { not: req.user!.id },
+          participants: { none: { userId: req.user!.id, removedAt: null } },
+        }
+      : { id: '__inaccessible_managed_support_view__' };
+  }
   const rows = await prisma.supportTicket.findMany({
-    where: { AND: [scope, filters] },
+    where: { AND: [scope, viewScope, filters] },
     take: limit,
     orderBy: { createdAt: 'desc' },
     include: {
@@ -420,6 +441,8 @@ router.get('/', async (req: AuthRequest, res) => {
         ? { id: 'protected-reporter', firstName: 'گزارشگر', lastName: 'حفاظت‌شده', username: 'protected' }
         : ticket.reporter,
       participants: ticket.participants,
+      isReporter: ticket.reporterId === req.user!.id,
+      viewerParticipationRole: ticket.participants.find((participant) => participant.userId === req.user!.id)?.role || null,
       _count: ticket._count,
       operationalTargetState: ticket.resolutionDueAt
         ? ticket.resolutionDueAt.getTime() < now

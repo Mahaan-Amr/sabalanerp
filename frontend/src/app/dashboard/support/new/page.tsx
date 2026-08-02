@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FaImage, FaLifeRing, FaMicrophone, FaPaperPlane, FaPause, FaShieldAlt, FaTrash } from 'react-icons/fa';
+import { FaChevronDown, FaImage, FaLifeRing, FaMicrophone, FaPaperPlane, FaPause, FaShieldAlt, FaTrash } from 'react-icons/fa';
 import { supportTicketsAPI } from '@/lib/api';
 import { featureLabelFa, workspaceLabelFa } from '@/lib/featureLabelsFa';
 import {
@@ -10,8 +10,9 @@ import {
   ErpCard,
   ErpCheckbox,
   ErpCheckboxControl,
+  ErpInlineState,
   ErpInput,
-  ErpPage,
+  ErpWorkspacePage,
   ErpPressable,
   ErpSelect,
   ErpTextarea,
@@ -77,6 +78,7 @@ export default function NewSupportTicketPage() {
   const [error, setError] = useState('');
   const [evidence, setEvidence] = useState<PendingEvidence[]>([]);
   const [recording, setRecording] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingStartedRef = useRef(0);
@@ -188,6 +190,7 @@ export default function NewSupportTicketPage() {
     () => context.features.filter((feature) => feature.workspace === form.reportedWorkspace),
     [context.features, form.reportedWorkspace],
   );
+  const needsSensitiveConsent = form.type === 'SECURITY_PRIVACY' || Boolean(origin.sensitiveCandidate) || evidence.some((item) => item.kind === 'AUDIO');
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -229,14 +232,9 @@ export default function NewSupportTicketPage() {
   };
 
   return (
-    <ErpPage
-      eyebrow="پشتیبانی"
-      title="ثبت تیکت جدید"
-      description="مشکل را در حدی توضیح دهید که تیم پشتیبانی بتواند آن را بازسازی و پیگیری کند."
-      backHref="/dashboard/support/history"
-    >
+    <ErpWorkspacePage title="ثبت درخواست پشتیبانی" backHref="/dashboard/support/history">
       <form onSubmit={submit} className="space-y-5" dir="rtl">
-        {error && <ErpCard tone="danger"><p role="alert" className="text-sm font-bold">{error}</p></ErpCard>}
+        {error && <ErpInlineState kind="error" title={error} />}
         {form.type === 'SECURITY_PRIVACY' && (
           <ErpCard tone="danger">
             <div className="flex items-start gap-3">
@@ -248,14 +246,14 @@ export default function NewSupportTicketPage() {
             </div>
           </ErpCard>
         )}
-        <ErpCard>
+        <ErpCard className="p-4 sm:p-5">
           <div className="grid gap-4 lg:grid-cols-2">
             <label className="lg:col-span-2">
               <span className={erpFieldLabelClassName}>عنوان</span>
               <ErpInput value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} maxLength={180} required />
             </label>
             <label>
-              <span className={erpFieldLabelClassName}>نوع تیکت</span>
+              <span className={erpFieldLabelClassName}>نوع مشکل</span>
               <ErpSelect value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}>
                 {typeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </ErpSelect>
@@ -266,44 +264,32 @@ export default function NewSupportTicketPage() {
                 {impactOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </ErpSelect>
             </label>
+            <label className="lg:col-span-2">
+              <span className={erpFieldLabelClassName}>شرح مشکل</span>
+              <ErpTextarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={6} maxLength={10000} />
+            </label>
             <label>
               <span className={erpFieldLabelClassName}>فضای کاری مرتبط</span>
               <ErpSelect value={form.reportedWorkspace} onChange={(event) => setForm({ ...form, reportedWorkspace: event.target.value, reportedFeature: '' })}>
                 <option value="">عمومی / نامشخص</option>
-                {context.workspaces.map((workspace) => (
-                  <option key={workspace} value={workspace}>{workspaceLabelFa(workspace)}</option>
-                ))}
+                {context.workspaces.map((workspace) => <option key={workspace} value={workspace}>{workspaceLabelFa(workspace)}</option>)}
               </ErpSelect>
             </label>
             <label>
               <span className={erpFieldLabelClassName}>قابلیت مرتبط</span>
               <ErpSelect value={form.reportedFeature} onChange={(event) => setForm({ ...form, reportedFeature: event.target.value })} disabled={!form.reportedWorkspace}>
                 <option value="">عمومی / نامشخص</option>
-                {features.map((feature) => (
-                  <option key={feature.feature} value={feature.feature}>{featureLabelFa(feature.feature, feature.label)}</option>
-                ))}
+                {features.map((feature) => <option key={feature.feature} value={feature.feature}>{featureLabelFa(feature.feature, feature.label)}</option>)}
               </ErpSelect>
             </label>
             <div className="lg:col-span-2">
-              <ErpCheckbox
-                checked={form.workaroundExists}
-                onChange={(event) => setForm({ ...form, workaroundExists: event.target.checked })}
-                label="برای ادامه کار راه‌حل موقت دارم"
-              />
+              <ErpButton label="جزئیات بیشتر" icon={FaChevronDown} tone="neutral" variant="ghost" onClick={() => setDetailsOpen((open) => !open)} />
             </div>
-            <label className="lg:col-span-2">
-              <span className={erpFieldLabelClassName}>شرح مشکل</span>
-              <ErpTextarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={6} maxLength={10000} />
-              <span className="mt-1 block text-xs text-[var(--sds-text-muted)]">اگر تصویر یا پیام صوتی معنادار می‌فرستید، نوشتن شرح الزامی نیست.</span>
-            </label>
-            <label>
-              <span className={erpFieldLabelClassName}>مراحلی که طی کردید (اختیاری)</span>
-              <ErpTextarea value={form.steps} onChange={(event) => setForm({ ...form, steps: event.target.value })} rows={4} maxLength={5000} />
-            </label>
-            <label>
-              <span className={erpFieldLabelClassName}>نتیجه مورد انتظار (اختیاری)</span>
-              <ErpTextarea value={form.expectedResult} onChange={(event) => setForm({ ...form, expectedResult: event.target.value })} rows={4} maxLength={5000} />
-            </label>
+            {detailsOpen && <>
+              <label><span className={erpFieldLabelClassName}>مراحلی که طی کردید</span><ErpTextarea value={form.steps} onChange={(event) => setForm({ ...form, steps: event.target.value })} rows={4} maxLength={5000} /></label>
+              <label><span className={erpFieldLabelClassName}>نتیجه مورد انتظار</span><ErpTextarea value={form.expectedResult} onChange={(event) => setForm({ ...form, expectedResult: event.target.value })} rows={4} maxLength={5000} /></label>
+              <div className="lg:col-span-2"><ErpCheckbox checked={form.workaroundExists} onChange={(event) => setForm({ ...form, workaroundExists: event.target.checked })} label="برای ادامه کار راه‌حل موقت دارم" /></div>
+            </>}
           </div>
         </ErpCard>
         <ErpCard>
@@ -363,7 +349,7 @@ export default function NewSupportTicketPage() {
             </div>
           )}
         </ErpCard>
-        <ErpCard tone="warning">
+        {needsSensitiveConsent && <ErpCard tone="warning">
           <label className="flex cursor-pointer items-start gap-3">
             <ErpCheckboxControl
               checked={form.sensitiveEvidenceConsent}
@@ -389,7 +375,7 @@ export default function NewSupportTicketPage() {
               />
             </label>
           )}
-        </ErpCard>
+        </ErpCard>}
         <div className="flex flex-wrap justify-end gap-2">
           <ErpButton label="انصراف" href="/dashboard/support/history" tone="neutral" variant="outline" />
           <ErpPressable
@@ -398,10 +384,10 @@ export default function NewSupportTicketPage() {
             className="sds-action sds-tone-primary sds-action-solid inline-flex min-h-11 items-center justify-center gap-2 px-4 text-sm font-bold disabled:opacity-50"
           >
             {saving ? <FaLifeRing className="h-4 w-4" /> : <FaPaperPlane className="h-4 w-4" />}
-            {saving ? 'در حال ثبت…' : 'ثبت تیکت'}
+            {saving ? 'در حال ثبت…' : 'ثبت درخواست'}
           </ErpPressable>
         </div>
       </form>
-    </ErpPage>
+    </ErpWorkspacePage>
   );
 }

@@ -806,7 +806,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         }
       >
         <div
-          className={`flex items-center rounded-xl transition-all duration-200 ${collapsed ? "min-h-11 gap-2 px-3 py-2 lg:min-h-12 lg:justify-center lg:px-1.5" : "min-h-11 gap-2 px-3 py-2"} ${
+          className={`flex items-center rounded-xl transition-all duration-200 ${collapsed ? "min-h-11 gap-2 px-3 py-2 lg:mx-auto lg:h-12 lg:w-12 lg:min-h-12 lg:justify-center lg:p-0" : "min-h-11 gap-2 px-3 py-2"} ${
             level > 0 ? "mr-4" : ""
           } ${
             isActive
@@ -820,7 +820,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
               aria-expanded={isExpanded}
               aria-current={isActive ? "page" : undefined}
               onClick={() => toggleExpanded(itemKey)}
-              className={`flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:justify-center" : "justify-between gap-4"}`}
+              className={`sds-dashboard-nav-control flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:h-12 lg:w-12 lg:flex-none lg:justify-center" : "justify-between gap-4"}`}
             >
               <span className="flex min-w-0 items-center gap-3">
                 <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
@@ -839,7 +839,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
               aria-current={isActive ? "page" : undefined}
               title={collapsed ? item.namePersian : undefined}
               onClick={() => onNavigate?.(item.href)}
-              className={`flex min-w-0 flex-1 items-center gap-3 ${collapsed ? "lg:justify-center" : ""}`}
+              className={`sds-dashboard-nav-control flex min-w-0 flex-1 items-center gap-3 ${collapsed ? "lg:h-12 lg:w-12 lg:flex-none lg:justify-center" : ""}`}
             >
               <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
               <span className={labelClassName}>{item.namePersian}</span>
@@ -861,7 +861,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   const navigationItems = getNavigationItems();
 
   return (
-    <div className={`flex h-full min-h-0 flex-col ${className}`}>
+    <div className={`flex min-h-0 flex-col lg:h-full ${className}`}>
       {/* Collapse Toggle */}
       <div className="hidden flex-shrink-0 border-b border-[var(--sds-border-default)] p-3 lg:block">
         <ErpPressable
@@ -881,31 +881,11 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
       {/* Navigation Items */}
       <nav
         aria-label="ناوبری فضای کاری"
-        className="scrollbar-thin flex-1 space-y-1 overflow-y-auto p-3 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:space-y-2 lg:p-3"
+        className="scrollbar-thin flex-none space-y-1 overflow-visible p-2 text-sm scrollbar-thumb-[var(--sds-border-strong)] scrollbar-track-[var(--sds-surface-subtle)] lg:flex-1 lg:overflow-y-auto lg:p-2"
       >
         {navigationItems.map((item) => renderNavigationItem(item))}
       </nav>
 
-      {/* Workspace Info */}
-      {!collapsed && currentWorkspace && (
-        <div className="flex-shrink-0 border-t border-[var(--sds-border-default)] p-4">
-          <div className="sds-workspace-surface p-3">
-            <div className="flex items-center gap-3">
-              <div className="sds-workspace-surface p-2">
-                <FaShieldAlt className="h-4 w-4 text-[var(--sds-accent)]" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="truncate text-sm font-medium text-[var(--sds-text-primary)]">
-                  {WORKSPACE_CONFIG[currentWorkspace].namePersian}
-                </p>
-                <p className="truncate text-xs text-[var(--sds-text-primary)] dark:text-[var(--sds-text-secondary)]">
-                  {WORKSPACE_CONFIG[currentWorkspace].description}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

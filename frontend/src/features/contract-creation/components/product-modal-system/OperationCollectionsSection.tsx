@@ -97,7 +97,7 @@ function CatalogResults({
     ? items.filter(item => item.name.toLocaleLowerCase('fa').includes(normalized))
     : items;
   return (
-    <div className="border-y border-[var(--sds-border-subtle)] py-2 dark:border-[var(--sds-border-subtle)]">
+    <div className="rounded-lg border border-[var(--sds-border-subtle)] p-3 dark:border-[var(--sds-border-subtle)]">
       <label htmlFor={searchId} className="mb-1 block text-xs font-semibold">
         {kind === 'tool' ? 'جستجوی ابزار' : 'جستجوی پرداخت'}
       </label>
@@ -114,7 +114,7 @@ function CatalogResults({
             key={`${item.catalogItemId}:${item.catalogSnapshotVersion}`}
             type="button"
             onClick={() => onSelect(item)}
-            className="flex min-h-9 w-full items-center justify-between gap-3 py-1.5 text-start text-xs"
+            className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-start text-xs hover:bg-[var(--sds-surface-subtle)]"
           >
             <span className="font-semibold">{item.name}</span>
             <span className="text-[var(--sds-text-muted)]">
@@ -388,7 +388,7 @@ export function OperationCollectionsSection({
               key={tool.toolSelectionId}
               data-operation-conflict={conflict ? 'true' : undefined}
               tabIndex={conflict ? -1 : undefined}
-              className="border-t border-[var(--sds-border-subtle)] py-2 text-xs dark:border-[var(--sds-border-subtle)]"
+              className="rounded-lg border-t border-[var(--sds-border-subtle)] px-3 py-3 text-xs dark:border-[var(--sds-border-subtle)]"
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-bold">{tool.name}</span>
@@ -601,6 +601,7 @@ export function OperationCollectionsSection({
                     kind="finishing"
                     items={finishingCatalog.data ?? []}
                     onSelect={addFinishing}
+                    focusOnMount
                   />
                 )
         )}
@@ -617,7 +618,7 @@ export function OperationCollectionsSection({
               key={finishing.finishingSelectionId}
               data-operation-conflict={conflict ? 'true' : undefined}
               tabIndex={conflict ? -1 : undefined}
-              className="border-t border-[var(--sds-border-subtle)] py-2 text-xs dark:border-[var(--sds-border-subtle)]"
+              className="rounded-lg border-t border-[var(--sds-border-subtle)] px-3 py-3 text-xs dark:border-[var(--sds-border-subtle)]"
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-bold">{finishing.name}</span>

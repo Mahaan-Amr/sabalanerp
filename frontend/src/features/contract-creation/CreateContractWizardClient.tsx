@@ -37,7 +37,16 @@ import { formatDisplayNumber, formatPrice, formatPriceWithRial, formatDimensions
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import StoneCanvas from '@/components/StoneCanvas';
-import { ErpInput, ErpInlineState, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
+import {
+  ErpInput,
+  ErpInlineState,
+  ErpNeumorphicCard,
+  ErpNeumorphicDialog,
+  ErpNeumorphicWorkflowLayout,
+  ErpPressable,
+  ErpSelect,
+  ErpTextarea
+} from '@/components/erp';
 
 // Import new step components
 import { Step1ContractDate } from '@/features/contract-creation/components/steps/Step1ContractDate';
@@ -5994,62 +6003,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setShowProductModal(false);
   };
 
-  const requestCloseStairConfigurationRef = useRef(requestCloseStairConfiguration);
-  requestCloseStairConfigurationRef.current = requestCloseStairConfiguration;
-  const stairDialogRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (
-      editRecoveryBlocked ||
-      !showProductModal ||
-      productConfig.productType !== 'stair'
-    ) return;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const selector = 'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
-    const focusTimer = window.setTimeout(() => {
-      stairDialogRef.current?.querySelector<HTMLElement>(selector)?.focus();
-    }, 0);
-    const onKeyDown = (event: KeyboardEvent) => {
-      const focusable = Array.from(
-        stairDialogRef.current?.querySelectorAll<HTMLElement>(selector) ?? []
-      );
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        requestCloseStairConfigurationRef.current();
-      } else if (event.key === 'Tab' && focusable.length > 0) {
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.clearTimeout(focusTimer);
-      document.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = previousOverflow;
-      previouslyFocused?.focus();
-    };
-  }, [editRecoveryBlocked, productConfig.productType, showProductModal]);
-
   return (
-    <main className="sds-workspace relative z-0 min-h-screen py-4 sm:py-8">
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 relative z-0">
-        <div className="mb-5 sm:mb-8">
-          <h1 className="sds-text-primary text-2xl font-bold sm:text-3xl">
-            {isContractEditMode
-              ? 'ویرایش قرارداد'
-              : isCollaborationContract
-                ? 'قرارداد همکاری در فروش'
-                : 'ایجاد قرارداد'}
-          </h1>
-        </div>
+    <ErpNeumorphicWorkflowLayout
+      title={isContractEditMode
+        ? 'ویرایش قرارداد'
+        : isCollaborationContract
+          ? 'قرارداد همکاری در فروش'
+          : 'ایجاد قرارداد'}
+    >
 
         {editRecoverySuccessMessage && (
           <ErpInlineState
@@ -6080,7 +6041,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       ? 'در حال انتقال اختیار ویرایش…'
                       : 'ادامه ویرایش در اینجا',
                     onClick: () => void handleEditRecoveryTakeover(),
-                    disabled: editRecovery.takeoverPending
+                    disabled: editRecovery.takeoverPending,
+                    tone: 'primary',
+                    variant: 'solid'
                   }}
             actions={editRecovery.blockReason === 'permission' ||
               editRecovery.blockReason === 'revision-conflict'
@@ -6111,9 +6074,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         />
 
         {/* Step Content */}
-        <div className="sds-workspace-surface step-content-card p-4 sm:p-6 lg:p-8 mb-6 sm:mb-8 relative z-0">
+        <ErpNeumorphicCard className="step-content-card relative z-0 mb-6 p-4 sm:mb-8 sm:p-6 lg:p-8">
           {renderStepContent()}
-        </div>
+        </ErpNeumorphicCard>
 
         {/* Navigation */}
         <WizardNavigation
@@ -6142,15 +6105,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         )}
 
         {/* Product Configuration Modal */}
-        {!editRecoveryBlocked && showProductModal && productConfig.productType === 'stair' && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--sds-surface-overlay)] p-3">
-            <div
-              ref={stairDialogRef}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="stair-product-dialog-title"
-              className="stair-v2-modal z-[10000] flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] shadow-[var(--sds-shadow-raised)]"
-            >
+        <ErpNeumorphicDialog
+          open={!editRecoveryBlocked && showProductModal && productConfig.productType === 'stair'}
+          onClose={requestCloseStairConfiguration}
+          labelledBy="stair-product-dialog-title"
+          className="stair-v2-modal z-[10000] flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)] text-[var(--sds-text-primary)]"
+        >
               <div className="stair-v2-header flex min-h-14 flex-shrink-0 items-center justify-between border-b border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4 dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
                 <h3 id="stair-product-dialog-title" className="text-base font-bold text-[var(--sds-text-primary)]">
                   تنظیمات محصول
@@ -10663,9 +10623,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   }
                 }}>{isEditMode ? 'ذخیره تغییرات' : 'اتمام و افزودن به قرارداد'}</ErpPressable>
               </div>
-            </div>
-          </div>
-        )}
+        </ErpNeumorphicDialog>
         {/* New Modal Components */}
         <ProductConfigurationModal
           isOpen={!editRecoveryBlocked && productModal.showProductModal && productModal.productConfig.productType !== 'stair' && !!productModal.selectedProduct}
@@ -10742,7 +10700,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           />
         )}
         </div>
-      </div>
-    </main>
+    </ErpNeumorphicWorkflowLayout>
   );
 }

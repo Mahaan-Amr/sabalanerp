@@ -84,14 +84,102 @@ test('dashboard navigation stays contained and aligned across desktop and mobile
   await page.goto('/dashboard/sales');
 
   const sidebar = page.locator('[data-dashboard-sidebar]');
+  const topbar = page.locator('[data-dashboard-topbar]');
   await expect(sidebar).toBeVisible();
-  expect(await backgroundAlpha(sidebar)).toBe(0);
+  const topbarBox = await topbar.boundingBox();
+  const desktopSidebarBox = await sidebar.boundingBox();
+  expect(topbarBox).not.toBeNull();
+  expect(desktopSidebarBox).not.toBeNull();
+  expect(topbarBox!.x).toBe(0);
+  expect(topbarBox!.width).toBe(1440);
+  expect(desktopSidebarBox!.y).toBe(topbarBox!.y + topbarBox!.height + 8);
+  expect(await backgroundAlpha(sidebar)).toBeLessThanOrEqual(0.05);
+  expect(await backgroundAlpha(sidebar.locator('.sds-dashboard-rail'))).toBeGreaterThan(0.95);
+  const railSections = sidebar.locator('.sds-dashboard-rail > [data-sidebar-section]');
+  expect(await railSections.count()).toBeGreaterThanOrEqual(3);
+  expect(await railSections.evaluateAll((sections) => {
+    const rail = sections[0]?.parentElement;
+    if (!rail) return false;
+    const railColor = getComputedStyle(rail).backgroundColor;
+    return sections.every((section) => {
+      const color = getComputedStyle(section).backgroundColor;
+      return color === 'rgba(0, 0, 0, 0)' || color === 'transparent' || color === railColor;
+    });
+  })).toBe(true);
+  const desktopShellDecoration = await sidebar.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderLeftWidth: style.borderLeftWidth, boxShadow: style.boxShadow };
+  });
+  expect(desktopShellDecoration.borderLeftWidth).toBe('0px');
+  expect(desktopShellDecoration.boxShadow).toBe('none');
+  await expect(sidebar.locator('[data-dashboard-sidebar-surface]')).toHaveCount(0);
 
-  const sidebarSurface = sidebar.locator('[data-dashboard-sidebar-surface]');
-  await expect(sidebarSurface).toBeVisible();
-  expect(await backgroundAlpha(sidebarSurface)).toBeGreaterThan(0.95);
+  const collapsedSidebarBox = await sidebar.boundingBox();
+  expect(collapsedSidebarBox).not.toBeNull();
+  expect(collapsedSidebarBox!.width).toBe(80);
+
+  const collapsedTheme = sidebar.getByRole('button', { name: /فعال‌کردن حالت/ });
+  const collapsedLogout = sidebar.getByRole('button', { name: 'خروج' });
+  const collapsedThemeBox = await collapsedTheme.boundingBox();
+  const collapsedLogoutBox = await collapsedLogout.boundingBox();
+  expect(collapsedThemeBox).not.toBeNull();
+  expect(collapsedLogoutBox).not.toBeNull();
+  expect(collapsedThemeBox!.width).toBe(collapsedLogoutBox!.width);
+  expect(collapsedThemeBox!.height).toBe(collapsedLogoutBox!.height);
+  const activeCollapsedItem = sidebar.locator('a[aria-current="page"]').first();
+  const activeCollapsedItemBox = await activeCollapsedItem.boundingBox();
+  const activeCollapsedIconBox = await activeCollapsedItem.locator('.sds-dashboard-nav-icon').boundingBox();
+  expect(activeCollapsedItemBox).not.toBeNull();
+  expect(activeCollapsedIconBox).not.toBeNull();
+  expect(Math.abs(
+    activeCollapsedItemBox!.x + activeCollapsedItemBox!.width / 2 -
+      (activeCollapsedIconBox!.x + activeCollapsedIconBox!.width / 2),
+  )).toBeLessThanOrEqual(1);
+  const collapsedRows = sidebar.getByRole('navigation', { name: 'ناوبری فضای کاری' }).locator(':scope > div > div');
+  expect(await collapsedRows.evaluateAll((rows) => rows.every((row) => {
+    const icon = row.querySelector<HTMLElement>('.sds-dashboard-nav-icon');
+    if (!icon) return true;
+    const rowBox = row.getBoundingClientRect();
+    const iconBox = icon.getBoundingClientRect();
+    return Math.abs(
+      rowBox.left + rowBox.width / 2 - (iconBox.left + iconBox.width / 2),
+    ) <= 1;
+  }))).toBe(true);
 
   await sidebar.getByRole('button', { name: 'بازکردن منو' }).click();
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(256);
+  const expandedThemeBox = await sidebar.getByRole('button', { name: /فعال‌کردن حالت/ }).boundingBox();
+  const expandedLogoutBox = await sidebar.getByRole('button', { name: 'خروج' }).boundingBox();
+  expect(expandedThemeBox).not.toBeNull();
+  expect(expandedLogoutBox).not.toBeNull();
+  expect(Math.abs(
+    expandedThemeBox!.y + expandedThemeBox!.height / 2 -
+      (expandedLogoutBox!.y + expandedLogoutBox!.height / 2),
+  )).toBeLessThanOrEqual(1);
+
+  const workspaceTrigger = sidebar.locator('button[aria-haspopup="listbox"]');
+  const triggerLabel = workspaceTrigger.getByText('فروش', { exact: true });
+  const triggerIcons = workspaceTrigger.locator('svg');
+  await expect(triggerIcons).toHaveCount(2);
+  const triggerCenters = await Promise.all([
+    verticalCenter(triggerIcons.nth(0)),
+    verticalCenter(triggerLabel),
+    verticalCenter(triggerIcons.nth(1)),
+  ]);
+  expect(Math.max(...triggerCenters) - Math.min(...triggerCenters)).toBeLessThanOrEqual(2);
+  const triggerLabelBox = await triggerLabel.boundingBox();
+  const triggerChevronBox = await triggerIcons.nth(1).boundingBox();
+  expect(triggerLabelBox).not.toBeNull();
+  expect(triggerChevronBox).not.toBeNull();
+  expect(triggerChevronBox!.x).toBeLessThan(triggerLabelBox!.x);
+  await workspaceTrigger.click();
+  const workspaceChoice = sidebar.getByRole('listbox', { name: 'فضای کاری' }).getByRole('button').first();
+  const choiceCenters = await Promise.all([
+    verticalCenter(workspaceChoice.locator('svg')),
+    verticalCenter(workspaceChoice.locator('strong')),
+  ]);
+  expect(Math.max(...choiceCenters) - Math.min(...choiceCenters)).toBeLessThanOrEqual(2);
+  await sidebar.getByRole('button', { name: 'بستن فهرست فضاهای کاری' }).click({ position: { x: 2, y: 2 } });
   const contracts = sidebar.getByRole('button', { name: /قراردادها/ });
   await expect(contracts).toBeVisible();
 
@@ -113,6 +201,10 @@ test('dashboard navigation stays contained and aligned across desktop and mobile
     verticalCenter(allContracts.getByText('همه قراردادها', { exact: true })),
   ]);
   expect(Math.max(...childCenters) - Math.min(...childCenters)).toBeLessThanOrEqual(3);
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  const salesDashboard = sidebar.getByRole('link', { name: 'داشبورد فروش', exact: true });
+  await salesDashboard.hover();
+  expect(await contrastAgainst(salesDashboard, '.sds-dashboard-rail')).toBeGreaterThanOrEqual(4.5);
 
   const workspaceNavigation = sidebar.getByRole('navigation', { name: 'ناوبری فضای کاری' });
   const logout = sidebar.getByRole('button', { name: 'خروج' });
@@ -126,18 +218,16 @@ test('dashboard navigation stays contained and aligned across desktop and mobile
 
   await sidebar.getByRole('button', { name: 'فعال‌کردن حالت روشن' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  expect(await backgroundAlpha(sidebar)).toBe(0);
-  expect(await backgroundAlpha(sidebarSurface)).toBeGreaterThan(0.95);
+  expect(await backgroundAlpha(sidebar)).toBeLessThanOrEqual(0.05);
   await expect(workspaceNavigation).toBeVisible();
   await expect(logout).toBeVisible();
 
   await sidebar.getByRole('button', { name: 'جمع‌کردن منو' }).click();
-  expect(await backgroundAlpha(sidebar)).toBe(0);
-  expect(await backgroundAlpha(sidebarSurface)).toBeGreaterThan(0.95);
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(80);
+  expect(await backgroundAlpha(sidebar)).toBeLessThanOrEqual(0.05);
   await expect(sidebar.getByRole('button', { name: 'خروج' })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const topbar = page.locator('[data-dashboard-topbar]');
   const hamburger = topbar.locator('button[aria-label="بازکردن منوی اصلی"]');
   const brand = topbar.getByRole('img', { name: 'Sabalan ERP' });
   await expect.poll(async () => {
@@ -150,6 +240,11 @@ test('dashboard navigation stays contained and aligned across desktop and mobile
 
   await hamburger.click();
   await expect(sidebar).toBeVisible();
+  const mobileTopbarBox = await topbar.boundingBox();
+  const mobileSidebarBox = await sidebar.boundingBox();
+  expect(mobileTopbarBox).not.toBeNull();
+  expect(mobileSidebarBox).not.toBeNull();
+  expect(mobileSidebarBox!.y).toBe(mobileTopbarBox!.y + mobileTopbarBox!.height + 8);
   expect(await backgroundAlpha(sidebar)).toBeGreaterThan(0.95);
   await expect(sidebar.getByRole('button', { name: /فعال‌کردن حالت/ })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: 'خروج' })).toBeVisible();
@@ -158,7 +253,10 @@ test('dashboard navigation stays contained and aligned across desktop and mobile
   expect(mobileNavigationBox).not.toBeNull();
   expect(mobileLogoutBox).not.toBeNull();
   expect(mobileNavigationBox!.y + mobileNavigationBox!.height).toBeLessThanOrEqual(mobileLogoutBox!.y);
-  expect(mobileLogoutBox!.y + mobileLogoutBox!.height).toBeLessThanOrEqual(
+  await sidebar.getByRole('button', { name: 'خروج' }).scrollIntoViewIfNeeded();
+  const scrolledMobileLogoutBox = await sidebar.getByRole('button', { name: 'خروج' }).boundingBox();
+  expect(scrolledMobileLogoutBox).not.toBeNull();
+  expect(scrolledMobileLogoutBox!.y + scrolledMobileLogoutBox!.height).toBeLessThanOrEqual(
     await page.evaluate(() => window.innerHeight),
   );
 

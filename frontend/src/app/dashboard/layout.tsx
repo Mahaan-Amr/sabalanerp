@@ -467,7 +467,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           type="button"
           aria-label="بستن منوی اصلی"
           data-dashboard-overlay
-          className="fixed inset-0 z-40 min-h-0 rounded-none !bg-[var(--sds-surface-overlay)] p-0 hover:!bg-[var(--sds-surface-overlay)] lg:hidden"
+          className="fixed inset-x-0 bottom-0 top-16 z-40 min-h-0 rounded-none !bg-[var(--sds-surface-overlay)] p-0 hover:!bg-[var(--sds-surface-overlay)] lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -475,14 +475,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Sidebar */}
       <div
         data-dashboard-sidebar
-        className={`sds-neumorphic-scope sds-dashboard-sidebar fixed inset-y-0 right-0 z-50 w-[min(86vw,320px)] transform overflow-hidden transition-[width,transform] duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-28" : "lg:w-72"}`}
+        className={`sds-dashboard-sidebar fixed bottom-0 right-0 top-[4.5rem] z-50 w-[min(86vw,288px)] transform overflow-y-auto transition-[width,transform] duration-300 ease-in-out lg:overflow-hidden ${sidebarOpen ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${sidebarCollapsed ? "lg:w-20" : "lg:w-64"}`}
       >
-        <div
-          data-dashboard-sidebar-surface
-          className="sds-dashboard-sidebar-surface flex h-full min-h-0 flex-col overflow-hidden lg:m-3 lg:h-[calc(100%-1.5rem)]"
-        >
+        <div className="flex min-h-full flex-col lg:h-full">
+          <div className="sds-dashboard-rail flex min-h-0 flex-1 flex-col lg:mx-3 lg:mb-3 lg:overflow-hidden">
           {/* Mobile drawer header. The company mark lives in the persistent site header. */}
           <div
+            data-sidebar-section
             className="sds-dashboard-sidebar-header flex items-center justify-between p-3 lg:hidden"
           >
             <span className="text-sm font-bold text-[var(--sds-text-primary)]">منو</span>
@@ -497,7 +496,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
 
           {/* User Info */}
-          <div className={`border-b border-[var(--sds-border-subtle)] p-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+          <div data-sidebar-section className={`border-b border-[var(--sds-border-subtle)] p-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
               <div className="flex items-center gap-3">
                 <div className="rounded-lg bg-[var(--sds-surface-subtle)] p-2.5 text-[var(--sds-accent)]">
                   <FaUser className="h-5 w-5" />
@@ -522,13 +521,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
 
           {/* Workspace Switcher */}
-          <div className={`border-b border-[var(--sds-border-subtle)] p-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+          <div data-sidebar-section className={`border-b border-[var(--sds-border-subtle)] p-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
               <WorkspaceSwitcher variant="dropdown" compact />
           </div>
 
-          <div className="sds-dashboard-rail flex min-h-0 flex-1 flex-col overflow-hidden">
             {/* Workspace Navigation */}
-            <div className="flex min-h-0 flex-1 overflow-hidden">
+            <div data-sidebar-section className="flex-none lg:flex-1 lg:overflow-hidden">
               <WorkspaceNavigation
                 collapsed={sidebarCollapsed}
                 onToggleCollapse={setSidebarCollapsed}
@@ -538,21 +536,18 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
             {/* Sidebar Footer */}
             <div
-              className={`sds-dashboard-sidebar-footer ${sidebarCollapsed ? "space-y-2 p-3" : "space-y-2 p-3"}`}
+              data-sidebar-section
+              className={`sds-dashboard-sidebar-footer flex items-center gap-3 p-3 ${sidebarCollapsed ? "lg:flex-col lg:justify-center lg:gap-2" : ""}`}
             >
-              <div
-                className={`flex ${sidebarCollapsed ? "items-center justify-between gap-3 lg:flex-col lg:justify-center lg:gap-2" : "items-center justify-between gap-3"}`}
-              >
-                <ThemeToggle />
-              </div>
+              <ThemeToggle />
               <ErpPressable
                 type="button"
                 onClick={handleLogout}
                 tone="danger"
                 className={`sds-dashboard-footer-action flex items-center text-[var(--sds-text-secondary)] transition-all duration-200 hover:bg-[var(--sds-danger-surface)] hover:text-[var(--sds-danger)] dark:text-[var(--sds-text-secondary)] dark:hover:bg-[var(--sds-danger-surface)] dark:hover:text-[var(--sds-danger)] ${
                   sidebarCollapsed
-                    ? "gap-3 w-full px-3 py-2 rounded-lg lg:mx-auto lg:h-11 lg:w-11 lg:justify-center lg:rounded-full lg:px-0 lg:py-0"
-                    : "gap-3 w-full px-3 py-2 rounded-lg"
+                    ? "h-12 flex-1 gap-3 rounded-lg px-3 py-2 lg:mx-auto lg:w-12 lg:flex-none lg:justify-center lg:rounded-full lg:px-0 lg:py-0"
+                    : "h-12 flex-1 justify-center gap-3 rounded-lg px-3 py-2"
                 }`}
               >
                 <FaSignOutAlt className="h-5 w-5" />
@@ -566,7 +561,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Main Content */}
       <div
         data-dashboard-content
-        className={`transition-all duration-300 ${isWorkspaceDetail ? "dashboard-workspace-detail" : ""} ${sidebarCollapsed ? "lg:mr-28" : "lg:mr-72"}`}
+        className={`transition-all duration-300 ${isWorkspaceDetail ? "dashboard-workspace-detail" : ""}`}
       >
         {/* Top Bar */}
         <header
@@ -633,13 +628,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         {/* Page Content */}
         <main
           data-dashboard-main
-          className={
+          className={`${sidebarCollapsed ? "lg:mr-20" : "lg:mr-64"} transition-[margin] duration-300 ${
             isNeumorphicWorkspace
               ? "p-4 pb-28 sm:p-6 sm:pb-28 xl:p-8"
               : hasMobileBottomNavigation
                 ? "p-4 pb-28 sm:p-6 sm:pb-28 lg:pb-6"
                 : "p-4 sm:p-6"
-          }
+          }`}
         >
           {sanitizedEnvironment && (
             <div

@@ -2,7 +2,7 @@
 // Payment entries management
 
 import React from 'react';
-import { ErpPressable, ErpSelect } from '@/components/erp';
+import { ErpNeumorphicCard, ErpPressable, ErpSelect } from '@/components/erp';
 import { FaPlus, FaTrash, FaEdit, FaCheck } from 'react-icons/fa';
 import { formatPrice, formatDisplayNumber, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
@@ -80,20 +80,15 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="text-center">
-        <h3 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] mb-2">
-          روش پرداخت
-        </h3>
-        <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
-          روش‌های پرداخت را تعیین کنید (جمع پرداخت و مانده مشتری نباید کمتر از مبلغ قرارداد باشد)
-        </p>
-      </div>
+      <p className="text-center text-sm text-[var(--sds-text-secondary)]">
+        جمع پرداخت و مانده مشتری نباید کمتر از مبلغ قرارداد باشد.
+      </p>
       
       <div className="max-w-4xl mx-auto space-y-4">
-        <div className="p-4 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
+        <ErpNeumorphicCard className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div className="space-y-1">
-              <h4 className="text-lg font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">تخفیف</h4>
+              <h4 className="text-lg font-medium text-[var(--sds-text-primary)]">تخفیف</h4>
               <p className="text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
                 تخفیف فقط روی جمع پایه محصولات سنگی اعمال می‌شود.
               </p>
@@ -112,7 +107,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
                 max={maxDiscountPercent}
                 step={0.1}
                 disabled={!hasMatchingDiscountRange || baseSubtotal <= 0}
-                className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3 py-2.5 text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-inverse)]"
+                className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3 py-2.5 text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
               />
             </div>
           </div>
@@ -126,15 +121,15 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
               مبلغ تخفیف: {formatPrice(discountAmount, wizardData.payment.currency)}
             </div>
           )}
-        </div>
+        </ErpNeumorphicCard>
 
         {/* Summary Section */}
-        <div className="p-4 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]">
+        <ErpNeumorphicCard className="p-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبلغ قرارداد:</span>
               <div className="mr-2">
-                <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                <span className="font-semibold text-[var(--sds-text-primary)]">
                   {formatPrice(totalContractAmount, wizardData.payment.currency)}
                 </span>
                 {wizardData.payment.currency === 'تومان' && (
@@ -223,12 +218,12 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
               </p>
             </div>
           )}
-        </div>
+        </ErpNeumorphicCard>
 
         {/* Payment Entries List */}
         <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <h4 className="text-lg font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+            <h4 className="text-lg font-medium text-[var(--sds-text-primary)]">
               لیست پرداخت‌ها
             </h4>
             <ErpPressable
@@ -252,7 +247,9 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
               </p>
               <ErpPressable
                 onClick={handleAddPaymentEntry}
-                className="px-4 py-2 bg-[var(--sds-accent-soft)] text-[var(--sds-text-inverse)] rounded-lg hover:bg-[var(--sds-accent-soft)] transition-colors"
+                tone="primary"
+                variant="outline"
+                className="px-4 py-2"
               >
                 ایجاد پرداخت جدید
               </ErpPressable>
@@ -260,14 +257,14 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
           ) : (
             <div className="space-y-3">
               {wizardData.payment.payments.map((payment, index) => (
-                <div
+                <ErpNeumorphicCard
                   key={index}
-                  className="p-4 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]"
+                  className="p-4"
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
-                        <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                        <span className="font-semibold text-[var(--sds-text-primary)]">
                           پرداخت {index + 1}
                         </span>
                         <span className="px-2 py-1 text-xs font-medium rounded-full bg-[var(--sds-info-surface)] text-[var(--sds-info)] dark:bg-[var(--sds-info-surface)] dark:text-[var(--sds-info)]">
@@ -314,7 +311,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
                       </ErpPressable>
                     </div>
                   </div>
-                </div>
+                </ErpNeumorphicCard>
               ))}
             </div>
           )}
@@ -333,5 +330,3 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
     </div>
   );
 };
-
-

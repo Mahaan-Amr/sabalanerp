@@ -954,6 +954,190 @@ export function ErpWorkspacePage({
   );
 }
 
+export type ErpNeumorphicWorkflowStep = {
+  id: number;
+  label: string;
+  icon: IconType;
+};
+
+export function ErpNeumorphicWorkflowLayout({
+  title,
+  children,
+  className,
+}: WithChildren & {
+  title: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <ErpWorkspacePage
+      title={title}
+      className={cx('sds-neumorphic-workflow-scope relative z-0 py-4 sm:py-8', className)}
+    >
+      {children}
+    </ErpWorkspacePage>
+  );
+}
+
+export function ErpNeumorphicWorkflowProgress({
+  currentStep,
+  steps,
+  ariaLabel,
+  onStepClick,
+  clickable = false,
+}: {
+  currentStep: number;
+  steps: ErpNeumorphicWorkflowStep[];
+  ariaLabel: string;
+  onStepClick?: (step: number) => void;
+  clickable?: boolean;
+}) {
+  if (!steps.length) return null;
+
+  const currentIndex = Math.max(0, steps.findIndex((step) => step.id === currentStep));
+  const active = steps[currentIndex] ?? steps[0];
+  const ActiveIcon = active.icon;
+  const progress = ((currentIndex + 1) / steps.length) * 100;
+
+  return (
+    <nav aria-label={ariaLabel} className="mb-4 sm:mb-6">
+      <div className="sds-neumorphic-card p-4 sm:hidden">
+        <div className="flex items-center gap-3">
+          <span className="sds-neumorphic-icon inline-flex h-11 w-11 shrink-0 items-center justify-center text-[var(--sds-accent)]">
+            <ActiveIcon className="h-5 w-5 shrink-0" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs text-[var(--sds-text-muted)]">
+              مرحله {(currentIndex + 1).toLocaleString('fa-IR')} از {steps.length.toLocaleString('fa-IR')}
+            </p>
+            <h2 className="mt-1 truncate text-base font-bold text-[var(--sds-text-primary)]">
+              {active.label}
+            </h2>
+          </div>
+        </div>
+        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--sds-border-subtle)]">
+          <div
+            className="h-full rounded-full bg-[var(--sds-accent)] transition-[width] duration-[var(--sds-motion-standard)] motion-reduce:transition-none"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+
+      <ol className="relative isolate hidden items-start sm:flex">
+        {steps.map((step, index) => {
+          const Icon = step.icon;
+          const isActive = index === currentIndex;
+          const completed = index < currentIndex;
+          return (
+            <li key={step.id} className="relative flex min-w-0 flex-1 flex-col items-center">
+              {index > 0 && (
+                <span
+                  aria-hidden="true"
+                  className={cx(
+                    'absolute left-1/2 right-[-50%] top-[1.375rem] z-0 h-0.5 -translate-y-1/2',
+                    completed || isActive
+                      ? 'bg-[var(--sds-accent)]'
+                      : 'bg-[var(--sds-border-default)]',
+                  )}
+                />
+              )}
+              <span className="relative z-20 h-11 w-11 shrink-0 rounded-full bg-[var(--sds-surface-panel)]">
+                <ErpPressable
+                  type="button"
+                  aria-current={isActive ? 'step' : undefined}
+                  disabled={!clickable}
+                  onClick={() => onStepClick?.(step.id)}
+                  tone={isActive || completed ? 'primary' : 'neutral'}
+                  variant={isActive ? 'solid' : completed ? 'soft' : 'outline'}
+                  className="relative h-11 w-11 rounded-full p-0 disabled:cursor-default disabled:opacity-100"
+                >
+                  {completed ? (
+                    <FaCheck className="absolute left-1/2 top-1/2 h-4 w-4 shrink-0 -translate-x-1/2 -translate-y-1/2" />
+                  ) : (
+                    <Icon className="absolute left-1/2 top-1/2 h-4 w-4 shrink-0 -translate-x-1/2 -translate-y-1/2" />
+                  )}
+                  <span className="sr-only">{step.label}</span>
+                </ErpPressable>
+              </span>
+              <span
+                className={cx(
+                  'mt-2 max-w-24 text-center text-xs',
+                  isActive ? 'font-bold text-[var(--sds-accent)]' : 'text-[var(--sds-text-muted)]',
+                )}
+              >
+                {step.label}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+export function ErpNeumorphicWorkflowNavigation({
+  primaryLabel,
+  previousLabel,
+  counterLabel,
+  primaryIcon: PrimaryIcon,
+  previousIcon: PreviousIcon,
+  onPrimary,
+  onPrevious,
+  primaryDisabled = false,
+  previousDisabled = false,
+  pending = false,
+}: {
+  primaryLabel: React.ReactNode;
+  previousLabel: React.ReactNode;
+  counterLabel: React.ReactNode;
+  primaryIcon: IconType;
+  previousIcon: IconType;
+  onPrimary: () => void;
+  onPrevious: () => void;
+  primaryDisabled?: boolean;
+  previousDisabled?: boolean;
+  pending?: boolean;
+}) {
+  return (
+    <div className="sds-neumorphic-card relative z-0 flex flex-wrap items-center justify-between gap-3 p-3">
+      <ErpPressable
+        type="button"
+        dir="ltr"
+        onClick={onPrimary}
+        disabled={pending || primaryDisabled}
+        aria-busy={pending}
+        tone="primary"
+        variant="solid"
+        className="inline-flex min-w-32 flex-nowrap items-center justify-center gap-2 whitespace-nowrap px-5"
+      >
+        <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
+          {pending ? (
+            <span className="absolute h-4 w-4 animate-spin rounded-full border-b-2 border-[var(--sds-text-inverse)] motion-reduce:animate-none" />
+          ) : (
+            <PrimaryIcon className="h-4 w-4 shrink-0" />
+          )}
+        </span>
+        <span dir="rtl">{primaryLabel}</span>
+      </ErpPressable>
+
+      <span className="order-3 w-full text-center text-xs text-[var(--sds-text-muted)] sm:order-none sm:w-auto">
+        {counterLabel}
+      </span>
+
+      <ErpPressable
+        type="button"
+        dir="ltr"
+        onClick={onPrevious}
+        disabled={previousDisabled}
+        variant="ghost"
+        className="inline-flex min-w-28 flex-nowrap items-center justify-center gap-2 whitespace-nowrap px-4"
+      >
+        <span dir="rtl">{previousLabel}</span>
+        <PreviousIcon className="h-4 w-4 shrink-0" />
+      </ErpPressable>
+    </div>
+  );
+}
+
 export function ErpMotionSection({ children, className, delay = 0 }: WithChildren & { delay?: number }) {
   const reduceMotion = useReducedMotion();
   return (

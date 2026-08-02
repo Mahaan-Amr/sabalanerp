@@ -2,7 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useId, type ComponentType, type ReactNode } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useId,
+  useRef,
+  type ButtonHTMLAttributes,
+  type ComponentType,
+  type DetailsHTMLAttributes,
+  type ReactNode,
+} from "react";
 import { FaChevronLeft } from "react-icons/fa";
 import type { ErpTone } from "./index";
 
@@ -34,6 +43,152 @@ export function ErpNeumorphicCard({
     <Element className={cx("sds-neumorphic-card", className)}>
       {children}
     </Element>
+  );
+}
+
+export const ErpNeumorphicInteractiveCard = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement>
+>(function ErpNeumorphicInteractiveCard({ className, type = "button", ...props }, ref) {
+  return (
+    <button
+      {...props}
+      ref={ref}
+      type={type}
+      className={cx(
+        "sds-action sds-neumorphic-card sds-neumorphic-interactive",
+        className,
+      )}
+    />
+  );
+});
+
+export function ErpNeumorphicDialog({
+  open,
+  onClose,
+  labelledBy,
+  children,
+  className,
+}: {
+  open: boolean;
+  onClose: () => void;
+  labelledBy: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    const selector =
+      'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+    document.body.style.overflow = "hidden";
+    const focusTimer = window.setTimeout(() => {
+      const dialog = dialogRef.current;
+      const firstFocusable = dialog?.querySelector<HTMLElement>(selector);
+      if (firstFocusable) firstFocusable.focus();
+      else dialog?.focus();
+    }, 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(selector) ?? [],
+      );
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+      } else if (event.key === "Tab" && focusable.length === 0) {
+        event.preventDefault();
+        dialogRef.current?.focus();
+      } else if (event.key === "Tab") {
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [open]);
+
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--sds-surface-overlay)] p-3"
+      role="presentation"
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        tabIndex={-1}
+        className={cx("sds-neumorphic-card", className)}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function ErpNeumorphicDisclosure({
+  className,
+  ...props
+}: DetailsHTMLAttributes<HTMLDetailsElement>) {
+  return (
+    <details
+      {...props}
+      className={cx("sds-neumorphic-card", className)}
+    />
+  );
+}
+
+export function ErpNeumorphicSelectedSummary({
+  icon: Icon,
+  label,
+  title,
+  children,
+  className,
+}: {
+  icon: IconType;
+  label: ReactNode;
+  title: ReactNode;
+  children?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <ErpNeumorphicCard
+      className={cx(
+        "border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] p-4",
+        className,
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <span className="sds-neumorphic-icon inline-flex h-10 w-10 flex-shrink-0 items-center justify-center bg-[var(--sds-accent-soft)] text-[var(--sds-accent-on-soft)]">
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-[var(--sds-accent)]">{label}</p>
+          <h4 className="mt-1 break-words text-base font-semibold text-[var(--sds-text-primary)]">
+            {title}
+          </h4>
+          {children}
+        </div>
+      </div>
+    </ErpNeumorphicCard>
   );
 }
 
@@ -129,17 +284,23 @@ export function ErpNeumorphicActionGrid({
   title,
   items,
   desktopColumns = 4,
+  showTitle = true,
 }: {
   title: string;
   items: ErpNeumorphicActionItem[];
   desktopColumns?: 4 | 5;
+  showTitle?: boolean;
 }) {
   const titleId = useId();
   return (
     <section aria-labelledby={titleId} className="space-y-4">
       <h2
         id={titleId}
-        className="text-lg font-black text-[var(--sds-text-primary)] sm:text-xl"
+        className={cx(
+          showTitle
+            ? "text-lg font-black text-[var(--sds-text-primary)] sm:text-xl"
+            : "sr-only",
+        )}
       >
         {title}
       </h2>

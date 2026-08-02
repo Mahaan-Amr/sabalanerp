@@ -2,7 +2,13 @@
 // Customer search and selection
 
 import React from 'react';
-import { ErpPressable, ErpInput } from '@/components/erp';
+import {
+  ErpButton,
+  ErpInput,
+  ErpNeumorphicCard,
+  ErpNeumorphicInteractiveCard,
+  ErpNeumorphicSelectedSummary,
+} from '@/components/erp';
 import { FaSearch, FaPlus, FaCheck, FaPhone, FaBuilding, FaUser } from 'react-icons/fa';
 import { useRouter } from 'next/navigation';
 import { crmAPI } from '@/lib/api';
@@ -86,14 +92,14 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
   return (
     <div className="space-y-5">
       <div className="flex justify-end">
-        <ErpPressable
-          type="button"
+        <ErpButton
+          label="ایجاد مشتری"
+          icon={FaPlus}
           onClick={persistAndCreateCustomer}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--sds-accent)] bg-[var(--sds-surface-raised)] px-4 py-2 text-sm font-semibold text-[var(--sds-accent)] shadow-sm transition-colors hover:bg-[var(--sds-accent-soft)] dark:border-[var(--sds-accent)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-accent)] dark:hover:bg-[var(--sds-accent-soft)]"
-        >
-          <FaPlus className="h-4 w-4" />
-          <span>ایجاد مشتری</span>
-        </ErpPressable>
+          tone="primary"
+          variant="outline"
+          className="flex-nowrap whitespace-nowrap px-4"
+        />
       </div>
 
       {errors.customerId && (
@@ -103,28 +109,21 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
       )}
 
       {selectedCustomer && (
-        <section className="rounded-xl border border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] p-4 dark:border-[var(--sds-accent)] dark:bg-[var(--sds-accent-soft)]">
-          <div className="flex items-start gap-3">
-            <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--sds-accent-soft)] text-[var(--sds-text-inverse)]">
-              <FaCheck className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">مشتری انتخاب شده</p>
-              <h4 className="mt-1 break-words text-base font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
-                {selectedCustomer.firstName} {selectedCustomer.lastName}
-              </h4>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
-                {selectedCustomer.companyName && <span>{selectedCustomer.companyName}</span>}
-                {selectedCustomer.phoneNumbers?.[0]?.number && <span>{selectedCustomer.phoneNumbers[0].number}</span>}
-                <span>مسئول فروش: {getOwnerLabel(selectedCustomer)}</span>
-                <span>{selectedCustomer.projectAddresses?.length || 0} پروژه</span>
-              </div>
-            </div>
+        <ErpNeumorphicSelectedSummary
+          icon={FaCheck}
+          label="مشتری انتخاب شده"
+          title={`${selectedCustomer.firstName} ${selectedCustomer.lastName}`}
+        >
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--sds-text-secondary)]">
+            {selectedCustomer.companyName && <span>{selectedCustomer.companyName}</span>}
+            {selectedCustomer.phoneNumbers?.[0]?.number && <span>{selectedCustomer.phoneNumbers[0].number}</span>}
+            <span>مسئول فروش: {getOwnerLabel(selectedCustomer)}</span>
+            <span>{selectedCustomer.projectAddresses?.length || 0} پروژه</span>
           </div>
-        </section>
+        </ErpNeumorphicSelectedSummary>
       )}
 
-      <section className="rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-3 shadow-sm dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)] sm:p-4">
+      <ErpNeumorphicCard className="p-3 sm:p-4">
         <div className="relative">
           <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
           <ErpInput
@@ -132,39 +131,39 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
             placeholder="جستجو با نام، شرکت، کد ملی یا شماره تلفن"
             value={customerSearchTerm}
             onChange={(e) => setCustomerSearchTerm(e.target.value)}
-            className="min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] py-3 pl-4 pr-10 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-inverse)] dark:placeholder-slate-400 dark:focus:border-[var(--sds-accent)] dark:focus:bg-[var(--sds-surface-subtle)]"
+            className="min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] py-3 pl-4 pr-10 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-primary)] dark:placeholder-slate-400 dark:focus:border-[var(--sds-accent)] dark:focus:bg-[var(--sds-surface-subtle)]"
           />
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
           <span>{hasSearch ? `${filteredCustomers.length} نتیجه پیدا شد` : `نمایش ${filteredCustomers.length} مشتری اخیر`}</span>
           <span>{`${customers.length} مشتری در CRM`}</span>
         </div>
-      </section>
+      </ErpNeumorphicCard>
 
       {filteredCustomers.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-8 text-center dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
           <p className="text-base font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
             {hasSearch ? 'مشتری‌ای با این عبارت پیدا نشد' : 'هیچ مشتری‌ای موجود نیست'}
           </p>
-          <ErpPressable
-            type="button"
+          <ErpButton
+            label="ایجاد مشتری"
+            icon={FaPlus}
             onClick={persistAndCreateCustomer}
-            className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--sds-accent)] px-4 py-2 text-sm font-semibold text-[var(--sds-accent)] transition-colors hover:bg-[var(--sds-accent-soft)] dark:border-[var(--sds-accent)] dark:text-[var(--sds-accent)] dark:hover:bg-[var(--sds-accent-soft)]"
-          >
-            <FaPlus className="h-4 w-4" />
-            ایجاد مشتری
-          </ErpPressable>
+            tone="primary"
+            variant="outline"
+            className="mt-5 flex-nowrap whitespace-nowrap px-4"
+          />
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {filteredCustomers.map((customer) => {
             const isSelected = wizardData.customerId === customer.id;
             return (
-              <ErpPressable
+              <ErpNeumorphicInteractiveCard
                 key={customer.id}
                 type="button"
                 onClick={() => handleSelectCustomer(customer)}
-                className={`rounded-xl border p-4 text-right shadow-sm transition ${
+                className={`rounded-xl p-4 text-right ${
                   isSelected
                     ? 'border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] dark:border-[var(--sds-accent)] dark:bg-[var(--sds-accent-soft)]'
                     : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] hover:border-[var(--sds-accent)] dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)] dark:hover:border-[var(--sds-accent)]'
@@ -172,7 +171,7 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h4 className="break-words text-base font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                    <h4 className="break-words text-base font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                       {customer.firstName} {customer.lastName}
                     </h4>
                     {customer.companyName && (
@@ -183,17 +182,17 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
                     )}
                   </div>
                   <span className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${
-                    isSelected ? 'bg-[var(--sds-accent-soft)] text-[var(--sds-text-inverse)]' : 'bg-[var(--sds-surface-subtle)] text-[var(--sds-text-muted)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-secondary)]'
+                    isSelected ? 'bg-[var(--sds-accent-soft)] text-[var(--sds-accent-on-soft)]' : 'bg-[var(--sds-surface-subtle)] text-[var(--sds-text-muted)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-secondary)]'
                   }`}>
                     {isSelected ? <FaCheck className="h-4 w-4" /> : <FaUser className="h-4 w-4" />}
                   </span>
                 </div>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="rounded-full bg-[var(--sds-info-surface)] px-2 py-1 font-medium text-[var(--sds-info)] dark:bg-[var(--sds-info-surface)] dark:text-[var(--sds-info)]">
+                  <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1 font-medium text-[var(--sds-text-secondary)]">
                     {customer.customerType}
                   </span>
-                  <span className="rounded-full bg-[var(--sds-success-surface)] px-2 py-1 font-medium text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
+                  <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1 font-medium text-[var(--sds-text-secondary)]">
                     {customer.status}
                   </span>
                   {customer.phoneNumbers?.[0]?.number && (
@@ -202,11 +201,11 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
                       {customer.phoneNumbers[0].number}
                     </span>
                   )}
-                  <span className="rounded-full bg-[var(--sds-purple-surface)] px-2 py-1 font-medium text-[var(--sds-purple)] dark:bg-[var(--sds-purple-surface)] dark:text-[var(--sds-purple)]">
+                  <span className="rounded-full bg-[var(--sds-surface-subtle)] px-2 py-1 font-medium text-[var(--sds-text-secondary)]">
                     مسئول فروش: {getOwnerLabel(customer)}
                   </span>
                 </div>
-              </ErpPressable>
+              </ErpNeumorphicInteractiveCard>
             );
           })}
         </div>
@@ -214,4 +213,3 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
     </div>
   );
 };
-

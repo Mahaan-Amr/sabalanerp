@@ -34,7 +34,11 @@ export function useStairLayerCalculationWorker(
     ) as CanonicalLayerCalculationRequest;
     const id = sequence.current + 1;
     sequence.current = id;
-    setState({ calculation: null, calculating: true, error: null });
+    setState(previous => ({
+      calculation: previous.calculation,
+      calculating: true,
+      error: null
+    }));
 
     if (typeof Worker === 'undefined') {
       setState({

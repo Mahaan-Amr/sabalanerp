@@ -36,7 +36,10 @@ export function CanonicalStairLayerSummary({
       className="divide-y divide-[var(--sds-border-default)] border-y border-[var(--sds-border-default)] text-xs dark:divide-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]"
     >
       <div className="py-2 font-semibold">خلاصه محاسبه لایه</div>
-      {state.calculating ? (
+      {state.calculating && calculation ? (
+        <span className="sr-only" role="status">در حال به‌روزرسانی محاسبات</span>
+      ) : null}
+      {state.calculating && !calculation ? (
         <ReservedRowsSkeleton rows={6} />
       ) : state.error ? (
         <div className="py-2 text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">

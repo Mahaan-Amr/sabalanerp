@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   ErpInlineState,
@@ -352,6 +353,7 @@ export function CentralProductModalShell({
   error?: string;
 }) {
   const reducedMotion = useReducedMotion();
+  const [portalTarget, setPortalTarget] = React.useState<HTMLElement | null>(null);
   const dialogRef = React.useRef<HTMLDivElement>(null);
   const onCloseRef = React.useRef(onClose);
   const onBackRef = React.useRef(onBack);
@@ -359,6 +361,9 @@ export function CentralProductModalShell({
   onCloseRef.current = onClose;
   onBackRef.current = onBack;
   pendingRef.current = pending;
+  React.useEffect(() => {
+    setPortalTarget(document.body);
+  }, []);
   React.useEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -405,7 +410,9 @@ export function CentralProductModalShell({
     };
   }, [open, reducedMotion, view]);
 
-  return (
+  if (!portalTarget) return null;
+
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -477,6 +484,7 @@ export function CentralProductModalShell({
           </motion.section>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    portalTarget
   );
 }

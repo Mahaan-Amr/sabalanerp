@@ -374,6 +374,29 @@ test('focused Product Selection workflows use one semantic dialog and control in
   assert.match(shell, /useReducedMotion\(\)/);
 });
 
+test('Sales contract visual regressions keep compact alignment, contrast, spacing, and finishing focus', () => {
+  const customerStep = contractWizardSources.find(([path]) => path === 'Step2CustomerSelection.tsx')[1];
+  const projectStep = contractWizardSources.find(([path]) => path === 'Step3ProjectManagement.tsx')[1];
+  const workflow = read('frontend/src/components/erp/index.tsx');
+  const primitives = focusedProductSources.find(([path]) => path === 'productModalPrimitives.tsx')[1];
+  const longitudinal = focusedProductSources.find(([path]) => path === 'LongitudinalProductSection.tsx')[1];
+  const operations = focusedProductSources.find(([path]) => path === 'OperationCollectionsSection.tsx')[1];
+
+  assert.match(customerStep, /<ErpButton[\s\S]{0,180}label="ایجاد مشتری"/);
+  assert.match(projectStep, /<ErpButton[\s\S]{0,180}label="ایجاد پروژه"/);
+  assert.doesNotMatch(customerStep, /dark:text-\[var\(--sds-text-inverse\)\]/);
+  assert.match(workflow, /<nav aria-label=\{ariaLabel\} className="mb-/);
+  assert.match(primitives, /h-11[^\n]+!min-h-11[^\n]+w-\[51px\]/);
+  assert.match(primitives, /data-switch-track[\s\S]{0,180}h-\[31px\][^\n]+w-\[51px\]/);
+  assert.match(primitives, /checked[\s\S]{0,80}\? 'translate-x-5 bg-\[var\(--sds-text-inverse\)\]'[\s\S]{0,80}: 'translate-x-0 bg-\[var\(--sds-text-secondary\)\]'/);
+  assert.match(primitives, /border-\[var\(--sds-border-strong\)\][^\n]+bg-\[var\(--sds-surface-subtle\)\]/);
+  assert.match(workflow, /top-\[1\.375rem\] z-0/);
+  assert.match(workflow, /relative z-20 h-11 w-11/);
+  assert.match(longitudinal, /grid grid-cols-1 items-start gap-3 sm:grid-cols-4/);
+  assert.match(operations, /kind="finishing"[\s\S]{0,180}focusOnMount/);
+  assert.match(operations, /min-h-11 w-full[^\n]+px-3 py-2/);
+});
+
 test('the complete Contract Creation wizard uses the shared semantic and accessible interface', () => {
   const hardcodedPalette =
     /\b(?:bg|border|fill|from|outline|ring|shadow|stroke|text|to|via)-(?:amber|blue|cyan|emerald|fuchsia|gray|green|indigo|lime|neutral|orange|pink|purple|red|rose|sky|slate|stone|teal|violet|yellow|zinc|black|white)(?:-\d{2,3})?(?:\/\d+)?\b|#[\da-fA-F]{3,8}\b/;
@@ -392,20 +415,25 @@ test('the complete Contract Creation wizard uses the shared semantic and accessi
   const paymentDialog = contractWizardSources.find(([path]) => path === 'PaymentEntryModal.tsx')[1];
   const progress = contractWizardSources.find(([path]) => path === 'WizardProgressBar.tsx')[1];
   const navigation = contractWizardSources.find(([path]) => path === 'WizardNavigation.tsx')[1];
+  const erpPrimitives = read('frontend/src/components/erp/index.tsx');
+  const neumorphicPrimitives = read('frontend/src/components/erp/NeumorphicPrimitives.tsx');
 
-  assert.match(wizard, /<main className="sds-workspace/);
+  assert.match(wizard, /<ErpNeumorphicWorkflowLayout/);
   assert.match(wizard, /contractSubmission\.isSubmitting/);
   assert.match(wizard, /editRecovery\.blocked/);
   assert.match(wizard, /inert: ''/);
-  assert.match(wizard, /role="dialog"/);
-  assert.match(wizard, /aria-modal="true"/);
-  assert.match(wizard, /event\.key === 'Escape'/);
-  assert.match(wizard, /event\.key === 'Tab'/);
-  assert.match(wizard, /previouslyFocused\?\.focus\(\)/);
+  assert.match(wizard, /<ErpNeumorphicDialog/);
+  assert.match(neumorphicPrimitives, /role="dialog"/);
+  assert.match(neumorphicPrimitives, /aria-modal="true"/);
+  assert.match(neumorphicPrimitives, /event\.key === "Escape"/);
+  assert.match(neumorphicPrimitives, /event\.key === "Tab"/);
+  assert.match(neumorphicPrimitives, /previouslyFocused\?\.focus\(\)/);
   assert.doesNotMatch(wizard, /مراحل ایجاد قرارداد را تکمیل کنید/u);
   assert.match(paymentDialog, /<CentralProductModalShell/);
-  assert.match(progress, /aria-current=\{isActive \? 'step' : undefined\}/);
-  assert.match(navigation, /aria-busy=\{loading\}/);
+  assert.match(progress, /<ErpNeumorphicWorkflowProgress/);
+  assert.match(navigation, /<ErpNeumorphicWorkflowNavigation/);
+  assert.match(erpPrimitives, /aria-current=\{isActive \? 'step' : undefined\}/);
+  assert.match(erpPrimitives, /aria-busy=\{pending\}/);
 });
 
 test('the application shell preserves shared behavior through canonical accessible surfaces', () => {

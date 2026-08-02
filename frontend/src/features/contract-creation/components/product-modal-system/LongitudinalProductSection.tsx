@@ -67,7 +67,7 @@ function CompactDecimalField({
   }, [value]);
   return (
     <div>
-      <div className="mb-1 flex min-h-6 items-center justify-between gap-2">
+      <div className="mb-1 flex h-11 items-center justify-between gap-2">
         <label htmlFor={id} className="text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
           {label}
         </label>
@@ -266,7 +266,7 @@ export function LongitudinalProductSection({
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-4">
         <CompactDecimalField
           id="longitudinal-length"
           label="طول"

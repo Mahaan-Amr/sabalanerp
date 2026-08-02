@@ -172,6 +172,28 @@
   box-shadow: var(--sds-shadow-focus), var(--sds-neu-shadow-card);
 }
 
+:is(.sds-sales-dashboard-scope, .sds-neumorphic-workflow-scope) .sds-workspace-surface,
+:is(.sds-sales-dashboard-scope, .sds-neumorphic-workflow-scope) .sds-card {
+  border-color: var(--sds-border-subtle);
+  background: var(--sds-surface-raised);
+  box-shadow: var(--sds-neu-shadow-card);
+}
+
+:is(.sds-sales-dashboard-scope, .sds-neumorphic-workflow-scope) .sds-field {
+  border-color: var(--sds-border-subtle);
+  background: var(--sds-surface-subtle);
+  box-shadow: var(--sds-neu-shadow-inset);
+}
+
+:is(.sds-sales-dashboard-scope, .sds-neumorphic-workflow-scope) .sds-action-outline,
+:is(.sds-sales-dashboard-scope, .sds-neumorphic-workflow-scope) .sds-action-ghost {
+  box-shadow: var(--sds-neu-shadow-small);
+}
+
+:is(.sds-sales-dashboard-scope, .sds-neumorphic-workflow-scope) .sds-action:active {
+  box-shadow: var(--sds-neu-shadow-inset);
+}
+
 .sds-action.sds-hiring-phase-completed {
   border-color: color-mix(in srgb, var(--sds-success) 58%, var(--sds-border-default));
   background: color-mix(in srgb, var(--sds-success) 18%, var(--sds-surface-raised));
@@ -258,6 +280,15 @@
   color: var(--sds-accent);
 }
 
+.sds-dashboard-sidebar .sds-dashboard-nav-control:hover {
+  color: var(--sds-text-primary);
+}
+
+.sds-dashboard-sidebar .sds-dashboard-nav-control[aria-current="page"],
+.sds-dashboard-sidebar .sds-dashboard-nav-control[aria-current="page"]:hover {
+  color: var(--sds-accent);
+}
+
 .sds-dashboard-topbar {
   border-bottom: 1px solid var(--sds-border-subtle);
   background: color-mix(in srgb, var(--sds-surface-raised) 92%, transparent);
@@ -315,6 +346,17 @@
   .sds-dashboard-rail {
     margin: 0.75rem;
   }
+}
+
+@media (min-width: 1024px) {
+  .sds-dashboard-sidebar,
+  [data-theme="dark"] .sds-dashboard-sidebar {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
 }
 
 .sds-neumorphic-applicant-card {

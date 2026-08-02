@@ -792,6 +792,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
     const itemKey = item.href;
     const isExpanded = expandedItems.includes(itemKey);
     const showChildren = hasChildren && isExpanded;
+    const labelClassName = `min-w-0 flex-1 truncate text-right font-bold ${collapsed ? "lg:sr-only" : ""}`;
 
     if (!item.show) return null;
 
@@ -805,7 +806,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         }
       >
         <div
-          className={`flex items-center rounded-xl transition-all duration-200 ${collapsed ? "min-h-11 gap-2 px-3 py-2 lg:min-h-12 lg:justify-center lg:px-1.5" : "min-h-11 gap-2 px-3 py-2"} ${
+          className={`flex items-center rounded-xl transition-all duration-200 ${collapsed ? "min-h-11 gap-2 px-3 py-2 lg:mx-auto lg:h-12 lg:w-12 lg:min-h-12 lg:justify-center lg:p-0" : "min-h-11 gap-2 px-3 py-2"} ${
             level > 0 ? "mr-4" : ""
           } ${
             isActive
@@ -819,15 +820,17 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
               aria-expanded={isExpanded}
               aria-current={isActive ? "page" : undefined}
               onClick={() => toggleExpanded(itemKey)}
-              className={`flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:flex-col lg:justify-center lg:gap-1" : "gap-3"}`}
+              className={`sds-dashboard-nav-control flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:h-12 lg:w-12 lg:flex-none lg:justify-center" : "justify-between gap-4"}`}
             >
-              <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
-              <span className={collapsed ? "flex-1 text-right font-bold lg:sr-only" : "flex-1 text-right font-bold"}>{item.namePersian}</span>
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
+                <span className={labelClassName}>{item.namePersian}</span>
+              </span>
               {!collapsed &&
                 (isExpanded ? (
-                  <FaChevronLeft className="h-4 w-4" />
+                  <FaChevronLeft className="h-4 w-4 shrink-0" />
                 ) : (
-                  <FaChevronRight className="h-4 w-4" />
+                  <FaChevronRight className="h-4 w-4 shrink-0" />
                 ))}
             </ErpPressable>
           ) : (
@@ -836,10 +839,10 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
               aria-current={isActive ? "page" : undefined}
               title={collapsed ? item.namePersian : undefined}
               onClick={() => onNavigate?.(item.href)}
-              className={`flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:flex-col lg:justify-center lg:gap-1" : "gap-3"}`}
+              className={`sds-dashboard-nav-control flex min-w-0 flex-1 items-center gap-3 ${collapsed ? "lg:h-12 lg:w-12 lg:flex-none lg:justify-center" : ""}`}
             >
               <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
-              <span className={collapsed ? "flex-1 text-right font-bold lg:sr-only" : "flex-1 text-right font-bold"}>{item.namePersian}</span>
+              <span className={labelClassName}>{item.namePersian}</span>
             </Link>
           )}
         </div>

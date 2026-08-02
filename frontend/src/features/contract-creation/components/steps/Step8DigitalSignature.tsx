@@ -1,5 +1,5 @@
 ﻿import React from 'react';
-import { ErpPressable } from '@/components/erp';
+import { ErpNeumorphicCard, ErpNeumorphicDisclosure, ErpPressable } from '@/components/erp';
 import {
   FaFileContract,
   FaUser,
@@ -154,23 +154,16 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="text-center">
-        <h3 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] mb-2">تایید دیجیتال قرارداد</h3>
-        <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
-          وضعیت تایید مشتری را بررسی کنید و در صورت نهایی شدن، فایل کامل قرارداد را دانلود یا پرینت کنید.
-        </p>
-      </div>
-
       <div className="max-w-6xl mx-auto space-y-6">
-        <div className="rounded-xl border-2 border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] p-6 shadow-[var(--sds-shadow-card)]">
+        <ErpNeumorphicCard className="border-[var(--sds-accent)] p-6">
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-2xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">خلاصه قرارداد</h3>
+            <h3 className="text-2xl font-bold text-[var(--sds-text-primary)]">خلاصه قرارداد</h3>
             <FaFileContract className="text-3xl text-[var(--sds-accent)] dark:text-[var(--sds-accent)]" />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
-              <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg p-4 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
+              <ErpNeumorphicCard className="p-4">
                 <h4 className="font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-3 flex items-center gap-2">
                   <FaFileContract className="text-[var(--sds-accent)]" />
                   اطلاعات قرارداد
@@ -178,22 +171,22 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">شماره قرارداد:</span>
-                    <span className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">{wizardData.contractNumber}</span>
+                    <span className="font-medium text-[var(--sds-text-primary)]">{wizardData.contractNumber}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">تاریخ قرارداد:</span>
-                    <span className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">{wizardData.contractDate}</span>
+                    <span className="font-medium text-[var(--sds-text-primary)]">{wizardData.contractDate}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">وضعیت:</span>
-                    <span className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                    <span className="font-medium text-[var(--sds-text-primary)]">
                       {signature?.contractStatus || '—'}
                     </span>
                   </div>
                 </div>
-              </div>
+              </ErpNeumorphicCard>
 
-              <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg p-4 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
+              <ErpNeumorphicCard className="p-4">
                 <h4 className="font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-3 flex items-center gap-2">
                   <FaUser className="text-[var(--sds-accent)]" />
                   اطلاعات مشتری
@@ -201,22 +194,22 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">نام:</span>
-                    <span className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                    <span className="font-medium text-[var(--sds-text-primary)]">
                       {wizardData.customer?.firstName} {wizardData.customer?.lastName}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">شماره موبایل تایید:</span>
-                    <span className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                    <span className="font-medium text-[var(--sds-text-primary)]">
                       {smsPhoneNumber || 'موبایل معتبر ثبت نشده'}
                     </span>
                   </div>
                 </div>
-              </div>
+              </ErpNeumorphicCard>
             </div>
 
             <div className="space-y-4">
-              <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg p-4 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
+              <ErpNeumorphicCard className="p-4">
                 <h4 className="font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-3 flex items-center gap-2">
                   <FaCreditCard className="text-[var(--sds-accent)]" />
                   جمع‌بندی مالی
@@ -224,13 +217,13 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">جمع محصولات:</span>
-                    <span className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                    <span className="font-medium text-[var(--sds-text-primary)]">
                       {formatPriceWithRial(financialSummary.productsTotal, financialSummary.currency)}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">جمع خدمات:</span>
-                    <span className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                    <span className="font-medium text-[var(--sds-text-primary)]">
                       {formatPriceWithRial(financialSummary.servicesTotal, financialSummary.currency)}
                     </span>
                   </div>
@@ -246,7 +239,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                   )}
                   <div className="flex justify-between">
                     <span className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">جمع پرداختی:</span>
-                    <span className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                    <span className="font-medium text-[var(--sds-text-primary)]">
                       {formatPriceWithRial(financialSummary.paymentTotal, financialSummary.currency)}
                     </span>
                   </div>
@@ -263,9 +256,9 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                     </span>
                   </div>
                 </div>
-              </div>
+              </ErpNeumorphicCard>
 
-              <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg p-4 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)] space-y-3">
+              <ErpNeumorphicCard className="space-y-3 p-4">
                 <div className="flex items-center justify-between">
                   <h4 className="font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">وضعیت تایید مشتری</h4>
                   {renderStatusBadge(signature?.confirmationStatus ?? null)}
@@ -276,14 +269,14 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                   {signature?.lastSentAt && <p>آخرین ارسال: {new Date(signature.lastSentAt).toLocaleString('fa-IR')}</p>}
                   {signature?.lastOpenedAt && <p>آخرین بازدید مشتری: {new Date(signature.lastOpenedAt).toLocaleString('fa-IR')}</p>}
                 </div>
-              </div>
+              </ErpNeumorphicCard>
             </div>
           </div>
-        </div>
+        </ErpNeumorphicCard>
 
         <div className="grid grid-cols-1 gap-3">
-          <details open className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
-            <summary className="px-4 py-3 cursor-pointer font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] flex items-center gap-2">
+          <ErpNeumorphicDisclosure open>
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-[var(--sds-text-primary)]">
               <FaListAlt className="text-[var(--sds-accent)]" />
               محصولات قرارداد ({productDetails.length})
             </summary>
@@ -319,10 +312,10 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                 </table>
               )}
             </div>
-          </details>
+          </ErpNeumorphicDisclosure>
 
-          <details className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
-            <summary className="px-4 py-3 cursor-pointer font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] flex items-center gap-2">
+          <ErpNeumorphicDisclosure>
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-[var(--sds-text-primary)]">
               <FaTools className="text-[var(--sds-accent)]" />
               خدمات و عملیات وابسته ({serviceDetails.length})
             </summary>
@@ -356,10 +349,10 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                 </table>
               )}
             </div>
-          </details>
+          </ErpNeumorphicDisclosure>
 
-          <details open className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
-            <summary className="px-4 py-3 cursor-pointer font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] flex items-center gap-2">
+          <ErpNeumorphicDisclosure open>
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-[var(--sds-text-primary)]">
               <FaTools className="text-[var(--sds-accent)]" />
               خدمات مستقل ({standaloneServiceDetails.length})
             </summary>
@@ -391,10 +384,10 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                 </table>
               )}
             </div>
-          </details>
+          </ErpNeumorphicDisclosure>
 
-          <details className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
-            <summary className="px-4 py-3 cursor-pointer font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] flex items-center gap-2">
+          <ErpNeumorphicDisclosure>
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-[var(--sds-text-primary)]">
               <FaTruck className="text-[var(--sds-accent)]" />
               برنامه تحویل ({deliveryDetails.length})
             </summary>
@@ -421,10 +414,10 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                 </div>
               ))}
             </div>
-          </details>
+          </ErpNeumorphicDisclosure>
 
-          <details className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
-            <summary className="px-4 py-3 cursor-pointer font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] flex items-center gap-2">
+          <ErpNeumorphicDisclosure>
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-[var(--sds-text-primary)]">
               <FaMoneyCheckAlt className="text-[var(--sds-accent)]" />
               برنامه پرداخت ({paymentDetails.length})
             </summary>
@@ -460,11 +453,11 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                 </table>
               )}
             </div>
-          </details>
+          </ErpNeumorphicDisclosure>
         </div>
 
-        <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
-          <h4 className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] mb-4">عملیات تایید قرارداد</h4>
+        <ErpNeumorphicCard className="p-6">
+          <h4 className="mb-4 font-semibold text-[var(--sds-text-primary)]">عملیات تایید قرارداد</h4>
           <div className="flex flex-wrap gap-3">
             <ErpPressable
               onClick={onSendForConfirmation}
@@ -499,7 +492,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
 
           {signature?.contractId && (
             <div className="mt-4 pt-4 border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
-              <h5 className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] mb-3">نسخه نهایی قرارداد</h5>
+              <h5 className="mb-3 font-semibold text-[var(--sds-text-primary)]">نسخه نهایی قرارداد</h5>
               <div className="flex flex-wrap gap-3">
                 <ErpPressable
                   onClick={onDownloadContractPdf}
@@ -529,7 +522,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
 
           {errors.signature && <p className="text-[var(--sds-danger)] text-sm mt-3">{errors.signature}</p>}
           {errors.verificationCode && <p className="text-[var(--sds-danger)] text-sm mt-3">{errors.verificationCode}</p>}
-        </div>
+        </ErpNeumorphicCard>
       </div>
     </div>
   );

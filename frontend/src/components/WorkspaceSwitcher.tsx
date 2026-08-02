@@ -125,8 +125,8 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
         onClick={() => selectWorkspace(workspace.id)}
         className={
           layout === "card"
-            ? "sds-neumorphic-card sds-neumorphic-interactive min-h-24 w-full justify-start p-4 text-right"
-            : "w-full justify-start gap-3 px-3 py-2 text-right"
+            ? "sds-neumorphic-card sds-neumorphic-interactive inline-flex min-h-24 w-full flex-nowrap items-center justify-start p-4 text-right"
+            : "inline-flex w-full flex-nowrap items-center justify-start gap-3 px-3 py-2 text-right"
         }
       >
         <span className="sds-tone-primary sds-tone-surface inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--sds-radius-control)]">
@@ -173,7 +173,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         onClick={() => setIsOpen((open) => !open)}
-        className={`w-full justify-between gap-3 ${compact ? "px-3 py-2 text-sm" : "px-4 py-3"}`}
+        className={`inline-flex w-full flex-nowrap items-center justify-between gap-3 ${compact ? "px-3 py-2 text-sm" : "px-4 py-3"}`}
       >
         <span className="flex min-w-0 items-center gap-3">
           <span className="sds-tone-primary sds-tone-surface inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--sds-radius-control)]">

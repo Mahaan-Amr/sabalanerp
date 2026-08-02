@@ -2,7 +2,7 @@
 // Delivery schedule management
 
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
+import { ErpInput, ErpNeumorphicCard, ErpPressable, ErpTextarea } from '@/components/erp';
 import { FaPlus, FaTrash, FaChevronUp, FaChevronDown } from 'react-icons/fa';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
@@ -168,15 +168,6 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="text-center">
-        <h3 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] mb-2">
-          برنامه تحویل
-        </h3>
-        <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
-          برنامه تحویل را مشخص کنید
-        </p>
-      </div>
-
       {deliveryReferenceConflicts.length > 0 && (
         <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-4 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           <p className="font-semibold">برنامه تحویل نیاز به بازبینی دارد</p>
@@ -202,7 +193,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
       
       <div className="max-w-4xl mx-auto">
         <div className="flex justify-between items-center mb-4">
-          <h4 className="text-lg font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+          <h4 className="text-lg font-medium text-[var(--sds-text-primary)]">
             لیست تحویل‌ها
           </h4>
           <ErpPressable
@@ -221,7 +212,9 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
             </p>
             <ErpPressable
               onClick={handleAddDelivery}
-              className="px-4 py-2 bg-[var(--sds-accent-soft)] text-[var(--sds-text-inverse)] rounded-lg hover:bg-[var(--sds-accent-soft)] transition-colors"
+              tone="primary"
+              variant="outline"
+              className="px-4 py-2"
             >
               ایجاد برنامه تحویل
             </ErpPressable>
@@ -229,12 +222,12 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
         ) : (
           <div className="space-y-4">
             {wizardData.deliveries.map((delivery, index) => (
-              <div
+              <ErpNeumorphicCard
                 key={index}
-                className="p-6 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]"
+                className="p-6"
               >
                 <div className="flex justify-between items-start mb-4">
-                  <h5 className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                  <h5 className="font-semibold text-[var(--sds-text-primary)]">
                     تحویل {index + 1}
                   </h5>
                   <ErpPressable
@@ -271,7 +264,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                       type="text"
                       value={delivery.deliveryAddress}
                       onChange={(e) => handleUpdateDelivery(index, { deliveryAddress: e.target.value })}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
+                      className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
                       placeholder="آدرس تحویل"
                     />
                   </div>
@@ -284,7 +277,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                       type="text"
                       value={delivery.projectManagerName || ''}
                       onChange={(e) => handleUpdateDelivery(index, { projectManagerName: e.target.value })}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
+                      className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
                       placeholder="نام مدیر پروژه"
                     />
                     {errors[`delivery_${index}_projectManager`] && (
@@ -300,7 +293,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                       type="text"
                       value={delivery.receiverName || ''}
                       onChange={(e) => handleUpdateDelivery(index, { receiverName: e.target.value })}
-                      className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
+                      className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
                       placeholder="نام تحویل‌گیرنده"
                     />
                     {errors[`delivery_${index}_receiver`] && (
@@ -316,15 +309,15 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                   <ErpTextarea
                     value={delivery.notes || ''}
                     onChange={(e) => handleUpdateDelivery(index, { notes: e.target.value })}
-                    className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
+                      className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
                     rows={3}
                     placeholder="توضیحات مربوط به این تحویل"
                   />
                 </div>
 
                 {(deliverableProductEntries.length > 0 || schedulableServiceEntries.length > 0) && (
-                  <div className="mt-4 p-4 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)]">
-                    <h6 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] mb-1">
+                  <ErpNeumorphicCard className="mt-4 p-4">
+                    <h6 className="mb-1 text-sm font-semibold text-[var(--sds-text-primary)]">
                       محصولات این تحویل
                     </h6>
                     <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mb-3">
@@ -343,12 +336,12 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                         const widthSummary = getProductWidthSummary(product);
                         const setQty = (value: number) => handleDeliveryProductQuantityChange(index, productIndex, Math.max(0, Math.min(maxForThisDelivery, value)));
                         return (
-                          <div
+                          <ErpNeumorphicCard
                             key={product.rowId || productIndex}
-                            className="p-3 rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] space-y-2"
+                            className="space-y-2 p-3"
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                              <span className="text-sm font-medium text-[var(--sds-text-primary)]">
                                 {productLabel}
                               </span>
                               {widthSummary && (
@@ -372,7 +365,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                                   min={0}
                                   max={maxForThisDelivery}
                                   step={deliveryUnit === 'count' ? 1 : 0.01}
-                                  className="w-20 px-2 py-1.5 text-sm text-center border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
+                                  className="w-20 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 py-1.5 text-center text-sm text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
                                 />
                                 <ErpPressable
                                   type="button"
@@ -405,7 +398,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                                 </ErpPressable>
                               )}
                             </div>
-                          </div>
+                          </ErpNeumorphicCard>
                         );
                       })}
                       {schedulableServiceEntries.map(({ serviceRow }) => {
@@ -417,12 +410,12 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                         const remaining = maxForThisDelivery;
                         const setQty = (value: number) => handleDeliveryServiceQuantityChange(index, serviceRow.id, Math.max(0, Math.min(maxForThisDelivery, value)));
                         return (
-                          <div
+                          <ErpNeumorphicCard
                             key={serviceRow.id}
-                            className="p-3 rounded-lg border border-[var(--sds-success-border)] dark:border-[var(--sds-success-border)] bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] space-y-2"
+                            className="space-y-2 border-[var(--sds-success-border)] p-3"
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                              <span className="text-sm font-medium text-[var(--sds-text-primary)]">
                                 {serviceRow.title}
                               </span>
                               <div className="flex items-center gap-1">
@@ -441,7 +434,7 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                                   min={0}
                                   max={maxForThisDelivery}
                                   step={serviceRow.unit === 'count' ? 1 : 0.01}
-                                  className="w-20 px-2 py-1.5 text-sm text-center border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]"
+                                  className="w-20 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-2 py-1.5 text-center text-sm text-[var(--sds-text-primary)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]"
                                 />
                                 <ErpPressable
                                   type="button"
@@ -474,20 +467,20 @@ export const Step6DeliverySchedule: React.FC<Step6DeliveryScheduleProps> = ({
                                 </ErpPressable>
                               )}
                             </div>
-                          </div>
+                          </ErpNeumorphicCard>
                         );
                       })}
                     </div>
                     {errors[`delivery_${index}_products`] && (
                       <p className="text-[var(--sds-danger)] text-sm mt-2">{errors[`delivery_${index}_products`]}</p>
                     )}
-                  </div>
+                  </ErpNeumorphicCard>
                 )}
 
                 {errors[`delivery_${index}_products`] && !wizardData.products.length && (
                   <p className="text-[var(--sds-danger)] text-sm mt-2">{errors[`delivery_${index}_products`]}</p>
                 )}
-              </div>
+              </ErpNeumorphicCard>
             ))}
           </div>
         )}

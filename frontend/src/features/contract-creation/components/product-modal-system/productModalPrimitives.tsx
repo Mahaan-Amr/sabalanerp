@@ -28,13 +28,15 @@ export function CompactSegmentedControl<Value extends string>({
   value,
   options,
   onChange,
-  className
+  className,
+  compactVisual = false
 }: {
   label: string;
   value: Value | null;
   options: readonly SegmentedOption<Value>[];
   onChange: (value: Value) => void;
   className?: string;
+  compactVisual?: boolean;
 }) {
   const selectRelative = (direction: 1 | -1) => {
     const enabled = options.filter(option => !option.disabled);
@@ -74,14 +76,23 @@ export function CompactSegmentedControl<Value extends string>({
           disabled={option.disabled}
           onClick={() => onChange(option.value)}
           className={cx(
-            'min-h-10 rounded-[var(--sds-radius-control)] px-2.5 text-xs font-semibold transition-colors',
-            option.value === value
+            'rounded-[var(--sds-radius-control)] text-xs font-semibold transition-colors',
+            compactVisual ? 'min-h-11 border-transparent bg-transparent px-0.5' : 'min-h-10 px-2.5',
+            !compactVisual && (option.value === value
               ? 'sds-tone-primary sds-action-solid'
-              : 'sds-action-ghost sds-text-secondary',
+              : 'sds-action-ghost sds-text-secondary'),
             option.disabled && 'cursor-not-allowed opacity-40'
           )}
         >
-          {option.label}
+          <span className={cx(
+            'inline-flex items-center justify-center',
+            compactVisual && 'h-6 rounded-full px-1.5 text-[10px]',
+            compactVisual && (option.value === value
+              ? 'bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
+              : 'text-[var(--sds-text-secondary)]')
+          )}>
+            {option.label}
+          </span>
         </ErpPressable>
       ))}
     </div>
@@ -111,7 +122,8 @@ export function CompactUnitSwitch({
         unit: nextUnit,
         value: convertCompactLengthUnit(value, unit, nextUnit)
       })}
-      className="min-h-10 rounded-full bg-transparent p-0 [&_button]:min-h-10 [&_button]:rounded-full [&_button]:px-2 [&_button]:text-[10px]"
+      compactVisual
+      className="min-h-11 rounded-full border-0 bg-transparent p-0"
     />
   );
 }
@@ -133,20 +145,35 @@ export function CompactSwitch({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      title={`${label}: ${checked ? 'روشن' : 'خاموش'}`}
+      dir="ltr"
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cx(
-        'relative h-6 min-h-6 w-11 shrink-0 rounded-full p-0 transition-colors',
-        checked ? 'bg-[var(--sds-accent)]' : 'bg-[var(--sds-border-strong)]',
+        'relative h-11 !min-h-11 w-[51px] shrink-0 border-transparent !bg-transparent p-0',
         disabled && 'cursor-not-allowed opacity-40'
       )}
     >
       <span
+        data-switch-track
+        aria-hidden="true"
         className={cx(
-          'absolute top-0.5 h-5 w-5 rounded-full bg-[var(--sds-surface-raised)] shadow-sm transition-transform',
-          checked ? 'translate-x-0.5' : 'translate-x-[22px]'
+          'absolute left-0 top-1/2 h-[31px] w-[51px] -translate-y-1/2 rounded-full border transition-colors',
+          checked
+            ? 'border-[var(--sds-accent)] bg-[var(--sds-accent)]'
+            : 'border-[var(--sds-border-strong)] bg-[var(--sds-surface-subtle)]'
         )}
-      />
+      >
+        <span
+          data-switch-thumb
+          className={cx(
+            'absolute left-px top-px h-[27px] w-[27px] rounded-full shadow-sm transition-[transform,background-color]',
+            checked
+              ? 'translate-x-5 bg-[var(--sds-text-inverse)]'
+              : 'translate-x-0 bg-[var(--sds-text-secondary)]'
+          )}
+        />
+      </span>
     </ErpPressable>
   );
 }
@@ -275,7 +302,7 @@ export function InlineCollectionSection({
       <div className="flex min-h-8 items-center justify-between gap-3">
         <h3 className="sds-text-primary text-sm font-bold">{title}</h3>
         {actionLabel && onAction && (
-          <ErpPressable type="button" onClick={onAction} tone="primary" variant="ghost" className="text-xs font-semibold">
+          <ErpPressable type="button" onClick={onAction} tone="primary" variant="outline" className="inline-flex min-h-11 items-center justify-center px-4 py-2 text-sm font-semibold">
             {actionLabel}
           </ErpPressable>
         )}
@@ -325,7 +352,7 @@ export function CentralProductModalShell({
   error?: string;
 }) {
   const reducedMotion = useReducedMotion();
-  const dialogRef = React.useRef<HTMLElement>(null);
+  const dialogRef = React.useRef<HTMLDivElement>(null);
   const onCloseRef = React.useRef(onClose);
   const onBackRef = React.useRef(onBack);
   const pendingRef = React.useRef(pending);
@@ -394,7 +421,7 @@ export function CentralProductModalShell({
             role="dialog"
             aria-modal="true"
             aria-labelledby="central-product-modal-title"
-            className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-[var(--sds-shadow-raised)]"
+              className="sds-neumorphic-card sds-text-primary flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)]"
             initial={reducedMotion ? false : { opacity: 0, y: 10, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.99 }}

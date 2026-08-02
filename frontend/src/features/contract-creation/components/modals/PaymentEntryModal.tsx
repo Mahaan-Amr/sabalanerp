@@ -33,7 +33,7 @@ const METHOD_OPTIONS: { value: PaymentEntryMethod; label: string }[] = [
 ];
 
 const inputClass =
-  'w-full px-3 py-2 text-sm border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-md bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]';
+  'w-full px-3 py-2 text-sm border border-[var(--sds-border-default)] rounded-md bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]';
 const labelClass = 'block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mb-1';
 
 export const PaymentEntryModal: React.FC<PaymentEntryModalProps> = ({

@@ -440,6 +440,8 @@ test('the complete Contract Creation wizard uses the shared semantic and accessi
   assert.match(wizard, /<ErpNeumorphicDialog/);
   assert.match(neumorphicPrimitives, /role="dialog"/);
   assert.match(neumorphicPrimitives, /aria-modal="true"/);
+  assert.match(neumorphicPrimitives, /createPortal\(open \? dialog : null, document\.body\)/);
+  assert.match(neumorphicPrimitives, /max-h-\[calc\(100dvh-1\.5rem\)\]/);
   assert.match(neumorphicPrimitives, /event\.key === "Escape"/);
   assert.match(neumorphicPrimitives, /event\.key === "Tab"/);
   assert.match(neumorphicPrimitives, /previouslyFocused\?\.focus\(\)/);

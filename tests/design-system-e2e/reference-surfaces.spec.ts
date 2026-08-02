@@ -797,9 +797,29 @@ test('Stair layer summary keeps its established values visible while recalculati
   await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4');
   const parentRow = page.locator('[data-contract-row-id="stair-parent-e2e"]');
   await expect(parentRow).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
   await parentRow.getByRole('button', { name: 'ویرایش', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
+  const footer = dialog.locator('.stair-v2-footer');
+  await expect(footer).toBeVisible();
+  const visibleFooterButtons = footer.locator('button:visible');
+  expect(await visibleFooterButtons.count()).toBeGreaterThanOrEqual(2);
+  for (const button of await visibleFooterButtons.all()) {
+    expect(await button.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+      );
+      return (
+        rect.top >= 0
+        && rect.bottom <= window.innerHeight
+        && hit !== null
+        && element.contains(hit)
+      );
+    })).toBe(true);
+  }
   const summary = dialog.locator('#stair-layer-calculation-summary');
   await expect(summary).toBeVisible();
   await expect(summary).toHaveAttribute('aria-busy', 'false', { timeout: 10_000 });
@@ -1312,6 +1332,33 @@ test('public, identity, and confirmation routes share the responsive semantic fo
           || field.getAttribute('type') === 'radio'
         ))
     )).toBe(true);
+  }
+});
+
+test('public verification workflows stay outside ERP authentication', async ({ page }) => {
+  let authChecks = 0;
+  await page.route('**/api/auth/me', async (route) => {
+    authChecks += 1;
+    await route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: false, error: 'Authentication required' }),
+    });
+  });
+  await page.route('**/api/public/contracts/confirm/e2e-token', async (route) => {
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: false, error: 'Invalid confirmation link' }),
+    });
+  });
+
+  for (const route of ['/apply', '/contracts/confirm', '/contracts/confirm/e2e-token']) {
+    const previousAuthChecks = authChecks;
+    await page.goto(route);
+    await expect.poll(() => authChecks).toBeGreaterThan(previousAuthChecks);
+    await expect(page).toHaveURL(new RegExp(`${route.replaceAll('/', '\\/')}$`));
+    await expect(page).not.toHaveURL(/\/login$/);
   }
 });
 

@@ -1,5 +1,5 @@
-import SalesReportingDashboard from '@/components/reporting/SalesReportingDashboard';
+import BiWorkspace from '@/features/bi/BiWorkspace';
 
 export default function BusinessIntelligencePage() {
-  return <SalesReportingDashboard mode="bi" />;
+  return <BiWorkspace />;
 }

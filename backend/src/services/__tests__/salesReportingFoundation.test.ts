@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { snapshotRealizedSale, recordRealizedAdjustment, recordContractCancellation } from '../salesAttributionService';
-import { buildRealizedSalesHeadline, buildSalesReportContractWhere, buildSalesReportScope, resolveAllTimeSalesReportPeriod, resolveSalesReportPeriod } from '../salesReportingService';
+import { buildRealizedSalesHeadline, buildSalesPipelineHeadline, buildSalesReportContractWhere, buildSalesReportScope, resolveAllTimeSalesReportPeriod, resolveSalesReportPeriod } from '../salesReportingService';
 
 const contract: any = {
   id: 'contract-1',
@@ -112,6 +112,26 @@ const run = async () => {
     { total: headline.netRealized, count: headline.realizedCount, average: headline.averageRealizedValue, successRate: headline.successRate },
     { total: 100, count: 1, average: 100, successRate: 50 },
     'dashboard and comprehensive reporting share one permission-scoped realized-sales projection',
+  );
+
+  assert.deepEqual(
+    buildSalesPipelineHeadline({
+      contracts: [
+        { id: 'old-open', status: 'APPROVED', totalAmount: 300, createdAt: '2025-01-01', responsibleSellerId: 'seller-1' },
+        { id: 'new-open', status: 'PENDING_APPROVAL', totalAmount: 200, createdAt: '2026-06-10', responsibleSellerId: 'seller-1' },
+        { id: 'realized', status: 'SIGNED', totalAmount: 900, createdAt: '2026-06-10', responsibleSellerId: 'seller-1' },
+      ],
+      sellerId: 'seller-1',
+      from: new Date('2026-06-01T00:00:00.000Z'),
+      to: new Date('2026-06-30T23:59:59.999Z'),
+    }),
+    {
+      activeValue: 500,
+      activeCount: 2,
+      createdInPeriodValue: 200,
+      createdInPeriodCount: 1,
+    },
+    'active pipeline remains point-in-time while period pipeline follows contract creation',
   );
 
   console.log('salesReportingFoundation tests passed');

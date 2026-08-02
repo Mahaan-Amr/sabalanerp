@@ -9,11 +9,11 @@ const faNumber = (value: unknown) => Number(value || 0).toLocaleString('fa-IR');
 const tooltipStyle = {
   direction: 'rtl' as const,
   textAlign: 'right' as const,
-  background: '#ffffff',
-  border: '1px solid #cbd5e1',
+  background: 'var(--sds-surface-raised)',
+  border: '1px solid var(--sds-border-default)',
   borderRadius: 10,
-  color: '#0f172a',
-  boxShadow: '0 12px 30px rgba(15, 23, 42, .14)'
+  color: 'var(--sds-text-primary)',
+  boxShadow: 'var(--sds-shadow-raised)'
 };
 
 export const chartTickInterval = (length: number, maximumVisibleTicks = 8) =>
@@ -30,22 +30,22 @@ function SeriesLegend({ items }: { items: Array<{ label: string; color: string; 
 
 export function RtlTrendChart({ data, onSelect }: { data: any[]; onSelect?: (row: any) => void }) {
   return (
-    <div dir="rtl" className="w-full" role="img" aria-label="روند زمانی؛ قدیمی‌ترین بازه در سمت راست و جدیدترین بازه در سمت چپ است">
+    <div dir="rtl" className="min-w-0 w-full overflow-hidden" role="img" aria-label="روند زمانی؛ قدیمی‌ترین بازه در سمت راست و جدیدترین بازه در سمت چپ است">
       <SeriesLegend items={[
-        { label: 'فروش قطعی خالص', color: '#0f766e' },
-        { label: 'پایپ‌لاین', color: '#f59e0b', dashed: true },
-        { label: 'تعدیلات', color: '#7c3aed' }
+        { label: 'فروش قطعی خالص', color: 'var(--sds-accent)' },
+        { label: 'پایپ‌لاین', color: 'var(--sds-warning)', dashed: true },
+        { label: 'تعدیلات', color: 'var(--sds-purple)' }
       ]} />
-      <div className="h-[300px] w-full">
+      <div className="h-[300px] min-w-0 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 8, right: 12, left: 16, bottom: 28 }} onClick={(state: any) => state?.activePayload?.[0]?.payload && onSelect?.(state.activePayload[0].payload)}>
-          <CartesianGrid stroke="#dbe4ea" vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#475569' }} interval={chartTickInterval(data.length)} minTickGap={24} tickMargin={10} height={50} />
-          <YAxis orientation="right" tickFormatter={faNumber} tick={{ fontSize: 10, fill: '#475569' }} tickMargin={8} width={92} />
+          <CartesianGrid stroke="var(--sds-border-subtle)" vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--sds-text-secondary)' }} interval={chartTickInterval(data.length, 3)} minTickGap={36} tickMargin={10} height={50} />
+          <YAxis orientation="right" tickFormatter={faNumber} tick={{ fontSize: 10, fill: 'var(--sds-text-secondary)' }} tickMargin={8} width={92} />
           <Tooltip contentStyle={tooltipStyle} labelStyle={{ textAlign: 'right', fontWeight: 800 }} formatter={(value: any, name: any) => [faNumber(value), name]} />
-          <Line type="monotone" dataKey="net" name="فروش قطعی خالص" stroke="#0f766e" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 6, cursor: 'pointer' }} />
-          <Line type="monotone" dataKey="pipeline" name="پایپ‌لاین" stroke="#f59e0b" strokeWidth={2} strokeDasharray="7 5" dot={{ r: 2 }} />
-          <Line type="monotone" dataKey="adjustments" name="تعدیلات" stroke="#7c3aed" strokeWidth={2} dot={false} />
+          <Line type="monotone" dataKey="net" name="فروش قطعی خالص" stroke="var(--sds-accent)" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 6, cursor: 'pointer' }} />
+          <Line type="monotone" dataKey="pipeline" name="پایپ‌لاین" stroke="var(--sds-warning)" strokeWidth={2} strokeDasharray="7 5" dot={{ r: 2 }} />
+          <Line type="monotone" dataKey="adjustments" name="تعدیلات" stroke="var(--sds-purple)" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -67,11 +67,11 @@ export function RtlHorizontalBarChart({ data, valueKey = 'value', labelKey = 'la
       <div dir="ltr" className="grid h-full gap-3" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(150px, 220px)' }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={normalizedData} layout="vertical" margin={{ top: 12, right: 2, left: 22, bottom: 18 }}>
-            <CartesianGrid stroke="#dbe4ea" horizontal={false} />
-            <XAxis type="number" reversed tickFormatter={faNumber} tick={{ fontSize: 10, fill: '#475569' }} tickMargin={8} />
+            <CartesianGrid stroke="var(--sds-border-subtle)" horizontal={false} />
+            <XAxis type="number" reversed tickFormatter={faNumber} tick={{ fontSize: 10, fill: 'var(--sds-text-secondary)' }} tickMargin={8} />
             <YAxis type="category" dataKey={labelKey} hide />
             <Tooltip contentStyle={tooltipStyle} labelStyle={{ direction: 'rtl', textAlign: 'right', fontWeight: 800 }} labelFormatter={(_, payload) => resolveChartLabel(payload?.[0]?.payload, labelKey)} formatter={(value: any) => [faNumber(value), valueLabel]} />
-            <Bar dataKey={valueKey} name={valueLabel} fill="#0f766e" radius={[7, 0, 0, 7]} cursor={onSelect ? 'pointer' : 'default'} onClick={(row: any) => onSelect?.(row?.payload || row)} />
+            <Bar dataKey={valueKey} name={valueLabel} fill="var(--sds-accent)" radius={[7, 0, 0, 7]} cursor={onSelect ? 'pointer' : 'default'} onClick={(row: any) => onSelect?.(row?.payload || row)} />
           </BarChart>
         </ResponsiveContainer>
         <div dir="rtl" className="grid py-3 text-right" style={{ gridTemplateRows: `repeat(${Math.max(normalizedData.length, 1)}, minmax(0, 1fr))`, paddingBottom: 18 }}>

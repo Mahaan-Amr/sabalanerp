@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { rankBiSellers } from './biRecommendationService';
 
 const prisma = new PrismaClient();
 const DAY = 86_400_000;
@@ -12,6 +13,7 @@ export type SalesReportAccess = {
   departmentId?: string | null;
   canManage: boolean;
   canCompany: boolean;
+  canOpenSalesSource?: boolean;
 };
 
 export type SalesReportQuery = {
@@ -249,6 +251,39 @@ export const buildRealizedSalesHeadline = ({
   };
 };
 
+type SalesPipelineContract = {
+  id: string;
+  status: string;
+  totalAmount: unknown;
+  createdAt: Date | string;
+  responsibleSellerId: string;
+};
+
+export const buildSalesPipelineHeadline = ({
+  contracts,
+  sellerId,
+  from,
+  to,
+}: {
+  contracts: SalesPipelineContract[];
+  sellerId?: string | null;
+  from: Date;
+  to: Date;
+}) => {
+  const activeContracts = contracts.filter((contract) =>
+    PIPELINE.has(contract.status)
+    && (!sellerId || contract.responsibleSellerId === sellerId));
+  const createdInPeriod = activeContracts.filter((contract) =>
+    inRange(contract.createdAt, from, to));
+
+  return {
+    activeValue: activeContracts.reduce((sum, contract) => sum + n(contract.totalAmount), 0),
+    activeCount: activeContracts.length,
+    createdInPeriodValue: createdInPeriod.reduce((sum, contract) => sum + n(contract.totalAmount), 0),
+    createdInPeriodCount: createdInPeriod.length,
+  };
+};
+
 const bucketKey = (date: Date, monthly: boolean) => monthly
   ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
   : date.toISOString().slice(0, 10);
@@ -280,15 +315,34 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   }
 
   const contractIds = contracts.map((contract) => contract.id);
-  const [accountingPayments, receivables, financialRecords, loadingLines] = contractIds.length ? await Promise.all([
-    prisma.accountingPaymentStatus.findMany({ where: { contractId: { in: contractIds } } }),
-    prisma.accountingReceivable.findMany({ where: { contractId: { in: contractIds } } }),
-    prisma.accountingFinancialRecord.findMany({ where: { contractId: { in: contractIds } }, select: { contractId: true, financiallyApprovedAt: true, status: true } }),
-    prisma.logisticsLoadingLine.findMany({
+  const crmProjectWhere = {
+    isActive: true,
+    ...(scope.sellerId
+      ? { responsibleSellerId: scope.sellerId }
+      : scope.departmentId
+        ? { responsibleSeller: { departmentId: scope.departmentId } }
+        : {}),
+  };
+  const [accountingEvidence, deliveryEvidence, crmEvidence] = await Promise.allSettled([
+    contractIds.length ? Promise.all([
+      prisma.accountingPaymentStatus.findMany({ where: { contractId: { in: contractIds } } }),
+      prisma.accountingReceivable.findMany({ where: { contractId: { in: contractIds } } }),
+      prisma.accountingFinancialRecord.findMany({ where: { contractId: { in: contractIds } }, select: { contractId: true, financiallyApprovedAt: true, status: true } }),
+    ]) : Promise.resolve([[], [], []] as [never[], never[], never[]]),
+    contractIds.length ? prisma.logisticsLoadingLine.findMany({
       where: { sourceContractId: { in: contractIds } },
       include: { loading: { include: { securityVehicleMovements: true } } }
-    })
-  ]) : [[], [], [], []];
+    }) : Promise.resolve([] as never[]),
+    prisma.crmPotentialProject.findMany({
+      where: crmProjectWhere,
+      include: { nextActions: true },
+    }),
+  ]);
+  const [accountingPayments, receivables, financialRecords] = accountingEvidence.status === 'fulfilled'
+    ? accountingEvidence.value
+    : [[], [], []];
+  const loadingLines = deliveryEvidence.status === 'fulfilled' ? deliveryEvidence.value : [];
+  const crmProjects = crmEvidence.status === 'fulfilled' ? crmEvidence.value : [];
 
   const metricContracts = scope.sellerId
     ? contracts.filter((contract) => contract.responsibleSellerId === scope.sellerId || contract.realizedSellerId === scope.sellerId || contract.createdBy === scope.sellerId)
@@ -298,6 +352,12 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   const currentEvents = events.filter((event) => inRange(event.effectiveAt, period.from, period.to));
   const previousEvents = allTime ? [] : events.filter((event) => inRange(event.effectiveAt, period.previousFrom, period.previousTo));
   const headline = buildRealizedSalesHeadline({ contracts, sellerId: scope.sellerId, from: period.from, to: period.to });
+  const pipelineHeadline = buildSalesPipelineHeadline({
+    contracts: metricContracts,
+    sellerId: scope.sellerId,
+    from: period.from,
+    to: period.to,
+  });
   const { originalRealized, adjustments, grossRealized, adjustmentAmount, netRealized, realizedContractIds } = headline;
   const previousNet = previousEvents.reduce((sum, event) => sum + n(event.amount), 0);
 
@@ -350,6 +410,31 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   const loadings = Array.from(loadingById.values());
   const finalizedLoadings = loadings.filter((loading) => loading.status === 'FINALIZED');
   const exitedLoadings = loadings.filter((loading) => loading.securityVehicleMovements.some((movement: any) => movement.direction === 'EXIT' && !movement.voidedAt));
+  const now = new Date();
+  const stalledBefore = new Date(now.getTime() - 30 * DAY);
+  const activePipelineContracts = metricContracts.filter((contract) => PIPELINE.has(contract.status));
+  const stalledPipelineContracts = activePipelineContracts.filter((contract) => contract.createdAt < stalledBefore);
+  const overdueReceivableRows = receivables.filter((row) =>
+    n(row.remainingAmount) > 0
+    && row.dueDate < now
+    && !['SETTLED', 'VOIDED'].includes(row.status));
+  const overdueDeliveryRows = metricContracts.flatMap((contract) => contract.deliveries)
+    .filter((delivery) => delivery.deliveryDate < now && !['DELIVERED', 'CANCELLED'].includes(delivery.status));
+  const dueSoonEnd = new Date(now.getTime() + 7 * DAY);
+  const dueSoonDeliveryRows = metricContracts.flatMap((contract) => contract.deliveries)
+    .filter((delivery) => delivery.deliveryDate >= now && delivery.deliveryDate <= dueSoonEnd && !['DELIVERED', 'CANCELLED'].includes(delivery.status));
+  const deliveredUnconfirmedRows = metricContracts.flatMap((contract) => contract.deliveries)
+    .filter((delivery) => delivery.status === 'DELIVERED' && !delivery.customerConfirmation);
+  const contractsWithLoading = new Set(loadingLines.map((line) => line.sourceContractId).filter(Boolean));
+  const promisedWithoutLoading = metricContracts.filter((contract) =>
+    contract.deliveries.some((delivery) => delivery.status !== 'CANCELLED')
+    && !contractsWithLoading.has(contract.id));
+  const finalizedWithoutExit = finalizedLoadings.filter((loading) =>
+    !loading.securityVehicleMovements.some((movement: any) => movement.direction === 'EXIT' && !movement.voidedAt));
+  const overdueFollowUps = crmProjects.flatMap((project) => project.nextActions)
+    .filter((action) => action.dueAt < now && !action.completedAt && action.status !== 'انجام شده');
+  const crmWonWithoutContract = crmProjects.filter((project) =>
+    project.status === 'برنده شده' && !project.wonSalesContractId);
 
   const customerMap = new Map<string, any>();
   const productMap = new Map<string, any>();
@@ -372,23 +457,35 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   if (scope.canManage) {
     contracts.forEach((contract) => {
       const id = contract.responsibleSellerId;
-      if (!sellerMap.has(id)) sellerMap.set(id, { id, name: userName(contract.responsibleSeller), createdCount: 0, createdValue: 0, pipelineCount: 0, pipelineValue: 0, realizedCount: 0, realizedValue: 0, adjustments: 0, lostCount: 0, lostValue: 0, discountAmount: 0 });
+      if (!sellerMap.has(id)) sellerMap.set(id, { id, name: userName(contract.responsibleSeller), createdCount: 0, createdValue: 0, pipelineCount: 0, pipelineValue: 0, stalledPipelineCount: 0, overdueFollowUpCount: 0, realizedCount: 0, realizedValue: 0, adjustments: 0, previousNetRealized: 0, lostCount: 0, lostValue: 0, discountAmount: 0 });
       const row = sellerMap.get(id);
       if (inRange(contract.createdAt, period.from, period.to) && contract.createdBy === id) { row.createdCount += 1; row.createdValue += n(contract.totalAmount); }
-      if (PIPELINE.has(contract.status) && inRange(contract.createdAt, period.from, period.to)) { row.pipelineCount += 1; row.pipelineValue += n(contract.totalAmount); }
+      if (PIPELINE.has(contract.status)) {
+        row.pipelineCount += 1;
+        row.pipelineValue += n(contract.totalAmount);
+        if (contract.createdAt < stalledBefore) row.stalledPipelineCount += 1;
+      }
       if (LOST.has(contract.status) && inRange(contract.lostAt || contract.updatedAt, period.from, period.to)) { row.lostCount += 1; row.lostValue += n(contract.totalAmount); }
     });
     currentEvents.forEach((event) => {
       const id = event.sellerId || 'legacy-unassigned';
-      if (!sellerMap.has(id)) sellerMap.set(id, { id, name: id === 'legacy-unassigned' ? 'فروش قطعی تخصیص‌نیافته قدیمی' : 'نامشخص', createdCount: 0, createdValue: 0, pipelineCount: 0, pipelineValue: 0, realizedCount: 0, realizedValue: 0, adjustments: 0, lostCount: 0, lostValue: 0, discountAmount: 0 });
+      if (!sellerMap.has(id)) sellerMap.set(id, { id, name: id === 'legacy-unassigned' ? 'فروش قطعی تخصیص‌نیافته قدیمی' : 'نامشخص', createdCount: 0, createdValue: 0, pipelineCount: 0, pipelineValue: 0, stalledPipelineCount: 0, overdueFollowUpCount: 0, realizedCount: 0, realizedValue: 0, adjustments: 0, previousNetRealized: 0, lostCount: 0, lostValue: 0, discountAmount: 0 });
       const row = sellerMap.get(id);
       if (event.eventType === 'REALIZED') { row.realizedCount += 1; row.realizedValue += n(event.amount); } else row.adjustments += n(event.amount);
+    });
+    previousEvents.forEach((event) => {
+      if (event.sellerId && sellerMap.has(event.sellerId)) sellerMap.get(event.sellerId).previousNetRealized += n(event.amount);
+    });
+    crmProjects.forEach((project) => {
+      if (!sellerMap.has(project.responsibleSellerId)) return;
+      sellerMap.get(project.responsibleSellerId).overdueFollowUpCount += project.nextActions
+        .filter((action) => action.dueAt < now && !action.completedAt && action.status !== 'انجام شده').length;
     });
   }
 
   const details = metricContracts.filter((contract) => {
     const relevantEvent = contract.reportingEvents.some((event) => inRange(event.effectiveAt, period.from, period.to) && (!scope.sellerId || event.sellerId === scope.sellerId));
-    return relevantEvent || inRange(contract.createdAt, period.from, period.to) || inRange(contract.lostAt, period.from, period.to);
+    return PIPELINE.has(contract.status) || relevantEvent || inRange(contract.createdAt, period.from, period.to) || inRange(contract.lostAt, period.from, period.to);
   }).map((contract) => ({
     id: contract.id,
     customerId: contract.customerId,
@@ -410,19 +507,52 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     reportingEventDates: contract.reportingEvents
       .filter((event) => !scope.sellerId || event.sellerId === scope.sellerId)
       .map((event) => event.effectiveAt),
-    canOpenSource: access.canManage || contract.responsibleSellerId === access.userId || contract.createdBy === access.userId
+    canOpenSource: Boolean(access.canOpenSalesSource)
   })).sort((a, b) => new Date(b.realizedAt || b.lostAt || b.createdAt).getTime() - new Date(a.realizedAt || a.lostAt || a.createdAt).getTime());
 
-  const sellers = Array.from(sellerMap.values()).map((row) => ({
-    ...row,
-    netRealized: row.realizedValue + row.adjustments,
-    averageRealizedValue: row.realizedCount ? Math.round((row.realizedValue + row.adjustments) / row.realizedCount) : null
-  })).sort((a, b) => b.netRealized - a.netRealized);
+  const sellers = rankBiSellers(Array.from(sellerMap.values())
+    .filter((row) => row.id !== 'legacy-unassigned')
+    .map((row) => {
+      const netRealized = row.realizedValue + row.adjustments;
+      return {
+        ...row,
+        netRealized,
+        averageRealizedValue: row.realizedCount ? Math.round(netRealized / row.realizedCount) : null,
+        deteriorationPercent: allTime || row.previousNetRealized === 0
+          ? null
+          : Math.round(((netRealized - row.previousNetRealized) / Math.abs(row.previousNetRealized)) * 100),
+        lossRate: row.lostCount + row.realizedCount
+          ? Math.round((row.lostCount / (row.lostCount + row.realizedCount)) * 100)
+          : null,
+      };
+    }));
 
   return {
     generatedAt: new Date().toISOString(),
     generatedAtLabel: faDateTime(new Date()),
     currency: 'تومان',
+    sourceAvailability: {
+      crm: crmEvidence.status === 'fulfilled',
+      accounting: accountingEvidence.status === 'fulfilled',
+      logistics: deliveryEvidence.status === 'fulfilled',
+      security: deliveryEvidence.status === 'fulfilled',
+    },
+    riskEvidence: {
+      overdueReceivables: {
+        count: overdueReceivableRows.length,
+        value: overdueReceivableRows.reduce((sum, row) => sum + n(row.remainingAmount), 0),
+      },
+      overdueDeliveries: { count: overdueDeliveryRows.length },
+      overdueFollowUps: { count: overdueFollowUps.length },
+      dueSoonDeliveries: { count: dueSoonDeliveryRows.length },
+      stalledPipeline: {
+        count: stalledPipelineContracts.length,
+        value: stalledPipelineContracts.reduce((sum, contract) => sum + n(contract.totalAmount), 0),
+      },
+      promisedWithoutLoading: { count: promisedWithoutLoading.length },
+      finalizedWithoutExit: { count: finalizedWithoutExit.length },
+      crmWonWithoutContract: { count: crmWonWithoutContract.length },
+    },
     permissions: { canManage: scope.canManage, canCompany: scope.canCompany, canSelectSeller: scope.canManage, canViewSellerComparisons: scope.canManage },
     scope: {
       mode: scope.mode,
@@ -443,8 +573,10 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       grossRealized, adjustments: adjustmentAmount, netRealized,
       previousNetRealized: previousNet,
       growthPercent: allTime ? null : previousNet === 0 ? (netRealized === 0 ? null : 100) : Math.round(((netRealized - previousNet) / Math.abs(previousNet)) * 100),
-      pipelineValue: pipelineContracts.reduce((sum, contract) => sum + n(contract.totalAmount), 0),
-      pipelineCount: pipelineContracts.length,
+      currentPipelineValue: pipelineHeadline.activeValue,
+      currentPipelineCount: pipelineHeadline.activeCount,
+      pipelineValue: pipelineHeadline.createdInPeriodValue,
+      pipelineCount: pipelineHeadline.createdInPeriodCount,
       lostValue: lostContracts.reduce((sum, contract) => sum + n(contract.totalAmount), 0),
       lostCount: lostContracts.length,
       realizedCount: headline.realizedCount,
@@ -461,11 +593,15 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       plannedPaymentAmount: metricContracts.filter((contract) => realizedContractIds.has(contract.id)).flatMap((contract) => contract.payments).filter((payment) => payment.status !== 'CANCELLED').reduce((sum, payment) => sum + n(payment.totalAmount), 0),
       receivedAmount,
       receivableAmount,
+      overdueAmount: overdueReceivableRows.reduce((sum, row) => sum + n(row.remainingAmount), 0),
       coverage: { coveredContracts: accountingCovered, totalContracts: contractIds.length },
       source: 'ACCOUNTING'
     },
     delivery: {
       promisedDeliveries: metricContracts.flatMap((contract) => contract.deliveries).filter((delivery) => inRange(delivery.deliveryDate, period.from, period.to)).length,
+      dueSoonDeliveries: dueSoonDeliveryRows.length,
+      overdueDeliveries: overdueDeliveryRows.length,
+      deliveredUnconfirmed: deliveredUnconfirmedRows.length,
       finalizedLoadings: finalizedLoadings.length,
       exitedLoadings: exitedLoadings.length,
       coverage: { coveredContracts: new Set(loadingLines.map((line) => line.sourceContractId)).size, totalContracts: contractIds.length },

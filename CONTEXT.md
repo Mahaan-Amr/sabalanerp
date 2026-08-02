@@ -91,6 +91,22 @@ _Avoid_: summarizing slab cutting details so early that different source slab si
 
 ## Language
 
+**پایپ‌لاین فعال BI**:
+The point-in-time exposure of every currently PENDING_APPROVAL or APPROVED Sales Contract in the manager's authorized scope, regardless of when the contract was created. Period-created pipeline remains a separate trend measure.
+_Avoid_: dropping older open contracts at a period boundary, or presenting period-created pipeline as the current active exposure
+
+**پیشنهاد هوش تجاری**:
+A deterministic, read-only signal derived live from an authoritative business condition, prioritized as breached obligation, imminent risk, material comparable-period deterioration, or reconciliation issue. It links to evidence or the owning workspace and disappears when the source condition is resolved; it is not a persisted task.
+_Avoid_: adding completion, assignment, or manual-resolution controls in BI; persisting stale recommendations; implying target performance without an authoritative target model; or using an unexplained composite score
+
+**سلامت منبع هوش تجاری**:
+The independently reported freshness, availability, authorization, and coverage of Sales, CRM, Accounting, Logistics, or Guard evidence in a BI snapshot. Sales remains a usable core when another layer is unavailable, and missing evidence is shown as unavailable, not linked, out of date, or unauthorized—never as zero or confirmed failure.
+_Avoid_: failing the full BI snapshot because one evidence layer fails, turning missing data into zero, or issuing cross-workspace conclusions without sufficient evidence
+
+**تطبیق هوش تجاری**:
+The evidence view for missing links or contradictory states between authoritative workspaces, such as a delivery promise without a Logistics record, a finalized loading without a Guard exit, or a won CRM project without its linked Sales Contract.
+_Avoid_: treating an unavailable source as a mismatch, blaming a seller for Accounting or delivery ownership without an explicit Sales responsibility, or inventing a BI-side correction workflow
+
 **فروش همکاری**:
 A sales contract kind for selling products or services to a collaborative individual or group, reusing contract pricing and payment behavior while not requiring a normal project/address selection.
 _Avoid_: treating it as a normal customer contract with an empty project

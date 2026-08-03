@@ -271,8 +271,24 @@ test('Sales landing and the first contract step use the minimal shared workflow 
   }
 });
 
-test('Contract recovery presents takeover as the visible primary action', async ({ page }) => {
+test('Contract recovery presents takeover as primary and opens a blank independent contract', async ({ page }) => {
+  let acquireAttempts = 0;
   await page.route('**/sales/contract-edit-sessions/*/acquire', async (route) => {
+    acquireAttempts += 1;
+    if (acquireAttempts > 1) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            session: { leaseToken: 'e2e-fresh-contract-lease' },
+            recovery: null,
+          },
+        }),
+      });
+      return;
+    }
     await route.fulfill({
       status: 409,
       contentType: 'application/json',
@@ -317,6 +333,20 @@ test('Contract recovery presents takeover as the visible primary action', async 
   expect(styles[0].background).not.toBe('transparent');
   expect(styles[0].background).not.toBe(styles[1].background);
   expect(styles[1].border).not.toBe('rgba(0, 0, 0, 0)');
+  const lockedDraftId = await page.evaluate(() => Object.entries(localStorage)
+    .find(([key]) => key.startsWith('sabalan-contract-active-draft:'))?.[1]);
+  expect(lockedDraftId).toBeTruthy();
+
+  await fresh.click();
+  await expect(page).toHaveURL(/\/dashboard\/sales\/contracts\/create\?fresh=1$/);
+  await expect.poll(() => acquireAttempts).toBe(2);
+  await expect(recovery).toBeHidden();
+  await expect(page.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' })
+    .getByRole('button', { name: 'تاریخ قرارداد', exact: true })).toBeVisible();
+  const freshDraftId = await page.evaluate(() => Object.entries(localStorage)
+    .find(([key]) => key.startsWith('sabalan-contract-active-draft:'))?.[1]);
+  expect(freshDraftId).toBeTruthy();
+  expect(freshDraftId).not.toBe(lockedDraftId);
 });
 
 test('Guard renders through the semantic interface in both themes and mobile width', async ({ page }) => {
@@ -911,7 +941,7 @@ test('Contract Creation keeps early and consequential steps accessible and respo
   })).toBe(true);
 });
 
-test('Contract submission preserves input across an invalid response and succeeds on retry', async ({ page }) => {
+test('Contract submission preserves input across an invalid response, succeeds on retry, and exits without resubmitting', async ({ page }) => {
   let submissionAttempts = 0;
   await page.route('**/sales/contracts', async (route) => {
     if (route.request().method() !== 'POST') {
@@ -978,8 +1008,11 @@ test('Contract submission preserves input across an invalid response and succeed
   await expect(submit).toBeEnabled();
 
   await submit.click();
-  await expect(page.getByRole('button', { name: 'اتمام و بازگشت به قراردادها', exact: true }))
-    .toBeVisible();
+  const finish = page.getByRole('button', { name: 'اتمام و بازگشت به قراردادها', exact: true });
+  await expect(finish).toBeVisible();
+
+  await finish.click();
+  await expect(page).toHaveURL(/\/dashboard\/sales\/contracts$/);
   expect(submissionAttempts).toBe(2);
 });
 

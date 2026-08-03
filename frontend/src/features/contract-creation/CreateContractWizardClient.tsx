@@ -2640,8 +2640,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     if (recoveryUserId) {
       createFreshContractDraftId(recoveryUserId);
     }
-    router.push('/dashboard/sales/contracts/create?fresh=1');
-  }, [closeProductModal, recoveryUserId, router]);
+    window.location.assign('/dashboard/sales/contracts/create?fresh=1');
+  }, [closeProductModal, recoveryUserId]);
 
   // Product filtering hook provides all filtered lists
   const productFiltering = useProductFiltering({
@@ -5908,14 +5908,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     draftStorageKey: contractDraftStorageKey
   });
   const handleWizardSubmit = () => {
+    if (isContractCreationComplete) {
+      router.push('/dashboard/sales/contracts');
+      return;
+    }
+
     if (!editRecovery.ready || !editRecovery.leaseToken || editRecovery.blocked) {
       setErrors({ general: editRecovery.blockReason
         ? getContractEditRecoveryMessage(editRecovery.blockReason)
         : 'اتصال ایمن ویرایش هنوز آماده نیست' });
-      return;
-    }
-    if (isContractCreationComplete) {
-      router.push('/dashboard/sales/contracts');
       return;
     }
 

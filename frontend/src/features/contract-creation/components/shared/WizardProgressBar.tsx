@@ -26,7 +26,7 @@ export const WizardProgressBar: React.FC<WizardProgressBarProps> = ({
     <ErpNeumorphicWorkflowProgress
       currentStep={currentStep}
       steps={steps.map((step) => ({ id: step.id, label: step.title, icon: step.icon }))}
-      ariaLabel="مراحل ایجاد قرارداد"
+      ariaLabel={clickable ? 'مراحل ویرایش قرارداد' : 'مراحل ایجاد قرارداد'}
       clickable={clickable}
       onStepClick={onStepClick}
     />

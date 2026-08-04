@@ -991,36 +991,67 @@ export function ErpNeumorphicWorkflowProgress({
   onStepClick?: (step: number) => void;
   clickable?: boolean;
 }) {
+  const [mobilePickerOpen, setMobilePickerOpen] = React.useState(false);
+
   if (!steps.length) return null;
 
   const currentIndex = Math.max(0, steps.findIndex((step) => step.id === currentStep));
   const active = steps[currentIndex] ?? steps[0];
   const ActiveIcon = active.icon;
   const progress = ((currentIndex + 1) / steps.length) * 100;
+  const mobileSummary = (
+    <>
+      <div className="flex items-center gap-3">
+        <span className="sds-neumorphic-icon inline-flex h-11 w-11 shrink-0 items-center justify-center text-[var(--sds-accent)]">
+          <ActiveIcon className="h-5 w-5 shrink-0" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-[var(--sds-text-muted)]">
+            مرحله {(currentIndex + 1).toLocaleString('fa-IR')} از {steps.length.toLocaleString('fa-IR')}
+          </p>
+          <h2 className="mt-1 truncate text-base font-bold text-[var(--sds-text-primary)]">
+            {active.label}
+          </h2>
+        </div>
+        {clickable && (
+          <span className="shrink-0 text-xs font-semibold text-[var(--sds-accent)]">
+            تغییر مرحله
+          </span>
+        )}
+      </div>
+      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--sds-border-subtle)]">
+        <div
+          className="h-full rounded-full bg-[var(--sds-accent)] transition-[width] duration-[var(--sds-motion-standard)] motion-reduce:transition-none"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+    </>
+  );
+
+  const selectMobileStep = (step: number) => {
+    setMobilePickerOpen(false);
+    onStepClick?.(step);
+  };
 
   return (
     <nav aria-label={ariaLabel} className="mb-4 sm:mb-6">
-      <div className="sds-neumorphic-card p-4 sm:hidden">
-        <div className="flex items-center gap-3">
-          <span className="sds-neumorphic-icon inline-flex h-11 w-11 shrink-0 items-center justify-center text-[var(--sds-accent)]">
-            <ActiveIcon className="h-5 w-5 shrink-0" />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs text-[var(--sds-text-muted)]">
-              مرحله {(currentIndex + 1).toLocaleString('fa-IR')} از {steps.length.toLocaleString('fa-IR')}
-            </p>
-            <h2 className="mt-1 truncate text-base font-bold text-[var(--sds-text-primary)]">
-              {active.label}
-            </h2>
-          </div>
+      {clickable ? (
+        <ErpPressable
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={mobilePickerOpen}
+          aria-label={`انتخاب مرحله ویرایش؛ مرحله فعلی ${active.label}`}
+          onClick={() => setMobilePickerOpen(true)}
+          variant="ghost"
+          className="sds-neumorphic-card block min-h-11 w-full p-4 text-right sm:hidden"
+        >
+          {mobileSummary}
+        </ErpPressable>
+      ) : (
+        <div className="sds-neumorphic-card p-4 sm:hidden">
+          {mobileSummary}
         </div>
-        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--sds-border-subtle)]">
-          <div
-            className="h-full rounded-full bg-[var(--sds-accent)] transition-[width] duration-[var(--sds-motion-standard)] motion-reduce:transition-none"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      </div>
+      )}
 
       <ol className="relative isolate hidden items-start sm:flex">
         {steps.map((step, index) => {
@@ -1070,6 +1101,46 @@ export function ErpNeumorphicWorkflowProgress({
           );
         })}
       </ol>
+
+      <ErpSheet
+        open={clickable && mobilePickerOpen}
+        onClose={() => setMobilePickerOpen(false)}
+        title="انتخاب مرحله ویرایش"
+      >
+        <div className="grid gap-2" dir="rtl">
+          {steps.map((step, index) => {
+            const Icon = step.icon;
+            const isActive = step.id === active.id;
+            return (
+              <ErpPressable
+                key={step.id}
+                type="button"
+                aria-current={isActive ? 'step' : undefined}
+                onClick={() => selectMobileStep(step.id)}
+                tone={isActive ? 'primary' : 'neutral'}
+                variant={isActive ? 'soft' : 'outline'}
+                className={cx(
+                  'sds-neumorphic-interactive flex min-h-14 w-full items-center gap-3 px-4 py-3 text-right',
+                  isActive
+                    ? 'shadow-[var(--sds-neu-shadow-inset)]'
+                    : 'shadow-[var(--sds-neu-shadow-small)]',
+                )}
+              >
+                <span className="sds-neumorphic-icon inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--sds-border-subtle)]">
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-medium opacity-75">
+                    مرحله {(index + 1).toLocaleString('fa-IR')}
+                  </span>
+                  <span className="mt-0.5 block truncate text-sm font-bold">{step.label}</span>
+                </span>
+                {isActive && <FaCheck className="h-4 w-4 shrink-0" aria-hidden="true" />}
+              </ErpPressable>
+            );
+          })}
+        </div>
+      </ErpSheet>
     </nav>
   );
 }

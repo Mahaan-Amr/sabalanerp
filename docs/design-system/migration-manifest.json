@@ -74,6 +74,12 @@
       "reason": "Loading planning, detail, and dispatch surfaces use the shared responsive foundation without changing quantities, permissions, or lifecycle transitions."
     },
     {
+      "pattern": "frontend/src/app/dashboard/prototype/driver-dispatch/page.tsx",
+      "status": "migrated",
+      "acceptanceStatus": "accepted",
+      "reason": "The throwaway driver-to-exit prototype composes canonical Sabalan Design System controls to evaluate cross-workspace information architecture without production mutations."
+    },
+    {
       "pattern": "frontend/src/app/dashboard/accounting/**/page.tsx",
       "status": "migrated",
       "acceptanceStatus": "accepted",

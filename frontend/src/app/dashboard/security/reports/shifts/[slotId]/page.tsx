@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { FaRedo } from 'react-icons/fa';
+import { FaChevronLeft, FaChevronRight, FaRedo, FaSearchMinus, FaSearchPlus, FaUndo } from 'react-icons/fa';
 import {
+  ErpButton,
   ErpInlineState,
   ErpSection,
+  ErpSheet,
   ErpShiftTimeline,
+  type ErpShiftTimelineEntry,
   ErpSkeleton,
   ErpStatus,
   ErpWorkspacePage,
@@ -21,6 +24,8 @@ export default function SecurityShiftReportDetailPage() {
   const [report, setReport] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [preview, setPreview] = useState<{ entry: ErpShiftTimelineEntry; index: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -36,6 +41,33 @@ export default function SecurityShiftReportDetailPage() {
   }, [slotId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const openAttachmentPreview = (entry: ErpShiftTimelineEntry, index: number) => {
+    setPreview({ entry, index });
+    setZoom(1);
+  };
+  const movePreview = useCallback((direction: -1 | 1) => {
+    setPreview((current) => {
+      if (!current) return current;
+      const attachmentCount = current.entry.attachments?.length || 0;
+      if (attachmentCount < 2) return current;
+      return { ...current, index: (current.index + direction + attachmentCount) % attachmentCount };
+    });
+    setZoom(1);
+  }, []);
+
+  useEffect(() => {
+    if (!preview) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') movePreview(1);
+      if (event.key === 'ArrowRight') movePreview(-1);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [movePreview, preview]);
+
+  const previewAttachments = preview?.entry.attachments || [];
+  const previewAttachment = preview ? previewAttachments[preview.index] : null;
 
   return (
     <ErpWorkspacePage
@@ -110,8 +142,42 @@ export default function SecurityShiftReportDetailPage() {
               formatTimestamp={dateTime}
               showAttachmentImages
               attachmentHref={(attachmentId) => `/api/security/shift-log/attachments/${attachmentId}`}
+              onAttachmentOpen={openAttachmentPreview}
             />
           </ErpSection>
+
+          <ErpSheet
+            open={Boolean(preview && previewAttachment)}
+            onClose={() => setPreview(null)}
+            title={previewAttachment?.name || 'پیش‌نمایش تصویر گزارش'}
+            presentation="modal"
+            size="wide"
+            footer={previewAttachment ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs font-semibold sds-text-muted">
+                  تصویر {(preview!.index + 1).toLocaleString('fa-IR')} از {previewAttachments.length.toLocaleString('fa-IR')}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {previewAttachments.length > 1 && <ErpButton label="قبلی" icon={FaChevronRight} tone="neutral" variant="outline" onClick={() => movePreview(-1)} />}
+                  <ErpButton label="کوچک‌نمایی" icon={FaSearchMinus} tone="neutral" variant="outline" onClick={() => setZoom((current) => Math.max(1, current - 0.25))} disabled={zoom <= 1} />
+                  <ErpButton label="بازنشانی" icon={FaUndo} tone="neutral" variant="ghost" onClick={() => setZoom(1)} disabled={zoom === 1} />
+                  <ErpButton label="بزرگ‌نمایی" icon={FaSearchPlus} tone="neutral" variant="outline" onClick={() => setZoom((current) => Math.min(3, current + 0.25))} disabled={zoom >= 3} />
+                  {previewAttachments.length > 1 && <ErpButton label="بعدی" icon={FaChevronLeft} tone="neutral" variant="outline" onClick={() => movePreview(1)} />}
+                </div>
+              </div>
+            ) : undefined}
+          >
+            {previewAttachment && (
+              <div className="flex min-h-[55dvh] items-center justify-center overflow-auto rounded-xl bg-[var(--sds-surface-canvas)] p-2 sm:min-h-[65dvh]">
+                <img
+                  src={`/api/security/shift-log/attachments/${previewAttachment.id}`}
+                  alt={previewAttachment.name || 'تصویر گزارش شیفت'}
+                  className="max-h-[65dvh] max-w-full object-contain transition-transform duration-200 motion-reduce:transition-none"
+                  style={{ transform: `scale(${zoom})` }}
+                />
+              </div>
+            )}
+          </ErpSheet>
         </>
       ) : null}
     </ErpWorkspacePage>

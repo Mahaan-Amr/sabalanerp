@@ -180,11 +180,21 @@ export const formatCurrency = (
   });
 };
 
+export const formatMoneyNumber = (
+  value: number | string | null | undefined
+): string => {
+  return formatNumber(value, {
+    locale: 'fa-IR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  });
+};
+
 export const formatPrice = (
   value: number | string | null | undefined,
   currency: string = 'تومان'
 ): string => {
-  const formatted = formatDisplayNumber(value);
+  const formatted = formatMoneyNumber(value);
   return `${formatted} ${currency}`;
 };
 
@@ -205,7 +215,7 @@ export const formatPriceWithRial = (
   const formatted = formatPrice(value, currency);
   if (showRialConversion && currency === 'تومان') {
     const rialValue = tomanToRial(value);
-    const formattedRial = formatDisplayNumber(rialValue);
+    const formattedRial = formatMoneyNumber(rialValue);
     return `${formatted} (${formattedRial} ریال)`;
   }
   return formatted;

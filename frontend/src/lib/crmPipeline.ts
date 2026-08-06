@@ -1,5 +1,6 @@
 import type { ErpTone } from '@/components/erp';
 import PersianCalendar from '@/lib/persian-calendar';
+import { formatPrice } from '@/lib/numberFormat';
 
 export const POTENTIAL_PROJECT_STATUSES = [
   'جدید',
@@ -58,7 +59,7 @@ export const potentialProjectStatusTone = (status?: string): ErpTone => {
 export const formatToman = (value: unknown) => {
   const numeric = Number(value || 0);
   if (!Number.isFinite(numeric) || numeric <= 0) return 'ثبت نشده';
-  return `${numeric.toLocaleString('fa-IR')} تومان`;
+  return formatPrice(numeric);
 };
 
 export const crmPersonName = (customer?: { firstName?: string | null; lastName?: string | null; companyName?: string | null }) => {

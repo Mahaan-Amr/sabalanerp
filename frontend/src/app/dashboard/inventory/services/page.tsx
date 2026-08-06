@@ -6,6 +6,7 @@ import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaTools, FaCut, FaLay
 import { servicesAPI } from '@/lib/api';
 import { ErpButton, ErpLoading, ErpPage, ErpQuickFilters, ErpSection } from '@/components/erp';
 import CatalogExcelSyncModal from '@/components/CatalogExcelSyncModal';
+import { formatPrice } from '@/lib/numberFormat';
 
 interface Service {
   id: string;
@@ -611,7 +612,7 @@ const ServicesPage: React.FC = () => {
                           </td>
                           <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                             {cuttingType.pricePerMeter
-                              ? `${cuttingType.pricePerMeter.toLocaleString('fa-IR')} تومان`
+                              ? formatPrice(cuttingType.pricePerMeter)
                               : '-'}
                           </td>
                           <td className="py-3 px-4">
@@ -703,7 +704,7 @@ const ServicesPage: React.FC = () => {
                             {subService.description || '-'}
                           </td>
                           <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                            {subService.pricePerMeter.toLocaleString('fa-IR')} تومان
+                            {formatPrice(subService.pricePerMeter)}
                           </td>
                           <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                             {subService.calculationBase === 'length' ? 'طول' : 'متر مربع'}
@@ -1021,7 +1022,7 @@ const ServicesPage: React.FC = () => {
                             {layerType.name}
                           </td>
                           <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] font-mono">
-                            {layerType.pricePerLayer.toLocaleString('fa-IR')} تومان
+                            {formatPrice(layerType.pricePerLayer)}
                           </td>
                           <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                             {{
@@ -1122,7 +1123,7 @@ const ServicesPage: React.FC = () => {
                             {finishing.calculationBase === 'length' ? 'متر طول' : 'متر مربع'}
                           </td>
                           <td className="py-3 px-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] font-mono">
-                            {(finishing.unitPrice ?? finishing.pricePerSquareMeter).toLocaleString('fa-IR')} تومان
+                            {formatPrice(finishing.unitPrice ?? finishing.pricePerSquareMeter)}
                           </td>
                           <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                             {finishing.description || '-'}

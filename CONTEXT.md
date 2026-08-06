@@ -2,6 +2,10 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**Displayed Monetary Amount**:
+A monetary value presented to a user in Sabalan ERP, including interactive screens, print/PDF output, and Excel exports, rounded to the nearest whole unit of its stated currency. Storage and intermediate calculations retain their full precision so display rounding never changes business results. Each authoritative total is rounded directly for presentation and is never recomputed from already rounded display rows, even when the visible line-item arithmetic differs by a minor rounding residue.
+_Avoid_: displaying fractional currency units, rounding persisted values or intermediate calculations, rebuilding authoritative totals from rounded rows, or allowing different user-facing outputs to disagree
+
 **Sabalan Design System**:
 The platform-wide visual, interaction, accessibility, and user-experience language for Sabalan ERP. The Guard workspace and the contract Product Selection flow are reference implementations that inform the shared system without contributing Guard- or contract-specific domain assumptions to generic components.
 _Avoid_: calling the platform system the Guard design system, copying reference-page styling without reusable behavior, or leaking workspace terminology and permissions into shared primitives
@@ -1434,6 +1438,10 @@ An append-only operational log for one planned security shift, made of immutable
 New entries and patrols are recorded only against the currently active planned shift session for the authenticated security user; manager reconstruction may repair the session boundary but does not backfill log entries or patrols.
 _Avoid_: گزارش سرپرست, deleting log rows, forcing duplicate final-summary text when the log already records the shift, or hiding patrol sessions inside unstructured notes
 
+**تصاویر گزارش لحظه‌ای گارد**:
+The image evidence attached to one گزارش لحظه‌ای row. Its preview gallery is bounded to that row so the viewer can move among its images without losing which event supplied the evidence; an image opens fit-to-screen and supports zoom in, zoom out, and reset for inspecting fine detail.
+_Avoid_: mixing images from unrelated timeline rows into one gallery, showing only an uninspectable thumbnail, preventing inspection of full-resolution detail, or detaching image evidence from its report row
+
 **اصلاح حسابرسی‌شده جلسه شیفت گارد**:
 A manager correction of a recorded shift start or finish, or reconstruction of either missing boundary, using asserted actual times and a mandatory reason while preserving every original recorded timestamp or the fact that no click occurred. Operational views and reports use the corrected effective times but mark them visibly as manager-corrected, while audit history permanently retains the original evidence, correcting manager, correction time, and reason.
 Corrected times may fall outside the planned slot but cannot be in the future, must form a valid start-before-finish interval, must contain every retained patrol and shift-timeline event, and cannot overlap another shift session for the same guard. Unusual deviation from the planned slot requires an explicit warning and confirmation while the mandatory reason remains the accountable explanation.
@@ -1506,7 +1514,7 @@ The finished security shift session with the most recent actual `endedAt`, wheth
 _Avoid_: selecting the prior scheduled slot when another session finished later, or excluding force-closed sessions from the latest completed shift
 
 **دسته‌بندی پوشش شیفت‌های گارد**:
-The shift-coverage list has two operational categories: جاری و در انتظار contains the active shift first followed by upcoming waiting shifts nearest-first, including unresolved exceptional states that still require action; پایان‌یافته contains normally completed and manager-closed shifts ordered by actual finish time newest-first.
+The shift-coverage list has two operational categories: جاری و در انتظار contains the active shift first followed by upcoming waiting shifts nearest-first, including unresolved exceptional states that still require action; it initially exposes 10 shifts and reveals 10 more on each request until exhausted. پایان‌یافته contains normally completed and manager-closed shifts ordered by actual finish time newest-first and is not subject to this incremental disclosure.
 Each row links truthfully to its available evidence: a waiting slot opens planned-shift details, an active session opens its live shift report, and a finished session opens its completed shift report.
 _Avoid_: mixing completed history into live coverage work, ordering waiting shifts farthest-first, ordering completed shifts by planned slot time, hiding unresolved coverage states in history, or presenting an empty waiting slot as an existing shift report
 
@@ -1734,7 +1742,7 @@ The state of Personnel with no weekly schedule version at all, distinct from an 
 _Avoid_: treating migration-era personnel as off work every day, silently removing them from absence totals, or inventing delay and overtime without an expected interval
 
 **تأخیر و اضافه‌کار پرسنل**:
-On a configured workday, lateness is the positive whole-minute difference between actual entry and the scheduled start, and overtime is the positive whole-minute difference between actual exit and the scheduled end. There is no grace period; early entry does not create overtime, early exit does not create negative overtime, and early-departure classification is outside the current scope. Before scheduled start, missing entry is در انتظار شروع rather than absent; after start passes it becomes غایب, and a later entry changes it to حاضر با تأخیر with the exact delay. Historical attendance retains the schedule and calculated values that applied on its date; later weekly-schedule edits affect future calculations rather than rewriting past reports.
+On a configured workday, lateness is the positive whole-minute difference between actual entry and the scheduled start, and overtime is the positive whole-minute difference between actual exit and the scheduled end. There is no grace period; early entry does not create overtime, early exit does not create negative overtime, and early-departure classification is outside the current scope. Before scheduled start, missing entry is در انتظار شروع rather than absent; after start passes it becomes غایب, and a later entry changes it to حاضر با تأخیر with the exact delay. A positive delay remains part of the employee's visible attendance state regardless of which list filter exposed the record; its concise presentation uses minutes below one hour and hours plus remaining minutes from one hour onward. Historical attendance retains the schedule and calculated values that applied on its date; later weekly-schedule edits affect future calculations rather than rewriting past reports.
 _Avoid_: marking personnel absent before their workday starts, silently applying a grace period, offsetting late arrival with early arrival on another day, counting early arrival as overtime, introducing تعجیل در خروج without a separate business decision, or recalculating historical delay and overtime from a later schedule
 
 **حضور شبانه پرسنل**:

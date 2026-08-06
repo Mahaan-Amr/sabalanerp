@@ -11,6 +11,7 @@ import {
 import PersianCalendarPicker from '@/components/PersianCalendar';
 import { PersianCalendar } from '@/lib/persian-calendar';
 import { biAPI, departmentsAPI, salesReportsAPI } from '@/lib/api';
+import { formatPrice } from '@/lib/numberFormat';
 import { resolveChartLabel, RtlHorizontalBarChart, RtlTrendChart } from './RtlCharts';
 
 type Mode = 'sales' | 'bi';
@@ -41,7 +42,7 @@ const tabs = [
   ['sellers', 'عملکرد فروشندگان', FaUsers], ['export', 'خروجی گزارش', FaFilePdf]
 ] as const;
 
-const money = (value: unknown) => `${Number(value || 0).toLocaleString('fa-IR')} تومان`;
+const money = (value: unknown) => formatPrice(Number(value || 0));
 const count = (value: unknown) => Number(value || 0).toLocaleString('fa-IR');
 const dateFa = (value?: string | null) => value ? PersianCalendar.formatForDisplay(value) : 'ثبت نشده';
 const trendKeyForDate = (value: string, monthly: boolean) => {

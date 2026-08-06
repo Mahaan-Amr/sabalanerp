@@ -252,6 +252,7 @@ export function ErpShiftTimeline({
   compact = false,
   showAttachmentImages = false,
   attachmentHref,
+  onAttachmentOpen,
   onVoid,
 }: {
   title: string;
@@ -261,6 +262,7 @@ export function ErpShiftTimeline({
   compact?: boolean;
   showAttachmentImages?: boolean;
   attachmentHref?: (attachmentId: string) => string;
+  onAttachmentOpen?: (entry: ErpShiftTimelineEntry, attachmentIndex: number) => void;
   onVoid?: (entry: ErpShiftTimelineEntry) => void;
 }) {
   const reduceMotion = useReducedMotion();
@@ -308,7 +310,17 @@ export function ErpShiftTimeline({
                       {attachmentCount > 0 && !showAttachmentImages && <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--sds-text-muted)]"><FaPaperclip className="h-3 w-3" /> {attachmentCount.toLocaleString('fa-IR')} پیوست</p>}
                       {showAttachmentImages && attachments.length > 0 && attachmentHref && (
                         <div className="mt-3 flex flex-wrap gap-2">
-                          {attachments.map((attachment) => <img key={attachment.id} src={attachmentHref(attachment.id)} alt={attachment.name || 'پیوست گزارش'} className="h-20 w-20 rounded-lg object-cover" />)}
+                          {attachments.map((attachment, attachmentIndex) => onAttachmentOpen ? (
+                            <button
+                              key={attachment.id}
+                              type="button"
+                              onClick={() => onAttachmentOpen(entry, attachmentIndex)}
+                              className="h-20 w-20 overflow-hidden rounded-lg outline-none ring-offset-2 ring-offset-[var(--sds-surface-raised)] transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]"
+                              aria-label={`پیش‌نمایش ${attachment.name || `پیوست ${(attachmentIndex + 1).toLocaleString('fa-IR')}`}`}
+                            >
+                              <img src={attachmentHref(attachment.id)} alt={attachment.name || 'پیوست گزارش'} className="h-full w-full object-cover" />
+                            </button>
+                          ) : <img key={attachment.id} src={attachmentHref(attachment.id)} alt={attachment.name || 'پیوست گزارش'} className="h-20 w-20 rounded-lg object-cover" />)}
                         </div>
                       )}
                       <p className="mt-2 text-[11px] text-[var(--sds-text-muted)]">ثبت: {formatTimestamp(entry.createdAt)}{entry.author ? ` · توسط ${entry.author}` : ''}</p>

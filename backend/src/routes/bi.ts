@@ -8,6 +8,7 @@ import { generatePdfFromHtml } from '../utils/pdf';
 import { renderReportPdfHeaderTemplate, renderYekanFontFaces } from '../utils/printTemplate';
 import { buildBiSnapshot, BiSnapshot } from '../services/biSnapshotService';
 import { buildBiAnalysisPage } from '../services/biAnalysisService';
+import { formatMoney, roundMoney, roundMoneyFields } from '../utils/money';
 
 const router = express.Router();
 
@@ -48,11 +49,11 @@ const sourceStateLabel = (overview: BiSnapshot, source: BiSnapshot['sourceHealth
 
 const renderBiReportHtml = (overview: BiSnapshot) => {
   const cardRows = [
-    ['فروش قطعی خالص', overview.cards.netRealized],
+    ['فروش قطعی خالص', formatMoney(overview.cards.netRealized)],
     ['تغییر دوره', overview.cards.growthPercent == null ? '—' : `${overview.cards.growthPercent}%`],
-    ['پایپ‌لاین فعال', overview.cards.currentPipelineValue],
+    ['پایپ‌لاین فعال', formatMoney(overview.cards.currentPipelineValue)],
     ['قرارداد باز', overview.cards.currentPipelineCount],
-    ['مانده وصول', overview.sourceAvailability.accounting ? overview.finance.receivableAmount : '—'],
+    ['مانده وصول', overview.sourceAvailability.accounting ? formatMoney(overview.finance.receivableAmount) : '—'],
     ['وعده تحویل', overview.delivery.promisedDeliveries],
     ['بارگیری نهایی', overview.sourceAvailability.logistics ? overview.delivery.finalizedLoadings : '—'],
     ['خروج ثبت‌شده', overview.sourceAvailability.security ? overview.delivery.exitedLoadings : '—'],
@@ -159,7 +160,19 @@ router.get('/sales/export/:table', requireBiAccess, async (req: WorkspaceRequest
       ],
     };
     const table = req.params.table;
-    const rows = rowsByTable[table] || rowsByTable.summary;
+    const sourceRows = rowsByTable[table] || rowsByTable.summary;
+    const rows = table === 'sellers'
+      ? sourceRows.map((row) => roundMoneyFields(row, ['netRealized', 'pipelineValue']))
+      : table === 'products' || table === 'customers'
+        ? sourceRows.map((row) => roundMoneyFields(row, ['value']))
+        : table === 'contracts'
+          ? sourceRows.map((row) => roundMoneyFields(row, ['amount']))
+          : sourceRows.map((row) => {
+              if (typeof row.مقدار !== 'number') return row;
+              return ['فروش قطعی خالص', 'پایپ‌لاین فعال', 'مانده وصول'].includes(row.شاخص)
+                ? { ...row, مقدار: roundMoney(row.مقدار) }
+                : row;
+            });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), 'BI');
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });

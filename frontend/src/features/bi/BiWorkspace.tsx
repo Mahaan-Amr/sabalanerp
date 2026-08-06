@@ -12,6 +12,7 @@ import {
 import { RtlTrendChart } from '@/components/reporting/RtlCharts';
 import PersianCalendarPicker from '@/components/PersianCalendar';
 import { biAPI, departmentsAPI } from '@/lib/api';
+import { formatPrice } from '@/lib/numberFormat';
 import {
   applyBiFilters, beginBiRefresh, completeBiRefresh, failBiRefresh,
   resolveBiDestination, type BiFilters, type BiLoadState,
@@ -38,7 +39,7 @@ const stateLabels: Record<BiSourceHealth['state'], string> = {
 const stateTones: Record<BiSourceHealth['state'], 'success' | 'warning' | 'neutral'> = {
   complete: 'success', partial: 'warning', unavailable: 'neutral', unauthorized: 'neutral',
 };
-const money = (value: number | null | undefined) => value == null ? '—' : `${value.toLocaleString('fa-IR')} تومان`;
+const money = (value: number | null | undefined) => value == null ? '—' : formatPrice(value);
 const number = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString('fa-IR');
 const freshness = (value: string | null) => value
   ? new Intl.DateTimeFormat('fa-IR-u-ca-persian', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))

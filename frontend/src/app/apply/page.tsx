@@ -8,6 +8,7 @@ import PersianCalendarComponent from "@/components/PersianCalendar";
 import PersianCalendar from "@/lib/persian-calendar";
 import { toIsoDate } from "@/features/hr/hrUi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
+import { formatPrice } from '@/lib/numberFormat';
 
 const questions = [
   "به چه فعالیت‌های هنری یا ورزشی علاقه دارید؟",
@@ -879,7 +880,7 @@ export default function ApplicantFormPage() {
                   <div key={item.label} className="flex justify-between py-2">
                     <span>{item.label}</span>
                     <b>
-                      {Number(item.amountRials).toLocaleString("fa-IR")} ریال
+                      {formatPrice(Number(item.amountRials), 'ریال')}
                     </b>
                   </div>
                 ),
@@ -887,10 +888,7 @@ export default function ApplicantFormPage() {
               <div className="flex justify-between py-3 text-lg">
                 <b>جمع</b>
                 <b>
-                  {Number(application.compensation.totalRials).toLocaleString(
-                    "fa-IR",
-                  )}{" "}
-                  ریال
+                  {formatPrice(Number(application.compensation.totalRials), 'ریال')}
                 </b>
               </div>
             </div>
@@ -904,7 +902,7 @@ export default function ApplicantFormPage() {
                   <span>نوع: {hrDisplayLabel(application.compensation.collateralRequirement.type)}</span>
                   {application.compensation.collateralRequirement.amountRials && (
                     <span>
-                      مبلغ: {Number(application.compensation.collateralRequirement.amountRials).toLocaleString("fa-IR")} ریال
+                      مبلغ: {formatPrice(Number(application.compensation.collateralRequirement.amountRials), 'ریال')}
                     </span>
                   )}
                   {application.compensation.collateralRequirement.dueTiming && (

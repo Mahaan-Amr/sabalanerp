@@ -9,11 +9,13 @@ import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import { securityAPI } from '@/lib/api';
 import { askSecurityAction } from '@/components/SecurityNoticeHost';
-import { categorizeSecurityCoverageSlots } from './securityShiftCoverageViewModel';
+import { categorizeSecurityCoverageSlots, visibleSecurityCoverageSlots } from './securityShiftCoverageViewModel';
 
 type ShiftView = 'current' | 'plans' | 'history';
 type CoverageCategory = 'open' | 'finished';
 type DraftMode = 'replacement' | 'temporary' | 'force-close' | 'attendance-correction' | 'session-correction' | 'confirm-no-shift' | null;
+
+const COVERAGE_PAGE_SIZE = 10;
 
 const inputClass = 'sds-field min-h-12 w-full px-4 py-3 text-sm';
 const labelClass = 'mb-2 block text-sm font-medium sds-text-secondary ';
@@ -59,6 +61,7 @@ export default function SecurityShiftsPage() {
   const [now, setNow] = useState(Date.now());
   const [visibleMonth, setVisibleMonth] = useState(() => PersianCalendar.now().slice(0, 7));
   const [coverageCategory, setCoverageCategory] = useState<CoverageCategory>('open');
+  const [openCoverageLimit, setOpenCoverageLimit] = useState(COVERAGE_PAGE_SIZE);
   const [draft, setDraft] = useState<{ mode: DraftMode; slotId: string }>({ mode: null, slotId: '' });
   const [replacement, setReplacement] = useState({ personnelId: '', overrideReason: '' });
   const [temporary, setTemporary] = useState({ personnelId: '', startsAt: `${PersianCalendar.now()} 07:00`, endsAt: `${PersianCalendar.now()} 19:00`, note: '' });
@@ -165,7 +168,11 @@ export default function SecurityShiftsPage() {
     .filter((slot) => slot.session || slot.report || slot.attendance?.length || slot.temporaryCoverage?.length || slot.replacementPersonnelId || slot.probableNoShowAt)
     .sort((a, b) => new Date(b.session?.endedAt || b.startsAt).getTime() - new Date(a.session?.endedAt || a.startsAt).getTime()), [slots]);
   const categorizedCoverageSlots = useMemo(() => categorizeSecurityCoverageSlots(slots), [slots]);
-  const coverageSlots = categorizedCoverageSlots[coverageCategory];
+  const coverageSlots = useMemo(
+    () => visibleSecurityCoverageSlots(categorizedCoverageSlots, coverageCategory, openCoverageLimit),
+    [categorizedCoverageSlots, coverageCategory, openCoverageLimit],
+  );
+  const hasMoreOpenCoverage = coverageCategory === 'open' && coverageSlots.length < categorizedCoverageSlots.open.length;
   const activeShiftWorker = currentShift?.activeSession?.personnel || (currentShift?.activeSession?.slot ? slotWorker(currentShift.activeSession.slot) : null);
   const scheduledCurrentWorker = currentShift?.currentSlot ? slotWorker(currentShift.currentSlot) : null;
   const publishedPlan = useMemo(() => plans.find((plan) => plan.status === 'PUBLISHED'), [plans]);
@@ -413,7 +420,10 @@ export default function SecurityShiftsPage() {
         <ErpSection title="پوشش شیفت‌ها">
           <ErpSegmentedControl<CoverageCategory>
             value={coverageCategory}
-            onChange={setCoverageCategory}
+            onChange={(category) => {
+              setCoverageCategory(category);
+              if (category === 'open') setOpenCoverageLimit(COVERAGE_PAGE_SIZE);
+            }}
             options={[
               { value: 'open', label: 'جاری و در انتظار', icon: FaPlay },
               { value: 'finished', label: 'پایان‌یافته', icon: FaHistory },
@@ -498,6 +508,15 @@ export default function SecurityShiftsPage() {
               );
             })}
             {!coverageSlots.length && <ErpEmptyState icon={coverageCategory === 'open' ? FaPlay : FaHistory} title={coverageCategory === 'open' ? 'شیفت جاری یا در انتظار وجود ندارد' : 'شیفت پایان‌یافته‌ای وجود ندارد'} />}
+            {hasMoreOpenCoverage && (
+              <div className="flex justify-center pt-2">
+                <ErpButton
+                  label="مشاهده بیشتر"
+                  variant="outline"
+                  onClick={() => setOpenCoverageLimit((current) => current + COVERAGE_PAGE_SIZE)}
+                />
+              </div>
+            )}
           </div>
         </ErpSection>
       )}

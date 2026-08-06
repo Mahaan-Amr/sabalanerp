@@ -14,6 +14,7 @@ import {
   getPersianOperationEdgeLabel
 } from '../../services/operationCollectionPresentation';
 import { ReservedRowsSkeleton } from './productModalPrimitives';
+import { formatPrice } from '@/lib/numberFormat';
 
 const number = (value: string | number) =>
   new Intl.NumberFormat('fa-IR', { maximumFractionDigits: 6 }).format(
@@ -76,7 +77,7 @@ export function CanonicalStairLayerSummary({
               {' · '}
               {number(calculation.result.materialSourceSplit.paidMaterialSquareMeters)} m²
               {' · '}
-              {number(calculation.result.materialSourceSplit.paidMaterialAmountToman)} تومان
+              {formatPrice(calculation.result.materialSourceSplit.paidMaterialAmountToman)}
             </strong>
           </div>
           <div className="flex justify-between gap-3 py-1.5">
@@ -86,7 +87,7 @@ export function CanonicalStairLayerSummary({
               {' · '}
               {number(calculation.result.materialSourceSplit.newMaterialSquareMeters)} m²
               {' · '}
-              {number(calculation.result.materialSourceSplit.newMaterialAmountToman)} تومان
+              {formatPrice(calculation.result.materialSourceSplit.newMaterialAmountToman)}
             </strong>
           </div>
           <div className="flex justify-between gap-3 py-1.5">
@@ -110,9 +111,9 @@ export function CanonicalStairLayerSummary({
               >
                 <span>هزینه برش {direction}</span>
                 <strong>
-                  {number(line.quantity)}m × {number(line.rateToman)} تومان
+                  {number(line.quantity)}m × {formatPrice(line.rateToman)}
                   {' = '}
-                  {number(line.amountToman)} تومان
+                  {formatPrice(line.amountToman)}
                 </strong>
               </div>
             );
@@ -125,7 +126,7 @@ export function CanonicalStairLayerSummary({
           </div>
           <div className="flex justify-between gap-3 py-1.5">
             <span>جمع</span>
-            <strong>{number(calculation.result.totalAmountToman)} تومان</strong>
+            <strong>{formatPrice(calculation.result.totalAmountToman)}</strong>
           </div>
         </>
       ) : (

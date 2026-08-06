@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { sanitizeContractHtml } from '../utils/htmlSanitizer';
+import { formatMoney } from '../utils/money';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -518,8 +519,8 @@ function generateTableRows(items: any[]): string {
       <td>${item.width || ''}</td>
       <td>${item.quantity || ''}</td>
       <td>${item.squareMeter || ''}</td>
-      <td>${item.unitPrice || ''}</td>
-      <td>${item.totalPrice || ''}</td>
+      <td>${item.unitPrice == null ? '' : formatMoney(item.unitPrice)}</td>
+      <td>${item.totalPrice == null ? '' : formatMoney(item.totalPrice)}</td>
       <td>${item.description || ''}</td>
     </tr>
   `).join('');
@@ -534,7 +535,7 @@ function convertToPersianWords(num: number): string {
   if (num < 10) return persianNumbers[num];
   
   // For larger numbers, you'd implement a full converter
-  return num.toLocaleString('fa-IR') + ' تومان';
+  return formatMoney(num);
 }
 
 export default router;

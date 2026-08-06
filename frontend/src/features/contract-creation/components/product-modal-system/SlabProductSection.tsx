@@ -3,6 +3,7 @@
 import React from 'react';
 import { ErpPressable, ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
+import { formatPrice } from '@/lib/numberFormat';
 import {
   calculateSlab,
   parseCanonicalDecimal,
@@ -437,8 +438,8 @@ export function SlabProductSection({
           ['باقی‌مانده برش', resolved
             ? `${resolved.packingPlan.remainders.length} قطعه`
             : '—'],
-          ['برش', resolved ? `${resolved.cuttingAmountToman} تومان` : '—'],
-          ['جمع', resolved ? `${resolved.totalAmountToman} تومان` : '—']
+          ['برش', resolved ? formatPrice(resolved.cuttingAmountToman) : '—'],
+          ['جمع', resolved ? formatPrice(resolved.totalAmountToman) : '—']
         ].map(([label, value]) => (
           <div
             key={label}

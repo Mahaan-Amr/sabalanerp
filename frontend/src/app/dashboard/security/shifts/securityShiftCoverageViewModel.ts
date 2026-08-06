@@ -22,3 +22,11 @@ export const categorizeSecurityCoverageSlots = (slots: any[]) => ({
       - new Date(left.session?.endedAt || left.noShiftConfirmedAt || left.endsAt).getTime()
     )),
 });
+
+export const visibleSecurityCoverageSlots = (
+  categorizedSlots: ReturnType<typeof categorizeSecurityCoverageSlots>,
+  category: SecurityCoverageCategory,
+  openLimit: number,
+) => category === 'open'
+  ? categorizedSlots.open.slice(0, Math.max(0, openLimit))
+  : categorizedSlots.finished;

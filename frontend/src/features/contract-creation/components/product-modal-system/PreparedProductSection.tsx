@@ -3,6 +3,7 @@
 import React from 'react';
 import { ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
+import { formatPrice } from '@/lib/numberFormat';
 import type { ContractProduct, Product } from '../../types/contract.types';
 import {
   getPreparedKindLabel,
@@ -119,7 +120,7 @@ export function PreparedProductSection({
         <div className="grid min-h-9 grid-cols-[7rem_1fr] items-center gap-3 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs dark:border-[var(--sds-border-subtle)]">
           <span className="text-[var(--sds-text-muted)]">جمع</span>
           <span className="font-semibold">
-            {resolved.quantity} × {resolved.unitPrice} = {resolved.total} تومان
+            {resolved.quantity} × {formatPrice(resolved.unitPrice)} = {formatPrice(resolved.total)}
           </span>
         </div>
       </section>

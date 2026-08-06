@@ -139,6 +139,8 @@ assert.equal(normalizeDigits('۱۲۳٬۴۵۶٫۷'), '123,456.7');
 assert.equal(parseFormattedNumber('۱۲۳,۴۵۶'), 123456);
 assert.equal(parseFormattedNumber('١٢٣٤.٥'), 1234.5);
 assert.equal(formatPrice(9050120), '۹٬۰۵۰٬۱۲۰ تومان');
+assert.equal(formatPrice(24162273014.56), '۲۴٬۱۶۲٬۲۷۳٬۰۱۵ تومان');
+assert.equal(formatPrice(24162273014.49), '۲۴٬۱۶۲٬۲۷۳٬۰۱۴ تومان');
 
 assert.deepEqual(
   resolveLongitudinalWidth({ length: 12, width: 0 }, product, 'cm', false),

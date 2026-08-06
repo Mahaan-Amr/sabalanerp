@@ -18,6 +18,7 @@ import {
   ReservedRowsSkeleton,
   useCachedProductModalSection
 } from './productModalPrimitives';
+import { formatPrice } from '@/lib/numberFormat';
 import {
   buildOperationCollectionPresentation,
   getPersianOperationEdgeLabel
@@ -120,7 +121,7 @@ function CatalogResults({
             <span className="text-[var(--sds-text-muted)]">
               {item.rateToman === undefined || item.rateToman === null
                 ? 'نرخ ثبت نشده'
-                : `${item.rateToman} تومان / ${operationUnitLabel(item.unit)}`}
+                : `${formatPrice(item.rateToman)} / ${operationUnitLabel(item.unit)}`}
             </span>
           </ErpPressable>
         ))}
@@ -405,8 +406,8 @@ export function OperationCollectionsSection({
                   <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(tool.unit)}</span>
-                <span>{tool.rateToman === undefined ? 'نرخ ثبت نشده' : `${tool.rateToman} تومان`}</span>
-                <span className="font-semibold">{calculated?.amountToman ?? '—'} تومان</span>
+                <span>{tool.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(tool.rateToman)}</span>
+                <span className="font-semibold">{calculated ? formatPrice(calculated.amountToman) : '—'}</span>
                 {input.groups.length > 1 && (
                   <label className="inline-flex items-center gap-1">
                     اعمال روی
@@ -639,8 +640,8 @@ export function OperationCollectionsSection({
                   <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(finishing.unit)}</span>
-                <span>{finishing.rateToman === undefined ? 'نرخ ثبت نشده' : `${finishing.rateToman} تومان`}</span>
-                <span className="font-semibold">{calculated?.amountToman ?? '—'} تومان</span>
+                <span>{finishing.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(finishing.rateToman)}</span>
+                <span className="font-semibold">{calculated ? formatPrice(calculated.amountToman) : '—'}</span>
                 {input.groups.length > 1 && (
                   <label className="inline-flex items-center gap-1">
                     اعمال روی

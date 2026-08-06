@@ -27,6 +27,7 @@ import {
   parseAttendanceDashboardQuery,
   type DashboardAttendanceCondition,
 } from '../securityDashboardViewModel';
+import { formatAttendanceDelay } from './attendancePresentation';
 
 interface AttendanceRecord {
   id: string;
@@ -422,6 +423,7 @@ export default function AttendancePage() {
                 const checkingIn = actionLoadingId === `checkin-${record.employee.id}`;
                 const checkingOut = actionLoadingId === `checkout-${record.employee.id}`;
                 const expanded = expandedRecordId === record.id;
+                const delayLabel = formatAttendanceDelay(record.delayMinutes);
                 return (
                   <article key={record.id} className="sds-neumorphic-card p-3">
                     <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] items-center gap-2">
@@ -436,6 +438,7 @@ export default function AttendancePage() {
 
                     <div className="mt-2 flex flex-wrap gap-2">
                       {record.openPreviousAttendance ? <ErpButton label="ثبت خروج قبلی" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'close-previous')} tone="warning" variant="solid" disabled={Boolean(actionLoadingId)} /> : canCheckOut(record) ? <ErpButton label="خروج" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'checkout')} disabled={Boolean(actionLoadingId)} tone="neutral" variant="soft" /> : canCheckIn(record) ? <ErpButton label="ورود" icon={FaSignInAlt} onClick={() => openAttendanceDialog(record, 'checkin')} disabled={Boolean(actionLoadingId)} variant="soft" /> : null}
+                      {delayLabel && <ErpStatus label={`تأخیر: ${delayLabel}`} tone="warning" emphasis="strong" />}
                       <ErpButton label={expanded ? 'بستن جزئیات' : 'جزئیات'} onClick={() => setExpandedRecordId(expanded ? null : record.id)} tone="neutral" variant="ghost" />
                     </div>
                     {expanded && (
@@ -448,7 +451,7 @@ export default function AttendancePage() {
                         {record.movementTimeline?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">خط زمانی روز</dt><dd className="mt-2 space-y-1">{record.movementTimeline.map((segment, index) => <p key={`${segment.kind}-${segment.startsAt}-${index}`} className="rounded bg-[var(--sds-surface-panel)] px-2 py-1 text-xs"><strong>{segment.kind === 'PRESENCE' ? 'حضور در محل' : segment.kind === 'HOURLY_LEAVE' ? 'مرخصی ساعتی' : 'خارج از محل'}:</strong> {new Date(segment.startsAt).toLocaleString('fa-IR')} تا {segment.endsAt ? new Date(segment.endsAt).toLocaleString('fa-IR') : 'باز'}</p>)}</dd></div> : null}
                         {record.intervals?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">جزئیات تردد</dt><dd className="mt-2 space-y-1">{record.intervals.map((interval, index) => <div key={interval.id} className="rounded bg-[var(--sds-surface-panel)] px-2 py-2 text-xs"><p>{(index + 1).toLocaleString('fa-IR')}. {new Date(interval.enteredAt).toLocaleString('fa-IR')} تا {interval.exitedAt ? new Date(interval.exitedAt).toLocaleString('fa-IR') : 'باز'} · ثبت‌کننده ورود: {interval.entryRecorder ? `${interval.entryRecorder.firstName} ${interval.entryRecorder.lastName}` : '-'}</p><div className="mt-2 flex gap-2"><ErpPressable className="min-h-11 px-2 font-semibold" tone="primary" onClick={() => openIntervalDialog(record, interval, 'correct')}>اصلاح</ErpPressable><ErpPressable className="min-h-11 px-2 font-semibold" tone="danger" onClick={() => openIntervalDialog(record, interval, 'void')}>ابطال</ErpPressable></div></div>)}</dd></div> : null}
                         <div><dt className="text-xs sds-text-muted">ساعت کاری</dt><dd className="mt-1 font-semibold" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</dd></div>
-                        <div><dt className="text-xs sds-text-muted">تأخیر</dt><dd className="mt-1 font-semibold">{record.delayMinutes === null || record.delayMinutes === undefined ? '-' : `${record.delayMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
+                        <div><dt className="text-xs sds-text-muted">تأخیر</dt><dd className="mt-1 font-semibold">{delayLabel || '-'}</dd></div>
                         <div><dt className="text-xs sds-text-muted">اضافه‌کار</dt><dd className="mt-1 font-semibold">{record.overtimePending ? 'در انتظار ثبت خروج' : record.overtimeMinutes === null || record.overtimeMinutes === undefined ? '-' : `${record.overtimeMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
                         <div><dt className="text-xs sds-text-muted">یادداشت</dt><dd className="mt-1 font-semibold">{record.notes || record.exceptionType || 'بدون یادداشت'}</dd></div>
                         {record.openPreviousAttendance && <div className="col-span-2 text-xs font-semibold text-[var(--sds-warning)]">خروج روز قبل ثبت نشده است: {PersianCalendar.formatForDisplay(record.openPreviousAttendance.date)}، ورود {record.openPreviousAttendance.entryTime || '-'}</div>}
@@ -491,7 +494,7 @@ export default function AttendancePage() {
                       <td className="px-3 py-4 sds-text-primary">{record.entryTime || '-'}</td>
                       <td className="px-3 py-4 sds-text-primary">{record.exitTime || '-'}</td>
                       <td className="px-3 py-4 sds-text-secondary" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</td>
-                      <td className="px-3 py-4 text-[var(--sds-warning)]">{record.delayMinutes === null || record.delayMinutes === undefined ? '-' : `${record.delayMinutes.toLocaleString('fa-IR')} دقیقه`}</td>
+                      <td className="px-3 py-4 text-[var(--sds-warning)]">{formatAttendanceDelay(record.delayMinutes) || '-'}</td>
                       <td className="px-3 py-4 text-[var(--sds-accent)]">{record.overtimePending ? 'در انتظار خروج' : record.overtimeMinutes === null || record.overtimeMinutes === undefined ? '-' : `${record.overtimeMinutes.toLocaleString('fa-IR')} دقیقه`}</td>
                       <td className="px-3 py-4 sds-text-secondary">{record.presencePending ? 'در حال حضور' : `${(record.physicalPresenceMinutes || 0).toLocaleString('fa-IR')} / ${(record.outsideMinutes || 0).toLocaleString('fa-IR')} دقیقه`}</td>
                       <td className="px-3 py-4 sds-text-secondary">

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { categorizeSecurityCoverageSlots } from './securityShiftCoverageViewModel';
+import { categorizeSecurityCoverageSlots, visibleSecurityCoverageSlots } from './securityShiftCoverageViewModel';
 
 const slots = [
   { id: 'future-later', operationalState: 'WAITING', startsAt: '2026-07-28T07:00:00.000Z', endsAt: '2026-07-28T19:00:00.000Z' },
@@ -14,5 +14,8 @@ const slots = [
 const categorized = categorizeSecurityCoverageSlots(slots);
 assert.deepEqual(categorized.open.map((slot) => slot.id), ['active', 'review', 'future-next', 'future-later']);
 assert.deepEqual(categorized.finished.map((slot) => slot.id), ['force-new', 'no-shift', 'closed-old']);
+assert.deepEqual(visibleSecurityCoverageSlots(categorized, 'open', 2).map((slot) => slot.id), ['active', 'review']);
+assert.deepEqual(visibleSecurityCoverageSlots(categorized, 'open', 12).map((slot) => slot.id), ['active', 'review', 'future-next', 'future-later']);
+assert.deepEqual(visibleSecurityCoverageSlots(categorized, 'finished', 1).map((slot) => slot.id), ['force-new', 'no-shift', 'closed-old']);
 
 console.log('security shift coverage view-model tests passed');

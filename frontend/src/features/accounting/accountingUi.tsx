@@ -16,7 +16,7 @@ import {
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { ErpBadge, ErpButton, ErpCard, type ErpTone } from '@/components/erp';
-import { formatDisplayNumber, toFiniteNumber } from '@/lib/numberFormat';
+import { formatPrice, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 import { InlineFieldError } from '@/lib/formErrors';
 
@@ -165,7 +165,7 @@ export const correctionStatusLabels: Record<string, string> = {
 
 export const money = (amount?: string | number | null, _currency = 'ریال') => {
   const value = toFiniteNumber(amount);
-  return `${formatDisplayNumber(value)} ریال`;
+  return formatPrice(value, 'ریال');
 };
 
 export const dateFa = (value?: string | Date | null) => {

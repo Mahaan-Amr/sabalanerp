@@ -57,6 +57,10 @@ export const getContractProductPriceComponents = (
   const knownPayableMinimum = hasReliableMaterialBase
     ? materialBase + mandatoryAmount + cuttingCost + toolsCost + finishingCost
     : savedTotal;
+  const explicitCanonicalPricing = (product.meta as any)?.pricing;
+  const reconciledTotal = explicitCanonicalPricing?.authority === 'canonical-current-save'
+    ? toFiniteNumber(explicitCanonicalPricing.totalPrice)
+    : Math.max(savedTotal, knownPayableMinimum);
 
   return {
     savedTotal,
@@ -66,7 +70,7 @@ export const getContractProductPriceComponents = (
     toolsCost,
     finishingCost,
     knownPayableMinimum,
-    reconciledTotal: Math.max(savedTotal, knownPayableMinimum),
+    reconciledTotal,
     hasReliableMaterialBase
   };
 };

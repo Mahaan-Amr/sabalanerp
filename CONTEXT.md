@@ -295,6 +295,14 @@ _Avoid_: editing the catalog service description when the user only means the cu
 A product-level description printed inside the product's own output group as the last row for that product, after related explanatory, mandatory, cutting, tool, service, and finishing rows.
 _Avoid_: printing the product description before the product's related detail rows, or moving standalone service notes into a product group
 
+**ابعاد خروجی محصول قرارداد**:
+Every customer, accounting, workshop, delivery, and logistics output presents the contract row's customer-requested finished length and width with an explicit matching unit. A column labeled in meters receives meter values converted exactly once, regardless of the units used while entering the row. Source-material dimensions remain a separate consumption fact and follow the same value-and-unit coherence rule.
+_Avoid_: pairing a meter value with a centimeter label, converting an already-meter value again, printing source width as finished width, allowing output variants to disagree, or deriving customer dimensions from an internal optimizer layout
+
+**بازسازی خروجی تاریخی قرارداد**:
+Correcting an output projection does not rewrite the persisted commercial facts of an existing contract. When a cached output was generated with an incorrect projection, its template version is invalidated and the output is regenerated from the same canonical contract-product graph on the next request.
+_Avoid_: mutating historical contract rows merely to repair presentation, continuing to serve a known-invalid cached PDF, or rebuilding from stale legacy fields when the canonical graph exists
+
 **جستجوی عددی محصول**:
 A product catalog search that treats Persian, Arabic, and Latin digits as the same value when matching numeric product details such as عرض, ضخامت, کد, and قیمت.
 _Avoid_: making users switch keyboard language to find numeric product values
@@ -327,6 +335,7 @@ _Avoid_: ساختن حالت‌ها یا فرم‌های جدا برای روش�
 
 **تعداد صفر در برش هوشمند طولی**:
 فقط برای محصول سنگ طولی، تعداد خالی یا صفر اجازه یک برآورد داخلی برای جلوگیری از بیش‌برآورد هزینه است؛ محصول طولی که تازه از کاتالوگ برای یک ردیف جدید انتخاب می‌شود تعداد را در UI خالی نشان می‌دهد و همان معنای واقعی صفر/بدون تعداد را برای این برآورد حفظ می‌کند. تعداد، طول و عرض واردشده همچنان عین درخواست مشتری باقی می‌مانند. برای نمونه درخواست `40cm` منبع، `7cm` عرض، `50m` طول و تعداد صفر در همه ردیف‌ها و خروجی‌ها همان `0 / 50m / 7cm` می‌ماند و نتیجه بهینه‌ساز جایگزین آن نمی‌شود. در مقابل، تعداد مثبت صریح است و طول را به طول هر قطعه تبدیل می‌کند؛ `2 / 50m` یعنی دو قطعه 50 متری و مجموع 100 متر. ردیف و پیش‌نویس موجود و ردیف تکثیرشده مقدار خود را حفظ می‌کنند. ردیف قدیمی که مقادیر صفر را با خروجی بهینه‌ساز جایگزین کرده، هنگام خواندن از provenance بازسازی می‌شود و فقط با ذخیره صریح قرارداد اصلاح پایدار می‌گردد.
+اگر فروشنده در یک ردیف موجود یا تکثیرشده با تعداد صفر، تعداد مثبت وارد کند، همان ویرایش صریحاً ردیف را به معنای «تعداد قطعه با طول هر قطعه» منتقل می‌کند؛ provenance و برنامه بهینه‌سازی تعداد صفر دیگر مالک طول، تعداد، مترمربع یا قیمت نیستند و همه واقعیت‌های مشتق‌شده از ورودی‌های جدید بازحساب می‌شوند.
 _Avoid_: تبدیل تعداد خالی یا صفر به یک یا تعداد محاسبه‌شده، تبدیل طول کل مشتری به طول قطعه محاسبه‌شده، تعمیم این معنا به انواع دیگر محصول، نمایش برآورد داخلی به‌عنوان خواسته مشتری، یا مهاجرت بی‌صدای قراردادهای نهایی‌شده
 
 **چیدمان عرضی قطعات صریح سنگ طولی**:
@@ -1156,6 +1165,11 @@ _Avoid_: forcing every selected row to appear as a full detail card when the con
 **ویرایش جزئیات محصول قرارداد**:
 Editing a saved contract product should preserve previously selected ابزار and پرداخت سنگ details from the contract snapshot, even when the current catalog record is missing or inactive. Saved labels, units, prices, and amounts should remain visible instead of being silently dropped.
 _Avoid_: resetting selected contract product details only because catalog lookup fails
+
+**ذخیره اتمیک ردیف محصول قرارداد**:
+Saving a created, edited, or duplicated contract-product row is one indivisible business action across the customer request, physical geometry and consumption, remaining-stone relationships, mandatory settings, cutting, tools, finishings, descriptions, images, price components, and row total. The save either commits one mutually consistent row and every affected relationship or changes nothing; success is shown only after every displayed and downstream fact agrees with that same calculation.
+An untouched historical row may preserve an all-in saved amount that cannot be reconstructed safely from incomplete legacy facts. Once a seller explicitly creates or saves a row with a complete current calculation, that exact calculation owns the row total and replaces any higher or lower stale amount; unresolved disagreement blocks the row save rather than being deferred to contract submission.
+_Avoid_: saving only the fields currently visible, merging old derived facts with new inputs, preserving a stale higher or lower total, showing success for a partially updated row, or requiring final contract submission to discover a row inconsistency that product save could determine
 
 **تکثیر ردیف محصول قرارداد**:
 Creating a new editable contract product row from an existing row by copying its product selection, dimensions, quantities, pricing, mandatory settings, cutting details, tools, finishing, notes, images, and remaining-stone usage settings while giving it independent row identity.

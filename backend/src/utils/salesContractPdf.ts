@@ -6,7 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { generatePdfFromHtml } from './pdf';
 import { ContractCustomPrintOptions, ContractPrintVariant, renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
 
-export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-operation-lookups-v20-2026-07-27';
+export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-canonical-dimensions-v21-2026-08-06';
 const prisma = new PrismaClient();
 
 export const salesContractPrintableInclude = {

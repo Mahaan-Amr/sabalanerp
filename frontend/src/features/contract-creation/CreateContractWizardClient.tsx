@@ -170,6 +170,7 @@ import {
   mergeEditedRemainingStoneState,
   removeStairLayerConfiguration,
   resolveExistingCalibrationCutEnabled,
+  resolveLongitudinalOptimizerEditOwnership,
   resolveLongitudinalQuantityOptimizationFailure,
   resolveLongitudinalWidth,
   selectStairLayerConfiguration
@@ -4936,12 +4937,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     const previousLongitudinalProduct =
       isEditMode && editingProductIndex !== null ? wizardData.products[editingProductIndex] : null;
     const editingRemainingStoneChild = isRemainingStoneChild(previousLongitudinalProduct);
-    const preserveDerivedQuantity =
-      !!productConfig.smartCutDerivedQuantity &&
-      !touchedFields.has('quantity') &&
-      !touchedFields.has('length');
     const hasDimensions = (productConfig.length && productConfig.width) || productConfig.squareMeters;
     const enteredLongitudinalQuantity = Math.max(0, Number(productConfig.quantity) || 0);
+    const optimizerEditOwnership = resolveLongitudinalOptimizerEditOwnership({
+      enteredQuantity: enteredLongitudinalQuantity,
+      inheritedDerivedQuantity: productConfig.smartCutDerivedQuantity,
+      inheritedDerivedDimension: productConfig.smartCutDerivedDimension,
+      touchedFields
+    });
+    const preserveDerivedQuantity = optimizerEditOwnership.preserveDerivedQuantity;
     const longitudinalQuantityOptimizerIntent =
       (productConfig.productType || previousLongitudinalProduct?.productType) === 'longitudinal' &&
       (enteredLongitudinalQuantity === 0 || preserveDerivedQuantity);
@@ -5058,8 +5062,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     const sawKerfEnabled = !!productConfig.sawKerfEnabled && userEnteredWidthInCm > 0 && userEnteredWidthInCm < originalWidth;
     const sawKerfCm = sawKerfEnabled ? (productConfig.sawKerfCm || SAW_KERF_CM) : null;
     const calibrationCutEnabled = productConfig.calibrationCutEnabled ?? true;
-    const preserveDerivedWidth = productConfig.smartCutDerivedDimension === 'width' && !touchedFields.has('width');
-    const preserveDerivedLength = productConfig.smartCutDerivedDimension === 'length' && !touchedFields.has('length');
+    const preserveDerivedWidth = optimizerEditOwnership.preserveDerivedWidth;
+    const preserveDerivedLength = optimizerEditOwnership.preserveDerivedLength;
     const optimizerTotalLength = preserveDerivedQuantity
       ? Number(productConfig.smartCutPlan?.totalRequestedLengthM || 0)
       : 0;
@@ -5297,6 +5301,20 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       billableCuttingCost +
       existingSubServiceCost +
       resolvedFinishingCost;
+    finalProduct.meta = {
+      ...(finalProduct.meta || {}),
+      pricing: {
+        ...((finalProduct.meta as any)?.pricing || {}),
+        authority: 'canonical-current-save',
+        materialBase: longitudinalMaterialPricing.originalTotalPrice,
+        mandatoryAmount:
+          longitudinalMaterialPricing.totalPrice - longitudinalMaterialPricing.originalTotalPrice,
+        cuttingCost: billableCuttingCost,
+        toolsCost: existingSubServiceCost,
+        finishingCost: resolvedFinishingCost,
+        totalPrice: finalProduct.totalPrice
+      }
+    } as any;
 
     // Add to contract or update existing product
     if (isEditMode && editingProductIndex !== null) {

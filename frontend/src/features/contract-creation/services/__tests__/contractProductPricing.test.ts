@@ -137,4 +137,24 @@ const product = (overrides: Partial<ContractProduct> = {}): ContractProduct => (
   assert.equal(getContractProductPayableTotal(ambiguousLegacy), 12_000_000);
 }
 
+{
+  const explicitlySavedCanonicalRow = product({
+    originalTotalPrice: 3_480_000,
+    isMandatory: true,
+    mandatoryPercentage: 20,
+    cuttingCost: 0,
+    physicalCuttingCost: 0,
+    cuttingBreakdown: [],
+    totalPrice: 27_600_000,
+    meta: {
+      pricing: {
+        authority: 'canonical-current-save',
+        totalPrice: 4_176_000
+      }
+    }
+  });
+  assert.equal(getContractProductPayableTotal(explicitlySavedCanonicalRow), 4_176_000);
+  assert.equal(reconcileContractProductPricing(explicitlySavedCanonicalRow).totalPrice, 4_176_000);
+}
+
 console.log('contractProductPricing tests passed');

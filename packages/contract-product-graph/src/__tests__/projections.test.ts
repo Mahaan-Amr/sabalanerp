@@ -15,7 +15,19 @@ const graph = parseCanonicalProductGraph({
   rows: [{
     productRowId: 'parent', catalogProductId: 'catalog', catalogSnapshotVersion: 'snapshot',
     productType: 'longitudinal', contractualTitle: 'Parent',
-    commercial: { totalAmountToman: '100' }
+    commercial: {
+      requestedLengthMeters: '0.8',
+      requestedWidthMeters: '0.4',
+      requestedAreaSquareMeters: '209.92',
+      requestedQuantity: '656',
+      totalAmountToman: '100',
+      legacySnapshot: {
+        length: '80',
+        lengthUnit: 'cm',
+        width: '40',
+        widthUnit: 'cm'
+      }
+    }
   }, {
     productRowId: 'child', parentProductRowId: 'parent', sourceProductRowId: 'parent',
     catalogProductId: 'catalog', catalogSnapshotVersion: 'snapshot',
@@ -32,4 +44,9 @@ for (const audience of ['step5', 'confirmation', 'pdf', 'accounting', 'workshop'
   assert.deepEqual(projection.products[0]?.childRowIds, ['child']);
 }
 assert.equal(projectCanonicalGraphToLegacyProducts(graph)[1]?.sourceProductRowId, 'parent');
+const legacyProjection = projectCanonicalGraphToLegacyProducts(graph)[0];
+assert.equal(legacyProjection?.length, '0.8');
+assert.equal(legacyProjection?.lengthUnit, 'm');
+assert.equal(legacyProjection?.width, '0.4');
+assert.equal(legacyProjection?.widthUnit, 'm');
 console.log('canonical projection tests passed');

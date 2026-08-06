@@ -24,6 +24,7 @@ import {
   mergeEditedRemainingStoneState,
   removeStairLayerConfiguration,
   resolveExistingCalibrationCutEnabled,
+  resolveLongitudinalOptimizerEditOwnership,
   resolveLongitudinalQuantityOptimizationFailure,
   resolveLongitudinalWidth,
   selectStairLayerConfiguration
@@ -177,6 +178,28 @@ assert.deepEqual(getContractQuantityInputPolicy('longitudinal', 3), {
   quantity: 3,
   calculationQuantity: 3,
   optimizerRequested: false
+});
+
+assert.deepEqual(resolveLongitudinalOptimizerEditOwnership({
+  enteredQuantity: 6,
+  inheritedDerivedQuantity: true,
+  inheritedDerivedDimension: 'length',
+  touchedFields: new Set()
+}), {
+  preserveDerivedQuantity: false,
+  preserveDerivedLength: false,
+  preserveDerivedWidth: false
+});
+
+assert.deepEqual(resolveLongitudinalOptimizerEditOwnership({
+  enteredQuantity: 0,
+  inheritedDerivedQuantity: true,
+  inheritedDerivedDimension: 'width',
+  touchedFields: new Set()
+}), {
+  preserveDerivedQuantity: true,
+  preserveDerivedLength: false,
+  preserveDerivedWidth: true
 });
 assert.deepEqual(getFreshContractProductDefaults('longitudinal'), {
   quantity: 0,

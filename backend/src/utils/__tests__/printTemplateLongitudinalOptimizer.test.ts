@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import {
+  parseCanonicalProductGraph,
+  projectCanonicalGraphToLegacyProducts
+} from '@sabalanerp/contract-product-graph';
 import { renderContractHtml } from '../printTemplate';
 
 const contract = {
@@ -80,6 +84,61 @@ const normalizePrintedRow = (value: string): string => value
   .replace(/٫/g, '.')
   .replace(/\s+/g, ' ')
   .trim();
+
+const canonicalDimensionGraph = parseCanonicalProductGraph({
+  schemaVersion: 1,
+  revision: 1,
+  calculationPolicy: {
+    calculation: 'calculation-v1',
+    packing: 'packing-v1',
+    pricing: 'pricing-v1',
+    rounding: 'rounding-v1'
+  },
+  catalogSnapshots: [{
+    catalogProductId: 'canonical-width-product',
+    snapshotVersion: 'snapshot',
+    facts: {}
+  }],
+  rows: [{
+    productRowId: 'canonical-width-row',
+    catalogProductId: 'canonical-width-product',
+    catalogSnapshotVersion: 'snapshot',
+    productType: 'longitudinal',
+    contractualTitle: 'CANONICAL-WIDTH-REGRESSION',
+    commercial: {
+      requestedLengthMeters: '0.8',
+      requestedWidthMeters: '0.4',
+      requestedAreaSquareMeters: '209.92',
+      requestedQuantity: '656',
+      totalAmountToman: '272896000',
+      legacySnapshot: {
+        length: '80',
+        lengthUnit: 'cm',
+        width: '40',
+        widthUnit: 'cm'
+      }
+    }
+  }],
+  stairSystems: [],
+  layerConfigurations: [],
+  sourceBatches: [],
+  remainingStones: [],
+  allocations: [],
+  operationGroups: [],
+  toolSelections: [],
+  finishingSelections: []
+});
+const canonicalDimensionHtml = renderContractHtml({
+  ...contract,
+  contractNumber: 'TEST-CANONICAL-DIMENSIONS',
+  contractData: {
+    products: projectCanonicalGraphToLegacyProducts(canonicalDimensionGraph)
+  }
+} as any);
+const canonicalDimensionRow = (canonicalDimensionHtml.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) || [])
+  .find(row => row.includes('CANONICAL-WIDTH-REGRESSION')) || '';
+assert.match(normalizePrintedRow(canonicalDimensionRow), /0\.8.*0\.4.*656.*209\.92/);
+assert.ok(!normalizePrintedRow(canonicalDimensionRow).includes('0.004'));
 
 const mandatoryCutHtml = renderContractHtml({
   ...contract,

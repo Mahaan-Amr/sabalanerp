@@ -384,6 +384,28 @@ export const getContractQuantityInputPolicy = (
   };
 };
 
+export const resolveLongitudinalOptimizerEditOwnership = ({
+  enteredQuantity,
+  inheritedDerivedQuantity,
+  inheritedDerivedDimension,
+  touchedFields
+}: {
+  enteredQuantity: number | null | undefined;
+  inheritedDerivedQuantity: boolean | null | undefined;
+  inheritedDerivedDimension: 'length' | 'width' | null | undefined;
+  touchedFields: ReadonlySet<string>;
+}) => {
+  const explicitPieceCount = Math.max(0, Number(enteredQuantity) || 0) > 0;
+  return {
+    preserveDerivedQuantity: !explicitPieceCount && !!inheritedDerivedQuantity &&
+      !touchedFields.has('quantity') && !touchedFields.has('length'),
+    preserveDerivedLength: !explicitPieceCount && inheritedDerivedDimension === 'length' &&
+      !touchedFields.has('length'),
+    preserveDerivedWidth: !explicitPieceCount && inheritedDerivedDimension === 'width' &&
+      !touchedFields.has('width')
+  };
+};
+
 export const resolveLongitudinalQuantityOptimizationFailure = (
   quantityOptimizationRequested: boolean,
   plan: Pick<SmartLongitudinalCutPlan, 'derivedQuantity' | 'requestedQuantity' | 'warnings'>

@@ -133,25 +133,6 @@ export const findGraphIntegrityConflicts = (
         received: row.stairPart.stairSystemId
       });
     }
-    if (row.stairPart) {
-      const system = graph.stairSystems.find(
-        item => item.stairSystemId === row.stairPart?.stairSystemId
-      );
-      if (
-        system &&
-        (
-          system.catalogProductId !== row.catalogProductId ||
-          system.catalogSnapshotVersion !== row.catalogSnapshotVersion
-        )
-      ) {
-        conflicts.push({
-          code: 'catalog-snapshot-conflict',
-          path: ['rows', row.productRowId, 'stairPart', 'catalogIdentity'],
-          productRowId: row.productRowId,
-          message: 'Stair part catalog identity differs from its stair system.'
-        });
-      }
-    }
     if (row.stairPart && row.productType !== 'stair') {
       conflicts.push({
         code: 'orphan-graph-reference',
@@ -209,22 +190,6 @@ export const findGraphIntegrityConflicts = (
         productRowId: row.productRowId,
         message: 'Contract product row does not have its referenced catalog snapshot.',
         received: row.catalogSnapshotVersion
-      });
-    }
-  });
-
-  graph.stairSystems.forEach(system => {
-    const hasSnapshot = graph.catalogSnapshots.some(snapshot =>
-      snapshot.catalogProductId === system.catalogProductId &&
-      snapshot.snapshotVersion === system.catalogSnapshotVersion
-    );
-    if (!hasSnapshot) {
-      conflicts.push({
-        code: 'catalog-snapshot-missing',
-        path: ['stairSystems', system.stairSystemId, 'catalogSnapshotVersion'],
-        entityId: system.stairSystemId,
-        received: system.catalogSnapshotVersion,
-        message: 'Stair system does not have its shared catalog snapshot.'
       });
     }
   });

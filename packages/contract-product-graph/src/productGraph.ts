@@ -970,38 +970,24 @@ export const executeProductGraphCommand = (
         }]
       };
     }
-    const firstPart = command.sellerIntent.parts[0];
-    const sharedCatalogSnapshots = command.catalogSnapshots.filter(snapshot =>
-      snapshot.catalogProductId === firstPart.row.catalogProductId &&
-      snapshot.snapshotVersion === firstPart.row.catalogSnapshotVersion
+    const partWithoutExactlyOneCatalogSnapshot = command.sellerIntent.parts.find(part =>
+      command.catalogSnapshots.filter(snapshot =>
+        snapshot.catalogProductId === part.row.catalogProductId &&
+        snapshot.snapshotVersion === part.row.catalogSnapshotVersion
+      ).length !== 1
     );
-    if (sharedCatalogSnapshots.length !== 1) {
+    if (partWithoutExactlyOneCatalogSnapshot) {
       return {
         ok: false,
         conflicts: [{
           code: 'catalog-snapshot-conflict',
           path: [
             'catalogSnapshots',
-            firstPart.row.catalogProductId,
-            firstPart.row.catalogSnapshotVersion
+            partWithoutExactlyOneCatalogSnapshot.row.catalogProductId,
+            partWithoutExactlyOneCatalogSnapshot.row.catalogSnapshotVersion
           ],
-          productRowId: firstPart.row.productRowId,
-          message: 'A stair system requires exactly one shared catalog stone snapshot.'
-        }]
-      };
-    }
-    const contradictoryCatalogPart = command.sellerIntent.parts.find(part =>
-      part.row.catalogProductId !== firstPart.row.catalogProductId ||
-      part.row.catalogSnapshotVersion !== firstPart.row.catalogSnapshotVersion
-    );
-    if (contradictoryCatalogPart) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'catalog-snapshot-conflict',
-          path: ['sellerIntent', 'parts', 'catalogIdentity'],
-          productRowId: contradictoryCatalogPart.row.productRowId,
-          message: 'Every part in one stair system must use the same catalog stone snapshot.'
+          productRowId: partWithoutExactlyOneCatalogSnapshot.row.productRowId,
+          message: 'Every stair row requires exactly one matching catalog stone snapshot.'
         }]
       };
     }
@@ -1009,9 +995,7 @@ export const executeProductGraphCommand = (
     try {
       resolvedQuantity = {
         ...resolveStaircaseQuantity(command.sellerIntent.quantity),
-        stairSystemId: command.sellerIntent.stairSystemId,
-        catalogProductId: firstPart.row.catalogProductId,
-        catalogSnapshotVersion: firstPart.row.catalogSnapshotVersion
+        stairSystemId: command.sellerIntent.stairSystemId
       };
     } catch (error) {
       return {
@@ -1025,16 +1009,7 @@ export const executeProductGraphCommand = (
     }
     let stagedGraph: CanonicalProductGraph = {
       ...cloneGraph(graph),
-      stairSystems: [...graph.stairSystems, resolvedQuantity],
-      catalogSnapshots: graph.catalogSnapshots.some(snapshot =>
-        snapshot.catalogProductId === firstPart.row.catalogProductId &&
-        snapshot.snapshotVersion === firstPart.row.catalogSnapshotVersion
-      )
-        ? graph.catalogSnapshots.map(cloneCatalogSnapshot)
-        : [
-            ...graph.catalogSnapshots.map(cloneCatalogSnapshot),
-            cloneCatalogSnapshot(sharedCatalogSnapshots[0])
-          ]
+      stairSystems: [...graph.stairSystems, resolvedQuantity]
     };
     for (const [index, part] of command.sellerIntent.parts.entries()) {
       if (!part.stairPartPolicyInput) {
@@ -1394,20 +1369,6 @@ export const executeProductGraphCommand = (
           productRowId: requestedRow.productRowId,
           received: stairInput.stairSystemId,
           message: 'Stair part references a missing stair system.'
-        }]
-      };
-    }
-    if (
-      stairSystem.catalogProductId !== requestedRow.catalogProductId ||
-      stairSystem.catalogSnapshotVersion !== requestedRow.catalogSnapshotVersion
-    ) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'catalog-snapshot-conflict',
-          path: ['sellerIntent', 'stairPartPolicyInput', 'catalogIdentity'],
-          productRowId: requestedRow.productRowId,
-          message: 'Every part in one stair system must use its shared catalog stone snapshot.'
         }]
       };
     }

@@ -391,14 +391,6 @@ const stairSystemAt = (value: unknown, path: string): CanonicalStairSystem => {
     'stair-system',
     `${path}.stairSystemId`
   );
-  const catalogProductId = nonEmptyStringAt(
-    record.catalogProductId,
-    `${path}.catalogProductId`
-  );
-  const catalogSnapshotVersion = nonEmptyStringAt(
-    record.catalogSnapshotVersion,
-    `${path}.catalogSnapshotVersion`
-  );
   const quantityMode = enumAt(
     record.quantityMode,
     ['steps', 'staircases'],
@@ -409,8 +401,6 @@ const stairSystemAt = (value: unknown, path: string): CanonicalStairSystem => {
   if (quantityMode === 'steps') {
     return {
       stairSystemId,
-      catalogProductId,
-      catalogSnapshotVersion,
       quantityMode,
       totalSteps
     };
@@ -432,8 +422,6 @@ const stairSystemAt = (value: unknown, path: string): CanonicalStairSystem => {
   }
   return {
     stairSystemId,
-    catalogProductId,
-    catalogSnapshotVersion,
     quantityMode,
     totalSteps,
     numberOfStaircases,

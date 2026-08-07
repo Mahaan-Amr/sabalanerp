@@ -199,6 +199,7 @@ export const FEATURES = {
   ACCOUNTING_AUDIT_VIEW: 'accounting_audit_view',
   ACCOUNTING_RECORDS_APPROVE_VOID: 'accounting_records_approve_void',
   ACCOUNTING_ACTIONS_MANAGE: 'accounting_actions_manage',
+  ACCOUNTING_BIOMETRIC_DIAGNOSTICS_VIEW: 'accounting_biometric_diagnostics_view',
 
   // BI Features
   BI_DASHBOARD_VIEW: 'bi_dashboard_view',
@@ -430,6 +431,7 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.ACCOUNTING_AUDIT_VIEW]: 'accounting',
   [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID]: 'accounting',
   [FEATURES.ACCOUNTING_ACTIONS_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_BIOMETRIC_DIAGNOSTICS_VIEW]: 'accounting',
 
   // BI Features
   [FEATURES.BI_DASHBOARD_VIEW]: 'bi',
@@ -638,6 +640,7 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   [FEATURES.ACCOUNTING_AUDIT_VIEW]: 'Accounting Audit - View',
   [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID]: 'Accounting Records - Approve/Void',
   [FEATURES.ACCOUNTING_ACTIONS_MANAGE]: 'Accounting Actions - Manage',
+  [FEATURES.ACCOUNTING_BIOMETRIC_DIAGNOSTICS_VIEW]: 'Accounting Biometric Connector Diagnostics - View',
   [FEATURES.BI_DASHBOARD_VIEW]: 'BI Dashboard - View',
 
   [FEATURES.LOGISTICS_DASHBOARD_VIEW]: 'Logistics Dashboard - View',

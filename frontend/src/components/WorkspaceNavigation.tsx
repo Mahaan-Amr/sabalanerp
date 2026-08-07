@@ -38,6 +38,7 @@ import {
   FaMoneyBillWave,
   FaTruck,
   FaBell,
+  FaFingerprint,
 } from "react-icons/fa";
 import {
   useWorkspace,
@@ -70,6 +71,7 @@ interface User {
   lastName: string;
   email: string;
   role: string;
+  permissions?: { features?: Array<{ feature: string; permissionLevel: string }> };
 }
 
 export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
@@ -593,6 +595,15 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             href: "/dashboard/accounting/performance",
             icon: FaUserClock,
             show: true,
+          },
+          {
+            name: "Biometric Connector",
+            namePersian: "وضعیت اسکنر اثر انگشت",
+            href: "/dashboard/accounting/settings/biometric-connector",
+            icon: FaFingerprint,
+            show:
+              currentUser?.role === "ADMIN" ||
+              Boolean(currentUser?.permissions?.features?.some((permission) => permission.feature === "accounting_biometric_diagnostics_view")),
           },
           {
             name: "Settings",

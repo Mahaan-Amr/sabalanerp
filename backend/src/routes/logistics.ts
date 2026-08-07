@@ -4,6 +4,7 @@ import { Prisma, PrismaClient, SecurityDriverQueueTurnStatus } from '@prisma/cli
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -374,6 +375,8 @@ const validateDriverSnapshot = (snapshot: any) => {
 };
 
 const releaseQueueTurn = async (tx: Prisma.TransactionClient, loadingId: string) => {
+  const existingAssignmentCount = await tx.logisticsLoadingDriverAssignment.count({ where: { loadingId } });
+  assertNoLegacyDispatchReferences({ queueTurnIds: [], existingAssignmentCount, vehiclePairId: null });
   await tx.securityDriverQueueTurn.updateMany({
     where: { loadingId, status: SecurityDriverQueueTurnStatus.RESERVED },
     data: { status: SecurityDriverQueueTurnStatus.ENTERED_LOADING_AREA, loadingId: null, driverRequestId: null, reservedAt: null, reservedBy: null, reservedPosition: null }
@@ -389,6 +392,7 @@ const pairIsCompleteForLoading = (pair: any) => Boolean(
 const reconcileDriverAssignments = async (tx: Prisma.TransactionClient, loadingId: string, queueTurnIds: string[], actorId: string) => {
   const selectedIds = Array.from(new Set((queueTurnIds || []).filter(Boolean)));
   const existing = await tx.logisticsLoadingDriverAssignment.findMany({ where: { loadingId } });
+  assertNoLegacyDispatchReferences({ queueTurnIds: selectedIds, existingAssignmentCount: existing.length, vehiclePairId: null });
   const existingIds = new Set(existing.map((assignment) => assignment.queueTurnId));
   const selectedSet = new Set(selectedIds);
   const removed = existing.filter((assignment) => !selectedSet.has(assignment.queueTurnId));
@@ -875,7 +879,7 @@ router.post('/projects/:projectId/draft', canEdit, canCreateLoadings, async (req
     res.status(201).json({ success: true, resumed: false, data: await loadLoading(loading.id) });
   } catch (error: any) {
     console.error('Create or resume logistics draft error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Server error' });
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Server error' });
   }
 });
 
@@ -959,7 +963,7 @@ router.post('/loadings', canEdit, canCreateLoadings, [
     res.status(201).json({ success: true, data: await loadLoading(loading.id) });
   } catch (error: any) {
     console.error('Create loading error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Server error' });
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Server error' });
   }
 });
 
@@ -999,7 +1003,7 @@ router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Resp
     res.json({ success: true, data: await loadLoading(existing.id) });
   } catch (error: any) {
     console.error('Update loading error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Server error' });
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Server error' });
   }
 });
 
@@ -1016,7 +1020,7 @@ router.delete('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: R
     res.json({ success: true });
   } catch (error: any) {
     console.error('Delete loading draft error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Server error' });
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Server error' });
   }
 });
 
@@ -1025,6 +1029,7 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
     const loading = await loadLoading(req.params.id);
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (loading.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be finalized' });
+    if (loading.driverAssignments.length) return res.status(410).json({ success: false, error: 'Legacy Security driver assignments cannot be finalized. Rebuild the allocation from the canonical queue after ticket #216.' });
     if (!loading.lines.length) return res.status(400).json({ success: false, error: 'At least one loading line is required' });
     if (loading.lines.some((line: any) => toNumber(line.quantity) <= 0)) return res.status(400).json({ success: false, error: 'All loading quantities must be greater than zero before finalization' });
     if (!loading.driverAssignments.length) return res.status(400).json({ success: false, error: 'Select at least one security-entered driver before finalization' });
@@ -1073,7 +1078,7 @@ router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
     res.json({ success: true, data: await loadLoading(updated.id) });
   } catch (error: any) {
     console.error('Cancel loading error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Server error' });
+    res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Server error' });
   }
 });
 
@@ -1127,27 +1132,8 @@ router.post('/loadings/:id/corrections', canEdit, canCreateCorrections, [
 
 router.get('/drivers', canView, canViewDrivers, async (req: any, res: Response) => {
   try {
-    const turns = await prisma.securityDriverQueueTurn.findMany({
-      where: { status: { in: [SecurityDriverQueueTurnStatus.ENTERED_LOADING_AREA, SecurityDriverQueueTurnStatus.RESERVED] } },
-      include: { vehiclePair: true, loading: { select: { id: true, loadingNumber: true } } },
-      orderBy: [{ loadingAreaEnteredAt: 'asc' }, { enteredAt: 'asc' }, { id: 'asc' }]
-    });
-    res.json({ success: true, data: turns.map((turn, index) => ({
-      id: turn.id,
-      queueTurnId: turn.id,
-      vehiclePairId: turn.vehiclePairId,
-      firstName: turn.vehiclePair.firstName,
-      lastName: turn.vehiclePair.lastName,
-      vehiclePlate: turn.vehiclePair.vehiclePlate,
-      vehicleType: turn.vehiclePair.vehicleType,
-      phone: turn.vehiclePair.phone,
-      nationalCode: turn.vehiclePair.nationalCode,
-      queueStatus: turn.status,
-      queuePosition: index + 1,
-      enteredAt: turn.enteredAt,
-      enteredLoadingAreaAt: turn.loadingAreaEnteredAt,
-      reservedLoading: turn.loading
-    })) });
+    // Ticket #216 owns the canonical physical queue. Retired Security queue rows remain historical only.
+    res.json({ success: true, data: [] });
   } catch (error) {
     console.error('Drivers list error:', error);
     res.status(500).json({ success: false, error: 'Server error' });

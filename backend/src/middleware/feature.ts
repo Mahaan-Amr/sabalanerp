@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from './auth';
+import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 
 const prisma = new PrismaClient();
 
@@ -214,6 +215,19 @@ export const FEATURES = {
   LOGISTICS_DRIVERS_VIEW: 'logistics_drivers_view',
   LOGISTICS_DRIVERS_MANAGE: 'logistics_drivers_manage',
 
+  // HR-hosted Driver and Vehicle Operations Features
+  HR_INTERNAL_DRIVERS_VIEW: 'hr_internal_drivers_view',
+  HR_INTERNAL_DRIVERS_MANAGE: 'hr_internal_drivers_manage',
+  HR_VEHICLE_OPERATIONS_VIEW: 'hr_vehicle_operations_view',
+  HR_VEHICLE_OPERATIONS_MANAGE: 'hr_vehicle_operations_manage',
+  HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE: 'hr_internal_driver_eligibility_manage',
+  HR_DRIVER_BIOMETRIC_AUDIT_VIEW: 'hr_driver_biometric_audit_view',
+  HR_DRIVER_PROFILES_MANAGE: 'hr_driver_profiles_manage',
+  HR_COMPANY_VEHICLES_MANAGE: 'hr_company_vehicles_manage',
+  HR_VEHICLE_PLATES_MANAGE: 'hr_vehicle_plates_manage',
+  HR_DRIVER_VEHICLE_ASSIGNMENTS_MANAGE: 'hr_driver_vehicle_assignments_manage',
+  HR_VEHICLE_OPERATIONS_AUDIT_VIEW: 'hr_vehicle_operations_audit_view',
+
   // Security Features
   SECURITY_SHIFTS_VIEW: 'security_shifts_view',
   SECURITY_SHIFTS_CREATE: 'security_shifts_create',
@@ -236,6 +250,10 @@ export const FEATURES = {
   SECURITY_SIGNATURE_UPDATE: 'security_signature_update',
   SECURITY_SIGNATURE_VIEW: 'security_signature_view',
   SECURITY_SIGNATURE_VALIDATE: 'security_signature_validate',
+  SECURITY_EXTERNAL_DRIVERS_VIEW: 'security_external_drivers_view',
+  SECURITY_EXTERNAL_DRIVERS_MANAGE: 'security_external_drivers_manage',
+  SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE: 'security_external_driver_vehicle_manage',
+  SECURITY_DISPATCH_EVIDENCE_VIEW: 'security_dispatch_evidence_view',
   SUPPORT_SECURITY_INCIDENT_HANDLE: 'support_security_incident_handle'
 } as const;
 
@@ -445,6 +463,18 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.LOGISTICS_DRIVERS_VIEW]: 'logistics',
   [FEATURES.LOGISTICS_DRIVERS_MANAGE]: 'logistics',
 
+  [FEATURES.HR_INTERNAL_DRIVERS_VIEW]: 'hr',
+  [FEATURES.HR_INTERNAL_DRIVERS_MANAGE]: 'hr',
+  [FEATURES.HR_VEHICLE_OPERATIONS_VIEW]: 'hr',
+  [FEATURES.HR_VEHICLE_OPERATIONS_MANAGE]: 'hr',
+  [FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE]: 'hr',
+  [FEATURES.HR_DRIVER_BIOMETRIC_AUDIT_VIEW]: 'hr',
+  [FEATURES.HR_DRIVER_PROFILES_MANAGE]: 'hr',
+  [FEATURES.HR_COMPANY_VEHICLES_MANAGE]: 'hr',
+  [FEATURES.HR_VEHICLE_PLATES_MANAGE]: 'hr',
+  [FEATURES.HR_DRIVER_VEHICLE_ASSIGNMENTS_MANAGE]: 'hr',
+  [FEATURES.HR_VEHICLE_OPERATIONS_AUDIT_VIEW]: 'hr',
+
   // Security Features
   [FEATURES.SECURITY_SHIFTS_VIEW]: 'security',
   [FEATURES.SECURITY_SHIFTS_CREATE]: 'security',
@@ -467,6 +497,10 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.SECURITY_SIGNATURE_UPDATE]: 'security',
   [FEATURES.SECURITY_SIGNATURE_VIEW]: 'security',
   [FEATURES.SECURITY_SIGNATURE_VALIDATE]: 'security',
+  [FEATURES.SECURITY_EXTERNAL_DRIVERS_VIEW]: 'security',
+  [FEATURES.SECURITY_EXTERNAL_DRIVERS_MANAGE]: 'security',
+  [FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE]: 'security',
+  [FEATURES.SECURITY_DISPATCH_EVIDENCE_VIEW]: 'security',
   [FEATURES.SUPPORT_SECURITY_INCIDENT_HANDLE]: 'security'
 };
 
@@ -671,6 +705,21 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   [FEATURES.SECURITY_SIGNATURE_UPDATE]: 'Security Signature - Update',
   [FEATURES.SECURITY_SIGNATURE_VIEW]: 'Security Signature - View',
   [FEATURES.SECURITY_SIGNATURE_VALIDATE]: 'Security Signature - Validate',
+  [FEATURES.HR_INTERNAL_DRIVERS_VIEW]: 'HR Internal Drivers - View',
+  [FEATURES.HR_INTERNAL_DRIVERS_MANAGE]: 'HR Internal Drivers - Manage',
+  [FEATURES.HR_VEHICLE_OPERATIONS_VIEW]: 'HR Vehicle Operations - View',
+  [FEATURES.HR_VEHICLE_OPERATIONS_MANAGE]: 'HR Vehicle Operations - Manage',
+  [FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE]: 'HR Internal Driver Eligibility - Manage',
+  [FEATURES.HR_DRIVER_BIOMETRIC_AUDIT_VIEW]: 'HR Driver Biometric Audit - View',
+  [FEATURES.HR_DRIVER_PROFILES_MANAGE]: 'HR Driver Profiles - Manage',
+  [FEATURES.HR_COMPANY_VEHICLES_MANAGE]: 'HR Company Vehicles - Manage',
+  [FEATURES.HR_VEHICLE_PLATES_MANAGE]: 'HR Vehicle Plates - Manage',
+  [FEATURES.HR_DRIVER_VEHICLE_ASSIGNMENTS_MANAGE]: 'HR Driver Vehicle Assignments - Manage',
+  [FEATURES.HR_VEHICLE_OPERATIONS_AUDIT_VIEW]: 'HR Vehicle Operations Audit - View',
+  [FEATURES.SECURITY_EXTERNAL_DRIVERS_VIEW]: 'Security External Drivers - View',
+  [FEATURES.SECURITY_EXTERNAL_DRIVERS_MANAGE]: 'Security External Drivers - Manage',
+  [FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE]: 'Security External Driver Vehicle - Manage',
+  [FEATURES.SECURITY_DISPATCH_EVIDENCE_VIEW]: 'Security Dispatch Evidence - View',
   [FEATURES.SUPPORT_SECURITY_INCIDENT_HANDLE]: 'Support - Designated Security Incident Handler'
 };
 
@@ -772,6 +821,26 @@ export const requireFeatureAccess = (feature: Feature, requiredPermission: Featu
         success: false,
         error: 'Internal server error'
       });
+    }
+  };
+};
+
+// Sensitive and independently owned features do not inherit ordinary workspace view/edit.
+// Explicit feature grants are accepted; workspace admin and global ADMIN/MANAGER retain oversight.
+export const requireNarrowFeatureAccess = (feature: Feature, requiredPermission: FeaturePermission = FEATURE_PERMISSIONS.VIEW) => {
+  return async (req: FeatureRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) return res.status(401).json({ success: false, error: 'Authentication required' });
+      const workspace = FEATURE_WORKSPACE_MAP[feature];
+      const access = await resolveNarrowFeatureAccess(prisma, { userId: req.user.id, role: req.user.role, workspace, feature, requiredPermission });
+      if (!access.allowed) {
+        return res.status(403).json({ success: false, error: `Access denied to independently scoped feature: ${feature}` });
+      }
+      req.featurePermission = access.permissionLevel!;
+      return next();
+    } catch (error) {
+      console.error('Narrow feature access check error:', error);
+      return res.status(500).json({ success: false, error: 'Internal server error' });
     }
   };
 };

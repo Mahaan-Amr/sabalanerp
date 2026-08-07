@@ -706,11 +706,241 @@ model Personnel {
   hiringCandidate                     HrCandidate?
   hiringOnboardingTasks               HrOnboardingTask[]
   hrPersonnelAudits                   HrPersonnelAudit[]
+  internalDriverProfile               InternalDriverProfile?
+  externalDriverContinuityLinks       ExternalDriverPersonnelContinuityLink[]
 
   @@index([isActive, departmentId])
   @@index([archivedAt, lastName, firstName])
   @@index([lastName, firstName])
   @@map("personnel")
+}
+
+enum InternalDriverEligibilityStatus {
+  ELIGIBLE
+  SUSPENDED
+  ENDED
+}
+
+enum InternalDriverProfileStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum CompanyVehicleLifecycleStatus {
+  DRAFT
+  ACTIVE
+  OUT_OF_SERVICE
+  ARCHIVED
+}
+
+enum ExternalRegistryLifecycleStatus {
+  DRAFT
+  ACTIVE
+  RESTRICTED
+  ARCHIVED
+}
+
+model InternalDriverProfile {
+  id                 String                            @id @default(cuid())
+  personnelId        String                            @unique
+  licenceNumber      String?                           @unique
+  licenceClass       String?
+  licenceExpiresAt   DateTime?
+  status             InternalDriverProfileStatus       @default(DRAFT)
+  notes              String?
+  createdAt          DateTime                          @default(now())
+  createdBy          String
+  personnel          Personnel                         @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  eligibilityPeriods InternalDriverEligibilityPeriod[]
+  vehicleAssignments DriverVehicleAssignment[]
+
+  @@index([status])
+  @@map("internal_driver_profiles")
+}
+
+model InternalDriverEligibilityPeriod {
+  id            String                          @id @default(cuid())
+  driverId      String
+  status        InternalDriverEligibilityStatus
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  reason        String
+  recordedAt    DateTime                        @default(now())
+  recordedBy    String
+  driver        InternalDriverProfile           @relation(fields: [driverId], references: [id], onDelete: Restrict)
+
+  @@index([driverId, effectiveFrom])
+  @@index([status, effectiveFrom, effectiveTo])
+  @@map("internal_driver_eligibility_periods")
+}
+
+model CompanyVehicle {
+  id          String                    @id @default(cuid())
+  fleetCode   String                    @unique
+  vehicleType String
+  make        String?
+  model       String?
+  vin         String?                   @unique
+  status      CompanyVehicleLifecycleStatus @default(DRAFT)
+  statusEffectiveFrom DateTime              @default(now())
+  statusReason        String?
+  statusRecordedBy    String?
+  notes       String?
+  createdAt   DateTime                  @default(now())
+  createdBy   String
+  plates      CompanyVehiclePlate[]
+  assignments DriverVehicleAssignment[]
+
+  @@index([status])
+  @@map("company_vehicles")
+}
+
+model CompanyVehiclePlate {
+  id              String         @id @default(cuid())
+  vehicleId       String
+  plate           String
+  normalizedPlate String
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  reason          String
+  recordedAt      DateTime       @default(now())
+  recordedBy      String
+  vehicle         CompanyVehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  @@index([vehicleId, effectiveFrom])
+  @@index([normalizedPlate, effectiveFrom, effectiveTo])
+  @@map("company_vehicle_plates")
+}
+
+model DriverVehicleAssignment {
+  id            String                @id @default(cuid())
+  driverId      String
+  vehicleId     String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  reason        String
+  recordedAt    DateTime              @default(now())
+  recordedBy    String
+  driver        InternalDriverProfile @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  vehicle       CompanyVehicle        @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  @@index([driverId, effectiveFrom])
+  @@index([vehicleId, effectiveFrom])
+  @@map("driver_vehicle_assignments")
+}
+
+model ExternalDriver {
+  id            String                                  @id @default(cuid())
+  firstName     String
+  lastName      String
+  nationalCode  String                                  @unique
+  phone         String
+  status        ExternalRegistryLifecycleStatus         @default(DRAFT)
+  statusEffectiveFrom DateTime                           @default(now())
+  statusReason  String?
+  statusRecordedBy String?
+  notes         String?
+  createdAt     DateTime                                @default(now())
+  createdBy     String
+  externalLinks ExternalDriverPersonnelContinuityLink[]
+  documents     ExternalDriverDocument[]
+
+  @@index([status])
+  @@map("external_drivers")
+}
+
+model ExternalDriverDocument {
+  id            String         @id @default(cuid())
+  driverId      String
+  documentType  String
+  reference     String
+  expiresAt     DateTime?
+  recordedAt    DateTime       @default(now())
+  recordedBy    String
+  driver        ExternalDriver @relation(fields: [driverId], references: [id], onDelete: Restrict)
+
+  @@index([driverId, documentType, recordedAt])
+  @@map("external_driver_documents")
+}
+
+model ExternalVehicle {
+  id          String                 @id @default(cuid())
+  vehicleType String
+  status      ExternalRegistryLifecycleStatus @default(DRAFT)
+  statusEffectiveFrom DateTime               @default(now())
+  statusReason String?
+  statusRecordedBy String?
+  notes       String?
+  createdAt   DateTime               @default(now())
+  createdBy   String
+  plates      ExternalVehiclePlate[]
+  documents   ExternalVehicleDocument[]
+
+  @@index([status])
+  @@map("external_vehicles")
+}
+
+model ExternalVehicleDocument {
+  id            String          @id @default(cuid())
+  vehicleId     String
+  documentType  String
+  reference     String
+  expiresAt     DateTime?
+  recordedAt    DateTime        @default(now())
+  recordedBy    String
+  vehicle       ExternalVehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  @@index([vehicleId, documentType, recordedAt])
+  @@map("external_vehicle_documents")
+}
+
+model ExternalVehiclePlate {
+  id              String          @id @default(cuid())
+  vehicleId       String
+  plate           String
+  normalizedPlate String
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  reason          String
+  recordedAt      DateTime        @default(now())
+  recordedBy      String
+  vehicle         ExternalVehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  @@index([vehicleId, effectiveFrom])
+  @@index([normalizedPlate, effectiveFrom, effectiveTo])
+  @@map("external_vehicle_plates")
+}
+
+model ExternalDriverPersonnelContinuityLink {
+  id               String         @id @default(cuid())
+  externalDriverId String
+  personnelId      String
+  reason           String
+  recordedAt       DateTime       @default(now())
+  recordedBy       String
+  externalDriver   ExternalDriver @relation(fields: [externalDriverId], references: [id], onDelete: Restrict)
+  personnel        Personnel      @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+
+  @@unique([externalDriverId, personnelId])
+  @@index([personnelId])
+  @@map("external_driver_personnel_continuity_links")
+}
+
+model DispatchMasterDataAudit {
+  id           String   @id @default(cuid())
+  subjectType  String
+  subjectId    String
+  ownerScope   String
+  eventType    String
+  payload      Json
+  actorId      String
+  recordedAt   DateTime @default(now())
+  previousHash String?
+  eventHash    String   @unique
+
+  @@index([subjectType, subjectId, recordedAt])
+  @@map("dispatch_master_data_audits")
 }
 
 model HrPersonnelAudit {

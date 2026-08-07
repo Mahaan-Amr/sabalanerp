@@ -15,6 +15,7 @@ import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSc
 import { buildDashboardRecentReports, buildSecurityDashboardAwareness } from '../services/securityDashboardAwareness';
 import { buildCombinedSecurityShiftTimeline, validateShiftSessionCorrectionPolicy } from '../services/securityShiftSessionPolicy';
 import { summarizeSecurityAttendance } from '../services/securityAttendanceSummary';
+import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
 import { renderCompletedSecurityShiftPdfHtml } from '../services/securityCompletedShiftPdf';
 
 const router = express.Router();
@@ -501,6 +502,12 @@ const includeMovement = {
 
 // @desc    Get security-owned driver/vehicle pairs
 // @route   GET /api/security/vehicle-pairs
+const legacyDispatchReadOnly = (req: AuthRequest, res: Response, next: any) => {
+  if (req.method === 'GET') return next();
+  return res.status(410).json({ success: false, error: 'Legacy combined driver-vehicle records are historical-only. Use the canonical external registry and admission flow.' });
+};
+router.use(['/vehicle-pairs', '/driver-queue', '/loading-driver-requests/:id/assign'], protect, legacyDispatchReadOnly);
+
 router.get('/vehicle-pairs', protect, securityView, async (req: AuthRequest, res: Response) => {
   try {
     const includeInactive = req.query.includeInactive === 'true';
@@ -524,8 +531,11 @@ router.get('/vehicle-pairs', protect, securityView, async (req: AuthRequest, res
     });
     res.json({ success: true, data: pairs.map((pair) => ({
       ...pair,
+      source: 'LEGACY_COMBINED',
+      historicalOnly: true,
+      operationalUseAllowed: false,
       informationComplete: pairIsComplete(pair),
-      canDelete: pair._count.loadings + pair._count.movements + pair._count.queueTurns === 0
+      canDelete: false
     })) });
   } catch (error) {
     console.error('Security vehicle pairs list error:', error);
@@ -654,7 +664,7 @@ router.get('/driver-queue', protect, securityView, async (req: AuthRequest, res:
       orderBy: history ? [{ enteredAt: 'desc' }, { id: 'desc' }] : [{ returnedToQueueAt: 'desc' }, { enteredAt: 'asc' }, { id: 'asc' }],
       take: history ? 250 : undefined
     });
-    res.json({ success: true, data: turns });
+    res.json({ success: true, data: turns.map((turn) => ({ ...turn, source: 'LEGACY_COMBINED_QUEUE', historicalOnly: true, operationalUseAllowed: false })) });
   } catch (error) {
     console.error('Driver queue list error:', error);
     res.status(500).json({ success: false, error: 'دریافت صف رانندگان ناموفق بود.' });
@@ -890,10 +900,9 @@ router.post('/vehicle-movements/inbound', protect, securityEdit, [
     if (req.body.purpose === 'SALES_RETURN' && !req.body.customerId) {
       return res.status(400).json({ success: false, error: 'Customer is required for sales return' });
     }
-
-    const pair = req.body.vehiclePairId
-      ? await prisma.securityVehiclePair.findUnique({ where: { id: req.body.vehiclePairId } })
-      : null;
+    if (req.body.vehiclePairId) {
+      return res.status(410).json({ success: false, error: 'Legacy combined driver-vehicle records cannot be attached to new movements. Record a visit snapshot or use canonical identities.' });
+    }
 
     const movement = await prisma.securityVehicleMovement.create({
       data: {
@@ -901,11 +910,11 @@ router.post('/vehicle-movements/inbound', protect, securityEdit, [
         direction: 'INBOUND',
         purpose: req.body.purpose,
         status: 'ENTRY_RECORDED',
-        vehiclePairId: pair?.id || null,
+        vehiclePairId: null,
         customerId: req.body.customerId || null,
         projectId: req.body.projectId || null,
         occurredAt: req.body.occurredAt ? new Date(req.body.occurredAt) : new Date(),
-        driverSnapshot: req.body.driverSnapshot || (pair ? pairSnapshot(pair) : null),
+        driverSnapshot: req.body.driverSnapshot || null,
         documentSnapshot: req.body.documentSnapshot || null,
         settlementSnapshot: req.body.settlementSnapshot || null,
         notes: req.body.notes || null,
@@ -963,6 +972,8 @@ router.post('/vehicle-movements/exit', protect, securityEdit, [
     });
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (loading.status !== 'FINALIZED') return res.status(400).json({ success: false, error: 'Only finalized loadings can exit the gate' });
+    try { assertNoLegacyDispatchReferences({ queueTurnIds: [], existingAssignmentCount: 0, vehiclePairId: req.body.vehiclePairId || loading.vehiclePairId }); }
+    catch (error: any) { return res.status(error.statusCode || 410).json({ success: false, error: error.message }); }
 
     const existingExit = await prisma.securityVehicleMovement.findFirst({
       where: { loadingId: loading.id, direction: 'OUTBOUND', status: 'EXITED' }
@@ -970,22 +981,18 @@ router.post('/vehicle-movements/exit', protect, securityEdit, [
     if (existingExit) return res.status(400).json({ success: false, error: 'Gate exit already recorded for this loading' });
 
     const purpose = req.body.customerPersonalCar ? 'CUSTOMER_PERSONAL_CAR_EXIT' : 'SALES_EXIT';
-    const pair = req.body.vehiclePairId
-      ? await prisma.securityVehiclePair.findUnique({ where: { id: req.body.vehiclePairId } })
-      : loading.vehiclePair;
-
     const movement = await prisma.securityVehicleMovement.create({
       data: {
         movementNumber: await generateMovementNumber('OUT'),
         direction: 'OUTBOUND',
         purpose: purpose as any,
         status: 'EXITED',
-        vehiclePairId: purpose === 'SALES_EXIT' ? pair?.id || null : null,
+        vehiclePairId: null,
         loadingId: loading.id,
         customerId: loading.customerId,
         projectId: loading.projectId,
         occurredAt: req.body.occurredAt ? new Date(req.body.occurredAt) : new Date(),
-        driverSnapshot: purpose === 'SALES_EXIT' ? (req.body.driverSnapshot || (pair ? pairSnapshot(pair) : loading.driverSnapshot)) : null,
+        driverSnapshot: purpose === 'SALES_EXIT' ? (req.body.driverSnapshot || loading.driverSnapshot) : null,
         notes: req.body.notes || null,
         createdBy: req.user!.id
       },

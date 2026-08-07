@@ -13,6 +13,7 @@
     "test:seller-product-history": "tsx src/services/__tests__/sellerProductHistory.test.ts",
     "migration:product-graph:dry": "node dist/scripts/dry-run-contract-product-graph-migration.js",
     "test:hr-personnel-boundary": "tsx src/services/__tests__/hrPersonnelBoundary.test.ts",
+    "test:dispatch-master-data": "tsx src/services/__tests__/dispatchMasterDataPolicy.test.ts",
     "test:hr-candidate-access": "tsx src/services/__tests__/hrCandidateAccess.test.ts",
     "test:hr-candidate-correction": "tsx src/services/__tests__/hrCandidateCorrection.test.ts",
     "test:hr-offer-decision": "tsx src/services/__tests__/hrOfferDecision.test.ts",
@@ -39,6 +40,7 @@
     "verify:security-shifts": "tsx scripts/verify-security-shift-planning.ts",
     "verify:security-attendance-migration": "tsx scripts/verify-security-attendance-migration.ts",
     "preview:security-shift-pdf": "tsx scripts/render-security-completed-shift-preview.ts",
+    "verify:dispatch-master-data": "tsx scripts/verify-dispatch-master-data.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },

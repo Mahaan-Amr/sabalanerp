@@ -1437,6 +1437,8 @@ model SalesContract {
   reportingEvents                   SalesReportingEvent[]
   productGraphState                 SalesContractProductGraphState?
   productGraphAudits                SalesContractProductGraphAudit[]
+  shipmentQuantityEvidence          ShipmentQuantityEvidence[]
+  shipmentQuantityProjections       ShipmentQuantityProjection[]
 
   @@index([createdBy, creatorSequenceNumber])
   @@index([responsibleSellerId])
@@ -1905,6 +1907,8 @@ model ContractItem {
   logisticsLoadingLines             LogisticsLoadingLine[]
   logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
   logisticsLoadingCorrections       LogisticsLoadingCorrection[]
+  shipmentQuantityEvidence          ShipmentQuantityEvidence[]
+  shipmentQuantityProjection        ShipmentQuantityProjection?
 
   @@unique([contractId, productRowId])
   @@map("contract_items")
@@ -2423,6 +2427,55 @@ model LogisticsLoadingCorrection {
   @@index([sourceContractItemId])
   @@index([productId])
   @@map("logistics_loading_corrections")
+}
+
+model ShipmentQuantityEvidence {
+  id             String                       @id @default(cuid())
+  contractId     String
+  contractItemId String
+  productRowId   String
+  unit           String
+  kind           ShipmentQuantityEvidenceKind
+  quantity       Decimal                      @db.Decimal(18, 3)
+  effectiveAt    DateTime
+  recordedAt     DateTime                     @default(now())
+  sourceType     String
+  sourceId       String
+  sourceVersion  Int                          @default(1)
+  integrityHash  String
+  metadata       Json?
+  contract       SalesContract                @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  contractItem   ContractItem                 @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceType, sourceId, sourceVersion])
+  @@index([contractId, effectiveAt])
+  @@index([contractItemId, effectiveAt])
+  @@index([recordedAt])
+  @@map("shipment_quantity_evidence")
+}
+
+model ShipmentQuantityProjection {
+  contractItemId       String                   @id
+  contractId           String
+  productRowId         String
+  unit                 String
+  contracted           Decimal?                 @db.Decimal(18, 3)
+  finalizedReserved    Decimal?                 @db.Decimal(18, 3)
+  physicallyDispatched Decimal?                 @db.Decimal(18, 3)
+  availableToLoad      Decimal?                 @db.Decimal(18, 3)
+  health               ShipmentProjectionHealth
+  healthReasons        Json
+  sourceEvidenceIds    Json
+  cutoff               DateTime
+  refreshedAt          DateTime                 @default(now())
+  lastVerifiedAt       DateTime?
+  integrityHash        String
+  contract             SalesContract            @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  contractItem         ContractItem             @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
+
+  @@index([contractId])
+  @@index([health])
+  @@map("shipment_quantity_projections")
 }
 
 // ==================== INVENTORY MASTER DATA ====================
@@ -3054,6 +3107,29 @@ enum LogisticsLoadingStatus {
   DRAFT
   FINALIZED
   CANCELLED
+}
+
+enum ShipmentQuantityEvidenceKind {
+  CONTRACTED_SET
+  ALLOCATION_FINALIZED
+  ALLOCATION_RELEASED
+  PHYSICAL_EXIT
+  MANUAL_OUTAGE_EXIT
+  DISPATCH_CORRECTION_DRAFT
+  DISPATCH_CORRECTION_POSTED
+  LEGACY_UNRECONCILED_RESERVED
+  LEGACY_DISPATCHED
+  LEGACY_RELEASED
+  LEGACY_STILL_RESERVED
+  PROJECTION_STALE
+  EVIDENCE_CONFLICT
+}
+
+enum ShipmentProjectionHealth {
+  CURRENT
+  STALE
+  LEGACY_UNRECONCILED
+  EVIDENCE_CONFLICT
 }
 
 enum SecurityVehicleMovementDirection {

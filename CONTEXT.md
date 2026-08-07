@@ -2,6 +2,26 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**Shipment Quantity Reconciliation**:
+The event-derived, scale-three reconciliation for one financially approved stable Contract Item row and its snapshotted unit: Contracted Quantity equals Finalized/Reserved Quantity plus Physically Dispatched Quantity plus Available-to-Load Quantity. Identical-looking rows remain separate, incompatible units are never combined, and negative availability remains visible.
+_Avoid_: using catalog identity as row identity, binary floating-point arithmetic, mixing units, clamping negative balances, or treating a Logistics finalization as physical dispatch
+
+**Finalized/Reserved Quantity**:
+The quantity held by immutable finalized Logistics allocations that have not yet physically exited or received an explicit allocation disposition. Accounting review, waybill issuance, driver confirmation, authorization expiry or revocation, and document-only voiding do not release this quantity.
+_Avoid_: releasing a reservation because a document changed, counting the same allocation as both reserved and dispatched, or deriving this bucket from scheduled Delivery records
+
+**Physically Dispatched Quantity**:
+The quantity proven to have crossed the gate by a Guard Physical Exit Record or honestly registered Manual Outage Exit, adjusted only by posted append-only Dispatch Corrections. A verified return changes this quantity only after Accounting posts its linked negative correction.
+_Avoid_: calling Logistics finalization dispatch, treating a waybill or driver confirmation as physical exit, applying draft corrections, or deleting prior exit evidence
+
+**Available-to-Load Quantity**:
+The signed result of Contracted Quantity minus Finalized/Reserved Quantity minus Physically Dispatched Quantity for one stable Contract Item row and unit. It is authoritative for display only when projection health is current; Logistics finalization must still recompute and lock source evidence transactionally.
+_Avoid_: using a cached value to authorize loading, presenting an uncertain row as zero, or hiding over-allocation by clamping the result
+
+**Shipment Projection Health**:
+The evidence condition attached to each Shipment Quantity Reconciliation: `CURRENT`, `STALE`, `LEGACY_UNRECONCILED`, or `EVIDENCE_CONFLICT`. Non-current rows retain their last verified truth when available and block new loading authorization; aggregates label known subtotals and affected-row counts instead of claiming completeness.
+_Avoid_: converting missing or conflicting evidence to zero, presenting a partial subtotal as complete, or allowing stale projection cache to authorize a reservation
+
 **Displayed Monetary Amount**:
 A monetary value presented to a user in Sabalan ERP, including interactive screens, print/PDF output, and Excel exports, rounded to the nearest whole unit of its stated currency. Storage and intermediate calculations retain their full precision so display rounding never changes business results. Each authoritative total is rounded directly for presentation and is never recomputed from already rounded display rows, even when the visible line-item arithmetic differs by a minor rounding residue.
 _Avoid_: displaying fractional currency units, rounding persisted values or intermediate calculations, rebuilding authoritative totals from rounded rows, or allowing different user-facing outputs to disagree

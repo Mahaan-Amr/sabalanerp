@@ -6,7 +6,7 @@ The connector is a narrow, device-neutral boundary between SabalanERP and a futu
 
 The ERP signs a command for one configured workstation. A command contains a unique command ID and nonce, an issuance and expiry time, the operation, and transaction references. The validity window may not exceed 60 seconds. The connector authenticates the HMAC signature before inspecting the command, rejects another workstation, rejects nonce replay, and returns the prior result when the same command is safely retried.
 
-The durable command journal stores only hashes and safe normalized results. Atomic replacement allows a process restart without repeating a completed capture. It must be kept in a connector-owned directory readable only by the service identity.
+The durable command journal stores only hashes and safe normalized results. It atomically reserves a command as `IN_FLIGHT` before the device operation begins. A concurrent duplicate is rejected as already in progress. Atomic replacement allows a process restart without repeating a completed capture; an orphaned `IN_FLIGHT` reservation becomes `INTERRUPTED`, reports that its outcome is unknown, and is never automatically replayed. An operator must reconcile that transaction before creating a fresh command. The journal must be kept in a connector-owned directory readable only by the service identity.
 
 Supported operations are `HEALTH`, `CAPTURE`, `VERIFY`, and `CANCEL`. Results normalize:
 
@@ -20,7 +20,9 @@ Vendor-native values remain inside the future adapter. A real adapter must imple
 
 ## Simulator
 
-The deterministic scenarios are success, poor quality, liveness failure, non-match, wrong driver, disconnect, timeout, retry, and recovery. Retry succeeds only when the caller advances to attempt two; repeating an identical signed command remains idempotent.
+The deterministic scenarios are success, poor quality, liveness failure, non-match, wrong driver, disconnect, timeout, retry, recovery, and SDK licensing failure. Retry succeeds only when the caller advances to attempt two; repeating an identical signed command remains idempotent. Fallback eligibility is stateful per challenge and becomes true only after three good-quality, live non-matches. Poor-quality captures and liveness failures never increment that count.
+
+Authenticated commands are operation-specific. Unknown fields, missing required identifiers, unsupported simulation values, nested arrays, raw-image/sample/blob/probe/template-material fields, and base64-like material are rejected before reservation or device execution. The simulator itself also fails closed when called directly with an unsupported scenario.
 
 The simulator is the only diagnostics source in this ticket. The Accounting diagnostics page explicitly reports simulator mode and `liveEnrollmentEnabled: false`.
 

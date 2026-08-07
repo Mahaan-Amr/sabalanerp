@@ -1,13 +1,13 @@
 import express from 'express';
 import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
-import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middleware/feature';
+import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
 import { appendDispatchMasterDataAudit } from '../services/dispatchMasterDataAudit';
 import { activeAt, actor, fail, internalInclude, parsedDate, prisma, projectDriver, requiredText } from './dispatch-master-data.shared';
 
 const router = express.Router();
 const view = requireFeatureAccess(FEATURES.HR_INTERNAL_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
-const manage = requireFeatureAccess(FEATURES.HR_INTERNAL_DRIVERS_MANAGE, FEATURE_PERMISSIONS.EDIT);
+const manage = requireNarrowFeatureAccess(FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE, FEATURE_PERMISSIONS.EDIT);
 
 router.get('/internal-drivers', view, async (req, res) => {
   try {

@@ -1,14 +1,17 @@
 import express from 'express';
 import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
-import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middleware/feature';
+import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
 import { appendDispatchMasterDataAudit } from '../services/dispatchMasterDataAudit';
 import { assertLifecycleTransition, assertValidEffectivePeriod, canPermanentlyDeleteDraft, normalizeIranianPlate } from '../services/dispatchMasterDataPolicy';
 import { activeAt, actor, fail, internalInclude, optionalDate, optionalText, parsedDate, prisma, projectDriver, requiredText } from './dispatch-master-data.shared';
 
 const router = express.Router();
 const view = requireFeatureAccess(FEATURES.HR_VEHICLE_OPERATIONS_VIEW, FEATURE_PERMISSIONS.VIEW);
-const manage = requireFeatureAccess(FEATURES.HR_VEHICLE_OPERATIONS_MANAGE, FEATURE_PERMISSIONS.EDIT);
+const manageProfiles = requireNarrowFeatureAccess(FEATURES.HR_DRIVER_PROFILES_MANAGE, FEATURE_PERMISSIONS.EDIT);
+const manageVehicles = requireNarrowFeatureAccess(FEATURES.HR_COMPANY_VEHICLES_MANAGE, FEATURE_PERMISSIONS.EDIT);
+const managePlates = requireNarrowFeatureAccess(FEATURES.HR_VEHICLE_PLATES_MANAGE, FEATURE_PERMISSIONS.EDIT);
+const manageAssignments = requireNarrowFeatureAccess(FEATURES.HR_DRIVER_VEHICLE_ASSIGNMENTS_MANAGE, FEATURE_PERMISSIONS.EDIT);
 
 router.get('/vehicle-operations/internal-drivers', view, async (req, res) => {
   try {
@@ -18,7 +21,7 @@ router.get('/vehicle-operations/internal-drivers', view, async (req, res) => {
   } catch (error) { return fail(res, error, 'List Vehicle Operations driving profiles'); }
 });
 
-router.put('/internal-drivers/:id/profile', manage, async (req: AuthRequest, res) => {
+router.put('/internal-drivers/:id/profile', manageProfiles, async (req: AuthRequest, res) => {
   try {
     const reason = requiredText(req.body.reason, 'reason');
     const result = await prisma.$transaction(async (tx) => {
@@ -36,7 +39,7 @@ router.put('/internal-drivers/:id/profile', manage, async (req: AuthRequest, res
   } catch (error) { return fail(res, error, 'Update internal driving profile'); }
 });
 
-router.post('/internal-drivers/:id/profile-status', manage, async (req: AuthRequest, res) => {
+router.post('/internal-drivers/:id/profile-status', manageProfiles, async (req: AuthRequest, res) => {
   try {
     const next = requiredText(req.body.status, 'status') as 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
     const reason = requiredText(req.body.reason, 'reason');
@@ -60,7 +63,7 @@ router.get('/company-vehicles', view, async (_req, res) => {
   } catch (error) { return fail(res, error, 'List company vehicles'); }
 });
 
-router.post('/company-vehicles', manage, async (req: AuthRequest, res) => {
+router.post('/company-vehicles', manageVehicles, async (req: AuthRequest, res) => {
   try {
     const reason = requiredText(req.body.reason, 'reason');
     const vehicle = await prisma.$transaction(async (tx) => {
@@ -77,7 +80,7 @@ router.post('/company-vehicles', manage, async (req: AuthRequest, res) => {
   } catch (error) { return fail(res, error, 'Create company-vehicle draft'); }
 });
 
-router.post('/company-vehicles/:id/plates', manage, async (req: AuthRequest, res) => {
+router.post('/company-vehicles/:id/plates', managePlates, async (req: AuthRequest, res) => {
   try {
     const effectiveFrom = parsedDate(req.body.effectiveFrom, 'effectiveFrom'); const plate = requiredText(req.body.plate, 'plate'); const reason = requiredText(req.body.reason, 'reason');
     const result = await prisma.$transaction(async (tx) => {
@@ -93,7 +96,7 @@ router.post('/company-vehicles/:id/plates', manage, async (req: AuthRequest, res
   } catch (error) { return fail(res, error, 'Change company vehicle plate'); }
 });
 
-router.post('/company-vehicles/:id/status', manage, async (req: AuthRequest, res) => {
+router.post('/company-vehicles/:id/status', manageVehicles, async (req: AuthRequest, res) => {
   try {
     const next = requiredText(req.body.status, 'status') as 'DRAFT' | 'ACTIVE' | 'OUT_OF_SERVICE' | 'ARCHIVED';
     const reason = requiredText(req.body.reason, 'reason'); const effectiveFrom = parsedDate(req.body.effectiveFrom, 'effectiveFrom');
@@ -111,7 +114,7 @@ router.post('/company-vehicles/:id/status', manage, async (req: AuthRequest, res
   } catch (error) { return fail(res, error, 'Transition company vehicle'); }
 });
 
-router.delete('/company-vehicles/:id', manage, async (req: AuthRequest, res) => {
+router.delete('/company-vehicles/:id', manageVehicles, async (req: AuthRequest, res) => {
   try {
     const deleted = await prisma.$transaction(async (tx) => {
       const current = await tx.companyVehicle.findUnique({ where: { id: req.params.id }, include: { _count: { select: { assignments: true } } } });
@@ -126,7 +129,7 @@ router.delete('/company-vehicles/:id', manage, async (req: AuthRequest, res) => 
   } catch (error) { return fail(res, error, 'Delete company-vehicle draft'); }
 });
 
-router.post('/driver-vehicle-assignments', manage, async (req: AuthRequest, res) => {
+router.post('/driver-vehicle-assignments', manageAssignments, async (req: AuthRequest, res) => {
   try {
     const effectiveFrom = parsedDate(req.body.effectiveFrom, 'effectiveFrom'); const effectiveTo = optionalDate(req.body.effectiveTo, 'effectiveTo'); assertValidEffectivePeriod(effectiveFrom, effectiveTo);
     const driverId = requiredText(req.body.driverId, 'driverId'); const vehicleId = requiredText(req.body.vehicleId, 'vehicleId'); const reason = requiredText(req.body.reason, 'reason');

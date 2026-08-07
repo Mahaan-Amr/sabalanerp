@@ -1,27 +1,69 @@
 import express from 'express';
 import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
-import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middleware/feature';
+import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
 import { appendDispatchMasterDataAudit } from '../services/dispatchMasterDataAudit';
-import { assertLifecycleTransition, canPermanentlyDeleteDraft, normalizeIranianPlate } from '../services/dispatchMasterDataPolicy';
+import { assertLifecycleTransition, canPermanentlyDeleteDraft, normalizeIranianPlate, projectExternalDriverReadiness, projectExternalVehicleReadiness } from '../services/dispatchMasterDataPolicy';
 import { activeAt, actor, fail, optionalText, parsedDate, prisma, requiredText } from './dispatch-master-data.shared';
 
 const router = express.Router();
 const view = requireFeatureAccess(FEATURES.SECURITY_EXTERNAL_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
-const manage = requireFeatureAccess(FEATURES.SECURITY_EXTERNAL_DRIVERS_MANAGE, FEATURE_PERMISSIONS.EDIT);
+const manage = requireNarrowFeatureAccess(FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE, FEATURE_PERMISSIONS.EDIT);
 
-router.get('/external-registry', view, async (_req, res) => {
+router.get('/external-registry', view, async (req: AuthRequest, res) => {
   try {
-    const [drivers, vehicles, legacyPairs] = await Promise.all([
-      prisma.externalDriver.findMany({ include: { externalLinks: true }, orderBy: { createdAt: 'desc' } }),
-      prisma.externalVehicle.findMany({ include: { plates: { orderBy: { effectiveFrom: 'desc' } } }, orderBy: { createdAt: 'desc' } }),
+    const at = new Date();
+    const [drivers, vehicles, legacyPairs, userFeature, roleFeature, userWorkspace, roleWorkspace] = await Promise.all([
+      prisma.externalDriver.findMany({ include: { externalLinks: true, documents: { orderBy: { recordedAt: 'desc' } } }, orderBy: { createdAt: 'desc' } }),
+      prisma.externalVehicle.findMany({ include: { plates: { orderBy: { effectiveFrom: 'desc' } }, documents: { orderBy: { recordedAt: 'desc' } } }, orderBy: { createdAt: 'desc' } }),
       prisma.securityVehiclePair.findMany({ orderBy: { createdAt: 'desc' }, select: { id: true, firstName: true, lastName: true, nationalCode: true, phone: true, vehiclePlate: true, vehicleType: true, isActive: true, createdAt: true } }),
+      prisma.featurePermission.findUnique({ where: { userId_workspace_feature: { userId: actor(req), workspace: 'security', feature: FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE } } }),
+      prisma.roleFeaturePermission.findUnique({ where: { role_workspace_feature: { role: req.user!.role as any, workspace: 'security', feature: FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE } } }),
+      prisma.workspacePermission.findUnique({ where: { userId_workspace: { userId: actor(req), workspace: 'security' } } }),
+      prisma.roleWorkspacePermission.findUnique({ where: { role_workspace: { role: req.user!.role as any, workspace: 'security' } } }),
     ]);
+    const activePermission = (permission: any) => permission?.isActive && (!permission.expiresAt || permission.expiresAt > at);
+    const explicitFeature = activePermission(userFeature) ? userFeature : activePermission(roleFeature) ? roleFeature : null;
+    const canManage = ['ADMIN', 'MANAGER'].includes(req.user!.role) ||
+      ['edit', 'admin'].includes(explicitFeature?.permissionLevel || '') ||
+      [userWorkspace, roleWorkspace].some((permission) => activePermission(permission) && permission?.permissionLevel === 'admin');
     return res.json({ success: true, data: {
-      drivers: drivers.map((item) => ({ ...item, source: 'GUARD_EXTERNAL' })), vehicles: vehicles.map((item) => ({ ...item, source: 'GUARD_EXTERNAL' })),
+      drivers: drivers.map((item) => ({ ...item, source: 'GUARD_EXTERNAL', readiness: projectExternalDriverReadiness({ lifecycleStatus: item.status, documents: item.documents }, at) })),
+      vehicles: vehicles.map((item) => ({ ...item, source: 'GUARD_EXTERNAL', readiness: projectExternalVehicleReadiness({ lifecycleStatus: item.status, hasCurrentPlate: item.plates.some((plate) => plate.effectiveFrom <= at && (!plate.effectiveTo || plate.effectiveTo > at)), documents: item.documents }, at) })),
       legacyPairs: legacyPairs.map((item) => ({ ...item, source: 'LEGACY_COMBINED', historicalOnly: true, operationalUseAllowed: false, readiness: { status: 'NOT_READY', blockers: ['LEGACY_SOURCE_ONLY'] } })),
+      capabilities: { canManage },
     } });
   } catch (error) { return fail(res, error, 'List Guard external registry'); }
+});
+
+router.post('/external-drivers/:id/documents', manage, async (req: AuthRequest, res) => {
+  try {
+    const documentType = requiredText(req.body.documentType, 'documentType');
+    if (documentType !== 'DRIVING_LICENCE') throw new Error('Unsupported external-driver document type.');
+    const expiresAt = parsedDate(req.body.expiresAt, 'expiresAt');
+    const created = await prisma.$transaction(async (tx) => {
+      if (!await tx.externalDriver.findUnique({ where: { id: req.params.id } })) throw new Error('External driver was not found.');
+      const document = await tx.externalDriverDocument.create({ data: { driverId: req.params.id, documentType, reference: requiredText(req.body.reference, 'reference'), expiresAt, recordedBy: actor(req) } });
+      await appendDispatchMasterDataAudit(tx, { ownerScope: 'GUARD', subjectType: 'EXTERNAL_DRIVER', subjectId: req.params.id, eventType: 'EXTERNAL_DRIVER_DOCUMENT_RECORDED', payload: { documentId: document.id, documentType, expiresAt }, actorId: actor(req) });
+      return document;
+    });
+    return res.status(201).json({ success: true, data: created });
+  } catch (error) { return fail(res, error, 'Record external-driver document evidence'); }
+});
+
+router.post('/external-vehicles/:id/documents', manage, async (req: AuthRequest, res) => {
+  try {
+    const documentType = requiredText(req.body.documentType, 'documentType');
+    if (documentType !== 'VEHICLE_REGISTRATION') throw new Error('Unsupported external-vehicle document type.');
+    const expiresAt = parsedDate(req.body.expiresAt, 'expiresAt');
+    const created = await prisma.$transaction(async (tx) => {
+      if (!await tx.externalVehicle.findUnique({ where: { id: req.params.id } })) throw new Error('External vehicle was not found.');
+      const document = await tx.externalVehicleDocument.create({ data: { vehicleId: req.params.id, documentType, reference: requiredText(req.body.reference, 'reference'), expiresAt, recordedBy: actor(req) } });
+      await appendDispatchMasterDataAudit(tx, { ownerScope: 'GUARD', subjectType: 'EXTERNAL_VEHICLE', subjectId: req.params.id, eventType: 'EXTERNAL_VEHICLE_DOCUMENT_RECORDED', payload: { documentId: document.id, documentType, expiresAt }, actorId: actor(req) });
+      return document;
+    });
+    return res.status(201).json({ success: true, data: created });
+  } catch (error) { return fail(res, error, 'Record external-vehicle document evidence'); }
 });
 
 router.post('/external-drivers', manage, async (req: AuthRequest, res) => {
@@ -91,8 +133,8 @@ router.post('/external-vehicles/:id/status', manage, transition('EXTERNAL_VEHICL
 router.delete('/external-drivers/:id', manage, async (req: AuthRequest, res) => {
   try {
     const id = await prisma.$transaction(async (tx) => {
-      const current = await tx.externalDriver.findUnique({ where: { id: req.params.id }, include: { _count: { select: { externalLinks: true } } } });
-      if (!current || !canPermanentlyDeleteDraft({ status: current.status, dependencyCount: current._count.externalLinks })) throw new Error('Only an unused external-driver draft may be permanently deleted.');
+      const current = await tx.externalDriver.findUnique({ where: { id: req.params.id }, include: { _count: { select: { externalLinks: true, documents: true } } } });
+      if (!current || !canPermanentlyDeleteDraft({ status: current.status, dependencyCount: current._count.externalLinks + current._count.documents })) throw new Error('Only an unused external-driver draft may be permanently deleted.');
       await appendDispatchMasterDataAudit(tx, { ownerScope: 'GUARD', subjectType: 'EXTERNAL_DRIVER', subjectId: current.id, eventType: 'EXTERNAL_DRIVER_DRAFT_DELETED', payload: { reason: requiredText(req.body.reason, 'reason') }, actorId: actor(req) });
       await tx.externalDriver.delete({ where: { id: current.id } }); return current.id;
     });
@@ -103,8 +145,8 @@ router.delete('/external-drivers/:id', manage, async (req: AuthRequest, res) => 
 router.delete('/external-vehicles/:id', manage, async (req: AuthRequest, res) => {
   try {
     const id = await prisma.$transaction(async (tx) => {
-      const current = await tx.externalVehicle.findUnique({ where: { id: req.params.id } });
-      if (!current || !canPermanentlyDeleteDraft({ status: current.status, dependencyCount: 0 })) throw new Error('Only an unused external-vehicle draft may be permanently deleted.');
+      const current = await tx.externalVehicle.findUnique({ where: { id: req.params.id }, include: { _count: { select: { documents: true } } } });
+      if (!current || !canPermanentlyDeleteDraft({ status: current.status, dependencyCount: current._count.documents })) throw new Error('Only an unused external-vehicle draft may be permanently deleted.');
       await appendDispatchMasterDataAudit(tx, { ownerScope: 'GUARD', subjectType: 'EXTERNAL_VEHICLE', subjectId: current.id, eventType: 'EXTERNAL_VEHICLE_DRAFT_DELETED', payload: { reason: requiredText(req.body.reason, 'reason') }, actorId: actor(req) });
       await tx.externalVehiclePlate.deleteMany({ where: { vehicleId: current.id } }); await tx.externalVehicle.delete({ where: { id: current.id } }); return current.id;
     });

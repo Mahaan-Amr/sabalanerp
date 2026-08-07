@@ -68,6 +68,53 @@ export const projectInternalDriverReadiness = (input: {
   return { status: blockers.length ? 'NOT_READY' : 'READY', blockers };
 };
 
+type ExternalDocument = { documentType: string; expiresAt: Date | null };
+type ExternalReadinessBlocker =
+  | 'LIFECYCLE_INACTIVE'
+  | 'VEHICLE_PLATE_MISSING'
+  | 'DRIVING_LICENCE_MISSING'
+  | 'DRIVING_LICENCE_EXPIRED'
+  | 'VEHICLE_REGISTRATION_MISSING'
+  | 'VEHICLE_REGISTRATION_EXPIRED';
+
+const requiredDocumentBlockers = (
+  documents: ExternalDocument[], documentType: string, missing: ExternalReadinessBlocker,
+  expired: ExternalReadinessBlocker, at: Date,
+): ExternalReadinessBlocker[] => {
+  const matching = documents.filter((document) => document.documentType === documentType);
+  if (!matching.length) return [missing];
+  return matching.some((document) => !document.expiresAt || document.expiresAt.getTime() > at.getTime()) ? [] : [expired];
+};
+
+export const projectExternalDriverReadiness = (input: {
+  lifecycleStatus: string; documents: ExternalDocument[];
+}, at = new Date()): { status: 'READY' | 'NOT_READY'; blockers: ExternalReadinessBlocker[] } => {
+  const blockers: ExternalReadinessBlocker[] = [];
+  if (input.lifecycleStatus !== 'ACTIVE') blockers.push('LIFECYCLE_INACTIVE');
+  blockers.push(...requiredDocumentBlockers(input.documents, 'DRIVING_LICENCE', 'DRIVING_LICENCE_MISSING', 'DRIVING_LICENCE_EXPIRED', at));
+  return { status: blockers.length ? 'NOT_READY' : 'READY', blockers };
+};
+
+export const projectExternalVehicleReadiness = (input: {
+  lifecycleStatus: string; hasCurrentPlate: boolean; documents: ExternalDocument[];
+}, at = new Date()): { status: 'READY' | 'NOT_READY'; blockers: ExternalReadinessBlocker[] } => {
+  const blockers: ExternalReadinessBlocker[] = [];
+  if (input.lifecycleStatus !== 'ACTIVE') blockers.push('LIFECYCLE_INACTIVE');
+  if (!input.hasCurrentPlate) blockers.push('VEHICLE_PLATE_MISSING');
+  blockers.push(...requiredDocumentBlockers(input.documents, 'VEHICLE_REGISTRATION', 'VEHICLE_REGISTRATION_MISSING', 'VEHICLE_REGISTRATION_EXPIRED', at));
+  return { status: blockers.length ? 'NOT_READY' : 'READY', blockers };
+};
+
+export const assertNoLegacyDispatchReferences = (input: {
+  queueTurnIds: string[]; existingAssignmentCount: number; vehiclePairId: string | null | undefined;
+}): void => {
+  if (input.queueTurnIds.length || input.existingAssignmentCount > 0 || input.vehiclePairId) {
+    const error = new Error('Legacy Security driver-vehicle and queue records are retired from new dispatch operations.') as Error & { statusCode: number };
+    error.statusCode = 410;
+    throw error;
+  }
+};
+
 type LifecycleSubject = 'COMPANY_VEHICLE' | 'EXTERNAL_DRIVER' | 'EXTERNAL_VEHICLE' | 'INTERNAL_DRIVER_PROFILE';
 
 const lifecycleTransitions: Record<LifecycleSubject, Record<string, readonly string[]>> = {

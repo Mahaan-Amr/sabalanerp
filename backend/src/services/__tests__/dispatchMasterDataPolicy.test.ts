@@ -7,6 +7,9 @@ import {
   assertLifecycleTransition,
   canPermanentlyDeleteDraft,
   auditOwnerForSubject,
+  projectExternalDriverReadiness,
+  projectExternalVehicleReadiness,
+  assertNoLegacyDispatchReferences,
 } from '../dispatchMasterDataPolicy';
 
 assert.equal(normalizeIranianPlate(' ۱۲ ب ۳۴۵ ایران ۶۷ '), '12ب345ایران67');
@@ -82,5 +85,31 @@ assert.equal(canPermanentlyDeleteDraft({ status: 'ARCHIVED', dependencyCount: 0 
 assert.equal(auditOwnerForSubject('INTERNAL_DRIVER_ELIGIBILITY'), 'HR');
 assert.equal(auditOwnerForSubject('INTERNAL_DRIVER_PROFILE'), 'VEHICLE_OPERATIONS');
 assert.equal(auditOwnerForSubject('EXTERNAL_DRIVER'), 'GUARD');
+
+const at = new Date('2026-08-07T00:00:00.000Z');
+assert.deepEqual(projectExternalDriverReadiness({ lifecycleStatus: 'ACTIVE', documents: [] }, at), {
+  status: 'NOT_READY', blockers: ['DRIVING_LICENCE_MISSING'],
+});
+assert.deepEqual(projectExternalDriverReadiness({ lifecycleStatus: 'ACTIVE', documents: [
+  { documentType: 'DRIVING_LICENCE', expiresAt: new Date('2026-08-01T00:00:00.000Z') },
+] }, at), { status: 'NOT_READY', blockers: ['DRIVING_LICENCE_EXPIRED'] });
+assert.deepEqual(projectExternalDriverReadiness({ lifecycleStatus: 'ACTIVE', documents: [
+  { documentType: 'DRIVING_LICENCE', expiresAt: new Date('2027-08-01T00:00:00.000Z') },
+] }, at), { status: 'READY', blockers: [] });
+
+assert.deepEqual(projectExternalVehicleReadiness({ lifecycleStatus: 'ACTIVE', hasCurrentPlate: true, documents: [] }, at), {
+  status: 'NOT_READY', blockers: ['VEHICLE_REGISTRATION_MISSING'],
+});
+assert.deepEqual(projectExternalVehicleReadiness({ lifecycleStatus: 'ACTIVE', hasCurrentPlate: true, documents: [
+  { documentType: 'VEHICLE_REGISTRATION', expiresAt: new Date('2026-08-07T00:00:00.000Z') },
+] }, at), { status: 'NOT_READY', blockers: ['VEHICLE_REGISTRATION_EXPIRED'] });
+assert.deepEqual(projectExternalVehicleReadiness({ lifecycleStatus: 'ACTIVE', hasCurrentPlate: true, documents: [
+  { documentType: 'VEHICLE_REGISTRATION', expiresAt: new Date('2027-08-01T00:00:00.000Z') },
+] }, at), { status: 'READY', blockers: [] });
+
+assert.doesNotThrow(() => assertNoLegacyDispatchReferences({ queueTurnIds: [], existingAssignmentCount: 0, vehiclePairId: null }));
+assert.throws(() => assertNoLegacyDispatchReferences({ queueTurnIds: ['legacy-turn'], existingAssignmentCount: 0, vehiclePairId: null }), /retired/i);
+assert.throws(() => assertNoLegacyDispatchReferences({ queueTurnIds: [], existingAssignmentCount: 1, vehiclePairId: null }), /retired/i);
+assert.throws(() => assertNoLegacyDispatchReferences({ queueTurnIds: [], existingAssignmentCount: 0, vehiclePairId: 'legacy-pair' }), /retired/i);
 
 console.log('Dispatch master-data policy tests passed.');

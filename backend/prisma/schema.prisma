@@ -844,9 +844,24 @@ model ExternalDriver {
   createdAt     DateTime                                @default(now())
   createdBy     String
   externalLinks ExternalDriverPersonnelContinuityLink[]
+  documents     ExternalDriverDocument[]
 
   @@index([status])
   @@map("external_drivers")
+}
+
+model ExternalDriverDocument {
+  id            String         @id @default(cuid())
+  driverId      String
+  documentType  String
+  reference     String
+  expiresAt     DateTime?
+  recordedAt    DateTime       @default(now())
+  recordedBy    String
+  driver        ExternalDriver @relation(fields: [driverId], references: [id], onDelete: Restrict)
+
+  @@index([driverId, documentType, recordedAt])
+  @@map("external_driver_documents")
 }
 
 model ExternalVehicle {
@@ -860,9 +875,24 @@ model ExternalVehicle {
   createdAt   DateTime               @default(now())
   createdBy   String
   plates      ExternalVehiclePlate[]
+  documents   ExternalVehicleDocument[]
 
   @@index([status])
   @@map("external_vehicles")
+}
+
+model ExternalVehicleDocument {
+  id            String          @id @default(cuid())
+  vehicleId     String
+  documentType  String
+  reference     String
+  expiresAt     DateTime?
+  recordedAt    DateTime        @default(now())
+  recordedBy    String
+  vehicle       ExternalVehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  @@index([vehicleId, documentType, recordedAt])
+  @@map("external_vehicle_documents")
 }
 
 model ExternalVehiclePlate {

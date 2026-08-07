@@ -15,6 +15,7 @@ import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSc
 import { buildDashboardRecentReports, buildSecurityDashboardAwareness } from '../services/securityDashboardAwareness';
 import { buildCombinedSecurityShiftTimeline, validateShiftSessionCorrectionPolicy } from '../services/securityShiftSessionPolicy';
 import { summarizeSecurityAttendance } from '../services/securityAttendanceSummary';
+import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
 import { renderCompletedSecurityShiftPdfHtml } from '../services/securityCompletedShiftPdf';
 
 const router = express.Router();
@@ -971,6 +972,8 @@ router.post('/vehicle-movements/exit', protect, securityEdit, [
     });
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (loading.status !== 'FINALIZED') return res.status(400).json({ success: false, error: 'Only finalized loadings can exit the gate' });
+    try { assertNoLegacyDispatchReferences({ queueTurnIds: [], existingAssignmentCount: 0, vehiclePairId: req.body.vehiclePairId || loading.vehiclePairId }); }
+    catch (error: any) { return res.status(error.statusCode || 410).json({ success: false, error: error.message }); }
 
     const existingExit = await prisma.securityVehicleMovement.findFirst({
       where: { loadingId: loading.id, direction: 'OUTBOUND', status: 'EXITED' }
@@ -978,22 +981,18 @@ router.post('/vehicle-movements/exit', protect, securityEdit, [
     if (existingExit) return res.status(400).json({ success: false, error: 'Gate exit already recorded for this loading' });
 
     const purpose = req.body.customerPersonalCar ? 'CUSTOMER_PERSONAL_CAR_EXIT' : 'SALES_EXIT';
-    const pair = req.body.vehiclePairId
-      ? await prisma.securityVehiclePair.findUnique({ where: { id: req.body.vehiclePairId } })
-      : loading.vehiclePair;
-
     const movement = await prisma.securityVehicleMovement.create({
       data: {
         movementNumber: await generateMovementNumber('OUT'),
         direction: 'OUTBOUND',
         purpose: purpose as any,
         status: 'EXITED',
-        vehiclePairId: purpose === 'SALES_EXIT' ? pair?.id || null : null,
+        vehiclePairId: null,
         loadingId: loading.id,
         customerId: loading.customerId,
         projectId: loading.projectId,
         occurredAt: req.body.occurredAt ? new Date(req.body.occurredAt) : new Date(),
-        driverSnapshot: purpose === 'SALES_EXIT' ? (req.body.driverSnapshot || (pair ? pairSnapshot(pair) : loading.driverSnapshot)) : null,
+        driverSnapshot: purpose === 'SALES_EXIT' ? (req.body.driverSnapshot || loading.driverSnapshot) : null,
         notes: req.body.notes || null,
         createdBy: req.user!.id
       },

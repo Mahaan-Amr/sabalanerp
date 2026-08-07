@@ -214,6 +214,12 @@ export const FEATURES = {
   LOGISTICS_DRIVERS_VIEW: 'logistics_drivers_view',
   LOGISTICS_DRIVERS_MANAGE: 'logistics_drivers_manage',
 
+  // HR-hosted Driver and Vehicle Operations Features
+  HR_INTERNAL_DRIVERS_VIEW: 'hr_internal_drivers_view',
+  HR_INTERNAL_DRIVERS_MANAGE: 'hr_internal_drivers_manage',
+  HR_VEHICLE_OPERATIONS_VIEW: 'hr_vehicle_operations_view',
+  HR_VEHICLE_OPERATIONS_MANAGE: 'hr_vehicle_operations_manage',
+
   // Security Features
   SECURITY_SHIFTS_VIEW: 'security_shifts_view',
   SECURITY_SHIFTS_CREATE: 'security_shifts_create',
@@ -236,6 +242,8 @@ export const FEATURES = {
   SECURITY_SIGNATURE_UPDATE: 'security_signature_update',
   SECURITY_SIGNATURE_VIEW: 'security_signature_view',
   SECURITY_SIGNATURE_VALIDATE: 'security_signature_validate',
+  SECURITY_EXTERNAL_DRIVERS_VIEW: 'security_external_drivers_view',
+  SECURITY_EXTERNAL_DRIVERS_MANAGE: 'security_external_drivers_manage',
   SUPPORT_SECURITY_INCIDENT_HANDLE: 'support_security_incident_handle'
 } as const;
 
@@ -445,6 +453,11 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.LOGISTICS_DRIVERS_VIEW]: 'logistics',
   [FEATURES.LOGISTICS_DRIVERS_MANAGE]: 'logistics',
 
+  [FEATURES.HR_INTERNAL_DRIVERS_VIEW]: 'hr',
+  [FEATURES.HR_INTERNAL_DRIVERS_MANAGE]: 'hr',
+  [FEATURES.HR_VEHICLE_OPERATIONS_VIEW]: 'hr',
+  [FEATURES.HR_VEHICLE_OPERATIONS_MANAGE]: 'hr',
+
   // Security Features
   [FEATURES.SECURITY_SHIFTS_VIEW]: 'security',
   [FEATURES.SECURITY_SHIFTS_CREATE]: 'security',
@@ -467,6 +480,8 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.SECURITY_SIGNATURE_UPDATE]: 'security',
   [FEATURES.SECURITY_SIGNATURE_VIEW]: 'security',
   [FEATURES.SECURITY_SIGNATURE_VALIDATE]: 'security',
+  [FEATURES.SECURITY_EXTERNAL_DRIVERS_VIEW]: 'security',
+  [FEATURES.SECURITY_EXTERNAL_DRIVERS_MANAGE]: 'security',
   [FEATURES.SUPPORT_SECURITY_INCIDENT_HANDLE]: 'security'
 };
 
@@ -671,6 +686,12 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   [FEATURES.SECURITY_SIGNATURE_UPDATE]: 'Security Signature - Update',
   [FEATURES.SECURITY_SIGNATURE_VIEW]: 'Security Signature - View',
   [FEATURES.SECURITY_SIGNATURE_VALIDATE]: 'Security Signature - Validate',
+  [FEATURES.HR_INTERNAL_DRIVERS_VIEW]: 'HR Internal Drivers - View',
+  [FEATURES.HR_INTERNAL_DRIVERS_MANAGE]: 'HR Internal Drivers - Manage',
+  [FEATURES.HR_VEHICLE_OPERATIONS_VIEW]: 'HR Vehicle Operations - View',
+  [FEATURES.HR_VEHICLE_OPERATIONS_MANAGE]: 'HR Vehicle Operations - Manage',
+  [FEATURES.SECURITY_EXTERNAL_DRIVERS_VIEW]: 'Security External Drivers - View',
+  [FEATURES.SECURITY_EXTERNAL_DRIVERS_MANAGE]: 'Security External Drivers - Manage',
   [FEATURES.SUPPORT_SECURITY_INCIDENT_HANDLE]: 'Support - Designated Security Incident Handler'
 };
 

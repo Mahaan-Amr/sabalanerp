@@ -9,6 +9,7 @@ import {
   FaUserPlus,
   FaUserTie,
   FaUsers,
+  FaTruck,
 } from "react-icons/fa";
 import {
   ErpButton,
@@ -143,6 +144,12 @@ export default function HrDashboardPage() {
             title: "پرسنل و روابط استخدامی",
             href: "/dashboard/hr/personnel",
             icon: FaUsers,
+          },
+          {
+            id: "vehicle-operations",
+            title: "رانندگان و خودروهای شرکت",
+            href: "/dashboard/hr/vehicle-operations",
+            icon: FaTruck,
           },
           {
             id: "migration",

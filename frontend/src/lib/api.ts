@@ -342,6 +342,24 @@ export const hrAPI = {
   applyMigration: (data: any) => api.post('/hr/migration/apply', data),
 };
 
+export const dispatchMasterDataAPI = {
+  getInternalDrivers: (params?: { at?: string }) => api.get('/dispatch-master-data/internal-drivers', { params }),
+  createInternalDriver: (data: any) => api.post('/dispatch-master-data/internal-drivers', data),
+  transitionInternalDriverEligibility: (id: string, data: any) => api.post(`/dispatch-master-data/internal-drivers/${id}/eligibility`, data),
+  updateInternalDrivingProfile: (id: string, data: any) => api.put(`/dispatch-master-data/internal-drivers/${id}/profile`, data),
+  getCompanyVehicles: () => api.get('/dispatch-master-data/company-vehicles'),
+  createCompanyVehicle: (data: any) => api.post('/dispatch-master-data/company-vehicles', data),
+  changeCompanyVehiclePlate: (id: string, data: any) => api.post(`/dispatch-master-data/company-vehicles/${id}/plates`, data),
+  transitionCompanyVehicleStatus: (id: string, data: any) => api.post(`/dispatch-master-data/company-vehicles/${id}/status`, data),
+  assignCompanyVehicle: (data: any) => api.post('/dispatch-master-data/driver-vehicle-assignments', data),
+  getExternalRegistry: () => api.get('/dispatch-master-data/external-registry'),
+  createExternalDriver: (data: any) => api.post('/dispatch-master-data/external-drivers', data),
+  createExternalVehicle: (data: any) => api.post('/dispatch-master-data/external-vehicles', data),
+  changeExternalVehiclePlate: (id: string, data: any) => api.post(`/dispatch-master-data/external-vehicles/${id}/plates`, data),
+  transitionExternalDriverStatus: (id: string, data: any) => api.post(`/dispatch-master-data/external-drivers/${id}/status`, data),
+  transitionExternalVehicleStatus: (id: string, data: any) => api.post(`/dispatch-master-data/external-vehicles/${id}/status`, data),
+};
+
 // Posts API
 export const postsAPI = {
   getPosts: (page = 1, limit = 10, published?: boolean) => {

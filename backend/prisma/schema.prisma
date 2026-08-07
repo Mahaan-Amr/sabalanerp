@@ -721,25 +721,33 @@ enum InternalDriverEligibilityStatus {
   ENDED
 }
 
-enum DriverOperationalStatus {
+enum InternalDriverProfileStatus {
+  DRAFT
   ACTIVE
-  SUSPENDED
-  RETIRED
+  ARCHIVED
 }
 
-enum FleetVehicleStatus {
-  IN_SERVICE
+enum CompanyVehicleLifecycleStatus {
+  DRAFT
+  ACTIVE
   OUT_OF_SERVICE
-  RETIRED
+  ARCHIVED
+}
+
+enum ExternalRegistryLifecycleStatus {
+  DRAFT
+  ACTIVE
+  RESTRICTED
+  ARCHIVED
 }
 
 model InternalDriverProfile {
   id                 String                            @id @default(cuid())
   personnelId        String                            @unique
-  licenceNumber      String                            @unique
+  licenceNumber      String?                           @unique
   licenceClass       String?
   licenceExpiresAt   DateTime?
-  status             DriverOperationalStatus           @default(ACTIVE)
+  status             InternalDriverProfileStatus       @default(DRAFT)
   notes              String?
   createdAt          DateTime                          @default(now())
   createdBy          String
@@ -774,7 +782,10 @@ model CompanyVehicle {
   make        String?
   model       String?
   vin         String?                   @unique
-  status      FleetVehicleStatus        @default(IN_SERVICE)
+  status      CompanyVehicleLifecycleStatus @default(DRAFT)
+  statusEffectiveFrom DateTime              @default(now())
+  statusReason        String?
+  statusRecordedBy    String?
   notes       String?
   createdAt   DateTime                  @default(now())
   createdBy   String
@@ -825,7 +836,10 @@ model ExternalDriver {
   lastName      String
   nationalCode  String                                  @unique
   phone         String
-  status        DriverOperationalStatus                 @default(ACTIVE)
+  status        ExternalRegistryLifecycleStatus         @default(DRAFT)
+  statusEffectiveFrom DateTime                           @default(now())
+  statusReason  String?
+  statusRecordedBy String?
   notes         String?
   createdAt     DateTime                                @default(now())
   createdBy     String
@@ -838,7 +852,10 @@ model ExternalDriver {
 model ExternalVehicle {
   id          String                 @id @default(cuid())
   vehicleType String
-  status      FleetVehicleStatus     @default(IN_SERVICE)
+  status      ExternalRegistryLifecycleStatus @default(DRAFT)
+  statusEffectiveFrom DateTime               @default(now())
+  statusReason String?
+  statusRecordedBy String?
   notes       String?
   createdAt   DateTime               @default(now())
   createdBy   String
@@ -884,6 +901,7 @@ model DispatchMasterDataAudit {
   id           String   @id @default(cuid())
   subjectType  String
   subjectId    String
+  ownerScope   String
   eventType    String
   payload      Json
   actorId      String

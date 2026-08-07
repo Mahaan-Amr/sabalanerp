@@ -13,6 +13,7 @@ const stableValue = (value: unknown): unknown => {
 export const appendDispatchMasterDataAudit = async (tx: any, input: {
   subjectType: string;
   subjectId: string;
+  ownerScope: 'HR' | 'VEHICLE_OPERATIONS' | 'GUARD';
   eventType: string;
   payload: unknown;
   actorId: string;
@@ -28,6 +29,7 @@ export const appendDispatchMasterDataAudit = async (tx: any, input: {
   const eventHash = crypto.createHash('sha256').update(JSON.stringify({
     subjectType: input.subjectType,
     subjectId: input.subjectId,
+    ownerScope: input.ownerScope,
     eventType: input.eventType,
     payload,
     actorId: input.actorId,

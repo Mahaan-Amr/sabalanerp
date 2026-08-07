@@ -1409,6 +1409,11 @@ _Avoid_: cluttering the reusable driver/vehicle registry with every one-time sup
 A lightweight outbound sales movement where the customer takes goods with a personal vehicle. It must be tied to the customer or linked بارگیری/project and must record the exact exit time, without requiring a reusable driver/vehicle pair.
 _Avoid_: forcing customer personal vehicles into the reusable logistics driver/vehicle registry, or requiring freight settlement fields for a customer pickup
 
+**Canonical Driver and Vehicle Master Data (supersedes ثبت راننده و خودرو)**:
+Internal-driver eligibility is an HR-owned effective period attached to Personnel. The internal driving profile, licence facts, company vehicles, effective plates, and effective driver–vehicle assignments are independently permissioned Vehicle Operations facts. Guard owns independent external-driver and external-vehicle identities and their lifecycle evidence. A driver and a vehicle are combined only at physical Guard admission, where the queue turn freezes the identities and plate that actually arrived.
+The former `SecurityVehiclePair` registry and its queue admissions are historical source evidence only: they remain readable for prior movements, loadings, photos, and audits, but cannot be created, edited, deleted, photographed, admitted, or selected for any new operation. New master records begin in DRAFT, become operational only after explicit readiness-checked activation, and preserve lifecycle and effective-period history. Company vehicles use DRAFT, ACTIVE, OUT_OF_SERVICE, and ARCHIVED; external drivers and vehicles use DRAFT, ACTIVE, RESTRICTED, and ARCHIVED. Permanent deletion is limited to dependency-free unused drafts.
+_Avoid_: granting HR authority over licence/profile fields, granting Vehicle Operations authority over Personnel eligibility, granting Guard authority over internal Personnel facts, reusing a legacy combined pair for a new queue turn or loading, treating a mutable plate as vehicle identity, or exposing another workspace's audit evidence through a broad master-data permission
+
 **زمان خروج فروش**:
 The official outbound sales exit time is the گارد-recorded gate time when the vehicle physically leaves. It is separate from the logistics بارگیری finalization time.
 _Avoid_: treating logistics finalization time as proof of physical gate exit

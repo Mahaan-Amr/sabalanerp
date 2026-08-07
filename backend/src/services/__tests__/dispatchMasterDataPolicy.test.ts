@@ -4,6 +4,9 @@ import {
   effectivePeriodsOverlap,
   normalizeIranianPlate,
   projectInternalDriverReadiness,
+  assertLifecycleTransition,
+  canPermanentlyDeleteDraft,
+  auditOwnerForSubject,
 } from '../dispatchMasterDataPolicy';
 
 assert.equal(normalizeIranianPlate(' ۱۲ ب ۳۴۵ ایران ۶۷ '), '12ب345ایران67');
@@ -34,8 +37,12 @@ const ready = projectInternalDriverReadiness({
   activeEmployment: true,
   eligible: true,
   drivingProfileActive: true,
+  licenceNumber: 'LIC-1',
+  licenceClass: 'CLASS_ONE',
   licenceExpiresAt: new Date('2026-12-01T00:00:00.000Z'),
-  assignedVehicleInService: true,
+  assignmentActive: true,
+  assignedVehicleActive: true,
+  assignedVehicleHasCurrentPlate: true,
 }, new Date('2026-08-07T00:00:00.000Z'));
 assert.deepEqual(ready, { status: 'READY', blockers: [] });
 
@@ -44,12 +51,36 @@ const blocked = projectInternalDriverReadiness({
   activeEmployment: true,
   eligible: false,
   drivingProfileActive: true,
-  licenceExpiresAt: new Date('2026-01-01T00:00:00.000Z'),
-  assignedVehicleInService: false,
+  licenceNumber: '',
+  licenceClass: '',
+  licenceExpiresAt: null,
+  assignmentActive: true,
+  assignedVehicleActive: false,
+  assignedVehicleHasCurrentPlate: false,
 }, new Date('2026-08-07T00:00:00.000Z'));
 assert.deepEqual(blocked, {
   status: 'NOT_READY',
-  blockers: ['ELIGIBILITY_INACTIVE', 'LICENCE_EXPIRED', 'VEHICLE_NOT_IN_SERVICE'],
+  blockers: ['ELIGIBILITY_INACTIVE', 'LICENCE_NUMBER_MISSING', 'LICENCE_CLASS_MISSING', 'LICENCE_EXPIRY_MISSING', 'VEHICLE_NOT_ACTIVE', 'VEHICLE_PLATE_MISSING'],
 });
+
+const expiredLicence = projectInternalDriverReadiness({
+  personnelActive: true, activeEmployment: true, eligible: true, drivingProfileActive: true,
+  licenceNumber: 'LIC-2', licenceClass: 'CLASS_ONE', licenceExpiresAt: new Date('2026-01-01T00:00:00.000Z'),
+  assignmentActive: true, assignedVehicleActive: true, assignedVehicleHasCurrentPlate: true,
+}, new Date('2026-08-07T00:00:00.000Z'));
+assert.deepEqual(expiredLicence.blockers, ['LICENCE_EXPIRED']);
+
+assert.throws(() => assertLifecycleTransition('COMPANY_VEHICLE', 'DRAFT', 'OUT_OF_SERVICE'), /not permitted/i);
+assert.doesNotThrow(() => assertLifecycleTransition('COMPANY_VEHICLE', 'DRAFT', 'ACTIVE'));
+assert.doesNotThrow(() => assertLifecycleTransition('EXTERNAL_DRIVER', 'ACTIVE', 'RESTRICTED'));
+assert.throws(() => assertLifecycleTransition('EXTERNAL_DRIVER', 'ARCHIVED', 'RESTRICTED'), /not permitted/i);
+
+assert.equal(canPermanentlyDeleteDraft({ status: 'DRAFT', dependencyCount: 0 }), true);
+assert.equal(canPermanentlyDeleteDraft({ status: 'DRAFT', dependencyCount: 1 }), false);
+assert.equal(canPermanentlyDeleteDraft({ status: 'ARCHIVED', dependencyCount: 0 }), false);
+
+assert.equal(auditOwnerForSubject('INTERNAL_DRIVER_ELIGIBILITY'), 'HR');
+assert.equal(auditOwnerForSubject('INTERNAL_DRIVER_PROFILE'), 'VEHICLE_OPERATIONS');
+assert.equal(auditOwnerForSubject('EXTERNAL_DRIVER'), 'GUARD');
 
 console.log('Dispatch master-data policy tests passed.');

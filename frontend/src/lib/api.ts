@@ -346,11 +346,14 @@ export const dispatchMasterDataAPI = {
   getInternalDrivers: (params?: { at?: string }) => api.get('/dispatch-master-data/internal-drivers', { params }),
   createInternalDriver: (data: any) => api.post('/dispatch-master-data/internal-drivers', data),
   transitionInternalDriverEligibility: (id: string, data: any) => api.post(`/dispatch-master-data/internal-drivers/${id}/eligibility`, data),
+  getVehicleOperationsDrivers: (params?: { at?: string }) => api.get('/dispatch-master-data/vehicle-operations/internal-drivers', { params }),
   updateInternalDrivingProfile: (id: string, data: any) => api.put(`/dispatch-master-data/internal-drivers/${id}/profile`, data),
+  transitionInternalDrivingProfile: (id: string, data: any) => api.post(`/dispatch-master-data/internal-drivers/${id}/profile-status`, data),
   getCompanyVehicles: () => api.get('/dispatch-master-data/company-vehicles'),
   createCompanyVehicle: (data: any) => api.post('/dispatch-master-data/company-vehicles', data),
   changeCompanyVehiclePlate: (id: string, data: any) => api.post(`/dispatch-master-data/company-vehicles/${id}/plates`, data),
   transitionCompanyVehicleStatus: (id: string, data: any) => api.post(`/dispatch-master-data/company-vehicles/${id}/status`, data),
+  deleteCompanyVehicleDraft: (id: string, reason: string) => api.delete(`/dispatch-master-data/company-vehicles/${id}`, { data: { reason } }),
   assignCompanyVehicle: (data: any) => api.post('/dispatch-master-data/driver-vehicle-assignments', data),
   getExternalRegistry: () => api.get('/dispatch-master-data/external-registry'),
   createExternalDriver: (data: any) => api.post('/dispatch-master-data/external-drivers', data),
@@ -358,6 +361,8 @@ export const dispatchMasterDataAPI = {
   changeExternalVehiclePlate: (id: string, data: any) => api.post(`/dispatch-master-data/external-vehicles/${id}/plates`, data),
   transitionExternalDriverStatus: (id: string, data: any) => api.post(`/dispatch-master-data/external-drivers/${id}/status`, data),
   transitionExternalVehicleStatus: (id: string, data: any) => api.post(`/dispatch-master-data/external-vehicles/${id}/status`, data),
+  deleteExternalDriverDraft: (id: string, reason: string) => api.delete(`/dispatch-master-data/external-drivers/${id}`, { data: { reason } }),
+  deleteExternalVehicleDraft: (id: string, reason: string) => api.delete(`/dispatch-master-data/external-vehicles/${id}`, { data: { reason } }),
 };
 
 // Posts API
@@ -1129,17 +1134,8 @@ export const securityAPI = {
 
   // Vehicle gate operations
   getVehiclePairs: (params?: any) => api.get('/security/vehicle-pairs', { params }),
-  createVehiclePair: (data: FormData) => api.post('/security/vehicle-pairs', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  updateVehiclePair: (id: string, data: any) => api.put(`/security/vehicle-pairs/${id}`, data),
-  deleteVehiclePair: (id: string) => api.delete(`/security/vehicle-pairs/${id}`),
-  addVehiclePairPhotos: (id: string, data: FormData) => api.post(`/security/vehicle-pairs/${id}/photos`, data, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  deleteVehiclePairPhoto: (id: string, photoId: string) => api.delete(`/security/vehicle-pairs/${id}/photos/${photoId}`),
   getVehiclePairPhoto: (photoId: string) => api.get(`/security/vehicle-pairs/photos/${photoId}`, { responseType: 'blob' }),
   getDriverQueue: (history = false) => api.get('/security/driver-queue', { params: { history } }),
-  enqueueDriver: (vehiclePairId: string) => api.post('/security/driver-queue', { vehiclePairId }),
-  removeDriverFromQueue: (id: string, reason: string) => api.post(`/security/driver-queue/${id}/remove`, { reason }),
-  enterDriverLoadingArea: (id: string) => api.post(`/security/driver-queue/${id}/enter-loading-area`),
-  returnDriverToWaiting: (id: string, reason: string) => api.post(`/security/driver-queue/${id}/return-to-waiting`, { reason }),
   getVehicleMovements: (params?: any) => api.get('/security/vehicle-movements', { params }),
   getReadyExitLoadings: () => api.get('/security/vehicle-movements/ready-exit'),
   createInboundVehicleMovement: (data: any) => api.post('/security/vehicle-movements/inbound', data),

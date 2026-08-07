@@ -501,6 +501,12 @@ const includeMovement = {
 
 // @desc    Get security-owned driver/vehicle pairs
 // @route   GET /api/security/vehicle-pairs
+const legacyDispatchReadOnly = (req: AuthRequest, res: Response, next: any) => {
+  if (req.method === 'GET') return next();
+  return res.status(410).json({ success: false, error: 'Legacy combined driver-vehicle records are historical-only. Use the canonical external registry and admission flow.' });
+};
+router.use(['/vehicle-pairs', '/driver-queue', '/loading-driver-requests/:id/assign'], protect, legacyDispatchReadOnly);
+
 router.get('/vehicle-pairs', protect, securityView, async (req: AuthRequest, res: Response) => {
   try {
     const includeInactive = req.query.includeInactive === 'true';
@@ -524,8 +530,11 @@ router.get('/vehicle-pairs', protect, securityView, async (req: AuthRequest, res
     });
     res.json({ success: true, data: pairs.map((pair) => ({
       ...pair,
+      source: 'LEGACY_COMBINED',
+      historicalOnly: true,
+      operationalUseAllowed: false,
       informationComplete: pairIsComplete(pair),
-      canDelete: pair._count.loadings + pair._count.movements + pair._count.queueTurns === 0
+      canDelete: false
     })) });
   } catch (error) {
     console.error('Security vehicle pairs list error:', error);
@@ -654,7 +663,7 @@ router.get('/driver-queue', protect, securityView, async (req: AuthRequest, res:
       orderBy: history ? [{ enteredAt: 'desc' }, { id: 'desc' }] : [{ returnedToQueueAt: 'desc' }, { enteredAt: 'asc' }, { id: 'asc' }],
       take: history ? 250 : undefined
     });
-    res.json({ success: true, data: turns });
+    res.json({ success: true, data: turns.map((turn) => ({ ...turn, source: 'LEGACY_COMBINED_QUEUE', historicalOnly: true, operationalUseAllowed: false })) });
   } catch (error) {
     console.error('Driver queue list error:', error);
     res.status(500).json({ success: false, error: 'دریافت صف رانندگان ناموفق بود.' });
@@ -890,10 +899,9 @@ router.post('/vehicle-movements/inbound', protect, securityEdit, [
     if (req.body.purpose === 'SALES_RETURN' && !req.body.customerId) {
       return res.status(400).json({ success: false, error: 'Customer is required for sales return' });
     }
-
-    const pair = req.body.vehiclePairId
-      ? await prisma.securityVehiclePair.findUnique({ where: { id: req.body.vehiclePairId } })
-      : null;
+    if (req.body.vehiclePairId) {
+      return res.status(410).json({ success: false, error: 'Legacy combined driver-vehicle records cannot be attached to new movements. Record a visit snapshot or use canonical identities.' });
+    }
 
     const movement = await prisma.securityVehicleMovement.create({
       data: {
@@ -901,11 +909,11 @@ router.post('/vehicle-movements/inbound', protect, securityEdit, [
         direction: 'INBOUND',
         purpose: req.body.purpose,
         status: 'ENTRY_RECORDED',
-        vehiclePairId: pair?.id || null,
+        vehiclePairId: null,
         customerId: req.body.customerId || null,
         projectId: req.body.projectId || null,
         occurredAt: req.body.occurredAt ? new Date(req.body.occurredAt) : new Date(),
-        driverSnapshot: req.body.driverSnapshot || (pair ? pairSnapshot(pair) : null),
+        driverSnapshot: req.body.driverSnapshot || null,
         documentSnapshot: req.body.documentSnapshot || null,
         settlementSnapshot: req.body.settlementSnapshot || null,
         notes: req.body.notes || null,

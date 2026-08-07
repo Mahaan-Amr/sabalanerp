@@ -49,7 +49,7 @@ test('device-neutral simulator reports safe outcomes for every required scenario
   } as const;
 
   for (const [scenario, expected] of Object.entries(expectations)) {
-    const result = await simulator.execute(command(scenario).command);
+    const result = await simulator.execute(command(scenario, { challengeId: `challenge-${scenario}` }).command);
     assert.deepEqual(
       [result.availability, result.captureQuality.state, result.liveness.state, result.match.state],
       expected,
@@ -77,6 +77,33 @@ test('only three good-quality live non-matches unlock biometric fallback', async
   const third = await simulator.execute(command('NON_MATCH', { simulation: { scenario: 'NON_MATCH', attempt: 3 } }).command);
   assert.deepEqual(second.fallback, { goodQualityLiveNonMatchCount: 2, eligible: false });
   assert.deepEqual(third.fallback, { goodQualityLiveNonMatchCount: 3, eligible: true });
+});
+
+test('duplicate and out-of-order non-match attempts are rejected without advancing fallback', async () => {
+  const simulator = new DeterministicBiometricSimulator();
+  const first = await simulator.execute(command('NON_MATCH', { challengeId: 'sequence-01', simulation: { scenario: 'NON_MATCH', attempt: 1 } }).command);
+  const duplicate = await simulator.execute(command('NON_MATCH', { challengeId: 'sequence-01', simulation: { scenario: 'NON_MATCH', attempt: 1 } }).command);
+  const skipped = await simulator.execute(command('NON_MATCH', { challengeId: 'sequence-01', simulation: { scenario: 'NON_MATCH', attempt: 3 } }).command);
+  const second = await simulator.execute(command('NON_MATCH', { challengeId: 'sequence-01', simulation: { scenario: 'NON_MATCH', attempt: 2 } }).command);
+  const third = await simulator.execute(command('NON_MATCH', { challengeId: 'sequence-01', simulation: { scenario: 'NON_MATCH', attempt: 3 } }).command);
+
+  assert.deepEqual(first.fallback, { goodQualityLiveNonMatchCount: 1, eligible: false });
+  assert.equal(duplicate.errorCategory, 'ATTEMPT_SEQUENCE_INVALID');
+  assert.equal(skipped.errorCategory, 'ATTEMPT_SEQUENCE_INVALID');
+  assert.deepEqual(second.fallback, { goodQualityLiveNonMatchCount: 2, eligible: false });
+  assert.deepEqual(third.fallback, { goodQualityLiveNonMatchCount: 3, eligible: true });
+});
+
+test('fallback attempt state is isolated by challenge and resets after a successful match', async () => {
+  const simulator = new DeterministicBiometricSimulator();
+  const challengeA = await simulator.execute(command('NON_MATCH', { challengeId: 'challenge-a', simulation: { scenario: 'NON_MATCH', attempt: 1 } }).command);
+  const challengeB = await simulator.execute(command('NON_MATCH', { challengeId: 'challenge-b', simulation: { scenario: 'NON_MATCH', attempt: 1 } }).command);
+  await simulator.execute(command('SUCCESS', { challengeId: 'challenge-a' }).command);
+  const resetA = await simulator.execute(command('NON_MATCH', { challengeId: 'challenge-a', simulation: { scenario: 'NON_MATCH', attempt: 1 } }).command);
+
+  assert.equal(challengeA.fallback.goodQualityLiveNonMatchCount, 1);
+  assert.equal(challengeB.fallback.goodQualityLiveNonMatchCount, 1);
+  assert.deepEqual(resetA.fallback, { goodQualityLiveNonMatchCount: 1, eligible: false });
 });
 
 test('diagnostics disclose operational health but no biometric or authentication material', async () => {
@@ -131,6 +158,22 @@ test('signed commands reject replay and survive restart with idempotent results'
   await assert.rejects(() => restartedGateway.execute(replay), /replay/i);
   const tampered = { ...signed, command: { ...signed.command, payload: { ...signed.command.payload, expectedDriverId: 'driver-02' } } };
   await assert.rejects(() => restartedGateway.execute(tampered), /signature/i);
+});
+
+test('idempotent replay and a duplicate attempt under another command ID cannot increment fallback', async () => {
+  const journalPath = join(mkdtempSync(join(tmpdir(), 'sabalan-biometric-attempt-idempotency-')), 'commands.json');
+  const simulator = new DeterministicBiometricSimulator();
+  const gateway = new AuthenticatedBiometricConnector({ secret, workstationId: 'accounting-01', connector: simulator, journal: new BiometricCommandJournal(journalPath), now: () => now });
+  const first = command('NON_MATCH', { challengeId: 'signed-sequence', simulation: { scenario: 'NON_MATCH', attempt: 1 } });
+  const firstResult = await gateway.execute(first);
+  assert.deepEqual(await gateway.execute(first), firstResult);
+
+  const duplicateAttempt = signBiometricCommand({ ...first.command, commandId: 'another-command', nonce: 'another-nonce' }, secret);
+  const duplicateResult = await gateway.execute(duplicateAttempt);
+  assert.equal(duplicateResult.errorCategory, 'ATTEMPT_SEQUENCE_INVALID');
+
+  const second = signBiometricCommand({ ...first.command, commandId: 'second-command', nonce: 'second-nonce', payload: { ...first.command.payload, simulation: { scenario: 'NON_MATCH', attempt: 2 } } }, secret);
+  assert.deepEqual((await gateway.execute(second)).fallback, { goodQualityLiveNonMatchCount: 2, eligible: false });
 });
 
 test('command execution is durably reserved before the device runs and concurrent duplicates do not execute twice', async () => {

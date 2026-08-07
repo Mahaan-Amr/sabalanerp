@@ -20,7 +20,7 @@ Vendor-native values remain inside the future adapter. A real adapter must imple
 
 ## Simulator
 
-The deterministic scenarios are success, poor quality, liveness failure, non-match, wrong driver, disconnect, timeout, retry, recovery, and SDK licensing failure. Retry succeeds only when the caller advances to attempt two; repeating an identical signed command remains idempotent. Fallback eligibility is stateful per challenge and becomes true only after three good-quality, live non-matches. Poor-quality captures and liveness failures never increment that count.
+The deterministic scenarios are success, poor quality, liveness failure, non-match, wrong driver, disconnect, timeout, retry, recovery, and SDK licensing failure. Retry succeeds only when the caller advances to attempt two; repeating an identical signed command remains idempotent. Fallback eligibility is stateful and isolated per challenge. It becomes true only after distinct, sequential attempt numbers 1, 2, and 3 each produce a good-quality live non-match. Duplicate or skipped attempt numbers fail with `ATTEMPT_SEQUENCE_INVALID` and do not advance the counter; poor-quality captures and liveness failures also do not count. A successful match clears that challenge's failure sequence.
 
 Authenticated commands are operation-specific. Unknown fields, missing required identifiers, unsupported simulation values, nested arrays, raw-image/sample/blob/probe/template-material fields, and base64-like material are rejected before reservation or device execution. The simulator itself also fails closed when called directly with an unsupported scenario.
 

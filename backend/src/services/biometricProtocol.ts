@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 export type BiometricOperation = 'HEALTH' | 'CAPTURE' | 'VERIFY' | 'CANCEL';
 export type SimulatorScenario = 'SUCCESS' | 'POOR_QUALITY' | 'LIVENESS_FAILURE' | 'NON_MATCH' | 'WRONG_DRIVER' | 'DISCONNECT' | 'TIMEOUT' | 'RETRY' | 'RECOVERY' | 'LICENSING_FAILURE';
-export type ConnectorErrorCategory = 'NONE' | 'POOR_CAPTURE_QUALITY' | 'LIVENESS_FAILED' | 'NO_MATCH' | 'WRONG_DRIVER' | 'DEVICE_DISCONNECTED' | 'CAPTURE_TIMEOUT' | 'RETRYABLE_CONNECTOR_ERROR' | 'SDK_LICENSE_INVALID' | 'INVALID_COMMAND';
+export type ConnectorErrorCategory = 'NONE' | 'POOR_CAPTURE_QUALITY' | 'LIVENESS_FAILED' | 'NO_MATCH' | 'WRONG_DRIVER' | 'DEVICE_DISCONNECTED' | 'CAPTURE_TIMEOUT' | 'RETRYABLE_CONNECTOR_ERROR' | 'SDK_LICENSE_INVALID' | 'ATTEMPT_SEQUENCE_INVALID' | 'INVALID_COMMAND';
 
 export interface BiometricCommand {
   commandId: string;

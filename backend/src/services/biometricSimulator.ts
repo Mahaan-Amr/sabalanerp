@@ -14,7 +14,7 @@ const baseResult = (command: BiometricCommand): BiometricConnectorResult => ({
 });
 
 export class DeterministicBiometricSimulator implements BiometricConnector {
-  private nonMatchesByChallenge = new Map<string, number>();
+  private lastNonMatchAttemptByChallenge = new Map<string, number>();
 
   async execute(command: BiometricCommand): Promise<BiometricConnectorResult> {
     const scenario = String(command.payload.simulation?.scenario || 'SUCCESS') as SimulatorScenario;
@@ -26,18 +26,24 @@ export class DeterministicBiometricSimulator implements BiometricConnector {
       result.liveness = { state: 'NOT_EVALUATED' };
       result.match = { state: 'NOT_EVALUATED' };
     };
-    const countNonMatch = () => {
-      const count = (this.nonMatchesByChallenge.get(challengeId) || 0) + 1;
-      this.nonMatchesByChallenge.set(challengeId, count);
-      result.fallback = { goodQualityLiveNonMatchCount: count, eligible: count >= 3 };
+    const acceptNonMatchAttempt = () => {
+      const lastAttempt = this.lastNonMatchAttemptByChallenge.get(challengeId) || 0;
+      if (attempt !== lastAttempt + 1) return false;
+      this.lastNonMatchAttemptByChallenge.set(challengeId, attempt);
+      result.fallback = { goodQualityLiveNonMatchCount: attempt, eligible: attempt >= 3 };
+      return true;
     };
     const fail = (errorCategory: ConnectorErrorCategory, retryable = false) => { result.errorCategory = errorCategory; result.retryable = retryable; };
 
     switch (scenario) {
       case 'POOR_QUALITY': result.captureQuality = { state: 'REJECTED', score: 18 }; result.liveness = { state: 'NOT_EVALUATED' }; result.match = { state: 'NOT_EVALUATED' }; fail('POOR_CAPTURE_QUALITY', true); break;
       case 'LIVENESS_FAILURE': result.liveness = { state: 'NOT_LIVE', score: 11 }; result.match = { state: 'NOT_EVALUATED' }; fail('LIVENESS_FAILED'); break;
-      case 'NON_MATCH': result.match = { state: 'NO_MATCH', score: 12 }; fail('NO_MATCH', true); countNonMatch(); break;
-      case 'WRONG_DRIVER': result.match = { state: 'NO_MATCH', score: 4 }; fail('WRONG_DRIVER'); countNonMatch(); break;
+      case 'NON_MATCH':
+        if (!acceptNonMatchAttempt()) { unevaluated(); fail('ATTEMPT_SEQUENCE_INVALID'); break; }
+        result.match = { state: 'NO_MATCH', score: 12 }; fail('NO_MATCH', true); break;
+      case 'WRONG_DRIVER':
+        if (!acceptNonMatchAttempt()) { unevaluated(); fail('ATTEMPT_SEQUENCE_INVALID'); break; }
+        result.match = { state: 'NO_MATCH', score: 4 }; fail('WRONG_DRIVER'); break;
       case 'DISCONNECT': result.availability = 'UNAVAILABLE'; unevaluated(); fail('DEVICE_DISCONNECTED', true); break;
       case 'TIMEOUT': unevaluated(); fail('CAPTURE_TIMEOUT', true); break;
       case 'RETRY': if (attempt < 2) { unevaluated(); fail('RETRYABLE_CONNECTOR_ERROR', true); } break;
@@ -46,6 +52,7 @@ export class DeterministicBiometricSimulator implements BiometricConnector {
       case 'SUCCESS': break;
       default: unevaluated(); fail('INVALID_COMMAND'); break;
     }
+    if (result.match.state === 'MATCH') this.lastNonMatchAttemptByChallenge.delete(challengeId);
     return result;
   }
 }

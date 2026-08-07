@@ -5,13 +5,33 @@ const login = async (page: Page) => {
   await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('admin');
   await page.getByRole('textbox', { name: 'رمز عبور خود را وارد کنید' }).fill('admin123');
   await page.getByRole('button', { name: 'ورود', exact: true }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/dashboard(?:\/security)?$/, { timeout: 15_000 });
 };
 
 test('Guard admits a canonical visit and advances it while legacy history remains read-only', async ({ page }) => {
   let canonicalTurns: any[] = [];
   let admissions = 0;
   let voids = 0;
+  let exits = 0;
+  let failedExits = 0;
+  let authorizedExits: any[] = [{ id: 'authorization-1', waybillId: 'waybill-1', dispatchNumber: '1000000001',
+    validUntil: '2026-08-08T08:00:00.000Z', admissionSnapshot: { driver: { firstName: 'راننده', lastName: 'مجاز' }, plate: { plate: '44ه444ایران44' } } }];
+  await page.route('**/api/security/exit-desk/authorizations**', async (route) => {
+    if (route.request().method() === 'POST') {
+      if (route.request().url().includes('authorization-expired')) {
+        failedExits += 1;
+        authorizedExits = [];
+        await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'Expired authorization' }) });
+        return;
+      }
+      exits += 1;
+      authorizedExits = [];
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ success: true,
+        data: { id: 'physical-exit-1', smsIntent: { status: 'NEEDS_ATTENTION' } } }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: authorizedExits }) });
+  });
   await page.route('**/api/security/canonical-driver-queue**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -85,6 +105,28 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   expect(voids).toBe(0);
   await confirmation.getByRole('button', { name: 'تأیید ابطال', exact: true }).click();
   await expect.poll(() => voids).toBe(1);
+  await workspace.getByRole('button', { name: 'آماده خروج', exact: true }).click();
+  await expect(workspace.getByRole('heading', { name: 'خروج مجاز گیت', exact: true })).toBeVisible();
+  await expect(workspace.getByText('بارنامه 1000000001', { exact: true })).toBeVisible();
+  await expect(workspace.getByText('نسخه چاپی به‌تنهایی اجازه خروج نمی‌دهد', { exact: false })).toBeVisible();
+  await workspace.getByRole('button', { name: 'ثبت خروج', exact: true }).click();
+  const exitConfirmation = page.getByRole('dialog', { name: 'تأیید خروج فیزیکی' });
+  await expect(exitConfirmation).toBeVisible();
+  expect(exits).toBe(0);
+  await exitConfirmation.getByRole('button', { name: 'ثبت خروج فیزیکی', exact: true }).click();
+  await expect.poll(() => exits).toBe(1);
+  await expect(workspace.getByText(/نیاز به پیگیری/)).toBeVisible();
+  await expect(workspace.getByText('مجوز معتبر برای خروج وجود ندارد', { exact: true })).toBeVisible();
+  await workspace.getByRole('button', { name: 'صف رانندگان', exact: true }).click();
+  authorizedExits = [{ id: 'authorization-expired', waybillId: 'waybill-expired', dispatchNumber: '1000000002',
+    validUntil: '2026-08-07T07:00:00.000Z', admissionSnapshot: { driver: { firstName: 'Expired', lastName: 'Driver' }, plate: { plate: '55E555IR55' } } }];
+  await page.reload();
+  await workspace.getByRole('button', { name: 'آماده خروج', exact: true }).click();
+  await workspace.getByRole('button', { name: 'ثبت خروج', exact: true }).click();
+  await page.getByRole('dialog', { name: 'تأیید خروج فیزیکی' }).getByRole('button', { name: 'ثبت خروج فیزیکی', exact: true }).click();
+  await expect.poll(() => failedExits).toBe(1);
+  await expect(workspace.getByText('Expired authorization', { exact: true })).toBeVisible();
+  await workspace.getByRole('button', { name: 'صف رانندگان', exact: true }).click();
   await expect(workspace.getByRole('heading', { name: 'سوابق صف قدیمی', exact: true })).toBeVisible();
   await expect(workspace.getByText('فقط سابقه', { exact: true })).toBeVisible();
   expect(await workspace.evaluate((element) => {
@@ -97,6 +139,7 @@ test('view-only Guard sees redacted queue state without mutation controls', asyn
   let mutations = 0;
   let admissionOptionRequests = 0;
   await page.route('**/api/workspace-permissions/user-workspaces', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [{ workspace: 'security', permission: 'view' }] }) }));
+  await page.route('**/api/security/exit-desk/authorizations**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }));
   await page.route('**/api/security/canonical-driver-queue**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());

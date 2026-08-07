@@ -3,9 +3,11 @@ import { GuardDriverSource, PrismaClient } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WorkspaceRequest, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { admitGuardDriverQueueTurn, closeGuardQueueTurnWithoutLoading, GuardQueueConflictError, GuardQueueValidationError, listGuardQueueAdmissionOptions, makeGuardQueueTurnAvailable, returnGuardQueueTurnToWaiting, voidGuardQueueTurn } from '../services/guardDriverQueue';
+import { PhysicalGateExitConflictError, PhysicalGateExitService, PhysicalGateExitValidationError } from '../services/physicalGateExit';
 
 const router = express.Router();
 const prisma = new PrismaClient();
+const physicalExitService = new PhysicalGateExitService(prisma);
 const guardView = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
 const guardEdit = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
 const responseTurn = (turn: any, redacted = false) => {
@@ -29,11 +31,23 @@ const responseTurn = (turn: any, redacted = false) => {
   };
 };
 const fail = (res: any, error: unknown, context: string) => {
-  if (error instanceof GuardQueueConflictError) return res.status(409).json({ success: false, error: error.message });
-  if (error instanceof GuardQueueValidationError) return res.status(400).json({ success: false, error: error.message });
+  if (error instanceof GuardQueueConflictError || error instanceof PhysicalGateExitConflictError) return res.status(409).json({ success: false, error: error.message });
+  if (error instanceof GuardQueueValidationError || error instanceof PhysicalGateExitValidationError) return res.status(400).json({ success: false, error: error.message });
   console.error(context, error);
   return res.status(500).json({ success: false, error: 'Canonical Guard queue command failed.' });
 };
+
+router.get('/exit-desk/authorizations', protect, guardView, async (_req: WorkspaceRequest, res) => {
+  try { return res.json({ success: true, data: await physicalExitService.listCurrentlyAuthorized() }); }
+  catch (error) { return fail(res, error, 'List Guard exit authorizations'); }
+});
+
+router.post('/exit-desk/authorizations/:authorizationId/exit', protect, guardEdit, async (req: WorkspaceRequest, res) => {
+  try { return res.status(201).json({ success: true, data: await physicalExitService.recordExit({ authorizationId: req.params.authorizationId,
+    actorId: req.user!.id, effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace,
+      workspacePermission: req.workspacePermission } }) }); }
+  catch (error) { return fail(res, error, 'Record Guard physical exit'); }
+});
 
 router.get('/canonical-driver-queue', protect, guardView, async (req: WorkspaceRequest, res) => {
   try {

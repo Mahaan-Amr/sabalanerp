@@ -53,6 +53,12 @@ const main = async () => {
     status: 'APPROVED', customerId: customer.id, departmentId: department.id, createdBy: actor.id,
     responsibleSellerId: actor.id, contractData: { products: [{ rowId, productId: product.id, quantity: '10.000', unit: 'count', name: product.name }] },
   } });
+  const accountingAuthority = { actorRole: actor.role, workspace: 'accounting', workspacePermission: 'edit' };
+  await prisma.contractPublicConfirmation.create({ data: {
+    contractId: contract.id, tokenHash: `dispatch-token-${suffix}`, phoneNumber: '09121111111',
+    otpCodeHash: `dispatch-otp-${suffix}`, otpExpiresAt: new Date(Date.now() + 600_000),
+    linkExpiresAt: new Date(Date.now() + 86_400_000), status: 'CONFIRMED', verifiedAt: new Date(), createdBy: actor.id,
+  } });
   const item = await prisma.contractItem.create({ data: { contractId: contract.id, productId: product.id, productRowId: rowId,
     productType: 'count', quantity: 10, unitPrice: 1, totalPrice: 10 } });
   const approvedAt = new Date();
@@ -124,16 +130,16 @@ const main = async () => {
   const successorAccepted = await decideAccountingDispatchCandidate(prisma, { candidateId: successorRevision.candidate!.id,
     action: 'ACCEPT', idempotencyKey: `successor-accept-${suffix}`, actorId: actor.id });
   const voidedSuccessor = await voidAccountingDispatchWaybill(prisma, { waybillId: (successorAccepted as any).waybill.id,
-    reason: 'Successor document withdrawn', idempotencyKey: `void-${suffix}`, actorId: actor.id });
+    reason: 'Successor document withdrawn', idempotencyKey: `void-${suffix}`, actorId: actor.id, effectiveAuthority: accountingAuthority });
   const voidedSuccessorRetry = await voidAccountingDispatchWaybill(prisma, { waybillId: (successorAccepted as any).waybill.id,
-    reason: 'Successor document withdrawn', idempotencyKey: `void-${suffix}`, actorId: actor.id });
+    reason: 'Successor document withdrawn', idempotencyKey: `void-${suffix}`, actorId: actor.id, effectiveAuthority: accountingAuthority });
   assert.deepEqual(voidedSuccessorRetry, voidedSuccessor);
   const original = await prisma.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: (accepted as any).waybill.id } });
   await assert.rejects(prisma.accountingDispatchWaybill.update({ where: { id: original.id }, data: { number: original.number + 1n } }), /immutable/i);
   const replacement = await replaceAccountingDispatchWaybill(prisma, { waybillId: original.id, reason: 'Correct immutable document detail',
-    idempotencyKey: `replace-${suffix}`, actorId: actor.id });
+    idempotencyKey: `replace-${suffix}`, actorId: actor.id, effectiveAuthority: accountingAuthority });
   const replacementRetry = await replaceAccountingDispatchWaybill(prisma, { waybillId: original.id, reason: 'Correct immutable document detail',
-    idempotencyKey: `replace-${suffix}`, actorId: actor.id });
+    idempotencyKey: `replace-${suffix}`, actorId: actor.id, effectiveAuthority: accountingAuthority });
   assert.deepEqual(replacementRetry, replacement, 'replacement must be idempotent after the original is voided');
   assert.notEqual(replacement.replacement.number, original.number.toString());
   const preserved = await prisma.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: original.id } });

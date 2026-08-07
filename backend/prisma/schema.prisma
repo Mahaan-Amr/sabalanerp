@@ -1007,6 +1007,7 @@ model GuardDriverQueueTurn {
   events                GuardDriverQueueEvent[]
   allocationDrafts      LogisticsAllocationDraft[]
   allocationRevisions   LogisticsAllocationRevision[]
+  physicalExit          GuardPhysicalExit?
 
   @@index([status, admittedAt])
   @@index([internalDriverId, status])
@@ -2692,6 +2693,7 @@ model LogisticsAllocationRevision {
   candidate             AccountingDispatchCandidate?
   predecessorRevision   LogisticsAllocationRevision?      @relation("AllocationRevisionSuccessor", fields: [predecessorRevisionId], references: [id], onDelete: Restrict)
   successorRevision     LogisticsAllocationRevision?      @relation("AllocationRevisionSuccessor")
+  physicalExit          GuardPhysicalExit?
 
   @@unique([loadingId, queueTurnId, revisionNumber])
   @@index([loadingId, finalizedAt])
@@ -2764,6 +2766,7 @@ model AccountingDispatchWaybill {
   replacementWaybill   AccountingDispatchWaybill?      @relation("DispatchWaybillReplacement")
   confirmationSessions DispatchConfirmationSession[]
   exitAuthorizations   DispatchExitAuthorization[]
+  physicalExit         GuardPhysicalExit?
 
   @@index([candidateId, issuedAt])
   @@map("accounting_dispatch_waybills")
@@ -2951,10 +2954,55 @@ model DispatchExitAuthorization {
   consumedBy           String?
   waybill              AccountingDispatchWaybill   @relation(fields: [waybillId], references: [id], onDelete: Restrict)
   session              DispatchConfirmationSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  physicalExit         GuardPhysicalExit?
 
   @@index([waybillId, status])
   @@index([validUntil, status])
   @@map("dispatch_exit_authorizations")
+}
+
+model GuardPhysicalExit {
+  id                   String                      @id @default(cuid())
+  authorizationId      String                      @unique
+  waybillId            String                      @unique
+  queueTurnId          String                      @unique
+  allocationRevisionId String                      @unique
+  occurredAt           DateTime
+  recordedAt           DateTime                    @default(now())
+  recordedBy           String
+  snapshot             Json
+  integrityHash        String                      @unique
+  authorization        DispatchExitAuthorization   @relation(fields: [authorizationId], references: [id], onDelete: Restrict)
+  waybill              AccountingDispatchWaybill   @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+  queueTurn            GuardDriverQueueTurn        @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
+  allocationRevision   LogisticsAllocationRevision @relation(fields: [allocationRevisionId], references: [id], onDelete: Restrict)
+  smsIntent            DispatchBuyerSmsIntent?
+
+  @@index([occurredAt])
+  @@map("guard_physical_exits")
+}
+
+model DispatchBuyerSmsIntent {
+  id                String                 @id @default(cuid())
+  physicalExitId    String                 @unique
+  idempotencyKey    String                 @unique
+  phoneNumber       String?
+  dispatchNumber    String
+  vehiclePlate      String
+  payload           Json
+  status            DispatchBuyerSmsStatus @default(PENDING)
+  attemptCount      Int                    @default(0)
+  availableAt       DateTime               @default(now())
+  lastAttemptAt     DateTime?
+  sentAt            DateTime?
+  unknownAt         DateTime?
+  providerMessageId String?
+  lastError         String?
+  createdAt         DateTime               @default(now())
+  physicalExit      GuardPhysicalExit      @relation(fields: [physicalExitId], references: [id], onDelete: Restrict)
+
+  @@index([status, availableAt])
+  @@map("dispatch_buyer_sms_intents")
 }
 
 model DispatchConfirmationAlert {
@@ -3808,6 +3856,16 @@ enum AccountingDispatchWorkItemStatus {
 enum AccountingDispatchWaybillStatus {
   ISSUED
   VOIDED
+  EXIT_RECORDED
+}
+
+enum DispatchBuyerSmsStatus {
+  PENDING
+  RETRY
+  SENDING
+  SENT
+  UNKNOWN
+  NEEDS_ATTENTION
 }
 
 enum ShipmentQuantityEvidenceKind {

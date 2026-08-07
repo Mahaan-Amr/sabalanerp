@@ -82,6 +82,47 @@ const appendAudit = async (tx: Tx, input: {
   } });
 };
 
+const revokeActiveExitAuthorization = async (tx: Tx, input: {
+  waybillId: string; actorId: string; reason: string; eventType: string; at: Date; effectiveAuthority: unknown;
+}) => {
+  const authorization = await tx.dispatchExitAuthorization.findFirst({ where: { waybillId: input.waybillId, status: 'ACTIVE' } });
+  if (!authorization) return;
+  await lockKeys(tx, [`DISPATCH_EXIT_AUTHORIZATION:${authorization.id}`]);
+  const revoked = await tx.dispatchExitAuthorization.updateMany({ where: { id: authorization.id, status: 'ACTIVE' }, data: {
+    status: 'REVOKED', revokedAt: input.at, revokedBy: input.actorId, revocationReason: input.reason,
+  } });
+  if (revoked.count !== 1) throw new DispatchAllocationConflictError('The authorization was finalized by a competing command.');
+  await appendAudit(tx, { aggregateType: 'DISPATCH_EXIT_AUTHORIZATION', aggregateId: authorization.id,
+    eventType: input.eventType, payload: { workspace: 'accounting', effectiveAuthority: input.effectiveAuthority,
+      beforeStatus: 'ACTIVE', afterStatus: 'REVOKED', waybillId: input.waybillId,
+      sessionId: authorization.sessionId, authorizationIntegrityHash: authorization.integrityHash,
+      reason: input.reason, correlationId: input.waybillId }, actorId: input.actorId, recordedAt: input.at });
+};
+
+const normalizeConfirmationPhone = (phoneNumber: string) => {
+  let digits = phoneNumber.replace(/\D/g, '');
+  if (digits.startsWith('0098')) digits = digits.slice(4);
+  else if (digits.startsWith('98')) digits = digits.slice(2);
+  if (digits.length === 10 && digits.startsWith('9')) digits = `0${digits}`;
+  return digits;
+};
+
+const resolveRevisionConfirmationPhone = async (tx: Tx, contractIds: string[]) => {
+  const uniqueContractIds = [...new Set(contractIds)];
+  const confirmations = await tx.contractPublicConfirmation.findMany({
+    where: { contractId: { in: uniqueContractIds }, status: 'CONFIRMED', verifiedAt: { not: null } },
+    select: { contractId: true, phoneNumber: true, verifiedAt: true, createdAt: true },
+    orderBy: [{ verifiedAt: 'desc' }, { createdAt: 'desc' }],
+  });
+  const latestByContract = new Map<string, string>();
+  for (const confirmation of confirmations) {
+    if (!latestByContract.has(confirmation.contractId)) latestByContract.set(confirmation.contractId, normalizeConfirmationPhone(confirmation.phoneNumber));
+  }
+  const phones = [...new Set(latestByContract.values())].filter(Boolean);
+  if (phones.length > 1) throw new DispatchAllocationConflictError('Allocation rows have conflicting confirmed buyer notification phones. Split the allocation or reconcile confirmations.');
+  return phones[0] || null;
+};
+
 export type CanonicalAllocationLineInput = {
   sourceContractItemId: string;
   quantity: string | number;
@@ -130,7 +171,7 @@ export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
   return tx.logisticsAllocationDraft.findUniqueOrThrow({ where: { id: draft.id }, include: { lines: true, queueTurn: true } });
 });
 
-const refreshProjectionContracts = async (tx: Tx, contractIds: string[]) => {
+export const refreshProjectionContracts = async (tx: Tx, contractIds: string[]) => {
   for (const contractId of [...new Set(contractIds)]) {
     const projection = await readShipmentQuantityProjection(tx as unknown as PrismaClient, { contractId });
     for (const row of projection.rows) {
@@ -201,6 +242,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     loadingId: loading.id, idempotencyKey, finalizedAt: now, finalizedBy: input.actorId,
   } });
   for (const draft of loading.canonicalAllocationDrafts) {
+    const confirmationPhone = await resolveRevisionConfirmationPhone(tx, draft.lines.map((line) => line.sourceContractId));
     const prior = await tx.logisticsAllocationRevision.aggregate({ where: { loadingId: loading.id, queueTurnId: draft.queueTurnId }, _max: { revisionNumber: true } });
     const revisionNumber = (prior._max.revisionNumber || 0) + 1;
     const snapshot = stableValue({ schemaVersion: 1, loading: { id: loading.id, number: loading.loadingNumber,
@@ -208,7 +250,9 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
       project: { id: loading.project.id, name: loading.project.projectName, address: loading.project.address } },
       queueTurn: { id: draft.queueTurn.id, driverSource: draft.queueTurn.driverSource,
         admissionSnapshot: draft.queueTurn.admissionSnapshot, admissionIntegrityHash: draft.queueTurn.integrityHash },
-      revisionNumber, finalizedAt: now, lines: draft.lines.map((line) => ({ contractId: line.sourceContractId,
+      revisionNumber, finalizedAt: now,
+      notification: { confirmationPhone, source: 'CONTRACT_PUBLIC_CONFIRMATION', capturedAt: now },
+      lines: draft.lines.map((line) => ({ contractId: line.sourceContractId,
         contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
         quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot })) });
     const revision = await tx.logisticsAllocationRevision.create({ data: {
@@ -321,6 +365,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     }
   }
   const now = new Date();
+  const confirmationPhone = await resolveRevisionConfirmationPhone(tx, rows.map((line) => line.sourceContractId));
   const batch = await tx.logisticsAllocationBatch.create({ data: { loadingId: predecessor.loadingId, idempotencyKey,
     finalizedAt: now, finalizedBy: input.actorId } });
   const revisionNumber = predecessor.revisionNumber + 1;
@@ -330,7 +375,9 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
       project: { id: predecessor.loading.project.id, name: predecessor.loading.project.projectName, address: predecessor.loading.project.address } },
     queueTurn: { id: predecessor.queueTurn.id, driverSource: predecessor.queueTurn.driverSource,
       admissionSnapshot: predecessor.queueTurn.admissionSnapshot, admissionIntegrityHash: predecessor.queueTurn.integrityHash },
-    revisionNumber, finalizedAt: now, lines: rows.map((line) => ({ contractId: line.sourceContractId,
+    revisionNumber, finalizedAt: now,
+    notification: { confirmationPhone, source: 'CONTRACT_PUBLIC_CONFIRMATION', capturedAt: now },
+    lines: rows.map((line) => ({ contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
       quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot })) });
   const revision = await tx.logisticsAllocationRevision.create({ data: { batchId: batch.id, loadingId: predecessor.loadingId,
@@ -453,7 +500,7 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
 });
 
 export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
-  waybillId: string; reason: string; idempotencyKey: string; actorId: string;
+  waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
 }) => serializable(prisma, async (tx) => {
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
   const initial = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId } });
@@ -470,8 +517,11 @@ export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
   const waybill = await tx.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: input.waybillId } });
   if (waybill.status !== AccountingDispatchWaybillStatus.ISSUED) throw new DispatchAllocationConflictError('Only an issued waybill can be voided.');
   const reason = required(input.reason, 'reason');
+  const now = new Date();
+  await revokeActiveExitAuthorization(tx, { waybillId: waybill.id, actorId: input.actorId,
+    reason: `Waybill voided: ${reason}`, eventType: 'REVOKED_FOR_WAYBILL_VOID', at: now, effectiveAuthority: input.effectiveAuthority });
   const voided = await tx.accountingDispatchWaybill.update({ where: { id: waybill.id }, data: {
-    status: AccountingDispatchWaybillStatus.VOIDED, voidedAt: new Date(), voidedBy: input.actorId, voidReason: reason,
+    status: AccountingDispatchWaybillStatus.VOIDED, voidedAt: now, voidedBy: input.actorId, voidReason: reason,
   } });
   await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id,
     eventType: 'WAYBILL_VOIDED', payload: { number: waybill.number.toString(), reason }, actorId: input.actorId });
@@ -482,7 +532,7 @@ export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
 });
 
 export const replaceAccountingDispatchWaybill = async (prisma: Database, input: {
-  waybillId: string; reason: string; idempotencyKey: string; actorId: string;
+  waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
 }) => serializable(prisma, async (tx) => {
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
   const initial = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId } });
@@ -501,8 +551,11 @@ export const replaceAccountingDispatchWaybill = async (prisma: Database, input: 
   if (!waybill) throw new DispatchAllocationValidationError('Dispatch waybill was not found.');
   if (waybill.status !== AccountingDispatchWaybillStatus.ISSUED) throw new DispatchAllocationConflictError('Only an issued waybill can be replaced.');
   const reason = required(input.reason, 'reason');
+  const now = new Date();
+  await revokeActiveExitAuthorization(tx, { waybillId: waybill.id, actorId: input.actorId,
+    reason: `Waybill replaced: ${reason}`, eventType: 'REVOKED_FOR_WAYBILL_REPLACEMENT', at: now, effectiveAuthority: input.effectiveAuthority });
   await tx.accountingDispatchWaybill.update({ where: { id: waybill.id }, data: {
-    status: AccountingDispatchWaybillStatus.VOIDED, voidedAt: new Date(), voidedBy: input.actorId, voidReason: reason,
+    status: AccountingDispatchWaybillStatus.VOIDED, voidedAt: now, voidedBy: input.actorId, voidReason: reason,
   } });
   const replacement = await issueWaybill(tx, waybill.candidate, input.actorId, waybill.id);
   await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id,

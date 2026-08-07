@@ -22,6 +22,16 @@ interface SmsTemplateParameter {
   value: string;
 }
 
+type SmsSendResult = {
+  success: boolean;
+  messageId?: number;
+  error?: string;
+  rawResponse?: unknown;
+  failureKind?: 'PROVIDER_REJECTION' | 'HTTP' | 'NETWORK';
+  httpStatus?: number;
+  errorCode?: string;
+};
+
 export const buildHiringOfferTemplateParameters = (code: string): SmsTemplateParameter[] => {
   if (!/^\d{6}$/.test(code)) throw new Error('Hiring offer access code must contain exactly six digits.');
   return [{ name: 'CODE', value: code }];
@@ -43,6 +53,7 @@ class SmsService {
   private hiringInvitationTemplateId: number;
   private hiringCorrectionTemplateId: number;
   private hiringOfferTemplateId: number;
+  private dispatchExitTemplateId: number;
   private environment: string;
   private requestTimeoutMs: number;
   private dnsServers: string[];
@@ -69,6 +80,7 @@ class SmsService {
       process.env.SMS_IR_HIRING_OFFER_TEMPLATE_ID || '894291',
       10
     );
+    this.dispatchExitTemplateId = parseInt(process.env.SMS_IR_DISPATCH_EXIT_TEMPLATE_ID || '0', 10);
     this.environment = process.env.SMS_IR_ENVIRONMENT || 'sandbox';
     this.requestTimeoutMs = parseInt(process.env.SMS_IR_TIMEOUT_MS || '30000', 10);
     this.dnsServers = (process.env.SMS_IR_DNS_SERVERS || '')
@@ -220,7 +232,7 @@ class SmsService {
   async sendVerificationCode(
     phoneNumber: string,
     code: string
-  ): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
+  ): Promise<SmsSendResult> {
     try {
       // Validate API key
       if (!this.apiKey) {
@@ -336,7 +348,7 @@ class SmsService {
     formattedPhone: string,
     templateId: number,
     parameters: SmsTemplateParameter[]
-  ): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
+  ): Promise<SmsSendResult> {
     try {
       console.info('[sms.ir] sending template SMS', {
         templateId,
@@ -387,7 +399,8 @@ class SmsService {
       return {
         success: false,
         error: response.data.message || 'Failed to send SMS',
-        rawResponse: response.data
+        rawResponse: response.data,
+        failureKind: 'PROVIDER_REJECTION'
       };
     } catch (error: any) {
       if (error.response) {
@@ -401,7 +414,9 @@ class SmsService {
         return {
           success: false,
           error: error.response.data?.message || error.response.data?.error || 'SMS API error',
-          rawResponse: error.response?.data
+          rawResponse: error.response?.data,
+          failureKind: 'HTTP',
+          httpStatus: error.response.status
         };
       }
 
@@ -416,9 +431,22 @@ class SmsService {
 
       return {
         success: false,
-        error: error.message || 'Failed to send SMS'
+        error: error.message || 'Failed to send SMS',
+        failureKind: 'NETWORK',
+        errorCode: error.code
       };
     }
+  }
+
+  async sendDispatchExitNotice(params: { phoneNumber: string; dispatchNumber: string; vehiclePlate: string }): Promise<SmsSendResult> {
+    if (this.environment === 'sandbox' && !this.apiKey) return { success: true, messageId: undefined };
+    if (!Number.isInteger(this.dispatchExitTemplateId) || this.dispatchExitTemplateId <= 0) {
+      return { success: false, error: 'Dispatch exit SMS template is not configured.' };
+    }
+    return this.sendTemplate(this.formatPhoneNumber(params.phoneNumber), this.dispatchExitTemplateId, [
+      { name: 'DispatchNumber', value: params.dispatchNumber },
+      { name: 'Plate', value: params.vehiclePlate },
+    ]);
   }
 
   async getDeliveryReport(messageId: number): Promise<{

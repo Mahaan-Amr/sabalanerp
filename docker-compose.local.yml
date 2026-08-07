@@ -53,6 +53,7 @@ services:
       FRONTEND_URL: http://localhost:3000
       PUBLIC_APP_URL: http://localhost:3000
       SMS_IR_ENVIRONMENT: sandbox
+      SMS_IR_DISPATCH_EXIT_TEMPLATE_ID: "0"
       BIOMETRIC_TEMPLATE_KEY_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       DISPATCH_CONFIRMATION_OTP_SECRET: local-dispatch-confirmation-otp-secret
       BIOMETRIC_CONNECTOR_MODE: simulator

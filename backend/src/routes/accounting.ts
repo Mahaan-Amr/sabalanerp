@@ -2,8 +2,8 @@ import express, { Response } from 'express';
 import path from 'path';
 import { body, validationResult } from 'express-validator';
 import { protect, AuthRequest } from '../middleware/auth';
-import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
-import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
+import { requireWorkspaceAccess, WorkspaceRequest, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
+import { FeatureRequest, FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
 import {
@@ -107,18 +107,22 @@ router.post('/dispatch-candidates/:id/decision', accountingDispatchEdit, async (
   } catch (error) { return dispatchError(res, error); }
 });
 
-router.post('/dispatch-waybills/:id/void', accountingDispatchEdit, async (req: AuthRequest, res: Response) => {
+router.post('/dispatch-waybills/:id/void', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
   try {
     const data = await voidAccountingDispatchWaybill(prisma, { waybillId: req.params.id, reason: req.body.reason,
-      idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user!.id });
+      idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user!.id,
+      effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace, workspacePermission: req.workspacePermission,
+        feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE, featurePermission: req.featurePermission } });
     return res.json({ success: true, data });
   } catch (error) { return dispatchError(res, error); }
 });
 
-router.post('/dispatch-waybills/:id/replace', accountingDispatchEdit, async (req: AuthRequest, res: Response) => {
+router.post('/dispatch-waybills/:id/replace', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
   try {
     const data = await replaceAccountingDispatchWaybill(prisma, { waybillId: req.params.id, reason: req.body.reason,
-      idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user!.id });
+      idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user!.id,
+      effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace, workspacePermission: req.workspacePermission,
+        feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE, featurePermission: req.featurePermission } });
     return res.json({ success: true, data });
   } catch (error) { return dispatchError(res, error); }
 });

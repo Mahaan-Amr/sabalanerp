@@ -79,11 +79,11 @@ export default function SecurityVehiclesPage() {
   const pathname = usePathname();
   const [pairs, setPairs] = useState<any[]>([]);
   const [movements, setMovements] = useState<any[]>([]);
-  const [readyExit, setReadyExit] = useState<any[]>([]);
   const [queueTurns, setQueueTurns] = useState<any[]>([]);
   const [queueHistory, setQueueHistory] = useState<any[]>([]);
   const [canonicalQueue, setCanonicalQueue] = useState<any[]>([]);
   const [canonicalQueueHistory, setCanonicalQueueHistory] = useState<any[]>([]);
+  const [authorizedExits, setAuthorizedExits] = useState<any[]>([]);
   const [admissionOptions, setAdmissionOptions] = useState<any>({ internalAssignments: [], externalDrivers: [], externalVehicles: [] });
   const [admissionSource, setAdmissionSource] = useState<'INTERNAL' | 'EXTERNAL'>('INTERNAL');
   const [internalDriverId, setInternalDriverId] = useState('');
@@ -91,6 +91,7 @@ export default function SecurityVehiclesPage() {
   const [externalVehicleId, setExternalVehicleId] = useState('');
   const [queueReason, setQueueReason] = useState('');
   const [voidTarget, setVoidTarget] = useState<any>(null);
+  const [exitTarget, setExitTarget] = useState<any>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [customerSearch, setCustomerSearch] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
@@ -105,21 +106,21 @@ export default function SecurityVehiclesPage() {
 
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true);
-    setError('');
+    if (!silent) setError('');
     try {
       const results = await Promise.allSettled([
         securityAPI.getVehiclePairs({ includeInactive: true }),
         securityAPI.getVehicleMovements({ limit: 50 }),
-        securityAPI.getReadyExitLoadings(),
         securityAPI.getDriverQueue(),
         securityAPI.getDriverQueue(true),
         securityAPI.getCanonicalDriverQueue(),
         securityAPI.getCanonicalDriverQueue(true),
+        securityAPI.getAuthorizedPhysicalExits(),
         canEditQueue
           ? securityAPI.getCanonicalQueueAdmissionOptions()
           : Promise.resolve({ data: { success: true, data: { internalAssignments: [], externalDrivers: [], externalVehicles: [] } } }),
       ]);
-      const setters = [setPairs, setMovements, setReadyExit, setQueueTurns, setQueueHistory, setCanonicalQueue, setCanonicalQueueHistory, setAdmissionOptions];
+      const setters = [setPairs, setMovements, setQueueTurns, setQueueHistory, setCanonicalQueue, setCanonicalQueueHistory, setAuthorizedExits, setAdmissionOptions];
       results.forEach((result, index) => { if (result.status === 'fulfilled' && result.value.data.success) setters[index](result.value.data.data); });
       if (results.some((result) => result.status === 'rejected')) setError('بخشی از اطلاعات خودرویی دریافت نشد؛ اطلاعات موفق نمایش داده می‌شود.');
     } catch (err: any) {
@@ -215,14 +216,21 @@ export default function SecurityVehiclesPage() {
     finally { setSaving(false); }
   };
 
-  const recordExit = async (loadingId: string, customerPersonalCar = false) => {
+  const recordAuthorizedExit = async (authorizationId: string) => {
     setSaving(true);
+    setError('');
     try {
-      await securityAPI.recordVehicleExit({ loadingId, customerPersonalCar });
-      setMessage(customerPersonalCar ? 'خروج با سواری شخصی مشتری ثبت شد.' : 'خروج فروش در گیت ثبت شد.');
-      await loadData();
+      const response = await securityAPI.recordAuthorizedPhysicalExit(authorizationId);
+      const smsStatus = response.data?.data?.smsIntent?.status;
+      setMessage(smsStatus === 'NEEDS_ATTENTION'
+        ? 'خروج فیزیکی ثبت شد؛ ارسال پیامک خریدار نیاز به پیگیری دارد.'
+        : 'خروج فیزیکی با مجوز معتبر ثبت شد و پیامک خریدار در صف ارسال قرار گرفت.');
+      setExitTarget(null);
+      await loadData(true);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'ثبت خروج ناموفق بود.');
+      setError(err.response?.data?.error || 'مجوز خروج دیگر معتبر نیست؛ فهرست به‌روز شد.');
+      setExitTarget(null);
+      await loadData(true);
     } finally {
       setSaving(false);
     }
@@ -261,6 +269,7 @@ export default function SecurityVehiclesPage() {
         </div>
       </ErpSection>}
       <ErpSheet open={Boolean(voidTarget)} onClose={() => { if (!saving) setVoidTarget(null); }} title="تأیید ابطال پذیرش" presentation="modal" dismissible={!saving} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setVoidTarget(null)} /><ErpButton label="تأیید ابطال" tone="danger" variant="solid" disabled={saving || !queueReason.trim()} onClick={() => void runQueueCommand(() => securityAPI.voidCanonicalQueueTurn(voidTarget.id, queueReason.trim()), 'پذیرش با حفظ سابقه باطل شد.', true).then(() => setVoidTarget(null))} /></div>}><p className="text-sm leading-7 sds-text-muted">این مراجعه از صف جاری خارج می‌شود و برای حفظ زنجیره حسابرسی قابل حذف یا بازگردانی نیست. دلیل ثبت‌شده همراه سابقه باقی می‌ماند.</p></ErpSheet>
+      <ErpSheet open={Boolean(exitTarget)} onClose={() => { if (!saving) setExitTarget(null); }} title="تأیید خروج فیزیکی" presentation="modal" dismissible={!saving} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setExitTarget(null)} /><ErpButton label="ثبت خروج فیزیکی" tone="success" variant="solid" disabled={saving} onClick={() => void recordAuthorizedExit(exitTarget.id)} /></div>}><p className="text-sm leading-7 sds-text-muted">این فرمان مجوز یک‌بارمصرف را مصرف می‌کند و عبور محموله از گیت را به‌صورت تغییرناپذیر ثبت می‌کند.</p></ErpSheet>
 
       {activeSection === 'queue' && <ErpSection title="سوابق صف قدیمی" description="مدل ترکیبی قدیمی فقط برای مشاهده سابقه حفظ شده و هیچ عملیات یا پذیرش جدیدی از این صفحه انجام نمی‌شود.">
         <div className="space-y-3">{Array.from(new Map([...queueTurns, ...queueHistory].map((turn) => [turn.id, turn])).values()).map((turn) => <ErpCard key={turn.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold">{turn.vehiclePair.firstName} {turn.vehiclePair.lastName} · {turn.vehiclePair.vehiclePlate}</p><p className="mt-1 text-xs sds-text-muted">ورود: {new Date(turn.enteredAt).toLocaleString('fa-IR')}{turn.loading ? ` · بارگیری ${turn.loading.loadingNumber}` : ''}</p></div><div className="flex flex-wrap gap-2"><ErpBadge tone="warning">فقط سابقه</ErpBadge><ErpBadge tone="neutral">{queueStatusLabel[turn.status] || turn.status}</ErpBadge></div></div></ErpCard>)}</div>
@@ -322,27 +331,25 @@ export default function SecurityVehiclesPage() {
       )}
 
       {activeSection === 'sales-exit' && (
-      <ErpSection title="آماده خروج">
-        {readyExit.length === 0 ? (
-          <ErpEmptyState icon={FaCarSide} title="بارگیری آماده خروج وجود ندارد" />
+      <ErpSection title="خروج مجاز گیت" description="فقط بارنامه‌ای که مجوز یک‌بارمصرف معتبر دارد در این فهرست دیده می‌شود؛ نسخه چاپی به‌تنهایی اجازه خروج نمی‌دهد.">
+        {authorizedExits.length === 0 ? (
+          <ErpEmptyState icon={FaCarSide} title="مجوز معتبر برای خروج وجود ندارد" />
         ) : (
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {readyExit.map((loading) => (
-              <ErpCard key={loading.id} className="p-4">
+            {authorizedExits.map((authorization) => {
+              const snapshot = authorization.admissionSnapshot || {};
+              return <ErpCard key={authorization.id} className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="font-semibold sds-text-primary">{loading.loadingNumber}</p>
-                    <p className="mt-1 text-sm sds-text-muted">{loading.customer?.firstName} {loading.customer?.lastName} · {loading.project?.projectName || loading.project?.address}</p>
-                    <p className="mt-1 text-xs sds-text-muted">{loading.driverSnapshot?.firstName || 'بدون راننده'} {loading.driverSnapshot?.lastName || ''} · {loading.driverSnapshot?.vehiclePlate || 'بدون پلاک'}</p>
+                    <p className="font-semibold sds-text-primary">بارنامه {authorization.dispatchNumber}</p>
+                    <p className="mt-1 text-sm sds-text-muted">{snapshot.driver?.firstName} {snapshot.driver?.lastName} · {snapshot.plate?.plate || 'بدون پلاک'}</p>
+                    <p className="mt-1 text-xs sds-text-muted">اعتبار تا {new Date(authorization.validUntil).toLocaleString('fa-IR')}</p>
                   </div>
-                  <ErpBadge tone="warning">آماده خروج</ErpBadge>
+                  <ErpBadge tone="success">مجوز معتبر</ErpBadge>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <ErpButton label="ثبت خروج" icon={FaCheck} onClick={() => recordExit(loading.id)} disabled={saving} variant="solid" />
-                  <ErpButton label="سواری شخصی مشتری" icon={FaCarSide} onClick={() => recordExit(loading.id, true)} disabled={saving} tone="neutral" />
-                </div>
-              </ErpCard>
-            ))}
+                {canEditQueue && <div className="mt-3"><ErpButton label="ثبت خروج" icon={FaCheck} onClick={() => setExitTarget(authorization)} disabled={saving} variant="solid" tone="success" /></div>}
+              </ErpCard>;
+            })}
           </div>
         )}
       </ErpSection>

@@ -15,7 +15,7 @@ const stableValue = (value: unknown): unknown => {
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex');
 const activeAt = (at: Date) => ({ effectiveFrom: { lte: at }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }] });
 type GuardQueueEventType = 'ADMITTED' | 'MADE_AVAILABLE_FOR_LOADING' | 'RESERVED_FOR_LOADING' | 'RESERVATION_RELEASED'
-  | 'LOADING_FINALIZED'
+  | 'LOADING_FINALIZED' | 'PHYSICAL_EXIT_RECORDED'
   | 'RETURNED_TO_GATE_WAITING' | 'RESERVATION_RELEASED_FOR_DEPARTURE' | 'CLOSED_WITHOUT_LOADING'
   | 'RESERVATION_RELEASED_FOR_VOID' | 'VOIDED';
 

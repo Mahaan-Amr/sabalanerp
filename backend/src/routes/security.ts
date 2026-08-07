@@ -836,35 +836,7 @@ router.post('/loading-driver-requests/:id/assign', protect, securityEdit, [body(
 // @desc    Get finalized logistics loadings waiting for gate exit
 // @route   GET /api/security/vehicle-movements/ready-exit
 router.get('/vehicle-movements/ready-exit', protect, securityView, async (_req: AuthRequest, res: Response) => {
-  try {
-    const exited = await prisma.securityVehicleMovement.findMany({
-      where: {
-        direction: 'OUTBOUND',
-        status: 'EXITED',
-        loadingId: { not: null }
-      },
-      select: { loadingId: true }
-    });
-    const exitedIds = exited.map((item) => item.loadingId).filter(Boolean) as string[];
-    const loadings = await prisma.logisticsLoading.findMany({
-      where: {
-        status: 'FINALIZED',
-        id: exitedIds.length ? { notIn: exitedIds } : undefined
-      },
-      include: {
-        customer: true,
-        project: true,
-        vehiclePair: true,
-        lines: true
-      },
-      orderBy: { finalizedAt: 'desc' },
-      take: 100
-    });
-    res.json({ success: true, data: loadings });
-  } catch (error) {
-    console.error('Ready exit loadings error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
-  }
+  res.status(410).json({ success: false, error: 'Legacy gate-exit selection is retired. Use a current Dispatch Exit Authorization.' });
 });
 
 // @desc    List vehicle movements
@@ -965,47 +937,7 @@ router.put('/vehicle-movements/:id/complete', protect, securityEdit, async (req:
 router.post('/vehicle-movements/exit', protect, securityEdit, [
   body('loadingId').notEmpty().withMessage('Loading is required')
 ], async (req: AuthRequest, res: Response) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
-
-    const loading = await prisma.logisticsLoading.findUnique({
-      where: { id: req.body.loadingId },
-      include: { customer: true, project: true, vehiclePair: true }
-    });
-    if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
-    if (loading.status !== 'FINALIZED') return res.status(400).json({ success: false, error: 'Only finalized loadings can exit the gate' });
-    try { assertNoLegacyDispatchReferences({ queueTurnIds: [], existingAssignmentCount: 0, vehiclePairId: req.body.vehiclePairId || loading.vehiclePairId }); }
-    catch (error: any) { return res.status(error.statusCode || 410).json({ success: false, error: error.message }); }
-
-    const existingExit = await prisma.securityVehicleMovement.findFirst({
-      where: { loadingId: loading.id, direction: 'OUTBOUND', status: 'EXITED' }
-    });
-    if (existingExit) return res.status(400).json({ success: false, error: 'Gate exit already recorded for this loading' });
-
-    const purpose = req.body.customerPersonalCar ? 'CUSTOMER_PERSONAL_CAR_EXIT' : 'SALES_EXIT';
-    const movement = await prisma.securityVehicleMovement.create({
-      data: {
-        movementNumber: await generateMovementNumber('OUT'),
-        direction: 'OUTBOUND',
-        purpose: purpose as any,
-        status: 'EXITED',
-        vehiclePairId: null,
-        loadingId: loading.id,
-        customerId: loading.customerId,
-        projectId: loading.projectId,
-        occurredAt: req.body.occurredAt ? new Date(req.body.occurredAt) : new Date(),
-        driverSnapshot: purpose === 'SALES_EXIT' ? (req.body.driverSnapshot || loading.driverSnapshot) : null,
-        notes: req.body.notes || null,
-        createdBy: req.user!.id
-      },
-      include: includeMovement
-    });
-    res.status(201).json({ success: true, data: movement });
-  } catch (error: any) {
-    console.error('Create outbound exit error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Server error' });
-  }
+  res.status(410).json({ success: false, error: 'Legacy gate-exit recording is retired. Use a current Dispatch Exit Authorization.' });
 });
 
 // @desc    Void vehicle movement

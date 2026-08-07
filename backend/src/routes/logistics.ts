@@ -6,6 +6,7 @@ import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../mi
 import { requireFeatureAccess, requireNarrowFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
 import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
+import { createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -60,6 +61,36 @@ router.post('/canonical-driver-queue/:id/release', canEdit, canManageDrivers, as
     if (error instanceof GuardQueueValidationError) return res.status(400).json({ success: false, error: error.message });
     console.error('Canonical queue reservation release error:', error);
     return res.status(500).json({ success: false, error: 'Canonical queue reservation release failed.' });
+  }
+});
+
+router.put('/loadings/:id/canonical-allocations/:queueTurnId', canEdit, canEditLoadings, async (req: any, res: Response) => {
+  try {
+    const draft = await saveCanonicalAllocationDraft(prisma, {
+      loadingId: req.params.id, queueTurnId: req.params.queueTurnId,
+      lines: Array.isArray(req.body.lines) ? req.body.lines : [], actorId: req.user.id,
+    });
+    return res.json({ success: true, data: draft });
+  } catch (error) {
+    if (error instanceof DispatchAllocationConflictError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof DispatchAllocationValidationError) return res.status(400).json({ success: false, error: error.message });
+    console.error('Canonical allocation draft error:', error);
+    return res.status(500).json({ success: false, error: 'Canonical allocation draft failed.' });
+  }
+});
+
+router.post('/allocation-revisions/:id/successor', canEdit, canFinalizeLoadings, async (req: any, res: Response) => {
+  try {
+    const batch = await createSuccessorAllocationRevision(prisma, {
+      predecessorRevisionId: req.params.id, lines: Array.isArray(req.body.lines) ? req.body.lines : [],
+      idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user.id,
+    });
+    return res.status(201).json({ success: true, data: batch });
+  } catch (error) {
+    if (error instanceof DispatchAllocationConflictError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof DispatchAllocationValidationError) return res.status(400).json({ success: false, error: error.message });
+    console.error('Successor allocation error:', error);
+    return res.status(500).json({ success: false, error: 'Successor allocation failed.' });
   }
 });
 
@@ -636,6 +667,11 @@ const loadLoading = (id: string) => {
         },
         orderBy: { createdAt: 'asc' }
       },
+      canonicalAllocationDrafts: { include: { queueTurn: true, lines: true }, orderBy: { createdAt: 'asc' } },
+      canonicalAllocationRevisions: {
+        include: { queueTurn: true, lines: true, candidate: { include: { workItem: true, waybills: true } } },
+        orderBy: { finalizedAt: 'asc' }
+      },
       driverRequests: {
         include: {
           requester: { select: { id: true, firstName: true, lastName: true, username: true } },
@@ -1062,6 +1098,12 @@ router.delete('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: R
 
 router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: any, res: Response) => {
   try {
+    const canonicalDraftCount = await prisma.logisticsAllocationDraft.count({ where: { loadingId: req.params.id } });
+    if (canonicalDraftCount > 0) {
+      const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim();
+      const batch = await finalizeCanonicalLoadingAllocations(prisma, { loadingId: req.params.id, idempotencyKey, actorId: req.user.id });
+      return res.json({ success: true, data: batch });
+    }
     const loading = await loadLoading(req.params.id);
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (loading.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be finalized' });
@@ -1091,7 +1133,9 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
     res.json({ success: true, data: await loadLoading(updated.id) });
   } catch (error: any) {
     console.error('Finalize loading error:', error);
-    res.status(400).json({ success: false, error: error.message || 'Server error' });
+    const status = error instanceof DispatchAllocationConflictError ? 409
+      : error instanceof DispatchAllocationValidationError ? 400 : 400;
+    res.status(status).json({ success: false, error: error.message || 'Server error' });
   }
 });
 

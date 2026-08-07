@@ -3,7 +3,7 @@ import path from 'path';
 import { body, validationResult } from 'express-validator';
 import { protect, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
-import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middleware/feature';
+import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
 import {
@@ -34,6 +34,13 @@ import {
 } from '../services/accountingService';
 import type { ContractCustomPrintOptions, ContractPrintVariant } from '../utils/printTemplate';
 import { publishNotificationEvent } from '../services/notificationService';
+import {
+  decideAccountingDispatchCandidate,
+  DispatchAllocationConflictError,
+  DispatchAllocationValidationError,
+  replaceAccountingDispatchWaybill,
+  voidAccountingDispatchWaybill,
+} from '../services/dispatchAllocation';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -51,6 +58,18 @@ const accountingEdit = [
   requireFeatureAccess(FEATURES.ACCOUNTING_ACTIONS_MANAGE, FEATURE_PERMISSIONS.EDIT)
 ];
 
+const accountingDispatchView = [
+  protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.VIEW),
+  requireNarrowFeatureAccess(FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_VIEW, FEATURE_PERMISSIONS.VIEW),
+];
+
+const accountingDispatchEdit = [
+  protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
+  requireNarrowFeatureAccess(FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE, FEATURE_PERMISSIONS.EDIT),
+];
+
 const managerReviewActions = new Set([
   'APPROVE_CORRECTION_FOR_SALES_EDIT',
   'DECLINE_CORRECTION',
@@ -59,6 +78,50 @@ const managerReviewActions = new Set([
   'APPROVE_FINANCIAL_INVOICE',
   'RESOLVE_CORRECTION'
 ]);
+
+const dispatchError = (res: Response, error: unknown) => {
+  if (error instanceof DispatchAllocationConflictError) return res.status(409).json({ success: false, error: error.message });
+  if (error instanceof DispatchAllocationValidationError) return res.status(400).json({ success: false, error: error.message });
+  console.error('Accounting dispatch error:', error);
+  return res.status(500).json({ success: false, error: 'Accounting dispatch command failed.' });
+};
+
+router.get('/dispatch-candidates', accountingDispatchView, async (_req: AuthRequest, res: Response) => {
+  try {
+    const candidates = await prisma.accountingDispatchCandidate.findMany({
+      include: { workItem: true, allocationRevision: { include: { lines: true, queueTurn: true } }, waybills: { orderBy: { issuedAt: 'asc' } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,
+      waybills: candidate.waybills.map((waybill) => ({ ...waybill, number: waybill.number.toString() })) })) });
+  } catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/dispatch-candidates/:id/decision', accountingDispatchEdit, async (req: AuthRequest, res: Response) => {
+  try {
+    const data = await decideAccountingDispatchCandidate(prisma, {
+      candidateId: req.params.id, action: req.body.action, reason: req.body.reason,
+      idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user!.id,
+    });
+    return res.json({ success: true, data });
+  } catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/dispatch-waybills/:id/void', accountingDispatchEdit, async (req: AuthRequest, res: Response) => {
+  try {
+    const data = await voidAccountingDispatchWaybill(prisma, { waybillId: req.params.id, reason: req.body.reason,
+      idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user!.id });
+    return res.json({ success: true, data });
+  } catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/dispatch-waybills/:id/replace', accountingDispatchEdit, async (req: AuthRequest, res: Response) => {
+  try {
+    const data = await replaceAccountingDispatchWaybill(prisma, { waybillId: req.params.id, reason: req.body.reason,
+      idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user!.id });
+    return res.json({ success: true, data });
+  } catch (error) { return dispatchError(res, error); }
+});
 
 const handleValidation = (req: AuthRequest, res: Response) => {
   const errors = validationResult(req);

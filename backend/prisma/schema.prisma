@@ -964,19 +964,19 @@ model DispatchMasterDataAudit {
 }
 
 model GuardDriverQueueTurn {
-  id                    String                     @id @default(cuid())
+  id                    String                        @id @default(cuid())
   driverSource          GuardDriverSource
-  status                GuardDriverQueueTurnStatus @default(WAITING_AT_GATE)
+  status                GuardDriverQueueTurnStatus    @default(WAITING_AT_GATE)
   internalDriverId      String?
   externalDriverId      String?
   companyVehicleId      String?
   externalVehicleId     String?
   assignmentId          String?
-  admittedAt            DateTime                   @default(now())
+  admittedAt            DateTime                      @default(now())
   admittedBy            String
-  snapshotSchemaVersion Int                        @default(1)
+  snapshotSchemaVersion Int                           @default(1)
   admissionSnapshot     Json
-  integrityHash         String                     @unique
+  integrityHash         String                        @unique
   availableAt           DateTime?
   availableBy           String?
   loadingId             String?
@@ -993,17 +993,19 @@ model GuardDriverQueueTurn {
   voidedBy              String?
   voidReason            String?
   replacementTurnId     String?
-  createdAt             DateTime                   @default(now())
-  updatedAt             DateTime                   @updatedAt
-  internalDriver        InternalDriverProfile?     @relation(fields: [internalDriverId], references: [id], onDelete: Restrict)
-  externalDriver        ExternalDriver?            @relation(fields: [externalDriverId], references: [id], onDelete: Restrict)
-  companyVehicle        CompanyVehicle?            @relation(fields: [companyVehicleId], references: [id], onDelete: Restrict)
-  externalVehicle       ExternalVehicle?           @relation(fields: [externalVehicleId], references: [id], onDelete: Restrict)
-  assignment            DriverVehicleAssignment?   @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
-  loading               LogisticsLoading?          @relation(fields: [loadingId], references: [id], onDelete: Restrict)
-  replacementTurn       GuardDriverQueueTurn?      @relation("GuardQueueReplacement", fields: [replacementTurnId], references: [id], onDelete: Restrict)
-  replacedTurns         GuardDriverQueueTurn[]     @relation("GuardQueueReplacement")
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
+  internalDriver        InternalDriverProfile?        @relation(fields: [internalDriverId], references: [id], onDelete: Restrict)
+  externalDriver        ExternalDriver?               @relation(fields: [externalDriverId], references: [id], onDelete: Restrict)
+  companyVehicle        CompanyVehicle?               @relation(fields: [companyVehicleId], references: [id], onDelete: Restrict)
+  externalVehicle       ExternalVehicle?              @relation(fields: [externalVehicleId], references: [id], onDelete: Restrict)
+  assignment            DriverVehicleAssignment?      @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  loading               LogisticsLoading?             @relation(fields: [loadingId], references: [id], onDelete: Restrict)
+  replacementTurn       GuardDriverQueueTurn?         @relation("GuardQueueReplacement", fields: [replacementTurnId], references: [id], onDelete: Restrict)
+  replacedTurns         GuardDriverQueueTurn[]        @relation("GuardQueueReplacement")
   events                GuardDriverQueueEvent[]
+  allocationDrafts      LogisticsAllocationDraft[]
+  allocationRevisions   LogisticsAllocationRevision[]
 
   @@index([status, admittedAt])
   @@index([internalDriverId, status])
@@ -2580,35 +2582,38 @@ model SabalanCalendarEntry {
 }
 
 model LogisticsLoading {
-  id                       String                             @id @default(cuid())
-  loadingNumber            String                             @unique
-  customerId               String
-  projectId                String
-  status                   LogisticsLoadingStatus             @default(DRAFT)
-  loadingDate              DateTime                           @default(now())
-  notes                    String?
-  driverId                 String?
-  vehiclePairId            String?
-  driverSnapshot           Json?
-  finalizedAt              DateTime?
-  finalizedBy              String?
-  cancelledAt              DateTime?
-  cancelledBy              String?
-  cancellationReason       String?
-  createdBy                String
-  createdAt                DateTime                           @default(now())
-  updatedAt                DateTime                           @updatedAt
-  customer                 CrmCustomer                        @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  project                  ProjectAddress                     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  driver                   LogisticsDriver?                   @relation(fields: [driverId], references: [id], onDelete: SetNull)
-  vehiclePair              SecurityVehiclePair?               @relation(fields: [vehiclePairId], references: [id], onDelete: SetNull)
-  lines                    LogisticsLoadingLine[]
-  corrections              LogisticsLoadingCorrection[]
-  securityVehicleMovements SecurityVehicleMovement[]
-  driverQueueTurns         SecurityDriverQueueTurn[]
-  driverRequests           LogisticsDriverRequest[]
-  driverAssignments        LogisticsLoadingDriverAssignment[]
-  guardQueueTurns          GuardDriverQueueTurn[]
+  id                           String                             @id @default(cuid())
+  loadingNumber                String                             @unique
+  customerId                   String
+  projectId                    String
+  status                       LogisticsLoadingStatus             @default(DRAFT)
+  loadingDate                  DateTime                           @default(now())
+  notes                        String?
+  driverId                     String?
+  vehiclePairId                String?
+  driverSnapshot               Json?
+  finalizedAt                  DateTime?
+  finalizedBy                  String?
+  cancelledAt                  DateTime?
+  cancelledBy                  String?
+  cancellationReason           String?
+  createdBy                    String
+  createdAt                    DateTime                           @default(now())
+  updatedAt                    DateTime                           @updatedAt
+  customer                     CrmCustomer                        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  project                      ProjectAddress                     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  driver                       LogisticsDriver?                   @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  vehiclePair                  SecurityVehiclePair?               @relation(fields: [vehiclePairId], references: [id], onDelete: SetNull)
+  lines                        LogisticsLoadingLine[]
+  corrections                  LogisticsLoadingCorrection[]
+  securityVehicleMovements     SecurityVehicleMovement[]
+  driverQueueTurns             SecurityDriverQueueTurn[]
+  driverRequests               LogisticsDriverRequest[]
+  driverAssignments            LogisticsLoadingDriverAssignment[]
+  guardQueueTurns              GuardDriverQueueTurn[]
+  allocationBatches            LogisticsAllocationBatch[]
+  canonicalAllocationDrafts    LogisticsAllocationDraft[]
+  canonicalAllocationRevisions LogisticsAllocationRevision[]
 
   @@index([customerId])
   @@index([projectId])
@@ -2617,6 +2622,177 @@ model LogisticsLoading {
   @@index([vehiclePairId])
   @@index([loadingDate])
   @@map("logistics_loadings")
+}
+
+model LogisticsAllocationBatch {
+  id             String                        @id @default(cuid())
+  loadingId      String
+  idempotencyKey String
+  finalizedAt    DateTime                      @default(now())
+  finalizedBy    String
+  loading        LogisticsLoading              @relation(fields: [loadingId], references: [id], onDelete: Restrict)
+  revisions      LogisticsAllocationRevision[]
+
+  @@unique([loadingId, idempotencyKey])
+  @@index([loadingId, finalizedAt])
+  @@map("logistics_allocation_batches")
+}
+
+model LogisticsAllocationDraft {
+  id          String                         @id @default(cuid())
+  loadingId   String
+  queueTurnId String                         @unique
+  createdBy   String
+  createdAt   DateTime                       @default(now())
+  updatedAt   DateTime                       @updatedAt
+  loading     LogisticsLoading               @relation(fields: [loadingId], references: [id], onDelete: Cascade)
+  queueTurn   GuardDriverQueueTurn           @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
+  lines       LogisticsAllocationDraftLine[]
+
+  @@unique([loadingId, queueTurnId])
+  @@index([loadingId])
+  @@map("logistics_allocation_drafts")
+}
+
+model LogisticsAllocationDraftLine {
+  id                   String                   @id @default(cuid())
+  draftId              String
+  sourceContractId     String
+  sourceContractItemId String
+  productRowId         String
+  productId            String
+  quantity             Decimal                  @db.Decimal(18, 3)
+  unit                 String
+  snapshot             Json
+  createdAt            DateTime                 @default(now())
+  draft                LogisticsAllocationDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([draftId])
+  @@index([sourceContractItemId])
+  @@map("logistics_allocation_draft_lines")
+}
+
+model LogisticsAllocationRevision {
+  id                    String                            @id @default(cuid())
+  batchId               String
+  loadingId             String
+  queueTurnId           String
+  revisionNumber        Int
+  snapshot              Json
+  integrityHash         String                            @unique
+  finalizedAt           DateTime                          @default(now())
+  finalizedBy           String
+  sealedAt              DateTime?
+  predecessorRevisionId String?                           @unique
+  batch                 LogisticsAllocationBatch          @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  loading               LogisticsLoading                  @relation(fields: [loadingId], references: [id], onDelete: Restrict)
+  queueTurn             GuardDriverQueueTurn              @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
+  lines                 LogisticsAllocationRevisionLine[]
+  candidate             AccountingDispatchCandidate?
+  predecessorRevision   LogisticsAllocationRevision?      @relation("AllocationRevisionSuccessor", fields: [predecessorRevisionId], references: [id], onDelete: Restrict)
+  successorRevision     LogisticsAllocationRevision?      @relation("AllocationRevisionSuccessor")
+
+  @@unique([loadingId, queueTurnId, revisionNumber])
+  @@index([loadingId, finalizedAt])
+  @@index([queueTurnId])
+  @@map("logistics_allocation_revisions")
+}
+
+model LogisticsAllocationRevisionLine {
+  id                   String                      @id @default(cuid())
+  revisionId           String
+  sourceContractId     String
+  sourceContractItemId String
+  productRowId         String
+  productId            String
+  quantity             Decimal                     @db.Decimal(18, 3)
+  unit                 String
+  snapshot             Json
+  integrityHash        String                      @unique
+  revision             LogisticsAllocationRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+
+  @@index([revisionId])
+  @@index([sourceContractItemId])
+  @@map("logistics_allocation_revision_lines")
+}
+
+model AccountingDispatchCandidate {
+  id                   String                            @id @default(cuid())
+  allocationRevisionId String                            @unique
+  status               AccountingDispatchCandidateStatus @default(PENDING)
+  createdAt            DateTime                          @default(now())
+  dispositionAt        DateTime?
+  dispositionBy        String?
+  dispositionReason    String?
+  allocationRevision   LogisticsAllocationRevision       @relation(fields: [allocationRevisionId], references: [id], onDelete: Restrict)
+  workItem             AccountingDispatchWorkItem?
+  waybills             AccountingDispatchWaybill[]
+  commands             AccountingDispatchCommand[]
+
+  @@index([status, createdAt])
+  @@map("accounting_dispatch_candidates")
+}
+
+model AccountingDispatchWorkItem {
+  id          String                           @id @default(cuid())
+  candidateId String                           @unique
+  status      AccountingDispatchWorkItemStatus @default(OPEN)
+  createdAt   DateTime                         @default(now())
+  completedAt DateTime?
+  candidate   AccountingDispatchCandidate      @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@map("accounting_dispatch_work_items")
+}
+
+model AccountingDispatchWaybill {
+  id                 String                          @id @default(cuid())
+  number             BigInt                          @unique @default(dbgenerated("nextval('accounting_dispatch_waybill_number_seq'::regclass)"))
+  candidateId        String
+  status             AccountingDispatchWaybillStatus @default(ISSUED)
+  snapshot           Json
+  integrityHash      String                          @unique
+  issuedAt           DateTime                        @default(now())
+  issuedBy           String
+  voidedAt           DateTime?
+  voidedBy           String?
+  voidReason         String?
+  replacesWaybillId  String?                         @unique
+  candidate          AccountingDispatchCandidate     @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  replacesWaybill    AccountingDispatchWaybill?      @relation("DispatchWaybillReplacement", fields: [replacesWaybillId], references: [id], onDelete: Restrict)
+  replacementWaybill AccountingDispatchWaybill?      @relation("DispatchWaybillReplacement")
+
+  @@index([candidateId, issuedAt])
+  @@map("accounting_dispatch_waybills")
+}
+
+model AccountingDispatchCommand {
+  id             String                      @id @default(cuid())
+  candidateId    String
+  idempotencyKey String
+  action         String
+  result         Json
+  actorId        String
+  createdAt      DateTime                    @default(now())
+  candidate      AccountingDispatchCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+
+  @@unique([candidateId, idempotencyKey])
+  @@map("accounting_dispatch_commands")
+}
+
+model DispatchLifecycleAudit {
+  id            String   @id @default(cuid())
+  aggregateType String
+  aggregateId   String
+  eventType     String
+  payload       Json
+  actorId       String
+  recordedAt    DateTime @default(now())
+  previousHash  String?
+  eventHash     String   @unique
+
+  @@index([aggregateType, aggregateId, recordedAt])
+  @@map("dispatch_lifecycle_audits")
 }
 
 model LogisticsLoadingDriverAssignment {
@@ -3440,6 +3616,24 @@ enum LogisticsLoadingStatus {
   DRAFT
   FINALIZED
   CANCELLED
+}
+
+enum AccountingDispatchCandidateStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  RETURNED
+  WITHDRAWN
+}
+
+enum AccountingDispatchWorkItemStatus {
+  OPEN
+  COMPLETED
+}
+
+enum AccountingDispatchWaybillStatus {
+  ISSUED
+  VOIDED
 }
 
 enum ShipmentQuantityEvidenceKind {

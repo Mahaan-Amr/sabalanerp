@@ -307,6 +307,11 @@ export const readShipmentQuantityProjection = async (
   }
   const explicitContractRows = new Set(persisted.filter((item) => item.kind === 'CONTRACTED_SET').map((item) => item.contractItemId));
   const explicitLegacySources = new Set(persisted.filter((item) => item.sourceType.startsWith('LEGACY_')).map((item) => item.sourceId));
+  const canonicalLoadingLineIds = new Set(persisted.flatMap((item) => {
+    if (item.sourceType !== 'LOGISTICS_ALLOCATION_REVISION') return [];
+    const loadingLineId = asRecord(item.metadata).loadingLineId;
+    return typeof loadingLineId === 'string' && loadingLineId ? [loadingLineId] : [];
+  }));
 
   for (const contract of contracts) {
     const approval = approvedAt.get(contract.id);
@@ -336,6 +341,7 @@ export const readShipmentQuantityProjection = async (
     });
 
     for (const line of contract.logisticsLoadingLines) {
+      if (canonicalLoadingLineIds.has(line.id)) continue;
       if (explicitLegacySources.has(line.id)) continue;
       const item = contract.items.find((candidate) => candidate.id === line.sourceContractItemId);
       if (!item) continue;

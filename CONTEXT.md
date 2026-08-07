@@ -7,8 +7,8 @@ The event-derived, scale-three reconciliation for one financially approved stabl
 _Avoid_: using catalog identity as row identity, binary floating-point arithmetic, mixing units, clamping negative balances, or treating a Logistics finalization as physical dispatch
 
 **Finalized/Reserved Quantity**:
-The quantity held by immutable finalized Logistics allocations that have not yet physically exited or received an explicit allocation disposition. Accounting review, waybill issuance, driver confirmation, authorization expiry or revocation, and document-only voiding do not release this quantity.
-_Avoid_: releasing a reservation because a document changed, counting the same allocation as both reserved and dispatched, or deriving this bucket from scheduled Delivery records
+The quantity of an active, immutable finalized Logistics Allocation Revision that has not physically exited. It remains reserved through Accounting review, waybill issuance, driver confirmation, authorization expiry or revocation, and document-only waybill voiding or reissue. It leaves the bucket only by moving to Physically Dispatched Quantity at Guard-recorded exit or when the allocation receives an explicit rejection, withdrawal, cancellation, unloading, or supersession disposition.
+_Avoid_: releasing a reservation because a document changed, counting the same allocation as both reserved and dispatched, retaining a disposed allocation in available-load calculations, or deriving this bucket from scheduled Delivery records
 
 **Physically Dispatched Quantity**:
 The quantity proven to have crossed the gate by a Guard Physical Exit Record or honestly registered Manual Outage Exit, adjusted only by posted append-only Dispatch Corrections. A verified return changes this quantity only after Accounting posts its linked negative correction.
@@ -2682,3 +2682,248 @@ _Avoid_: arbitrary database-trigger policies, administrator-authored permission 
 **Support Operational Target**:
 A versioned acknowledgment and resolution goal measured using the explicit Asia/Tehran support calendar and fixed to a ticket at triage. Waiting for genuine reporter information pauses only the resolution clock; approaching and missed targets notify and escalate without automatically closing or reassigning the ticket.
 _Avoid_: assuming 24/7 elapsed time, treating targets as promises, rewriting existing tickets when policy changes, or hiding the full elapsed timeline
+
+**HR-Hosted Vehicle Operations**:
+The first-version arrangement in which operational driver profiles, company vehicles, plates, and assignments are surfaced inside the HR workspace while remaining a separately permissioned Vehicle Operations feature group. Hosting these functions in HR does not merge personnel identity or eligibility with operational vehicle ownership.
+_Avoid_: creating a separate Vehicle Operations workspace for the first version, granting vehicle authority to every HR editor, or treating a vehicle assignment as an HR identity fact
+
+**Role-Specific Dispatch Surface**:
+The owning workspace's view of one shared dispatch case and handoff timeline, presenting cross-workspace state as readable context while exposing only the decisions and actions that workspace owns. Human Resources, HR-hosted Vehicle Operations, Guard, Logistics, and Accounting each retain their native work queues and detail surfaces.
+_Avoid_: a cross-workspace dispatch super-screen, duplicating the case into separate workspace records, or exposing another workspace's commands merely because its state is visible
+
+**Internal Dispatch Pilot Cohort**:
+The named rollout group of three to five trained Internal Driver Identities and two to three Company Vehicle Identities used to validate the new dispatch flow before broader use, covering every operating shift and including at least one driver with a known difficult-fingerprint case. Only trained Human Resources, HR-hosted Vehicle Operations, Guard, Logistics, Accounting, and support personnel may operate cohort dispatches; External Driver Identities remain excluded until the cohort passes its acceptance gates.
+_Avoid_: opening the pilot to any eligible internal driver, including external drivers before the internal flow is accepted, omitting a shift or known difficult-fingerprint scenario, or allowing untrained operators to handle pilot dispatches
+
+**Internal Dispatch Pilot Acceptance Window**:
+The minimum live-evidence period before the Internal Dispatch Pilot Cohort may be accepted: at least twenty operating days and at least fifty successfully completed Guard Physical Exit Records, whichever finishes later, covering every operating shift with at least five completed dispatches per cohort driver and ten per cohort vehicle. Evidence gathered before a Pilot Safety Pause remains part of the record, but acceptance additionally requires ten consecutive operating days and twenty-five exits after the final corrective release.
+_Avoid_: accepting on elapsed calendar time alone, accepting on volume without shift and cohort coverage, discarding earlier evidence after a pause, or expanding without a substantial clean run after the last critical correction
+
+**Staged Dispatch Expansion**:
+The controlled progression beyond the accepted Internal Dispatch Pilot Cohort. Internal capacity grows by at most five drivers and three company vehicles followed by five clean operating days per addition; after all intended internal drivers are active, internal operation proves another twenty clean operating days and one hundred exits. External confirmation then begins with three to five known recurring external drivers and two to three external vehicles, passes the same twenty-day and fifty-exit acceptance, monitoring, support, training, reconciliation, and non-waivable integrity gates except biometric-specific measures, and expands at the same cohort pace. Pilot Safety Pause freezes progression, no stage may be skipped, and general availability additionally requires notification and report verification plus cross-workspace written approval. Regulated external transport waybill issuance remains outside this progression.
+_Avoid_: expanding all users at once, adding another cohort before five clean days, treating internal success as proof of the external confirmation path, applying biometric metrics to OTP confirmation, skipping cross-workspace approval, or silently adding regulated transport-waybill scope
+
+**Internal Driver Identity**:
+The Vehicle Operations driving profile of one HR Personnel identity that is eligible to drive for Sabalan; personnel identity remains owned by Human Resources and is not copied into a separate driver person record.
+_Avoid_: duplicating Personnel as a driver, treating eligibility as a vehicle assignment, or allowing Vehicle Operations to redefine HR identity
+
+**Internal Driver Eligibility**:
+The non-overlapping, effective-dated HR authority for an active Personnel identity to drive for Sabalan; suspension or withdrawal closes the current period with a reason, and reinstatement creates a new period.
+_Avoid_: a mutable eligibility flag, overwriting earlier eligibility, granting eligibility through Vehicle Operations, or deleting used periods
+
+**Internal Driver Profile**:
+The single stable Vehicle Operations record for an Internal Driver Identity, holding licence and operational driving details without duplicating Personnel identity. Current readiness is derived from active Personnel, current Internal Driver Eligibility, profile completeness, and licence validity; a used profile remains historical rather than being deleted.
+_Avoid_: a second personnel record, a manually asserted ready status, storing HR eligibility on the profile, or deleting a profile referenced by operations
+
+**External Driver Identity**:
+The reusable Guard-managed identity of a non-personnel driver, independent of any vehicle used on a particular visit.
+_Avoid_: embedding the external driver inside a permanent driver-vehicle pair, creating a new identity for every arrival, or treating an external driver as HR Personnel
+
+**Driver Source Continuity**:
+The explicit link between an External Driver Identity and a later Personnel-linked Internal Driver Profile for the same real person, without converting either identity or relabelling historical evidence. Active Personnel cannot enter the Guard queue through the linked external source; after employment ends, Guard may reactivate that external identity with a recorded reason.
+_Avoid_: merging source records, rewriting external history as internal, creating unlinked duplicates, or bypassing HR eligibility through an external identity
+
+**Company Vehicle Identity**:
+The canonical Vehicle Operations record for one Sabalan-managed vehicle, independent of its current or historical driver.
+_Avoid_: identifying a company vehicle through its current driver, copying the vehicle for each assignment, or letting a queue turn redefine the vehicle
+
+**Company Vehicle Lifecycle**:
+A company vehicle progresses from `DRAFT` to `ACTIVE`, may temporarily become `OUT_OF_SERVICE` without ending its driver assignment, and may be removed from active project use as restorable `ARCHIVED`; only an unused, dependency-free `DRAFT` may be permanently deleted. Active use requires a current plate and driver assignment, unavailable or archived vehicles cannot advance through the queue, and any operationally used vehicle remains historical.
+_Avoid_: queueing incomplete or unavailable vehicles, ending an assignment solely for temporary repair, hard-deleting operational history, or showing archived vehicles in ordinary active lists
+
+**External Vehicle Identity**:
+The reusable Guard-managed identity of a non-company vehicle, independent of the external driver using it on a particular visit.
+_Avoid_: embedding the external vehicle inside a permanent driver-vehicle pair, creating a duplicate for each driver, or treating it as a company vehicle
+
+**External Driver and Vehicle Lifecycle**:
+A Guard-managed external driver or vehicle progresses from incomplete `DRAFT` to `ACTIVE`, may be temporarily `RESTRICTED` with accountable effective-dated evidence, and may be removed from ordinary use as restorable `ARCHIVED`; only an unused, dependency-free `DRAFT` may be permanently deleted. Queue readiness additionally requires complete, current identity and documents, so expiry makes readiness false without silently changing lifecycle state.
+_Avoid_: using one active flag for different meanings, hiding restrictions, mutating lifecycle on document expiry, queueing an unready record, or deleting operationally used identities
+
+**Vehicle Plate Registration**:
+The effective-dated normalized plate assigned to a stable Company Vehicle Identity or External Vehicle Identity; plate periods never overlap across the two registries. Correction or replacement closes the prior period with a reason, later reuse begins only after the earlier period ends, and operational snapshots retain the plate that applied at their recorded time.
+_Avoid_: using the plate as vehicle identity, overlapping plate ownership, rewriting historical plates, or changing old queue and dispatch evidence after a plate update
+
+**Driver-Vehicle Association**:
+The explicit relationship that joins independent driver and vehicle identities for a defined operational period or visit; internal assignments preserve effective-dated history, while Guard admission records the external combination actually presented.
+_Avoid_: a mutable combined driver-vehicle identity, overwriting assignment history, or inferring a historical pairing from current records
+
+**Internal Driver-Vehicle Assignment**:
+The effective-dated Vehicle Operations association between one Internal Driver Profile and one Company Vehicle Identity. At any instant each driver and each vehicle has at most one active assignment; periods cannot overlap on either side, reassignment closes the prior assignment with a reason, and future non-overlapping periods may be scheduled.
+_Avoid_: concurrent active assignments for either identity, mutating an assignment into a different pairing, overwriting substitution history, or rejecting valid future scheduling
+
+**Guard Driver Queue Turn**:
+One immutable, time-ordered admission of the driver and vehicle physically presented to Guard for loading, retaining their source identities, the applicable internal assignment when relevant, and an admission snapshot. Later identity or assignment edits never rewrite the turn; eligibility is revalidated before loading-area entry and Logistics reservation, and an invalid turn is removed with accountable evidence rather than mutated.
+_Avoid_: a live projection of the current assignment, overwriting the admitted combination, carrying an invalidated turn forward, or reusing one turn for repeat visits
+
+**Dispatch Case Identity**:
+The cross-workspace correlation identity anchored to one Guard Driver Queue Turn and carried through its Logistics allocation lineage, Accounting candidates and waybills, confirmations, authorizations, and physical exit. Successor revisions and replacement waybills remain visible within that same case, while a repeat physical visit always begins a new case through a new queue turn.
+_Avoid_: creating a second cross-workspace source-of-truth record, using a replaceable waybill number as the journey identity, merging repeat visits, or losing superseded evidence from the case timeline
+
+**Supported Driver-Vehicle Admission Classes**:
+Guard admits either an Internal Driver Identity with the Company Vehicle Identity from its current active assignment, or an External Driver Identity with an External Vehicle Identity combined for that visit. Mixed-source pairings require a separately designed temporary-authorization model and are outside the current dispatch flow.
+_Avoid_: internal drivers with external vehicles, external drivers with company vehicles, bypassing an active internal assignment, or inventing an implicit mixed-source exception
+
+**Dispatch Evidence Snapshot Chain**:
+The immutable evidence chain in which Guard admission freezes the presented identities and readiness, Logistics finalization freezes each allocation from that admission, Accounting issues each Dispatch Waybill only from the finalized Logistics snapshot, and Guard exit records the confirmed authorization and physical exit. Every boundary retains its upstream identity and integrity hash plus enough embedded display fields to render history without mutable master data; later profile, plate, contact, document, or assignment changes never backfill it.
+_Avoid_: rebuilding history from current master records, silently updating old snapshots, issuing from an editable draft, or relying on an upstream record alone to render historical evidence
+
+**Allocation-Scoped Accounting Rejection**:
+Accounting rejects only the affected finalized driver-vehicle allocation; accepted sibling allocations remain immutable and may continue toward confirmation and exit, while Logistics creates a successor allocation revision for the rejected allocation. An error in shared loading identity rejects every affected allocation that has not exited, while exited allocations remain immutable and are corrected through separate audited records.
+_Avoid_: reopening accepted sibling allocations for a local error, mutating a rejected allocation in place, reissuing from the rejected revision, or rewriting an allocation after physical exit
+
+**Logistics Allocation Revision**:
+The mutable `DRAFT` and then immutable `FINALIZED` snapshot of what one Guard-admitted driver-vehicle allocation carries; rejection, withdrawal, cancellation or unloading, and succession are linked disposition records rather than edits. A successor may change lines, quantities, calculations, and operational notes but retains the same driver, vehicle, and queue turn; changing that physical combination requires accountable cancellation or unloading and a new allocation from another eligible turn.
+_Avoid_: editing a finalized revision, changing its admitted identity, erasing rejected revisions, or representing driver substitution as an ordinary quantity correction
+
+**Accounting Dispatch Candidate**:
+The immutable Accounting review input created atomically from one finalized Logistics driver-vehicle allocation, accompanied by an Accounting work item but carrying no Accounting Dispatch Waybill number. Its lifecycle is `PENDING_REVIEW` to terminal `ACCEPTED`, `REJECTED`, or `WITHDRAWN`; acceptance atomically issues the numbered waybill.
+_Avoid_: calling the candidate a waybill, numbering it before Accounting accepts it, editing its Logistics snapshot, or bypassing Accounting review
+
+**Logistics Dispatch Candidate Withdrawal**:
+The pre-issuance command by which Logistics ends its own Accounting Dispatch Candidate with a mandatory reason, atomically closes the Accounting work item, and then creates a successor revision or records cancellation or unloading. Once a waybill is issued, Logistics may only request Accounting to void it.
+_Avoid_: withdrawing an issued waybill, leaving a withdrawn work item open, editing the withdrawn candidate, or treating withdrawal as Accounting rejection
+
+**Accounting Dispatch Waybill**:
+The permanently numbered, immutable Accounting record issued from one accepted Accounting Dispatch Candidate for one driver-vehicle allocation, with lifecycle `ISSUED` to terminal `VOIDED` or `EXIT_RECORDED`. Confirmation is separate evidence rather than a waybill state; voiding requires a reason and any replacement receives a new linked number that is never reused or erased.
+One waybill exits only as the full effective allocation through one atomic Guard Physical Exit Record. A multi-driver loading becomes partially dispatched only as its separate allocations exit independently. A pre-exit quantity change requires an unloading or cancellation disposition and a successor allocation and waybill; a post-exit change uses Returned Dispatch Reconciliation or another Dispatch Correction.
+_Avoid_: editing an issued waybill, issuing one for multiple driver-vehicle allocations, partially exiting one waybill, reusing a voided number, or deleting superseded evidence
+
+**Driver Waybill Confirmation**:
+The transaction-bound evidence that the snapshotted driver confirmed one exact numbered Accounting Dispatch Waybill, binding driver identity, waybill identity and snapshot hash, verification method, server time, and device or session evidence. It never transfers to a replacement waybill, successor allocation revision, or another dispatch, even when the driver and vehicle are unchanged.
+_Avoid_: treating a reusable fingerprint template as transaction confirmation, copying confirmation to a replacement, or accepting evidence that is not bound to the waybill snapshot
+
+**Waybill Confirmation Attempt Evidence**:
+The protected record of each successful or failed fingerprint, OTP, or approved fallback attempt against one exact Accounting Dispatch Waybill, including method, server time, result code, and available device, session, and actor context. Failure leaves the waybill `ISSUED` without an exit authorization; throttling or fallback eligibility is derived separately and never silently voids or rejects the waybill.
+_Avoid_: overwriting earlier attempts, treating failure as a waybill state, creating authorization from an unsuccessful attempt, or exposing protected verification evidence broadly
+
+**Dispatch Protected Evidence**:
+The restricted enrollment, confirmation, fallback, outage, device, actor, and audit detail whose workspace-owned portion is visible to that workspace's administrators and whose complete chain is visible only to global managers, global administrators, or explicitly authorized evidence reviewers. Export is a separately authorized, reason-bound, encrypted and audited act; biometric templates, raw images, OTP secrets, cryptographic keys, and connector secrets are never viewable or exportable.
+_Avoid_: equating ordinary dispatch visibility with evidence access, giving a workspace administrator cross-workspace evidence, exporting without purpose and attribution, or exposing reusable authentication material
+
+**Dispatch Audit Chain**:
+The append-only, hash-linked record of every dispatch authority change, domain transition, verification or exception outcome, protected-evidence access, privacy action, and denied control, carrying the effective actor authority, workspace, subject, before/after state or hashes, server time, reason, session/device context, and correlation identity. Alerts route exceptional events to the owning workspace administrators and the designated global, security, technical, evidence, or privacy recipients without changing the underlying audit fact.
+_Avoid_: logging only successful commands, overwriting audit rows, omitting effective authority or denial evidence, or treating an alert as the authoritative record
+
+**Dispatch Evidence Retention**:
+The fail-closed lifecycle that never persists raw fingerprint images, keeps a reusable template only while eligibility and consent are active, disables matching immediately when either ends, and separates template, consent, transaction-evidence, security-log, export, backup, deletion-certificate, and legal-hold schedules. Production biometric enrollment remains unavailable until counsel-approved schedules are configured; a legal hold pauses destruction without restoring matching or expanding access.
+_Avoid_: inventing one universal retention period, using held data operationally, deleting only the primary database copy, or enabling production enrollment before required schedules exist
+
+**Biometric Legal Readiness Gate**:
+The prerequisite that qualified Iranian counsel answer the dispatch biometric and electronic-evidence checklist and approve purpose-specific employee consent and withdrawal, official privacy and driver-facing wording, electronic-evidence characterization, separate retention schedules, incident and disclosure handling, vendor and cross-system handling, and legal-hold and deletion rules before any real-driver enrollment or live biometric pilot. Every required answer must be configured and tested fail-closed; missing consent, retention, or policy configuration disables enrollment and cannot be waived by managerial authority. Synthetic-identity simulation and non-production technical proof-of-concept work may proceed before the gate passes.
+_Avoid_: treating a small pilot as exempt, asking a manager to waive missing legal configuration, enrolling real drivers under draft wording, using one guessed retention period, or blocking synthetic technical validation unnecessarily
+
+**Internal Driver Biometric Enrollment**:
+The HR-owned, consent-bound act of creating or replacing the encrypted reusable fingerprint template for an actively eligible Internal Driver Identity; failed or cancelled enrollment leaves the prior valid template unchanged and creates no dispatch fallback authority. Ending eligibility, consent, or permitted retention disables matching without erasing accountable historical evidence.
+_Avoid_: enrolling an ineligible person, treating an enrollment attempt as waybill confirmation, using driver OTP to bypass enrollment, replacing a valid template after a failed scan, or deleting transaction history when matching is disabled
+
+**Internal Driver Biometric Fallback**:
+The controlled alternate confirmation path made eligible by a reported scanner or connector failure or by three failed live fingerprint attempts in the current waybill-confirmation session. Accounting initiates it without a waiting period, but success requires driver OTP, approval by a different Guard supervisor, a mandatory reason, device or error context, and a manager alert.
+_Avoid_: offering fallback before qualifying evidence, letting one user approve both sides, treating OTP alone as sufficient, or hiding fallback use as an ordinary fingerprint success
+
+**Simulated Biometric Device Gate**:
+The pre-hardware acceptance gate in which the device-neutral connector simulator proves the complete internal-driver dispatch journey and deterministic success, poor-quality, non-match, wrong-driver, three-failure fallback-eligibility, unavailable-device, disconnect, timeout, recovery, retry-idempotency, void, revocation, and exit-concurrency scenarios. The gate requires all automated tests and one hundred consecutive simulated end-to-end cycles to pass with no critical or high-severity defect, unexplained evidence difference, reconciliation difference, raw fingerprint persistence, or secret exposure, while producing the required transaction-bound evidence, audit events, alerts, and authorization outcomes.
+_Avoid_: connecting production-intended hardware before simulator acceptance, testing only the happy path, treating retries as new confirmations or exits, tolerating missing evidence, or allowing simulated biometric material to bypass production privacy boundaries
+
+**Physical Biometric Device Gate**:
+The pre-pilot acceptance gate in which the exact purchased BioMini Slim 2, production SDK, Accounting workstation build, and signed connector pass every mandatory proof-of-concept check and their predeclared performance thresholds. Every pilot driver enrolls at least two fingers; at least one hundred representative genuine attempts achieve at least 95 percent first-attempt success overall, no driver below 90 percent, and at least 99 percent success within three attempts; at least one hundred wrong-driver attempts and the approved safe-spoof protocol produce no false acceptance; and p95 verification completes within three seconds after finger placement. A 500-cycle soak and one full operational day must complete without resource leaks, frozen UI, connector restart, or lost evidence, while restart, USB suspend and reconnect, blocked vendor endpoints, licensing failure, replay, revocation, and cross-waybill controls behave safely. Written production SDK, redistribution, server-matching, offline-activation, warranty, spare-unit, and replacement terms are part of the gate. Thresholds may be revised deliberately before evaluation, never after observing a failure; a difficult-fingerprint failure may trigger a RealScan-G1 trial but cannot be hidden through routine fallback.
+_Avoid_: accepting a vendor demonstration, changing thresholds after results are known, averaging away one unusable driver, treating fallback as device success, bulk purchasing before acceptance, or using hardware without confirmed production and support rights
+
+**Dispatch Dual Control**:
+The transaction-level rule that two distinct authenticated users must complete the two approval sides of a biometric fallback or Manual Outage Exit. Global `ADMIN` and `MANAGER` users may act in either capacity across all five dispatch workspaces, while a workspace administrator may act only for that workspace; broad privileged access never turns a two-person exception into self-approval.
+_Avoid_: equating access with self-approval, bypassing actor separation for privileged users, or granting a workspace administrator authority outside that workspace
+
+**Dispatch Workspace Authority**:
+The three-level authority model in which workspace `view` exposes ordinary redacted dispatch status, `edit` permits routine commands owned by that workspace, and `admin` additionally permits its supervisory, exception, reversal, and protected-evidence review commands. Narrow feature grants may authorize individual commands but cannot override Dispatch Dual Control or expose biometric templates, OTP secrets, or cryptographic keys.
+_Avoid_: treating workspace access as unrestricted evidence access, requiring workspace administration for every routine command, or using a feature grant to bypass transaction invariants
+
+**External Driver Waybill Confirmation**:
+The confirmation of one exact Accounting Dispatch Waybill through driver OTP plus a fresh Guard identity approval bound to the same confirmation session. Guard may approve remotely from its workspace, but admission-time identity evidence alone is insufficient and no authorization exists until both factors succeed in the live session.
+_Avoid_: reusing Guard admission as confirmation, accepting OTP alone, requiring Guard's physical presence in Accounting, or combining evidence from different sessions
+
+**Dispatch Exit Authorization**:
+The single-use authority created by a successful driver confirmation for one Accounting Dispatch Waybill, valid for 12 hours by default, with lifecycle `ACTIVE` to terminal `CONSUMED`, `EXPIRED`, or `REVOKED`; every reconfirmation creates a new authorization. Accounting or Guard may revoke it for a recorded operational or identity concern without changing a correct waybill, while incorrect waybill facts require voiding and replacement.
+_Avoid_: treating confirmation as permanent exit permission, extending an authorization in place, allowing exit after expiry or revocation, voiding a correct waybill for a temporary concern, or reissuing solely because authorization expired
+
+**Guard Physical Exit Record**:
+The immutable fact created when Guard atomically verifies and consumes an active Dispatch Exit Authorization and closes the corresponding queue turn as `EXIT_RECORDED`; retries of the same exit command are idempotent. Exit requires no checkout or long-lived user lock but competes transactionally with authorization revocation and waybill voiding: the first valid command committed wins, and an already-recorded exit permits only a separate audited correction.
+_Avoid_: recording exit from a stale pre-check, consuming one authorization twice, blocking routine work with an editing lock, duplicating exit on retry, voiding an exited waybill, or rewriting the physical-exit fact
+
+**Manual Outage Exit**:
+The explicit two-person exception that permits physical exit during a verified ERP-wide outage using a pre-numbered emergency record containing the waybill, driver, vehicle, load, outage window, reason, driver acknowledgment, and distinct Accounting and Guard-supervisor approvals. Guard registers the actual exit and evidence after recovery as an outage exception without fabricating normal fingerprint, OTP, or digital-authorization success.
+_Avoid_: using the manual path for an ordinary device failure, allowing one-person approval, inventing a normal confirmation retrospectively, losing the actual exit time, or leaving the exception unregistered after recovery
+
+**Dispatch Correction**:
+An append-only Accounting delta record linked to an exited Accounting Dispatch Waybill that adjusts downstream quantity or accounting projections without changing the original allocation, waybill, confirmation, authorization, or Guard exit. Its lifecycle is `DRAFT` to immutable `POSTED`: drafts affect no projection, while posting atomically makes the delta effective. Each correction states the change from the previously effective quantity; projections equal the original exited quantity plus every posted correction delta in recorded order. A mistaken posted correction is countered by a new opposite posted delta rather than edited, voided, or silently replaced. A physical return is a separate linked Guard inbound movement rather than a reversal of exit, and a return-related negative correction must reference verified Guard inbound evidence. Who may post and whether maker-checker approval is required are separate authorization decisions that do not change projection semantics.
+_Avoid_: applying a draft correction, editing or voiding posted evidence, deleting an exit, representing a return as a negative exit, accepting a return correction without inbound evidence, silently replacing an earlier correction, or calculating corrected projections from only the latest row
+
+**Returned Dispatch Reconciliation**:
+The two-boundary reconciliation of goods physically returned after exit: Guard's linked inbound movement proves the physical return but does not decide contract attribution or accepted quantity; Accounting reviews that evidence and posts the linked negative Dispatch Correction. Until the correction becomes effective, shipment views preserve the dispatched quantity and show a reconciliation exception. Once effective, Physically Dispatched Quantity decreases and Available-to-Load Quantity increases by the same amount unless a financially approved contract amendment cancels the replacement obligation.
+_Avoid_: letting Guard change Accounting shipment truth, reducing dispatch from an unreviewed inbound movement, hiding the pending mismatch, or reopening a cancelled commercial obligation
+
+**Contract Shipment Quantity Reconciliation**:
+The per-contract-product-row quantity truth in which the effective Contracted Quantity is reconciled into three mutually exclusive buckets: active finalized allocations not yet physically exited are Finalized/Reserved Quantity, effective Guard-recorded exits are Physically Dispatched Quantity, and the signed remainder is Available-to-Load Quantity, calculated as `Contracted - Finalized/Reserved - Physically Dispatched`. The authoritative grain is one Contract Item identified by its stable productRowId and effective version; contract and customer views roll up these row reconciliations without merging identical-looking rows or summing different units. Presentation may visually group compatible products only while preserving drill-down attribution to every source contract and row. A quantity moves from finalized/reserved to physically dispatched when Guard records exit; rejected, withdrawn, cancelled, unloaded, and superseded allocations contribute to neither bucket. The contracted baseline is the latest financially approved row quantity effective at the projection time; draft or rejected changes do not affect it, and an historical view uses the version then effective. A controlled contract-row reduction becomes effective only when its new quantity is at least the sum of Finalized/Reserved and Physically Dispatched quantities; active reservations must first be disposed, and effective dispatch must first be reduced through return or correction evidence before the contract can fall below it. Cancelling an unfulfilled obligation follows the same guard and never erases dispatch history. A negative available balance remains visible as an over-allocated or over-dispatched reconciliation exception and blocks new finalization; unavoidable later facts such as a positive Dispatch Correction may create that exception even though a controlled commercial reduction may not. Logistics offers zero additional selectable quantity, while unit-specific validation tolerance never changes stored or displayed projection truth. At the same effective time, `Contracted Quantity = Finalized/Reserved Quantity + Physically Dispatched Quantity + Available-to-Load Quantity`.
+_Avoid_: counting one allocation as both finalized/reserved and physically dispatched, calling Logistics finalization a dispatch, retaining inactive allocation revisions in the reserved bucket, using an original or unapproved contract version as the current baseline, reducing a contract below reserved plus dispatched truth, rejecting or rewriting unavoidable physical evidence, clamping away a negative balance, applying validation tolerance to projection truth, using a grouped presentation as calculation truth, merging repeated row identities, combining units, or deriving available-to-load from only one downstream lifecycle
+
+**Shipment Projection Time**:
+The two explicit time perspectives used to reconstruct Contract Shipment Quantity Reconciliation. `effectiveAt` is when a business event actually occurred; `recordedAt` is when Sabalan ERP learned and recorded it. An operational historical view uses effective time with all knowledge currently available, while an audit-known-at view additionally excludes evidence recorded after its cutoff. A saved export or snapshot records its mode, cutoff, source event identities and versions, and integrity hash.
+_Avoid_: using one ambiguous timestamp, losing the actual time of a retrospectively registered event, rewriting what an earlier audit view knew, or saving an historical result without reproducibility metadata
+
+**Shipment Quantity Projection**:
+A rebuildable read model derived from immutable contract-version, allocation-disposition, Guard-exit, Dispatch Correction, and return evidence to present Contract Shipment Quantity Reconciliation efficiently. Each row reports `CURRENT`, `STALE`, `LEGACY_UNRECONCILED`, or `EVIDENCE_CONFLICT`; missing links, broken hashes, contradictory dispositions, and incomplete rebuilds never become zero. Views retain the last verified quantities with cutoff, freshness, and unresolved condition. Aggregates distinguish a known subtotal from a complete total and report affected-row counts. A cached or stale projection permits viewing but never authorizes loading. Logistics finalization blocks affected rows, locks every unaffected contract row, and atomically recomputes authoritative current balances from source evidence, then reserves every requested quantity or none; rebuilding a projection from the same evidence must reproduce the same values.
+_Avoid_: treating a materialized or grouped view as source truth, authorizing from stale or unhealthy evidence, presenting missing evidence as zero, presenting a partial subtotal as a complete total, partially reserving a multi-row finalization, or maintaining unrebuildable mutable counters
+
+**Shipment Quantity Precision**:
+The exact fixed-point quantity policy shared by contract versions, allocations, exits, corrections, returns, cutover decisions, and shipment projections. Values use canonical scale three and never binary floating-point arithmetic; presentation may trim trailing zeros but never rounds a value used for reconciliation. Every event retains the contract row's snapshotted unit, projections neither convert nor combine units, and a financially approved row's unit becomes immutable once reservation or dispatch evidence exists. A commercial unit change creates a new contract row with a new stable identity. Unit-specific operational tolerances validate finalization only and never alter projection values.
+_Avoid_: floating-point reconciliation, hidden calculation rounding, cross-unit aggregation or conversion, changing a used row's unit, or folding tolerance into shipment truth
+
+**Legacy Shipment Quantity Cutover**:
+The per-contract-row transition from legacy shipment evidence to Contract Shipment Quantity Reconciliation. Delivery and DeliveryProduct remain scheduling or supporting evidence and never directly change shipment quantities. A legacy finalized loading linked to verified Guard outbound movement becomes physically dispatched; a cancelled loading contributes nothing; and a finalized loading without trustworthy exit evidence becomes `LEGACY_UNRECONCILED`, conservatively holding its quantity as reserved until reviewed. Review creates an immutable `DISPATCHED`, `RELEASED`, or `STILL_RESERVED` decision with source links, actor, time, reason, and integrity hash. The reviewed cutover baseline plus post-cutover canonical events reconstructs every later projection.
+_Avoid_: treating scheduled or self-reported delivery as physical exit, releasing uncertain legacy quantities for loading, fabricating exit evidence, or relying on an unexplained mutable opening balance
+
+**Legacy Driver-Vehicle Pair Cutover**:
+The validation-driven retirement of every combined Security driver-vehicle pair into read-only historical source data with its original identity and snapshot, while owning workspaces review match candidates before activating separate canonical identities. Legacy pairs are disabled for new queue use, historical loading and movement evidence retains its original source, and all new operations use only validated canonical records.
+_Avoid_: automatic internal or external classification, promoting a legacy pair directly into active use, breaking historical references, or allowing old and new registries to accept concurrent work
+
+**Driver-Vehicle Cutover Mapping**:
+An append-only reviewed decision for each legacy pair that records its linked canonical driver and vehicle targets or its historical-only, duplicate, or invalid disposition, together with reviewer, time, reason, and evidence. Conflicts are quarantined per affected identity without blocking unrelated migration; corrections supersede rather than rewrite prior decisions, and copied legacy documents require explicit validation with provenance.
+_Avoid_: automatic merge, silent overwrite, mutable mapping decisions, migration-wide blocking for one conflict, or copying legacy evidence without provenance
+
+**Driver-Vehicle Cutover Boundary**:
+The immutable switch from legacy pair and queue writes to canonical driver, vehicle, assignment, and queue records after a verified snapshot, explicit clearing of open legacy turns, and release of non-finalized reservations. Legacy writes may be restored only before the first canonical queue admission; afterward operations pause and fix forward so two competing histories never form.
+_Avoid_: deleting cleared turns, rewriting finalized loading history, rolling back after canonical live traffic, or permitting old and new write paths concurrently
+
+**Pilot Safety Pause**:
+The fail-safe operating state required when a critical dispatch failure occurs after the first canonical Guard Driver Queue Turn makes legacy rollback unsafe. It blocks new admissions, reservations, finalizations, waybill issuance, and confirmations; preserves all evidence; and permits only explicitly assessed safe completion, revocation, or holding of in-flight cases while a critical incident is fixed forward. Manual Outage Exit remains limited to a verified ERP-wide outage and is not a rollback substitute. Resumption requires documented root cause, correction, reconciliation, repetition of the failed acceptance tests, and approval from the incident lead plus Guard, Logistics, and Accounting owners.
+_Avoid_: restoring legacy writes after canonical traffic, deleting or rewriting failed evidence, continuing new work during the pause, using Manual Outage Exit for an ordinary defect, or resuming on technical recovery alone without operational approval
+
+**Pilot Operational Monitoring**:
+The live operational view of connector, device, and licence health; dispatch cases by lifecycle and age; confirmation outcomes and latency; fallback and outage use; authorization expiry and revocation; exit idempotency; projection health; reconciliation exceptions; audit-chain integrity; and SMS delivery backlog throughout the Internal Dispatch Pilot Cohort. An unauthorized or duplicate exit, false biometric acceptance, broken evidence or hash chain, unexplained quantity difference, Dispatch Dual Control bypass, raw biometric or secret exposure, or authorization consumed against the wrong snapshot is a critical alert that immediately enters Pilot Safety Pause. Service degradation and stuck work alert support without automatically pausing unless they threaten safety or evidence integrity.
+_Avoid_: monitoring only infrastructure, hiding business-state age or reconciliation health, treating every warning as a shutdown, continuing after an integrity-critical alert, or placing biometric material or secrets in telemetry
+
+**Dispatch Pilot Reconciliation and Acceptance**:
+The non-waivable evidence gate for expanding beyond the Internal Dispatch Pilot Cohort. Every operating day reconciles queue turns, allocations, candidates, waybills, confirmations, authorizations, exits, corrections, shipment quantities, audit hashes, and SMS enqueue outcomes with exact source-event counts and hashes, exact scale-three shipment equations, and an explained disposition for every exception. Guard, Logistics, and Accounting owners sign daily; HR-hosted Vehicle Operations signs any day with relevant identity, eligibility, enrollment, vehicle, plate, or assignment change. Final acceptance additionally requires every preceding gate and the Internal Dispatch Pilot Acceptance Window, no unresolved critical or high-severity defect, no unauthorized or duplicate exit, false acceptance, wrong-snapshot authorization, dual-control bypass, or privacy failure, complete evidence-chain and quantity reconciliation, sustained physical-device thresholds, reconciled retrospective outage registration, and the correct non-blocking SMS job for every exit. Expansion requires written approval from HR-hosted Vehicle Operations, Guard, Logistics, Accounting, technical support, security and privacy, and the pilot incident lead; no single manager can waive a mandatory failure.
+_Avoid_: accepting an unexplained difference, treating missing evidence as zero, skipping daily owner review, averaging away an integrity failure, expanding with an unresolved severe defect, or substituting managerial discretion for required multi-owner approval
+
+**Pilot Support Coverage**:
+The named operational and technical readiness required whenever Internal Dispatch Pilot Cohort work is active. A pilot dispatch starts only when trained Guard, Logistics, and Accounting shift owners plus a technical responder are reachable. Active hypercare runs from one hour before the first pilot dispatch through the final pilot exit on each of the first five operating days; every later pilot shift has on-call workspace super-user, application and operations, engineering and security, and scanner-supplier escalation paths. Critical alerts are acknowledged within five minutes, receive containment or Pilot Safety Pause within fifteen minutes, and immediately gain an incident lead; high-severity failures are acknowledged within fifteen minutes and receive a safe workaround or escalation within sixty minutes. Every incident preserves its timeline, evidence, decisions, affected cases, reconciliation result, root cause, and follow-up owner.
+_Avoid_: starting without accountable owners, relying on an unnamed shared support channel, measuring response outside the operating shift calendar, continuing while critical containment is overdue, or closing an incident without case and reconciliation evidence
+
+**Dispatch Pilot Competency Certification**:
+The role-specific proof that each Internal Dispatch Pilot Cohort participant understands owned actions, handoffs, prohibited actions, privacy, audit reasons, and escalation and can perform the normal path plus every exception their authority permits in a production-like environment. Accounting and Guard supervisors jointly demonstrate biometric fallback, Manual Outage Exit, and Dispatch Dual Control; each workspace demonstrates its recovery and rejection paths; support diagnoses device, licence, projection, audit, and notification failures without exposing secrets; and drivers receive the consent and privacy explanation and practice capture, retry, and fallback expectations. Failed assessment requires retraining, while a material workflow change or relevant incident requires targeted recertification.
+_Avoid_: treating attendance as competence, certifying a role without its exceptions, allowing untrained exception approval, omitting drivers or support staff, exposing protected evidence during training, or carrying certification unchanged across a material process change
+
+**Dispatch Cutover Rehearsal Gate**:
+The prerequisite of two successful production-like rehearsals before live dispatch cutover: a correctness rehearsal proves mappings, queue clearing, reservation release, finalized-loading preservation, shipment reconciliation, permissions, audit hashes, and rollback restoration; a timed dress rehearsal then uses the exact runbook, named operators, support coverage, and approved downtime window. Both require matching source and target counts and hashes, no unexplained quantity differences, no unresolved identity or plate conflicts affecting the Internal Dispatch Pilot Cohort, and no critical or high-severity defects. A failed rehearsal is corrected and repeated before the gate can pass.
+_Avoid_: treating a partially successful rehearsal as cumulative evidence, skipping restoration proof, rehearsing with different operators or steps than live cutover, accepting unexplained reconciliation differences, or carrying a severe defect into production
+
+**Guard Driver Queue Lifecycle**:
+The normal visit path is `WAITING_AT_GATE` to `AVAILABLE_FOR_LOADING` to `RESERVED_FOR_LOADING` to `LOADING_FINALIZED` to `EXIT_RECORDED`; only Guard's physical-exit fact produces the final state, so Logistics finalization is not called dispatch. Before finalization Guard may return availability to waiting and Logistics may release a reservation to availability, always with actor, time, and reason; a finalized turn remains occupied, and every repeat visit creates a new turn.
+_Avoid_: marking physical dispatch at loading finalization, reserving one turn twice, silently reversing progress, editing a completed visit, or reusing an earlier turn
+
+**Queue Closure Without Loading**:
+A real Guard Driver Queue Turn that ends before loading finalization because the driver physically leaves or becomes ineligible; Guard records departure time and reason, and any Logistics reservation is released transactionally first.
+_Avoid_: deleting the visit, confusing it with a mistaken entry, leaving a reservation active, or using it to cancel a finalized loading
+
+**Voided Queue Turn**:
+A queue turn retained as accountable evidence because the admission record itself was entered by mistake or duplicated, with actor, time, reason, and an optional replacement-turn link.
+_Avoid_: hard deletion, using voiding for a real visit that ended without loading, or voiding after finalized downstream evidence exists

@@ -2447,18 +2447,23 @@ model ShipmentQuantityEvidence {
   metadata              Json?
   guardReturnMovementId String?
   returnEvidenceId      String?
+  dispatchEvidenceId    String?
   contract              SalesContract                @relation(fields: [contractId], references: [id], onDelete: Restrict)
   contractItem          ContractItem                 @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
   guardReturnMovement   SecurityVehicleMovement?     @relation(fields: [guardReturnMovementId], references: [id], onDelete: Restrict)
   returnEvidence        ShipmentQuantityEvidence?    @relation("ShipmentReturnEvidence", fields: [returnEvidenceId], references: [id], onDelete: Restrict)
   linkedCorrections     ShipmentQuantityEvidence[]   @relation("ShipmentReturnEvidence")
+  dispatchEvidence      ShipmentQuantityEvidence?    @relation("ShipmentReturnDispatch", fields: [dispatchEvidenceId], references: [id], onDelete: Restrict)
+  linkedReturns         ShipmentQuantityEvidence[]   @relation("ShipmentReturnDispatch")
 
-  @@unique([sourceType, sourceId, sourceVersion])
+  @@unique([sourceType, sourceId, sourceVersion], map: "shipment_quantity_evidence_sourceType_sourceId_sourceVersion_ke")
+  @@unique([guardReturnMovementId, contractItemId, dispatchEvidenceId], map: "shipment_quantity_evidence_guardReturnMovementId_contractItemId")
   @@index([contractId, effectiveAt])
   @@index([contractItemId, effectiveAt])
   @@index([recordedAt])
   @@index([guardReturnMovementId])
   @@index([returnEvidenceId])
+  @@index([dispatchEvidenceId])
   @@map("shipment_quantity_evidence")
 }
 

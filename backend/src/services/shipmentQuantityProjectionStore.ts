@@ -58,7 +58,7 @@ export const resolveContractProductSnapshot = (contractData: unknown, identity: 
   return { snapshot: null, conflict: 'Stable productRowId is missing and no validated legacy index exists' };
 };
 
-const mapPersistedEvidence = (item: any): ShipmentQuantityEvidence => ({
+const mapPersistedEvidence = (item: any, guardReturnValidated = false): ShipmentQuantityEvidence => ({
   id: item.id,
   contractId: item.contractId,
   contractItemId: item.contractItemId,
@@ -75,6 +75,8 @@ const mapPersistedEvidence = (item: any): ShipmentQuantityEvidence => ({
   metadata: asRecord(item.metadata),
   guardReturnMovementId: item.guardReturnMovementId || undefined,
   returnEvidenceId: item.returnEvidenceId || undefined,
+  dispatchEvidenceId: item.dispatchEvidenceId || undefined,
+  guardReturnValidated: item.kind === 'GUARD_RETURN_VERIFIED' ? guardReturnValidated : undefined,
 });
 
 const persistedEvidencePayload = (item: ShipmentQuantityEvidence) => ({
@@ -83,6 +85,7 @@ const persistedEvidencePayload = (item: ShipmentQuantityEvidence) => ({
   recordedAt: item.recordedAt, sourceType: item.sourceType, sourceId: item.sourceId,
   sourceVersion: item.sourceVersion, metadata: item.metadata || {},
   guardReturnMovementId: item.guardReturnMovementId || null, returnEvidenceId: item.returnEvidenceId || null,
+  ...(item.dispatchEvidenceId ? { dispatchEvidenceId: item.dispatchEvidenceId } : {}),
 });
 
 export const shipmentQuantityEvidenceIntegrityHash = (item: ShipmentQuantityEvidence) =>
@@ -101,6 +104,84 @@ const projectionIntegrityPayload = (row: {
 export const shipmentQuantityProjectionIntegrityHash = (row: Parameters<typeof projectionIntegrityPayload>[0]) =>
   hash(projectionIntegrityPayload(row));
 
+export const shipmentProjectionPersistenceData = (row: ShipmentQuantityProjection['rows'][number]) => ({
+  productRowId: row.productRowId,
+  unit: row.unit,
+  contracted: row.quantities?.contracted,
+  finalizedReserved: row.quantities?.finalizedReserved,
+  physicallyDispatched: row.quantities?.physicallyDispatched,
+  availableToLoad: row.quantities?.availableToLoad,
+  health: row.health,
+  healthReasons: row.healthReasons as string[],
+  sourceEvidenceIds: row.sourceEvidenceIds as string[],
+  cutoff: new Date(row.cutoff),
+  lastVerifiedAt: row.lastVerifiedAt ? new Date(row.lastVerifiedAt) : null,
+  integrityHash: shipmentQuantityProjectionIntegrityHash(row),
+});
+
+export const guardReturnValidationFailure = (item: any, allReturns: readonly any[]): string | null => {
+  if (item.kind !== 'GUARD_RETURN_VERIFIED') return null;
+  if (!item.guardReturnMovementId || !item.guardReturnMovement) return 'Verified Guard return movement is missing';
+  if (item.guardReturnMovement.id !== item.guardReturnMovementId) return 'Verified Guard return movement attribution does not match';
+  if (item.guardReturnMovement.direction !== 'INBOUND' || item.guardReturnMovement.purpose !== 'SALES_RETURN') {
+    return 'Verified Guard return must reference an inbound sales-return movement';
+  }
+  if (item.guardReturnMovement.status !== 'INFO_COMPLETED') return 'Verified Guard return movement is not completed';
+  if (!item.dispatchEvidenceId || !item.dispatchEvidence) return 'Verified Guard return dispatch evidence is missing';
+  if (!['PHYSICAL_EXIT', 'MANUAL_OUTAGE_EXIT'].includes(item.dispatchEvidence.kind)) return 'Verified Guard return must reference physical dispatch evidence';
+  for (const field of ['contractId', 'contractItemId', 'productRowId', 'unit'] as const) {
+    if (item[field] !== item.dispatchEvidence[field]) return `Verified Guard return ${field} attribution does not match its dispatch`;
+  }
+  const dispatchLoadingId = asRecord(item.dispatchEvidence.metadata).loadingId;
+  if (!dispatchLoadingId || item.guardReturnMovement.loadingId !== dispatchLoadingId) return 'Verified Guard return loading attribution does not match its dispatch';
+  const incompatibleReuse = allReturns.some((candidate) => candidate.id !== item.id
+    && candidate.kind === 'GUARD_RETURN_VERIFIED'
+    && candidate.guardReturnMovementId === item.guardReturnMovementId
+    && candidate.dispatchEvidenceId !== item.dispatchEvidenceId);
+  if (incompatibleReuse) return 'Verified Guard return movement is reused for an incompatible dispatch';
+  const quantity = new Prisma.Decimal(item.quantity);
+  if (!quantity.gt(0) || quantity.gt(new Prisma.Decimal(item.dispatchEvidence.quantity))) return 'Verified Guard return quantity exceeds its dispatch attribution';
+  return null;
+};
+
+export const captureContractQuantityVersionAtFinancialApproval = async (
+  tx: Prisma.TransactionClient,
+  approval: { contractId: string; financialRecordId: string; approvedAt: Date },
+) => {
+  const contract = await tx.salesContract.findUnique({ where: { id: approval.contractId }, include: { items: true } });
+  if (!contract) throw new Error('Financially approved contract not found for shipment quantity capture');
+  const versions: Array<Omit<ShipmentQuantityEvidence, 'id'>> = contract.items.map((item) => {
+    const resolution = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId });
+    const snapshot = resolution.snapshot || {};
+    const unit = inferUnit(item, snapshot);
+    const common = {
+      contractId: contract.id, contractItemId: item.id, productRowId: item.productRowId || `missing:${item.id}`, unit,
+      effectiveAt: approval.approvedAt.toISOString(), recordedAt: approval.approvedAt.toISOString(),
+      sourceId: `${approval.financialRecordId}:${item.id}`, sourceVersion: 1,
+    };
+    try {
+      if (resolution.conflict) throw new Error(resolution.conflict);
+      const version = {
+        ...common, kind: 'CONTRACTED_SET' as const, quantity: deriveContractedQuantity(item, snapshot, unit),
+        sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION',
+        metadata: { financialRecordId: approval.financialRecordId, financiallyApprovedAt: approval.approvedAt.toISOString() }, integrityHash: '',
+      };
+      return { ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) };
+    } catch (error) {
+      const version = {
+        ...common, kind: 'EVIDENCE_CONFLICT' as const, quantity: '0.000', sourceType: 'CONTRACT_QUANTITY_VERSION_CAPTURE_CONFLICT',
+        metadata: { financialRecordId: approval.financialRecordId, financiallyApprovedAt: approval.approvedAt.toISOString(), reason: error instanceof Error ? error.message : 'Contract quantity version could not be captured' }, integrityHash: '',
+      };
+      return { ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) };
+    }
+  });
+  if (versions.length > 0) await tx.shipmentQuantityEvidence.createMany({
+    data: versions.map((item) => ({ ...item, effectiveAt: approval.approvedAt, recordedAt: approval.approvedAt, metadata: item.metadata as Prisma.InputJsonValue })),
+    skipDuplicates: true,
+  });
+  return versions.length;
+};
+
 export const captureFinanciallyApprovedContractQuantityVersions = async (prisma: PrismaClient, scope: Scope, cutoverAt = new Date()) => {
   const contracts = await prisma.salesContract.findMany({
     where: { ...(scope.contractId ? { id: scope.contractId } : {}), ...(scope.customerId ? { customerId: scope.customerId } : {}) },
@@ -114,31 +195,25 @@ export const captureFinanciallyApprovedContractQuantityVersions = async (prisma:
   approvals.forEach((approval) => { if (approval.contractId && !approvalByContract.has(approval.contractId)) approvalByContract.set(approval.contractId, approval.financiallyApprovedAt!); });
   const existingVersions = await prisma.shipmentQuantityEvidence.findMany({
     where: { contractId: { in: contracts.map((contract) => contract.id) }, kind: 'CONTRACTED_SET' },
-    orderBy: { sourceVersion: 'desc' },
   });
-  const latestByRow = new Map<string, typeof existingVersions[number]>();
-  existingVersions.forEach((version) => { if (!latestByRow.has(version.contractItemId)) latestByRow.set(version.contractItemId, version); });
+  const capturedRows = new Set(existingVersions.map((version) => version.contractItemId));
   const versions: Array<Omit<ShipmentQuantityEvidence, 'id'>> = [];
   for (const contract of contracts) {
     const approval = approvalByContract.get(contract.id);
     if (!approval) continue;
     for (const item of contract.items) {
+      if (capturedRows.has(item.id)) continue;
       const resolution = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId });
       const snapshot = resolution.snapshot || {};
       const unit = inferUnit(item, snapshot);
-      const previousVersion = latestByRow.get(item.id);
-      const sourceVersion = (previousVersion?.sourceVersion || 0) + 1;
-      const effectiveAt = previousVersion ? approval : cutoverAt;
       const common = {
         contractId: contract.id, contractItemId: item.id, productRowId: item.productRowId || `missing:${item.id}`, unit,
-        effectiveAt: effectiveAt.toISOString(), recordedAt: cutoverAt.toISOString(), sourceId: item.id, sourceVersion,
+        effectiveAt: cutoverAt.toISOString(), recordedAt: cutoverAt.toISOString(), sourceId: `cutover:${item.id}`, sourceVersion: 1,
       };
       try {
         if (resolution.conflict) throw new Error(resolution.conflict);
         const quantity = deriveContractedQuantity(item, snapshot, unit);
-        if (previousVersion && previousVersion.quantity.toFixed(3) === quantity && previousVersion.unit === unit
-          && previousVersion.productRowId === common.productRowId && asRecord(previousVersion.metadata).financiallyApprovedAt === approval.toISOString()) continue;
-        const version = { ...common, kind: 'CONTRACTED_SET' as const, quantity, sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION', metadata: { financiallyApprovedAt: approval.toISOString(), capturedAtCutover: !previousVersion }, integrityHash: '' };
+        const version = { ...common, kind: 'CONTRACTED_SET' as const, quantity, sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION', metadata: { financiallyApprovedAt: approval.toISOString(), capturedAtCutover: true }, integrityHash: '' };
         versions.push({ ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) });
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'Contract quantity version could not be captured';
@@ -182,14 +257,24 @@ export const readShipmentQuantityProjection = async (
       select: { contractId: true, financiallyApprovedAt: true },
       orderBy: { financiallyApprovedAt: 'asc' },
     }),
-    prisma.shipmentQuantityEvidence.findMany({ where: { contractId: { in: contractIds } } }),
+    prisma.shipmentQuantityEvidence.findMany({
+      where: { contractId: { in: contractIds } },
+      include: { guardReturnMovement: true, dispatchEvidence: true },
+    }),
     prisma.shipmentQuantityProjection.findMany({ where: { contractId: { in: contractIds }, lastVerifiedAt: { not: null } } }),
   ]);
   const approvedAt = new Map(approvals.map((item) => [item.contractId, item.financiallyApprovedAt!]));
   const evidence: ShipmentQuantityEvidence[] = [];
-  for (const item of persisted.map(mapPersistedEvidence)) {
+  for (const persistedItem of persisted) {
+    const validationFailure = guardReturnValidationFailure(persistedItem, persisted);
+    const item = mapPersistedEvidence(persistedItem, !validationFailure);
     if (item.integrityHash === shipmentQuantityEvidenceIntegrityHash(item)) {
-      evidence.push(item);
+      if (!validationFailure) evidence.push(item);
+      else evidence.push({
+        ...item, id: `guard-return-conflict:${item.id}`, kind: 'EVIDENCE_CONFLICT', quantity: '0.000',
+        sourceType: 'GUARD_RETURN_VALIDATION_CONFLICT', sourceId: item.id, sourceVersion: 1,
+        integrityHash: hash({ evidenceId: item.id, reason: validationFailure }), metadata: { reason: validationFailure },
+      });
       continue;
     }
     evidence.push({
@@ -302,23 +387,13 @@ export const readShipmentQuantityProjection = async (
 export const rebuildShipmentQuantityProjection = async (prisma: PrismaClient, scope: Scope) => {
   await captureFinanciallyApprovedContractQuantityVersions(prisma, scope);
   const result = await readShipmentQuantityProjection(prisma, scope);
-  await prisma.$transaction(result.rows.map((row) => prisma.shipmentQuantityProjection.upsert({
-    where: { contractItemId: row.contractItemId },
-    create: {
-      contractItemId: row.contractItemId, contractId: row.contractId, productRowId: row.productRowId, unit: row.unit,
-      contracted: row.quantities?.contracted, finalizedReserved: row.quantities?.finalizedReserved,
-      physicallyDispatched: row.quantities?.physicallyDispatched, availableToLoad: row.quantities?.availableToLoad,
-      health: row.health, healthReasons: row.healthReasons as string[], sourceEvidenceIds: row.sourceEvidenceIds as string[],
-      cutoff: new Date(row.cutoff), lastVerifiedAt: row.lastVerifiedAt ? new Date(row.lastVerifiedAt) : null,
-      integrityHash: shipmentQuantityProjectionIntegrityHash(row),
-    },
-    update: {
-      productRowId: row.productRowId, unit: row.unit, contracted: row.quantities?.contracted,
-      finalizedReserved: row.quantities?.finalizedReserved, physicallyDispatched: row.quantities?.physicallyDispatched,
-      availableToLoad: row.quantities?.availableToLoad, health: row.health, healthReasons: row.healthReasons as string[],
-      sourceEvidenceIds: row.sourceEvidenceIds as string[], cutoff: new Date(row.cutoff), refreshedAt: new Date(),
-      lastVerifiedAt: row.lastVerifiedAt ? new Date(row.lastVerifiedAt) : null, integrityHash: shipmentQuantityProjectionIntegrityHash(row),
-    },
-  })));
+  await prisma.$transaction(result.rows.map((row) => {
+    const data = shipmentProjectionPersistenceData(row);
+    return prisma.shipmentQuantityProjection.upsert({
+      where: { contractItemId: row.contractItemId },
+      create: { contractItemId: row.contractItemId, contractId: row.contractId, ...data },
+      update: { ...data, refreshedAt: new Date() },
+    });
+  }));
   return result;
 };

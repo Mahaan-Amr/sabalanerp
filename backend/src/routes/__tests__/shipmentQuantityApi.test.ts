@@ -61,26 +61,31 @@ const authenticatedAs = (role: string) => (req: any, _res: any, next: any) => {
   next();
 };
 
-test('MANAGER has no global shipment projection bypass', async () => {
-  const none = { findMany: async () => [] };
-  const prisma = { workspacePermission: none, roleWorkspacePermission: none, featurePermission: none, roleFeaturePermission: none } as any;
+test('global MANAGER eligibility follows the canonical feature policy', async () => {
+  const unavailable = { findUnique: async () => { throw new Error('global role must not query grants'); } };
+  const prisma = { workspacePermission: unavailable, roleWorkspacePermission: unavailable, featurePermission: unavailable, roleFeaturePermission: unavailable } as any;
   const app = express();
-  app.use('/api/shipment-quantities', createShipmentQuantityRouter({ prisma, authenticate: authenticatedAs('MANAGER') }));
+  app.use('/api/shipment-quantities', createShipmentQuantityRouter({
+    prisma, authenticate: authenticatedAs('MANAGER'), readProjection: (async () => projection) as any,
+  }));
   const server = app.listen(0);
   try {
     const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/shipment-quantities/contracts/c1`);
-    assert.equal(response.status, 403);
+    assert.equal(response.status, 200);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
 
-test('active role workspace and matching feature grants permit view when user grant is unavailable', async () => {
+test('canonical workspace fallback grants view and ignores expired direct overrides', async () => {
+  const expiredAt = new Date('2026-01-01T00:00:00.000Z');
   const prisma = {
-    workspacePermission: { findMany: async ({ where }: any) => { assert.ok(where.OR.some((item: any) => item.expiresAt === null)); return []; } },
-    featurePermission: { findMany: async ({ where }: any) => { assert.ok(where.OR.some((item: any) => item.expiresAt === null)); return []; } },
-    roleWorkspacePermission: { findMany: async () => [{ workspace: 'accounting', permissionLevel: 'view' }] },
-    roleFeaturePermission: { findMany: async () => [{ workspace: 'accounting', feature: 'accounting_contracts_view', permissionLevel: 'view' }] },
+    workspacePermission: { findUnique: async ({ where }: any) => where.userId_workspace.workspace === 'accounting'
+      ? { permissionLevel: 'view', isActive: true, expiresAt: null } : null },
+    featurePermission: { findUnique: async ({ where }: any) => where.userId_workspace_feature.workspace === 'accounting'
+      ? { permissionLevel: 'admin', isActive: true, expiresAt: expiredAt } : null },
+    roleWorkspacePermission: { findUnique: async () => null },
+    roleFeaturePermission: { findUnique: async () => null },
   } as any;
   const app = express();
   app.use('/api/shipment-quantities', createShipmentQuantityRouter({
@@ -90,6 +95,25 @@ test('active role workspace and matching feature grants permit view when user gr
   try {
     const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/shipment-quantities/contracts/c1`);
     assert.equal(response.status, 200);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('expired canonical grants do not disclose shipment projection existence', async () => {
+  const expired = { permissionLevel: 'view', isActive: true, expiresAt: new Date('2020-01-01T00:00:00.000Z') };
+  const prisma = {
+    workspacePermission: { findUnique: async () => expired }, featurePermission: { findUnique: async () => expired },
+    roleWorkspacePermission: { findUnique: async () => null }, roleFeaturePermission: { findUnique: async () => null },
+  } as any;
+  const app = express();
+  app.use('/api/shipment-quantities', createShipmentQuantityRouter({
+    prisma, authenticate: authenticatedAs('ACCOUNTANT'), readProjection: (async () => projection) as any,
+  }));
+  const server = app.listen(0);
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/shipment-quantities/contracts/secret-contract`);
+    assert.equal(response.status, 403);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

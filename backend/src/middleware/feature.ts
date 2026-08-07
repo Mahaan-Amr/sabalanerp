@@ -782,6 +782,15 @@ export const requireFeatureAccess = (feature: Feature, requiredPermission: Featu
 export const requireAnyFeatureAccess = (
   features: Feature[],
   requiredPermission: FeaturePermission = FEATURE_PERMISSIONS.VIEW
+) => requireAnyFeatureAccessWithClient(prisma, features, requiredPermission);
+
+type FeaturePermissionClient = Pick<PrismaClient, 'featurePermission' | 'roleFeaturePermission' | 'workspacePermission' | 'roleWorkspacePermission'>;
+
+export const requireAnyFeatureAccessWithClient = (
+  permissionClient: FeaturePermissionClient,
+  features: Feature[],
+  requiredPermission: FeaturePermission = FEATURE_PERMISSIONS.VIEW,
+  globallyEligibleRoles: readonly string[] = ['ADMIN'],
 ) => {
   return async (req: FeatureRequest, res: Response, next: NextFunction) => {
     try {
@@ -792,7 +801,7 @@ export const requireAnyFeatureAccess = (
         });
       }
 
-      if (req.user.role === 'ADMIN') {
+      if (globallyEligibleRoles.includes(req.user.role)) {
         req.featurePermission = FEATURE_PERMISSIONS.ADMIN;
         return next();
       }
@@ -800,7 +809,7 @@ export const requireAnyFeatureAccess = (
       for (const feature of features) {
         const workspace = FEATURE_WORKSPACE_MAP[feature];
 
-        const userFeaturePermission = await prisma.featurePermission.findUnique({
+        const userFeaturePermission = await permissionClient.featurePermission.findUnique({
           where: {
             userId_workspace_feature: {
               userId: req.user.id,
@@ -810,7 +819,7 @@ export const requireAnyFeatureAccess = (
           }
         });
 
-        const roleFeaturePermission = await prisma.roleFeaturePermission.findUnique({
+        const roleFeaturePermission = await permissionClient.roleFeaturePermission.findUnique({
           where: {
             role_workspace_feature: {
               role: req.user.role,
@@ -820,7 +829,7 @@ export const requireAnyFeatureAccess = (
           }
         });
 
-        const userWorkspacePermission = await prisma.workspacePermission.findUnique({
+        const userWorkspacePermission = await permissionClient.workspacePermission.findUnique({
           where: {
             userId_workspace: {
               userId: req.user.id,
@@ -829,7 +838,7 @@ export const requireAnyFeatureAccess = (
           }
         });
 
-        const roleWorkspacePermission = await prisma.roleWorkspacePermission.findUnique({
+        const roleWorkspacePermission = await permissionClient.roleWorkspacePermission.findUnique({
           where: {
             role_workspace: {
               role: req.user.role,

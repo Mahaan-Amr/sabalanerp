@@ -167,7 +167,7 @@ test('keeps dispatched truth and reports a verified return awaiting Accounting',
   const result = projectShipmentQuantities([
     evidence('contracted', 'CONTRACTED_SET', '5.000'),
     evidence('exit', 'LEGACY_DISPATCHED', '5.000'),
-    evidence('return', 'GUARD_RETURN_VERIFIED', '1.125', { metadata: { returnEvidenceId: 'return-1' }, sourceId: 'return-1' }),
+    evidence('return', 'GUARD_RETURN_VERIFIED', '1.125', { guardReturnMovementId: 'movement-in', dispatchEvidenceId: 'exit', guardReturnValidated: true, sourceId: 'return-1' }),
   ]);
   assert.equal(result.rows[0]?.health, 'EVIDENCE_CONFLICT');
   assert.equal(result.rows[0]?.quantities?.physicallyDispatched, '5.000');
@@ -178,7 +178,7 @@ test('applies a return correction only when it links verified Guard inbound evid
   const source = [
     evidence('contracted', 'CONTRACTED_SET', '5.000'),
     evidence('exit', 'LEGACY_DISPATCHED', '5.000'),
-    evidence('return', 'GUARD_RETURN_VERIFIED', '1.125', { sourceId: 'return-1' }),
+    evidence('return', 'GUARD_RETURN_VERIFIED', '1.125', { guardReturnMovementId: 'movement-in', dispatchEvidenceId: 'exit', guardReturnValidated: true, sourceId: 'return-1' }),
     evidence('posted-return', 'DISPATCH_CORRECTION_POSTED', '-1.125', { returnEvidenceId: 'return' }),
   ];
   const valid = projectShipmentQuantities(source);
@@ -199,6 +199,43 @@ test('non-current health uses verified projection truth without inventing zeros'
     verifiedAt: '2026-08-01T09:00:00.000Z',
   }] });
   assert.deepEqual(result.rows[0]?.quantities, { contracted: '9.999', finalizedReserved: '0.001', physicallyDispatched: '0.002', availableToLoad: '9.996' });
+  assert.equal(result.rows[0]?.lastVerifiedAt, '2026-08-01T09:00:00.000Z');
+});
+
+test('every unsafe health state carries the verified timestamp forward', () => {
+  const verifiedAt = '2026-07-31T09:00:00.000Z';
+  const lastVerifiedRows = [{
+    contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'squareMeter',
+    quantities: { contracted: '8.000', finalizedReserved: '1.000', physicallyDispatched: '2.000', availableToLoad: '5.000' }, verifiedAt,
+  }];
+  for (const unsafe of [
+    evidence('stale', 'PROJECTION_STALE', '0.000'),
+    evidence('legacy', 'LEGACY_UNRECONCILED_RESERVED', '1.000'),
+    evidence('conflict', 'EVIDENCE_CONFLICT', '0.000'),
+  ]) {
+    const result = projectShipmentQuantities([evidence('contracted', 'CONTRACTED_SET', '8.000'), unsafe], { lastVerifiedRows });
+    assert.equal(result.rows[0]?.lastVerifiedAt, verifiedAt, unsafe.kind);
+    assert.equal(result.rows[0]?.cutoff, result.cutoff, unsafe.kind);
+  }
+});
+
+test('fabricated or over-consumed return evidence cannot reduce dispatched truth', () => {
+  const base = [evidence('contracted', 'CONTRACTED_SET', '5.000'), evidence('exit', 'LEGACY_DISPATCHED', '5.000')];
+  const fabricated = projectShipmentQuantities([
+    ...base, evidence('return', 'GUARD_RETURN_VERIFIED', '1.000', { guardReturnMovementId: 'fake', dispatchEvidenceId: 'exit' }),
+    evidence('correction', 'DISPATCH_CORRECTION_POSTED', '-1.000', { returnEvidenceId: 'return' }),
+  ]);
+  assert.equal(fabricated.rows[0]?.quantities?.physicallyDispatched, '5.000');
+  assert.equal(fabricated.rows[0]?.health, 'EVIDENCE_CONFLICT');
+
+  const validReturn = evidence('return', 'GUARD_RETURN_VERIFIED', '1.000', { guardReturnMovementId: 'movement-in', dispatchEvidenceId: 'exit', guardReturnValidated: true });
+  const reused = projectShipmentQuantities([
+    ...base, validReturn,
+    evidence('correction-a', 'DISPATCH_CORRECTION_POSTED', '-0.750', { returnEvidenceId: 'return' }),
+    evidence('correction-b', 'DISPATCH_CORRECTION_POSTED', '-0.500', { returnEvidenceId: 'return', effectiveAt: '2026-08-01T09:00:00.000Z' }),
+  ]);
+  assert.equal(reused.rows[0]?.quantities?.physicallyDispatched, '4.250');
+  assert.equal(reused.rows[0]?.health, 'EVIDENCE_CONFLICT');
 });
 
 test('contracted quantity follows the financially approved version effective at cutoff', () => {

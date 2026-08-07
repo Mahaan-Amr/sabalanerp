@@ -37,6 +37,8 @@ export interface ShipmentQuantityEvidence {
   readonly metadata?: Record<string, unknown>;
   readonly guardReturnMovementId?: string;
   readonly returnEvidenceId?: string;
+  readonly dispatchEvidenceId?: string;
+  readonly guardReturnValidated?: boolean;
 }
 
 export interface ShipmentQuantities {
@@ -144,8 +146,11 @@ export const projectShipmentQuantities = (
     let reserved = 0n;
     let dispatched = 0n;
     let unresolvedLegacy = 0n;
-    const verifiedReturns = new Set(events.filter((item) => item.kind === 'GUARD_RETURN_VERIFIED').map((item) => item.id));
-    const awaitingReturnAccounting = new Set(verifiedReturns);
+    const verifiedReturns = new Map(events
+      .filter((item) => item.kind === 'GUARD_RETURN_VERIFIED' && item.guardReturnValidated)
+      .map((item) => [item.id, parseFixed(item.quantity)]));
+    const awaitingReturnAccounting = new Set(verifiedReturns.keys());
+    const usedReturnCorrections = new Set<string>();
     let health: ShipmentProjectionHealth = 'CURRENT';
     const healthReasons: string[] = [];
 
@@ -165,15 +170,23 @@ export const projectShipmentQuantities = (
         case 'DISPATCH_CORRECTION_POSTED':
           if (quantity < 0n) {
             const returnEvidenceId = String(item.returnEvidenceId || item.metadata?.returnEvidenceId || '');
-            if (!returnEvidenceId || !verifiedReturns.has(returnEvidenceId)) {
+            const verifiedReturnQuantity = verifiedReturns.get(returnEvidenceId);
+            if (!returnEvidenceId || verifiedReturnQuantity === undefined) {
               worsenHealth('EVIDENCE_CONFLICT', 'Negative return correction lacks verified Guard inbound evidence');
               break;
             }
+            if (usedReturnCorrections.has(returnEvidenceId) || -quantity > verifiedReturnQuantity) {
+              worsenHealth('EVIDENCE_CONFLICT', 'Verified Guard return evidence is reused or correction exceeds the accepted return');
+              break;
+            }
+            usedReturnCorrections.add(returnEvidenceId);
             awaitingReturnAccounting.delete(returnEvidenceId);
           }
           dispatched += quantity;
           break;
-        case 'GUARD_RETURN_VERIFIED': break;
+        case 'GUARD_RETURN_VERIFIED':
+          if (!item.guardReturnValidated) worsenHealth('EVIDENCE_CONFLICT', 'Guard return evidence was not validated against a completed inbound movement');
+          break;
         case 'LEGACY_UNRECONCILED_RESERVED':
           reserved += quantity;
           unresolvedLegacy += quantity;
@@ -223,7 +236,7 @@ export const projectShipmentQuantities = (
       hasNegativeAvailability: quantities ? parseFixed(quantities.availableToLoad) < 0n : false,
       canAuthorizeLoading: finalHealth === 'CURRENT' && quantities !== null && parseFixed(quantities.availableToLoad) >= 0n,
       cutoff,
-      lastVerifiedAt: finalHealth === 'EVIDENCE_CONFLICT' && verified ? verified.verifiedAt : finalHealth === 'CURRENT' ? cutoff : null,
+      lastVerifiedAt: finalHealth !== 'CURRENT' && verified ? verified.verifiedAt : finalHealth === 'CURRENT' ? cutoff : null,
       sourceEvidenceIds: events.map((item) => item.id),
     };
   }).sort((left, right) => rowKey(left).localeCompare(rowKey(right)));

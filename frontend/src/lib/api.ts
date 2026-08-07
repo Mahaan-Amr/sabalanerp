@@ -760,6 +760,13 @@ export const crmAPI = {
   completeNextAction: (id: string) => api.put(`/crm/next-actions/${id}/complete`),
 };
 
+export const shipmentQuantityAPI = {
+  getContract: (contractId: string, params?: { cutoff?: string; mode?: 'operational' | 'audit-known-at' }) =>
+    api.get(`/shipment-quantities/contracts/${contractId}`, { params }),
+  getCustomer: (customerId: string, params?: { cutoff?: string; mode?: 'operational' | 'audit-known-at' }) =>
+    api.get(`/shipment-quantities/customers/${customerId}`, { params }),
+};
+
 // Inventory Workspace API
 export const inventoryAPI = {
   // Cut Types

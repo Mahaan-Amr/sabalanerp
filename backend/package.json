@@ -27,6 +27,7 @@
     "test:notifications": "tsx src/services/__tests__/notificationPolicy.test.ts",
     "test:support-tickets": "tsx src/services/__tests__/supportTicketPolicy.test.ts",
     "test:biometric-connector": "tsx src/services/__tests__/biometricConnector.test.ts",
+    "test:shipment-quantities": "tsx src/services/__tests__/shipmentQuantityProjection.test.ts && tsx src/services/__tests__/shipmentContractQuantityVersion.test.ts && tsx src/routes/__tests__/shipmentQuantityApi.test.ts",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "db:migrate": "prisma migrate dev",

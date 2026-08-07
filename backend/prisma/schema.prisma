@@ -1667,6 +1667,8 @@ model SalesContract {
   reportingEvents                   SalesReportingEvent[]
   productGraphState                 SalesContractProductGraphState?
   productGraphAudits                SalesContractProductGraphAudit[]
+  shipmentQuantityEvidence          ShipmentQuantityEvidence[]
+  shipmentQuantityProjections       ShipmentQuantityProjection[]
 
   @@index([createdBy, creatorSequenceNumber])
   @@index([responsibleSellerId])
@@ -2135,6 +2137,8 @@ model ContractItem {
   logisticsLoadingLines             LogisticsLoadingLine[]
   logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
   logisticsLoadingCorrections       LogisticsLoadingCorrection[]
+  shipmentQuantityEvidence          ShipmentQuantityEvidence[]
+  shipmentQuantityProjection        ShipmentQuantityProjection?
 
   @@unique([contractId, productRowId])
   @@map("contract_items")
@@ -2278,32 +2282,33 @@ model SecurityVehiclePairPhoto {
 }
 
 model SecurityVehicleMovement {
-  id                 String                           @id @default(cuid())
-  movementNumber     String                           @unique
-  direction          SecurityVehicleMovementDirection
-  purpose            SecurityVehicleMovementPurpose
-  status             SecurityVehicleMovementStatus    @default(ENTRY_RECORDED)
-  vehiclePairId      String?
-  loadingId          String?
-  customerId         String?
-  projectId          String?
-  occurredAt         DateTime                         @default(now())
-  completedAt        DateTime?
-  voidedAt           DateTime?
-  voidedBy           String?
-  voidReason         String?
-  driverSnapshot     Json?
-  documentSnapshot   Json?
-  settlementSnapshot Json?
-  notes              String?
-  createdBy          String
-  createdAt          DateTime                         @default(now())
-  updatedAt          DateTime                         @updatedAt
-  vehiclePair        SecurityVehiclePair?             @relation(fields: [vehiclePairId], references: [id], onDelete: SetNull)
-  loading            LogisticsLoading?                @relation(fields: [loadingId], references: [id], onDelete: SetNull)
-  customer           CrmCustomer?                     @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  project            ProjectAddress?                  @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  attachments        SecurityVehicleAttachment[]
+  id                     String                           @id @default(cuid())
+  movementNumber         String                           @unique
+  direction              SecurityVehicleMovementDirection
+  purpose                SecurityVehicleMovementPurpose
+  status                 SecurityVehicleMovementStatus    @default(ENTRY_RECORDED)
+  vehiclePairId          String?
+  loadingId              String?
+  customerId             String?
+  projectId              String?
+  occurredAt             DateTime                         @default(now())
+  completedAt            DateTime?
+  voidedAt               DateTime?
+  voidedBy               String?
+  voidReason             String?
+  driverSnapshot         Json?
+  documentSnapshot       Json?
+  settlementSnapshot     Json?
+  notes                  String?
+  createdBy              String
+  createdAt              DateTime                         @default(now())
+  updatedAt              DateTime                         @updatedAt
+  vehiclePair            SecurityVehiclePair?             @relation(fields: [vehiclePairId], references: [id], onDelete: SetNull)
+  loading                LogisticsLoading?                @relation(fields: [loadingId], references: [id], onDelete: SetNull)
+  customer               CrmCustomer?                     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  project                ProjectAddress?                  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  attachments            SecurityVehicleAttachment[]
+  shipmentReturnEvidence ShipmentQuantityEvidence[]
 
   @@index([direction])
   @@index([purpose])
@@ -2653,6 +2658,67 @@ model LogisticsLoadingCorrection {
   @@index([sourceContractItemId])
   @@index([productId])
   @@map("logistics_loading_corrections")
+}
+
+model ShipmentQuantityEvidence {
+  id                    String                       @id @default(cuid())
+  contractId            String
+  contractItemId        String
+  productRowId          String
+  unit                  String
+  kind                  ShipmentQuantityEvidenceKind
+  quantity              Decimal                      @db.Decimal(18, 3)
+  effectiveAt           DateTime
+  recordedAt            DateTime                     @default(now())
+  sourceType            String
+  sourceId              String
+  sourceVersion         Int                          @default(1)
+  integrityHash         String
+  metadata              Json?
+  guardReturnMovementId String?
+  returnEvidenceId      String?
+  dispatchEvidenceId    String?
+  contract              SalesContract                @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  contractItem          ContractItem                 @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
+  guardReturnMovement   SecurityVehicleMovement?     @relation(fields: [guardReturnMovementId], references: [id], onDelete: Restrict)
+  returnEvidence        ShipmentQuantityEvidence?    @relation("ShipmentReturnEvidence", fields: [returnEvidenceId], references: [id], onDelete: Restrict)
+  linkedCorrections     ShipmentQuantityEvidence[]   @relation("ShipmentReturnEvidence")
+  dispatchEvidence      ShipmentQuantityEvidence?    @relation("ShipmentReturnDispatch", fields: [dispatchEvidenceId], references: [id], onDelete: Restrict)
+  linkedReturns         ShipmentQuantityEvidence[]   @relation("ShipmentReturnDispatch")
+
+  @@unique([sourceType, sourceId, sourceVersion], map: "shipment_quantity_evidence_sourceType_sourceId_sourceVersion_ke")
+  @@unique([guardReturnMovementId, contractItemId, dispatchEvidenceId], map: "shipment_quantity_evidence_guardReturnMovementId_contractItemId")
+  @@index([contractId, effectiveAt])
+  @@index([contractItemId, effectiveAt])
+  @@index([recordedAt])
+  @@index([guardReturnMovementId])
+  @@index([returnEvidenceId])
+  @@index([dispatchEvidenceId])
+  @@map("shipment_quantity_evidence")
+}
+
+model ShipmentQuantityProjection {
+  contractItemId       String                   @id
+  contractId           String
+  productRowId         String
+  unit                 String
+  contracted           Decimal?                 @db.Decimal(18, 3)
+  finalizedReserved    Decimal?                 @db.Decimal(18, 3)
+  physicallyDispatched Decimal?                 @db.Decimal(18, 3)
+  availableToLoad      Decimal?                 @db.Decimal(18, 3)
+  health               ShipmentProjectionHealth
+  healthReasons        Json
+  sourceEvidenceIds    Json
+  cutoff               DateTime
+  refreshedAt          DateTime                 @default(now())
+  lastVerifiedAt       DateTime?
+  integrityHash        String
+  contract             SalesContract            @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  contractItem         ContractItem             @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
+
+  @@index([contractId])
+  @@index([health])
+  @@map("shipment_quantity_projections")
 }
 
 // ==================== INVENTORY MASTER DATA ====================
@@ -3284,6 +3350,30 @@ enum LogisticsLoadingStatus {
   DRAFT
   FINALIZED
   CANCELLED
+}
+
+enum ShipmentQuantityEvidenceKind {
+  CONTRACTED_SET
+  ALLOCATION_FINALIZED
+  ALLOCATION_RELEASED
+  PHYSICAL_EXIT
+  MANUAL_OUTAGE_EXIT
+  DISPATCH_CORRECTION_DRAFT
+  DISPATCH_CORRECTION_POSTED
+  GUARD_RETURN_VERIFIED
+  LEGACY_UNRECONCILED_RESERVED
+  LEGACY_DISPATCHED
+  LEGACY_RELEASED
+  LEGACY_STILL_RESERVED
+  PROJECTION_STALE
+  EVIDENCE_CONFLICT
+}
+
+enum ShipmentProjectionHealth {
+  CURRENT
+  STALE
+  LEGACY_UNRECONCILED
+  EVIDENCE_CONFLICT
 }
 
 enum SecurityVehicleMovementDirection {

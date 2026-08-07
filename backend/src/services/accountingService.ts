@@ -19,6 +19,7 @@ import {
   TaxSubmissionStatus
 } from '@prisma/client';
 import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
+import { captureContractQuantityVersionAtFinancialApproval } from './shipmentQuantityProjectionStore';
 
 const prisma = new PrismaClient();
 
@@ -1322,6 +1323,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       throw new Error('System invoice number is already used');
     }
 
+    const approvedAt = new Date();
     const updated = await tx.accountingFinancialRecord.update({
       where: { id: invoiceId },
       data: {
@@ -1329,11 +1331,19 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
         systemInvoiceNumber,
         systemInvoiceDate,
         sepidarAmount,
-        financiallyApprovedAt: new Date(),
+        financiallyApprovedAt: approvedAt,
         financiallyApprovedBy: actor.userId,
-        postedAt: new Date()
+        postedAt: approvedAt
       }
     });
+
+    if (updated.contractId) {
+      await captureContractQuantityVersionAtFinancialApproval(tx, {
+        contractId: updated.contractId,
+        financialRecordId: updated.id,
+        approvedAt,
+      });
+    }
 
     const replacementNumberReuseNote = isAllowedReplacementNumberReuse && replacementNumberSource
       ? `Replacement invoice reused system invoice number ${systemInvoiceNumber} from voided source record ${replacementNumberSource.id}; replacement record ${updated.id} is linked by metadata.replacesRecordId. Reason: linked replacement invoice for a post-approval correction.`

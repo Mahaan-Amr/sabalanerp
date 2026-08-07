@@ -144,39 +144,65 @@ export const guardReturnValidationFailure = (item: any, allReturns: readonly any
   return null;
 };
 
+type ContractQuantityEvidencePolicy = {
+  effectiveAt: string;
+  recordedAt: string;
+  sourceId: string;
+  sourceVersion: number;
+  successMetadata: Record<string, unknown>;
+  conflictMetadata: Record<string, unknown>;
+};
+
+const buildContractRowQuantityEvidence = (
+  contract: { id: string; contractData: unknown },
+  item: { id: string; productRowId: string | null; productId: string; productType: string | null; quantity: Prisma.Decimal },
+  policy: ContractQuantityEvidencePolicy,
+): Omit<ShipmentQuantityEvidence, 'id'> => {
+  const resolution = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId });
+  const snapshot = resolution.snapshot || {};
+  const unit = inferUnit(item, snapshot);
+  const common = {
+    contractId: contract.id, contractItemId: item.id, productRowId: item.productRowId || `missing:${item.id}`, unit,
+    effectiveAt: policy.effectiveAt, recordedAt: policy.recordedAt, sourceId: policy.sourceId, sourceVersion: policy.sourceVersion,
+  };
+  try {
+    if (resolution.conflict) throw new Error(resolution.conflict);
+    const version = {
+      ...common, kind: 'CONTRACTED_SET' as const, quantity: deriveContractedQuantity(item, snapshot, unit),
+      sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION', metadata: policy.successMetadata, integrityHash: '',
+    };
+    return { ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) };
+  } catch (error) {
+    const version = {
+      ...common, kind: 'EVIDENCE_CONFLICT' as const, quantity: '0.000', sourceType: 'CONTRACT_QUANTITY_VERSION_CAPTURE_CONFLICT',
+      metadata: { ...policy.conflictMetadata, reason: error instanceof Error ? error.message : 'Contract quantity version could not be captured' }, integrityHash: '',
+    };
+    return { ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) };
+  }
+};
+
+const persistedContractQuantityEvidence = (item: Omit<ShipmentQuantityEvidence, 'id'>) => ({
+  ...item,
+  effectiveAt: new Date(item.effectiveAt),
+  recordedAt: new Date(item.recordedAt),
+  quantity: item.quantity,
+  metadata: item.metadata as Prisma.InputJsonValue,
+});
+
 export const captureContractQuantityVersionAtFinancialApproval = async (
   tx: Prisma.TransactionClient,
   approval: { contractId: string; financialRecordId: string; approvedAt: Date },
 ) => {
   const contract = await tx.salesContract.findUnique({ where: { id: approval.contractId }, include: { items: true } });
   if (!contract) throw new Error('Financially approved contract not found for shipment quantity capture');
-  const versions: Array<Omit<ShipmentQuantityEvidence, 'id'>> = contract.items.map((item) => {
-    const resolution = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId });
-    const snapshot = resolution.snapshot || {};
-    const unit = inferUnit(item, snapshot);
-    const common = {
-      contractId: contract.id, contractItemId: item.id, productRowId: item.productRowId || `missing:${item.id}`, unit,
-      effectiveAt: approval.approvedAt.toISOString(), recordedAt: approval.approvedAt.toISOString(),
-      sourceId: `${approval.financialRecordId}:${item.id}`, sourceVersion: 1,
-    };
-    try {
-      if (resolution.conflict) throw new Error(resolution.conflict);
-      const version = {
-        ...common, kind: 'CONTRACTED_SET' as const, quantity: deriveContractedQuantity(item, snapshot, unit),
-        sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION',
-        metadata: { financialRecordId: approval.financialRecordId, financiallyApprovedAt: approval.approvedAt.toISOString() }, integrityHash: '',
-      };
-      return { ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) };
-    } catch (error) {
-      const version = {
-        ...common, kind: 'EVIDENCE_CONFLICT' as const, quantity: '0.000', sourceType: 'CONTRACT_QUANTITY_VERSION_CAPTURE_CONFLICT',
-        metadata: { financialRecordId: approval.financialRecordId, financiallyApprovedAt: approval.approvedAt.toISOString(), reason: error instanceof Error ? error.message : 'Contract quantity version could not be captured' }, integrityHash: '',
-      };
-      return { ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) };
-    }
-  });
+  const approvedAt = approval.approvedAt.toISOString();
+  const metadata = { financialRecordId: approval.financialRecordId, financiallyApprovedAt: approvedAt };
+  const versions = contract.items.map((item) => buildContractRowQuantityEvidence(contract, item, {
+    effectiveAt: approvedAt, recordedAt: approvedAt, sourceId: `${approval.financialRecordId}:${item.id}`, sourceVersion: 1,
+    successMetadata: metadata, conflictMetadata: metadata,
+  }));
   if (versions.length > 0) await tx.shipmentQuantityEvidence.createMany({
-    data: versions.map((item) => ({ ...item, effectiveAt: approval.approvedAt, recordedAt: approval.approvedAt, metadata: item.metadata as Prisma.InputJsonValue })),
+    data: versions.map(persistedContractQuantityEvidence),
     skipDuplicates: true,
   });
   return versions.length;
@@ -203,27 +229,17 @@ export const captureFinanciallyApprovedContractQuantityVersions = async (prisma:
     if (!approval) continue;
     for (const item of contract.items) {
       if (capturedRows.has(item.id)) continue;
-      const resolution = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId });
-      const snapshot = resolution.snapshot || {};
-      const unit = inferUnit(item, snapshot);
-      const common = {
-        contractId: contract.id, contractItemId: item.id, productRowId: item.productRowId || `missing:${item.id}`, unit,
-        effectiveAt: cutoverAt.toISOString(), recordedAt: cutoverAt.toISOString(), sourceId: `cutover:${item.id}`, sourceVersion: 1,
-      };
-      try {
-        if (resolution.conflict) throw new Error(resolution.conflict);
-        const quantity = deriveContractedQuantity(item, snapshot, unit);
-        const version = { ...common, kind: 'CONTRACTED_SET' as const, quantity, sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION', metadata: { financiallyApprovedAt: approval.toISOString(), capturedAtCutover: true }, integrityHash: '' };
-        versions.push({ ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) });
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : 'Contract quantity version could not be captured';
-        const version = { ...common, kind: 'EVIDENCE_CONFLICT' as const, quantity: '0.000', sourceType: 'CONTRACT_QUANTITY_VERSION_CAPTURE_CONFLICT', metadata: { reason, financiallyApprovedAt: approval.toISOString() }, integrityHash: '' };
-        versions.push({ ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) });
-      }
+      const approvedAt = approval.toISOString();
+      const cutover = cutoverAt.toISOString();
+      versions.push(buildContractRowQuantityEvidence(contract, item, {
+        effectiveAt: cutover, recordedAt: cutover, sourceId: `cutover:${item.id}`, sourceVersion: 1,
+        successMetadata: { financiallyApprovedAt: approvedAt, capturedAtCutover: true },
+        conflictMetadata: { financiallyApprovedAt: approvedAt },
+      }));
     }
   }
   if (versions.length > 0) await prisma.shipmentQuantityEvidence.createMany({
-    data: versions.map((item) => ({ ...item, effectiveAt: new Date(item.effectiveAt), recordedAt: new Date(item.recordedAt), quantity: item.quantity, metadata: item.metadata as Prisma.InputJsonValue })),
+    data: versions.map(persistedContractQuantityEvidence),
     skipDuplicates: true,
   });
   return versions.length;

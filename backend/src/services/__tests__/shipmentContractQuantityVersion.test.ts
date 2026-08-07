@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Prisma } from '@prisma/client';
-import { captureContractQuantityVersionAtFinancialApproval, deriveContractedQuantity, guardReturnValidationFailure, resolveContractProductSnapshot, shipmentProjectionPersistenceData, shipmentQuantityProjectionIntegrityHash } from '../shipmentQuantityProjectionStore';
+import { captureContractQuantityVersionAtFinancialApproval, captureFinanciallyApprovedContractQuantityVersions, deriveContractedQuantity, guardReturnValidationFailure, resolveContractProductSnapshot, shipmentProjectionPersistenceData, shipmentQuantityEvidenceIntegrityHash, shipmentQuantityProjectionIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { projectShipmentQuantities } from '../shipmentQuantityProjection';
 
 test('stable productRowId is the only canonical snapshot identity', () => {
@@ -61,6 +61,33 @@ test('every financial approval captures an immutable contract-row version withou
   }));
   assert.equal(projectShipmentQuantities(evidence, { cutoff: '2026-08-03T00:00:00.000Z' }).rows[0]?.quantities?.contracted, '10.000');
   assert.equal(projectShipmentQuantities(evidence, { cutoff: '2026-08-06T00:00:00.000Z' }).rows[0]?.quantities?.contracted, '7.500');
+});
+
+test('cutover bootstrap preserves its distinct source, timing, metadata, and integrity policy', async () => {
+  const created: any[] = [];
+  const contract = {
+    id: 'contract-1', contractData: { products: [{ rowId: 'row-1', productId: 'product-a', unit: 'count', quantity: '4' }] },
+    items: [{ id: 'item-1', productRowId: 'row-1', productId: 'product-a', productType: null, quantity: new Prisma.Decimal('4') }],
+  };
+  let evidenceRead = false;
+  const prisma = {
+    salesContract: { findMany: async () => [contract] },
+    accountingFinancialRecord: { findMany: async () => [{ contractId: contract.id, financiallyApprovedAt: new Date('2026-07-31T09:00:00.000Z') }] },
+    shipmentQuantityEvidence: {
+      findMany: async () => { evidenceRead = true; return []; },
+      createMany: async ({ data }: any) => { created.push(...data); return { count: data.length }; },
+    },
+  } as any;
+  await captureFinanciallyApprovedContractQuantityVersions(prisma, { contractId: contract.id }, new Date('2026-08-07T10:00:00.000Z'));
+  assert.equal(evidenceRead, true);
+  assert.deepEqual({
+    sourceId: created[0].sourceId, effectiveAt: created[0].effectiveAt.toISOString(), recordedAt: created[0].recordedAt.toISOString(), metadata: created[0].metadata,
+  }, {
+    sourceId: 'cutover:item-1', effectiveAt: '2026-08-07T10:00:00.000Z', recordedAt: '2026-08-07T10:00:00.000Z',
+    metadata: { financiallyApprovedAt: '2026-07-31T09:00:00.000Z', capturedAtCutover: true },
+  });
+  const normalized = { ...created[0], id: '', effectiveAt: created[0].effectiveAt.toISOString(), recordedAt: created[0].recordedAt.toISOString() };
+  assert.equal(created[0].integrityHash, shipmentQuantityEvidenceIntegrityHash(normalized));
 });
 
 const persistedReturn = (overrides: Record<string, any> = {}) => ({

@@ -41,6 +41,16 @@ import {
   replaceAccountingDispatchWaybill,
   voidAccountingDispatchWaybill,
 } from '../services/dispatchAllocation';
+import {
+  approveManualOutageExit,
+  createDispatchCorrection,
+  createManualOutageExit,
+  DispatchRecoveryConflictError,
+  DispatchRecoveryValidationError,
+  endErpWideOutage,
+  postDispatchCorrection,
+  verifyErpWideOutage,
+} from '../services/dispatchCorrectionOutage';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -70,6 +80,16 @@ const accountingDispatchEdit = [
   requireNarrowFeatureAccess(FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE, FEATURE_PERMISSIONS.EDIT),
 ];
 
+const accountingCorrectionsEdit = [
+  protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.ACCOUNTING_CORRECTIONS_MANAGE, FEATURE_PERMISSIONS.EDIT),
+];
+
+const dispatchAuthority = (req: WorkspaceRequest & FeatureRequest) => ({ actorRole: req.user!.role,
+  workspace: req.workspace || WORKSPACES.ACCOUNTING, workspacePermission: req.workspacePermission || WORKSPACE_PERMISSIONS.EDIT,
+  feature: FEATURES.ACCOUNTING_CORRECTIONS_MANAGE, featurePermission: req.featurePermission || FEATURE_PERMISSIONS.EDIT });
+
 const managerReviewActions = new Set([
   'APPROVE_CORRECTION_FOR_SALES_EDIT',
   'DECLINE_CORRECTION',
@@ -80,11 +100,60 @@ const managerReviewActions = new Set([
 ]);
 
 const dispatchError = (res: Response, error: unknown) => {
-  if (error instanceof DispatchAllocationConflictError) return res.status(409).json({ success: false, error: error.message });
-  if (error instanceof DispatchAllocationValidationError) return res.status(400).json({ success: false, error: error.message });
+  if (error instanceof DispatchAllocationConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
+  if (error instanceof DispatchAllocationValidationError || error instanceof DispatchRecoveryValidationError) return res.status(400).json({ success: false, error: error.message });
   console.error('Accounting dispatch error:', error);
   return res.status(500).json({ success: false, error: 'Accounting dispatch command failed.' });
 };
+
+router.get('/dispatch-corrections', accountingDispatchView, async (_req: AuthRequest, res: Response) => {
+  try { return res.json({ success: true, data: await prisma.dispatchCorrection.findMany({ include: { lines: true, waybill: true }, orderBy: { createdAt: 'desc' } }) }); }
+  catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/dispatch-corrections', accountingCorrectionsEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  try { return res.status(201).json({ success: true, data: await createDispatchCorrection(prisma, { waybillId: req.body.waybillId,
+    reason: req.body.reason, effectiveAt: new Date(req.body.effectiveAt), lines: req.body.lines, reversalOfId: req.body.reversalOfId,
+    actorId: req.user!.id, authority: dispatchAuthority(req) }) }); }
+  catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/dispatch-corrections/:id/post', accountingCorrectionsEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  try { return res.json({ success: true, data: await postDispatchCorrection(prisma, { correctionId: req.params.id,
+    actorId: req.user!.id, authority: dispatchAuthority(req) }) }); }
+  catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/dispatch-outages/verify', accountingCorrectionsEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  try { return res.status(201).json({ success: true, data: await verifyErpWideOutage(prisma, { reason: req.body.reason,
+    verification: req.body.verification || {}, actualStartedAt: new Date(req.body.actualStartedAt),
+    actorId: req.user!.id, authority: dispatchAuthority(req) }) }); }
+  catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/dispatch-outages/:id/end', accountingCorrectionsEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  try { return res.json({ success: true, data: await endErpWideOutage(prisma, { outageId: req.params.id,
+    actualEndedAt: new Date(req.body.actualEndedAt), actorId: req.user!.id, authority: dispatchAuthority(req) }) }); }
+  catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/manual-outage-exits', accountingCorrectionsEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  try { return res.status(201).json({ success: true, data: await createManualOutageExit(prisma, { outageId: req.body.outageId,
+    waybillId: req.body.waybillId, paperNumber: req.body.paperNumber, actualOccurredAt: new Date(req.body.actualOccurredAt),
+    paperEvidence: req.body.paperEvidence || {}, actorId: req.user!.id, authority: dispatchAuthority(req) }) }); }
+  catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/manual-outage-exits/:id/accounting-approval', accountingCorrectionsEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  try { return res.json({ success: true, data: await approveManualOutageExit(prisma, { id: req.params.id, role: 'ACCOUNTING',
+    actorId: req.user!.id, authority: dispatchAuthority(req) }) }); }
+  catch (error) { return dispatchError(res, error); }
+});
+
+router.get('/dispatch-evidence-exceptions', accountingDispatchView, async (_req: AuthRequest, res: Response) => {
+  try { return res.json({ success: true, data: await prisma.dispatchEvidenceException.findMany({ orderBy: { createdAt: 'desc' } }) }); }
+  catch (error) { return dispatchError(res, error); }
+});
 
 router.get('/dispatch-candidates', accountingDispatchView, async (_req: AuthRequest, res: Response) => {
   try {

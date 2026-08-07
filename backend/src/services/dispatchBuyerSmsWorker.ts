@@ -8,15 +8,20 @@ const STALE_SENDING_MS = 5 * 60_000;
 
 export const deliverPendingDispatchBuyerSms = async (prisma: PrismaClient, now = new Date()) => {
   const stale = await prisma.dispatchBuyerSmsIntent.findMany({ where: { status: DispatchBuyerSmsStatus.SENDING,
-    lastAttemptAt: { lte: new Date(now.getTime() - STALE_SENDING_MS) } }, include: { physicalExit: { include: { authorization: true } } }, take: 50 });
+    lastAttemptAt: { lte: new Date(now.getTime() - STALE_SENDING_MS) } }, take: 50 });
   for (const intent of stale) {
     await prisma.$transaction(async (tx) => {
       const changed = await tx.dispatchBuyerSmsIntent.updateMany({ where: { id: intent.id, status: DispatchBuyerSmsStatus.SENDING }, data: {
         status: DispatchBuyerSmsStatus.UNKNOWN, unknownAt: now, lastError: 'Worker stopped after provider request; delivery outcome is unknown.',
       } });
-      if (changed.count) await tx.dispatchConfirmationAlert.create({ data: { sessionId: intent.physicalExit.authorization.sessionId,
-        alertType: 'BUYER_EXIT_SMS_UNKNOWN', payload: { physicalExitId: intent.physicalExitId, smsIntentId: intent.id,
-          dispatchNumber: intent.dispatchNumber, status: 'UNKNOWN', detail: 'Recovered stale SENDING intent' } } });
+      if (changed.count && intent.sessionId) await tx.dispatchConfirmationAlert.create({ data: { sessionId: intent.sessionId,
+        alertType: 'BUYER_EXIT_SMS_UNKNOWN', payload: { physicalExitId: intent.physicalExitId, manualOutageExitId: intent.manualOutageExitId,
+          smsIntentId: intent.id, dispatchNumber: intent.dispatchNumber, status: 'UNKNOWN', detail: 'Recovered stale SENDING intent' } } });
+      else if (changed.count) await tx.dispatchEvidenceException.create({ data: { exceptionType: 'BUYER_EXIT_SMS_UNKNOWN',
+        aggregateType: intent.manualOutageExitId ? 'MANUAL_OUTAGE_EXIT' : 'DISPATCH_BUYER_SMS',
+        aggregateId: intent.manualOutageExitId || intent.id, createdBy: 'SYSTEM', detail: {
+          smsIntentId: intent.id, dispatchNumber: intent.dispatchNumber, status: 'UNKNOWN', detail: 'Recovered stale SENDING intent',
+        } } });
     });
   }
   const ready = await prisma.dispatchBuyerSmsIntent.findMany({ where: { status: { in: [DispatchBuyerSmsStatus.PENDING, DispatchBuyerSmsStatus.RETRY] },

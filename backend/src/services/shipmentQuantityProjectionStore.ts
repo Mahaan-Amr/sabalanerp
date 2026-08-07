@@ -132,8 +132,19 @@ export const guardReturnValidationFailure = (item: any, allReturns: readonly any
   for (const field of ['contractId', 'contractItemId', 'productRowId', 'unit'] as const) {
     if (item[field] !== item.dispatchEvidence[field]) return `Verified Guard return ${field} attribution does not match its dispatch`;
   }
-  const dispatchLoadingId = asRecord(item.dispatchEvidence.metadata).loadingId;
+  const dispatchLoadingId = asRecord(item.dispatchEvidence.metadata).loadingId
+    || asRecord(item.metadata).dispatchLoadingId;
   if (!dispatchLoadingId || item.guardReturnMovement.loadingId !== dispatchLoadingId) return 'Verified Guard return loading attribution does not match its dispatch';
+  const movementOccurredAt = new Date(item.guardReturnMovement.occurredAt).getTime();
+  const movementCompletedAt = new Date(item.guardReturnMovement.completedAt).getTime();
+  const evidenceRecordedAt = new Date(item.recordedAt).getTime();
+  if (!Number.isFinite(movementOccurredAt) || !Number.isFinite(movementCompletedAt)
+    || movementCompletedAt < movementOccurredAt || movementOccurredAt > evidenceRecordedAt || movementCompletedAt > evidenceRecordedAt) {
+    return 'Verified Guard return chronology is invalid or future-dated';
+  }
+  if (movementOccurredAt < new Date(item.dispatchEvidence.effectiveAt).getTime()) {
+    return 'Verified Guard return cannot occur before its physical dispatch';
+  }
   const incompatibleReuse = allReturns.some((candidate) => candidate.id !== item.id
     && candidate.kind === 'GUARD_RETURN_VERIFIED'
     && candidate.guardReturnMovementId === item.guardReturnMovementId

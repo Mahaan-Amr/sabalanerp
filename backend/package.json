@@ -47,6 +47,7 @@
     "verify:dispatch-allocations": "tsx scripts/verify-dispatch-allocations-waybills.ts",
     "verify:dispatch-confirmation": "tsx scripts/verify-dispatch-confirmation.ts",
     "verify:physical-gate-exit": "tsx scripts/verify-physical-gate-exit.ts",
+    "verify:dispatch-corrections-outages": "tsx scripts/verify-dispatch-corrections-outages.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },

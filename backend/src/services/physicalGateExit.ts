@@ -133,7 +133,7 @@ export class PhysicalGateExitService {
         const evidence = { id: `${exitId}:${line.id}`, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
           productRowId: line.productRowId, unit: line.unit, kind: 'PHYSICAL_EXIT' as const, quantity: line.quantity.toFixed(3),
           effectiveAt: at.toISOString(), recordedAt: at.toISOString(), sourceType: 'GUARD_PHYSICAL_EXIT', sourceId: `${exitId}:${line.id}`,
-          sourceVersion: 1, integrityHash: '', metadata: { waybillId: waybill.id, physicalExitId: exitId,
+          sourceVersion: 1, integrityHash: '', metadata: { loadingId: revision.loadingId, waybillId: waybill.id, physicalExitId: exitId,
             authorizationId: authorization.id, allocationLineId: line.id, allocationRevisionId: revision.id } };
         evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
         await tx.shipmentQuantityEvidence.create({ data: { contractId: evidence.contractId, contractItemId: evidence.contractItemId,
@@ -149,6 +149,7 @@ export class PhysicalGateExitService {
       await appendQueueEvent(tx, { turnId: turn.id, eventType: 'PHYSICAL_EXIT_RECORDED', fromStatus: GuardDriverQueueTurnStatus.LOADING_FINALIZED,
         toStatus: GuardDriverQueueTurnStatus.EXIT_RECORDED, actorId, payload: { physicalExitId: exitId, authorizationId: authorization.id, waybillId: waybill.id } });
       const smsIntent = await tx.dispatchBuyerSmsIntent.create({ data: { physicalExitId: exitId, idempotencyKey: `BUYER_EXIT:${exitId}`,
+        sessionId: authorization.sessionId,
         phoneNumber, dispatchNumber: waybill.number.toString(), vehiclePlate: plate,
         payload: json({ dispatchNumber: waybill.number.toString(), vehiclePlate: plate }), status: phoneNumber ? 'PENDING' : 'NEEDS_ATTENTION', availableAt: at } });
       if (!phoneNumber) await tx.dispatchConfirmationAlert.create({ data: { sessionId: authorization.sessionId,
@@ -216,15 +217,20 @@ export class PhysicalGateExitService {
         unknownAt: result.outcome === 'UNKNOWN' ? completedAt : undefined,
         availableAt: result.outcome === 'FAILED' && result.retryable ? new Date(completedAt.getTime() + 60_000) : undefined,
         lastError: result.outcome === 'SENT' ? null : result.detail || 'Provider outcome is unknown',
-      }, include: { physicalExit: { include: { authorization: true } } } });
+      } });
       const detail = result.outcome === 'SENT' ? null : result.detail || 'Provider outcome is unknown';
-      await appendAudit(tx, { aggregateType: 'GUARD_PHYSICAL_EXIT', aggregateId: updated.physicalExitId,
+      const sourceAggregateId = updated.physicalExitId || updated.manualOutageExitId || updated.id;
+      await appendAudit(tx, { aggregateType: updated.physicalExitId ? 'GUARD_PHYSICAL_EXIT' : 'MANUAL_OUTAGE_EXIT', aggregateId: sourceAggregateId,
         eventType: `BUYER_SMS_${status}`, payload: { smsIntentId: updated.id, status, attemptCount: updated.attemptCount,
-          providerMessageId: updated.providerMessageId, detail, correlationId: updated.physicalExitId }, actorId: 'SYSTEM', at: completedAt });
+          providerMessageId: updated.providerMessageId, detail, correlationId: sourceAggregateId }, actorId: 'SYSTEM', at: completedAt });
       if (status === DispatchBuyerSmsStatus.UNKNOWN || status === DispatchBuyerSmsStatus.NEEDS_ATTENTION) {
-        await tx.dispatchConfirmationAlert.create({ data: { sessionId: updated.physicalExit.authorization.sessionId,
+        if (updated.sessionId) await tx.dispatchConfirmationAlert.create({ data: { sessionId: updated.sessionId,
           alertType: `BUYER_EXIT_SMS_${status}`, payload: json({ physicalExitId: updated.physicalExitId, smsIntentId: updated.id,
             dispatchNumber: updated.dispatchNumber, status, detail }) } });
+        else await tx.dispatchEvidenceException.create({ data: { exceptionType: `BUYER_EXIT_SMS_${status}`,
+          aggregateType: updated.manualOutageExitId ? 'MANUAL_OUTAGE_EXIT' : 'DISPATCH_BUYER_SMS',
+          aggregateId: updated.manualOutageExitId || updated.id, createdBy: 'SYSTEM',
+          detail: json({ smsIntentId: updated.id, dispatchNumber: updated.dispatchNumber, status, detail }) } });
       }
       return updated;
     });

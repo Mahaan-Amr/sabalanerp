@@ -238,6 +238,17 @@ test('fabricated or over-consumed return evidence cannot reduce dispatched truth
   assert.equal(reused.rows[0]?.health, 'EVIDENCE_CONFLICT');
 });
 
+test('a posted correction mistake is undone only by an opposite immutable reversal', () => {
+  const result = projectShipmentQuantities([
+    evidence('contracted', 'CONTRACTED_SET', '5.000'),
+    evidence('exit', 'LEGACY_DISPATCHED', '5.000'),
+    evidence('mistake', 'DISPATCH_CORRECTION_POSTED', '1.250'),
+    evidence('reversal', 'DISPATCH_CORRECTION_POSTED', '-1.250', { metadata: { reversalOfId: 'mistake' } }),
+  ]);
+  assert.equal(result.rows[0]?.health, 'CURRENT');
+  assert.equal(result.rows[0]?.quantities?.physicallyDispatched, '5.000');
+});
+
 test('contracted quantity follows the financially approved version effective at cutoff', () => {
   const versions = [
     evidence('approved-v1', 'CONTRACTED_SET', '10.000', { effectiveAt: '2026-08-01T00:00:00.000Z', recordedAt: '2026-08-01T01:00:00.000Z', sourceVersion: 1 }),

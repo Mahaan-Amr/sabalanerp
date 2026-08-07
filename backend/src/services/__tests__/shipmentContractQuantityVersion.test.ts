@@ -94,10 +94,13 @@ const persistedReturn = (overrides: Record<string, any> = {}) => ({
   id: 'return-1', kind: 'GUARD_RETURN_VERIFIED', contractId: 'contract-1', contractItemId: 'item-1',
   productRowId: 'row-1', unit: 'count', quantity: new Prisma.Decimal('1.000'),
   guardReturnMovementId: 'movement-in', dispatchEvidenceId: 'exit-1',
-  guardReturnMovement: { id: 'movement-in', direction: 'INBOUND', status: 'INFO_COMPLETED', purpose: 'SALES_RETURN', loadingId: 'loading-1' },
+  recordedAt: new Date('2026-08-07T11:00:00Z'),
+  guardReturnMovement: { id: 'movement-in', direction: 'INBOUND', status: 'INFO_COMPLETED', purpose: 'SALES_RETURN', loadingId: 'loading-1',
+    occurredAt: new Date('2026-08-07T10:30:00Z'), completedAt: new Date('2026-08-07T10:45:00Z') },
   dispatchEvidence: {
     id: 'exit-1', kind: 'PHYSICAL_EXIT', contractId: 'contract-1', contractItemId: 'item-1',
-    productRowId: 'row-1', unit: 'count', quantity: new Prisma.Decimal('2.000'), metadata: { loadingId: 'loading-1' },
+    productRowId: 'row-1', unit: 'count', quantity: new Prisma.Decimal('2.000'), effectiveAt: new Date('2026-08-07T10:00:00Z'),
+    metadata: { loadingId: 'loading-1' },
   },
   ...overrides,
 });
@@ -119,6 +122,13 @@ test('verified Guard return must preserve row and loading attribution to its dis
   assert.match(guardReturnValidationFailure(persistedReturn({
     guardReturnMovement: { id: 'movement-in', direction: 'INBOUND', status: 'INFO_COMPLETED', purpose: 'SALES_RETURN', loadingId: 'other-loading' },
   }), [] as any) || '', /loading attribution/);
+  assert.equal(guardReturnValidationFailure(persistedReturn({
+    metadata: { dispatchLoadingId: 'loading-1' }, dispatchEvidence: { ...persistedReturn().dispatchEvidence, metadata: {} },
+  }), [] as any), null, 'return evidence may durably carry immutable dispatch loading attribution');
+  assert.match(guardReturnValidationFailure(persistedReturn({
+    guardReturnMovement: { ...persistedReturn().guardReturnMovement, occurredAt: new Date('2026-08-07T09:00:00Z') },
+    dispatchEvidence: { ...persistedReturn().dispatchEvidence, effectiveAt: new Date('2026-08-07T10:00:00Z') },
+  }), [] as any) || '', /before its physical dispatch/);
 });
 
 test('materialization preserves verified time and requested cutoff for unsafe fallback rows', () => {

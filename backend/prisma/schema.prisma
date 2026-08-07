@@ -1008,6 +1008,7 @@ model GuardDriverQueueTurn {
   allocationDrafts      LogisticsAllocationDraft[]
   allocationRevisions   LogisticsAllocationRevision[]
   physicalExit          GuardPhysicalExit?
+  manualOutageExit      ManualOutageExit?
 
   @@index([status, admittedAt])
   @@index([internalDriverId, status])
@@ -2694,6 +2695,7 @@ model LogisticsAllocationRevision {
   predecessorRevision   LogisticsAllocationRevision?      @relation("AllocationRevisionSuccessor", fields: [predecessorRevisionId], references: [id], onDelete: Restrict)
   successorRevision     LogisticsAllocationRevision?      @relation("AllocationRevisionSuccessor")
   physicalExit          GuardPhysicalExit?
+  manualOutageExit      ManualOutageExit?
 
   @@unique([loadingId, queueTurnId, revisionNumber])
   @@index([loadingId, finalizedAt])
@@ -2767,6 +2769,8 @@ model AccountingDispatchWaybill {
   confirmationSessions DispatchConfirmationSession[]
   exitAuthorizations   DispatchExitAuthorization[]
   physicalExit         GuardPhysicalExit?
+  dispatchCorrections  DispatchCorrection[]
+  manualOutageExit     ManualOutageExit?
 
   @@index([candidateId, issuedAt])
   @@map("accounting_dispatch_waybills")
@@ -2887,6 +2891,7 @@ model DispatchConfirmationSession {
   guardApprovals       DispatchGuardApproval[]
   exitAuthorization    DispatchExitAuthorization?
   alerts               DispatchConfirmationAlert[]
+  buyerSmsIntents      DispatchBuyerSmsIntent[]
 
   @@index([waybillId, status])
   @@index([expiresAt, status])
@@ -2983,26 +2988,135 @@ model GuardPhysicalExit {
 }
 
 model DispatchBuyerSmsIntent {
-  id                String                 @id @default(cuid())
-  physicalExitId    String                 @unique
-  idempotencyKey    String                 @unique
-  phoneNumber       String?
-  dispatchNumber    String
-  vehiclePlate      String
-  payload           Json
-  status            DispatchBuyerSmsStatus @default(PENDING)
-  attemptCount      Int                    @default(0)
-  availableAt       DateTime               @default(now())
-  lastAttemptAt     DateTime?
-  sentAt            DateTime?
-  unknownAt         DateTime?
-  providerMessageId String?
-  lastError         String?
-  createdAt         DateTime               @default(now())
-  physicalExit      GuardPhysicalExit      @relation(fields: [physicalExitId], references: [id], onDelete: Restrict)
+  id                 String                       @id @default(cuid())
+  physicalExitId     String?                      @unique
+  manualOutageExitId String?                      @unique
+  sessionId          String?
+  idempotencyKey     String                       @unique
+  phoneNumber        String?
+  dispatchNumber     String
+  vehiclePlate       String
+  payload            Json
+  status             DispatchBuyerSmsStatus       @default(PENDING)
+  attemptCount       Int                          @default(0)
+  availableAt        DateTime                     @default(now())
+  lastAttemptAt      DateTime?
+  sentAt             DateTime?
+  unknownAt          DateTime?
+  providerMessageId  String?
+  lastError          String?
+  createdAt          DateTime                     @default(now())
+  physicalExit       GuardPhysicalExit?           @relation(fields: [physicalExitId], references: [id], onDelete: Restrict)
+  manualOutageExit   ManualOutageExit?            @relation(fields: [manualOutageExitId], references: [id], onDelete: Restrict)
+  session            DispatchConfirmationSession? @relation(fields: [sessionId], references: [id], onDelete: Restrict)
 
   @@index([status, availableAt])
+  @@index([sessionId])
   @@map("dispatch_buyer_sms_intents")
+}
+
+model DispatchCorrection {
+  id            String                    @id @default(cuid())
+  waybillId     String
+  status        DispatchCorrectionStatus  @default(DRAFT)
+  reason        String
+  effectiveAt   DateTime
+  createdAt     DateTime                  @default(now())
+  createdBy     String
+  postedAt      DateTime?
+  postedBy      String?
+  reversalOfId  String?                   @unique
+  integrityHash String?
+  waybill       AccountingDispatchWaybill @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+  reversalOf    DispatchCorrection?       @relation("DispatchCorrectionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversals     DispatchCorrection[]      @relation("DispatchCorrectionReversal")
+  lines         DispatchCorrectionLine[]
+
+  @@index([waybillId, createdAt])
+  @@index([status])
+  @@map("dispatch_corrections")
+}
+
+model DispatchCorrectionLine {
+  id               String             @id @default(cuid())
+  correctionId     String
+  contractId       String
+  contractItemId   String
+  productRowId     String
+  unit             String
+  quantity         Decimal            @db.Decimal(18, 3)
+  returnEvidenceId String?
+  correction       DispatchCorrection @relation(fields: [correctionId], references: [id], onDelete: Restrict)
+
+  @@index([correctionId])
+  @@index([contractItemId])
+  @@map("dispatch_correction_lines")
+}
+
+model DispatchOutage {
+  id              String               @id @default(cuid())
+  status          DispatchOutageStatus @default(VERIFIED)
+  scope           String
+  reason          String
+  verification    Json
+  actualStartedAt DateTime
+  verifiedAt      DateTime
+  verifiedBy      String
+  endedAt         DateTime?
+  actualEndedAt   DateTime?
+  endedBy         String?
+  createdAt       DateTime             @default(now())
+  manualExits     ManualOutageExit[]
+
+  @@index([status, verifiedAt])
+  @@map("dispatch_outages")
+}
+
+model ManualOutageExit {
+  id                   String                      @id @default(cuid())
+  paperNumber          String                      @unique
+  outageId             String
+  waybillId            String                      @unique
+  queueTurnId          String                      @unique
+  allocationRevisionId String                      @unique
+  status               ManualOutageExitStatus      @default(PENDING_APPROVALS)
+  actualOccurredAt     DateTime
+  paperEvidence        Json
+  accountingApprovedAt DateTime?
+  accountingApprovedBy String?
+  guardApprovedAt      DateTime?
+  guardApprovedBy      String?
+  recordedAt           DateTime?
+  recordedBy           String?
+  snapshot             Json?
+  integrityHash        String?                     @unique
+  outage               DispatchOutage              @relation(fields: [outageId], references: [id], onDelete: Restrict)
+  waybill              AccountingDispatchWaybill   @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+  queueTurn            GuardDriverQueueTurn        @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
+  allocationRevision   LogisticsAllocationRevision @relation(fields: [allocationRevisionId], references: [id], onDelete: Restrict)
+  smsIntent            DispatchBuyerSmsIntent?
+
+  @@index([outageId, status])
+  @@map("manual_outage_exits")
+}
+
+model DispatchEvidenceException {
+  id            String    @id @default(cuid())
+  exceptionType String
+  severity      String    @default("HIGH")
+  aggregateType String
+  aggregateId   String
+  detail        Json
+  status        String    @default("OPEN")
+  createdAt     DateTime  @default(now())
+  createdBy     String
+  resolvedAt    DateTime?
+  resolvedBy    String?
+  resolution    String?
+
+  @@index([status, createdAt])
+  @@index([aggregateType, aggregateId])
+  @@map("dispatch_evidence_exceptions")
 }
 
 model DispatchConfirmationAlert {
@@ -3866,6 +3980,24 @@ enum DispatchBuyerSmsStatus {
   SENT
   UNKNOWN
   NEEDS_ATTENTION
+}
+
+enum DispatchCorrectionStatus {
+  DRAFT
+  POSTED
+}
+
+enum DispatchOutageStatus {
+  VERIFIED
+  ENDED
+}
+
+enum ManualOutageExitStatus {
+  PENDING_APPROVALS
+  APPROVED
+  REGISTERED
+  SPOILED
+  CONFLICT
 }
 
 enum ShipmentQuantityEvidenceKind {

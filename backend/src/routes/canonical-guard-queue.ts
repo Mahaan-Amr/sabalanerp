@@ -4,6 +4,8 @@ import { AuthRequest, protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WorkspaceRequest, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { admitGuardDriverQueueTurn, closeGuardQueueTurnWithoutLoading, GuardQueueConflictError, GuardQueueValidationError, listGuardQueueAdmissionOptions, makeGuardQueueTurnAvailable, returnGuardQueueTurnToWaiting, voidGuardQueueTurn } from '../services/guardDriverQueue';
 import { PhysicalGateExitConflictError, PhysicalGateExitService, PhysicalGateExitValidationError } from '../services/physicalGateExit';
+import { approveManualOutageExit, DispatchRecoveryConflictError, DispatchRecoveryValidationError,
+  registerManualOutageExit, reportMissingManualOutagePaper, spoilManualOutageExit, verifyGuardPhysicalReturn } from '../services/dispatchCorrectionOutage';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -31,11 +33,13 @@ const responseTurn = (turn: any, redacted = false) => {
   };
 };
 const fail = (res: any, error: unknown, context: string) => {
-  if (error instanceof GuardQueueConflictError || error instanceof PhysicalGateExitConflictError) return res.status(409).json({ success: false, error: error.message });
-  if (error instanceof GuardQueueValidationError || error instanceof PhysicalGateExitValidationError) return res.status(400).json({ success: false, error: error.message });
+  if (error instanceof GuardQueueConflictError || error instanceof PhysicalGateExitConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
+  if (error instanceof GuardQueueValidationError || error instanceof PhysicalGateExitValidationError || error instanceof DispatchRecoveryValidationError) return res.status(400).json({ success: false, error: error.message });
   console.error(context, error);
   return res.status(500).json({ success: false, error: 'Canonical Guard queue command failed.' });
 };
+const guardAuthority = (req: WorkspaceRequest) => ({ actorRole: req.user!.role, workspace: req.workspace || WORKSPACES.SECURITY,
+  workspacePermission: req.workspacePermission || WORKSPACE_PERMISSIONS.EDIT });
 
 router.get('/exit-desk/authorizations', protect, guardView, async (_req: WorkspaceRequest, res) => {
   try { return res.json({ success: true, data: await physicalExitService.listCurrentlyAuthorized() }); }
@@ -47,6 +51,41 @@ router.post('/exit-desk/authorizations/:authorizationId/exit', protect, guardEdi
     actorId: req.user!.id, effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace,
       workspacePermission: req.workspacePermission } }) }); }
   catch (error) { return fail(res, error, 'Record Guard physical exit'); }
+});
+
+router.post('/dispatch-returns/:movementId/verify', protect, guardEdit, async (req: WorkspaceRequest, res) => {
+  try { return res.status(201).json({ success: true, data: await verifyGuardPhysicalReturn(prisma, { movementId: req.params.movementId,
+    dispatchEvidenceId: req.body.dispatchEvidenceId, quantity: req.body.quantity, actorId: req.user!.id, authority: guardAuthority(req) }) }); }
+  catch (error) { return fail(res, error, 'Verify Guard physical return'); }
+});
+
+router.post('/manual-outage-exits/:id/guard-approval', protect, guardEdit, async (req: WorkspaceRequest, res) => {
+  try { return res.json({ success: true, data: await approveManualOutageExit(prisma, { id: req.params.id, role: 'GUARD',
+    actorId: req.user!.id, authority: guardAuthority(req) }) }); }
+  catch (error) { return fail(res, error, 'Approve manual outage exit'); }
+});
+
+router.post('/manual-outage-exits/:id/register', protect, guardEdit, async (req: WorkspaceRequest, res) => {
+  try { return res.json({ success: true, data: await registerManualOutageExit(prisma, { id: req.params.id,
+    actorId: req.user!.id, authority: guardAuthority(req) }) }); }
+  catch (error) { return fail(res, error, 'Register manual outage exit'); }
+});
+
+router.post('/manual-outage-exits/:id/spoil', protect, guardEdit, async (req: WorkspaceRequest, res) => {
+  try { return res.json({ success: true, data: await spoilManualOutageExit(prisma, { id: req.params.id, reason: req.body.reason,
+    actorId: req.user!.id, authority: guardAuthority(req) }) }); }
+  catch (error) { return fail(res, error, 'Spoil manual outage exit'); }
+});
+
+router.post('/manual-outage-papers/missing', protect, guardEdit, async (req: WorkspaceRequest, res) => {
+  try { return res.status(201).json({ success: true, data: await reportMissingManualOutagePaper(prisma, {
+    paperNumber: req.body.paperNumber, reason: req.body.reason, actorId: req.user!.id, authority: guardAuthority(req) }) }); }
+  catch (error) { return fail(res, error, 'Report missing manual outage paper'); }
+});
+
+router.get('/dispatch-evidence-exceptions', protect, guardView, async (_req: WorkspaceRequest, res) => {
+  try { return res.json({ success: true, data: await prisma.dispatchEvidenceException.findMany({ orderBy: { createdAt: 'desc' } }) }); }
+  catch (error) { return fail(res, error, 'List dispatch evidence exceptions'); }
 });
 
 router.get('/canonical-driver-queue', protect, guardView, async (req: WorkspaceRequest, res) => {

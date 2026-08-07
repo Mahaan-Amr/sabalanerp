@@ -169,6 +169,10 @@ export const projectShipmentQuantities = (
         case 'MANUAL_OUTAGE_EXIT': reserved -= quantity; dispatched += quantity; break;
         case 'DISPATCH_CORRECTION_POSTED':
           if (quantity < 0n) {
+            if (item.metadata?.reversalOfId) {
+              dispatched += quantity;
+              break;
+            }
             const returnEvidenceId = String(item.returnEvidenceId || item.metadata?.returnEvidenceId || '');
             const verifiedReturnQuantity = verifiedReturns.get(returnEvidenceId);
             if (!returnEvidenceId || verifiedReturnQuantity === undefined) {

@@ -864,7 +864,9 @@ router.get('/vehicle-movements', protect, securityView, async (req: AuthRequest,
 // @desc    Record inbound loaded vehicle entry
 // @route   POST /api/security/vehicle-movements/inbound
 router.post('/vehicle-movements/inbound', protect, securityEdit, [
-  body('purpose').isIn(['OUTSIDE_PURCHASE', 'SALES_RETURN', 'CONSIGNMENT']).withMessage('Invalid inbound purpose')
+  body('purpose').isIn(['OUTSIDE_PURCHASE', 'SALES_RETURN', 'CONSIGNMENT']).withMessage('Invalid inbound purpose'),
+  body('loadingId').if(body('purpose').equals('SALES_RETURN')).notEmpty().withMessage('Original dispatch loading is required for sales return'),
+  body('occurredAt').optional().isISO8601().withMessage('occurredAt must be a valid timestamp')
 ], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -874,6 +876,11 @@ router.post('/vehicle-movements/inbound', protect, securityEdit, [
     }
     if (req.body.purpose === 'SALES_RETURN' && !req.body.customerId) {
       return res.status(400).json({ success: false, error: 'Customer is required for sales return' });
+    }
+    const occurredAt = req.body.occurredAt ? new Date(req.body.occurredAt) : new Date();
+    if (occurredAt > new Date()) return res.status(400).json({ success: false, error: 'Inbound movement cannot occur in the future' });
+    if (req.body.purpose === 'SALES_RETURN' && !await prisma.logisticsLoading.findUnique({ where: { id: req.body.loadingId } })) {
+      return res.status(400).json({ success: false, error: 'Original dispatch loading was not found' });
     }
     if (req.body.vehiclePairId) {
       return res.status(410).json({ success: false, error: 'Legacy combined driver-vehicle records cannot be attached to new movements. Record a visit snapshot or use canonical identities.' });
@@ -886,9 +893,10 @@ router.post('/vehicle-movements/inbound', protect, securityEdit, [
         purpose: req.body.purpose,
         status: 'ENTRY_RECORDED',
         vehiclePairId: null,
+        loadingId: req.body.purpose === 'SALES_RETURN' ? req.body.loadingId : null,
         customerId: req.body.customerId || null,
         projectId: req.body.projectId || null,
-        occurredAt: req.body.occurredAt ? new Date(req.body.occurredAt) : new Date(),
+        occurredAt,
         driverSnapshot: req.body.driverSnapshot || null,
         documentSnapshot: req.body.documentSnapshot || null,
         settlementSnapshot: req.body.settlementSnapshot || null,

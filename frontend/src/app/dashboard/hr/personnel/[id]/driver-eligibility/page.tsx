@@ -53,7 +53,7 @@ export default function PersonnelDriverEligibilityPage() {
       <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (!reason.trim()) return; void run(() => driver ? dispatchMasterDataAPI.transitionInternalDriverEligibility(driver.id, { status: eligible ? 'SUSPENDED' : 'ELIGIBLE', effectiveFrom, reason }) : dispatchMasterDataAPI.createInternalDriver({ personnelId, effectiveFrom, reason }), driver ? 'وضعیت صلاحیت ثبت شد.' : 'راننده داخلی تعریف شد.'); }}>
         <label className={field}>تاریخ اثر<ErpInput required type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label>
         <label className={field}>دلیل<ErpInput required value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-        <ErpButton label={!driver ? 'تعریف راننده داخلی' : eligible ? 'تعلیق صلاحیت' : 'بازگردانی صلاحیت'} icon={!driver ? FaUserCheck : eligible ? FaPause : FaPlay} tone={eligible ? 'warning' : 'success'} disabled={saving || !reason.trim()} className="sm:col-span-2" />
+        <ErpButton type="submit" label={!driver ? 'تعریف راننده داخلی' : eligible ? 'تعلیق صلاحیت' : 'بازگردانی صلاحیت'} icon={!driver ? FaUserCheck : eligible ? FaPause : FaPlay} tone={eligible ? 'warning' : 'success'} disabled={saving || !reason.trim()} className="sm:col-span-2" />
       </form>
     </ErpSection>}
   </ErpWorkspacePage>;

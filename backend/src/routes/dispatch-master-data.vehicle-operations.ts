@@ -58,6 +58,7 @@ router.post('/internal-drivers/:id/profile-status', manageProfiles, async (req: 
     const updated = await prisma.$transaction(async (tx) => {
       const current = await tx.internalDriverProfile.findUnique({ where: { id: req.params.id } });
       if (!current) throw new Error('Internal driving profile was not found.');
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DRIVER_BIOMETRIC:${current.id}`);
       assertLifecycleTransition('INTERNAL_DRIVER_PROFILE', current.status, next);
       if (next === 'ACTIVE' && (!current.licenceNumber || !current.licenceClass || !current.licenceExpiresAt || current.licenceExpiresAt <= new Date())) throw new Error('A licence number, licence class, and future licence expiry are required for activation.');
       const record = await tx.internalDriverProfile.update({ where: { id: current.id }, data: { status: next } });

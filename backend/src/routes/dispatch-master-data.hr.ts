@@ -56,6 +56,7 @@ router.post('/internal-drivers/:id/eligibility', manage, async (req: AuthRequest
     const result = await prisma.$transaction(async (tx) => {
       const driver = await tx.internalDriverProfile.findUnique({ where: { id: req.params.id } });
       if (!driver) throw new Error('Internal driver was not found.');
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DRIVER_BIOMETRIC:${driver.id}`);
       const current = await tx.internalDriverEligibilityPeriod.findFirst({ where: { driverId: driver.id, ...activeAt(effectiveFrom) }, orderBy: { effectiveFrom: 'desc' } });
       if (current?.effectiveFrom.getTime() === effectiveFrom.getTime()) throw new Error('A recorded eligibility transition already exists at this time.');
       if (current) await tx.internalDriverEligibilityPeriod.update({ where: { id: current.id }, data: { effectiveTo: effectiveFrom } });

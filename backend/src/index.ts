@@ -55,6 +55,7 @@ import notificationRoutes from "./routes/notifications";
 import supportTicketRoutes from "./routes/support-tickets";
 import dispatchMasterDataRoutes from "./routes/dispatch-master-data";
 import biometricConnectorRoutes from "./routes/biometric-connector";
+import dispatchConfirmationRoutes from "./routes/dispatch-confirmation";
 import shipmentQuantityRoutes from "./routes/shipment-quantities";
 
 // Import middleware
@@ -200,6 +201,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/support-tickets", supportTicketRoutes);
 app.use("/api/dispatch-master-data", dispatchMasterDataRoutes);
 app.use("/api/biometric-connector", biometricConnectorRoutes);
+app.use("/api/dispatch-confirmation", dispatchConfirmationRoutes);
 app.use("/api/shipment-quantities", shipmentQuantityRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);

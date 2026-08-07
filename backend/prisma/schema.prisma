@@ -707,6 +707,7 @@ model Personnel {
   hiringOnboardingTasks               HrOnboardingTask[]
   hrPersonnelAudits                   HrPersonnelAudit[]
   internalDriverProfile               InternalDriverProfile?
+  biometricEnrollments                DriverBiometricEnrollment[]
   externalDriverContinuityLinks       ExternalDriverPersonnelContinuityLink[]
 
   @@index([isActive, departmentId])
@@ -2746,21 +2747,23 @@ model AccountingDispatchWorkItem {
 }
 
 model AccountingDispatchWaybill {
-  id                 String                          @id @default(cuid())
-  number             BigInt                          @unique @default(dbgenerated("nextval('accounting_dispatch_waybill_number_seq'::regclass)"))
-  candidateId        String
-  status             AccountingDispatchWaybillStatus @default(ISSUED)
-  snapshot           Json
-  integrityHash      String                          @unique
-  issuedAt           DateTime                        @default(now())
-  issuedBy           String
-  voidedAt           DateTime?
-  voidedBy           String?
-  voidReason         String?
-  replacesWaybillId  String?                         @unique
-  candidate          AccountingDispatchCandidate     @relation(fields: [candidateId], references: [id], onDelete: Restrict)
-  replacesWaybill    AccountingDispatchWaybill?      @relation("DispatchWaybillReplacement", fields: [replacesWaybillId], references: [id], onDelete: Restrict)
-  replacementWaybill AccountingDispatchWaybill?      @relation("DispatchWaybillReplacement")
+  id                   String                          @id @default(cuid())
+  number               BigInt                          @unique @default(dbgenerated("nextval('accounting_dispatch_waybill_number_seq'::regclass)"))
+  candidateId          String
+  status               AccountingDispatchWaybillStatus @default(ISSUED)
+  snapshot             Json
+  integrityHash        String                          @unique
+  issuedAt             DateTime                        @default(now())
+  issuedBy             String
+  voidedAt             DateTime?
+  voidedBy             String?
+  voidReason           String?
+  replacesWaybillId    String?                         @unique
+  candidate            AccountingDispatchCandidate     @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  replacesWaybill      AccountingDispatchWaybill?      @relation("DispatchWaybillReplacement", fields: [replacesWaybillId], references: [id], onDelete: Restrict)
+  replacementWaybill   AccountingDispatchWaybill?      @relation("DispatchWaybillReplacement")
+  confirmationSessions DispatchConfirmationSession[]
+  exitAuthorizations   DispatchExitAuthorization[]
 
   @@index([candidateId, issuedAt])
   @@map("accounting_dispatch_waybills")
@@ -2793,6 +2796,177 @@ model DispatchLifecycleAudit {
 
   @@index([aggregateType, aggregateId, recordedAt])
   @@map("dispatch_lifecycle_audits")
+}
+
+model BiometricGovernancePolicy {
+  id                                String                      @id @default(cuid())
+  policyVersion                     String                      @unique
+  legalBasis                        String
+  consentWordingVersion             String
+  templateRetentionDays             Int
+  confirmationEvidenceRetentionDays Int
+  securityLogRetentionDays          Int
+  exportRetentionDays               Int
+  backupRetentionDays               Int
+  deletionCertificateRetentionDays  Int
+  accessControlPolicy               String
+  legalHoldPolicy                   String
+  incidentResponsePolicy            String
+  disclosurePolicy                  String
+  counselApprovedAt                 DateTime
+  counselApprovedBy                 String
+  activeFrom                        DateTime
+  retiredAt                         DateTime?
+  recordedBy                        String
+  recordedAt                        DateTime                    @default(now())
+  enrollments                       DriverBiometricEnrollment[]
+
+  @@index([activeFrom, retiredAt])
+  @@map("biometric_governance_policies")
+}
+
+model DriverBiometricEnrollment {
+  id                 String                    @id @default(cuid())
+  personnelId        String
+  governancePolicyId String
+  status             String                    @default("ACTIVE")
+  acknowledgement    String
+  confirmationPhone  String
+  acknowledgedAt     DateTime
+  enrolledAt         DateTime                  @default(now())
+  enrolledBy         String
+  retentionUntil     DateTime
+  withdrawnAt        DateTime?
+  withdrawnBy        String?
+  personnel          Personnel                 @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  governancePolicy   BiometricGovernancePolicy @relation(fields: [governancePolicyId], references: [id], onDelete: Restrict)
+  templates          DriverBiometricTemplate[]
+
+  @@index([personnelId, status])
+  @@map("driver_biometric_enrollments")
+}
+
+model DriverBiometricTemplate {
+  id                String                    @id @default(cuid())
+  enrollmentId      String
+  finger            String
+  format            String
+  templateReference String                    @unique
+  protectedEnvelope Json
+  deviceEvidence    Json
+  createdAt         DateTime                  @default(now())
+  enrollment        DriverBiometricEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+
+  @@unique([enrollmentId, finger])
+  @@map("driver_biometric_templates")
+}
+
+model DispatchConfirmationSession {
+  id                   String                      @id @default(cuid())
+  waybillId            String
+  method               String
+  status               String                      @default("ACTIVE")
+  driverSource         GuardDriverSource
+  driverId             String
+  accountingActorId    String
+  waybillIntegrityHash String
+  workstationId        String
+  expiresAt            DateTime
+  fallbackEligibleAt   DateTime?
+  fallbackFailure      Json?
+  confirmedAt          DateTime?
+  failedAt             DateTime?
+  cancelledAt          DateTime?
+  createdAt            DateTime                    @default(now())
+  waybill              AccountingDispatchWaybill   @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+  otpChallenges        DispatchOtpChallenge[]
+  attempts             DispatchBiometricAttempt[]
+  guardApprovals       DispatchGuardApproval[]
+  exitAuthorization    DispatchExitAuthorization?
+  alerts               DispatchConfirmationAlert[]
+
+  @@index([waybillId, status])
+  @@index([expiresAt, status])
+  @@map("dispatch_confirmation_sessions")
+}
+
+model DispatchOtpChallenge {
+  id             String                      @id @default(cuid())
+  sessionId      String
+  digest         String
+  expiresAt      DateTime
+  resendAfter    DateTime
+  incorrectCount Int                         @default(0)
+  verifiedAt     DateTime?
+  invalidatedAt  DateTime?
+  createdAt      DateTime                    @default(now())
+  session        DispatchConfirmationSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId, createdAt])
+  @@map("dispatch_otp_challenges")
+}
+
+model DispatchBiometricAttempt {
+  id         String                      @id @default(cuid())
+  sessionId  String
+  sequence   Int
+  result     Json
+  recordedAt DateTime                    @default(now())
+  session    DispatchConfirmationSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+
+  @@unique([sessionId, sequence])
+  @@map("dispatch_biometric_attempts")
+}
+
+model DispatchGuardApproval {
+  id                String                      @id @default(cuid())
+  sessionId         String
+  guardActorId      String
+  reauthenticatedAt DateTime
+  reason            String?
+  approvedAt        DateTime                    @default(now())
+  session           DispatchConfirmationSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId, approvedAt])
+  @@map("dispatch_guard_approvals")
+}
+
+model DispatchExitAuthorization {
+  id                   String                      @id @default(cuid())
+  waybillId            String
+  sessionId            String                      @unique
+  status               String                      @default("ACTIVE")
+  method               String
+  driverSource         GuardDriverSource
+  driverId             String
+  waybillIntegrityHash String
+  evidenceSnapshot     Json
+  integrityHash        String                      @unique
+  issuedAt             DateTime                    @default(now())
+  validUntil           DateTime
+  revokedAt            DateTime?
+  revokedBy            String?
+  revocationReason     String?
+  consumedAt           DateTime?
+  consumedBy           String?
+  waybill              AccountingDispatchWaybill   @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+  session              DispatchConfirmationSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+
+  @@index([waybillId, status])
+  @@index([validUntil, status])
+  @@map("dispatch_exit_authorizations")
+}
+
+model DispatchConfirmationAlert {
+  id        String                      @id @default(cuid())
+  sessionId String
+  alertType String
+  payload   Json
+  createdAt DateTime                    @default(now())
+  session   DispatchConfirmationSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId, createdAt])
+  @@map("dispatch_confirmation_alerts")
 }
 
 model LogisticsLoadingDriverAssignment {

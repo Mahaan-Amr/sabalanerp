@@ -45,6 +45,7 @@
     "verify:dispatch-master-data": "tsx scripts/verify-dispatch-master-data.ts",
     "verify:guard-driver-queue": "tsx scripts/verify-guard-driver-queue.ts",
     "verify:dispatch-allocations": "tsx scripts/verify-dispatch-allocations-waybills.ts",
+    "verify:dispatch-confirmation": "tsx scripts/verify-dispatch-confirmation.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },

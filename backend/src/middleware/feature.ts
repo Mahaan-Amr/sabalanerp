@@ -203,6 +203,7 @@ export const FEATURES = {
   ACCOUNTING_BIOMETRIC_DIAGNOSTICS_VIEW: 'accounting_biometric_diagnostics_view',
   ACCOUNTING_DISPATCH_CANDIDATES_VIEW: 'accounting_dispatch_candidates_view',
   ACCOUNTING_DISPATCH_CANDIDATES_MANAGE: 'accounting_dispatch_candidates_manage',
+  ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE: 'accounting_dispatch_confirmation_manage',
 
   // BI Features
   BI_DASHBOARD_VIEW: 'bi_dashboard_view',
@@ -225,6 +226,7 @@ export const FEATURES = {
   HR_VEHICLE_OPERATIONS_MANAGE: 'hr_vehicle_operations_manage',
   HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE: 'hr_internal_driver_eligibility_manage',
   HR_DRIVER_BIOMETRIC_AUDIT_VIEW: 'hr_driver_biometric_audit_view',
+  HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE: 'hr_driver_biometric_enrollment_manage',
   HR_DRIVER_PROFILES_MANAGE: 'hr_driver_profiles_manage',
   HR_COMPANY_VEHICLES_MANAGE: 'hr_company_vehicles_manage',
   HR_VEHICLE_PLATES_MANAGE: 'hr_vehicle_plates_manage',
@@ -257,6 +259,7 @@ export const FEATURES = {
   SECURITY_EXTERNAL_DRIVERS_MANAGE: 'security_external_drivers_manage',
   SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE: 'security_external_driver_vehicle_manage',
   SECURITY_DISPATCH_EVIDENCE_VIEW: 'security_dispatch_evidence_view',
+  SECURITY_DISPATCH_CONFIRMATION_APPROVE: 'security_dispatch_confirmation_approve',
   SUPPORT_SECURITY_INCIDENT_HANDLE: 'support_security_incident_handle'
 } as const;
 
@@ -454,6 +457,7 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.ACCOUNTING_BIOMETRIC_DIAGNOSTICS_VIEW]: 'accounting',
   [FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_VIEW]: 'accounting',
   [FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE]: 'accounting',
 
   // BI Features
   [FEATURES.BI_DASHBOARD_VIEW]: 'bi',
@@ -475,6 +479,7 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.HR_VEHICLE_OPERATIONS_MANAGE]: 'hr',
   [FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE]: 'hr',
   [FEATURES.HR_DRIVER_BIOMETRIC_AUDIT_VIEW]: 'hr',
+  [FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE]: 'hr',
   [FEATURES.HR_DRIVER_PROFILES_MANAGE]: 'hr',
   [FEATURES.HR_COMPANY_VEHICLES_MANAGE]: 'hr',
   [FEATURES.HR_VEHICLE_PLATES_MANAGE]: 'hr',
@@ -507,6 +512,7 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.SECURITY_EXTERNAL_DRIVERS_MANAGE]: 'security',
   [FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE]: 'security',
   [FEATURES.SECURITY_DISPATCH_EVIDENCE_VIEW]: 'security',
+  [FEATURES.SECURITY_DISPATCH_CONFIRMATION_APPROVE]: 'security',
   [FEATURES.SUPPORT_SECURITY_INCIDENT_HANDLE]: 'security'
 };
 
@@ -681,6 +687,7 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   [FEATURES.ACCOUNTING_BIOMETRIC_DIAGNOSTICS_VIEW]: 'Accounting Biometric Connector Diagnostics - View',
   [FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_VIEW]: 'Accounting Dispatch Candidates - View',
   [FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE]: 'Accounting Dispatch Candidates - Manage',
+  [FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE]: 'Accounting Dispatch Confirmation - Manage',
   [FEATURES.BI_DASHBOARD_VIEW]: 'BI Dashboard - View',
 
   [FEATURES.LOGISTICS_DASHBOARD_VIEW]: 'Logistics Dashboard - View',
@@ -720,6 +727,7 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   [FEATURES.HR_VEHICLE_OPERATIONS_MANAGE]: 'HR Vehicle Operations - Manage',
   [FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE]: 'HR Internal Driver Eligibility - Manage',
   [FEATURES.HR_DRIVER_BIOMETRIC_AUDIT_VIEW]: 'HR Driver Biometric Audit - View',
+  [FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE]: 'HR Driver Biometric Enrollment - Manage',
   [FEATURES.HR_DRIVER_PROFILES_MANAGE]: 'HR Driver Profiles - Manage',
   [FEATURES.HR_COMPANY_VEHICLES_MANAGE]: 'HR Company Vehicles - Manage',
   [FEATURES.HR_VEHICLE_PLATES_MANAGE]: 'HR Vehicle Plates - Manage',
@@ -729,6 +737,7 @@ export const FEATURE_LABELS: Record<Feature, string> = {
   [FEATURES.SECURITY_EXTERNAL_DRIVERS_MANAGE]: 'Security External Drivers - Manage',
   [FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE]: 'Security External Driver Vehicle - Manage',
   [FEATURES.SECURITY_DISPATCH_EVIDENCE_VIEW]: 'Security Dispatch Evidence - View',
+  [FEATURES.SECURITY_DISPATCH_CONFIRMATION_APPROVE]: 'Security Dispatch Confirmation - Approve',
   [FEATURES.SUPPORT_SECURITY_INCIDENT_HANDLE]: 'Support - Designated Security Incident Handler'
 };
 

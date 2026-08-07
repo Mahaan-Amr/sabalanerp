@@ -1253,9 +1253,7 @@ test('Guard attendance and vehicle operations use canonical fields and responsiv
   await page.goto('/dashboard/security/vehicles');
   const vehicles = page.locator('main.sds-workspace');
   await expect(vehicles.getByRole('heading', { name: 'تردد خودروها', exact: true })).toBeVisible();
-
-  await vehicles.getByRole('button', { name: 'رانندگان و خودروها', exact: true }).click();
-  await expect(vehicles.getByRole('heading', { name: 'ثبت راننده و خودرو', exact: true })).toBeVisible();
+  await expect(vehicles.getByRole('heading', { name: 'پذیرش صف جاری', exact: true })).toBeVisible();
   const vehicleFields = await vehicles.evaluate((element) => {
     const fields = Array.from(element.querySelectorAll('input:not([type="checkbox"]), select, textarea'));
     return {
@@ -1268,7 +1266,8 @@ test('Guard attendance and vehicle operations use canonical fields and responsiv
   });
   expect(vehicleFields.count).toBeGreaterThan(0);
   expect(vehicleFields.canonical).toBe(true);
-  await expect(vehicles.getByRole('checkbox', { name: 'پلاک ویژه' })).toBeVisible();
+  await expect(vehicles.getByRole('combobox', { name: 'راننده و خودروی داخلی' })).toBeVisible();
+  await expect(vehicles.getByRole('textbox', { name: 'دلیل بازگشت، خروج بدون بارگیری یا ابطال' })).toBeVisible();
 
   const vehiclesFit = await vehicles.evaluate((element) => {
     const rect = element.getBoundingClientRect();

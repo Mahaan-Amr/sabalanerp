@@ -17,6 +17,7 @@ import { buildCombinedSecurityShiftTimeline, validateShiftSessionCorrectionPolic
 import { summarizeSecurityAttendance } from '../services/securityAttendanceSummary';
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
 import { renderCompletedSecurityShiftPdfHtml } from '../services/securityCompletedShiftPdf';
+import canonicalGuardQueueRoutes from './canonical-guard-queue';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -38,6 +39,8 @@ const leaveExceptionTypes = new Set<ExceptionType>([
 ]);
 
 const addDays = addSecurityDays;
+
+router.use(canonicalGuardQueueRoutes);
 const parseDayQuery = parseSecurityBusinessDate;
 
 const currentAttendanceTime = () => securityNowTime();

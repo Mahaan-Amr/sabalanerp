@@ -680,15 +680,15 @@ model RecoveryAuditEvent {
 }
 
 model Personnel {
-  id                                  String                               @id @default(cuid())
+  id                                  String                                  @id @default(cuid())
   firstName                           String
   lastName                            String
-  nationalCode                        String?                              @unique
-  employeeNumber                      String?                              @unique
+  nationalCode                        String?                                 @unique
+  employeeNumber                      String?                                 @unique
   departmentId                        String?
-  isActive                            Boolean                              @default(true)
-  createdAt                           DateTime                             @default(now())
-  updatedAt                           DateTime                             @updatedAt
+  isActive                            Boolean                                 @default(true)
+  createdAt                           DateTime                                @default(now())
+  updatedAt                           DateTime                                @updatedAt
   archivedAt                          DateTime?
   archivedBy                          String?
   archiveReason                       String?
@@ -701,7 +701,7 @@ model Personnel {
   exceptionRequests                   ExceptionRequest[]
   missionAssignments                  MissionAssignment[]
   user                                User?
-  department                          Department?                          @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  department                          Department?                             @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   hrEmploymentRelationships           HrEmploymentRelationship[]
   hiringCandidate                     HrCandidate?
   hiringOnboardingTasks               HrOnboardingTask[]
@@ -741,6 +741,21 @@ enum ExternalRegistryLifecycleStatus {
   ARCHIVED
 }
 
+enum GuardDriverSource {
+  INTERNAL
+  EXTERNAL
+}
+
+enum GuardDriverQueueTurnStatus {
+  WAITING_AT_GATE
+  AVAILABLE_FOR_LOADING
+  RESERVED_FOR_LOADING
+  LOADING_FINALIZED
+  EXIT_RECORDED
+  CLOSED_WITHOUT_LOADING
+  VOIDED
+}
+
 model InternalDriverProfile {
   id                 String                            @id @default(cuid())
   personnelId        String                            @unique
@@ -754,6 +769,7 @@ model InternalDriverProfile {
   personnel          Personnel                         @relation(fields: [personnelId], references: [id], onDelete: Restrict)
   eligibilityPeriods InternalDriverEligibilityPeriod[]
   vehicleAssignments DriverVehicleAssignment[]
+  guardQueueTurns    GuardDriverQueueTurn[]
 
   @@index([status])
   @@map("internal_driver_profiles")
@@ -776,21 +792,22 @@ model InternalDriverEligibilityPeriod {
 }
 
 model CompanyVehicle {
-  id          String                    @id @default(cuid())
-  fleetCode   String                    @unique
-  vehicleType String
-  make        String?
-  model       String?
-  vin         String?                   @unique
-  status      CompanyVehicleLifecycleStatus @default(DRAFT)
-  statusEffectiveFrom DateTime              @default(now())
+  id                  String                        @id @default(cuid())
+  fleetCode           String                        @unique
+  vehicleType         String
+  make                String?
+  model               String?
+  vin                 String?                       @unique
+  status              CompanyVehicleLifecycleStatus @default(DRAFT)
+  statusEffectiveFrom DateTime                      @default(now())
   statusReason        String?
   statusRecordedBy    String?
-  notes       String?
-  createdAt   DateTime                  @default(now())
-  createdBy   String
-  plates      CompanyVehiclePlate[]
-  assignments DriverVehicleAssignment[]
+  notes               String?
+  createdAt           DateTime                      @default(now())
+  createdBy           String
+  plates              CompanyVehiclePlate[]
+  assignments         DriverVehicleAssignment[]
+  guardQueueTurns     GuardDriverQueueTurn[]
 
   @@index([status])
   @@map("company_vehicles")
@@ -814,16 +831,17 @@ model CompanyVehiclePlate {
 }
 
 model DriverVehicleAssignment {
-  id            String                @id @default(cuid())
-  driverId      String
-  vehicleId     String
-  effectiveFrom DateTime
-  effectiveTo   DateTime?
-  reason        String
-  recordedAt    DateTime              @default(now())
-  recordedBy    String
-  driver        InternalDriverProfile @relation(fields: [driverId], references: [id], onDelete: Restrict)
-  vehicle       CompanyVehicle        @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  id              String                 @id @default(cuid())
+  driverId        String
+  vehicleId       String
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  reason          String
+  recordedAt      DateTime               @default(now())
+  recordedBy      String
+  driver          InternalDriverProfile  @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  vehicle         CompanyVehicle         @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  guardQueueTurns GuardDriverQueueTurn[]
 
   @@index([driverId, effectiveFrom])
   @@index([vehicleId, effectiveFrom])
@@ -831,65 +849,67 @@ model DriverVehicleAssignment {
 }
 
 model ExternalDriver {
-  id            String                                  @id @default(cuid())
-  firstName     String
-  lastName      String
-  nationalCode  String                                  @unique
-  phone         String
-  status        ExternalRegistryLifecycleStatus         @default(DRAFT)
-  statusEffectiveFrom DateTime                           @default(now())
-  statusReason  String?
-  statusRecordedBy String?
-  notes         String?
-  createdAt     DateTime                                @default(now())
-  createdBy     String
-  externalLinks ExternalDriverPersonnelContinuityLink[]
-  documents     ExternalDriverDocument[]
+  id                  String                                  @id @default(cuid())
+  firstName           String
+  lastName            String
+  nationalCode        String                                  @unique
+  phone               String
+  status              ExternalRegistryLifecycleStatus         @default(DRAFT)
+  statusEffectiveFrom DateTime                                @default(now())
+  statusReason        String?
+  statusRecordedBy    String?
+  notes               String?
+  createdAt           DateTime                                @default(now())
+  createdBy           String
+  externalLinks       ExternalDriverPersonnelContinuityLink[]
+  documents           ExternalDriverDocument[]
+  guardQueueTurns     GuardDriverQueueTurn[]
 
   @@index([status])
   @@map("external_drivers")
 }
 
 model ExternalDriverDocument {
-  id            String         @id @default(cuid())
-  driverId      String
-  documentType  String
-  reference     String
-  expiresAt     DateTime?
-  recordedAt    DateTime       @default(now())
-  recordedBy    String
-  driver        ExternalDriver @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  id           String         @id @default(cuid())
+  driverId     String
+  documentType String
+  reference    String
+  expiresAt    DateTime?
+  recordedAt   DateTime       @default(now())
+  recordedBy   String
+  driver       ExternalDriver @relation(fields: [driverId], references: [id], onDelete: Restrict)
 
   @@index([driverId, documentType, recordedAt])
   @@map("external_driver_documents")
 }
 
 model ExternalVehicle {
-  id          String                 @id @default(cuid())
-  vehicleType String
-  status      ExternalRegistryLifecycleStatus @default(DRAFT)
-  statusEffectiveFrom DateTime               @default(now())
-  statusReason String?
-  statusRecordedBy String?
-  notes       String?
-  createdAt   DateTime               @default(now())
-  createdBy   String
-  plates      ExternalVehiclePlate[]
-  documents   ExternalVehicleDocument[]
+  id                  String                          @id @default(cuid())
+  vehicleType         String
+  status              ExternalRegistryLifecycleStatus @default(DRAFT)
+  statusEffectiveFrom DateTime                        @default(now())
+  statusReason        String?
+  statusRecordedBy    String?
+  notes               String?
+  createdAt           DateTime                        @default(now())
+  createdBy           String
+  plates              ExternalVehiclePlate[]
+  documents           ExternalVehicleDocument[]
+  guardQueueTurns     GuardDriverQueueTurn[]
 
   @@index([status])
   @@map("external_vehicles")
 }
 
 model ExternalVehicleDocument {
-  id            String          @id @default(cuid())
-  vehicleId     String
-  documentType  String
-  reference     String
-  expiresAt     DateTime?
-  recordedAt    DateTime        @default(now())
-  recordedBy    String
-  vehicle       ExternalVehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  id           String          @id @default(cuid())
+  vehicleId    String
+  documentType String
+  reference    String
+  expiresAt    DateTime?
+  recordedAt   DateTime        @default(now())
+  recordedBy   String
+  vehicle      ExternalVehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
 
   @@index([vehicleId, documentType, recordedAt])
   @@map("external_vehicle_documents")
@@ -941,6 +961,75 @@ model DispatchMasterDataAudit {
 
   @@index([subjectType, subjectId, recordedAt])
   @@map("dispatch_master_data_audits")
+}
+
+model GuardDriverQueueTurn {
+  id                    String                     @id @default(cuid())
+  driverSource          GuardDriverSource
+  status                GuardDriverQueueTurnStatus @default(WAITING_AT_GATE)
+  internalDriverId      String?
+  externalDriverId      String?
+  companyVehicleId      String?
+  externalVehicleId     String?
+  assignmentId          String?
+  admittedAt            DateTime                   @default(now())
+  admittedBy            String
+  snapshotSchemaVersion Int                        @default(1)
+  admissionSnapshot     Json
+  integrityHash         String                     @unique
+  availableAt           DateTime?
+  availableBy           String?
+  loadingId             String?
+  reservedAt            DateTime?
+  reservedBy            String?
+  finalizedAt           DateTime?
+  finalizedBy           String?
+  exitedAt              DateTime?
+  exitedBy              String?
+  closedAt              DateTime?
+  closedBy              String?
+  closureReason         String?
+  voidedAt              DateTime?
+  voidedBy              String?
+  voidReason            String?
+  replacementTurnId     String?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  internalDriver        InternalDriverProfile?     @relation(fields: [internalDriverId], references: [id], onDelete: Restrict)
+  externalDriver        ExternalDriver?            @relation(fields: [externalDriverId], references: [id], onDelete: Restrict)
+  companyVehicle        CompanyVehicle?            @relation(fields: [companyVehicleId], references: [id], onDelete: Restrict)
+  externalVehicle       ExternalVehicle?           @relation(fields: [externalVehicleId], references: [id], onDelete: Restrict)
+  assignment            DriverVehicleAssignment?   @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  loading               LogisticsLoading?          @relation(fields: [loadingId], references: [id], onDelete: Restrict)
+  replacementTurn       GuardDriverQueueTurn?      @relation("GuardQueueReplacement", fields: [replacementTurnId], references: [id], onDelete: Restrict)
+  replacedTurns         GuardDriverQueueTurn[]     @relation("GuardQueueReplacement")
+  events                GuardDriverQueueEvent[]
+
+  @@index([status, admittedAt])
+  @@index([internalDriverId, status])
+  @@index([externalDriverId, status])
+  @@index([companyVehicleId, status])
+  @@index([externalVehicleId, status])
+  @@index([loadingId])
+  @@map("guard_driver_queue_turns")
+}
+
+model GuardDriverQueueEvent {
+  id           String                      @id @default(cuid())
+  turnId       String
+  eventType    String
+  fromStatus   GuardDriverQueueTurnStatus?
+  toStatus     GuardDriverQueueTurnStatus
+  reason       String?
+  payload      Json
+  actorId      String
+  recordedAt   DateTime                    @default(now())
+  previousHash String?
+  eventHash    String                      @unique
+  turn         GuardDriverQueueTurn        @relation(fields: [turnId], references: [id], onDelete: Restrict)
+
+  @@index([turnId, recordedAt])
+  @@map("guard_driver_queue_events")
 }
 
 model HrPersonnelAudit {
@@ -2519,6 +2608,7 @@ model LogisticsLoading {
   driverQueueTurns         SecurityDriverQueueTurn[]
   driverRequests           LogisticsDriverRequest[]
   driverAssignments        LogisticsLoadingDriverAssignment[]
+  guardQueueTurns          GuardDriverQueueTurn[]
 
   @@index([customerId])
   @@index([projectId])

@@ -1,10 +1,11 @@
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import { Prisma, PrismaClient, SecurityDriverQueueTurnStatus } from '@prisma/client';
+import { GuardDriverQueueTurnStatus, Prisma, PrismaClient, SecurityDriverQueueTurnStatus } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
+import { GuardQueueConflictError, GuardQueueValidationError, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -26,6 +27,38 @@ const canFinalizeLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_FIN
 const canCancelLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_CANCEL, FEATURE_PERMISSIONS.EDIT);
 const canCreateCorrections = requireFeatureAccess(FEATURES.LOGISTICS_CORRECTIONS_CREATE, FEATURE_PERMISSIONS.EDIT);
 const canViewDrivers = requireFeatureAccess(FEATURES.LOGISTICS_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
+
+router.post('/canonical-driver-queue/:id/reserve', canEdit, async (req: any, res: Response) => {
+  try {
+    const loadingId = String(req.body.loadingId || '').trim();
+    if (!loadingId) return res.status(400).json({ success: false, error: 'loadingId is required.' });
+    const turn = await reserveGuardQueueTurn(prisma, { turnId: req.params.id, loadingId, actorId: req.user.id });
+    return res.json({ success: true, data: {
+      ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId,
+    } });
+  } catch (error) {
+    if (error instanceof GuardQueueConflictError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof GuardQueueValidationError) return res.status(400).json({ success: false, error: error.message });
+    console.error('Canonical queue reservation error:', error);
+    return res.status(500).json({ success: false, error: 'Canonical queue reservation failed.' });
+  }
+});
+
+router.post('/canonical-driver-queue/:id/release', canEdit, async (req: any, res: Response) => {
+  try {
+    const turn = await releaseGuardQueueReservation(prisma, {
+      turnId: req.params.id, loadingId: String(req.body.loadingId || '').trim(), actorId: req.user.id, reason: String(req.body.reason || ''),
+    });
+    return res.json({ success: true, data: {
+      ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId,
+    } });
+  } catch (error) {
+    if (error instanceof GuardQueueConflictError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof GuardQueueValidationError) return res.status(400).json({ success: false, error: error.message });
+    console.error('Canonical queue reservation release error:', error);
+    return res.status(500).json({ success: false, error: 'Canonical queue reservation release failed.' });
+  }
+});
 
 const toNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
@@ -667,7 +700,7 @@ router.get('/dashboard', canView, canViewDashboard, async (_req: any, res: Respo
       prisma.logisticsLoading.count({ where: { status: EDITABLE_STATUS as any } }),
       prisma.logisticsLoading.count({ where: { status: FINALIZED_STATUS as any } }),
       prisma.logisticsLoading.count({ where: { status: CANCELLED_STATUS as any } }),
-      prisma.securityDriverQueueTurn.count({ where: { status: SecurityDriverQueueTurnStatus.WAITING } })
+      prisma.guardDriverQueueTurn.count({ where: { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING } })
     ]);
 
     const recent = await prisma.logisticsLoading.findMany({
@@ -1132,8 +1165,29 @@ router.post('/loadings/:id/corrections', canEdit, canCreateCorrections, [
 
 router.get('/drivers', canView, canViewDrivers, async (req: any, res: Response) => {
   try {
-    // Ticket #216 owns the canonical physical queue. Retired Security queue rows remain historical only.
-    res.json({ success: true, data: [] });
+    const turns = await prisma.guardDriverQueueTurn.findMany({
+      where: { status: { in: [GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING] } },
+      include: { loading: { select: { id: true, loadingNumber: true } } },
+      orderBy: [{ availableAt: 'asc' }, { admittedAt: 'asc' }, { id: 'asc' }],
+    });
+    res.json({ success: true, data: turns.map((turn) => {
+      const snapshot = turn.admissionSnapshot as any;
+      return {
+        id: turn.id,
+        source: turn.driverSource,
+        firstName: snapshot?.driver?.firstName || '',
+        lastName: snapshot?.driver?.lastName || '',
+        phone: snapshot?.driver?.phone || '',
+        nationalCode: snapshot?.driver?.nationalCode || '',
+        vehiclePlate: snapshot?.plate?.plate || '',
+        vehicleType: snapshot?.vehicle?.vehicleType || '',
+        queueStatus: turn.status === GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING ? 'ENTERED_LOADING_AREA' : 'RESERVED',
+        canonicalQueueStatus: turn.status,
+        enteredLoadingAreaAt: turn.availableAt,
+        reservedLoading: turn.loading,
+        admissionIntegrityHash: turn.integrityHash,
+      };
+    }) });
   } catch (error) {
     console.error('Drivers list error:', error);
     res.status(500).json({ success: false, error: 'Server error' });

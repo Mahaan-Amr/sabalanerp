@@ -57,6 +57,10 @@ const statusLabel: Record<string, string> = {
   EXIT_VOIDED: 'لغو خروج',
 };
 const queueStatusLabel: Record<string, string> = { WAITING: 'در انتظار', ENTERED_LOADING_AREA: 'وارد محوطه بارگیری', RESERVED: 'رزرو شده', DISPATCHED: 'اعزام شده', OUT_OF_QUEUE: 'خارج از صف' };
+const canonicalQueueStatusLabel: Record<string, string> = {
+  WAITING_AT_GATE: 'در انتظار گیت', AVAILABLE_FOR_LOADING: 'آماده بارگیری', RESERVED_FOR_LOADING: 'رزرو بارگیری',
+  LOADING_FINALIZED: 'بارگیری نهایی‌شده', EXIT_RECORDED: 'خروج ثبت‌شده', CLOSED_WITHOUT_LOADING: 'بسته‌شده بدون بارگیری', VOIDED: 'باطل‌شده',
+};
 
 const statusTone = (status: string) => {
   if (status === 'EXITED' || status === 'INFO_COMPLETED') return 'success' as const;
@@ -75,6 +79,14 @@ export default function SecurityVehiclesPage() {
   const [readyExit, setReadyExit] = useState<any[]>([]);
   const [queueTurns, setQueueTurns] = useState<any[]>([]);
   const [queueHistory, setQueueHistory] = useState<any[]>([]);
+  const [canonicalQueue, setCanonicalQueue] = useState<any[]>([]);
+  const [canonicalQueueHistory, setCanonicalQueueHistory] = useState<any[]>([]);
+  const [admissionOptions, setAdmissionOptions] = useState<any>({ internalAssignments: [], externalDrivers: [], externalVehicles: [] });
+  const [admissionSource, setAdmissionSource] = useState<'INTERNAL' | 'EXTERNAL'>('INTERNAL');
+  const [internalDriverId, setInternalDriverId] = useState('');
+  const [externalDriverId, setExternalDriverId] = useState('');
+  const [externalVehicleId, setExternalVehicleId] = useState('');
+  const [queueReason, setQueueReason] = useState('');
   const [customers, setCustomers] = useState<any[]>([]);
   const [customerSearch, setCustomerSearch] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
@@ -97,8 +109,11 @@ export default function SecurityVehiclesPage() {
         securityAPI.getReadyExitLoadings(),
         securityAPI.getDriverQueue(),
         securityAPI.getDriverQueue(true),
+        securityAPI.getCanonicalDriverQueue(),
+        securityAPI.getCanonicalDriverQueue(true),
+        securityAPI.getCanonicalQueueAdmissionOptions(),
       ]);
-      const setters = [setPairs, setMovements, setReadyExit, setQueueTurns, setQueueHistory];
+      const setters = [setPairs, setMovements, setReadyExit, setQueueTurns, setQueueHistory, setCanonicalQueue, setCanonicalQueueHistory, setAdmissionOptions];
       results.forEach((result, index) => { if (result.status === 'fulfilled' && result.value.data.success) setters[index](result.value.data.data); });
       if (results.some((result) => result.status === 'rejected')) setError('بخشی از اطلاعات خودرویی دریافت نشد؛ اطلاعات موفق نمایش داده می‌شود.');
     } catch (err: any) {
@@ -168,6 +183,32 @@ export default function SecurityVehiclesPage() {
     await loadData();
   };
 
+  const admitQueueTurn = async () => {
+    const selectedInternal = admissionOptions.internalAssignments.find((option: any) => option.driverId === internalDriverId);
+    const driverId = admissionSource === 'INTERNAL' ? selectedInternal?.driverId : externalDriverId;
+    const vehicleId = admissionSource === 'INTERNAL' ? undefined : externalVehicleId;
+    if (!driverId || (admissionSource === 'EXTERNAL' && !vehicleId)) return;
+    setSaving(true); setError('');
+    try {
+      await securityAPI.admitCanonicalQueueTurn({ source: admissionSource, driverId, vehicleId });
+      setInternalDriverId(''); setExternalDriverId(''); setExternalVehicleId('');
+      setMessage('پذیرش راننده و خودرو در صف ثبت شد.');
+      await loadData(true);
+    } catch (err: any) { setError(err.response?.data?.error || 'ثبت پذیرش صف ناموفق بود.'); }
+    finally { setSaving(false); }
+  };
+
+  const runQueueCommand = async (command: () => Promise<any>, successMessage: string, consumesReason = false) => {
+    setSaving(true); setError('');
+    try {
+      await command();
+      if (consumesReason) setQueueReason('');
+      setMessage(successMessage);
+      await loadData(true);
+    } catch (err: any) { setError(err.response?.data?.error || 'تغییر وضعیت صف ناموفق بود.'); }
+    finally { setSaving(false); }
+  };
+
   const recordExit = async (loadingId: string, customerPersonalCar = false) => {
     setSaving(true);
     try {
@@ -197,8 +238,25 @@ export default function SecurityVehiclesPage() {
       />
       {activeSection !== 'movements' && <div className="flex flex-wrap gap-2"><ErpButton label="صف رانندگان" onClick={() => setActiveSection('queue')} variant={activeSection === 'queue' ? 'solid' : 'soft'} /><ErpButton label="آماده خروج" onClick={() => setActiveSection('sales-exit')} variant={activeSection === 'sales-exit' ? 'solid' : 'soft'} /><ErpButton label="ثبت ورود" onClick={() => setActiveSection('inbound')} variant={activeSection === 'inbound' ? 'solid' : 'soft'} /><ErpButton label="رانندگان و خودروها" onClick={() => setActiveSection('registry')} variant={activeSection === 'registry' ? 'solid' : 'soft'} /></div>}
 
+      {activeSection === 'queue' && <ErpSection title="پذیرش صف جاری" description="پذیرش، هویت راننده، خودرو، پلاک و مدارک آماده‌بودن را برای همین مراجعه ثابت می‌کند.">
+        <div className="space-y-4">
+          <ErpSegmentedControl<'INTERNAL' | 'EXTERNAL'> value={admissionSource} onChange={setAdmissionSource} options={[{ value: 'INTERNAL', label: 'راننده داخلی' }, { value: 'EXTERNAL', label: 'راننده متفرقه' }]} />
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+            {admissionSource === 'INTERNAL' ? <label><span className={labelClass}>راننده و خودروی داخلی</span><ErpSelect value={internalDriverId} onChange={(event) => setInternalDriverId(event.target.value)}><option value="">انتخاب تخصیص آماده</option>{admissionOptions.internalAssignments.map((option: any) => <option key={option.assignmentId} value={option.driverId}>{option.driverName} · {option.plate} · {option.fleetCode}</option>)}</ErpSelect></label> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><label><span className={labelClass}>راننده متفرقه</span><ErpSelect value={externalDriverId} onChange={(event) => setExternalDriverId(event.target.value)}><option value="">انتخاب راننده آماده</option>{admissionOptions.externalDrivers.map((option: any) => <option key={option.id} value={option.id}>{option.firstName} {option.lastName} · {option.nationalCode}</option>)}</ErpSelect></label><label><span className={labelClass}>خودروی متفرقه</span><ErpSelect value={externalVehicleId} onChange={(event) => setExternalVehicleId(event.target.value)}><option value="">انتخاب خودروی آماده</option>{admissionOptions.externalVehicles.map((option: any) => <option key={option.id} value={option.id}>{option.vehicleType} · {option.plate}</option>)}</ErpSelect></label></div>}
+            <ErpButton label="ثبت پذیرش" icon={FaPlus} variant="solid" disabled={saving || (admissionSource === 'INTERNAL' ? !internalDriverId : !externalDriverId || !externalVehicleId)} onClick={admitQueueTurn} className="self-end" />
+          </div>
+          <label className="block"><span className={labelClass}>دلیل بازگشت، خروج بدون بارگیری یا ابطال</span><ErpInput value={queueReason} onChange={(event) => setQueueReason(event.target.value)} /></label>
+          {!canonicalQueue.length ? <ErpEmptyState icon={FaClock} title="مراجعه جاری در صف وجود ندارد" /> : <div className="space-y-3">{canonicalQueue.map((turn) => {
+            const snapshot = turn.admissionSnapshot || {};
+            const driverName = [snapshot.driver?.firstName, snapshot.driver?.lastName].filter(Boolean).join(' ') || 'راننده ثبت‌شده';
+            return <ErpCard key={turn.id} className="p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-semibold sds-text-primary">{driverName} · {snapshot.plate?.plate || 'بدون پلاک'}</p><p className="mt-1 text-sm sds-text-muted">{snapshot.vehicle?.vehicleType || 'خودرو'} · پذیرش {new Date(turn.admittedAt).toLocaleString('fa-IR')}</p></div><ErpBadge tone={turn.status === 'AVAILABLE_FOR_LOADING' ? 'success' : turn.status === 'RESERVED_FOR_LOADING' ? 'warning' : 'neutral'}>{canonicalQueueStatusLabel[turn.status] || turn.status}</ErpBadge></div><div className="mt-3 flex flex-wrap gap-2">{turn.status === 'WAITING_AT_GATE' && <ErpButton label="آماده بارگیری" icon={FaCheck} variant="solid" disabled={saving} onClick={() => runQueueCommand(() => securityAPI.makeCanonicalQueueTurnAvailable(turn.id), 'راننده برای بارگیری آماده شد.')} />}{turn.status === 'AVAILABLE_FOR_LOADING' && <ErpButton label="بازگشت به انتظار" icon={FaRedo} variant="soft" disabled={saving || !queueReason.trim()} onClick={() => runQueueCommand(() => securityAPI.returnCanonicalQueueTurnToWaiting(turn.id, queueReason.trim()), 'مراجعه به انتظار گیت بازگشت.', true)} />} {['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING'].includes(turn.status) && <><ErpButton label="خروج بدون بارگیری" tone="warning" variant="soft" disabled={saving || !queueReason.trim()} onClick={() => runQueueCommand(() => securityAPI.closeCanonicalQueueTurnWithoutLoading(turn.id, queueReason.trim()), 'مراجعه بدون بارگیری بسته شد.', true)} /><ErpButton label="ابطال پذیرش" tone="danger" variant="outline" disabled={saving || !queueReason.trim()} onClick={() => runQueueCommand(() => securityAPI.voidCanonicalQueueTurn(turn.id, queueReason.trim()), 'پذیرش با حفظ سابقه باطل شد.', true)} /></>}</div></ErpCard>;
+          })}</div>}
+          {canonicalQueueHistory.some((turn: any) => ['CLOSED_WITHOUT_LOADING', 'VOIDED', 'EXIT_RECORDED'].includes(turn.status)) && <div><p className="mb-2 text-sm font-semibold sds-text-secondary">سوابق اخیر صف رسمی</p><div className="space-y-2">{canonicalQueueHistory.filter((turn: any) => ['CLOSED_WITHOUT_LOADING', 'VOIDED', 'EXIT_RECORDED'].includes(turn.status)).slice(0, 10).map((turn: any) => <ErpCard key={turn.id} className="p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm sds-text-primary">{turn.admissionSnapshot?.driver?.firstName} {turn.admissionSnapshot?.driver?.lastName} · {turn.admissionSnapshot?.plate?.plate}</span><ErpBadge tone={turn.status === 'VOIDED' ? 'danger' : 'neutral'}>{canonicalQueueStatusLabel[turn.status] || turn.status}</ErpBadge></div></ErpCard>)}</div></div>}
+        </div>
+      </ErpSection>}
+
       {activeSection === 'queue' && <ErpSection title="سوابق صف قدیمی" description="مدل ترکیبی قدیمی فقط برای مشاهده سابقه حفظ شده و هیچ عملیات یا پذیرش جدیدی از این صفحه انجام نمی‌شود.">
-        <div className="space-y-3">{[...queueTurns, ...queueHistory].map((turn) => <ErpCard key={turn.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold">{turn.vehiclePair.firstName} {turn.vehiclePair.lastName} · {turn.vehiclePair.vehiclePlate}</p><p className="mt-1 text-xs sds-text-muted">ورود: {new Date(turn.enteredAt).toLocaleString('fa-IR')}{turn.loading ? ` · بارگیری ${turn.loading.loadingNumber}` : ''}</p></div><div className="flex flex-wrap gap-2"><ErpBadge tone="warning">فقط سابقه</ErpBadge><ErpBadge tone="neutral">{queueStatusLabel[turn.status] || turn.status}</ErpBadge></div></div></ErpCard>)}</div>
+        <div className="space-y-3">{Array.from(new Map([...queueTurns, ...queueHistory].map((turn) => [turn.id, turn])).values()).map((turn) => <ErpCard key={turn.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold">{turn.vehiclePair.firstName} {turn.vehiclePair.lastName} · {turn.vehiclePair.vehiclePlate}</p><p className="mt-1 text-xs sds-text-muted">ورود: {new Date(turn.enteredAt).toLocaleString('fa-IR')}{turn.loading ? ` · بارگیری ${turn.loading.loadingNumber}` : ''}</p></div><div className="flex flex-wrap gap-2"><ErpBadge tone="warning">فقط سابقه</ErpBadge><ErpBadge tone="neutral">{queueStatusLabel[turn.status] || turn.status}</ErpBadge></div></div></ErpCard>)}</div>
         {!queueTurns.length && !queueHistory.length && <ErpEmptyState icon={FaClock} title="سابقه‌ای وجود ندارد" />}
       </ErpSection>}
       {activeSection === 'registry' && <ErpSection title="سوابق ترکیبی قدیمی" description="این رکوردها و تصاویرشان فقط شواهد تاریخی هستند. برای عملیات جدید از رجیستر مستقل راننده و خودرو استفاده کنید.">

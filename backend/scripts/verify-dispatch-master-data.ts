@@ -33,6 +33,9 @@ const main = async () => {
   const hrUser = await createUser('hr'); ids.hrUser = hrUser.id;
   const fleetUser = await createUser('fleet'); ids.fleetUser = fleetUser.id;
   const profileUser = await createUser('profile'); ids.profileUser = profileUser.id;
+  const hrWorkspaceUser = await createUser('hr-workspace'); ids.hrWorkspaceUser = hrWorkspaceUser.id;
+  const expiredFleetUser = await createUser('expired-fleet'); ids.expiredFleetUser = expiredFleetUser.id;
+  const manager = await createUser('manager', 'MANAGER'); ids.manager = manager.id;
   const guardUser = await createUser('guard'); ids.guardUser = guardUser.id;
   await prisma.featurePermission.createMany({ data: [
     { userId: hrUser.id, workspace: 'hr', feature: 'hr_internal_drivers_view', permissionLevel: 'edit', grantedBy: admin.id },
@@ -49,15 +52,21 @@ const main = async () => {
     { userId: guardUser.id, workspace: 'security', feature: 'security_external_driver_vehicle_manage', permissionLevel: 'edit', grantedBy: admin.id },
     { userId: guardUser.id, workspace: 'security', feature: 'security_dispatch_evidence_view', permissionLevel: 'view', grantedBy: admin.id },
     { userId: viewer.id, workspace: 'hr', feature: 'hr_vehicle_operations_view', permissionLevel: 'view', grantedBy: admin.id },
+    { userId: expiredFleetUser.id, workspace: 'hr', feature: 'hr_vehicle_operations_view', permissionLevel: 'view', expiresAt: new Date('2026-01-01T00:00:00.000Z'), grantedBy: admin.id },
   ] });
+  await prisma.workspacePermission.create({ data: { userId: hrWorkspaceUser.id, workspace: 'hr', permissionLevel: 'edit', grantedBy: admin.id } });
   const personnel = await prisma.personnel.create({ data: { firstName: 'Dispatch', lastName: 'Driver', employeeNumber: `DRV-${suffix}` } }); ids.personnel = personnel.id;
   await prisma.hrEmploymentRelationship.create({ data: { personnelId: personnel.id, status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), createdBy: admin.id } });
-  const tokens = Object.fromEntries(await Promise.all([admin, viewer, hrUser, fleetUser, profileUser, guardUser].map(async (user) => [user.id, (await createAuthoritativeSession(prisma, user.id, { userAgent: 'dispatch-master-data-verifier' })).token])));
+  const tokens = Object.fromEntries(await Promise.all([admin, viewer, hrUser, fleetUser, profileUser, hrWorkspaceUser, expiredFleetUser, manager, guardUser].map(async (user) => [user.id, (await createAuthoritativeSession(prisma, user.id, { userAgent: 'dispatch-master-data-verifier' })).token])));
 
   const server = spawn(process.execPath, [path.resolve('dist/index.js')], { env: { ...process.env, PORT: String(port), NODE_ENV: 'development', FRONTEND_URL: 'http://localhost:3000' }, stdio: 'ignore', windowsHide: true });
   try {
     await waitUntilReady();
     assert.equal((await master(tokens[viewer.id], '/internal-drivers')).response.status, 403);
+    assert.equal((await master(tokens[hrWorkspaceUser.id], '/vehicle-operations/internal-drivers')).response.status, 403, 'ordinary HR workspace edit cannot read Vehicle Operations');
+    assert.equal((await master(tokens[expiredFleetUser.id], '/vehicle-operations/internal-drivers')).response.status, 403, 'expired Vehicle Operations view grant is denied');
+    assert.equal((await master(tokens[manager.id], '/vehicle-operations/internal-drivers')).response.status, 200, 'MANAGER retains broad eligibility');
+    assert.equal((await master(tokens[admin.id], '/vehicle-operations/internal-drivers')).response.status, 200, 'ADMIN retains broad eligibility');
 
     const driverCreated = await master(tokens[hrUser.id], '/internal-drivers', json('POST', { personnelId: personnel.id, licenceNumber: 'must-be-ignored', effectiveFrom: '2026-01-01', reason: 'HR designation' }));
     assert.equal(driverCreated.response.status, 201, JSON.stringify(driverCreated.body)); ids.driver = driverCreated.body.data.id;
@@ -67,6 +76,7 @@ const main = async () => {
     assert.equal((await master(tokens[profileUser.id], '/company-vehicles', json('POST', { fleetCode: `FORBIDDEN-${suffix}`, vehicleType: 'TRUCK', reason: 'narrow authority proof' }))).response.status, 403, 'driver profile authority cannot manage company vehicles');
 
     const incompleteDrivers = await master(tokens[fleetUser.id], '/vehicle-operations/internal-drivers?at=2026-08-07T00:00:00.000Z');
+    assert.deepEqual(incompleteDrivers.body.capabilities, { canManageProfiles: true, canManageCompanyVehicles: true, canManagePlates: true, canManageAssignments: true });
     assert.deepEqual(incompleteDrivers.body.data[0].readiness.blockers.slice(0, 5), ['DRIVING_PROFILE_INACTIVE', 'LICENCE_NUMBER_MISSING', 'LICENCE_CLASS_MISSING', 'LICENCE_EXPIRY_MISSING', 'VEHICLE_NOT_ASSIGNED']);
     assert.equal((await master(tokens[fleetUser.id], `/internal-drivers/${ids.driver}/profile`, json('PUT', { licenceNumber: 'LIC-INVALID', licenceClass: 'CLASS_ONE', licenceExpiresAt: 'not-a-date', reason: 'Invalid expiry proof' }))).response.status, 400);
     const profile = await master(tokens[fleetUser.id], `/internal-drivers/${ids.driver}/profile`, json('PUT', { licenceNumber: `LIC-${suffix}`, licenceClass: 'CLASS_ONE', licenceExpiresAt: '2027-12-31', reason: 'Profile completion' }));
@@ -80,6 +90,8 @@ const main = async () => {
     assert.equal(disposableVehicle.response.status, 201); ids.disposableVehicle = disposableVehicle.body.data.id;
     assert.equal((await master(tokens[fleetUser.id], `/company-vehicles/${ids.disposableVehicle}/status`, json('POST', { status: 'ACTIVE', effectiveFrom: '2026-01-01', reason: 'Lifecycle proof activation' }))).response.status, 200);
     assert.equal((await master(tokens[fleetUser.id], `/company-vehicles/${ids.disposableVehicle}/status`, json('POST', { status: 'ARCHIVED', effectiveFrom: '2026-08-01', reason: 'Lifecycle proof archive' }))).response.status, 200);
+    assert.equal((await master(tokens[fleetUser.id], '/company-vehicles')).body.data.some((item: any) => item.id === ids.disposableVehicle), false, 'ordinary fleet list excludes archived vehicles');
+    assert.equal((await master(tokens[fleetUser.id], '/company-vehicles?archived=only')).body.data.some((item: any) => item.id === ids.disposableVehicle), true, 'archived fleet view is explicit');
     assert.equal((await master(tokens[fleetUser.id], `/company-vehicles/${ids.disposableVehicle}/status`, json('POST', { status: 'DRAFT', effectiveFrom: '2026-08-02', reason: 'Lifecycle proof restore' }))).response.status, 200);
     assert.equal((await master(tokens[fleetUser.id], `/company-vehicles/${ids.disposableVehicle}`, json('DELETE', { reason: 'Unused restored draft cleanup' }))).response.status, 200);
     assert.equal((await master(tokens[fleetUser.id], '/driver-vehicle-assignments', json('POST', { driverId: ids.driver, vehicleId: ids.vehicle, effectiveFrom: '2026-01-02', reason: 'Operational assignment' }))).response.status, 201);
@@ -98,6 +110,9 @@ const main = async () => {
     assert.equal((await master(tokens[guardUser.id], `/external-drivers/${ids.externalDriver}/documents`, json('POST', { documentType: 'DRIVING_LICENCE', reference: `DL-${suffix}`, expiresAt: '2027-12-31' }))).response.status, 201);
     externalRegistry = await master(tokens[guardUser.id], '/external-registry');
     assert.deepEqual(externalRegistry.body.data.drivers.find((item: any) => item.id === ids.externalDriver).readiness, { status: 'READY', blockers: [] });
+    assert.equal((await master(tokens[guardUser.id], `/external-drivers/${ids.externalDriver}/personnel-continuity`, json('POST', { personnelId: personnel.id, reason: 'Identity continuity proof' }))).response.status, 201);
+    externalRegistry = await master(tokens[guardUser.id], '/external-registry');
+    assert.deepEqual(externalRegistry.body.data.drivers.find((item: any) => item.id === ids.externalDriver).readiness, { status: 'NOT_READY', blockers: ['CONTINUITY_LINKED_INTERNAL_IDENTITY_ACTIVE'] });
 
     const collision = await master(tokens[guardUser.id], '/external-vehicles', json('POST', { vehicleType: 'TRUCK', plate: vehicle.body.data.plates[0].plate, effectiveFrom: '2026-01-02', reason: 'Collision proof' }));
     assert.equal(collision.response.status, 409);
@@ -111,7 +126,13 @@ const main = async () => {
     assert.deepEqual(externalRegistry.body.data.vehicles.find((item: any) => item.id === ids.externalVehicle).readiness, { status: 'READY', blockers: [] });
     const restricted = await master(tokens[guardUser.id], `/external-vehicles/${ids.externalVehicle}/status`, json('POST', { status: 'RESTRICTED', effectiveFrom: '2026-08-02', reason: 'Accountable restriction evidence' }));
     assert.equal(restricted.response.status, 200); assert.equal(restricted.body.data.statusReason, 'Accountable restriction evidence');
+    assert.equal((await master(tokens[guardUser.id], `/external-vehicles/${ids.externalVehicle}/status`, json('POST', { status: 'ARCHIVED', effectiveFrom: '2026-08-03', reason: 'Archive vehicle proof' }))).response.status, 200);
+    assert.equal((await master(tokens[guardUser.id], '/external-registry')).body.data.vehicles.some((item: any) => item.id === ids.externalVehicle), false, 'ordinary external registry excludes archived vehicles');
+    assert.equal((await master(tokens[guardUser.id], '/external-registry?archived=only')).body.data.vehicles.some((item: any) => item.id === ids.externalVehicle), true, 'archived external-vehicle view is explicit');
+    assert.equal((await master(tokens[guardUser.id], `/external-vehicles/${ids.externalVehicle}/status`, json('POST', { status: 'DRAFT', effectiveFrom: '2026-08-04', reason: 'Restore vehicle proof' }))).response.status, 200);
     assert.equal((await master(tokens[guardUser.id], `/external-drivers/${ids.externalDriver}/status`, json('POST', { status: 'ARCHIVED', effectiveFrom: '2026-08-03', reason: 'Archive lifecycle proof' }))).response.status, 200);
+    assert.equal((await master(tokens[guardUser.id], '/external-registry')).body.data.drivers.some((item: any) => item.id === ids.externalDriver), false, 'ordinary external registry excludes archived drivers');
+    assert.equal((await master(tokens[guardUser.id], '/external-registry?archived=only')).body.data.drivers.some((item: any) => item.id === ids.externalDriver), true, 'archived external-driver view is explicit');
     assert.equal((await master(tokens[guardUser.id], `/external-drivers/${ids.externalDriver}/status`, json('POST', { status: 'DRAFT', effectiveFrom: '2026-08-04', reason: 'Restore lifecycle proof' }))).response.status, 200);
     const disposable = await master(tokens[guardUser.id], '/external-drivers', json('POST', { firstName: 'Disposable', lastName: 'Draft', nationalCode: `9${Date.now()}`.slice(-10), phone: '09121111111', reason: 'Deletion proof' }));
     assert.equal(disposable.response.status, 201); ids.disposableDriver = disposable.body.data.id;
@@ -149,7 +170,7 @@ main().finally(async () => {
   if (ids.externalDriver) { await prisma.externalDriverPersonnelContinuityLink.deleteMany({ where: { externalDriverId: ids.externalDriver } }); await prisma.externalDriverDocument.deleteMany({ where: { driverId: ids.externalDriver } }); await prisma.externalDriver.deleteMany({ where: { id: ids.externalDriver } }); }
   if (ids.externalVehicle) { await prisma.externalVehicleDocument.deleteMany({ where: { vehicleId: ids.externalVehicle } }); await prisma.externalVehiclePlate.deleteMany({ where: { vehicleId: ids.externalVehicle } }); await prisma.externalVehicle.deleteMany({ where: { id: ids.externalVehicle } }); }
   if (ids.personnel) { await prisma.hrEmploymentRelationship.deleteMany({ where: { personnelId: ids.personnel } }); await prisma.personnel.deleteMany({ where: { id: ids.personnel } }); }
-  const userIds = [ids.admin, ids.viewer, ids.hrUser, ids.fleetUser, ids.profileUser, ids.guardUser].filter(Boolean);
+  const userIds = [ids.admin, ids.viewer, ids.hrUser, ids.fleetUser, ids.profileUser, ids.hrWorkspaceUser, ids.expiredFleetUser, ids.manager, ids.guardUser].filter(Boolean);
   if (userIds.length) { await prisma.authSession.deleteMany({ where: { userId: { in: userIds } } }); await prisma.recognizedBrowserProfile.deleteMany({ where: { userId: { in: userIds } } }); await prisma.user.deleteMany({ where: { id: { in: userIds } } }); }
   await prisma.$disconnect();
 }).catch((error) => { console.error(error); process.exitCode = 1; });

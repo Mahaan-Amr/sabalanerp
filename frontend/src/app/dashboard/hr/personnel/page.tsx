@@ -757,6 +757,9 @@ function PersonnelCard(props: any) {
           />
         </div>
       )}
+      <div className="mt-2">
+        <ErpButton label="صلاحیت رانندگی" icon={FaUserPlus} variant="soft" href={`/dashboard/hr/personnel/${person.id}/driver-eligibility`} />
+      </div>
       {person.retentionCapabilities?.canPermanentlyDelete && (
         <div className="mt-2">
           <ErpButton

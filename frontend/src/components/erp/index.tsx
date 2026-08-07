@@ -14,6 +14,7 @@ export type ErpTone = 'primary' | 'neutral' | 'success' | 'warning' | 'danger' |
 
 export type ErpAction = {
   label: string;
+  type?: 'button' | 'submit' | 'reset';
   href?: string;
   onClick?: () => void;
   icon?: IconType;
@@ -159,6 +160,7 @@ const buttonClasses = (tone: ErpTone, variant: ErpAction['variant']) => {
 
 export function ErpButton({
   label,
+  type = 'button',
   href,
   onClick,
   icon: Icon,
@@ -190,7 +192,7 @@ export function ErpButton({
   }
 
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={className} title={title}>
+    <button type={type} onClick={onClick} disabled={disabled} className={className} title={title}>
       {content}
     </button>
   );

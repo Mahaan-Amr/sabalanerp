@@ -3,11 +3,25 @@ import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
 import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
 import { appendDispatchMasterDataAudit } from '../services/dispatchMasterDataAudit';
+import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import { activeAt, actor, fail, internalInclude, parsedDate, prisma, projectDriver, requiredText } from './dispatch-master-data.shared';
 
 const router = express.Router();
 const view = requireFeatureAccess(FEATURES.HR_INTERNAL_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
 const manage = requireNarrowFeatureAccess(FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE, FEATURE_PERMISSIONS.EDIT);
+
+router.get('/internal-drivers/personnel/:personnelId', view, async (req: AuthRequest, res) => {
+  try {
+    const at = req.query.at ? parsedDate(req.query.at, 'at') : new Date();
+    const [personnel, driver, manageAccess] = await Promise.all([
+      prisma.personnel.findUnique({ where: { id: req.params.personnelId } }),
+      prisma.internalDriverProfile.findUnique({ where: { personnelId: req.params.personnelId }, include: internalInclude }),
+      resolveNarrowFeatureAccess(prisma, { userId: actor(req), role: req.user!.role, workspace: 'hr', feature: FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE, requiredPermission: 'edit' }, at),
+    ]);
+    if (!personnel) return res.status(404).json({ success: false, error: 'Personnel was not found.' });
+    return res.json({ success: true, data: { personnel, driver: driver ? projectDriver(driver, at) : null }, capabilities: { canManageEligibility: manageAccess.allowed } });
+  } catch (error) { return fail(res, error, 'Read Personnel-owned driver eligibility'); }
+});
 
 router.get('/internal-drivers', view, async (req, res) => {
   try {

@@ -11,6 +11,7 @@ import {
   projectExternalVehicleReadiness,
   assertNoLegacyDispatchReferences,
 } from '../dispatchMasterDataPolicy';
+import { evaluateNarrowFeatureAccess } from '../narrowFeatureAccess';
 
 assert.equal(normalizeIranianPlate(' ۱۲ ب ۳۴۵ ایران ۶۷ '), '12ب345ایران67');
 assert.equal(normalizeIranianPlate('IR-22 AA 010'), 'IR22AA010');
@@ -96,6 +97,9 @@ assert.deepEqual(projectExternalDriverReadiness({ lifecycleStatus: 'ACTIVE', doc
 assert.deepEqual(projectExternalDriverReadiness({ lifecycleStatus: 'ACTIVE', documents: [
   { documentType: 'DRIVING_LICENCE', expiresAt: new Date('2027-08-01T00:00:00.000Z') },
 ] }, at), { status: 'READY', blockers: [] });
+assert.deepEqual(projectExternalDriverReadiness({ lifecycleStatus: 'ACTIVE', documents: [
+  { documentType: 'DRIVING_LICENCE', expiresAt: new Date('2027-08-01T00:00:00.000Z') },
+], continuityLinkedToActiveInternalIdentity: true }, at), { status: 'NOT_READY', blockers: ['CONTINUITY_LINKED_INTERNAL_IDENTITY_ACTIVE'] });
 
 assert.deepEqual(projectExternalVehicleReadiness({ lifecycleStatus: 'ACTIVE', hasCurrentPlate: true, documents: [] }, at), {
   status: 'NOT_READY', blockers: ['VEHICLE_REGISTRATION_MISSING'],
@@ -111,5 +115,13 @@ assert.doesNotThrow(() => assertNoLegacyDispatchReferences({ queueTurnIds: [], e
 assert.throws(() => assertNoLegacyDispatchReferences({ queueTurnIds: ['legacy-turn'], existingAssignmentCount: 0, vehiclePairId: null }), /retired/i);
 assert.throws(() => assertNoLegacyDispatchReferences({ queueTurnIds: [], existingAssignmentCount: 1, vehiclePairId: null }), /retired/i);
 assert.throws(() => assertNoLegacyDispatchReferences({ queueTurnIds: [], existingAssignmentCount: 0, vehiclePairId: 'legacy-pair' }), /retired/i);
+
+const narrowAt = new Date('2026-08-07T00:00:00.000Z');
+const hrWorkspaceEditOnly = evaluateNarrowFeatureAccess({ role: 'USER', requiredPermission: 'view', userFeature: null, roleFeature: null, userWorkspace: { isActive: true, expiresAt: null, permissionLevel: 'edit' }, roleWorkspace: null }, narrowAt);
+assert.deepEqual(hrWorkspaceEditOnly, { allowed: false, permissionLevel: null });
+assert.deepEqual(evaluateNarrowFeatureAccess({ role: 'USER', requiredPermission: 'view', userFeature: { isActive: true, expiresAt: null, permissionLevel: 'view' }, roleFeature: null, userWorkspace: null, roleWorkspace: null }, narrowAt), { allowed: true, permissionLevel: 'view' });
+assert.deepEqual(evaluateNarrowFeatureAccess({ role: 'USER', requiredPermission: 'edit', userFeature: { isActive: true, expiresAt: null, permissionLevel: 'edit' }, roleFeature: null, userWorkspace: null, roleWorkspace: null }, narrowAt), { allowed: true, permissionLevel: 'edit' });
+assert.deepEqual(evaluateNarrowFeatureAccess({ role: 'USER', requiredPermission: 'view', userFeature: { isActive: true, expiresAt: new Date('2026-08-06T00:00:00.000Z'), permissionLevel: 'admin' }, roleFeature: null, userWorkspace: null, roleWorkspace: null }, narrowAt), { allowed: false, permissionLevel: null });
+for (const role of ['ADMIN', 'MANAGER']) assert.deepEqual(evaluateNarrowFeatureAccess({ role, requiredPermission: 'edit', userFeature: null, roleFeature: null, userWorkspace: null, roleWorkspace: null }, narrowAt), { allowed: true, permissionLevel: 'admin' });
 
 console.log('Dispatch master-data policy tests passed.');

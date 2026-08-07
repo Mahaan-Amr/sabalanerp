@@ -4,34 +4,35 @@ import { AuthRequest } from '../middleware/auth';
 import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
 import { appendDispatchMasterDataAudit } from '../services/dispatchMasterDataAudit';
 import { assertLifecycleTransition, canPermanentlyDeleteDraft, normalizeIranianPlate, projectExternalDriverReadiness, projectExternalVehicleReadiness } from '../services/dispatchMasterDataPolicy';
+import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import { activeAt, actor, fail, optionalText, parsedDate, prisma, requiredText } from './dispatch-master-data.shared';
 
 const router = express.Router();
 const view = requireFeatureAccess(FEATURES.SECURITY_EXTERNAL_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
 const manage = requireNarrowFeatureAccess(FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE, FEATURE_PERMISSIONS.EDIT);
+const continuityLinkedToActiveInternalIdentity = (driver: any, at: Date) => driver.externalLinks.some((link: any) => {
+  const personnel = link.personnel;
+  const activeEmployment = personnel.hrEmploymentRelationships.some((relationship: any) => relationship.status === 'ACTIVE' && relationship.effectiveFrom <= at && (!relationship.effectiveTo || relationship.effectiveTo > at));
+  const activeEligibility = personnel.internalDriverProfile?.eligibilityPeriods.some((period: any) => period.status === 'ELIGIBLE' && period.effectiveFrom <= at && (!period.effectiveTo || period.effectiveTo > at));
+  return personnel.isActive && (activeEmployment || activeEligibility);
+});
 
 router.get('/external-registry', view, async (req: AuthRequest, res) => {
   try {
     const at = new Date();
-    const [drivers, vehicles, legacyPairs, userFeature, roleFeature, userWorkspace, roleWorkspace] = await Promise.all([
-      prisma.externalDriver.findMany({ include: { externalLinks: true, documents: { orderBy: { recordedAt: 'desc' } } }, orderBy: { createdAt: 'desc' } }),
-      prisma.externalVehicle.findMany({ include: { plates: { orderBy: { effectiveFrom: 'desc' } }, documents: { orderBy: { recordedAt: 'desc' } } }, orderBy: { createdAt: 'desc' } }),
+    const includeArchived = req.query.archived === 'include' || req.query.archived === 'only';
+    const onlyArchived = req.query.archived === 'only';
+    const [drivers, vehicles, legacyPairs, manageAccess] = await Promise.all([
+      prisma.externalDriver.findMany({ where: onlyArchived ? { status: 'ARCHIVED' } : includeArchived ? {} : { status: { not: 'ARCHIVED' } }, include: { externalLinks: { include: { personnel: { include: { hrEmploymentRelationships: true, internalDriverProfile: { include: { eligibilityPeriods: true } } } } } }, documents: { orderBy: { recordedAt: 'desc' } } }, orderBy: { createdAt: 'desc' } }),
+      prisma.externalVehicle.findMany({ where: onlyArchived ? { status: 'ARCHIVED' } : includeArchived ? {} : { status: { not: 'ARCHIVED' } }, include: { plates: { orderBy: { effectiveFrom: 'desc' } }, documents: { orderBy: { recordedAt: 'desc' } } }, orderBy: { createdAt: 'desc' } }),
       prisma.securityVehiclePair.findMany({ orderBy: { createdAt: 'desc' }, select: { id: true, firstName: true, lastName: true, nationalCode: true, phone: true, vehiclePlate: true, vehicleType: true, isActive: true, createdAt: true } }),
-      prisma.featurePermission.findUnique({ where: { userId_workspace_feature: { userId: actor(req), workspace: 'security', feature: FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE } } }),
-      prisma.roleFeaturePermission.findUnique({ where: { role_workspace_feature: { role: req.user!.role as any, workspace: 'security', feature: FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE } } }),
-      prisma.workspacePermission.findUnique({ where: { userId_workspace: { userId: actor(req), workspace: 'security' } } }),
-      prisma.roleWorkspacePermission.findUnique({ where: { role_workspace: { role: req.user!.role as any, workspace: 'security' } } }),
+      resolveNarrowFeatureAccess(prisma, { userId: actor(req), role: req.user!.role, workspace: 'security', feature: FEATURES.SECURITY_EXTERNAL_DRIVER_VEHICLE_MANAGE, requiredPermission: 'edit' }, at),
     ]);
-    const activePermission = (permission: any) => permission?.isActive && (!permission.expiresAt || permission.expiresAt > at);
-    const explicitFeature = activePermission(userFeature) ? userFeature : activePermission(roleFeature) ? roleFeature : null;
-    const canManage = ['ADMIN', 'MANAGER'].includes(req.user!.role) ||
-      ['edit', 'admin'].includes(explicitFeature?.permissionLevel || '') ||
-      [userWorkspace, roleWorkspace].some((permission) => activePermission(permission) && permission?.permissionLevel === 'admin');
     return res.json({ success: true, data: {
-      drivers: drivers.map((item) => ({ ...item, source: 'GUARD_EXTERNAL', readiness: projectExternalDriverReadiness({ lifecycleStatus: item.status, documents: item.documents }, at) })),
+      drivers: drivers.map((item) => ({ ...item, source: 'GUARD_EXTERNAL', readiness: projectExternalDriverReadiness({ lifecycleStatus: item.status, documents: item.documents, continuityLinkedToActiveInternalIdentity: continuityLinkedToActiveInternalIdentity(item, at) }, at) })),
       vehicles: vehicles.map((item) => ({ ...item, source: 'GUARD_EXTERNAL', readiness: projectExternalVehicleReadiness({ lifecycleStatus: item.status, hasCurrentPlate: item.plates.some((plate) => plate.effectiveFrom <= at && (!plate.effectiveTo || plate.effectiveTo > at)), documents: item.documents }, at) })),
       legacyPairs: legacyPairs.map((item) => ({ ...item, source: 'LEGACY_COMBINED', historicalOnly: true, operationalUseAllowed: false, readiness: { status: 'NOT_READY', blockers: ['LEGACY_SOURCE_ONLY'] } })),
-      capabilities: { canManage },
+      capabilities: { canManage: manageAccess.allowed }, filters: { archived: onlyArchived ? 'only' : includeArchived ? 'include' : 'exclude' },
     } });
   } catch (error) { return fail(res, error, 'List Guard external registry'); }
 });

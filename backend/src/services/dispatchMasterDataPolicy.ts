@@ -75,7 +75,8 @@ type ExternalReadinessBlocker =
   | 'DRIVING_LICENCE_MISSING'
   | 'DRIVING_LICENCE_EXPIRED'
   | 'VEHICLE_REGISTRATION_MISSING'
-  | 'VEHICLE_REGISTRATION_EXPIRED';
+  | 'VEHICLE_REGISTRATION_EXPIRED'
+  | 'CONTINUITY_LINKED_INTERNAL_IDENTITY_ACTIVE';
 
 const requiredDocumentBlockers = (
   documents: ExternalDocument[], documentType: string, missing: ExternalReadinessBlocker,
@@ -87,10 +88,11 @@ const requiredDocumentBlockers = (
 };
 
 export const projectExternalDriverReadiness = (input: {
-  lifecycleStatus: string; documents: ExternalDocument[];
+  lifecycleStatus: string; documents: ExternalDocument[]; continuityLinkedToActiveInternalIdentity?: boolean;
 }, at = new Date()): { status: 'READY' | 'NOT_READY'; blockers: ExternalReadinessBlocker[] } => {
   const blockers: ExternalReadinessBlocker[] = [];
   if (input.lifecycleStatus !== 'ACTIVE') blockers.push('LIFECYCLE_INACTIVE');
+  if (input.continuityLinkedToActiveInternalIdentity) blockers.push('CONTINUITY_LINKED_INTERNAL_IDENTITY_ACTIVE');
   blockers.push(...requiredDocumentBlockers(input.documents, 'DRIVING_LICENCE', 'DRIVING_LICENCE_MISSING', 'DRIVING_LICENCE_EXPIRED', at));
   return { status: blockers.length ? 'NOT_READY' : 'READY', blockers };
 };

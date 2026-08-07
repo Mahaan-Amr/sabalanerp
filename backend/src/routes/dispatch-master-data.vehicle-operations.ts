@@ -1,23 +1,35 @@
 import express from 'express';
 import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
-import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
+import { FEATURE_PERMISSIONS, FEATURES, requireNarrowFeatureAccess } from '../middleware/feature';
 import { appendDispatchMasterDataAudit } from '../services/dispatchMasterDataAudit';
 import { assertLifecycleTransition, assertValidEffectivePeriod, canPermanentlyDeleteDraft, normalizeIranianPlate } from '../services/dispatchMasterDataPolicy';
+import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import { activeAt, actor, fail, internalInclude, optionalDate, optionalText, parsedDate, prisma, projectDriver, requiredText } from './dispatch-master-data.shared';
 
 const router = express.Router();
-const view = requireFeatureAccess(FEATURES.HR_VEHICLE_OPERATIONS_VIEW, FEATURE_PERMISSIONS.VIEW);
+const view = requireNarrowFeatureAccess(FEATURES.HR_VEHICLE_OPERATIONS_VIEW, FEATURE_PERMISSIONS.VIEW);
 const manageProfiles = requireNarrowFeatureAccess(FEATURES.HR_DRIVER_PROFILES_MANAGE, FEATURE_PERMISSIONS.EDIT);
 const manageVehicles = requireNarrowFeatureAccess(FEATURES.HR_COMPANY_VEHICLES_MANAGE, FEATURE_PERMISSIONS.EDIT);
 const managePlates = requireNarrowFeatureAccess(FEATURES.HR_VEHICLE_PLATES_MANAGE, FEATURE_PERMISSIONS.EDIT);
 const manageAssignments = requireNarrowFeatureAccess(FEATURES.HR_DRIVER_VEHICLE_ASSIGNMENTS_MANAGE, FEATURE_PERMISSIONS.EDIT);
 
-router.get('/vehicle-operations/internal-drivers', view, async (req, res) => {
+const capabilitiesFor = async (req: AuthRequest) => {
+  const base = { userId: actor(req), role: req.user!.role, workspace: 'hr' };
+  const [profiles, vehicles, plates, assignments] = await Promise.all([
+    resolveNarrowFeatureAccess(prisma, { ...base, feature: FEATURES.HR_DRIVER_PROFILES_MANAGE, requiredPermission: 'edit' }),
+    resolveNarrowFeatureAccess(prisma, { ...base, feature: FEATURES.HR_COMPANY_VEHICLES_MANAGE, requiredPermission: 'edit' }),
+    resolveNarrowFeatureAccess(prisma, { ...base, feature: FEATURES.HR_VEHICLE_PLATES_MANAGE, requiredPermission: 'edit' }),
+    resolveNarrowFeatureAccess(prisma, { ...base, feature: FEATURES.HR_DRIVER_VEHICLE_ASSIGNMENTS_MANAGE, requiredPermission: 'edit' }),
+  ]);
+  return { canManageProfiles: profiles.allowed, canManageCompanyVehicles: vehicles.allowed, canManagePlates: plates.allowed, canManageAssignments: assignments.allowed };
+};
+
+router.get('/vehicle-operations/internal-drivers', view, async (req: AuthRequest, res) => {
   try {
     const at = req.query.at ? parsedDate(req.query.at, 'at') : new Date();
     const drivers = await prisma.internalDriverProfile.findMany({ include: internalInclude, orderBy: { createdAt: 'desc' } });
-    return res.json({ success: true, data: drivers.map((driver) => projectDriver(driver, at)) });
+    return res.json({ success: true, data: drivers.map((driver) => projectDriver(driver, at)), capabilities: await capabilitiesFor(req) });
   } catch (error) { return fail(res, error, 'List Vehicle Operations driving profiles'); }
 });
 
@@ -56,10 +68,12 @@ router.post('/internal-drivers/:id/profile-status', manageProfiles, async (req: 
   } catch (error) { return fail(res, error, 'Transition internal driving profile'); }
 });
 
-router.get('/company-vehicles', view, async (_req, res) => {
+router.get('/company-vehicles', view, async (req: AuthRequest, res) => {
   try {
-    const vehicles = await prisma.companyVehicle.findMany({ include: { plates: { orderBy: { effectiveFrom: 'desc' } }, assignments: { include: { driver: { include: { personnel: true } } }, orderBy: { effectiveFrom: 'desc' } } }, orderBy: { createdAt: 'desc' } });
-    return res.json({ success: true, data: vehicles.map((vehicle) => ({ ...vehicle, source: 'COMPANY_FLEET' })) });
+    const includeArchived = req.query.archived === 'include' || req.query.archived === 'only';
+    const onlyArchived = req.query.archived === 'only';
+    const vehicles = await prisma.companyVehicle.findMany({ where: onlyArchived ? { status: 'ARCHIVED' } : includeArchived ? {} : { status: { not: 'ARCHIVED' } }, include: { plates: { orderBy: { effectiveFrom: 'desc' } }, assignments: { include: { driver: { include: { personnel: true } } }, orderBy: { effectiveFrom: 'desc' } } }, orderBy: { createdAt: 'desc' } });
+    return res.json({ success: true, data: vehicles.map((vehicle) => ({ ...vehicle, source: 'COMPANY_FLEET' })), capabilities: await capabilitiesFor(req), filters: { archived: onlyArchived ? 'only' : includeArchived ? 'include' : 'exclude' } });
   } catch (error) { return fail(res, error, 'List company vehicles'); }
 });
 

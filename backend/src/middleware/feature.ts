@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from './auth';
+import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 
 const prisma = new PrismaClient();
 
@@ -830,24 +831,12 @@ export const requireNarrowFeatureAccess = (feature: Feature, requiredPermission:
   return async (req: FeatureRequest, res: Response, next: NextFunction) => {
     try {
       if (!req.user) return res.status(401).json({ success: false, error: 'Authentication required' });
-      if (req.user.role === 'ADMIN' || req.user.role === 'MANAGER') {
-        req.featurePermission = FEATURE_PERMISSIONS.ADMIN;
-        return next();
-      }
       const workspace = FEATURE_WORKSPACE_MAP[feature];
-      const [userFeature, roleFeature, userWorkspace, roleWorkspace] = await Promise.all([
-        prisma.featurePermission.findUnique({ where: { userId_workspace_feature: { userId: req.user.id, workspace, feature } } }),
-        prisma.roleFeaturePermission.findUnique({ where: { role_workspace_feature: { role: req.user.role, workspace, feature } } }),
-        prisma.workspacePermission.findUnique({ where: { userId_workspace: { userId: req.user.id, workspace } } }),
-        prisma.roleWorkspacePermission.findUnique({ where: { role_workspace: { role: req.user.role, workspace } } }),
-      ]);
-      const explicit = isPermissionActiveAndNotExpired(userFeature) ? userFeature : isPermissionActiveAndNotExpired(roleFeature) ? roleFeature : null;
-      const workspaceAdmin = [userWorkspace, roleWorkspace].some((permission) => isPermissionActiveAndNotExpired(permission) && permission!.permissionLevel === FEATURE_PERMISSIONS.ADMIN);
-      const effective = explicit?.permissionLevel as FeaturePermission | undefined;
-      if ((!effective || !hasRequiredPermissionLevel(effective, requiredPermission)) && !workspaceAdmin) {
+      const access = await resolveNarrowFeatureAccess(prisma, { userId: req.user.id, role: req.user.role, workspace, feature, requiredPermission });
+      if (!access.allowed) {
         return res.status(403).json({ success: false, error: `Access denied to independently scoped feature: ${feature}` });
       }
-      req.featurePermission = workspaceAdmin ? FEATURE_PERMISSIONS.ADMIN : effective;
+      req.featurePermission = access.permissionLevel!;
       return next();
     } catch (error) {
       console.error('Narrow feature access check error:', error);

@@ -11,6 +11,7 @@ const login = async (page: Page) => {
 test('Guard admits a canonical visit and advances it while legacy history remains read-only', async ({ page }) => {
   let canonicalTurns: any[] = [];
   let admissions = 0;
+  let voids = 0;
   await page.route('**/api/security/canonical-driver-queue**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -27,11 +28,23 @@ test('Guard admits a canonical visit and advances it while legacy history remain
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: canonicalTurns[0] }) });
       return;
     }
+    if (request.method() === 'POST' && url.pathname.endsWith('/close-without-loading')) {
+      canonicalTurns = [];
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { id: 'turn-1', status: 'CLOSED_WITHOUT_LOADING' } }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname.endsWith('/void')) {
+      voids += 1;
+      canonicalTurns = [];
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { id: 'turn-2', status: 'VOIDED' } }) });
+      return;
+    }
     if (request.method() === 'POST' && url.pathname.endsWith('/canonical-driver-queue')) {
       admissions += 1;
+      const external = request.postDataJSON().source === 'EXTERNAL';
       canonicalTurns = [{
-        id: 'turn-1', status: 'WAITING_AT_GATE', driverSource: 'INTERNAL', admittedAt: '2026-08-07T08:00:00.000Z',
-        admissionSnapshot: { driver: { firstName: 'راننده', lastName: 'داخلی' }, vehicle: { vehicleType: 'کامیون' }, plate: { plate: '11ب111ایران11' } },
+        id: external ? 'turn-2' : 'turn-1', status: 'WAITING_AT_GATE', driverSource: external ? 'EXTERNAL' : 'INTERNAL', admittedAt: '2026-08-07T08:00:00.000Z',
+        admissionSnapshot: { driver: { firstName: 'راننده', lastName: external ? 'متفرقه' : 'داخلی' }, vehicle: { vehicleType: 'کامیون' }, plate: { plate: external ? '22ج222ایران22' : '11ب111ایران11' } },
       }];
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ success: true, data: canonicalTurns[0] }) });
       return;
@@ -57,10 +70,60 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   await expect(workspace.getByText('راننده داخلی', { exact: true })).toBeVisible();
   await workspace.getByRole('button', { name: 'آماده بارگیری', exact: true }).click();
   await expect(workspace.getByText('آماده بارگیری', { exact: true })).toBeVisible();
+  const reason = workspace.getByRole('textbox', { name: 'دلیل بازگشت، خروج بدون بارگیری یا ابطال' });
+  await reason.fill('پایان مراجعه آزمایشی');
+  await workspace.getByRole('button', { name: 'خروج بدون بارگیری', exact: true }).click();
+  await workspace.getByRole('button', { name: 'راننده متفرقه', exact: true }).click();
+  await workspace.getByRole('combobox', { name: 'راننده متفرقه' }).selectOption('external-driver-1');
+  await workspace.getByRole('combobox', { name: 'خودروی متفرقه' }).selectOption('external-vehicle-1');
+  await workspace.getByRole('button', { name: 'ثبت پذیرش', exact: true }).click();
+  await expect.poll(() => admissions).toBe(2);
+  await reason.fill('ثبت اشتباه برای آزمون');
+  await workspace.getByRole('button', { name: 'ابطال پذیرش', exact: true }).click();
+  const confirmation = page.getByRole('dialog', { name: 'تأیید ابطال پذیرش' });
+  await expect(confirmation).toBeVisible();
+  expect(voids).toBe(0);
+  await confirmation.getByRole('button', { name: 'تأیید ابطال', exact: true }).click();
+  await expect.poll(() => voids).toBe(1);
   await expect(workspace.getByRole('heading', { name: 'سوابق صف قدیمی', exact: true })).toBeVisible();
   await expect(workspace.getByText('فقط سابقه', { exact: true })).toBeVisible();
   expect(await workspace.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return rect.left >= 0 && rect.right <= document.documentElement.clientWidth + 1;
   })).toBe(true);
+});
+
+test('view-only Guard sees redacted queue state without mutation controls', async ({ page }) => {
+  let mutations = 0;
+  let admissionOptionRequests = 0;
+  await page.route('**/api/workspace-permissions/user-workspaces', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [{ workspace: 'security', permission: 'view' }] }) }));
+  await page.route('**/api/security/canonical-driver-queue**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() !== 'GET') mutations += 1;
+    if (url.pathname.endsWith('/admission-options')) {
+      admissionOptionRequests += 1;
+      await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'edit required' }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, capabilities: { canEdit: false }, data: [{
+      id: 'redacted-turn', status: 'WAITING_AT_GATE', driverSource: 'INTERNAL', admittedAt: '2026-08-07T08:00:00.000Z', redacted: true,
+      admissionSnapshot: { driver: { firstName: '', lastName: 'راننده' }, vehicle: { vehicleType: 'کامیون' }, plate: { plate: '********11' }, readiness: { status: 'READY' } }, events: [],
+    }] }) });
+  });
+  await page.route('**/api/security/driver-queue**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }));
+  await page.route('**/api/security/vehicle-pairs**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }));
+  await page.route('**/api/security/vehicle-movements**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) }));
+
+  await login(page);
+  await page.goto('/dashboard/security/vehicles');
+  const workspace = page.locator('main.sds-workspace');
+  await expect(workspace.getByText('راننده · ********11', { exact: true })).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'ثبت پذیرش', exact: true })).toHaveCount(0);
+  await expect(workspace.getByRole('button', { name: 'آماده بارگیری', exact: true })).toHaveCount(0);
+  await expect(workspace.getByRole('button', { name: 'ابطال پذیرش', exact: true })).toHaveCount(0);
+  await expect(workspace.getByRole('textbox', { name: 'دلیل بازگشت، خروج بدون بارگیری یا ابطال' })).toHaveCount(0);
+  expect(mutations).toBe(0);
+  expect(admissionOptionRequests).toBe(0);
+  await expect(workspace.getByText('بخشی از اطلاعات خودرویی دریافت نشد')).toHaveCount(0);
 });

@@ -1,22 +1,11 @@
 import assert from 'node:assert/strict';
-import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { PrismaClient } from '@prisma/client';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../src/services/identitySessionService';
 
 const prisma = new PrismaClient();
-const port = Number(process.env.GUARD_QUEUE_VERIFY_PORT || 5106);
-const baseUrl = `http://127.0.0.1:${port}`;
+const baseUrl = 'http://127.0.0.1:5000';
 const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const ids: Record<string, string> = {};
-
-const waitUntilReady = async () => {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try { if ((await fetch(`${baseUrl}/api/ready`)).ok) return; } catch { /* starting */ }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error('Verification API did not become ready.');
-};
 
 const request = async (token: string, pathname: string, init: RequestInit = {}) => {
   const response = await fetch(`${baseUrl}${pathname}`, {
@@ -52,6 +41,12 @@ const main = async () => {
     firstName: 'Unauthorized', lastName: 'Verifier', role: 'USER',
   } });
   ids.unauthorized = unauthorized.id;
+  const viewOnly = await prisma.user.create({ data: {
+    email: `queue-view-${suffix}@example.invalid`, username: `queue-view-${suffix}`, password: 'not-used',
+    firstName: 'View', lastName: 'Only', role: 'USER',
+  } });
+  ids.viewOnly = viewOnly.id;
+  await prisma.workspacePermission.create({ data: { userId: viewOnly.id, workspace: 'security', permissionLevel: 'view', grantedBy: guard.id } });
   await prisma.workspacePermission.create({ data: { userId: logistics.id, workspace: 'logistics', permissionLevel: 'edit', grantedBy: guard.id } });
   await prisma.featurePermission.create({ data: { userId: logistics.id, workspace: 'logistics', feature: 'logistics_drivers_view', permissionLevel: 'view', grantedBy: guard.id } });
   const personnel = await prisma.personnel.create({ data: { firstName: 'Internal', lastName: 'Driver', employeeNumber: `QUEUE-${suffix}` } });
@@ -83,13 +78,10 @@ const main = async () => {
   const token = (await createAuthoritativeSession(prisma, guard.id, { userAgent: 'guard-queue-verifier' })).token;
   const logisticsToken = (await createAuthoritativeSession(prisma, logistics.id, { userAgent: 'guard-queue-verifier' })).token;
   const unauthorizedToken = (await createAuthoritativeSession(prisma, unauthorized.id, { userAgent: 'guard-queue-verifier' })).token;
+  const viewOnlyToken = (await createAuthoritativeSession(prisma, viewOnly.id, { userAgent: 'guard-queue-verifier' })).token;
 
-  const server = spawn(process.execPath, [path.resolve('dist/index.js')], {
-    env: { ...process.env, PORT: String(port), NODE_ENV: 'development', FRONTEND_URL: 'http://localhost:3000' },
-    stdio: 'ignore', windowsHide: true,
-  });
   try {
-    await waitUntilReady();
+    assert.equal((await fetch(`${baseUrl}/api/ready`)).status, 200, 'sabalanerp-local backend must be ready on port 5000');
     assert.equal((await request(unauthorizedToken, '/api/security/canonical-driver-queue')).response.status, 403);
     assert.equal((await request(unauthorizedToken, '/api/security/canonical-driver-queue', { method: 'POST', body: JSON.stringify({ source: 'INTERNAL', driverId: driver.id }) })).response.status, 403);
     const admitted = await request(token, '/api/security/canonical-driver-queue', { method: 'POST', body: JSON.stringify({ source: 'INTERNAL', driverId: driver.id }) });
@@ -101,6 +93,14 @@ const main = async () => {
     assert.equal(admitted.body.data.admissionSnapshot.plate.id, plate.id);
     assert.equal(admitted.body.data.admissionSnapshot.readiness.status, 'READY');
     assert.match(admitted.body.data.integrityHash, /^[a-f0-9]{64}$/);
+    const redacted = await request(viewOnlyToken, '/api/security/canonical-driver-queue');
+    assert.equal(redacted.response.status, 200);
+    assert.equal(redacted.body.capabilities.canEdit, false);
+    assert.equal(redacted.body.data[0].redacted, true);
+    assert.equal(redacted.body.data[0].admissionSnapshot.driver.nationalCode, undefined);
+    assert.equal(redacted.body.data[0].admissionSnapshot.documents, undefined);
+    assert.equal((await request(viewOnlyToken, '/api/security/canonical-driver-queue/admission-options')).response.status, 403);
+    assert.equal((await request(viewOnlyToken, `/api/security/canonical-driver-queue/${admitted.body.data.id}/available`, { method: 'POST', body: '{}' })).response.status, 403);
     await assert.rejects(
       prisma.guardDriverQueueTurn.update({ where: { id: admitted.body.data.id }, data: { admissionSnapshot: { tampered: true } } }),
       /immutable/i,
@@ -110,6 +110,8 @@ const main = async () => {
     assert.equal(available.body.data.status, 'AVAILABLE_FOR_LOADING');
     assert.equal(available.body.data.integrityHash, admitted.body.data.integrityHash, 'lifecycle changes cannot rewrite the admission snapshot hash');
     assert.equal(await prisma.guardDriverQueueEvent.count({ where: { turnId: admitted.body.data.id } }), 2);
+    assert.equal((await request(logisticsToken, `/api/logistics/canonical-driver-queue/${admitted.body.data.id}/reserve`, { method: 'POST', body: JSON.stringify({ loadingId: loading.id }) })).response.status, 403);
+    await prisma.featurePermission.create({ data: { userId: logistics.id, workspace: 'logistics', feature: 'logistics_drivers_manage', permissionLevel: 'edit', grantedBy: guard.id } });
     const reserved = await request(logisticsToken, `/api/logistics/canonical-driver-queue/${admitted.body.data.id}/reserve`, { method: 'POST', body: JSON.stringify({ loadingId: loading.id }) });
     assert.equal(reserved.response.status, 200, JSON.stringify(reserved.body));
     assert.equal(reserved.body.data.status, 'RESERVED_FOR_LOADING');
@@ -121,6 +123,8 @@ const main = async () => {
     assert.equal(released.body.data.loadingId, null);
     const releaseEvent = await prisma.guardDriverQueueEvent.findFirstOrThrow({ where: { turnId: admitted.body.data.id, eventType: 'RESERVATION_RELEASED' } });
     assert.equal(releaseEvent.reason, 'Loading plan changed');
+    await assert.rejects(prisma.guardDriverQueueEvent.update({ where: { id: releaseEvent.id }, data: { reason: 'tampered' } }), /append-only/i);
+    await assert.rejects(prisma.guardDriverQueueEvent.delete({ where: { id: releaseEvent.id } }), /append-only/i);
     const waitingAgain = await request(token, `/api/security/canonical-driver-queue/${admitted.body.data.id}/return-to-waiting`, { method: 'POST', body: JSON.stringify({ reason: 'Driver returned to gate waiting area' }) });
     assert.equal(waitingAgain.response.status, 200, JSON.stringify(waitingAgain.body));
     assert.equal(waitingAgain.body.data.status, 'WAITING_AT_GATE');
@@ -169,6 +173,10 @@ const main = async () => {
     const sharedPool = await request(logisticsToken, '/api/logistics/drivers');
     assert.equal(sharedPool.response.status, 200, JSON.stringify(sharedPool.body));
     assert.ok(sharedPool.body.data.some((option: any) => option.id === externalAdmitted.body.data.id && option.canonicalQueueStatus === 'AVAILABLE_FOR_LOADING' && option.queueStatus === 'ENTERED_LOADING_AREA'));
+    await prisma.externalVehicle.update({ where: { id: externalVehicle.id }, data: { status: 'RESTRICTED' } });
+    assert.equal((await request(logisticsToken, '/api/logistics/drivers')).body.data.some((option: any) => option.id === externalAdmitted.body.data.id), false);
+    assert.equal((await request(logisticsToken, `/api/logistics/canonical-driver-queue/${externalAdmitted.body.data.id}/reserve`, { method: 'POST', body: JSON.stringify({ loadingId: loading.id }) })).response.status, 409);
+    await prisma.externalVehicle.update({ where: { id: externalVehicle.id }, data: { status: 'ACTIVE' } });
     const competingReservations = await Promise.all([
       request(logisticsToken, `/api/logistics/canonical-driver-queue/${externalAdmitted.body.data.id}/reserve`, { method: 'POST', body: JSON.stringify({ loadingId: loading.id }) }),
       request(logisticsToken, `/api/logistics/canonical-driver-queue/${externalAdmitted.body.data.id}/reserve`, { method: 'POST', body: JSON.stringify({ loadingId: loading.id }) }),
@@ -182,46 +190,25 @@ const main = async () => {
     assert.equal(await prisma.guardDriverQueueEvent.count({ where: { turnId: externalAdmitted.body.data.id, eventType: 'RESERVATION_RELEASED_FOR_DEPARTURE' } }), 1);
     const eventChain = await prisma.guardDriverQueueEvent.findMany({ where: { turnId: externalAdmitted.body.data.id }, orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
     eventChain.forEach((event, index) => assert.equal(event.previousHash, index ? eventChain[index - 1].eventHash : null));
-  } finally {
-    server.kill();
-  }
+  } finally { /* cleanup runs below */ }
 };
 
-main().finally(async () => {
-  if (ids.driver) {
-    const turns = await prisma.guardDriverQueueTurn.findMany({ where: { internalDriverId: ids.driver }, select: { id: true } });
-    await prisma.guardDriverQueueEvent.deleteMany({ where: { turnId: { in: turns.map((turn) => turn.id) } } });
-    await prisma.guardDriverQueueTurn.deleteMany({ where: { internalDriverId: ids.driver } });
-  }
-  if (ids.driver) await prisma.driverVehicleAssignment.deleteMany({ where: { driverId: ids.driver } });
-  if (ids.vehicle) await prisma.companyVehiclePlate.deleteMany({ where: { vehicleId: ids.vehicle } });
-  if (ids.vehicle) await prisma.companyVehicle.deleteMany({ where: { id: ids.vehicle } });
-  if (ids.externalDriver || ids.externalVehicle) {
-    const turns = await prisma.guardDriverQueueTurn.findMany({ where: { OR: [{ externalDriverId: ids.externalDriver }, { externalVehicleId: ids.externalVehicle }] }, select: { id: true } });
-    await prisma.guardDriverQueueEvent.deleteMany({ where: { turnId: { in: turns.map((turn) => turn.id) } } });
-    await prisma.guardDriverQueueTurn.deleteMany({ where: { id: { in: turns.map((turn) => turn.id) } } });
-  }
-  if (ids.externalDriver) await prisma.externalDriverDocument.deleteMany({ where: { driverId: ids.externalDriver } });
-  if (ids.externalVehicle) await prisma.externalVehicleDocument.deleteMany({ where: { vehicleId: ids.externalVehicle } });
-  if (ids.externalVehicle) await prisma.externalVehiclePlate.deleteMany({ where: { vehicleId: ids.externalVehicle } });
-  if (ids.externalDriver) await prisma.externalDriver.deleteMany({ where: { id: ids.externalDriver } });
-  if (ids.externalVehicle) await prisma.externalVehicle.deleteMany({ where: { id: ids.externalVehicle } });
-  if (ids.loading) await prisma.logisticsLoading.deleteMany({ where: { id: ids.loading } });
-  if (ids.project) await prisma.projectAddress.deleteMany({ where: { id: ids.project } });
-  if (ids.customer) await prisma.crmCustomer.deleteMany({ where: { id: ids.customer } });
-  if (ids.driver) await prisma.internalDriverEligibilityPeriod.deleteMany({ where: { driverId: ids.driver } });
-  if (ids.driver) await prisma.internalDriverProfile.deleteMany({ where: { id: ids.driver } });
-  if (ids.personnel) await prisma.hrEmploymentRelationship.deleteMany({ where: { personnelId: ids.personnel } });
-  if (ids.personnel) await prisma.personnel.deleteMany({ where: { id: ids.personnel } });
-  if (ids.legacyTurn) await prisma.securityDriverQueueTurn.deleteMany({ where: { id: ids.legacyTurn } });
-  if (ids.legacyPair) await prisma.securityVehiclePair.deleteMany({ where: { id: ids.legacyPair } });
-  if (ids.guard) await prisma.authSession.deleteMany({ where: { userId: ids.guard } });
-  if (ids.logistics) await prisma.authSession.deleteMany({ where: { userId: ids.logistics } });
-  if (ids.unauthorized) await prisma.authSession.deleteMany({ where: { userId: ids.unauthorized } });
-  if (ids.logistics) await prisma.workspacePermission.deleteMany({ where: { userId: ids.logistics } });
-  if (ids.logistics) await prisma.featurePermission.deleteMany({ where: { userId: ids.logistics } });
-  if (ids.logistics) await prisma.user.deleteMany({ where: { id: ids.logistics } });
-  if (ids.unauthorized) await prisma.user.deleteMany({ where: { id: ids.unauthorized } });
-  if (ids.guard) await prisma.user.deleteMany({ where: { id: ids.guard } });
-  await prisma.$disconnect();
-});
+main().finally(async () => prisma.$transaction(async (cleanup) => {
+  // Canonical visits and their master-data evidence intentionally remain: the production chain is append-only.
+  if (ids.loading) await cleanup.logisticsLoading.deleteMany({ where: { id: ids.loading } });
+  if (ids.project) await cleanup.projectAddress.deleteMany({ where: { id: ids.project } });
+  if (ids.customer) await cleanup.crmCustomer.deleteMany({ where: { id: ids.customer } });
+  if (ids.legacyTurn) await cleanup.securityDriverQueueTurn.deleteMany({ where: { id: ids.legacyTurn } });
+  if (ids.legacyPair) await cleanup.securityVehiclePair.deleteMany({ where: { id: ids.legacyPair } });
+  if (ids.guard) await cleanup.authSession.deleteMany({ where: { userId: ids.guard } });
+  if (ids.logistics) await cleanup.authSession.deleteMany({ where: { userId: ids.logistics } });
+  if (ids.unauthorized) await cleanup.authSession.deleteMany({ where: { userId: ids.unauthorized } });
+  if (ids.viewOnly) await cleanup.authSession.deleteMany({ where: { userId: ids.viewOnly } });
+  if (ids.logistics) await cleanup.workspacePermission.deleteMany({ where: { userId: ids.logistics } });
+  if (ids.viewOnly) await cleanup.workspacePermission.deleteMany({ where: { userId: ids.viewOnly } });
+  if (ids.logistics) await cleanup.featurePermission.deleteMany({ where: { userId: ids.logistics } });
+  if (ids.logistics) await cleanup.user.deleteMany({ where: { id: ids.logistics } });
+  if (ids.unauthorized) await cleanup.user.deleteMany({ where: { id: ids.unauthorized } });
+  if (ids.viewOnly) await cleanup.user.deleteMany({ where: { id: ids.viewOnly } });
+  if (ids.guard) await cleanup.user.deleteMany({ where: { id: ids.guard } });
+})).finally(() => prisma.$disconnect());

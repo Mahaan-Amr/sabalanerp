@@ -3,9 +3,9 @@ import { body, validationResult } from 'express-validator';
 import { GuardDriverQueueTurnStatus, Prisma, PrismaClient, SecurityDriverQueueTurnStatus } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
-import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+import { requireFeatureAccess, requireNarrowFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
-import { GuardQueueConflictError, GuardQueueValidationError, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
+import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -27,8 +27,9 @@ const canFinalizeLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_FIN
 const canCancelLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_CANCEL, FEATURE_PERMISSIONS.EDIT);
 const canCreateCorrections = requireFeatureAccess(FEATURES.LOGISTICS_CORRECTIONS_CREATE, FEATURE_PERMISSIONS.EDIT);
 const canViewDrivers = requireFeatureAccess(FEATURES.LOGISTICS_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
+const canManageDrivers = requireNarrowFeatureAccess(FEATURES.LOGISTICS_DRIVERS_MANAGE, FEATURE_PERMISSIONS.EDIT);
 
-router.post('/canonical-driver-queue/:id/reserve', canEdit, async (req: any, res: Response) => {
+router.post('/canonical-driver-queue/:id/reserve', canEdit, canManageDrivers, async (req: any, res: Response) => {
   try {
     const loadingId = String(req.body.loadingId || '').trim();
     if (!loadingId) return res.status(400).json({ success: false, error: 'loadingId is required.' });
@@ -38,13 +39,14 @@ router.post('/canonical-driver-queue/:id/reserve', canEdit, async (req: any, res
     } });
   } catch (error) {
     if (error instanceof GuardQueueConflictError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') return res.status(409).json({ success: false, error: 'The queue turn changed during reservation.' });
     if (error instanceof GuardQueueValidationError) return res.status(400).json({ success: false, error: error.message });
     console.error('Canonical queue reservation error:', error);
     return res.status(500).json({ success: false, error: 'Canonical queue reservation failed.' });
   }
 });
 
-router.post('/canonical-driver-queue/:id/release', canEdit, async (req: any, res: Response) => {
+router.post('/canonical-driver-queue/:id/release', canEdit, canManageDrivers, async (req: any, res: Response) => {
   try {
     const turn = await releaseGuardQueueReservation(prisma, {
       turnId: req.params.id, loadingId: String(req.body.loadingId || '').trim(), actorId: req.user.id, reason: String(req.body.reason || ''),
@@ -54,6 +56,7 @@ router.post('/canonical-driver-queue/:id/release', canEdit, async (req: any, res
     } });
   } catch (error) {
     if (error instanceof GuardQueueConflictError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') return res.status(409).json({ success: false, error: 'The queue reservation changed during release.' });
     if (error instanceof GuardQueueValidationError) return res.status(400).json({ success: false, error: error.message });
     console.error('Canonical queue reservation release error:', error);
     return res.status(500).json({ success: false, error: 'Canonical queue reservation release failed.' });
@@ -1166,11 +1169,13 @@ router.post('/loadings/:id/corrections', canEdit, canCreateCorrections, [
 router.get('/drivers', canView, canViewDrivers, async (req: any, res: Response) => {
   try {
     const turns = await prisma.guardDriverQueueTurn.findMany({
-      where: { status: { in: [GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING] } },
+      where: { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING },
       include: { loading: { select: { id: true, loadingNumber: true } } },
       orderBy: [{ availableAt: 'asc' }, { admittedAt: 'asc' }, { id: 'asc' }],
     });
-    res.json({ success: true, data: turns.map((turn) => {
+    const eligibleTurns = (await Promise.all(turns.map(async (turn) => await isGuardQueueTurnCurrentlyReady(prisma, turn) ? turn : null)))
+      .filter((turn): turn is (typeof turns)[number] => turn !== null);
+    res.json({ success: true, data: eligibleTurns.map((turn) => {
       const snapshot = turn.admissionSnapshot as any;
       return {
         id: turn.id,

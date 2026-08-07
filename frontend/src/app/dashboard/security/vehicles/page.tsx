@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { FaCarSide, FaCheck, FaClipboardList, FaClock, FaPlus, FaRedo, FaSearch, FaTruck, FaUserShield } from 'react-icons/fa';
-import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpInput, ErpPressable, ErpSection, ErpSegmentedControl, ErpSelect, ErpSkeleton, ErpWorkspacePage, erpFieldLabelClassName } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpInlineState, ErpInput, ErpPressable, ErpSection, ErpSegmentedControl, ErpSelect, ErpSheet, ErpSkeleton, ErpWorkspacePage, erpFieldLabelClassName } from '@/components/erp';
 import { crmAPI, securityAPI } from '@/lib/api';
+import { WORKSPACES, WORKSPACE_PERMISSIONS, useWorkspace } from '@/contexts/WorkspaceContext';
 
 const labelClass = erpFieldLabelClassName;
 
@@ -72,6 +73,8 @@ const statusTone = (status: string) => {
 type VehicleSection = 'registry' | 'queue' | 'movements' | 'inbound' | 'sales-exit';
 
 export default function SecurityVehiclesPage() {
+  const { hasPermission, loading: permissionsLoading } = useWorkspace();
+  const canEditQueue = hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
   const router = useRouter();
   const pathname = usePathname();
   const [pairs, setPairs] = useState<any[]>([]);
@@ -87,6 +90,7 @@ export default function SecurityVehiclesPage() {
   const [externalDriverId, setExternalDriverId] = useState('');
   const [externalVehicleId, setExternalVehicleId] = useState('');
   const [queueReason, setQueueReason] = useState('');
+  const [voidTarget, setVoidTarget] = useState<any>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [customerSearch, setCustomerSearch] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
@@ -111,7 +115,9 @@ export default function SecurityVehiclesPage() {
         securityAPI.getDriverQueue(true),
         securityAPI.getCanonicalDriverQueue(),
         securityAPI.getCanonicalDriverQueue(true),
-        securityAPI.getCanonicalQueueAdmissionOptions(),
+        canEditQueue
+          ? securityAPI.getCanonicalQueueAdmissionOptions()
+          : Promise.resolve({ data: { success: true, data: { internalAssignments: [], externalDrivers: [], externalVehicles: [] } } }),
       ]);
       const setters = [setPairs, setMovements, setReadyExit, setQueueTurns, setQueueHistory, setCanonicalQueue, setCanonicalQueueHistory, setAdmissionOptions];
       results.forEach((result, index) => { if (result.status === 'fulfilled' && result.value.data.success) setters[index](result.value.data.data); });
@@ -124,8 +130,8 @@ export default function SecurityVehiclesPage() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (!permissionsLoading) void loadData();
+  }, [permissionsLoading, canEditQueue]);
 
   useEffect(() => {
     if (activeSection !== 'queue') return undefined;
@@ -223,7 +229,7 @@ export default function SecurityVehiclesPage() {
   };
 
   return (
-    <ErpWorkspacePage className="guard-workspace" title="تردد خودروها" primaryAction={{ label: 'ثبت راننده یا خودرو', icon: FaPlus, href: '/dashboard/security/external-registry', variant: 'solid' }} secondaryActions={[{ label: 'ثبت متفرقه‌های جدید', icon: FaUserShield, href: '/dashboard/security/external-registry' }, { label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData }]}>
+    <ErpWorkspacePage className="guard-workspace" title="تردد خودروها" primaryAction={canEditQueue ? { label: 'ثبت راننده یا خودرو', icon: FaPlus, href: '/dashboard/security/external-registry', variant: 'solid' } : undefined} secondaryActions={[...(canEditQueue ? [{ label: 'ثبت متفرقه‌های جدید', icon: FaUserShield, href: '/dashboard/security/external-registry' }] : []), { label: 'به‌روزرسانی', icon: FaRedo, onClick: loadData }]}>
       {loading && !pairs.length && !movements.length ? <ErpSkeleton lines={6} /> : <>
       {message && <ErpInlineState kind="success" title={message} />}
       {error && <ErpInlineState kind={pairs.length || movements.length ? 'stale' : 'error'} title={error} action={{ label: 'تلاش مجدد', onClick: loadData }} />}
@@ -240,20 +246,21 @@ export default function SecurityVehiclesPage() {
 
       {activeSection === 'queue' && <ErpSection title="پذیرش صف جاری" description="پذیرش، هویت راننده، خودرو، پلاک و مدارک آماده‌بودن را برای همین مراجعه ثابت می‌کند.">
         <div className="space-y-4">
-          <ErpSegmentedControl<'INTERNAL' | 'EXTERNAL'> value={admissionSource} onChange={setAdmissionSource} options={[{ value: 'INTERNAL', label: 'راننده داخلی' }, { value: 'EXTERNAL', label: 'راننده متفرقه' }]} />
+          {canEditQueue && <><ErpSegmentedControl<'INTERNAL' | 'EXTERNAL'> value={admissionSource} onChange={setAdmissionSource} options={[{ value: 'INTERNAL', label: 'راننده داخلی' }, { value: 'EXTERNAL', label: 'راننده متفرقه' }]} />
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
             {admissionSource === 'INTERNAL' ? <label><span className={labelClass}>راننده و خودروی داخلی</span><ErpSelect value={internalDriverId} onChange={(event) => setInternalDriverId(event.target.value)}><option value="">انتخاب تخصیص آماده</option>{admissionOptions.internalAssignments.map((option: any) => <option key={option.assignmentId} value={option.driverId}>{option.driverName} · {option.plate} · {option.fleetCode}</option>)}</ErpSelect></label> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><label><span className={labelClass}>راننده متفرقه</span><ErpSelect value={externalDriverId} onChange={(event) => setExternalDriverId(event.target.value)}><option value="">انتخاب راننده آماده</option>{admissionOptions.externalDrivers.map((option: any) => <option key={option.id} value={option.id}>{option.firstName} {option.lastName} · {option.nationalCode}</option>)}</ErpSelect></label><label><span className={labelClass}>خودروی متفرقه</span><ErpSelect value={externalVehicleId} onChange={(event) => setExternalVehicleId(event.target.value)}><option value="">انتخاب خودروی آماده</option>{admissionOptions.externalVehicles.map((option: any) => <option key={option.id} value={option.id}>{option.vehicleType} · {option.plate}</option>)}</ErpSelect></label></div>}
             <ErpButton label="ثبت پذیرش" icon={FaPlus} variant="solid" disabled={saving || (admissionSource === 'INTERNAL' ? !internalDriverId : !externalDriverId || !externalVehicleId)} onClick={admitQueueTurn} className="self-end" />
           </div>
-          <label className="block"><span className={labelClass}>دلیل بازگشت، خروج بدون بارگیری یا ابطال</span><ErpInput value={queueReason} onChange={(event) => setQueueReason(event.target.value)} /></label>
+          <label className="block"><span className={labelClass}>دلیل بازگشت، خروج بدون بارگیری یا ابطال</span><ErpInput value={queueReason} onChange={(event) => setQueueReason(event.target.value)} /></label></>}
           {!canonicalQueue.length ? <ErpEmptyState icon={FaClock} title="مراجعه جاری در صف وجود ندارد" /> : <div className="space-y-3">{canonicalQueue.map((turn) => {
             const snapshot = turn.admissionSnapshot || {};
             const driverName = [snapshot.driver?.firstName, snapshot.driver?.lastName].filter(Boolean).join(' ') || 'راننده ثبت‌شده';
-            return <ErpCard key={turn.id} className="p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-semibold sds-text-primary">{driverName} · {snapshot.plate?.plate || 'بدون پلاک'}</p><p className="mt-1 text-sm sds-text-muted">{snapshot.vehicle?.vehicleType || 'خودرو'} · پذیرش {new Date(turn.admittedAt).toLocaleString('fa-IR')}</p></div><ErpBadge tone={turn.status === 'AVAILABLE_FOR_LOADING' ? 'success' : turn.status === 'RESERVED_FOR_LOADING' ? 'warning' : 'neutral'}>{canonicalQueueStatusLabel[turn.status] || turn.status}</ErpBadge></div><div className="mt-3 flex flex-wrap gap-2">{turn.status === 'WAITING_AT_GATE' && <ErpButton label="آماده بارگیری" icon={FaCheck} variant="solid" disabled={saving} onClick={() => runQueueCommand(() => securityAPI.makeCanonicalQueueTurnAvailable(turn.id), 'راننده برای بارگیری آماده شد.')} />}{turn.status === 'AVAILABLE_FOR_LOADING' && <ErpButton label="بازگشت به انتظار" icon={FaRedo} variant="soft" disabled={saving || !queueReason.trim()} onClick={() => runQueueCommand(() => securityAPI.returnCanonicalQueueTurnToWaiting(turn.id, queueReason.trim()), 'مراجعه به انتظار گیت بازگشت.', true)} />} {['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING'].includes(turn.status) && <><ErpButton label="خروج بدون بارگیری" tone="warning" variant="soft" disabled={saving || !queueReason.trim()} onClick={() => runQueueCommand(() => securityAPI.closeCanonicalQueueTurnWithoutLoading(turn.id, queueReason.trim()), 'مراجعه بدون بارگیری بسته شد.', true)} /><ErpButton label="ابطال پذیرش" tone="danger" variant="outline" disabled={saving || !queueReason.trim()} onClick={() => runQueueCommand(() => securityAPI.voidCanonicalQueueTurn(turn.id, queueReason.trim()), 'پذیرش با حفظ سابقه باطل شد.', true)} /></>}</div></ErpCard>;
+            return <ErpCard key={turn.id} className="p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-semibold sds-text-primary">{driverName} · {snapshot.plate?.plate || 'بدون پلاک'}</p><p className="mt-1 text-sm sds-text-muted">{snapshot.vehicle?.vehicleType || 'خودرو'} · پذیرش {new Date(turn.admittedAt).toLocaleString('fa-IR')}</p></div><ErpBadge tone={turn.status === 'AVAILABLE_FOR_LOADING' ? 'success' : turn.status === 'RESERVED_FOR_LOADING' ? 'warning' : 'neutral'}>{canonicalQueueStatusLabel[turn.status] || turn.status}</ErpBadge></div>{canEditQueue && <div className="mt-3 flex flex-wrap gap-2">{turn.status === 'WAITING_AT_GATE' && <ErpButton label="آماده بارگیری" icon={FaCheck} variant="solid" disabled={saving} onClick={() => runQueueCommand(() => securityAPI.makeCanonicalQueueTurnAvailable(turn.id), 'راننده برای بارگیری آماده شد.')} />}{turn.status === 'AVAILABLE_FOR_LOADING' && <ErpButton label="بازگشت به انتظار" icon={FaRedo} variant="soft" disabled={saving || !queueReason.trim()} onClick={() => runQueueCommand(() => securityAPI.returnCanonicalQueueTurnToWaiting(turn.id, queueReason.trim()), 'مراجعه به انتظار گیت بازگشت.', true)} />} {['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING'].includes(turn.status) && <><ErpButton label="خروج بدون بارگیری" tone="warning" variant="soft" disabled={saving || !queueReason.trim()} onClick={() => runQueueCommand(() => securityAPI.closeCanonicalQueueTurnWithoutLoading(turn.id, queueReason.trim()), 'مراجعه بدون بارگیری بسته شد.', true)} /><ErpButton label="ابطال پذیرش" tone="danger" variant="outline" disabled={saving || !queueReason.trim()} onClick={() => setVoidTarget(turn)} /></>}</div>}</ErpCard>;
           })}</div>}
           {canonicalQueueHistory.some((turn: any) => ['CLOSED_WITHOUT_LOADING', 'VOIDED', 'EXIT_RECORDED'].includes(turn.status)) && <div><p className="mb-2 text-sm font-semibold sds-text-secondary">سوابق اخیر صف رسمی</p><div className="space-y-2">{canonicalQueueHistory.filter((turn: any) => ['CLOSED_WITHOUT_LOADING', 'VOIDED', 'EXIT_RECORDED'].includes(turn.status)).slice(0, 10).map((turn: any) => <ErpCard key={turn.id} className="p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm sds-text-primary">{turn.admissionSnapshot?.driver?.firstName} {turn.admissionSnapshot?.driver?.lastName} · {turn.admissionSnapshot?.plate?.plate}</span><ErpBadge tone={turn.status === 'VOIDED' ? 'danger' : 'neutral'}>{canonicalQueueStatusLabel[turn.status] || turn.status}</ErpBadge></div></ErpCard>)}</div></div>}
         </div>
       </ErpSection>}
+      <ErpSheet open={Boolean(voidTarget)} onClose={() => { if (!saving) setVoidTarget(null); }} title="تأیید ابطال پذیرش" presentation="modal" dismissible={!saving} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setVoidTarget(null)} /><ErpButton label="تأیید ابطال" tone="danger" variant="solid" disabled={saving || !queueReason.trim()} onClick={() => void runQueueCommand(() => securityAPI.voidCanonicalQueueTurn(voidTarget.id, queueReason.trim()), 'پذیرش با حفظ سابقه باطل شد.', true).then(() => setVoidTarget(null))} /></div>}><p className="text-sm leading-7 sds-text-muted">این مراجعه از صف جاری خارج می‌شود و برای حفظ زنجیره حسابرسی قابل حذف یا بازگردانی نیست. دلیل ثبت‌شده همراه سابقه باقی می‌ماند.</p></ErpSheet>
 
       {activeSection === 'queue' && <ErpSection title="سوابق صف قدیمی" description="مدل ترکیبی قدیمی فقط برای مشاهده سابقه حفظ شده و هیچ عملیات یا پذیرش جدیدی از این صفحه انجام نمی‌شود.">
         <div className="space-y-3">{Array.from(new Map([...queueTurns, ...queueHistory].map((turn) => [turn.id, turn])).values()).map((turn) => <ErpCard key={turn.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-semibold">{turn.vehiclePair.firstName} {turn.vehiclePair.lastName} · {turn.vehiclePair.vehiclePlate}</p><p className="mt-1 text-xs sds-text-muted">ورود: {new Date(turn.enteredAt).toLocaleString('fa-IR')}{turn.loading ? ` · بارگیری ${turn.loading.loadingNumber}` : ''}</p></div><div className="flex flex-wrap gap-2"><ErpBadge tone="warning">فقط سابقه</ErpBadge><ErpBadge tone="neutral">{queueStatusLabel[turn.status] || turn.status}</ErpBadge></div></div></ErpCard>)}</div>

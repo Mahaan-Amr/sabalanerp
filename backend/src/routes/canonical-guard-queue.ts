@@ -1,18 +1,33 @@
 import express from 'express';
 import { GuardDriverSource, PrismaClient } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
-import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
+import { requireWorkspaceAccess, WorkspaceRequest, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { admitGuardDriverQueueTurn, closeGuardQueueTurnWithoutLoading, GuardQueueConflictError, GuardQueueValidationError, listGuardQueueAdmissionOptions, makeGuardQueueTurnAvailable, returnGuardQueueTurnToWaiting, voidGuardQueueTurn } from '../services/guardDriverQueue';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 const guardView = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
 const guardEdit = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
-const responseTurn = (turn: any) => ({
-  ...turn,
-  driverId: turn.internalDriverId || turn.externalDriverId,
-  vehicleId: turn.companyVehicleId || turn.externalVehicleId,
-});
+const responseTurn = (turn: any, redacted = false) => {
+  if (!redacted) return { ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId };
+  const snapshot = turn.admissionSnapshot || {};
+  const plate = String(snapshot.plate?.plate || '');
+  return {
+    id: turn.id, driverSource: turn.driverSource, status: turn.status, admittedAt: turn.admittedAt,
+    availableAt: turn.availableAt, reservedAt: turn.reservedAt, finalizedAt: turn.finalizedAt, exitedAt: turn.exitedAt,
+    closedAt: turn.closedAt, voidedAt: turn.voidedAt,
+    admissionSnapshot: {
+      driver: { firstName: '', lastName: 'راننده' },
+      vehicle: { vehicleType: snapshot.vehicle?.vehicleType || '' },
+      plate: { plate: plate ? `${'*'.repeat(Math.max(0, plate.length - 2))}${plate.slice(-2)}` : '' },
+      readiness: { status: snapshot.readiness?.status || 'UNKNOWN' },
+    },
+    events: Array.isArray(turn.events) ? turn.events.map((event: any) => ({
+      id: event.id, eventType: event.eventType, fromStatus: event.fromStatus, toStatus: event.toStatus, recordedAt: event.recordedAt,
+    })) : [],
+    redacted: true,
+  };
+};
 const fail = (res: any, error: unknown, context: string) => {
   if (error instanceof GuardQueueConflictError) return res.status(409).json({ success: false, error: error.message });
   if (error instanceof GuardQueueValidationError) return res.status(400).json({ success: false, error: error.message });
@@ -20,7 +35,7 @@ const fail = (res: any, error: unknown, context: string) => {
   return res.status(500).json({ success: false, error: 'Canonical Guard queue command failed.' });
 };
 
-router.get('/canonical-driver-queue', protect, guardView, async (req: AuthRequest, res) => {
+router.get('/canonical-driver-queue', protect, guardView, async (req: WorkspaceRequest, res) => {
   try {
     const history = req.query.history === 'true';
     const turns = await prisma.guardDriverQueueTurn.findMany({
@@ -29,14 +44,15 @@ router.get('/canonical-driver-queue', protect, guardView, async (req: AuthReques
       orderBy: history ? [{ admittedAt: 'desc' }, { id: 'desc' }] : [{ admittedAt: 'asc' }, { id: 'asc' }],
       take: history ? 250 : undefined,
     });
-    return res.json({ success: true, data: turns.map(responseTurn) });
+    const redacted = req.workspacePermission === WORKSPACE_PERMISSIONS.VIEW;
+    return res.json({ success: true, data: turns.map((turn) => responseTurn(turn, redacted)), capabilities: { canEdit: !redacted } });
   } catch (error) {
     console.error('Canonical Guard queue list error:', error);
     return res.status(500).json({ success: false, error: 'Canonical Guard queue could not be loaded.' });
   }
 });
 
-router.get('/canonical-driver-queue/admission-options', protect, guardView, async (_req: AuthRequest, res) => {
+router.get('/canonical-driver-queue/admission-options', protect, guardEdit, async (_req: AuthRequest, res) => {
   try {
     return res.json({ success: true, data: await listGuardQueueAdmissionOptions(prisma) });
   } catch (error) {

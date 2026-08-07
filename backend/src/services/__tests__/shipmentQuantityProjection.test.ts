@@ -154,10 +154,58 @@ test('does not infer a missing contracted quantity as zero', () => {
   assert.equal(result.rows[0]?.health, 'EVIDENCE_CONFLICT');
   assert.equal(result.rows[0]?.quantities, null);
   assert.equal(result.totalsByUnit[0]?.isComplete, false);
+  assert.equal(result.totalsByUnit[0]?.contracted, null);
 });
 
 test('rejects quantities that cannot be represented at canonical scale three', () => {
   assert.throws(() => projectShipmentQuantities([
     evidence('too-precise', 'CONTRACTED_SET', '1.0004'),
   ]), /at most three decimal places/);
+});
+
+test('keeps dispatched truth and reports a verified return awaiting Accounting', () => {
+  const result = projectShipmentQuantities([
+    evidence('contracted', 'CONTRACTED_SET', '5.000'),
+    evidence('exit', 'LEGACY_DISPATCHED', '5.000'),
+    evidence('return', 'GUARD_RETURN_VERIFIED', '1.125', { metadata: { returnEvidenceId: 'return-1' }, sourceId: 'return-1' }),
+  ]);
+  assert.equal(result.rows[0]?.health, 'EVIDENCE_CONFLICT');
+  assert.equal(result.rows[0]?.quantities?.physicallyDispatched, '5.000');
+  assert.match(result.rows[0]?.healthReasons.join(' ') || '', /awaits Accounting/);
+});
+
+test('applies a return correction only when it links verified Guard inbound evidence', () => {
+  const source = [
+    evidence('contracted', 'CONTRACTED_SET', '5.000'),
+    evidence('exit', 'LEGACY_DISPATCHED', '5.000'),
+    evidence('return', 'GUARD_RETURN_VERIFIED', '1.125', { sourceId: 'return-1' }),
+    evidence('posted-return', 'DISPATCH_CORRECTION_POSTED', '-1.125', { returnEvidenceId: 'return' }),
+  ];
+  const valid = projectShipmentQuantities(source);
+  const unlinked = projectShipmentQuantities(source.filter((item) => item.id !== 'return'));
+  assert.equal(valid.rows[0]?.health, 'CURRENT');
+  assert.equal(valid.rows[0]?.quantities?.physicallyDispatched, '3.875');
+  assert.equal(unlinked.rows[0]?.health, 'EVIDENCE_CONFLICT');
+  assert.equal(unlinked.rows[0]?.quantities?.physicallyDispatched, '5.000');
+});
+
+test('non-current health uses verified projection truth without inventing zeros', () => {
+  const result = projectShipmentQuantities([
+    evidence('contracted', 'CONTRACTED_SET', '10.000'),
+    evidence('stale', 'PROJECTION_STALE', '0.000'),
+  ], { lastVerifiedRows: [{
+    contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'squareMeter',
+    quantities: { contracted: '9.999', finalizedReserved: '0.001', physicallyDispatched: '0.002', availableToLoad: '9.996' },
+    verifiedAt: '2026-08-01T09:00:00.000Z',
+  }] });
+  assert.deepEqual(result.rows[0]?.quantities, { contracted: '9.999', finalizedReserved: '0.001', physicallyDispatched: '0.002', availableToLoad: '9.996' });
+});
+
+test('contracted quantity follows the financially approved version effective at cutoff', () => {
+  const versions = [
+    evidence('approved-v1', 'CONTRACTED_SET', '10.000', { effectiveAt: '2026-08-01T00:00:00.000Z', recordedAt: '2026-08-01T01:00:00.000Z', sourceVersion: 1 }),
+    evidence('approved-v2', 'CONTRACTED_SET', '8.000', { effectiveAt: '2026-08-05T00:00:00.000Z', recordedAt: '2026-08-06T00:00:00.000Z', sourceVersion: 2 }),
+  ];
+  assert.equal(projectShipmentQuantities(versions, { cutoff: '2026-08-04T00:00:00.000Z' }).rows[0]?.quantities?.contracted, '10.000');
+  assert.equal(projectShipmentQuantities(versions, { cutoff: '2026-08-07T00:00:00.000Z' }).rows[0]?.quantities?.contracted, '8.000');
 });

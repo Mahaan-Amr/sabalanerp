@@ -1,27 +1,40 @@
 import express, { NextFunction, RequestHandler, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect, type AuthRequest } from '../middleware/auth';
+import { FEATURES } from '../middleware/feature';
 import { readShipmentQuantityProjection, rebuildShipmentQuantityProjection } from '../services/shipmentQuantityProjectionStore';
 
-const VIEW_WORKSPACES = ['sales', 'crm', 'logistics', 'accounting'];
+const VIEW_FEATURES = [
+  { workspace: 'sales', feature: FEATURES.SALES_CONTRACTS_VIEW },
+  { workspace: 'crm', feature: FEATURES.CRM_CUSTOMERS_VIEW },
+  { workspace: 'logistics', feature: FEATURES.LOGISTICS_LOADINGS_VIEW },
+  { workspace: 'accounting', feature: FEATURES.ACCOUNTING_CONTRACTS_VIEW },
+];
 
 type ProjectionReader = typeof readShipmentQuantityProjection;
 type ProjectionRebuilder = typeof rebuildShipmentQuantityProjection;
 
-const shipmentViewAuthorization = (prisma: PrismaClient): RequestHandler => async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const shipmentViewAuthorization = (prisma: PrismaClient): RequestHandler => async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) return res.status(401).json({ success: false, error: 'Authentication required' });
-  if (req.user.role === 'ADMIN' || req.user.role === 'MANAGER') return next();
+  if (req.user.role === 'ADMIN') return next();
   const now = new Date();
-  const [userPermission, rolePermission] = await Promise.all([
-    prisma.workspacePermission.findFirst({
-      where: { userId: req.user.id, workspace: { in: VIEW_WORKSPACES }, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
-    }),
-    prisma.roleWorkspacePermission.findFirst({
-      where: { role: req.user.role, workspace: { in: VIEW_WORKSPACES }, isActive: true },
-    }),
+  const workspaces = VIEW_FEATURES.map((scope) => scope.workspace);
+  const features = VIEW_FEATURES.map((scope) => scope.feature);
+  const [userWorkspaces, roleWorkspaces, userFeatures, roleFeatures] = await Promise.all([
+    prisma.workspacePermission.findMany({ where: { userId: req.user.id, workspace: { in: workspaces }, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } }),
+    prisma.roleWorkspacePermission.findMany({ where: { role: req.user.role, workspace: { in: workspaces }, isActive: true } }),
+    prisma.featurePermission.findMany({ where: { userId: req.user.id, feature: { in: features }, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } }),
+    prisma.roleFeaturePermission.findMany({ where: { role: req.user.role, feature: { in: features }, isActive: true } }),
   ]);
   const rank = (value?: string | null) => ['view', 'edit', 'admin'].indexOf(value || '');
-  if (rank(userPermission?.permissionLevel) >= 0 || rank(rolePermission?.permissionLevel) >= 0) return next();
+  const allowed = VIEW_FEATURES.some((scope) => {
+    const workspace = userWorkspaces.find((item) => item.workspace === scope.workspace)
+      || roleWorkspaces.find((item) => item.workspace === scope.workspace);
+    const feature = userFeatures.find((item) => item.workspace === scope.workspace && item.feature === scope.feature)
+      || roleFeatures.find((item) => item.workspace === scope.workspace && item.feature === scope.feature);
+    return rank(workspace?.permissionLevel) >= 0 && rank(feature?.permissionLevel) >= 0;
+  });
+  if (allowed) return next();
   return res.status(403).json({ success: false, error: 'Shipment quantity view is not available' });
 };
 

@@ -13,7 +13,11 @@ const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(valu
 const asRecord = (value: unknown): Record<string, any> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 
-const toScaleThree = (value: unknown) => new Prisma.Decimal(String(value || 0)).toFixed(3);
+const exactScaleThree = (value: unknown) => {
+  const decimal = new Prisma.Decimal(String(value));
+  if (!decimal.isFinite() || decimal.decimalPlaces() > 3) throw new Error(`Quantity exceeds canonical scale three: ${value}`);
+  return decimal.toFixed(3);
+};
 
 const inferUnit = (item: { productType: string | null }, snapshot: Record<string, any>) => {
   const explicit = String(snapshot.unit || snapshot.preparedUnit || snapshot.meta?.unit || '');
@@ -27,24 +31,31 @@ const inferUnit = (item: { productType: string | null }, snapshot: Record<string
   return 'count';
 };
 
-const contractedQuantity = (item: { quantity: Prisma.Decimal; productType: string | null }, snapshot: Record<string, any>, unit: string) => {
+export const deriveContractedQuantity = (item: { quantity: Prisma.Decimal; productType: string | null }, snapshot: Record<string, any>, unit: string) => {
   if (unit === 'meter') {
-    const rawLength = Number(snapshot.length ?? snapshot.actualLength ?? snapshot.actualLengthMeters);
-    const length = snapshot.lengthUnit === 'cm' ? rawLength / 100 : rawLength;
-    const count = Number(snapshot.quantity ?? 1);
-    if (Number.isFinite(length) && length > 0 && Number.isFinite(count) && count > 0) return toScaleThree(length * count);
+    const rawLength = new Prisma.Decimal(String(snapshot.length ?? snapshot.actualLength ?? snapshot.actualLengthMeters ?? 0));
+    const length = snapshot.lengthUnit === 'cm' ? rawLength.div(100) : rawLength;
+    const count = new Prisma.Decimal(String(snapshot.quantity ?? 1));
+    if (length.gt(0) && count.gt(0)) return exactScaleThree(length.mul(count));
   }
-  if (unit === 'squareMeter' && Number(snapshot.squareMeters) > 0) return toScaleThree(snapshot.squareMeters);
-  if (['squareMeter', 'ton'].includes(unit) && Number(snapshot.preparedQuantity) > 0) return toScaleThree(snapshot.preparedQuantity);
-  return toScaleThree(snapshot.preparedQuantity ?? snapshot.quantity ?? item.quantity);
+  if (unit === 'squareMeter' && new Prisma.Decimal(String(snapshot.squareMeters ?? 0)).gt(0)) return exactScaleThree(snapshot.squareMeters);
+  if (['squareMeter', 'ton'].includes(unit) && new Prisma.Decimal(String(snapshot.preparedQuantity ?? 0)).gt(0)) return exactScaleThree(snapshot.preparedQuantity);
+  return exactScaleThree(snapshot.preparedQuantity ?? snapshot.quantity ?? item.quantity);
 };
 
-const contractProductSnapshot = (contractData: unknown, productRowId: string | null, productId: string, index: number) => {
+export const resolveContractProductSnapshot = (contractData: unknown, identity: { productRowId: string | null; productId: string; legacyProductIndex?: number | null }) => {
   const data = asRecord(contractData);
   const products = Array.isArray(data.products) ? data.products : Array.isArray(data.items) ? data.items : [];
-  return asRecord(products.find((product: any) => product?.rowId === productRowId)
-    || products[index]
-    || products.find((product: any) => product?.productId === productId));
+  if (identity.productRowId) {
+    const exact = products.find((product: any) => product?.rowId === identity.productRowId);
+    return exact ? { snapshot: asRecord(exact), conflict: null } : { snapshot: null, conflict: 'Stable productRowId has no matching contract row' };
+  }
+  if (Number.isInteger(identity.legacyProductIndex) && (identity.legacyProductIndex as number) >= 0) {
+    const candidate = products[identity.legacyProductIndex as number];
+    if (candidate?.productId === identity.productId) return { snapshot: asRecord(candidate), conflict: null };
+    return { snapshot: null, conflict: 'Legacy product index and product ID do not agree' };
+  }
+  return { snapshot: null, conflict: 'Stable productRowId is missing and no validated legacy index exists' };
 };
 
 const mapPersistedEvidence = (item: any): ShipmentQuantityEvidence => ({
@@ -62,6 +73,8 @@ const mapPersistedEvidence = (item: any): ShipmentQuantityEvidence => ({
   sourceVersion: item.sourceVersion,
   integrityHash: item.integrityHash,
   metadata: asRecord(item.metadata),
+  guardReturnMovementId: item.guardReturnMovementId || undefined,
+  returnEvidenceId: item.returnEvidenceId || undefined,
 });
 
 const persistedEvidencePayload = (item: ShipmentQuantityEvidence) => ({
@@ -69,10 +82,77 @@ const persistedEvidencePayload = (item: ShipmentQuantityEvidence) => ({
   unit: item.unit, kind: item.kind, quantity: item.quantity, effectiveAt: item.effectiveAt,
   recordedAt: item.recordedAt, sourceType: item.sourceType, sourceId: item.sourceId,
   sourceVersion: item.sourceVersion, metadata: item.metadata || {},
+  guardReturnMovementId: item.guardReturnMovementId || null, returnEvidenceId: item.returnEvidenceId || null,
 });
 
 export const shipmentQuantityEvidenceIntegrityHash = (item: ShipmentQuantityEvidence) =>
   hash(persistedEvidencePayload(item));
+
+const projectionIntegrityPayload = (row: {
+  contractId: string; contractItemId: string; productRowId: string; unit: string;
+  quantities: { contracted: string; finalizedReserved: string; physicallyDispatched: string; availableToLoad: string } | null;
+  health: string; healthReasons: readonly string[]; sourceEvidenceIds: readonly string[]; cutoff: string; lastVerifiedAt: string | null;
+}) => ({
+  contractId: row.contractId, contractItemId: row.contractItemId, productRowId: row.productRowId, unit: row.unit,
+  quantities: row.quantities, health: row.health, healthReasons: row.healthReasons,
+  sourceEvidenceIds: row.sourceEvidenceIds, cutoff: row.cutoff, lastVerifiedAt: row.lastVerifiedAt,
+});
+
+export const shipmentQuantityProjectionIntegrityHash = (row: Parameters<typeof projectionIntegrityPayload>[0]) =>
+  hash(projectionIntegrityPayload(row));
+
+export const captureFinanciallyApprovedContractQuantityVersions = async (prisma: PrismaClient, scope: Scope, cutoverAt = new Date()) => {
+  const contracts = await prisma.salesContract.findMany({
+    where: { ...(scope.contractId ? { id: scope.contractId } : {}), ...(scope.customerId ? { customerId: scope.customerId } : {}) },
+    include: { items: true },
+  });
+  const approvals = await prisma.accountingFinancialRecord.findMany({
+    where: { contractId: { in: contracts.map((contract) => contract.id) }, financiallyApprovedAt: { not: null } },
+    select: { contractId: true, financiallyApprovedAt: true }, orderBy: { financiallyApprovedAt: 'desc' },
+  });
+  const approvalByContract = new Map<string, Date>();
+  approvals.forEach((approval) => { if (approval.contractId && !approvalByContract.has(approval.contractId)) approvalByContract.set(approval.contractId, approval.financiallyApprovedAt!); });
+  const existingVersions = await prisma.shipmentQuantityEvidence.findMany({
+    where: { contractId: { in: contracts.map((contract) => contract.id) }, kind: 'CONTRACTED_SET' },
+    orderBy: { sourceVersion: 'desc' },
+  });
+  const latestByRow = new Map<string, typeof existingVersions[number]>();
+  existingVersions.forEach((version) => { if (!latestByRow.has(version.contractItemId)) latestByRow.set(version.contractItemId, version); });
+  const versions: Array<Omit<ShipmentQuantityEvidence, 'id'>> = [];
+  for (const contract of contracts) {
+    const approval = approvalByContract.get(contract.id);
+    if (!approval) continue;
+    for (const item of contract.items) {
+      const resolution = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId });
+      const snapshot = resolution.snapshot || {};
+      const unit = inferUnit(item, snapshot);
+      const previousVersion = latestByRow.get(item.id);
+      const sourceVersion = (previousVersion?.sourceVersion || 0) + 1;
+      const effectiveAt = previousVersion ? approval : cutoverAt;
+      const common = {
+        contractId: contract.id, contractItemId: item.id, productRowId: item.productRowId || `missing:${item.id}`, unit,
+        effectiveAt: effectiveAt.toISOString(), recordedAt: cutoverAt.toISOString(), sourceId: item.id, sourceVersion,
+      };
+      try {
+        if (resolution.conflict) throw new Error(resolution.conflict);
+        const quantity = deriveContractedQuantity(item, snapshot, unit);
+        if (previousVersion && previousVersion.quantity.toFixed(3) === quantity && previousVersion.unit === unit
+          && previousVersion.productRowId === common.productRowId && asRecord(previousVersion.metadata).financiallyApprovedAt === approval.toISOString()) continue;
+        const version = { ...common, kind: 'CONTRACTED_SET' as const, quantity, sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION', metadata: { financiallyApprovedAt: approval.toISOString(), capturedAtCutover: !previousVersion }, integrityHash: '' };
+        versions.push({ ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'Contract quantity version could not be captured';
+        const version = { ...common, kind: 'EVIDENCE_CONFLICT' as const, quantity: '0.000', sourceType: 'CONTRACT_QUANTITY_VERSION_CAPTURE_CONFLICT', metadata: { reason, financiallyApprovedAt: approval.toISOString() }, integrityHash: '' };
+        versions.push({ ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) });
+      }
+    }
+  }
+  if (versions.length > 0) await prisma.shipmentQuantityEvidence.createMany({
+    data: versions.map((item) => ({ ...item, effectiveAt: new Date(item.effectiveAt), recordedAt: new Date(item.recordedAt), quantity: item.quantity, metadata: item.metadata as Prisma.InputJsonValue })),
+    skipDuplicates: true,
+  });
+  return versions.length;
+};
 
 export const readShipmentQuantityProjection = async (
   prisma: PrismaClient,
@@ -130,26 +210,26 @@ export const readShipmentQuantityProjection = async (
   for (const contract of contracts) {
     const approval = approvedAt.get(contract.id);
     if (!approval) continue;
-    contract.items.forEach((item, index) => {
+    contract.items.forEach((item) => {
       const stableRowId = item.productRowId || `missing:${item.id}`;
-      const snapshot = contractProductSnapshot(contract.contractData, item.productRowId, item.productId, index);
+      const resolution = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId });
+      const snapshot = resolution.snapshot || {};
       const unit = inferUnit(item, snapshot);
       if (!explicitContractRows.has(item.id)) {
-        const quantity = contractedQuantity(item, snapshot, unit);
-        const identity = { contractId: contract.id, contractItemId: item.id, productRowId: stableRowId, unit, quantity };
         evidence.push({
-          id: `current-contract:${item.id}`, ...identity, kind: 'CONTRACTED_SET',
-          effectiveAt: approval.toISOString(), recordedAt: contract.updatedAt.toISOString(),
-          sourceType: 'CURRENT_FINANCIALLY_APPROVED_CONTRACT_ROW', sourceId: item.id, sourceVersion: 1,
-          integrityHash: hash(identity),
+          id: `missing-version:${item.id}`, contractId: contract.id, contractItemId: item.id, productRowId: stableRowId, unit,
+          kind: 'EVIDENCE_CONFLICT', quantity: '0.000', effectiveAt: options.cutoff || new Date().toISOString(), recordedAt: new Date().toISOString(),
+          sourceType: 'CONTRACT_QUANTITY_VERSION_MISSING', sourceId: item.id, sourceVersion: 1,
+          integrityHash: hash({ itemId: item.id, reason: 'approved version missing' }),
+          metadata: { reason: 'Financially approved contract quantity version is missing; rebuild the cutover baseline' },
         });
       }
-      if (!item.productRowId) {
+      if (resolution.conflict) {
         evidence.push({
           id: `missing-row:${item.id}`, contractId: contract.id, contractItemId: item.id, productRowId: stableRowId, unit,
           kind: 'EVIDENCE_CONFLICT', quantity: '0.000', effectiveAt: approval.toISOString(), recordedAt: contract.updatedAt.toISOString(),
           sourceType: 'CONTRACT_ROW_IDENTITY_CONFLICT', sourceId: item.id, sourceVersion: 1,
-          integrityHash: hash({ itemId: item.id, reason: 'missing productRowId' }), metadata: { reason: 'Stable product row identity is missing' },
+          integrityHash: hash({ itemId: item.id, reason: resolution.conflict }), metadata: { reason: resolution.conflict },
         });
       }
     });
@@ -180,21 +260,34 @@ export const readShipmentQuantityProjection = async (
     }
   }
 
+  const lastVerifiedRows = previous.flatMap((row) => {
+    if (row.contracted === null || row.finalizedReserved === null || row.physicallyDispatched === null || row.availableToLoad === null || !row.lastVerifiedAt
+      || (options.cutoff && row.lastVerifiedAt.toISOString() > options.cutoff)) return [];
+    const normalized = {
+      contractId: row.contractId, contractItemId: row.contractItemId, productRowId: row.productRowId, unit: row.unit,
+      quantities: { contracted: row.contracted.toFixed(3), finalizedReserved: row.finalizedReserved.toFixed(3), physicallyDispatched: row.physicallyDispatched.toFixed(3), availableToLoad: row.availableToLoad.toFixed(3) },
+      health: row.health, healthReasons: asRecord(row.healthReasons) as any, sourceEvidenceIds: row.sourceEvidenceIds as any,
+      cutoff: row.cutoff.toISOString(), lastVerifiedAt: row.lastVerifiedAt.toISOString(),
+    };
+    if (row.integrityHash !== shipmentQuantityProjectionIntegrityHash({ ...normalized, healthReasons: Array.isArray(row.healthReasons) ? row.healthReasons as string[] : [], sourceEvidenceIds: Array.isArray(row.sourceEvidenceIds) ? row.sourceEvidenceIds as string[] : [] })) {
+      evidence.push({
+        id: `projection-integrity:${row.contractItemId}`, contractId: row.contractId, contractItemId: row.contractItemId,
+        productRowId: row.productRowId, unit: row.unit, kind: 'EVIDENCE_CONFLICT', quantity: '0.000',
+        effectiveAt: options.cutoff || new Date().toISOString(), recordedAt: new Date().toISOString(),
+        sourceType: 'PREVIOUS_PROJECTION_INTEGRITY_CONFLICT', sourceId: row.contractItemId, sourceVersion: 1,
+        integrityHash: hash({ row: row.contractItemId, observedHash: row.integrityHash }), metadata: { reason: 'Previous projection integrity check failed' },
+      });
+      return [];
+    }
+    return [{ contractId: row.contractId, contractItemId: row.contractItemId, productRowId: row.productRowId, unit: row.unit, quantities: normalized.quantities, verifiedAt: row.lastVerifiedAt.toISOString() }];
+  });
   const result = projectShipmentQuantities(evidence, {
     ...options,
-    lastVerifiedRows: previous.flatMap((row) => row.contracted === null || row.finalizedReserved === null || row.physicallyDispatched === null || row.availableToLoad === null || !row.lastVerifiedAt
-      || (options.cutoff && row.lastVerifiedAt.toISOString() > options.cutoff) ? [] : [{
-      contractId: row.contractId, contractItemId: row.contractItemId, productRowId: row.productRowId, unit: row.unit,
-      quantities: {
-        contracted: row.contracted.toFixed(3), finalizedReserved: row.finalizedReserved.toFixed(3),
-        physicallyDispatched: row.physicallyDispatched.toFixed(3), availableToLoad: row.availableToLoad.toFixed(3),
-      },
-      verifiedAt: row.lastVerifiedAt.toISOString(),
-    }]),
+    lastVerifiedRows,
   });
   const presentation = new Map<string, { contractNumber: string; productName: string | null }>();
-  for (const contract of contracts) contract.items.forEach((item, index) => {
-    const snapshot = contractProductSnapshot(contract.contractData, item.productRowId, item.productId, index);
+  for (const contract of contracts) contract.items.forEach((item) => {
+    const snapshot = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId }).snapshot || {};
     presentation.set(item.id, {
       contractNumber: contract.contractNumber,
       productName: String(snapshot.name || snapshot.stoneName || snapshot.productName || '').trim() || null,
@@ -207,6 +300,7 @@ export const readShipmentQuantityProjection = async (
 };
 
 export const rebuildShipmentQuantityProjection = async (prisma: PrismaClient, scope: Scope) => {
+  await captureFinanciallyApprovedContractQuantityVersions(prisma, scope);
   const result = await readShipmentQuantityProjection(prisma, scope);
   await prisma.$transaction(result.rows.map((row) => prisma.shipmentQuantityProjection.upsert({
     where: { contractItemId: row.contractItemId },
@@ -216,14 +310,14 @@ export const rebuildShipmentQuantityProjection = async (prisma: PrismaClient, sc
       physicallyDispatched: row.quantities?.physicallyDispatched, availableToLoad: row.quantities?.availableToLoad,
       health: row.health, healthReasons: row.healthReasons as string[], sourceEvidenceIds: row.sourceEvidenceIds as string[],
       cutoff: new Date(row.cutoff), lastVerifiedAt: row.lastVerifiedAt ? new Date(row.lastVerifiedAt) : null,
-      integrityHash: hash(row),
+      integrityHash: shipmentQuantityProjectionIntegrityHash(row),
     },
     update: {
       productRowId: row.productRowId, unit: row.unit, contracted: row.quantities?.contracted,
       finalizedReserved: row.quantities?.finalizedReserved, physicallyDispatched: row.quantities?.physicallyDispatched,
       availableToLoad: row.quantities?.availableToLoad, health: row.health, healthReasons: row.healthReasons as string[],
       sourceEvidenceIds: row.sourceEvidenceIds as string[], cutoff: new Date(row.cutoff), refreshedAt: new Date(),
-      lastVerifiedAt: row.lastVerifiedAt ? new Date(row.lastVerifiedAt) : null, integrityHash: hash(row),
+      lastVerifiedAt: row.lastVerifiedAt ? new Date(row.lastVerifiedAt) : null, integrityHash: shipmentQuantityProjectionIntegrityHash(row),
     },
   })));
   return result;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ErpBadge, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection } from '@/components/erp';
+import { ErpBadge, ErpCard, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpSummaryGrid } from '@/components/erp';
 import { shipmentQuantityAPI } from '@/lib/api';
 import { formatShipmentQuantity, shipmentHealthPresentation, type ShipmentQuantityRow } from './shipmentQuantityPresentation';
 
@@ -10,10 +10,10 @@ interface ProjectionResponse {
   rows: ShipmentQuantityRow[];
   totalsByUnit: Array<{
     unit: string;
-    contracted: string;
-    finalizedReserved: string;
-    physicallyDispatched: string;
-    availableToLoad: string;
+    contracted: string | null;
+    finalizedReserved: string | null;
+    physicallyDispatched: string | null;
+    availableToLoad: string | null;
     affectedRowCount: number;
     isComplete: boolean;
   }>;
@@ -53,18 +53,18 @@ export function ShipmentQuantitySummary({ contractId, customerId }: { contractId
       ) : (
         <div className="space-y-4">
           {data.totalsByUnit.map((total) => (
-            <div key={total.unit} className="rounded-xl border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] p-3">
+            <ErpCard key={total.unit} tone={total.isComplete ? 'neutral' : 'warning'} className="p-3">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h3 className="sds-text-primary text-sm font-semibold">جمع {unitLabel(total.unit)}</h3>
                 {!total.isComplete && <ErpBadge tone="warning">جمع شناخته‌شده · {total.affectedRowCount.toLocaleString('fa-IR')} ردیف نیازمند بررسی</ErpBadge>}
               </div>
-              <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                {[
-                  ['قرارداد', total.contracted], ['رزروشده', total.finalizedReserved],
-                  ['خارج‌شده', total.physicallyDispatched], ['قابل بارگیری', total.availableToLoad],
-                ].map(([label, value]) => <div key={label}><dt className="sds-text-muted text-xs">{label}</dt><dd className="sds-text-primary mt-1 font-semibold">{formatShipmentQuantity(value)}</dd></div>)}
-              </dl>
-            </div>
+              <ErpSummaryGrid columns={2} items={[
+                { label: 'قرارداد', value: formatShipmentQuantity(total.contracted) },
+                { label: 'رزروشده', value: formatShipmentQuantity(total.finalizedReserved) },
+                { label: 'خارج‌شده', value: formatShipmentQuantity(total.physicallyDispatched) },
+                { label: 'قابل بارگیری', value: formatShipmentQuantity(total.availableToLoad), tone: total.availableToLoad?.startsWith('-') ? 'danger' : total.availableToLoad ? 'success' : 'warning' },
+              ]} />
+            </ErpCard>
           ))}
           <div className="overflow-x-auto">
             <table className="min-w-full text-right text-sm">

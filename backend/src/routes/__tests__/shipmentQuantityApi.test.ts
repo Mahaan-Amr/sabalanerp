@@ -55,3 +55,42 @@ test('API rejects an invalid cutoff without reading projection evidence', async 
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+const authenticatedAs = (role: string) => (req: any, _res: any, next: any) => {
+  req.user = { id: 'user-1', role, email: '', username: '', departmentId: null, isActive: true, mustChangePassword: false };
+  next();
+};
+
+test('MANAGER has no global shipment projection bypass', async () => {
+  const none = { findMany: async () => [] };
+  const prisma = { workspacePermission: none, roleWorkspacePermission: none, featurePermission: none, roleFeaturePermission: none } as any;
+  const app = express();
+  app.use('/api/shipment-quantities', createShipmentQuantityRouter({ prisma, authenticate: authenticatedAs('MANAGER') }));
+  const server = app.listen(0);
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/shipment-quantities/contracts/c1`);
+    assert.equal(response.status, 403);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('active role workspace and matching feature grants permit view when user grant is unavailable', async () => {
+  const prisma = {
+    workspacePermission: { findMany: async ({ where }: any) => { assert.ok(where.OR.some((item: any) => item.expiresAt === null)); return []; } },
+    featurePermission: { findMany: async ({ where }: any) => { assert.ok(where.OR.some((item: any) => item.expiresAt === null)); return []; } },
+    roleWorkspacePermission: { findMany: async () => [{ workspace: 'accounting', permissionLevel: 'view' }] },
+    roleFeaturePermission: { findMany: async () => [{ workspace: 'accounting', feature: 'accounting_contracts_view', permissionLevel: 'view' }] },
+  } as any;
+  const app = express();
+  app.use('/api/shipment-quantities', createShipmentQuantityRouter({
+    prisma, authenticate: authenticatedAs('ACCOUNTANT'), readProjection: (async () => projection) as any,
+  }));
+  const server = app.listen(0);
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/shipment-quantities/contracts/c1`);
+    assert.equal(response.status, 200);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

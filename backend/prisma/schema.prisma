@@ -2052,32 +2052,33 @@ model SecurityVehiclePairPhoto {
 }
 
 model SecurityVehicleMovement {
-  id                 String                           @id @default(cuid())
-  movementNumber     String                           @unique
-  direction          SecurityVehicleMovementDirection
-  purpose            SecurityVehicleMovementPurpose
-  status             SecurityVehicleMovementStatus    @default(ENTRY_RECORDED)
-  vehiclePairId      String?
-  loadingId          String?
-  customerId         String?
-  projectId          String?
-  occurredAt         DateTime                         @default(now())
-  completedAt        DateTime?
-  voidedAt           DateTime?
-  voidedBy           String?
-  voidReason         String?
-  driverSnapshot     Json?
-  documentSnapshot   Json?
-  settlementSnapshot Json?
-  notes              String?
-  createdBy          String
-  createdAt          DateTime                         @default(now())
-  updatedAt          DateTime                         @updatedAt
-  vehiclePair        SecurityVehiclePair?             @relation(fields: [vehiclePairId], references: [id], onDelete: SetNull)
-  loading            LogisticsLoading?                @relation(fields: [loadingId], references: [id], onDelete: SetNull)
-  customer           CrmCustomer?                     @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  project            ProjectAddress?                  @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  attachments        SecurityVehicleAttachment[]
+  id                     String                           @id @default(cuid())
+  movementNumber         String                           @unique
+  direction              SecurityVehicleMovementDirection
+  purpose                SecurityVehicleMovementPurpose
+  status                 SecurityVehicleMovementStatus    @default(ENTRY_RECORDED)
+  vehiclePairId          String?
+  loadingId              String?
+  customerId             String?
+  projectId              String?
+  occurredAt             DateTime                         @default(now())
+  completedAt            DateTime?
+  voidedAt               DateTime?
+  voidedBy               String?
+  voidReason             String?
+  driverSnapshot         Json?
+  documentSnapshot       Json?
+  settlementSnapshot     Json?
+  notes                  String?
+  createdBy              String
+  createdAt              DateTime                         @default(now())
+  updatedAt              DateTime                         @updatedAt
+  vehiclePair            SecurityVehiclePair?             @relation(fields: [vehiclePairId], references: [id], onDelete: SetNull)
+  loading                LogisticsLoading?                @relation(fields: [loadingId], references: [id], onDelete: SetNull)
+  customer               CrmCustomer?                     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  project                ProjectAddress?                  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  attachments            SecurityVehicleAttachment[]
+  shipmentReturnEvidence ShipmentQuantityEvidence[]
 
   @@index([direction])
   @@index([purpose])
@@ -2430,27 +2431,34 @@ model LogisticsLoadingCorrection {
 }
 
 model ShipmentQuantityEvidence {
-  id             String                       @id @default(cuid())
-  contractId     String
-  contractItemId String
-  productRowId   String
-  unit           String
-  kind           ShipmentQuantityEvidenceKind
-  quantity       Decimal                      @db.Decimal(18, 3)
-  effectiveAt    DateTime
-  recordedAt     DateTime                     @default(now())
-  sourceType     String
-  sourceId       String
-  sourceVersion  Int                          @default(1)
-  integrityHash  String
-  metadata       Json?
-  contract       SalesContract                @relation(fields: [contractId], references: [id], onDelete: Restrict)
-  contractItem   ContractItem                 @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
+  id                    String                       @id @default(cuid())
+  contractId            String
+  contractItemId        String
+  productRowId          String
+  unit                  String
+  kind                  ShipmentQuantityEvidenceKind
+  quantity              Decimal                      @db.Decimal(18, 3)
+  effectiveAt           DateTime
+  recordedAt            DateTime                     @default(now())
+  sourceType            String
+  sourceId              String
+  sourceVersion         Int                          @default(1)
+  integrityHash         String
+  metadata              Json?
+  guardReturnMovementId String?
+  returnEvidenceId      String?
+  contract              SalesContract                @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  contractItem          ContractItem                 @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
+  guardReturnMovement   SecurityVehicleMovement?     @relation(fields: [guardReturnMovementId], references: [id], onDelete: Restrict)
+  returnEvidence        ShipmentQuantityEvidence?    @relation("ShipmentReturnEvidence", fields: [returnEvidenceId], references: [id], onDelete: Restrict)
+  linkedCorrections     ShipmentQuantityEvidence[]   @relation("ShipmentReturnEvidence")
 
   @@unique([sourceType, sourceId, sourceVersion])
   @@index([contractId, effectiveAt])
   @@index([contractItemId, effectiveAt])
   @@index([recordedAt])
+  @@index([guardReturnMovementId])
+  @@index([returnEvidenceId])
   @@map("shipment_quantity_evidence")
 }
 
@@ -3117,6 +3125,7 @@ enum ShipmentQuantityEvidenceKind {
   MANUAL_OUTAGE_EXIT
   DISPATCH_CORRECTION_DRAFT
   DISPATCH_CORRECTION_POSTED
+  GUARD_RETURN_VERIFIED
   LEGACY_UNRECONCILED_RESERVED
   LEGACY_DISPATCHED
   LEGACY_RELEASED

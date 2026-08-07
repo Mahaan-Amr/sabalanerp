@@ -12,6 +12,7 @@ export type ShipmentQuantityEvidenceKind =
   | 'MANUAL_OUTAGE_EXIT'
   | 'DISPATCH_CORRECTION_DRAFT'
   | 'DISPATCH_CORRECTION_POSTED'
+  | 'GUARD_RETURN_VERIFIED'
   | 'LEGACY_UNRECONCILED_RESERVED'
   | 'LEGACY_DISPATCHED'
   | 'LEGACY_RELEASED'
@@ -34,6 +35,8 @@ export interface ShipmentQuantityEvidence {
   readonly sourceVersion: number;
   readonly integrityHash: string;
   readonly metadata?: Record<string, unknown>;
+  readonly guardReturnMovementId?: string;
+  readonly returnEvidenceId?: string;
 }
 
 export interface ShipmentQuantities {
@@ -71,8 +74,12 @@ export interface ShipmentQuantityProjection {
   readonly mode: 'OPERATIONAL_AS_OF' | 'AUDIT_KNOWN_AT';
   readonly cutoff: string;
   readonly rows: readonly ShipmentProjectionRow[];
-  readonly totalsByUnit: ReadonlyArray<ShipmentQuantities & {
+  readonly totalsByUnit: ReadonlyArray<{
     readonly unit: string;
+    readonly contracted: string | null;
+    readonly finalizedReserved: string | null;
+    readonly physicallyDispatched: string | null;
+    readonly availableToLoad: string | null;
     readonly affectedRowCount: number;
     readonly isComplete: boolean;
   }>;
@@ -137,6 +144,8 @@ export const projectShipmentQuantities = (
     let reserved = 0n;
     let dispatched = 0n;
     let unresolvedLegacy = 0n;
+    const verifiedReturns = new Set(events.filter((item) => item.kind === 'GUARD_RETURN_VERIFIED').map((item) => item.id));
+    const awaitingReturnAccounting = new Set(verifiedReturns);
     let health: ShipmentProjectionHealth = 'CURRENT';
     const healthReasons: string[] = [];
 
@@ -153,7 +162,18 @@ export const projectShipmentQuantities = (
         case 'ALLOCATION_RELEASED': reserved -= quantity; break;
         case 'PHYSICAL_EXIT':
         case 'MANUAL_OUTAGE_EXIT': reserved -= quantity; dispatched += quantity; break;
-        case 'DISPATCH_CORRECTION_POSTED': dispatched += quantity; break;
+        case 'DISPATCH_CORRECTION_POSTED':
+          if (quantity < 0n) {
+            const returnEvidenceId = String(item.returnEvidenceId || item.metadata?.returnEvidenceId || '');
+            if (!returnEvidenceId || !verifiedReturns.has(returnEvidenceId)) {
+              worsenHealth('EVIDENCE_CONFLICT', 'Negative return correction lacks verified Guard inbound evidence');
+              break;
+            }
+            awaitingReturnAccounting.delete(returnEvidenceId);
+          }
+          dispatched += quantity;
+          break;
+        case 'GUARD_RETURN_VERIFIED': break;
         case 'LEGACY_UNRECONCILED_RESERVED':
           reserved += quantity;
           unresolvedLegacy += quantity;
@@ -180,6 +200,7 @@ export const projectShipmentQuantities = (
     if (reserved < 0n) worsenHealth('EVIDENCE_CONFLICT', 'Reserved quantity movement has no matching reservation');
     if (unresolvedLegacy > 0n) worsenHealth('LEGACY_UNRECONCILED', 'Legacy finalized loading awaits review');
     if (unresolvedLegacy < 0n) worsenHealth('EVIDENCE_CONFLICT', 'Legacy review has no matching held quantity');
+    if (awaitingReturnAccounting.size > 0) worsenHealth('EVIDENCE_CONFLICT', 'Verified physical return awaits Accounting correction');
 
     const finalHealth = health as ShipmentProjectionHealth;
     const verified = lastVerified.get(key);
@@ -189,7 +210,7 @@ export const projectShipmentQuantities = (
       physicallyDispatched: formatFixed(dispatched),
       availableToLoad: formatFixed(contracted - reserved - dispatched),
     };
-    const quantities = finalHealth === 'EVIDENCE_CONFLICT' && verified ? verified.quantities : computed;
+    const quantities = finalHealth !== 'CURRENT' && verified ? verified.quantities : computed;
 
     return {
       contractId: identity.contractId,
@@ -207,13 +228,14 @@ export const projectShipmentQuantities = (
     };
   }).sort((left, right) => rowKey(left).localeCompare(rowKey(right)));
 
-  const byUnit = new Map<string, { contracted: bigint; reserved: bigint; dispatched: bigint; available: bigint; affected: number; complete: boolean }>();
+  const byUnit = new Map<string, { contracted: bigint; reserved: bigint; dispatched: bigint; available: bigint; affected: number; known: number; complete: boolean }>();
   for (const row of rows) {
-    const aggregate = byUnit.get(row.unit) || { contracted: 0n, reserved: 0n, dispatched: 0n, available: 0n, affected: 0, complete: true };
+    const aggregate = byUnit.get(row.unit) || { contracted: 0n, reserved: 0n, dispatched: 0n, available: 0n, affected: 0, known: 0, complete: true };
     if (!row.quantities) {
       aggregate.affected += 1;
       aggregate.complete = false;
     } else {
+      aggregate.known += 1;
       aggregate.contracted += parseFixed(row.quantities.contracted);
       aggregate.reserved += parseFixed(row.quantities.finalizedReserved);
       aggregate.dispatched += parseFixed(row.quantities.physicallyDispatched);
@@ -232,10 +254,10 @@ export const projectShipmentQuantities = (
     rows,
     totalsByUnit: [...byUnit.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([unit, value]) => ({
       unit,
-      contracted: formatFixed(value.contracted),
-      finalizedReserved: formatFixed(value.reserved),
-      physicallyDispatched: formatFixed(value.dispatched),
-      availableToLoad: formatFixed(value.available),
+      contracted: value.known ? formatFixed(value.contracted) : null,
+      finalizedReserved: value.known ? formatFixed(value.reserved) : null,
+      physicallyDispatched: value.known ? formatFixed(value.dispatched) : null,
+      availableToLoad: value.known ? formatFixed(value.available) : null,
       affectedRowCount: value.affected,
       isComplete: value.complete,
     })),

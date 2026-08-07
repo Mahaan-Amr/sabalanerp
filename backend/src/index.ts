@@ -54,6 +54,7 @@ import systemRecoveryRoutes from "./routes/system-recovery";
 import notificationRoutes from "./routes/notifications";
 import supportTicketRoutes from "./routes/support-tickets";
 import dispatchMasterDataRoutes from "./routes/dispatch-master-data";
+import biometricConnectorRoutes from "./routes/biometric-connector";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -197,6 +198,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/support-tickets", supportTicketRoutes);
 app.use("/api/dispatch-master-data", dispatchMasterDataRoutes);
+app.use("/api/biometric-connector", biometricConnectorRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/orders", orderRoutes);

@@ -26,6 +26,7 @@
     "test:system-recovery": "tsx src/services/__tests__/systemRecoveryPolicy.test.ts && tsx src/services/__tests__/recoveryCrypto.test.ts",
     "test:notifications": "tsx src/services/__tests__/notificationPolicy.test.ts",
     "test:support-tickets": "tsx src/services/__tests__/supportTicketPolicy.test.ts",
+    "test:biometric-connector": "tsx src/services/__tests__/biometricConnector.test.ts",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "db:migrate": "prisma migrate dev",

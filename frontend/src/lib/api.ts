@@ -875,6 +875,7 @@ export const accountingAPI = {
   getSettings: () => api.get('/accounting/settings'),
   updateSettings: (data: any) => api.put('/accounting/settings', data),
   executeAction: (data: any) => api.post('/accounting/actions', data),
+  getBiometricConnectorDiagnostics: () => api.get('/biometric-connector/diagnostics'),
 };
 
 export const biAPI = {

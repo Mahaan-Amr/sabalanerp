@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaEye, FaFileInvoice, FaSync, FaTrashAlt } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import PersianCalendar from '@/lib/persian-calendar';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import {
@@ -23,6 +24,18 @@ const statusOptions = [
   { label: 'نیازمند اصلاح', value: 'NEEDS_CORRECTION' },
 ];
 
+const buildPersianPeriodOptions = (selectedPeriod: string) => {
+  const currentPeriod = PersianCalendar.now().slice(0, 7).replace('/', '-');
+  const [baseYear, baseMonth] = (selectedPeriod || currentPeriod).split('-').map(Number);
+  return Array.from({ length: 13 }, (_, index) => {
+    const monthIndex = (baseYear * 12) + (baseMonth - 1) + 6 - index;
+    const year = Math.floor(monthIndex / 12);
+    const month = (monthIndex % 12) + 1;
+    const value = `${year}-${String(month).padStart(2, '0')}`;
+    return { value, label: value.replace('-', '/') };
+  }).filter((option) => /^1[2-7]\d{2}-/.test(option.value));
+};
+
 export default function AccountingInvoiceCandidatesPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -32,6 +45,7 @@ export default function AccountingInvoiceCandidatesPage() {
     [searchParams],
   );
   const query = canonicalQuery.state;
+  const periodOptions = useMemo(() => buildPersianPeriodOptions(query.period), [query.period]);
   const [rows, setRows] = useState<any[]>([]);
   const [pagination, setPagination] = useState(emptyAccountingPagination);
   const [loading, setLoading] = useState(true);
@@ -141,12 +155,22 @@ export default function AccountingInvoiceCandidatesPage() {
   return (
     <ErpListPage
       eyebrow="حسابداری"
-      title="پیش‌نویس صورتحساب‌ها"
-      description="صورتحساب‌های پیشنهادی که حسابداری از قراردادهای تایید شده، امضا شده یا چاپ شده ایجاد کرده است."
+      title={query.view === 'invoiced' ? 'صورتحساب‌های دوره مالی' : 'پیش‌نویس صورتحساب‌ها'}
+      description={query.view === 'invoiced'
+        ? `رکوردهای مؤثر در رویدادهای مالی${query.period ? ` دوره شمسی ${query.period.replace('-', '/')}` : ''}.`
+        : 'صورتحساب‌های پیشنهادی که حسابداری از قراردادهای تایید شده، امضا شده یا چاپ شده ایجاد کرده است.'}
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadRows, tone: 'neutral' }]}
       filters={[
         { id: 'search', label: 'جستجو', type: 'search', value: searchInput, onChange: setSearchInput, placeholder: 'شماره قرارداد یا مشتری...' },
         { id: 'status', label: 'وضعیت', type: 'select', value: query.status, onChange: (value) => updateQuery({ status: value }), options: statusOptions },
+        ...(query.view === 'invoiced' ? [{
+          id: 'period',
+          label: 'دوره مالی شمسی',
+          type: 'select' as const,
+          value: query.period,
+          onChange: (value: string) => updateQuery({ period: value }),
+          options: periodOptions,
+        }] : []),
       ]}
       rows={rows}
       rowKey={(row) => row.id}

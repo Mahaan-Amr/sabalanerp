@@ -5,6 +5,8 @@ import {
   classifyHrReconciliationRecord,
   projectLegacyHrAccess,
   planLegacyAssessmentMigration,
+  projectLegacyHrWorkItem,
+  projectLegacyPosition,
 } from '../hrRedesignDataContracts';
 
 assert.deepEqual(projectLegacyHrAccess({
@@ -16,6 +18,26 @@ assert.deepEqual(projectLegacyHrAccess({
   workspaceGrant: { legacyGrantId: 'workspace-1', userId: 'user-1', workspaceCode: 'HUMAN_RESOURCES', level: 'EDIT', status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null },
   featureGrants: [{ legacyGrantId: 'feature-1', userId: 'user-1', featureCode: 'PERSONNEL', level: 'VIEW', status: 'ACTIVE', effectiveFrom: new Date('2026-01-02T00:00:00.000Z'), effectiveTo: null }],
   authorityGrants: [{ legacyAuthorityId: 'authority-1', userId: 'user-1', authorityCode: 'HR_MANAGER', status: 'REVOKED', effectiveFrom: new Date('2026-01-03T00:00:00.000Z'), effectiveTo: new Date('2026-02-01T00:00:00.000Z') }],
+});
+
+assert.deepEqual(projectLegacyPosition({
+  id: 'position-1', code: 'POS-1', title: 'Legacy position', capacity: 2, isActive: true,
+  createdAt: new Date('2026-01-01T00:00:00.000Z'),
+}), {
+  id: 'position-1', code: 'POS-1', title: 'Legacy position', capacity: 2,
+  lifecycle: { status: 'ACTIVE', effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), source: 'LEGACY_CURRENT_STATE' },
+  lifecycleHistory: [], capacityHistory: [], historicalEvidenceFabricated: false,
+});
+
+assert.deepEqual(projectLegacyHrWorkItem({
+  id: 'work-1', title: 'Legacy work', description: null, status: 'IN_PROGRESS', sourceType: 'HIRING_ACTION',
+  sourceKey: 'application-1', destinationHref: '/dashboard/hr/hiring/application-1', dueDate: new Date('2026-02-01T00:00:00.000Z'),
+  assignedToUserId: 'user-1', completedByUserId: null, completedAt: null, waivedByUserId: null, waivedAt: null, waiverReason: null,
+}), {
+  id: 'work-1', title: 'Legacy work', description: null, status: 'OPEN', dueAt: new Date('2026-02-01T00:00:00.000Z'),
+  assigneeUserId: 'user-1', source: { type: 'HIRING_ACTION', id: 'application-1' },
+  destinationHref: '/dashboard/hr/hiring/application-1', envelope: { code: 'LEGACY_HR_WORK_ITEM', version: 1 },
+  structuredResult: null, compatibilitySource: 'LEGACY_HR_WORK_ITEM', taskScopedOnly: true,
 });
 
 assert.deepEqual(HR_REDESIGN_CATALOG.workspaceFeatures.map((feature) => feature.code), [
@@ -57,27 +79,29 @@ assert.deepEqual(planLegacyAssessmentMigration({
 });
 
 assert.deepEqual(classifyHrReconciliationRecord({
-  sourceType: 'PERSONNEL',
-  sourceId: 'person-1',
-  isCurrent: true,
-  hasLinkedUser: false,
+  sourceType: 'USER',
+  sourceId: 'user-1',
+  isOperationallyCurrent: true,
+  legacyOnlyReviewed: false,
+  userPersonnelLinkResolved: false,
   identityAmbiguous: false,
-  hasCurrentOrganizationalAssignment: false,
+  hasCurrentOrganizationalAssignment: true,
   employmentConsistent: true,
   startDateReviewOpen: false,
   assessmentPlanUnresolved: false,
   classificationError: false,
 }), {
   primaryState: 'NEEDS_REVIEW',
-  attentionFlags: ['USER_PERSONNEL_LINKAGE', 'CURRENT_ASSIGNMENT_GAP'],
+  attentionFlags: ['USER_PERSONNEL_LINKAGE'],
   cutoverBlocker: true,
 });
 
 assert.deepEqual(classifyHrReconciliationRecord({
   sourceType: 'PERSONNEL',
   sourceId: 'person-2',
-  isCurrent: false,
-  hasLinkedUser: false,
+  isOperationallyCurrent: false,
+  legacyOnlyReviewed: true,
+  userPersonnelLinkResolved: true,
   identityAmbiguous: false,
   hasCurrentOrganizationalAssignment: false,
   employmentConsistent: true,
@@ -86,6 +110,42 @@ assert.deepEqual(classifyHrReconciliationRecord({
   classificationError: false,
 }), {
   primaryState: 'LEGACY_ONLY_HISTORY',
+  attentionFlags: [],
+  cutoverBlocker: false,
+});
+
+assert.deepEqual(classifyHrReconciliationRecord({
+  sourceType: 'PERSONNEL',
+  sourceId: 'legacy-with-classification-error',
+  isOperationallyCurrent: false,
+  legacyOnlyReviewed: true,
+  userPersonnelLinkResolved: true,
+  identityAmbiguous: false,
+  hasCurrentOrganizationalAssignment: false,
+  employmentConsistent: true,
+  startDateReviewOpen: false,
+  assessmentPlanUnresolved: false,
+  classificationError: true,
+}), {
+  primaryState: 'CLASSIFICATION_ERROR',
+  attentionFlags: ['CLASSIFICATION_ERROR'],
+  cutoverBlocker: true,
+});
+
+assert.deepEqual(classifyHrReconciliationRecord({
+  sourceType: 'PERSONNEL',
+  sourceId: 'person-without-login',
+  isOperationallyCurrent: true,
+  legacyOnlyReviewed: false,
+  userPersonnelLinkResolved: true,
+  identityAmbiguous: false,
+  hasCurrentOrganizationalAssignment: true,
+  employmentConsistent: true,
+  startDateReviewOpen: false,
+  assessmentPlanUnresolved: false,
+  classificationError: false,
+}), {
+  primaryState: 'READY',
   attentionFlags: [],
   cutoverBlocker: false,
 });

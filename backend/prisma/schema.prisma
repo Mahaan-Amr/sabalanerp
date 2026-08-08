@@ -4861,7 +4861,7 @@ model HrFormalAssessmentPlan {
   predecessorPlanId      String?
   createdAt              DateTime                          @default(now())
   application            HrJobApplication                  @relation(fields: [applicationId], references: [id], onDelete: Restrict)
-  predecessor            HrFormalAssessmentPlan?           @relation("HrAssessmentPlanVersions", fields: [predecessorPlanId], references: [id], onDelete: Restrict)
+  predecessor            HrFormalAssessmentPlan?           @relation("HrAssessmentPlanVersions", fields: [predecessorPlanId, applicationId], references: [id, applicationId], onDelete: Restrict)
   successors             HrFormalAssessmentPlan[]          @relation("HrAssessmentPlanVersions")
   selections             HrFormalAssessmentPlanSelection[]
   results                HrFormalAssessmentResult[]
@@ -4907,11 +4907,12 @@ model HrFormalAssessmentResult {
   application         HrJobApplication                @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   plan                HrFormalAssessmentPlan          @relation(fields: [planId, applicationId], references: [id, applicationId], onDelete: Restrict)
   planSelection       HrFormalAssessmentPlanSelection @relation(fields: [planSelectionId, planId, assessmentKind], references: [id, planId, assessmentKind], onDelete: Restrict)
-  supersedes          HrFormalAssessmentResult?       @relation("HrAssessmentResultVersions", fields: [supersedesResultId], references: [id], onDelete: Restrict)
+  supersedes          HrFormalAssessmentResult?       @relation("HrAssessmentResultVersions", fields: [supersedesResultId, applicationId, assessmentKind], references: [id, applicationId, assessmentKind], onDelete: Restrict)
   supersededBy        HrFormalAssessmentResult[]      @relation("HrAssessmentResultVersions")
   attempts            HrFormalAssessmentAttempt[]
 
   @@unique([applicationId, assessmentKind, resultVersion])
+  @@unique([id, applicationId, assessmentKind])
   @@index([planSelectionId, status])
   @@map("hr_formal_assessment_results")
 }

@@ -12,7 +12,14 @@ import { assertArchiveReason, assertArchivedRecordMutable, assertPermanentDeleti
 import { buildPersonnelErasurePlan, executePersonnelErasureGraph } from '../services/hrPersonnelErasureGraph';
 import { commitStagedHiringFiles, planHiringFilesForDeletion, restoreStagedHiringFiles, stagePlannedHiringFiles, type StagedHiringFile } from '../services/hrDeletionFileTransaction';
 import { PERSONNEL_ERASURE_LEASE_MS } from '../services/hrPersonnelErasureRecovery';
-import { HR_REDESIGN_CATALOG, projectLegacyHrAccess, runHrRedesignBackfill } from '../services/hrRedesignDataContracts';
+import {
+  HR_REDESIGN_CATALOG,
+  planLegacyAssessmentMigration,
+  projectLegacyHrAccess,
+  projectLegacyHrWorkItem,
+  projectLegacyPosition,
+  runHrRedesignBackfill,
+} from '../services/hrRedesignDataContracts';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -1002,6 +1009,54 @@ router.get('/redesign/compatibility/access/:userId', adminAccess, async (req, re
     ]);
     res.json({ success: true, data: projectLegacyHrAccess({ userId: req.params.userId, workspacePermission, featurePermissions, authorities }) });
   } catch (error) { handleError(res, error, 'Project legacy HR access'); }
+});
+
+router.get('/redesign/compatibility/positions', viewAccess, async (_req, res) => {
+  try {
+    const positions = await prisma.hrPosition.findMany({
+      select: { id: true, code: true, title: true, capacity: true, isActive: true, createdAt: true },
+      orderBy: { code: 'asc' },
+    });
+    res.json({ success: true, data: positions.map(projectLegacyPosition) });
+  } catch (error) { handleError(res, error, 'Project legacy HR Positions'); }
+});
+
+router.get('/redesign/compatibility/work-items', adminAccess, async (_req, res) => {
+  try {
+    const workItems = await prisma.hrWorkItem.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
+    res.json({ success: true, data: workItems.map(projectLegacyHrWorkItem) });
+  } catch (error) { handleError(res, error, 'Project legacy HR work items'); }
+});
+
+router.get('/redesign/compatibility/applications/:applicationId/assessments', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    if (req.user!.role !== 'ADMIN') {
+      const authority = await prisma.hrHiringAuthority.findFirst({
+        where: {
+          userId: actorId(req),
+          authority: { in: ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HIRING_MANAGER'] },
+          isActive: true,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        select: { id: true },
+      });
+      if (!authority) return res.status(403).json({ success: false, error: 'Hiring assessment authority is required.' });
+    }
+    const application = await prisma.hrJobApplication.findUniqueOrThrow({
+      where: { id: req.params.applicationId },
+      select: { id: true, assessments: { orderBy: { recordedAt: 'asc' } } },
+    });
+    const completedAssessmentKinds = [...new Set(application.assessments
+      .map((assessment) => assessment.assessmentType)
+      .filter((kind): kind is 'DISC' | 'EQ' | 'BIG_FIVE' => ['DISC', 'EQ', 'BIG_FIVE'].includes(kind)))] as Array<'DISC' | 'EQ' | 'BIG_FIVE'>;
+    res.json({
+      success: true,
+      data: {
+        migration: planLegacyAssessmentMigration({ applicationId: application.id, completedAssessmentKinds }),
+        evidence: application.assessments,
+      },
+    });
+  } catch (error) { handleError(res, error, 'Project legacy HR assessment evidence'); }
 });
 
 router.get('/migration/redesign-preview', adminAccess, async (req: WorkspaceRequest, res) => {

@@ -116,6 +116,66 @@ export const projectLegacyHrAccess = (input: {
   return { workspaceGrant, featureGrants, authorityGrants };
 };
 
+export const projectLegacyPosition = (position: {
+  id: string;
+  code: string;
+  title: string;
+  capacity: number;
+  isActive: boolean;
+  createdAt: Date;
+}) => ({
+  id: position.id,
+  code: position.code,
+  title: position.title,
+  capacity: position.capacity,
+  lifecycle: {
+    status: position.isActive ? 'ACTIVE' as const : 'INACTIVE' as const,
+    effectiveFrom: position.createdAt,
+    source: 'LEGACY_CURRENT_STATE' as const,
+  },
+  lifecycleHistory: [],
+  capacityHistory: [],
+  historicalEvidenceFabricated: false,
+});
+
+export const projectLegacyHrWorkItem = (workItem: {
+  id: string;
+  title: string;
+  description: string | null;
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETE' | 'WAIVED';
+  sourceType: string;
+  sourceKey: string | null;
+  destinationHref: string;
+  dueDate: Date;
+  assignedToUserId: string | null;
+  completedByUserId: string | null;
+  completedAt: Date | null;
+  waivedByUserId: string | null;
+  waivedAt: Date | null;
+  waiverReason: string | null;
+}) => ({
+  id: workItem.id,
+  title: workItem.title,
+  description: workItem.description,
+  status: workItem.status === 'COMPLETE'
+    ? 'COMPLETED' as const
+    : workItem.status === 'WAIVED'
+      ? 'WAIVED' as const
+      : 'OPEN' as const,
+  dueAt: workItem.dueDate,
+  assigneeUserId: workItem.assignedToUserId,
+  source: { type: workItem.sourceType, id: workItem.sourceKey ?? workItem.id },
+  destinationHref: workItem.destinationHref,
+  envelope: { code: 'LEGACY_HR_WORK_ITEM' as const, version: 1 },
+  structuredResult: workItem.status === 'COMPLETE'
+    ? { outcome: 'COMPLETED', actorUserId: workItem.completedByUserId, respondedAt: workItem.completedAt }
+    : workItem.status === 'WAIVED'
+      ? { outcome: 'WAIVED', actorUserId: workItem.waivedByUserId, respondedAt: workItem.waivedAt, reason: workItem.waiverReason }
+      : null,
+  compatibilitySource: 'LEGACY_HR_WORK_ITEM' as const,
+  taskScopedOnly: true,
+});
+
 export const planLegacyAssessmentMigration = (input: {
   applicationId: string;
   completedAssessmentKinds: HrAssessmentKind[];
@@ -144,39 +204,40 @@ export type HrReconciliationAttentionFlag =
 export type HrReconciliationInput = {
   sourceType: string;
   sourceId: string;
-  isCurrent: boolean;
-  hasLinkedUser: boolean;
+  isOperationallyCurrent: boolean;
+  legacyOnlyReviewed: boolean;
+  userPersonnelLinkResolved: boolean;
   identityAmbiguous: boolean;
   hasCurrentOrganizationalAssignment: boolean;
   employmentConsistent: boolean;
   startDateReviewOpen: boolean;
   assessmentPlanUnresolved: boolean;
   classificationError: boolean;
+  suppressedAttentionFlags?: HrReconciliationAttentionFlag[];
 };
 
 export const classifyHrReconciliationRecord = (input: HrReconciliationInput) => {
-  if (!input.isCurrent) {
-    return {
-      primaryState: 'LEGACY_ONLY_HISTORY' as const,
-      attentionFlags: [] as HrReconciliationAttentionFlag[],
-      cutoverBlocker: false,
-    };
-  }
-
   const attentionFlags: HrReconciliationAttentionFlag[] = [];
-  if (!input.hasLinkedUser) attentionFlags.push('USER_PERSONNEL_LINKAGE');
-  if (input.identityAmbiguous) attentionFlags.push('IDENTITY_AMBIGUITY');
-  if (!input.hasCurrentOrganizationalAssignment) attentionFlags.push('CURRENT_ASSIGNMENT_GAP');
-  if (!input.employmentConsistent) attentionFlags.push('EMPLOYMENT_INCONSISTENCY');
-  if (input.startDateReviewOpen) attentionFlags.push('START_DATE_REVIEW');
-  if (input.assessmentPlanUnresolved) attentionFlags.push('ASSESSMENT_PLAN_UNRESOLVED');
-  if (input.classificationError) attentionFlags.push('CLASSIFICATION_ERROR');
+  const addFlag = (condition: boolean, flag: HrReconciliationAttentionFlag) => {
+    if (condition && !input.suppressedAttentionFlags?.includes(flag)) attentionFlags.push(flag);
+  };
+  addFlag(input.sourceType === 'USER' && !input.userPersonnelLinkResolved, 'USER_PERSONNEL_LINKAGE');
+  addFlag(input.identityAmbiguous, 'IDENTITY_AMBIGUITY');
+  if (input.sourceType === 'PERSONNEL' && input.isOperationallyCurrent && !input.hasCurrentOrganizationalAssignment) {
+    addFlag(true, 'CURRENT_ASSIGNMENT_GAP');
+  }
+  addFlag(!input.employmentConsistent, 'EMPLOYMENT_INCONSISTENCY');
+  addFlag(input.startDateReviewOpen, 'START_DATE_REVIEW');
+  addFlag(input.assessmentPlanUnresolved, 'ASSESSMENT_PLAN_UNRESOLVED');
+  addFlag(input.classificationError, 'CLASSIFICATION_ERROR');
 
   return {
     primaryState: input.classificationError
       ? 'CLASSIFICATION_ERROR' as const
       : attentionFlags.length > 0
         ? 'NEEDS_REVIEW' as const
+        : input.legacyOnlyReviewed
+          ? 'LEGACY_ONLY_HISTORY' as const
         : 'READY' as const,
     attentionFlags,
     cutoverBlocker: attentionFlags.length > 0,
@@ -224,8 +285,12 @@ export type RunHrRedesignBackfillOptions = {
   actorUserId?: string;
 };
 
+type HrBackfillClient = PrismaClient | Prisma.TransactionClient;
+
+const ownsTransactionBoundary = (client: HrBackfillClient): client is PrismaClient => '$transaction' in client;
+
 export const runHrRedesignBackfill = async (
-  client: PrismaClient,
+  client: HrBackfillClient,
   options: RunHrRedesignBackfillOptions,
 ) => {
   const workspaceCodes = [HR_REDESIGN_CATALOG.workspaceCode];
@@ -233,20 +298,29 @@ export const runHrRedesignBackfill = async (
   const authorityCodes = [...HR_REDESIGN_CATALOG.businessAuthorities];
   const responsibilityCodes = [...HR_REDESIGN_CATALOG.responsibilityTypes];
 
-  const [workspaceCount, featureCount, authorityCount, responsibilityCount, admins, applications, activePersonnel] = await Promise.all([
+  const [workspaceCount, featureCount, authorityCount, responsibilityCount, users, applications, personnel] = await Promise.all([
     client.hrWorkspaceCatalog.count({ where: { code: { in: workspaceCodes } } }),
     client.hrFeatureCatalog.count({ where: { code: { in: featureCodes } } }),
     client.hrAuthorityCatalog.count({ where: { code: { in: authorityCodes } } }),
     client.hrResponsibilityTypeCatalog.count({ where: { code: { in: responsibilityCodes } } }),
-    client.user.findMany({ where: { role: 'ADMIN', isActive: true }, select: { id: true } }),
-    client.hrJobApplication.findMany({
-      select: { id: true, stage: true, assessments: { select: { assessmentType: true } } },
+    client.user.findMany({
+      where: { erasedAt: null },
+      select: { id: true, role: true, isActive: true, personnelId: true },
     }),
-    client.personnel.findMany({
-      where: { isActive: true },
+    client.hrJobApplication.findMany({
       select: {
         id: true,
-        user: { select: { id: true } },
+        stage: true,
+        assessments: { select: { assessmentType: true } },
+        formalAssessmentPlans: { where: { status: 'ACTIVE' }, select: { id: true }, take: 1 },
+      },
+    }),
+    client.personnel.findMany({
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        isActive: true,
         hrEmploymentRelationships: {
           select: {
             status: true,
@@ -269,7 +343,7 @@ export const runHrRedesignBackfill = async (
   }
 
   const baselineUserIds = [...new Set([
-    ...admins.map((user: { id: string }) => user.id),
+    ...users.filter((user) => user.role === 'ADMIN' && user.isActive).map((user) => user.id),
     ...(shakilaUser?.isActive ? [shakilaUser.id] : []),
   ])];
   const expectedGrantKeys = baselineUserIds.flatMap((userId) => [
@@ -295,32 +369,102 @@ export const runHrRedesignBackfill = async (
   });
 
   const now = new Date();
-  const reconciliations = activePersonnel.map((person: any) => {
-    const currentRelationships = person.hrEmploymentRelationships.filter((relationship: any) => ['ACTIVE', 'SUSPENDED'].includes(relationship.status));
-    const hasCurrentOrganizationalAssignment = currentRelationships.some((relationship: any) => relationship.assignments.some((assignment: any) =>
+  const normalizedNameCounts = personnel.reduce<Map<string, number>>((counts, person) => {
+    const key = `${person.firstName.trim().toLocaleLowerCase('fa-IR')}\u0000${person.lastName.trim().toLocaleLowerCase('fa-IR')}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    return counts;
+  }, new Map());
+  const reconciliationInputs: HrReconciliationInput[] = [];
+  for (const person of personnel) {
+    const currentRelationships = person.hrEmploymentRelationships.filter((relationship) => ['ACTIVE', 'SUSPENDED'].includes(relationship.status));
+    const isOperationallyCurrent = person.isActive || currentRelationships.length > 0;
+    const hasCurrentOrganizationalAssignment = currentRelationships.some((relationship) => relationship.assignments.some((assignment) =>
       assignment.type === 'PRIMARY'
       && assignment.effectiveFrom <= now
       && (!assignment.effectiveTo || assignment.effectiveTo >= now)));
+    const nameKey = `${person.firstName.trim().toLocaleLowerCase('fa-IR')}\u0000${person.lastName.trim().toLocaleLowerCase('fa-IR')}`;
+    reconciliationInputs.push({
+      sourceType: 'PERSONNEL',
+      sourceId: person.id,
+      isOperationallyCurrent,
+      legacyOnlyReviewed: false,
+      userPersonnelLinkResolved: true,
+      identityAmbiguous: (normalizedNameCounts.get(nameKey) ?? 0) > 1,
+      hasCurrentOrganizationalAssignment,
+      employmentConsistent: person.isActive ? currentRelationships.length === 1 : currentRelationships.length === 0,
+      startDateReviewOpen: currentRelationships.some((relationship) => !relationship.startDateVerified),
+      assessmentPlanUnresolved: false,
+      classificationError: false,
+    });
+  }
+  for (const user of users) reconciliationInputs.push({
+    sourceType: 'USER',
+    sourceId: user.id,
+    isOperationallyCurrent: user.isActive,
+    legacyOnlyReviewed: false,
+    userPersonnelLinkResolved: Boolean(user.personnelId),
+    identityAmbiguous: false,
+    hasCurrentOrganizationalAssignment: true,
+    employmentConsistent: true,
+    startDateReviewOpen: false,
+    assessmentPlanUnresolved: false,
+    classificationError: false,
+  });
+  for (const application of applications) reconciliationInputs.push({
+    sourceType: 'APPLICATION',
+    sourceId: application.id,
+    isOperationallyCurrent: application.stage !== 'CLOSED',
+    legacyOnlyReviewed: false,
+    userPersonnelLinkResolved: true,
+    identityAmbiguous: false,
+    hasCurrentOrganizationalAssignment: true,
+    employmentConsistent: true,
+    startDateReviewOpen: false,
+    assessmentPlanUnresolved: application.stage !== 'CLOSED' && application.formalAssessmentPlans.length === 0,
+    classificationError: false,
+  });
+  const reconciliationKeys = reconciliationInputs.map((input) => stableKey('reconciliation', input.sourceType, input.sourceId));
+  const existingReconciliations = reconciliationKeys.length === 0 ? [] : await client.hrReconciliationRecord.findMany({
+    where: { stableKey: { in: reconciliationKeys } },
+    select: {
+      stableKey: true,
+      primaryState: true,
+      cutoverBlocker: true,
+      reviews: { orderBy: { version: 'desc' }, take: 1, select: { outcome: true } },
+      attentionFlags: { orderBy: { version: 'desc' }, select: { flagCode: true, isActive: true, resolutionReason: true } },
+    },
+  });
+  const existingReconciliationByKey = new Map(existingReconciliations.map((record) => [record.stableKey, record]));
+  const reconciliations = reconciliationInputs.map((input) => {
+    const key = stableKey('reconciliation', input.sourceType, input.sourceId);
+    const existing = existingReconciliationByKey.get(key);
+    const latestFlagByCode = new Map<string, { flagCode: string; isActive: boolean; resolutionReason: string | null }>();
+    for (const flag of existing?.attentionFlags ?? []) if (!latestFlagByCode.has(flag.flagCode)) latestFlagByCode.set(flag.flagCode, flag);
+    const suppressedAttentionFlags = [...latestFlagByCode.values()]
+      .filter((flag) => !flag.isActive && flag.resolutionReason !== 'SOURCE_CONDITION_CLEARED_BY_BACKFILL')
+      .map((flag) => flag.flagCode as HrReconciliationAttentionFlag);
+    const legacyOnlyReviewed = existing?.reviews[0]?.outcome === 'ACCEPTED_LEGACY_ONLY';
     return {
-      person,
-      classification: classifyHrReconciliationRecord({
-        sourceType: 'PERSONNEL',
-        sourceId: person.id,
-        isCurrent: true,
-        hasLinkedUser: Boolean(person.user),
-        identityAmbiguous: false,
-        hasCurrentOrganizationalAssignment,
-        employmentConsistent: currentRelationships.length === 1,
-        startDateReviewOpen: currentRelationships.some((relationship: any) => !relationship.startDateVerified),
-        assessmentPlanUnresolved: false,
-        classificationError: false,
-      }),
+      input: { ...input, legacyOnlyReviewed, suppressedAttentionFlags },
+      classification: classifyHrReconciliationRecord({ ...input, legacyOnlyReviewed, suppressedAttentionFlags }),
     };
   });
-  const reconciliationKeys = reconciliations.map(({ person }) => stableKey('reconciliation', 'PERSONNEL', person.id));
-  const existingReconciliationCount = reconciliationKeys.length === 0 ? 0 : await client.hrReconciliationRecord.count({
-    where: { stableKey: { in: reconciliationKeys } },
-  });
+  const existingReconciliationCount = existingReconciliations.length;
+  const reconciliationStateChangeCount = reconciliations.filter(({ input, classification }) => {
+    const existing = existingReconciliationByKey.get(stableKey('reconciliation', input.sourceType, input.sourceId));
+    return existing && (
+      existing.primaryState !== classification.primaryState
+      || existing.cutoverBlocker !== classification.cutoverBlocker
+    );
+  }).length;
+  const reconciliationFlagChangeCount = reconciliations.reduce((count, { input, classification }) => {
+    const existing = existingReconciliationByKey.get(stableKey('reconciliation', input.sourceType, input.sourceId));
+    const latestByCode = new Map<string, { isActive: boolean }>();
+    for (const flag of existing?.attentionFlags ?? []) if (!latestByCode.has(flag.flagCode)) latestByCode.set(flag.flagCode, flag);
+    const currentCodes = new Set<string>(classification.attentionFlags);
+    const allCodes = new Set([...latestByCode.keys(), ...currentCodes]);
+    return count + [...allCodes].filter((code) => Boolean(latestByCode.get(code)?.isActive) !== currentCodes.has(code)).length;
+  }, 0);
 
   const missingCatalogCount = (workspaceCodes.length - workspaceCount)
     + (featureCodes.length - featureCount)
@@ -334,6 +478,8 @@ export const runHrRedesignBackfill = async (
       { code: 'BASELINE_GRANTS', count: expectedGrantKeys.length - existingGrantCount },
       { code: 'ASSESSMENT_MIGRATION_EVENTS', count: assessmentEventKeys.length - existingAssessmentEventCount },
       { code: 'RECONCILIATION_RECORDS', count: reconciliationKeys.length - existingReconciliationCount },
+      { code: 'RECONCILIATION_STATE_CHANGES', count: reconciliationStateChangeCount },
+      { code: 'RECONCILIATION_FLAG_CHANGES', count: reconciliationFlagChangeCount },
     ],
     actionableConflicts: [{ code: 'CURRENT_HR_RECONCILIATION', count: actionableConflictCount }],
     neutralLegacyOutcomes: [
@@ -398,32 +544,96 @@ export const runHrRedesignBackfill = async (
       },
     });
 
-    for (const { person, classification } of reconciliations) {
-      const reconciliationKey = stableKey('reconciliation', 'PERSONNEL', person.id);
-      const record = await tx.hrReconciliationRecord.upsert({
+    for (const { input, classification } of reconciliations) {
+      const reconciliationKey = stableKey('reconciliation', input.sourceType, input.sourceId);
+      const existing = await tx.hrReconciliationRecord.findUnique({
         where: { stableKey: reconciliationKey },
-        update: {},
-        create: {
-          stableKey: reconciliationKey, sourceType: 'PERSONNEL', sourceId: person.id,
-          primaryState: classification.primaryState, detailsJson: { source: 'LEGACY_PERSONNEL' },
-          cutoverBlocker: classification.cutoverBlocker, classifiedAt: now, classifiedByUserId: options.actorUserId,
-        },
+        include: { attentionFlags: { orderBy: { version: 'desc' } } },
       });
-      for (const flagCode of classification.attentionFlags) {
-        const flagKey = stableKey('reconciliation-flag', record.id, flagCode);
-        await tx.hrReconciliationAttentionFlag.upsert({
-          where: { stableKey: flagKey }, update: {},
-          create: { stableKey: flagKey, reconciliationId: record.id, flagCode },
-        });
-        const blockerKey = stableKey('cutover-blocker', record.id, flagCode);
-        await tx.hrCutoverBlockerProjection.upsert({
-          where: { stableKey: blockerKey }, update: {},
-          create: { stableKey: blockerKey, reconciliationId: record.id, blockerCode: flagCode, sourceVersion: 1 },
-        });
+      const record = existing
+        ? await tx.hrReconciliationRecord.update({
+          where: { id: existing.id },
+          data: existing.primaryState !== classification.primaryState || existing.cutoverBlocker !== classification.cutoverBlocker
+            ? {
+              primaryState: classification.primaryState,
+              cutoverBlocker: classification.cutoverBlocker,
+              stateVersion: { increment: 1 },
+              detailsJson: { source: `LEGACY_${input.sourceType}` },
+              classifiedAt: now,
+              classifiedByUserId: options.actorUserId,
+            }
+            : {},
+        })
+        : await tx.hrReconciliationRecord.create({ data: {
+          stableKey: reconciliationKey,
+          sourceType: input.sourceType,
+          sourceId: input.sourceId,
+          primaryState: classification.primaryState,
+          detailsJson: { source: `LEGACY_${input.sourceType}` },
+          cutoverBlocker: classification.cutoverBlocker,
+          classifiedAt: now,
+          classifiedByUserId: options.actorUserId,
+        } });
+      const latestFlagByCode = new Map<string, {
+        id: string;
+        flagCode: string;
+        version: number;
+        isActive: boolean;
+      }>();
+      for (const flag of existing?.attentionFlags ?? []) if (!latestFlagByCode.has(flag.flagCode)) latestFlagByCode.set(flag.flagCode, flag);
+      const currentFlagCodes = new Set<string>(classification.attentionFlags);
+      const allFlagCodes = new Set([...latestFlagByCode.keys(), ...currentFlagCodes]);
+      for (const flagCode of allFlagCodes) {
+        const latestFlag = latestFlagByCode.get(flagCode);
+        if (!currentFlagCodes.has(flagCode)) {
+          if (latestFlag?.isActive) {
+            await tx.hrReconciliationAttentionFlag.update({
+              where: { id: latestFlag.id },
+              data: {
+                isActive: false,
+                resolvedAt: now,
+                resolvedByUserId: options.actorUserId,
+                resolutionReason: 'SOURCE_CONDITION_CLEARED_BY_BACKFILL',
+              },
+            });
+            const blocker = await tx.hrCutoverBlockerProjection.findFirst({
+              where: { reconciliationId: record.id, blockerCode: flagCode, isActive: true },
+              orderBy: { sourceVersion: 'desc' },
+            });
+            if (blocker) await tx.hrCutoverBlockerProjection.update({
+              where: { id: blocker.id }, data: { isActive: false, clearedAt: now },
+            });
+          }
+          continue;
+        }
+        if (latestFlag?.isActive) continue;
+        const version = (latestFlag?.version ?? 0) + 1;
+        const flagKey = version === 1
+          ? stableKey('reconciliation-flag', record.id, flagCode)
+          : stableKey('reconciliation-flag', record.id, flagCode, String(version));
+        await tx.hrReconciliationAttentionFlag.create({ data: {
+          stableKey: flagKey,
+          reconciliationId: record.id,
+          flagCode,
+          version,
+        } });
+        const blockerKey = version === 1
+          ? stableKey('cutover-blocker', record.id, flagCode)
+          : stableKey('cutover-blocker', record.id, flagCode, String(version));
+        await tx.hrCutoverBlockerProjection.create({ data: {
+          stableKey: blockerKey,
+          reconciliationId: record.id,
+          blockerCode: flagCode,
+          sourceVersion: version,
+        } });
       }
     }
   };
 
-  await client.$transaction(applyBackfill, { maxWait: 10_000, timeout: 120_000 });
+  if (ownsTransactionBoundary(client)) {
+    await client.$transaction(applyBackfill, { maxWait: 10_000, timeout: 120_000 });
+  } else {
+    await applyBackfill(client);
+  }
   return report;
 };

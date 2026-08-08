@@ -55,11 +55,18 @@ const AUDIT_ACTIONS = new Set([
   'FLAG_CONTRACT',
 ]);
 
+const RECEIVABLE_STATUSES = new Set(['OPEN', 'PARTIALLY_PAID', 'SETTLED', 'OVERDUE', 'VOIDED']);
+const CHECK_STATUSES = new Set([
+  'PENDING_HANDOVER', 'RECEIVED', 'DEPOSITED', 'CLEARED', 'BOUNCED', 'RETURNED', 'REPLACED',
+]);
+const DUE_BUCKETS = new Set(['overdue', 'next7', 'days8to30', 'later30']);
+
 const CONTRACT_KEYS = ['view', 'search', 'status', 'sourceStatus', 'dateFrom', 'dateTo', 'page', 'pageSize', 'sort'] as const;
 const INVOICE_KEYS = ['view', 'search', 'status', 'period', 'page', 'pageSize'] as const;
 const STATUS_DRILLDOWN_KEYS = ['view', 'search', 'status', 'page', 'pageSize'] as const;
 const AUDIT_KEYS = ['search', 'action', 'page', 'pageSize'] as const;
 const PERFORMANCE_KEYS = ['view', 'search', 'dateFrom', 'dateTo', 'page', 'pageSize'] as const;
+const COLLECTION_KEYS = ['view', 'search', 'status', 'due', 'period', 'recordId', 'page', 'pageSize'] as const;
 
 export type ContractsQueryState = {
   view: 'reviewable' | null;
@@ -97,6 +104,26 @@ export type PerformanceQueryState = {
   search: string;
   dateFrom: string;
   dateTo: string;
+  page: number;
+};
+
+export type ReceivablesQueryState = {
+  view: 'open' | 'outstanding' | null;
+  search: string;
+  status: string;
+  due: string;
+  period: string;
+  recordId: string;
+  page: number;
+};
+
+export type PaymentsQueryState = {
+  view: 'due-soon' | 'unsettled-checks' | 'received' | null;
+  search: string;
+  status: string;
+  due: string;
+  period: string;
+  recordId: string;
   page: number;
 };
 
@@ -240,6 +267,60 @@ export const canonicalizePerformanceQuery = (
   return { state: { view, search, dateFrom, dateTo, page }, params };
 };
 
+export const canonicalizeReceivablesQuery = (
+  source: URLSearchParams,
+): CanonicalQuery<ReceivablesQueryState> => {
+  const params = withoutRecognized(source, COLLECTION_KEYS);
+  const rawStatus = source.get('status') || '';
+  const status = RECEIVABLE_STATUSES.has(rawStatus) ? rawStatus : 'ALL';
+  const rawView = source.get('view');
+  const view = status === 'ALL' && (rawView === 'open' || rawView === 'outstanding') ? rawView : null;
+  const search = normalizedSearch(source);
+  const rawDue = source.get('due') || '';
+  const due = DUE_BUCKETS.has(rawDue) ? rawDue : '';
+  const rawPeriod = source.get('period') || '';
+  const period = view === 'outstanding' && isPeriodKey(rawPeriod) ? rawPeriod : '';
+  const recordId = (source.get('recordId') || '').trim();
+  const page = normalizedPage(source);
+
+  if (view) params.set('view', view);
+  if (search) params.set('search', search);
+  if (due) params.set('due', due);
+  if (period) params.set('period', period);
+  if (recordId) params.set('recordId', recordId);
+  if (status !== 'ALL') params.set('status', status);
+  if (page > 1) params.set('page', String(page));
+  return { state: { view, search, status, due, period, recordId, page }, params };
+};
+
+export const canonicalizePaymentsQuery = (
+  source: URLSearchParams,
+): CanonicalQuery<PaymentsQueryState> => {
+  const params = withoutRecognized(source, COLLECTION_KEYS);
+  const rawStatus = source.get('status') || '';
+  const status = CHECK_STATUSES.has(rawStatus) ? rawStatus : 'ALL';
+  const rawView = source.get('view');
+  const view = status === 'ALL' && (
+    rawView === 'due-soon' || rawView === 'unsettled-checks' || rawView === 'received'
+  ) ? rawView : null;
+  const search = normalizedSearch(source);
+  const rawDue = source.get('due') || '';
+  const due = DUE_BUCKETS.has(rawDue) ? rawDue : '';
+  const rawPeriod = source.get('period') || '';
+  const period = view === 'received' && isPeriodKey(rawPeriod) ? rawPeriod : '';
+  const recordId = (source.get('recordId') || '').trim();
+  const page = normalizedPage(source);
+
+  if (view) params.set('view', view);
+  if (search) params.set('search', search);
+  if (due) params.set('due', due);
+  if (period) params.set('period', period);
+  if (recordId) params.set('recordId', recordId);
+  if (status !== 'ALL') params.set('status', status);
+  if (page > 1) params.set('page', String(page));
+  return { state: { view, search, status, due, period, recordId, page }, params };
+};
+
 const applyPatch = (source: URLSearchParams, patch: QueryPatch) => {
   const next = new URLSearchParams(source.toString());
   if (Object.prototype.hasOwnProperty.call(patch, 'status')) next.delete('view');
@@ -271,3 +352,9 @@ export const patchAuditQuery = (source: URLSearchParams, patch: QueryPatch) =>
 
 export const patchPerformanceQuery = (source: URLSearchParams, patch: QueryPatch) =>
   canonicalizePerformanceQuery(applyPatch(source, patch));
+
+export const patchReceivablesQuery = (source: URLSearchParams, patch: QueryPatch) =>
+  canonicalizeReceivablesQuery(applyPatch(source, patch));
+
+export const patchPaymentsQuery = (source: URLSearchParams, patch: QueryPatch) =>
+  canonicalizePaymentsQuery(applyPatch(source, patch));

@@ -17,6 +17,16 @@ export const ACTIONABLE_INVOICE_STATUSES = [
 ] as const;
 
 type DateRange = { gte: Date; lt: Date };
+type DeadlineRange = { gte?: Date; lt?: Date };
+
+export const OPEN_RECEIVABLE_STATUSES = ['OPEN', 'PARTIALLY_PAID', 'OVERDUE'] as const;
+export const UNSETTLED_CHECK_STATUSES = ['PENDING_HANDOVER', 'RECEIVED', 'DEPOSITED', 'BOUNCED'] as const;
+export const CHECK_STATUSES = [
+  'PENDING_HANDOVER', 'RECEIVED', 'DEPOSITED', 'CLEARED', 'BOUNCED', 'RETURNED', 'REPLACED',
+] as const;
+export const RECEIVABLE_STATUSES = ['OPEN', 'PARTIALLY_PAID', 'SETTLED', 'OVERDUE', 'VOIDED'] as const;
+export const DUE_BUCKETS = ['overdue', 'next7', 'days8to30', 'later30'] as const;
+export type DueBucket = typeof DUE_BUCKETS[number];
 
 export type InvoiceCandidatePopulation = {
   statuses?: readonly string[];
@@ -130,6 +140,23 @@ export const resolveTehranDayRange = (value: unknown): DateRange | null => {
     gte: zonedMidnightToUtc(parsed.year, parsed.month, parsed.day),
     lt: zonedMidnightToUtc(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate()),
   };
+};
+
+const tehranCivilMidnight = (now: Date, dayOffset = 0) => {
+  const local = dateTimeParts(now, TEHRAN_TIME_ZONE);
+  const shifted = new Date(Date.UTC(local.year, local.month - 1, local.day + dayOffset));
+  return zonedMidnightToUtc(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate());
+};
+
+export const resolveTehranDeadlineRange = (
+  bucket: unknown,
+  now = new Date(),
+): DeadlineRange | null => {
+  if (!(DUE_BUCKETS as readonly unknown[]).includes(bucket)) return null;
+  if (bucket === 'overdue') return { lt: tehranCivilMidnight(now) };
+  if (bucket === 'next7') return { gte: tehranCivilMidnight(now), lt: tehranCivilMidnight(now, 8) };
+  if (bucket === 'days8to30') return { gte: tehranCivilMidnight(now, 8), lt: tehranCivilMidnight(now, 31) };
+  return { gte: tehranCivilMidnight(now, 31) };
 };
 
 const jalaliToGregorianParts = (jy: number, jm: number, jd: number) => {
@@ -364,3 +391,319 @@ export const accountingActivityPopulationWhere = (population: AccountingActivity
 export const resolveActiveAccountantIds = (rows: Array<{ actorId: string }>) => (
   [...new Set(rows.map((row) => row.actorId))]
 );
+
+type ReceivablePopulationQuery = {
+  view?: unknown;
+  status?: unknown;
+  due?: unknown;
+  period?: unknown;
+};
+
+export type ReceivablePopulation = {
+  statuses?: readonly string[];
+  dueRange?: DeadlineRange;
+  outstandingAt?: Date;
+};
+
+type ReceivablePopulationRecord = {
+  status: string;
+  dueDate: Date;
+  createdAt?: Date;
+};
+
+export const resolveReceivablePopulation = (
+  query: ReceivablePopulationQuery = {},
+  now = new Date(),
+): ReceivablePopulation => {
+  const requestedStatus = String(query.status || '');
+  const statuses = (RECEIVABLE_STATUSES as readonly string[]).includes(requestedStatus)
+    ? [requestedStatus]
+    : query.view === 'open'
+      ? OPEN_RECEIVABLE_STATUSES
+      : undefined;
+  const dueRange = resolveTehranDeadlineRange(query.due, now) || undefined;
+  const periodRange = query.view === 'outstanding' ? resolveTehranPeriodRange(query.period) : null;
+  return { statuses, dueRange, outstandingAt: periodRange?.lt };
+};
+
+const isWithinDeadline = (value: Date | null | undefined, range?: DeadlineRange) => Boolean(
+  value
+  && (!range?.gte || value >= range.gte)
+  && (!range?.lt || value < range.lt),
+);
+
+export const matchesReceivablePopulation = (
+  record: ReceivablePopulationRecord,
+  population: ReceivablePopulation,
+) => {
+  if (population.statuses && !population.statuses.includes(record.status)) return false;
+  if (population.dueRange && !isWithinDeadline(record.dueDate, population.dueRange)) return false;
+  if (population.outstandingAt && record.createdAt && record.createdAt >= population.outstandingAt) return false;
+  return true;
+};
+
+export const receivablePopulationWhere = (population: ReceivablePopulation) => {
+  const where: Record<string, unknown> = {};
+  if (population.statuses) where.status = { in: [...population.statuses] };
+  if (population.dueRange) where.dueDate = population.dueRange;
+  if (population.outstandingAt) where.createdAt = { lt: population.outstandingAt };
+  return where;
+};
+
+type PaymentPopulationQuery = {
+  view?: unknown;
+  status?: unknown;
+  due?: unknown;
+  period?: unknown;
+};
+
+export type PaymentPopulation = {
+  checkStatuses?: readonly string[];
+  checksOnly: boolean;
+  dueRange?: DeadlineRange;
+  received: boolean;
+  periodRange?: DateRange;
+  empty: boolean;
+};
+
+type PaymentPopulationRecord = {
+  id?: string;
+  method: string;
+  status?: string;
+  checkStatus?: string | null;
+  checkDueDate?: Date | null;
+  amount?: unknown;
+  occurredAt?: Date | null;
+  createdAt?: Date | null;
+  updatedAt?: Date | null;
+  metadata?: unknown;
+};
+
+export const resolvePaymentPopulation = (
+  query: PaymentPopulationQuery = {},
+  now = new Date(),
+): PaymentPopulation => {
+  const requestedStatus = String(query.status || '');
+  const statusOverride = (CHECK_STATUSES as readonly string[]).includes(requestedStatus);
+  const semanticStatuses = query.view === 'unsettled-checks' || query.view === 'due-soon'
+    ? UNSETTLED_CHECK_STATUSES
+    : undefined;
+  const explicitDue = resolveTehranDeadlineRange(query.due, now) || undefined;
+  const dueSoonRange = query.view === 'due-soon'
+    ? { lt: tehranCivilMidnight(now, 8) }
+    : undefined;
+  const dueRange = explicitDue || dueSoonRange;
+  const dueSoonConflict = Boolean(
+    query.view === 'due-soon'
+    && explicitDue?.gte
+    && explicitDue.gte >= tehranCivilMidnight(now, 8),
+  );
+  const received = !statusOverride && query.view === 'received';
+  return {
+    checkStatuses: statusOverride ? [requestedStatus] : semanticStatuses,
+    checksOnly: statusOverride || Boolean(semanticStatuses) || Boolean(dueRange),
+    dueRange,
+    received,
+    periodRange: received ? resolveTehranPeriodRange(query.period) || undefined : undefined,
+    empty: dueSoonConflict,
+  };
+};
+
+export const matchesPaymentPopulation = (
+  record: PaymentPopulationRecord,
+  population: PaymentPopulation,
+) => {
+  if (population.empty) return false;
+  if (population.checksOnly && record.method !== 'CHECK') return false;
+  if (population.checkStatuses && !population.checkStatuses.includes(String(record.checkStatus || ''))) return false;
+  if (population.dueRange && !isWithinDeadline(record.checkDueDate, population.dueRange)) return false;
+  if (population.received) return resolveReceivedCollectionMovements(record, population).length > 0;
+  return true;
+};
+
+export const paymentPopulationWhere = (population: PaymentPopulation) => {
+  const where: Record<string, unknown> = {};
+  if (population.empty) return { id: { equals: '__no_matching_payment__' } };
+  if (population.checksOnly) where.method = 'CHECK';
+  if (population.checkStatuses) where.checkStatus = { in: [...population.checkStatuses] };
+  if (population.dueRange) where.checkDueDate = population.dueRange;
+  return where;
+};
+
+export type CollectionMovement = {
+  projectionId: string;
+  recordId: string;
+  kind: string;
+  effectiveAt: Date;
+  amount: number;
+  confidence: 'authoritative' | 'legacy-fallback';
+};
+
+const metadataObject = (value: unknown): Record<string, any> => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
+);
+
+export const resolveReceivedCollectionMovements = (
+  record: PaymentPopulationRecord,
+  population: Pick<PaymentPopulation, 'periodRange'> = {},
+): CollectionMovement[] => {
+  const recordId = String(record.id || 'payment');
+  const stored = metadataObject(record.metadata).collectionMovements;
+  const candidates: CollectionMovement[] = Array.isArray(stored)
+    ? stored.flatMap((movement: any, index: number) => {
+        const effectiveAt = new Date(String(movement?.effectiveAt || ''));
+        const amount = Number(movement?.amount);
+        if (!movement?.kind || Number.isNaN(effectiveAt.getTime()) || !Number.isFinite(amount) || amount === 0) return [];
+        return [{
+          projectionId: `${recordId}:${index}:${effectiveAt.toISOString()}`,
+          recordId,
+          kind: String(movement.kind),
+          effectiveAt,
+          amount,
+          confidence: movement?.confidence === 'legacy-fallback' ? 'legacy-fallback' as const : 'authoritative' as const,
+        }];
+      })
+    : [];
+
+  const storedNet = candidates.reduce((sum, movement) => sum + movement.amount, 0);
+  if (record.status === 'REVERSED' && storedNet > 0) {
+    const effectiveAt = record.updatedAt || record.occurredAt || record.createdAt;
+    if (effectiveAt) {
+      candidates.push({
+        projectionId: `${recordId}:legacy-reversal:${effectiveAt.toISOString()}`,
+        recordId,
+        kind: 'REVERSED',
+        effectiveAt,
+        amount: -storedNet,
+        confidence: 'legacy-fallback',
+      });
+    }
+  }
+
+  if (candidates.length === 0) {
+    const effectiveAt = record.occurredAt || record.createdAt;
+    const amount = Number(record.amount);
+    let signedAmount = 0;
+    let kind = 'RECEIVED';
+    if (record.method === 'CHECK' && record.checkStatus === 'CLEARED') {
+      signedAmount = amount;
+      kind = 'CHECK_CLEARED';
+    } else if (record.method !== 'CHECK' && (record.status === 'RECEIVED' || record.status === 'RECONCILED')) {
+      signedAmount = amount;
+    } else if (record.method !== 'CHECK' && record.status === 'REVERSED') {
+      signedAmount = -amount;
+      kind = 'REVERSED';
+    }
+    if (effectiveAt && Number.isFinite(signedAmount) && signedAmount !== 0) {
+      candidates.push({
+        projectionId: `${recordId}:legacy:${effectiveAt.toISOString()}`,
+        recordId,
+        kind,
+        effectiveAt,
+        amount: signedAmount,
+        confidence: 'legacy-fallback',
+      });
+    }
+  }
+
+  return candidates.filter((movement) => !population.periodRange || isWithin(movement.effectiveAt, population.periodRange));
+};
+
+type OutstandingInvoiceRecord = {
+  financiallyApprovedAt?: Date | null;
+  systemInvoiceDate?: Date | null;
+  voidedAt?: Date | null;
+};
+
+type OutstandingReceivableRecord = {
+  id: string;
+  contractId?: string | null;
+  originalAmount: unknown;
+  dueDate: Date;
+  createdAt: Date;
+  invoiceRecord?: OutstandingInvoiceRecord | null;
+};
+
+type OutstandingPaymentRecord = PaymentPopulationRecord & {
+  contractId?: string | null;
+  receivableId?: string | null;
+};
+
+export const resolveOutstandingReceivableProjection = <T extends OutstandingReceivableRecord>(
+  receivables: T[],
+  payments: OutstandingPaymentRecord[],
+  population: Pick<ReceivablePopulation, 'outstandingAt'>,
+): Array<T & { representedRemainingAmount: number }> => {
+  if (!population.outstandingAt) return receivables.map((row) => ({
+    ...row,
+    representedRemainingAmount: Math.max(Number(row.originalAmount) || 0, 0),
+  }));
+  const cutoff = population.outstandingAt;
+  const valid = receivables.filter((row) => {
+    const invoice = row.invoiceRecord;
+    return Boolean(
+      invoice?.financiallyApprovedAt
+      && invoice.financiallyApprovedAt < cutoff
+      && invoice.systemInvoiceDate
+      && invoice.systemInvoiceDate < cutoff
+      && (!invoice.voidedAt || invoice.voidedAt >= cutoff),
+    );
+  });
+  const remaining = new Map(valid.map((row) => [row.id, Math.max(Number(row.originalAmount) || 0, 0)]));
+  const contractRows = new Map<string, T[]>();
+  valid.forEach((row) => {
+    const key = String(row.contractId || '');
+    contractRows.set(key, [...(contractRows.get(key) || []), row]);
+  });
+
+  const effects = payments.map((payment) => ({
+    payment,
+    amount: resolveReceivedCollectionMovements(payment)
+      .filter((movement) => movement.effectiveAt < cutoff)
+      .reduce((sum, movement) => sum + movement.amount, 0),
+  })).filter(({ amount }) => amount !== 0);
+
+  effects.filter(({ payment }) => payment.receivableId && remaining.has(payment.receivableId)).forEach(({ payment, amount }) => {
+    const id = payment.receivableId!;
+    const original = Number(valid.find((row) => row.id === id)?.originalAmount) || 0;
+    remaining.set(id, Math.min(Math.max((remaining.get(id) || 0) - amount, 0), original));
+  });
+
+  effects.filter(({ payment }) => !payment.receivableId).forEach(({ payment, amount }) => {
+    let unapplied = amount;
+    const rows = [...(contractRows.get(String(payment.contractId || '')) || [])]
+      .sort((left, right) => left.dueDate.getTime() - right.dueDate.getTime() || left.createdAt.getTime() - right.createdAt.getTime());
+    for (const row of rows) {
+      if (unapplied === 0) break;
+      const current = remaining.get(row.id) || 0;
+      const original = Number(row.originalAmount) || 0;
+      if (unapplied > 0) {
+        const applied = Math.min(current, unapplied);
+        remaining.set(row.id, current - applied);
+        unapplied -= applied;
+      } else {
+        const restored = Math.min(original - current, -unapplied);
+        remaining.set(row.id, current + restored);
+        unapplied += restored;
+      }
+    }
+  });
+
+  return valid
+    .map((row) => ({ ...row, representedRemainingAmount: remaining.get(row.id) || 0 }))
+    .filter((row) => row.representedRemainingAmount > 0);
+};
+
+export const resolveCollectionFocus = <T extends { id: string }>(
+  recordId: unknown,
+  representedIds: Iterable<string>,
+  authorizedRecord: T | null,
+) => {
+  const requestedId = String(recordId || '').trim();
+  if (!requestedId) return null;
+  if (!authorizedRecord) return { state: 'missing' as const, record: null };
+  return {
+    state: new Set(representedIds).has(authorizedRecord.id) ? 'focused' as const : 'current-truth' as const,
+    record: authorizedRecord,
+  };
+};

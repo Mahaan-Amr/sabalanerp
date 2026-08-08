@@ -50,7 +50,14 @@ export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<
       </style>
     </head><body>${options.htmlContent}</body></html>`;
 
-    await page.setContent(htmlWithRtl, { waitUntil: 'networkidle0' });
+    await page.setContent(htmlWithRtl, { waitUntil: 'load', timeout: 120_000 });
+    await page.evaluate(`Promise.all(Array.from(document.images).map(async (image) => {
+      if (!image.complete) await new Promise((resolve, reject) => {
+        image.addEventListener('load', resolve, { once: true });
+        image.addEventListener('error', () => reject(new Error('Failed to load PDF image')), { once: true });
+      });
+      if (typeof image.decode === 'function') await image.decode();
+    }))`);
     await page.evaluate('document.fonts.ready');
     await page.emulateMediaType('print');
 

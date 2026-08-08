@@ -2641,6 +2641,22 @@ model SecurityShiftLogAttachment {
   @@map("security_shift_log_attachments")
 }
 
+model SecurityPersonnelReportExportAudit {
+  id                    String   @id @default(cuid())
+  actorId               String
+  actorNameSnapshot     String
+  personnelId           String
+  personnelNameSnapshot String
+  filters               Json
+  includeImages         Boolean  @default(true)
+  reportCount           Int
+  generatedAt           DateTime @default(now())
+
+  @@index([actorId, generatedAt])
+  @@index([personnelId, generatedAt])
+  @@map("security_personnel_report_export_audits")
+}
+
 model SecurityPatrolSession {
   id          String               @id @default(cuid())
   sessionId   String

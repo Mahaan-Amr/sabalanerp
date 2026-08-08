@@ -711,6 +711,16 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             ),
           },
           {
+            name: "Personnel Report History",
+            namePersian: "سوابق گزارش پرسنل",
+            href: "/dashboard/security/personnel-report-history",
+            icon: FaHistory,
+            show: hasPermission(
+              WORKSPACES.SECURITY,
+              WORKSPACE_PERMISSIONS.ADMIN,
+            ),
+          },
+          {
             name: "Personnel",
             namePersian: "کارکنان گارد",
             href: "/dashboard/security/personnel",

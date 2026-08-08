@@ -17,6 +17,9 @@ import { buildCombinedSecurityShiftTimeline, validateShiftSessionCorrectionPolic
 import { summarizeSecurityAttendance } from '../services/securityAttendanceSummary';
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
 import { renderCompletedSecurityShiftPdfHtml } from '../services/securityCompletedShiftPdf';
+import { deduplicatePersonnelReportParticipants, normalizePersonnelReportDirectoryQuery, normalizePersonnelReportHistoryQuery, personnelReportParticipantWhere, personnelReportReporterSearchWhere } from '../services/securityPersonnelReportHistory';
+import { prepareSecurityPersonnelReportPdfEvidence, renderSecurityPersonnelReportHistoryPdfHtml } from '../services/securityPersonnelReportPdf';
+import { personnelSearchWhere } from '../services/hrPersonnelBoundary';
 import canonicalGuardQueueRoutes from './canonical-guard-queue';
 
 const router = express.Router();
@@ -3470,6 +3473,169 @@ const selectedShiftAttendance = (slots: any[], requestedPersonnelIds: string[]) 
   });
   return { personnel: Array.from(personnel.values()), selectedPersonnelIds: selectedIds, rows };
 };
+
+const personnelReportEntryInclude = {
+  attachments: { orderBy: { createdAt: 'asc' as const } },
+  participants: {
+    include: {
+      personnel: { include: { department: true } },
+      user: { select: { id: true, firstName: true, lastName: true, username: true, personnel: { include: { department: true } } } },
+    },
+    orderBy: { createdAt: 'asc' as const },
+  },
+  session: {
+    include: {
+      personnel: { include: { user: { select: { id: true, firstName: true, lastName: true, username: true } } } },
+      slot: { include: { plan: { select: { title: true } } } },
+    },
+  },
+} as const;
+
+const personnelReportJson = (entry: any, voidActors: Map<string, string> = new Map()) => ({
+  id: entry.id,
+  rowNumber: entry.rowNumber,
+  createdAt: entry.createdAt,
+  status: entry.status,
+  categoryId: entry.categoryId,
+  reportTypeId: entry.reportTypeId,
+  categoryNameSnapshot: entry.categoryNameSnapshot,
+  reportTypeNameSnapshot: entry.reportTypeNameSnapshot,
+  description: entry.description,
+  reporter: entry.session?.personnel ? { id: entry.session.personnel.id, name: securityName(entry.session.personnel.user) } : null,
+  reporterName: securityName(entry.session?.personnel?.user),
+  participants: deduplicatePersonnelReportParticipants(entry.participants || []).map((participant: any) => {
+    const canonical = participant.personnel || participant.user?.personnel;
+    return {
+      id: canonical?.id || null,
+      name: canonical ? securityName(canonical) : securityName(participant.user),
+      departmentName: canonical?.department?.namePersian || canonical?.department?.name || null,
+      historicalUserAssociation: !participant.personnelId,
+    };
+  }),
+  attachments: (entry.attachments || []).map((attachment: any) => ({ id: attachment.id, originalName: attachment.originalName, mimeType: attachment.mimeType, size: attachment.size })),
+  voidedAt: entry.voidedAt,
+  voidReason: entry.voidReason,
+  voidedByName: entry.voidedBy ? voidActors.get(entry.voidedBy) || entry.voidedBy : null,
+  session: entry.session ? {
+    id: entry.session.id,
+    status: entry.session.status,
+    startedAt: entry.session.startedAt,
+    endedAt: entry.session.endedAt,
+    slot: { id: entry.session.slot.id, title: entry.session.slot.plan?.title || 'شیفت گارد', startsAt: entry.session.slot.startsAt, endsAt: entry.session.slot.endsAt },
+  } : null,
+});
+
+const loadPersonnelReportHistory = async (personnelId: string, rawQuery: Record<string, unknown>, allRows = false) => {
+  const query = normalizePersonnelReportHistoryQuery(rawQuery);
+  const personnel = await prisma.personnel.findUnique({ where: { id: personnelId }, include: { department: true, user: { select: { id: true } } } });
+  if (!personnel) return null;
+  const participantWhere = personnelReportParticipantWhere(personnel.id, personnel.user?.id);
+  const startDate = query.startDate ? parseDayQuery(query.startDate) : undefined;
+  const endDate = query.endDate ? parseDayQuery(query.endDate, startDate) : undefined;
+  const where: any = {
+    participants: { some: participantWhere },
+    ...(query.status !== 'all' ? { status: query.status } : {}),
+    ...(query.categoryId ? { categoryId: query.categoryId } : {}),
+    ...(query.reportTypeId ? { reportTypeId: query.reportTypeId } : {}),
+    ...(query.reporterId ? { session: { personnelId: query.reporterId } } : {}),
+    ...(query.attachments === 'with' ? { attachments: { some: {} } } : query.attachments === 'without' ? { attachments: { none: {} } } : {}),
+    ...(startDate || endDate ? { createdAt: { ...(startDate ? { gte: startDate } : {}), ...(endDate ? { lt: addDays(endDate, 1) } : {}) } } : {}),
+    ...(query.q ? { OR: [
+      { description: { contains: query.q, mode: 'insensitive' } },
+      { categoryNameSnapshot: { contains: query.q, mode: 'insensitive' } },
+      { reportTypeNameSnapshot: { contains: query.q, mode: 'insensitive' } },
+      { session: { personnel: { user: personnelReportReporterSearchWhere(query.q) } } },
+    ] } : {}),
+  };
+  const [entries, total, categories, reportTypes, reporters] = await Promise.all([
+    prisma.securityShiftLogEntry.findMany({ where, include: personnelReportEntryInclude, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], ...(allRows ? {} : { skip: (query.page - 1) * query.pageSize, take: query.pageSize }) }),
+    prisma.securityShiftLogEntry.count({ where }),
+    prisma.securityInstantReportCategory.findMany({ orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }], select: { id: true, name: true } }),
+    prisma.securityInstantReportType.findMany({ orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }], select: { id: true, categoryId: true, name: true } }),
+    prisma.securityPersonnel.findMany({ where: { shiftSessions: { some: { logEntries: { some: { participants: { some: participantWhere } } } } } }, include: { user: { select: { firstName: true, lastName: true, username: true } } }, orderBy: { createdAt: 'asc' } }),
+  ]);
+  const voidActorIds = [...new Set(entries.map((entry) => entry.voidedBy).filter(Boolean) as string[])];
+  const actors = voidActorIds.length ? await prisma.user.findMany({ where: { id: { in: voidActorIds } }, select: { id: true, firstName: true, lastName: true, username: true } }) : [];
+  const voidActors = new Map(actors.map((actor) => [actor.id, securityName(actor)]));
+  return {
+    personnel,
+    query,
+    entries,
+    data: entries.map((entry) => personnelReportJson(entry, voidActors)),
+    meta: { page: query.page, pageSize: query.pageSize, total, totalPages: Math.max(1, Math.ceil(total / query.pageSize)) },
+    facets: { categories, reportTypes, reporters: reporters.map((reporter) => ({ id: reporter.id, name: securityName(reporter.user) })) },
+  };
+};
+
+router.get('/reports/personnel-history', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const query = normalizePersonnelReportDirectoryQuery(req.query as Record<string, unknown>);
+    const where: any = {
+      ...(query.status === 'active' ? { isActive: true, archivedAt: null } : query.status === 'inactive' ? { OR: [{ isActive: false }, { archivedAt: { not: null } }] } : {}),
+      ...(query.departmentId ? { departmentId: query.departmentId } : {}),
+      ...(personnelSearchWhere(query.q) || {}),
+      ...(query.hasReports ? { OR: [{ instantReportParticipants: { some: {} } }, { user: { instantReportParticipants: { some: {} } } }] } : {}),
+    };
+    const [rows, total, departments] = await Promise.all([
+      prisma.personnel.findMany({ where, include: { department: true, user: { select: { id: true } } }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }], skip: (query.page - 1) * query.pageSize, take: query.pageSize }),
+      prisma.personnel.count({ where }),
+      prisma.department.findMany({ orderBy: { namePersian: 'asc' }, select: { id: true, name: true, namePersian: true } }),
+    ]);
+    const personnelIds = rows.map((row) => row.id);
+    const userToPersonnel = new Map(rows.filter((row) => row.user).map((row) => [row.user!.id, row.id]));
+    const userIds = [...userToPersonnel.keys()];
+    const links = personnelIds.length ? await prisma.securityShiftLogParticipant.findMany({
+      where: { OR: [{ personnelId: { in: personnelIds } }, ...(userIds.length ? [{ userId: { in: userIds } }] : [])] },
+      select: { personnelId: true, userId: true, entry: { select: { id: true, status: true, createdAt: true } } },
+      orderBy: { entry: { createdAt: 'desc' } },
+    }) : [];
+    const summaries = new Map<string, { activeIds: Set<string>; latest: { id: string; status: string; createdAt: Date } | null }>();
+    rows.forEach((row) => summaries.set(row.id, { activeIds: new Set(), latest: null }));
+    links.forEach((link) => {
+      const id = link.personnelId || (link.userId ? userToPersonnel.get(link.userId) : null);
+      const summary = id ? summaries.get(id) : null;
+      if (!summary) return;
+      if (link.entry.status === SecurityShiftLogStatus.ACTIVE) summary.activeIds.add(link.entry.id);
+      if (!summary.latest || link.entry.createdAt > summary.latest.createdAt) summary.latest = link.entry;
+    });
+    return res.json({ success: true, data: rows.map((row) => { const summary = summaries.get(row.id)!; return { id: row.id, firstName: row.firstName, lastName: row.lastName, employeeNumber: row.employeeNumber, nationalCode: row.nationalCode, isActive: row.isActive && !row.archivedAt, archivedAt: row.archivedAt, department: row.department, activeReportCount: summary.activeIds.size, latestReport: summary.latest }; }), meta: { page: query.page, pageSize: query.pageSize, total, totalPages: Math.max(1, Math.ceil(total / query.pageSize)) }, facets: { departments } });
+  } catch (error: any) { console.error('List personnel report histories error:', error); return res.status(500).json({ success: false, error: error.message || 'دریافت سوابق گزارش پرسنل ناموفق بود.' }); }
+});
+
+router.get('/reports/personnel-history/:personnelId', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await loadPersonnelReportHistory(req.params.personnelId, req.query as Record<string, unknown>);
+    if (!result) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
+    return res.json({ success: true, data: { personnel: result.personnel, reports: result.data }, meta: result.meta, facets: result.facets });
+  } catch (error: any) { console.error('Get personnel report history error:', error); return res.status(500).json({ success: false, error: error.message || 'دریافت گزارش‌های مرتبط با پرسنل ناموفق بود.' }); }
+});
+
+router.get('/reports/personnel-history/:personnelId/attachments/:attachmentId', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  const personnel = await prisma.personnel.findUnique({ where: { id: req.params.personnelId }, include: { user: { select: { id: true } } } });
+  if (!personnel) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
+  const attachment = await prisma.securityShiftLogAttachment.findFirst({ where: { id: req.params.attachmentId, entry: { participants: { some: personnelReportParticipantWhere(personnel.id, personnel.user?.id) } } } });
+  if (!attachment) return res.status(404).json({ success: false, error: 'تصویر گزارش پیدا نشد.' });
+  const filePath = path.join(shiftLogPhotoDir, attachment.storageName);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, error: 'فایل تصویر گزارش در دسترس نیست.' });
+  return res.type(attachment.mimeType).sendFile(filePath);
+});
+
+router.post('/reports/personnel-history/:personnelId.pdf', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const includeImages = req.body?.includeImages !== false;
+    const result = await loadPersonnelReportHistory(req.params.personnelId, req.body?.filters || {}, true);
+    if (!result) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
+    if (!result.entries.length) return res.status(400).json({ success: false, error: 'گزارشی برای فیلترهای انتخاب‌شده وجود ندارد.' });
+    const reports = prepareSecurityPersonnelReportPdfEvidence(result.data, result.entries, includeImages, (storageName, mimeType) => securityFileToDataUri(path.join(shiftLogPhotoDir, storageName), mimeType));
+    const generatedAt = new Date();
+    const actor = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { firstName: true, lastName: true, username: true } });
+    const exporterName = securityName(actor || req.user);
+    const html = `${securityPdfStyles()}${renderSecurityPersonnelReportHistoryPdfHtml({ personnel: result.personnel, exporterName, generatedAt, filters: result.query as any, reports, includeImages })}`;
+    const pdfPath = await generatePdfFromHtml({ fileName: `security-personnel-report-history-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">سوابق گزارش‌های گارد پرسنل · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
+    await prisma.securityPersonnelReportExportAudit.create({ data: { actorId: req.user!.id, actorNameSnapshot: exporterName, personnelId: result.personnel.id, personnelNameSnapshot: securityName(result.personnel), filters: result.query as any, includeImages, reportCount: result.entries.length, generatedAt } });
+    return res.download(pdfPath, `security-personnel-reports-${result.personnel.employeeNumber || result.personnel.id}.pdf`, () => fs.unlink(pdfPath, () => undefined));
+  } catch (error: any) { console.error('Export personnel report history error:', error); return res.status(500).json({ success: false, error: error.message || 'ساخت PDF سوابق گزارش پرسنل ناموفق بود.' }); }
+});
 
 router.get('/reports/completed-shifts', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
   try {

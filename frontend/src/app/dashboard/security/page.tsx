@@ -6,6 +6,7 @@ import {
   FaChartLine,
   FaClock,
   FaFileAlt,
+  FaHistory,
   FaPlane,
   FaRedo,
   FaShieldAlt,
@@ -171,7 +172,7 @@ export default function SecurityDashboardPage() {
   const lateHref = statusItems.find((item) => item.id === 'late')?.href || '/dashboard/security/attendance';
 
   const quickAccessItems = useMemo(() => {
-    const icons = { attendance: FaClock, 'shift-report': FaFileAlt, vehicles: FaTruck, exceptions: FaPlane, shifts: FaCalendarDay, reports: FaChartLine, personnel: FaShieldAlt };
+    const icons = { attendance: FaClock, 'shift-report': FaFileAlt, vehicles: FaTruck, exceptions: FaPlane, shifts: FaCalendarDay, reports: FaChartLine, 'personnel-report-history': FaHistory, personnel: FaShieldAlt };
     const canOpenShiftReport = securityAdmin || (shiftAwareness?.access === 'operator' && shiftAwareness.overview?.state === 'ACTIVE');
     return buildSecurityQuickAccess(securityAdmin, canOpenShiftReport).map((item) => ({ ...item, icon: icons[item.id] }));
   }, [securityAdmin, shiftAwareness?.access, shiftAwareness?.overview?.state]);

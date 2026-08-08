@@ -43,7 +43,7 @@ export type Workspace = typeof WORKSPACES[keyof typeof WORKSPACES];
 /**
  * Middleware to check workspace access
  */
-export const requireWorkspaceAccess = (workspace: Workspace, requiredPermission: WorkspacePermission = WORKSPACE_PERMISSIONS.VIEW) => {
+export const requireWorkspaceAccessWithClient = (prismaClient: Pick<PrismaClient, 'workspacePermission' | 'roleWorkspacePermission'>, workspace: Workspace, requiredPermission: WorkspacePermission = WORKSPACE_PERMISSIONS.VIEW) => {
   return async (req: WorkspaceRequest, res: Response, next: NextFunction) => {
     try {
       if (!req.user) {
@@ -61,7 +61,7 @@ export const requireWorkspaceAccess = (workspace: Workspace, requiredPermission:
       }
 
       // Check user-specific workspace permissions
-      const userPermission = await prisma.workspacePermission.findUnique({
+      const userPermission = await prismaClient.workspacePermission.findUnique({
         where: {
           userId_workspace: {
             userId: req.user.id,
@@ -71,7 +71,7 @@ export const requireWorkspaceAccess = (workspace: Workspace, requiredPermission:
       });
 
       // Check role-based workspace permissions
-      const rolePermission = await prisma.roleWorkspacePermission.findUnique({
+      const rolePermission = await prismaClient.roleWorkspacePermission.findUnique({
         where: {
           role_workspace: {
             role: req.user.role,
@@ -120,6 +120,10 @@ export const requireWorkspaceAccess = (workspace: Workspace, requiredPermission:
     }
   };
 };
+
+export const requireWorkspaceAccess = (workspace: Workspace, requiredPermission: WorkspacePermission = WORKSPACE_PERMISSIONS.VIEW) => (
+  requireWorkspaceAccessWithClient(prisma, workspace, requiredPermission)
+);
 
 /**
  * Middleware to extract workspace from URL

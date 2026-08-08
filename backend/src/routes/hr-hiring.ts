@@ -65,9 +65,9 @@ import { assertHiringAuthorityMutationAllowed } from '../services/hrHiringAuthor
 import {
   activeHiringAuthoritiesAt,
   buildHrHiringDashboardMetrics,
-  hiringLifecycleHasActionableCollateralOrContract,
+  HR_HIRING_METRIC_VIEWS,
   HR_HIRING_DASHBOARD_METRICS_CACHE_HEADERS,
-  hrHiringDashboardMetricsResponse
+  resolveActionableCollateralOrContractApplications
 } from '../services/hrHiringDashboardMetrics';
 import {
   automaticHiringWorkItemBaseKey,
@@ -862,13 +862,13 @@ router.get('/dashboard-metrics', asyncHandler(async (req: AuthRequest, res: Resp
   });
 
   if (!hasFinanceAuthority) {
-    return res.json(hrHiringDashboardMetricsResponse(buildHrHiringDashboardMetrics({
+    return res.json({ success: true, data: buildHrHiringDashboardMetrics({
       viewerUserId: actorId(req),
       viewerAuthorities: authorities,
       applications: [],
       activeCollateralTemplates: 0,
       generatedAt
-    })));
+    }) });
   }
 
   const [applications, activeCollateralTemplates] = await Promise.all([
@@ -885,7 +885,7 @@ router.get('/dashboard-metrics', asyncHandler(async (req: AuthRequest, res: Resp
     activeCollateralTemplates,
     generatedAt
   });
-  res.json(hrHiringDashboardMetricsResponse(data));
+  res.json({ success: true, data });
 }));
 
 // Authenticated hiring workspace.
@@ -1129,7 +1129,7 @@ router.post('/applications/:id/pre-identity/apply-template', requireAuthority('C
 
 router.get('/collateral-templates', requireAuthority('FINANCE_RECORDER', 'FINANCE_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const rows = await prisma.hrCollateralChecklistTemplate.findMany({
-    where: String(req.query.view || '') === 'active' ? { isActive: true } : undefined,
+    where: String(req.query.view || '') === HR_HIRING_METRIC_VIEWS.activeCollateralTemplates ? { isActive: true } : undefined,
     include: { items: { orderBy: { sortOrder: 'asc' } } },
     orderBy: [{ name: 'asc' }, { version: 'desc' }]
   });
@@ -1167,7 +1167,7 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
       stage: req.query.stage ? req.query.stage as any : undefined,
       ...(req.query.outcome
         ? { outcome: req.query.outcome as any }
-        : String(req.query.includeHired || '') === 'true' || requestedView === 'collateral-contracts'
+        : String(req.query.includeHired || '') === 'true' || requestedView === HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts
           ? {}
           : { OR: [{ outcome: null }, { outcome: { not: 'HIRED' as any } }] }),
       disposition: req.query.disposition ? req.query.disposition as any : undefined,
@@ -1204,10 +1204,8 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
   const requestedPhase = String(req.query.phase || '').trim();
   const requestedStatus = String(req.query.lifecycleStatus || '').trim();
   const myActions = String(req.query.myActions || '') === 'true';
-  const representedRows = requestedView === 'collateral-contracts'
-    ? rows.filter((source) => hiringLifecycleHasActionableCollateralOrContract(
-      projectHiringLifecycle(source as any, authorities, actorId(req))
-    ))
+  const representedRows = requestedView === HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts
+    ? resolveActionableCollateralOrContractApplications(rows as any[], authorities, actorId(req))
     : rows;
   const projected = representedRows.map((source) => {
     const row = {

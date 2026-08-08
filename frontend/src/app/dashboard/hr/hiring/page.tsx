@@ -33,6 +33,7 @@ import {
   buildHiringQueueParams,
   type HiringQueueFilters,
 } from "@/features/hr-hiring/hiringQueueViewModel";
+import { HR_HIRING_METRIC_VIEWS } from "@/features/hr-hiring/hrHiringMetricViews";
 
 const blank = {
   firstName: "",
@@ -64,8 +65,8 @@ const badgeTone = (status: HiringLifecycleStatus) => {
 
 export default function HiringCasesPage() {
   const searchParams = useSearchParams();
-  const representedView = searchParams.get("view") === "collateral-contracts"
-    ? "collateral-contracts"
+  const representedView = searchParams.get("view") === HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts
+    ? HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts
     : "";
   const [rows, setRows] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);

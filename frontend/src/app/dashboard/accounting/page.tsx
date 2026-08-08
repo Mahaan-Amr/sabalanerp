@@ -28,10 +28,12 @@ import {
   money,
   taxStatusLabels,
 } from '@/features/accounting/accountingUi';
+import { AccountingDashboardPrototype } from '@/features/accounting/prototype/AccountingDashboardPrototype';
 
 export default function AccountingDashboardPage() {
   const [workspace, setWorkspace] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showPrototype, setShowPrototype] = useState(false);
 
   const loadWorkspace = async () => {
     try {
@@ -50,6 +52,18 @@ export default function AccountingDashboardPage() {
   useEffect(() => {
     loadWorkspace();
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setShowPrototype(
+      process.env.NEXT_PUBLIC_ENABLE_PROTOTYPES === '1'
+      && params.get('prototype') === 'accounting-dashboard',
+    );
+  }, []);
+
+  if (showPrototype) {
+    return <AccountingDashboardPrototype />;
+  }
 
   if (loading) {
     return <ErpLoading />;

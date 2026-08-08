@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   canonicalizeAuditQuery,
+  canonicalizeAccountingDashboardQuery,
   canonicalizeContractsQuery,
   canonicalizeCorrectionRequestsQuery,
   canonicalizeInvoiceCandidatesQuery,
@@ -10,6 +11,7 @@ import {
   canonicalizeReceivablesQuery,
   canonicalizeTaxQuery,
   patchAuditQuery,
+  patchAccountingDashboardQuery,
   patchContractsQuery,
   patchCorrectionRequestsQuery,
   patchInvoiceCandidatesQuery,
@@ -18,6 +20,28 @@ import {
   patchReceivablesQuery,
   patchTaxQuery,
 } from '../accountingQueryState';
+
+test('accounting dashboard deadline query keeps the bucket and omits the default all type', () => {
+  const combined = canonicalizeAccountingDashboardQuery(new URLSearchParams(
+    'due=next7&deadlineType=all&campaign=summer',
+  ));
+  const receivables = patchAccountingDashboardQuery(combined.params, { deadlineType: 'receivable' });
+  const nextBucket = patchAccountingDashboardQuery(receivables.params, { due: 'days8to30' });
+
+  assert.equal(combined.params.toString(), 'campaign=summer&due=next7');
+  assert.deepEqual(combined.state, { due: 'next7', deadlineType: 'all' });
+  assert.equal(receivables.params.toString(), 'campaign=summer&due=next7&deadlineType=receivable');
+  assert.equal(nextBucket.params.toString(), 'campaign=summer&due=days8to30&deadlineType=receivable');
+});
+
+test('accounting dashboard removes invalid deadline values without dropping unknown parameters', () => {
+  const result = canonicalizeAccountingDashboardQuery(new URLSearchParams(
+    'due=today&deadlineType=invoice&page=3&campaign=summer',
+  ));
+
+  assert.equal(result.params.toString(), 'page=3&campaign=summer');
+  assert.deepEqual(result.state, { due: '', deadlineType: 'all' });
+});
 
 test('contract query canonicalization preserves unknown parameters and removes invalid recognized values', () => {
   const result = canonicalizeContractsQuery(new URLSearchParams(

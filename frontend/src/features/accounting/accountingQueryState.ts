@@ -60,7 +60,9 @@ const CHECK_STATUSES = new Set([
   'PENDING_HANDOVER', 'RECEIVED', 'DEPOSITED', 'CLEARED', 'BOUNCED', 'RETURNED', 'REPLACED',
 ]);
 const DUE_BUCKETS = new Set(['overdue', 'next7', 'days8to30', 'later30']);
+const DEADLINE_TYPES = new Set(['all', 'receivable', 'check']);
 
+const ACCOUNTING_DASHBOARD_KEYS = ['due', 'deadlineType'] as const;
 const CONTRACT_KEYS = ['view', 'search', 'status', 'sourceStatus', 'dateFrom', 'dateTo', 'page', 'pageSize', 'sort'] as const;
 const INVOICE_KEYS = ['view', 'search', 'status', 'period', 'page', 'pageSize'] as const;
 const STATUS_DRILLDOWN_KEYS = ['view', 'search', 'status', 'page', 'pageSize'] as const;
@@ -127,6 +129,11 @@ export type PaymentsQueryState = {
   page: number;
 };
 
+export type AccountingDashboardQueryState = {
+  due: string;
+  deadlineType: 'all' | 'receivable' | 'check';
+};
+
 type CanonicalQuery<T> = { state: T; params: URLSearchParams };
 type QueryPatch = Record<string, string | number | null | undefined>;
 
@@ -143,6 +150,21 @@ const normalizedPage = (params: URLSearchParams) => {
   if (!raw || !/^\d+$/.test(raw)) return 1;
   const page = Number(raw);
   return page >= 2 ? page : 1;
+};
+
+export const canonicalizeAccountingDashboardQuery = (
+  source: URLSearchParams,
+): CanonicalQuery<AccountingDashboardQueryState> => {
+  const params = withoutRecognized(source, ACCOUNTING_DASHBOARD_KEYS);
+  const rawDue = source.get('due') || '';
+  const due = DUE_BUCKETS.has(rawDue) ? rawDue : '';
+  const rawDeadlineType = source.get('deadlineType') || 'all';
+  const deadlineType = DEADLINE_TYPES.has(rawDeadlineType)
+    ? rawDeadlineType as AccountingDashboardQueryState['deadlineType']
+    : 'all';
+  if (due) params.set('due', due);
+  if (deadlineType !== 'all') params.set('deadlineType', deadlineType);
+  return { state: { due, deadlineType }, params };
 };
 
 const isGregorianDateKey = (value: string) => {
@@ -337,6 +359,9 @@ const applyPatch = (source: URLSearchParams, patch: QueryPatch) => {
 
 export const patchContractsQuery = (source: URLSearchParams, patch: QueryPatch) =>
   canonicalizeContractsQuery(applyPatch(source, patch));
+
+export const patchAccountingDashboardQuery = (source: URLSearchParams, patch: QueryPatch) =>
+  canonicalizeAccountingDashboardQuery(applyPatch(source, patch));
 
 export const patchInvoiceCandidatesQuery = (source: URLSearchParams, patch: QueryPatch) =>
   canonicalizeInvoiceCandidatesQuery(applyPatch(source, patch));

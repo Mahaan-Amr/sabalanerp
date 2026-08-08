@@ -33,6 +33,7 @@ import {
   paymentPopulationWhere,
   receivablePopulationWhere,
   resolveAccountingActivityPopulation,
+  resolveAccountingDeadlines,
   resolveActiveAccountantIds,
   resolveCollectionFocus,
   resolveCorrectionRequestPopulation,
@@ -867,7 +868,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
   };
 };
 
-export const getAccountingWorkspace = async () => {
+export const getAccountingWorkspace = async (query: any = {}) => {
   const now = new Date();
   const [period, contractResponse, records, receivables, payments, taxRecords, corrections, auditLogs] = await Promise.all([
     getOrCreateCurrentPeriod(),
@@ -890,6 +891,15 @@ export const getAccountingWorkspace = async () => {
   const checksDueSoon = await prisma.accountingPaymentStatus.findMany({
     where: paymentPopulationWhere(dueSoonCheckPopulation) as Prisma.AccountingPaymentStatusWhereInput
   });
+  const unsettledCheckPopulation = resolvePaymentPopulation({ view: 'unsettled-checks' }, now);
+  const unsettledChecks = await prisma.accountingPaymentStatus.findMany({
+    where: paymentPopulationWhere(unsettledCheckPopulation) as Prisma.AccountingPaymentStatusWhereInput
+  });
+  const deadlineProjection = resolveAccountingDeadlines({
+    receivables: openReceivables,
+    checks: unsettledChecks,
+  }, query, now);
+  const deadlineItems = await attachListContext(deadlineProjection.items);
   const actionableInvoicePopulation = resolveInvoiceCandidatePopulation({ view: 'actionable' });
   const invoiceCandidates = await prisma.accountingFinancialRecord.findMany({
     where: invoiceCandidatePopulationWhere(actionableInvoicePopulation) as Prisma.AccountingFinancialRecordWhereInput
@@ -916,6 +926,10 @@ export const getAccountingWorkspace = async () => {
 
   return {
     period,
+    deadlines: {
+      ...deadlineProjection,
+      items: deadlineItems,
+    },
     commandCenter: {
       reviewableContracts: {
         count: contractResponse.total

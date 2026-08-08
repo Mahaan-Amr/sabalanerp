@@ -159,6 +159,124 @@ export const resolveTehranDeadlineRange = (
   return { gte: tehranCivilMidnight(now, 31) };
 };
 
+export const ACCOUNTING_DEADLINE_TYPES = ['all', 'receivable', 'check'] as const;
+export type AccountingDeadlineType = typeof ACCOUNTING_DEADLINE_TYPES[number];
+
+type AccountingDeadlineReceivable = {
+  id: string;
+  status: string;
+  dueDate: Date | null;
+  remainingAmount: unknown;
+  currency?: string | null;
+  contractId?: string | null;
+};
+
+type AccountingDeadlineCheck = {
+  id: string;
+  method: string;
+  checkStatus?: string | null;
+  checkDueDate?: Date | null;
+  amount: unknown;
+  currency?: string | null;
+  contractId?: string | null;
+};
+
+export type AccountingDeadlineItem = {
+  id: string;
+  type: Exclude<AccountingDeadlineType, 'all'>;
+  bucket: DueBucket;
+  status: string;
+  dueDate: Date;
+  amount: string;
+  currency: string | null;
+  contractId: string | null;
+};
+
+type AccountingDeadlineQuery = {
+  due?: unknown;
+  deadlineType?: unknown;
+};
+
+const deadlineBucketFor = (dueDate: Date, now: Date): DueBucket => {
+  for (const bucket of DUE_BUCKETS) {
+    const range = resolveTehranDeadlineRange(bucket, now)!;
+    if (isWithinDeadline(dueDate, range)) return bucket;
+  }
+  return 'later30';
+};
+
+export const resolveAccountingDeadlines = (
+  sources: {
+    receivables: AccountingDeadlineReceivable[];
+    checks: AccountingDeadlineCheck[];
+  },
+  query: AccountingDeadlineQuery = {},
+  now = new Date(),
+) => {
+  const due = (DUE_BUCKETS as readonly unknown[]).includes(query.due)
+    ? query.due as DueBucket
+    : null;
+  const deadlineType = (ACCOUNTING_DEADLINE_TYPES as readonly unknown[]).includes(query.deadlineType)
+    ? query.deadlineType as AccountingDeadlineType
+    : 'all';
+  const receivables: AccountingDeadlineItem[] = sources.receivables.flatMap((record) => (
+    record.dueDate && (OPEN_RECEIVABLE_STATUSES as readonly string[]).includes(record.status)
+      ? [{
+          id: record.id,
+          type: 'receivable' as const,
+          bucket: deadlineBucketFor(record.dueDate, now),
+          status: record.status,
+          dueDate: record.dueDate,
+          amount: String(record.remainingAmount),
+          currency: record.currency || null,
+          contractId: record.contractId || null,
+        }]
+      : []
+  ));
+  const checks: AccountingDeadlineItem[] = sources.checks.flatMap((record) => (
+    record.method === 'CHECK'
+    && record.checkDueDate
+    && (UNSETTLED_CHECK_STATUSES as readonly string[]).includes(String(record.checkStatus || ''))
+      ? [{
+          id: record.id,
+          type: 'check' as const,
+          bucket: deadlineBucketFor(record.checkDueDate, now),
+          status: String(record.checkStatus),
+          dueDate: record.checkDueDate,
+          amount: String(record.amount),
+          currency: record.currency || null,
+          contractId: record.contractId || null,
+        }]
+      : []
+  ));
+  const allItems = [...receivables, ...checks];
+  const itemsForDue = due ? allItems.filter((item) => item.bucket === due) : allItems;
+  const typeCounts = {
+    all: itemsForDue.length,
+    receivable: itemsForDue.filter((item) => item.type === 'receivable').length,
+    check: itemsForDue.filter((item) => item.type === 'check').length,
+  };
+  const bucketCounts = Object.fromEntries(DUE_BUCKETS.map((bucket) => {
+    const items = allItems.filter((item) => item.bucket === bucket);
+    return [bucket, {
+      all: items.length,
+      receivable: items.filter((item) => item.type === 'receivable').length,
+      check: items.filter((item) => item.type === 'check').length,
+    }];
+  })) as Record<DueBucket, { all: number; receivable: number; check: number }>;
+  const items = itemsForDue
+    .filter((item) => deadlineType === 'all' || item.type === deadlineType)
+    .sort((left, right) => left.dueDate.getTime() - right.dueDate.getTime() || left.id.localeCompare(right.id));
+
+  return {
+    selection: { due: due || '', deadlineType },
+    typeCounts,
+    bucketCounts,
+    items,
+    total: items.length,
+  };
+};
+
 const jalaliToGregorianParts = (jy: number, jm: number, jd: number) => {
   let jalaliYear = jy;
   let gregorianYear = 621;

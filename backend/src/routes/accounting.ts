@@ -168,15 +168,17 @@ const markOriginalSalesContractPrinted = async (
   });
 };
 
-router.get('/workspace', accountingView, async (_req: AuthRequest, res: Response) => {
+export const getAccountingWorkspaceResponse = async (req: AuthRequest, res: Response) => {
   try {
-    const workspace = await getAccountingWorkspace();
+    const workspace = await getAccountingWorkspace(req.query);
     res.json({ success: true, data: workspace });
   } catch (error) {
     console.error('Accounting workspace error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
-});
+};
+
+router.get('/workspace', accountingView, getAccountingWorkspaceResponse);
 
 router.get('/contracts', accountingView, async (req: AuthRequest, res: Response) => {
   try {

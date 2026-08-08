@@ -823,7 +823,7 @@ export const inventoryAPI = {
 
 // Accounting Workspace API
 export const accountingAPI = {
-  getWorkspace: () => api.get('/accounting/workspace'),
+  getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
   getContracts: (params?: any) => api.get('/accounting/contracts', { params }),
   getContract: (contractId: string) => api.get(`/accounting/contracts/${contractId}`),
   getContractPdf: (contractId: string) => api.get(`/accounting/contracts/${contractId}/pdf`),

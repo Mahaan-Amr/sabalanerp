@@ -13,6 +13,7 @@ import {
   matchesTaxRecordPopulation,
   orderReviewableContracts,
   resolveAccountingActivityPopulation,
+  resolveAccountingDeadlines,
   resolveActiveAccountantIds,
   resolveCorrectionRequestPopulation,
   resolvePaymentPopulation,
@@ -163,6 +164,95 @@ test('Tehran deadline buckets include today and every agreed inclusive boundary'
     const range = resolveTehranDeadlineRange(bucket, now);
     assert.equal(range && new Date(instant) >= (range.gte || new Date(0)) && new Date(instant) < (range.lt || new Date(8640000000000000)), true);
   }
+});
+
+test('accounting deadlines include only authoritative open receivables and unsettled dated checks', () => {
+  const now = new Date('2026-08-08T12:00:00.000Z');
+  const dueDate = new Date('2026-08-08T08:00:00.000Z');
+  const receivables = ['OPEN', 'PARTIALLY_PAID', 'OVERDUE', 'SETTLED', 'VOIDED'].map((status) => ({
+    id: `receivable-${status}`,
+    status,
+    dueDate,
+    remainingAmount: '10',
+    contractId: null,
+  }));
+  const checks = ['PENDING_HANDOVER', 'RECEIVED', 'DEPOSITED', 'BOUNCED', 'CLEARED', 'RETURNED', 'REPLACED'].map((checkStatus) => ({
+    id: `check-${checkStatus}`,
+    method: 'CHECK',
+    checkStatus,
+    checkDueDate: dueDate,
+    amount: '20',
+    contractId: null,
+  }));
+
+  const deadlines = resolveAccountingDeadlines({
+    receivables: [...receivables, { ...receivables[0], id: 'receivable-undated', dueDate: null }],
+    checks: [...checks, { ...checks[0], id: 'check-undated', checkDueDate: null }],
+  }, {}, now);
+
+  assert.deepEqual(deadlines.items.map((item) => item.id), [
+    'check-BOUNCED',
+    'check-DEPOSITED',
+    'check-PENDING_HANDOVER',
+    'check-RECEIVED',
+    'receivable-OPEN',
+    'receivable-OVERDUE',
+    'receivable-PARTIALLY_PAID',
+  ]);
+  assert.deepEqual(deadlines.typeCounts, { all: 7, receivable: 3, check: 4 });
+});
+
+test('accounting deadline filtering reconciles every exact Tehran bucket and type count', () => {
+  const now = new Date('2026-08-08T12:00:00.000Z');
+  const dates = {
+    overdue: '2026-08-07T20:29:59.999Z',
+    next7Start: '2026-08-07T20:30:00.000Z',
+    next7End: '2026-08-15T20:29:59.999Z',
+    days8to30Start: '2026-08-15T20:30:00.000Z',
+    days8to30End: '2026-09-07T20:29:59.999Z',
+    later30: '2026-09-07T20:30:00.000Z',
+  };
+  const receivables = Object.entries(dates).map(([id, value]) => ({
+    id: `receivable-${id}`,
+    status: 'OPEN',
+    dueDate: new Date(value),
+    remainingAmount: '10',
+    contractId: 'contract-1',
+  }));
+  const checks = Object.entries(dates).map(([id, value]) => ({
+    id: `check-${id}`,
+    method: 'CHECK',
+    checkStatus: 'RECEIVED',
+    checkDueDate: new Date(value),
+    amount: '20',
+    contractId: null,
+  }));
+
+  const combined = resolveAccountingDeadlines({ receivables, checks }, {}, now);
+  assert.deepEqual(combined.bucketCounts, {
+    overdue: { all: 2, receivable: 1, check: 1 },
+    next7: { all: 4, receivable: 2, check: 2 },
+    days8to30: { all: 4, receivable: 2, check: 2 },
+    later30: { all: 2, receivable: 1, check: 1 },
+  });
+
+  const filtered = resolveAccountingDeadlines(
+    { receivables, checks },
+    { due: 'next7', deadlineType: 'check' },
+    now,
+  );
+  assert.equal(filtered.items.length, filtered.typeCounts.check);
+  assert.deepEqual(filtered.items.map((item) => item.id), ['check-next7Start', 'check-next7End']);
+  assert.equal(filtered.items.every((item) => item.bucket === 'next7' && item.type === 'check'), true);
+
+  const empty = resolveAccountingDeadlines(
+    { receivables: [], checks: [] },
+    { due: 'later30', deadlineType: 'receivable' },
+    now,
+  );
+  assert.equal(empty.items.length, 0);
+  assert.deepEqual(empty.typeCounts, { all: 0, receivable: 0, check: 0 });
+  assert.deepEqual(empty.bucketCounts.later30, { all: 0, receivable: 0, check: 0 });
 });
 
 test('unsettled and due-soon checks use exact status and Tehran date populations', () => {

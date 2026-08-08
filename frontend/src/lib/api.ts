@@ -767,6 +767,11 @@ export const shipmentQuantityAPI = {
     api.get(`/shipment-quantities/customers/${customerId}`, { params }),
 };
 
+export const dispatchCasesAPI = {
+  list: (workspace: string, filters: { subjectId?: string; loadingId?: string } = {}) => api.get('/dispatch-cases', { params: { workspace, ...filters } }),
+  detail: (workspace: string, id: string, filters: { subjectId?: string; loadingId?: string } = {}) => api.get(`/dispatch-cases/${id}`, { params: { workspace, ...filters } }),
+};
+
 // Inventory Workspace API
 export const inventoryAPI = {
   // Cut Types
@@ -857,6 +862,13 @@ export const inventoryAPI = {
 // Accounting Workspace API
 export const accountingAPI = {
   getWorkspace: () => api.get('/accounting/workspace'),
+  getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
+  decideDispatchCandidate: (id: string, data: { action: 'ACCEPT' | 'REJECT'; reason: string; idempotencyKey: string }) =>
+    api.post(`/accounting/dispatch-candidates/${id}/decision`, data),
+  voidDispatchWaybill: (id: string, data: { reason: string; idempotencyKey: string }) =>
+    api.post(`/accounting/dispatch-waybills/${id}/void`, data),
+  replaceDispatchWaybill: (id: string, data: { reason: string; idempotencyKey: string }) =>
+    api.post(`/accounting/dispatch-waybills/${id}/replace`, data),
   getContracts: (params?: any) => api.get('/accounting/contracts', { params }),
   getContract: (contractId: string) => api.get(`/accounting/contracts/${contractId}`),
   getContractPdf: (contractId: string) => api.get(`/accounting/contracts/${contractId}/pdf`),
@@ -883,6 +895,20 @@ export const accountingAPI = {
   updateSettings: (data: any) => api.put('/accounting/settings', data),
   executeAction: (data: any) => api.post('/accounting/actions', data),
   getBiometricConnectorDiagnostics: () => api.get('/biometric-connector/diagnostics'),
+};
+
+export const dispatchConfirmationAPI = {
+  getCapabilities: () => api.get('/dispatch-confirmation/capabilities'),
+  enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment`, data),
+  withdrawEnrollment: (enrollmentId: string, reason: string) => api.post(`/dispatch-confirmation/enrollments/${enrollmentId}/withdraw`, { reason }),
+  startSession: (waybillId: string, workstationId: string) => api.post(`/dispatch-confirmation/waybills/${waybillId}/sessions`, { workstationId }),
+  verifyBiometric: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-attempts`, {}),
+  beginFallback: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/fallback`, {}),
+  resendOtp: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/otp/resend`, {}),
+  verifyOtp: (sessionId: string, code: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/otp/verify`, { code }),
+  approveByGuard: (sessionId: string, data: { password: string; reason?: string }) => api.post(`/dispatch-confirmation/sessions/${sessionId}/guard-approval`, data),
+  revokeAuthorization: (authorizationId: string, reason: string) => api.post(`/dispatch-confirmation/authorizations/${authorizationId}/revoke`, { reason }),
+  revokeAuthorizationAsGuard: (authorizationId: string, reason: string) => api.post(`/dispatch-confirmation/guard/authorizations/${authorizationId}/revoke`, { reason }),
 };
 
 export const biAPI = {

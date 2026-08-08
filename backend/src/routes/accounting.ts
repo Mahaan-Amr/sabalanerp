@@ -51,6 +51,7 @@ import {
   postDispatchCorrection,
   verifyErpWideOutage,
 } from '../services/dispatchCorrectionOutage';
+import { PilotSafetyPauseError } from '../services/dispatchCutover';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -100,7 +101,7 @@ const managerReviewActions = new Set([
 ]);
 
 const dispatchError = (res: Response, error: unknown) => {
-  if (error instanceof DispatchAllocationConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
+  if (error instanceof PilotSafetyPauseError || error instanceof DispatchAllocationConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
   if (error instanceof DispatchAllocationValidationError || error instanceof DispatchRecoveryValidationError) return res.status(400).json({ success: false, error: error.message });
   console.error('Accounting dispatch error:', error);
   return res.status(500).json({ success: false, error: 'Accounting dispatch command failed.' });

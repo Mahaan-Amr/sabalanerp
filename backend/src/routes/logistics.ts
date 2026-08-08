@@ -7,6 +7,7 @@ import { requireFeatureAccess, requireNarrowFeatureAccess, FEATURE_PERMISSIONS, 
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
 import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
 import { createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
+import { PilotSafetyPauseError } from '../services/dispatchCutover';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -39,7 +40,7 @@ router.post('/canonical-driver-queue/:id/reserve', canEdit, canManageDrivers, as
       ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId,
     } });
   } catch (error) {
-    if (error instanceof GuardQueueConflictError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof GuardQueueConflictError || error instanceof PilotSafetyPauseError) return res.status(409).json({ success: false, error: error.message });
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') return res.status(409).json({ success: false, error: 'The queue turn changed during reservation.' });
     if (error instanceof GuardQueueValidationError) return res.status(400).json({ success: false, error: error.message });
     console.error('Canonical queue reservation error:', error);
@@ -72,7 +73,7 @@ router.put('/loadings/:id/canonical-allocations/:queueTurnId', canEdit, canEditL
     });
     return res.json({ success: true, data: draft });
   } catch (error) {
-    if (error instanceof DispatchAllocationConflictError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof DispatchAllocationConflictError || error instanceof PilotSafetyPauseError) return res.status(409).json({ success: false, error: error.message });
     if (error instanceof DispatchAllocationValidationError) return res.status(400).json({ success: false, error: error.message });
     console.error('Canonical allocation draft error:', error);
     return res.status(500).json({ success: false, error: 'Canonical allocation draft failed.' });
@@ -1133,7 +1134,7 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
     res.json({ success: true, data: await loadLoading(updated.id) });
   } catch (error: any) {
     console.error('Finalize loading error:', error);
-    const status = error instanceof DispatchAllocationConflictError ? 409
+    const status = error instanceof DispatchAllocationConflictError || error instanceof PilotSafetyPauseError ? 409
       : error instanceof DispatchAllocationValidationError ? 400 : 400;
     res.status(status).json({ success: false, error: error.message || 'Server error' });
   }

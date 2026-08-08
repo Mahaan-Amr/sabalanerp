@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { FaPause, FaPlay, FaUserCheck } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpInlineState, ErpInput, ErpLoading, ErpSection, ErpWorkspacePage } from '@/components/erp';
-import { dispatchMasterDataAPI } from '@/lib/api';
+import { dispatchConfirmationAPI, dispatchMasterDataAPI } from '@/lib/api';
+import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const field = 'space-y-1.5 text-sm font-medium sds-text-secondary';
@@ -12,11 +13,16 @@ const field = 'space-y-1.5 text-sm font-medium sds-text-secondary';
 export default function PersonnelDriverEligibilityPage() {
   const personnelId = String(useParams<{ id: string }>().id);
   const [record, setRecord] = useState<any>(null);
-  const [capabilities, setCapabilities] = useState({ canManageEligibility: false });
+  const [capabilities, setCapabilities] = useState({ canManageEligibility: false, canManageBiometricEnrollment: false });
   const [effectiveFrom, setEffectiveFrom] = useState(today());
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
+  const [confirmationPhone, setConfirmationPhone] = useState('');
+  const [biometricAcknowledgement, setBiometricAcknowledgement] = useState('');
+  const [biometricWithdrawalReason, setBiometricWithdrawalReason] = useState('');
+  const [enrollmentId, setEnrollmentId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -24,7 +30,8 @@ export default function PersonnelDriverEligibilityPage() {
     try {
       const response = await dispatchMasterDataAPI.getPersonnelDriverEligibility(personnelId);
       setRecord(response.data.data);
-      setCapabilities(response.data.capabilities || { canManageEligibility: false });
+      setCapabilities(response.data.capabilities || { canManageEligibility: false, canManageBiometricEnrollment: false });
+      setEnrollmentId(response.data.data.activeBiometricEnrollment?.id || null);
     } catch (error: any) {
       setNotice({ kind: 'error', text: error?.response?.data?.error || 'دریافت صلاحیت رانندگی ممکن نشد.' });
     } finally { setLoading(false); }
@@ -53,8 +60,20 @@ export default function PersonnelDriverEligibilityPage() {
       <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (!reason.trim()) return; void run(() => driver ? dispatchMasterDataAPI.transitionInternalDriverEligibility(driver.id, { status: eligible ? 'SUSPENDED' : 'ELIGIBLE', effectiveFrom, reason }) : dispatchMasterDataAPI.createInternalDriver({ personnelId, effectiveFrom, reason }), driver ? 'وضعیت صلاحیت ثبت شد.' : 'راننده داخلی تعریف شد.'); }}>
         <label className={field}>تاریخ اثر<ErpInput required type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label>
         <label className={field}>دلیل<ErpInput required value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-        <ErpButton type="submit" label={!driver ? 'تعریف راننده داخلی' : eligible ? 'تعلیق صلاحیت' : 'بازگردانی صلاحیت'} icon={!driver ? FaUserCheck : eligible ? FaPause : FaPlay} tone={eligible ? 'warning' : 'success'} disabled={saving || !reason.trim()} className="sm:col-span-2" />
+        <ErpButton type="submit" label={!driver ? 'تعریف راننده داخلی' : eligible ? 'تعلیق صلاحیت' : 'بازگردانی صلاحیت'} icon={!driver ? FaUserCheck : eligible ? FaPause : FaPlay} tone={eligible ? 'warning' : 'success'} disabled={dispatchTimelineStale || saving || !reason.trim()} className="sm:col-span-2" />
       </form>
     </ErpSection>}
+    {driver && capabilities.canManageBiometricEnrollment && <ErpSection title="رضایت و ثبت بیومتریک راننده" description="ثبت فقط از اتصال‌گر تأییدشده انجام می‌شود؛ تصویر یا قالب خام در مرورگر دریافت نمی‌شود.">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <label className={field}>شماره تأیید راننده<ErpInput value={confirmationPhone} onChange={(event) => setConfirmationPhone(event.target.value)} /></label>
+        <label className={field}>متن اقرار و رضایت<ErpInput value={biometricAcknowledgement} onChange={(event) => setBiometricAcknowledgement(event.target.value)} /></label>
+        <ErpButton label="ثبت بیومتریک با اتصال‌گر" icon={FaUserCheck} disabled={Boolean(enrollmentId) || dispatchTimelineStale || saving || !confirmationPhone.trim() || !biometricAcknowledgement.trim()} onClick={() => void run(async () => {
+          const response = await dispatchConfirmationAPI.enrollInternalDriver(personnelId, { acknowledgement: biometricAcknowledgement.trim(), confirmationPhone: confirmationPhone.trim(), fingers: ['RIGHT_INDEX', 'LEFT_INDEX'], workstationId: 'HR-WEB' });
+          setEnrollmentId(response.data.data.id); return response;
+        }, 'رضایت و ثبت بیومتریک ذخیره شد.')} />
+        {enrollmentId && <><label className={field}>دلیل پس‌گرفتن رضایت<ErpInput value={biometricWithdrawalReason} onChange={(event) => setBiometricWithdrawalReason(event.target.value)} /></label><ErpButton label="پس‌گرفتن رضایت بیومتریک" icon={FaPause} tone="danger" variant="outline" disabled={dispatchTimelineStale || saving || !biometricWithdrawalReason.trim()} onClick={() => void run(() => dispatchConfirmationAPI.withdrawEnrollment(enrollmentId, biometricWithdrawalReason.trim()), 'رضایت بیومتریک پس گرفته شد.')} /></>}
+      </div>
+    </ErpSection>}
+    <RoleAwareDispatchCases workspace="hr" subjectId={personnelId} onStaleChange={setDispatchTimelineStale} />
   </ErpWorkspacePage>;
 }

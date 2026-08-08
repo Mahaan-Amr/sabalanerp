@@ -13,13 +13,18 @@ const manage = requireNarrowFeatureAccess(FEATURES.HR_INTERNAL_DRIVER_ELIGIBILIT
 router.get('/internal-drivers/personnel/:personnelId', view, async (req: AuthRequest, res) => {
   try {
     const at = req.query.at ? parsedDate(req.query.at, 'at') : new Date();
-    const [personnel, driver, manageAccess] = await Promise.all([
+    const [personnel, driver, manageAccess, biometricAccess, activeBiometricEnrollment] = await Promise.all([
       prisma.personnel.findUnique({ where: { id: req.params.personnelId } }),
       prisma.internalDriverProfile.findUnique({ where: { personnelId: req.params.personnelId }, include: internalInclude }),
       resolveNarrowFeatureAccess(prisma, { userId: actor(req), role: req.user!.role, workspace: 'hr', feature: FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE, requiredPermission: 'edit' }, at),
+      resolveNarrowFeatureAccess(prisma, { userId: actor(req), role: req.user!.role, workspace: 'hr', feature: FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE, requiredPermission: 'edit' }, at),
+      prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: req.params.personnelId, status: 'ACTIVE' },
+        select: { id: true, status: true, enrolledAt: true }, orderBy: { enrolledAt: 'desc' } }),
     ]);
     if (!personnel) return res.status(404).json({ success: false, error: 'Personnel was not found.' });
-    return res.json({ success: true, data: { personnel, driver: driver ? projectDriver(driver, at) : null }, capabilities: { canManageEligibility: manageAccess.allowed } });
+    return res.json({ success: true, data: { personnel, driver: driver ? projectDriver(driver, at) : null,
+      activeBiometricEnrollment: biometricAccess.allowed ? activeBiometricEnrollment : null },
+    capabilities: { canManageEligibility: manageAccess.allowed, canManageBiometricEnrollment: biometricAccess.allowed } });
   } catch (error) { return fail(res, error, 'Read Personnel-owned driver eligibility'); }
 });
 

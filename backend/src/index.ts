@@ -57,6 +57,8 @@ import dispatchMasterDataRoutes from "./routes/dispatch-master-data";
 import biometricConnectorRoutes from "./routes/biometric-connector";
 import dispatchConfirmationRoutes from "./routes/dispatch-confirmation";
 import shipmentQuantityRoutes from "./routes/shipment-quantities";
+import dispatchCaseRoutes from "./routes/dispatch-cases";
+import dispatchCutoverRoutes from "./routes/dispatch-cutover";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -209,6 +211,8 @@ app.use("/api/dispatch-master-data", dispatchMasterDataRoutes);
 app.use("/api/biometric-connector", biometricConnectorRoutes);
 app.use("/api/dispatch-confirmation", dispatchConfirmationRoutes);
 app.use("/api/shipment-quantities", shipmentQuantityRoutes);
+app.use("/api/dispatch-cases", dispatchCaseRoutes);
+app.use("/api/dispatch-cutover", dispatchCutoverRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/orders", orderRoutes);

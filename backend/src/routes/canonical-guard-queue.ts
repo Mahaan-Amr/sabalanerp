@@ -6,6 +6,7 @@ import { admitGuardDriverQueueTurn, closeGuardQueueTurnWithoutLoading, GuardQueu
 import { PhysicalGateExitConflictError, PhysicalGateExitService, PhysicalGateExitValidationError } from '../services/physicalGateExit';
 import { approveManualOutageExit, DispatchRecoveryConflictError, DispatchRecoveryValidationError,
   registerManualOutageExit, reportMissingManualOutagePaper, spoilManualOutageExit, verifyGuardPhysicalReturn } from '../services/dispatchCorrectionOutage';
+import { PilotSafetyPauseError } from '../services/dispatchCutover';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -33,7 +34,7 @@ const responseTurn = (turn: any, redacted = false) => {
   };
 };
 const fail = (res: any, error: unknown, context: string) => {
-  if (error instanceof GuardQueueConflictError || error instanceof PhysicalGateExitConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
+  if (error instanceof PilotSafetyPauseError || error instanceof GuardQueueConflictError || error instanceof PhysicalGateExitConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
   if (error instanceof GuardQueueValidationError || error instanceof PhysicalGateExitValidationError || error instanceof DispatchRecoveryValidationError) return res.status(400).json({ success: false, error: error.message });
   console.error(context, error);
   return res.status(500).json({ success: false, error: 'Canonical Guard queue command failed.' });

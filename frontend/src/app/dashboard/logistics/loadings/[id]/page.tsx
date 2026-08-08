@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { FaBan, FaCheck, FaEdit, FaPlus, FaPrint, FaSync, FaTrash } from 'react-icons/fa';
 import { ErpButton, ErpCard, ErpLoading, ErpPage, ErpSection, ErpSummaryGrid, ErpTwoColumn } from '@/components/erp';
 import { logisticsAPI } from '@/lib/api';
+import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
 import { StatusBadge, dateFa, inputClass, labelClass, loadingDriversName, numberFa, unitLabels } from '../../logistics-ui';
 
 export default function LoadingDetailPage() {
@@ -14,6 +15,7 @@ export default function LoadingDetailPage() {
   const [loading, setLoading] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [actionError, setActionError] = useState('');
+  const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [correction, setCorrection] = useState({ sourceContractItemId: '', loadingLineId: '', deltaQuantity: '', reason: '' });
 
@@ -89,7 +91,7 @@ export default function LoadingDetailPage() {
         { label: 'حذف پیش‌نویس', icon: FaTrash, onClick: deleteDraft, disabled: !canDeleteDraft, tone: 'danger' },
         { label: 'چاپ', icon: FaPrint, onClick: printPage, tone: 'neutral' },
         { label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' },
-        { label: 'نهایی‌سازی', icon: FaCheck, onClick: () => runAction(() => logisticsAPI.finalizeLoading(loading.id)), disabled: !canFinalize, tone: 'success', variant: 'solid' },
+        { label: 'نهایی‌سازی', icon: FaCheck, onClick: () => runAction(() => logisticsAPI.finalizeLoading(loading.id)), disabled: dispatchTimelineStale || !canFinalize, tone: 'success', variant: 'solid' },
       ]}
     >
       {actionError && <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">{actionError}</div>}
@@ -175,7 +177,7 @@ export default function LoadingDetailPage() {
               <ErpSection title="لغو سند">
                 <div className="space-y-3">
                   <ErpTextarea className={`${inputClass} min-h-24`} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="دلیل لغو" />
-                  <ErpButton label="لغو بارگیری" icon={FaBan} tone="danger" onClick={() => runAction(() => logisticsAPI.cancelLoading(loading.id, cancelReason))} disabled={!cancelReason.trim()} />
+                  <ErpButton label="لغو بارگیری" icon={FaBan} tone="danger" onClick={() => runAction(() => logisticsAPI.cancelLoading(loading.id, cancelReason))} disabled={dispatchTimelineStale || !cancelReason.trim()} />
                 </div>
               </ErpSection>
             )}
@@ -199,7 +201,7 @@ export default function LoadingDetailPage() {
                     label="ثبت اصلاح"
                     icon={FaPlus}
                     onClick={() => runAction(() => logisticsAPI.createCorrection(loading.id, correction))}
-                    disabled={!correction.sourceContractItemId || !correction.deltaQuantity || !correction.reason.trim()}
+                    disabled={dispatchTimelineStale || !correction.sourceContractItemId || !correction.deltaQuantity || !correction.reason.trim()}
                   />
                 </div>
               </ErpSection>
@@ -207,6 +209,7 @@ export default function LoadingDetailPage() {
           </>
         }
       />
+      <RoleAwareDispatchCases workspace="logistics" loadingId={params.id} onStaleChange={setDispatchTimelineStale} />
     </ErpPage>
   );
 }

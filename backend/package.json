@@ -48,6 +48,8 @@
     "verify:dispatch-confirmation": "tsx scripts/verify-dispatch-confirmation.ts",
     "verify:physical-gate-exit": "tsx scripts/verify-physical-gate-exit.ts",
     "verify:dispatch-corrections-outages": "tsx scripts/verify-dispatch-corrections-outages.ts",
+    "verify:dispatch-cutover": "tsx scripts/verify-dispatch-cutover.ts",
+    "test:dispatch-cutover": "tsx src/services/__tests__/dispatchCutoverPolicy.test.ts && tsx src/services/__tests__/dispatchCaseTimeline.test.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },

@@ -9,6 +9,8 @@ import smsService from '../services/smsService';
 import bcrypt from 'bcryptjs';
 import { BiometricConnector } from '../services/biometricProtocol';
 import { createHmac, randomUUID } from 'node:crypto';
+import { PilotSafetyPauseError } from '../services/dispatchCutover';
+import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -30,7 +32,7 @@ const service = () => {
 };
 const handle = (res: Response, error: unknown) => {
   if (error instanceof DispatchConfirmationValidationError) return res.status(400).json({ success: false, error: error.message });
-  if (error instanceof DispatchConfirmationConflictError) return res.status(409).json({ success: false, error: error.message });
+  if (error instanceof DispatchConfirmationConflictError || error instanceof PilotSafetyPauseError) return res.status(409).json({ success: false, error: error.message });
   console.error('Dispatch confirmation error:', error);
   return res.status(500).json({ success: false, error: 'Dispatch confirmation failed.' });
 };
@@ -38,6 +40,22 @@ const hrManage = [protect, requireNarrowFeatureAccess(FEATURES.HR_DRIVER_BIOMETR
 const accountingManage = [protect, requireNarrowFeatureAccess(FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE, FEATURE_PERMISSIONS.EDIT)];
 const guardApprove = [protect, requireNarrowFeatureAccess(FEATURES.SECURITY_DISPATCH_CONFIRMATION_APPROVE, FEATURE_PERMISSIONS.EDIT)];
 const evidenceView = [protect, requireNarrowFeatureAccess(FEATURES.SECURITY_DISPATCH_EVIDENCE_VIEW, FEATURE_PERMISSIONS.VIEW)];
+
+router.get('/capabilities', protect, async (req: AuthRequest, res) => {
+  try {
+    const resolve = (workspace: string, feature: string) => resolveNarrowFeatureAccess(prisma,
+      { userId: req.user!.id, role: req.user!.role, workspace, feature, requiredPermission: 'edit' });
+    const [accountingCandidates, accountingConfirmation, guardConfirmation, hrBiometric] = await Promise.all([
+      resolve('accounting', FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE),
+      resolve('accounting', FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE),
+      resolve('security', FEATURES.SECURITY_DISPATCH_CONFIRMATION_APPROVE),
+      resolve('hr', FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE),
+    ]);
+    return res.json({ success: true, data: { canManageAccountingCandidates: accountingCandidates.allowed,
+      canManageAccountingConfirmation: accountingConfirmation.allowed, canApproveGuardConfirmation: guardConfirmation.allowed,
+      canManageHrBiometric: hrBiometric.allowed } });
+  } catch (error) { return handle(res, error); }
+});
 
 router.post('/governance-policies', hrManage, async (req: AuthRequest, res) => {
   try { return res.status(201).json({ success: true, data: await service().recordGovernancePolicy({ ...req.body,

@@ -12,6 +12,7 @@ import {
   shipmentProjectionPersistenceData,
   shipmentQuantityEvidenceIntegrityHash,
 } from './shipmentQuantityProjectionStore';
+import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
 
 type Database = PrismaClient;
 type Tx = Prisma.TransactionClient;
@@ -132,6 +133,7 @@ export type CanonicalAllocationLineInput = {
 export const saveCanonicalAllocationDraft = async (prisma: Database, input: {
   loadingId: string; queueTurnId: string; lines: CanonicalAllocationLineInput[]; actorId: string;
 }) => serializable(prisma, async (tx) => {
+  await assertCanonicalDispatchCommandAllowed(tx);
   await lockKeys(tx, [`GUARD_QUEUE:${input.queueTurnId}`, `LOGISTICS_LOADING:${input.loadingId}`]);
   const [loading, turn] = await Promise.all([
     tx.logisticsLoading.findUnique({ where: { id: input.loadingId } }),
@@ -187,6 +189,7 @@ export const refreshProjectionContracts = async (tx: Tx, contractIds: string[]) 
 export const finalizeCanonicalLoadingAllocations = async (prisma: Database, input: {
   loadingId: string; idempotencyKey: string; actorId: string;
 }) => serializable(prisma, async (tx) => {
+  await assertCanonicalDispatchCommandAllowed(tx);
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
   await lockKeys(tx, [`LOGISTICS_LOADING:${input.loadingId}`]);
   const previous = await tx.logisticsAllocationBatch.findUnique({
@@ -312,6 +315,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
 export const createSuccessorAllocationRevision = async (prisma: Database, input: {
   predecessorRevisionId: string; lines: CanonicalAllocationLineInput[]; idempotencyKey: string; actorId: string;
 }) => serializable(prisma, async (tx) => {
+  await assertCanonicalDispatchCommandAllowed(tx);
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
   await lockKeys(tx, [`LOGISTICS_ALLOCATION_REVISION:${input.predecessorRevisionId}`]);
   const predecessor = await tx.logisticsAllocationRevision.findUnique({ where: { id: input.predecessorRevisionId },
@@ -446,6 +450,7 @@ const publicCandidateResult = (candidate: any, waybill?: any) => ({
 export const decideAccountingDispatchCandidate = async (prisma: Database, input: {
   candidateId: string; action: 'ACCEPT' | 'REJECT' | 'RETURN'; reason?: string; idempotencyKey: string; actorId: string;
 }) => serializable(prisma, async (tx) => {
+  await assertCanonicalDispatchCommandAllowed(tx);
   if (!['ACCEPT', 'REJECT', 'RETURN'].includes(input.action)) {
     throw new DispatchAllocationValidationError('action must be ACCEPT, REJECT, or RETURN.');
   }
@@ -534,6 +539,7 @@ export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
 export const replaceAccountingDispatchWaybill = async (prisma: Database, input: {
   waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
 }) => serializable(prisma, async (tx) => {
+  await assertCanonicalDispatchCommandAllowed(tx);
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
   const initial = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId } });
   if (!initial) throw new DispatchAllocationValidationError('Dispatch waybill was not found.');

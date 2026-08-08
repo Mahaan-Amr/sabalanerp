@@ -2318,10 +2318,122 @@ model SecurityVehiclePair {
   photos                   SecurityVehiclePairPhoto[]
   queueTurns               SecurityDriverQueueTurn[]
   loadingDriverAssignments LogisticsLoadingDriverAssignment[]
+  cutoverDispositions      LegacyDriverVehicleDisposition[]
 
   @@index([createdBy])
   @@index([isActive])
   @@map("security_vehicle_pairs")
+}
+
+model LegacyDriverVehicleDisposition {
+  id            String                          @id @default(cuid())
+  legacyPairId  String
+  disposition   LegacyDispatchDisposition
+  driverSource  String?
+  driverId      String?
+  vehicleSource String?
+  vehicleId     String?
+  reason        String
+  evidence      Json
+  reviewedAt    DateTime                        @default(now())
+  reviewedBy    String
+  supersedesId  String?                         @unique
+  integrityHash String                          @unique
+  legacyPair    SecurityVehiclePair             @relation(fields: [legacyPairId], references: [id], onDelete: Restrict)
+  supersedes    LegacyDriverVehicleDisposition? @relation("LegacyDispositionSupersession", fields: [supersedesId], references: [id], onDelete: Restrict)
+  supersededBy  LegacyDriverVehicleDisposition? @relation("LegacyDispositionSupersession")
+
+  @@index([legacyPairId, reviewedAt])
+  @@index([disposition])
+  @@map("legacy_driver_vehicle_dispositions")
+}
+
+model DispatchCutoverControl {
+  id                        String                        @id @default("dispatch")
+  phase                     DispatchCutoverPhase          @default(PRE_CUTOVER)
+  legacyWritesEnabled       Boolean                       @default(true)
+  firstCanonicalAdmissionAt DateTime?
+  cutoverAt                 DateTime?
+  cutoverBy                 String?
+  rollbackAt                DateTime?
+  rollbackBy                String?
+  pauseAt                   DateTime?
+  pauseBy                   String?
+  pauseReason               String?
+  snapshot                  Json?
+  integrityHash             String?
+  version                   Int                           @default(0)
+  updatedAt                 DateTime                      @updatedAt
+  actions                   DispatchCutoverAction[]
+  turnSnapshots             LegacyCutoverTurnSnapshot[]
+  resumeApprovals           DispatchPilotResumeApproval[]
+
+  @@map("dispatch_cutover_control")
+}
+
+model DispatchCutoverRehearsal {
+  id             String                  @id @default(cuid())
+  rehearsalType  DispatchRehearsalType
+  status         DispatchRehearsalStatus
+  sourceCount    Int
+  targetCount    Int
+  sourceHash     String
+  targetHash     String
+  checks         Json
+  performedAt    DateTime                @default(now())
+  performedBy    String
+  cutoverVersion Int
+
+  @@index([status, performedAt])
+  @@index([cutoverVersion, performedAt])
+  @@map("dispatch_cutover_rehearsals")
+}
+
+model DispatchCutoverAction {
+  id           String                    @id @default(cuid())
+  controlId    String
+  actionType   DispatchCutoverActionType
+  payload      Json
+  actorId      String
+  recordedAt   DateTime                  @default(now())
+  previousHash String?
+  eventHash    String                    @unique
+  control      DispatchCutoverControl    @relation(fields: [controlId], references: [id], onDelete: Restrict)
+
+  @@index([controlId, recordedAt])
+  @@map("dispatch_cutover_actions")
+}
+
+model DispatchPilotResumeApproval {
+  id             String                    @id @default(cuid())
+  controlId      String
+  cutoverVersion Int
+  pauseAt        DateTime
+  approvalRole   DispatchPilotApprovalRole
+  evidence       Json
+  approvedBy     String
+  approvedAt     DateTime                  @default(now())
+  integrityHash  String                    @unique
+  control        DispatchCutoverControl    @relation(fields: [controlId], references: [id], onDelete: Restrict)
+
+  @@index([controlId, cutoverVersion, pauseAt, approvalRole, approvedAt])
+  @@map("dispatch_pilot_resume_approvals")
+}
+
+model LegacyCutoverTurnSnapshot {
+  id             String                 @id @default(cuid())
+  controlId      String
+  legacyTurnId   String
+  cutoverVersion Int
+  before         Json
+  after          Json
+  integrityHash  String                 @unique
+  recordedAt     DateTime               @default(now())
+  control        DispatchCutoverControl @relation(fields: [controlId], references: [id], onDelete: Restrict)
+
+  @@unique([controlId, cutoverVersion, legacyTurnId])
+  @@index([controlId])
+  @@map("legacy_cutover_turn_snapshots")
 }
 
 model SecurityDriverQueueTurn {
@@ -3998,6 +4110,47 @@ enum ManualOutageExitStatus {
   REGISTERED
   SPOILED
   CONFLICT
+}
+
+enum LegacyDispatchDisposition {
+  LINKED
+  HISTORICAL_ONLY
+  DUPLICATE
+  INVALID
+}
+
+enum DispatchCutoverPhase {
+  PRE_CUTOVER
+  CANONICAL_LIVE
+  ROLLED_BACK
+  PILOT_SAFETY_PAUSE
+}
+
+enum DispatchRehearsalType {
+  CORRECTNESS
+  TIMED_DRESS
+}
+
+enum DispatchRehearsalStatus {
+  PASSED
+  FAILED
+}
+
+enum DispatchCutoverActionType {
+  REHEARSAL_RECORDED
+  CUTOVER_EXECUTED
+  LEGACY_WRITES_RESTORED
+  FIRST_CANONICAL_ADMISSION
+  PILOT_SAFETY_PAUSED
+  PILOT_RESUME_APPROVAL_RECORDED
+  PILOT_SAFETY_RESUMED
+}
+
+enum DispatchPilotApprovalRole {
+  INCIDENT_LEAD
+  GUARD
+  LOGISTICS
+  ACCOUNTING
 }
 
 enum ShipmentQuantityEvidenceKind {

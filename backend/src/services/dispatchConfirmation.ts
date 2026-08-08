@@ -2,6 +2,7 @@ import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
 import { GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
 import { BiometricConnector, SimulatorScenario } from './biometricProtocol';
 import { ProtectedTemplateEnvelope, ProtectedTemplateVault } from './biometricTemplateVault';
+import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
 
 type Tx = Prisma.TransactionClient;
 export class DispatchConfirmationValidationError extends Error {}
@@ -139,6 +140,7 @@ export class DispatchConfirmationService {
     const id = randomUUID();
     const expiresAt = addMinutes(at, 10);
     await this.prisma.$transaction(async (tx) => {
+      await assertCanonicalDispatchCommandAllowed(tx);
       await tx.dispatchOtpChallenge.updateMany({ where: { sessionId, invalidatedAt: null }, data: { invalidatedAt: at } });
       await tx.dispatchOtpChallenge.create({ data: { id, sessionId, digest: this.otpDigest(id, code), expiresAt, resendAfter: addMinutes(at, 1) } });
     });
@@ -154,6 +156,7 @@ export class DispatchConfirmationService {
     const driverId = turn.driverSource === GuardDriverSource.INTERNAL ? turn.internalDriverId : turn.externalDriverId;
     if (!driverId) throw new DispatchConfirmationConflictError('The waybill has no immutable driver identity.');
     await this.prisma.$transaction(async (tx) => {
+      await assertCanonicalDispatchCommandAllowed(tx);
       const staleSessions = await tx.dispatchConfirmationSession.findMany({ where: { waybillId: waybill.id, status: 'ACTIVE', expiresAt: { lte: at } } });
       for (const stale of staleSessions) {
         await tx.dispatchConfirmationSession.update({ where: { id: stale.id }, data: { status: 'EXPIRED' } });
@@ -175,11 +178,15 @@ export class DispatchConfirmationService {
       if (!enrollment) throw new DispatchConfirmationConflictError('The internal driver has no current biometric enrollment.');
       phone = enrollment.confirmationPhone;
     } else phone = turn.externalDriver!.phone;
-    const session = await this.prisma.dispatchConfirmationSession.create({ data: { waybillId: waybill.id, method, driverSource: turn.driverSource,
-      driverId, accountingActorId: required(input.actorId, 'actorId'), waybillIntegrityHash: waybill.integrityHash,
-      workstationId: required(input.workstationId, 'workstationId'), expiresAt: addMinutes(at, this.dependencies.sessionMinutes || 10) } });
-    await this.prisma.$transaction((tx) => appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id,
-      eventType: 'SESSION_STARTED', payload: { waybillId: waybill.id, method, waybillIntegrityHash: waybill.integrityHash }, actorId: input.actorId, at }));
+    const session = await this.prisma.$transaction(async (tx) => {
+      await assertCanonicalDispatchCommandAllowed(tx);
+      const created = await tx.dispatchConfirmationSession.create({ data: { waybillId: waybill.id, method, driverSource: turn.driverSource,
+        driverId, accountingActorId: required(input.actorId, 'actorId'), waybillIntegrityHash: waybill.integrityHash,
+        workstationId: required(input.workstationId, 'workstationId'), expiresAt: addMinutes(at, this.dependencies.sessionMinutes || 10) } });
+      await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: created.id,
+        eventType: 'SESSION_STARTED', payload: { waybillId: waybill.id, method, waybillIntegrityHash: waybill.integrityHash }, actorId: input.actorId, at });
+      return created;
+    });
     if (method === 'EXTERNAL_OTP_GUARD') await this.createOtp(session.id, phone!);
     return session;
   }
@@ -232,6 +239,7 @@ export class DispatchConfirmationService {
   private async issueAuthorization(sessionId: string, actorId: string) {
     const at = this.now();
     return this.prisma.$transaction(async (tx) => {
+      await assertCanonicalDispatchCommandAllowed(tx);
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DISPATCH_CONFIRMATION:${sessionId}`);
       return this.createAuthorizationLocked(tx, sessionId, actorId, at);
     });
@@ -252,9 +260,12 @@ export class DispatchConfirmationService {
         simulation: { scenario: input.scenario || 'SUCCESS', attempt: sequence } } });
     const safeResult = { availability: result.availability, device: result.device, captureQuality: result.captureQuality, liveness: result.liveness,
       match: result.match, errorCategory: result.errorCategory, retryable: result.retryable, sequence };
-    await this.prisma.dispatchBiometricAttempt.create({ data: { sessionId: session.id, sequence, result: json(safeResult) } });
-    await this.prisma.$transaction((tx) => appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id,
-      eventType: 'BIOMETRIC_ATTEMPT_RECORDED', payload: safeResult, actorId: input.actorId, at }));
+    await this.prisma.$transaction(async (tx) => {
+      await assertCanonicalDispatchCommandAllowed(tx);
+      await tx.dispatchBiometricAttempt.create({ data: { sessionId: session.id, sequence, result: json(safeResult) } });
+      await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id,
+        eventType: 'BIOMETRIC_ATTEMPT_RECORDED', payload: safeResult, actorId: input.actorId, at });
+    });
     if (result.match.state === 'MATCH' && result.captureQuality.state === 'ACCEPTED' && result.liveness.state === 'LIVE') {
       return { result: safeResult, authorization: await this.issueAuthorization(session.id, input.actorId) };
     }
@@ -265,8 +276,11 @@ export class DispatchConfirmationService {
     });
     const nonMatchCount = consecutiveNonMatches === -1 ? attempts.length : consecutiveNonMatches;
     const qualifyingFailure = ['DEVICE_DISCONNECTED', 'CAPTURE_TIMEOUT', 'SDK_LICENSE_INVALID'].includes(result.errorCategory);
-    if (nonMatchCount >= 3 || qualifyingFailure) await this.prisma.dispatchConfirmationSession.update({ where: { id: session.id }, data: {
-      fallbackEligibleAt: at, fallbackFailure: json({ errorCategory: result.errorCategory, nonMatchCount, device: result.device }) } });
+    if (nonMatchCount >= 3 || qualifyingFailure) await this.prisma.$transaction(async (tx) => {
+      await assertCanonicalDispatchCommandAllowed(tx);
+      await tx.dispatchConfirmationSession.update({ where: { id: session.id }, data: {
+        fallbackEligibleAt: at, fallbackFailure: json({ errorCategory: result.errorCategory, nonMatchCount, device: result.device }) } });
+    });
     return { result: safeResult, fallbackEligible: nonMatchCount >= 3 || qualifyingFailure };
   }
 
@@ -277,6 +291,7 @@ export class DispatchConfirmationService {
     const driver = await this.prisma.internalDriverProfile.findUniqueOrThrow({ where: { id: session.driverId } });
     const enrollment = await this.prisma.driverBiometricEnrollment.findFirstOrThrow({ where: { personnelId: driver.personnelId, status: 'ACTIVE' } });
     await this.prisma.$transaction(async (tx) => {
+      await assertCanonicalDispatchCommandAllowed(tx);
       await tx.dispatchConfirmationSession.update({ where: { id: session.id }, data: { method: 'INTERNAL_FALLBACK' } });
       await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id, eventType: 'FALLBACK_STARTED',
         payload: { failure: session.fallbackFailure }, actorId: input.actorId, at: this.now() });
@@ -302,6 +317,7 @@ export class DispatchConfirmationService {
     if (!['EXTERNAL_OTP_GUARD', 'INTERNAL_FALLBACK'].includes(session.method)) throw new DispatchConfirmationValidationError('This session does not accept OTP confirmation.');
     const at = this.now();
     const verified = await this.prisma.$transaction(async (tx) => {
+      await assertCanonicalDispatchCommandAllowed(tx);
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DISPATCH_OTP:${session.id}`);
       const challenge = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId: session.id, verifiedAt: null, invalidatedAt: null }, orderBy: { createdAt: 'desc' } });
       if (!challenge || challenge.expiresAt <= at) throw new DispatchConfirmationConflictError('The OTP is unavailable or expired.');
@@ -332,6 +348,7 @@ export class DispatchConfirmationService {
     if (input.guardActorId === session.accountingActorId) throw new DispatchConfirmationValidationError('Guard approval requires a different actor from Accounting.');
     const reason = session.method === 'INTERNAL_FALLBACK' ? required(input.reason, 'fallback reason') : (input.reason || null);
     return this.prisma.$transaction(async (tx) => {
+      await assertCanonicalDispatchCommandAllowed(tx);
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DISPATCH_CONFIRMATION:${session.id}`);
       const current = await tx.dispatchConfirmationSession.findUnique({ where: { id: session.id } });
       if (!current || current.status !== 'ACTIVE' || current.expiresAt <= at) throw new DispatchConfirmationConflictError('The confirmation session is no longer active.');

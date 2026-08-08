@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { GuardDriverQueueTurnStatus, GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
 import { projectExternalDriverReadiness, projectExternalVehicleReadiness, projectInternalDriverReadiness } from './dispatchMasterDataPolicy';
+import { assertCanonicalDispatchCommandAllowed, recordFirstCanonicalAdmission } from './dispatchCutover';
 
 const stableValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -186,6 +187,7 @@ export const admitGuardDriverQueueTurn = async (prisma: PrismaClient, input: {
   vehicleId?: string;
   actorId: string;
 }) => prisma.$transaction(async (tx) => {
+  await assertCanonicalDispatchCommandAllowed(tx);
   const admittedAt = new Date();
   const resolved = input.source === GuardDriverSource.INTERNAL
     ? await buildInternalAdmission(tx, input.driverId, input.actorId, admittedAt)
@@ -203,6 +205,7 @@ export const admitGuardDriverQueueTurn = async (prisma: PrismaClient, input: {
       turnId: turn.id, eventType: 'ADMITTED', fromStatus: null, toStatus: turn.status, actorId: input.actorId,
       payload: { integrityHash, snapshotSchemaVersion: turn.snapshotSchemaVersion },
     });
+    await recordFirstCanonicalAdmission(tx, input.actorId, turn.id, admittedAt);
     return turn;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -213,6 +216,7 @@ export const admitGuardDriverQueueTurn = async (prisma: PrismaClient, input: {
 }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
 export const makeGuardQueueTurnAvailable = async (prisma: PrismaClient, turnId: string, actorId: string) => prisma.$transaction(async (tx) => {
+  await assertCanonicalDispatchCommandAllowed(tx);
   await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `GUARD_QUEUE:${turnId}`);
   const current = await tx.guardDriverQueueTurn.findUnique({ where: { id: turnId } });
   if (!current) throw new GuardQueueValidationError('Canonical queue turn was not found.');
@@ -231,6 +235,7 @@ export const makeGuardQueueTurnAvailable = async (prisma: PrismaClient, turnId: 
 }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
 export const reserveGuardQueueTurn = async (prisma: PrismaClient, input: { turnId: string; loadingId: string; actorId: string }) => prisma.$transaction(async (tx) => {
+  await assertCanonicalDispatchCommandAllowed(tx);
   for (const key of [`GUARD_QUEUE:${input.turnId}`, `LOGISTICS_LOADING:${input.loadingId}`].sort()) {
     await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', key);
   }

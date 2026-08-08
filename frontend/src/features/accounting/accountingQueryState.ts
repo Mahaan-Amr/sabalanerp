@@ -12,7 +12,6 @@ const CONTRACT_SOURCE_STATUSES = new Set([
   'VISIBLE_ONLY',
   'ELIGIBLE',
   'HAS_FINANCIAL_RECORDS',
-  'BLOCKED',
   'NEEDS_CORRECTION',
 ]);
 
@@ -75,7 +74,7 @@ const isGregorianDateKey = (value: string) => {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 };
 
-const isPeriodKey = (value: string) => /^(?:1[2-7]\d{2}|[2-9]\d{3})-(?:0[1-9]|1[0-2])$/.test(value);
+const isPeriodKey = (value: string) => /^1[2-7]\d{2}-(?:0[1-9]|1[0-2])$/.test(value);
 
 export const canonicalizeContractsQuery = (
   source: URLSearchParams,
@@ -131,6 +130,7 @@ export const canonicalizeInvoiceCandidatesQuery = (
 
 const applyPatch = (source: URLSearchParams, patch: QueryPatch) => {
   const next = new URLSearchParams(source.toString());
+  if (Object.prototype.hasOwnProperty.call(patch, 'status')) next.delete('view');
   for (const [key, value] of Object.entries(patch)) {
     if (value == null || value === '') next.delete(key);
     else next.set(key, String(value));

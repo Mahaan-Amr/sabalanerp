@@ -176,23 +176,14 @@ export const resolveTehranPeriodRange = (value: unknown): DateRange | null => {
   const month = Number(match[2]);
   if (month < 1 || month > 12) return null;
 
-  if (year >= 1200 && year <= 1700) {
-    const start = jalaliToGregorianParts(year, month, 1);
-    const nextJalaliYear = month === 12 ? year + 1 : year;
-    const nextJalaliMonth = month === 12 ? 1 : month + 1;
-    const end = jalaliToGregorianParts(nextJalaliYear, nextJalaliMonth, 1);
-    return {
-      gte: zonedMidnightToUtc(start.year, start.month, start.day),
-      lt: zonedMidnightToUtc(end.year, end.month, end.day),
-    };
-  }
-
-  if (year < 1900 || year > 9999) return null;
-  const nextYear = month === 12 ? year + 1 : year;
-  const nextMonth = month === 12 ? 1 : month + 1;
+  if (year < 1200 || year > 1700) return null;
+  const start = jalaliToGregorianParts(year, month, 1);
+  const nextJalaliYear = month === 12 ? year + 1 : year;
+  const nextJalaliMonth = month === 12 ? 1 : month + 1;
+  const end = jalaliToGregorianParts(nextJalaliYear, nextJalaliMonth, 1);
   return {
-    gte: zonedMidnightToUtc(year, month, 1),
-    lt: zonedMidnightToUtc(nextYear, nextMonth, 1),
+    gte: zonedMidnightToUtc(start.year, start.month, start.day),
+    lt: zonedMidnightToUtc(end.year, end.month, end.day),
   };
 };
 

@@ -77,15 +77,15 @@ test('actionable invoice population reconciles when the represented dataset is e
   assert.equal(records.filter((record) => matchesInvoiceCandidatePopulation(record, population)).length, 0);
 });
 
-test('invoiced period uses Tehran month boundaries for approval and void events', () => {
-  const population = resolveInvoiceCandidatePopulation({ view: 'invoiced', period: '2026-08' });
+test('invoiced period uses Tehran Persian-month boundaries for approval and void events', () => {
+  const population = resolveInvoiceCandidatePopulation({ view: 'invoiced', period: '1405-05' });
   const beforeTehranMonth = invoice('ISSUED', {
-    financiallyApprovedAt: new Date('2026-07-31T20:29:59.999Z'),
-    systemInvoiceDate: new Date('2026-07-31T20:29:59.999Z'),
+    financiallyApprovedAt: new Date('2026-07-22T20:29:59.999Z'),
+    systemInvoiceDate: new Date('2026-07-22T20:29:59.999Z'),
   });
   const firstInstantInTehranMonth = invoice('ISSUED', {
-    financiallyApprovedAt: new Date('2026-07-31T20:30:00.000Z'),
-    systemInvoiceDate: new Date('2026-07-31T20:30:00.000Z'),
+    financiallyApprovedAt: new Date('2026-07-22T20:30:00.000Z'),
+    systemInvoiceDate: new Date('2026-07-22T20:30:00.000Z'),
   });
   const voidedDuringMonth = invoice('VOIDED', {
     financiallyApprovedAt: new Date('2026-07-01T00:00:00.000Z'),
@@ -93,14 +93,15 @@ test('invoiced period uses Tehran month boundaries for approval and void events'
     voidedAt: new Date('2026-08-10T08:00:00.000Z'),
   });
   const firstInstantAfterTehranMonth = invoice('ISSUED', {
-    financiallyApprovedAt: new Date('2026-08-31T20:30:00.000Z'),
-    systemInvoiceDate: new Date('2026-08-31T20:30:00.000Z'),
+    financiallyApprovedAt: new Date('2026-08-22T20:30:00.000Z'),
+    systemInvoiceDate: new Date('2026-08-22T20:30:00.000Z'),
   });
 
   assert.equal(matchesInvoiceCandidatePopulation(beforeTehranMonth, population), false);
   assert.equal(matchesInvoiceCandidatePopulation(firstInstantInTehranMonth, population), true);
   assert.equal(matchesInvoiceCandidatePopulation(voidedDuringMonth, population), true);
   assert.equal(matchesInvoiceCandidatePopulation(firstInstantAfterTehranMonth, population), false);
+  assert.equal(resolveInvoiceCandidatePopulation({ view: 'invoiced', period: '2026-08' }).periodRange, undefined);
 });
 
 test('manual Gregorian dates resolve to half-open Tehran civil days', () => {

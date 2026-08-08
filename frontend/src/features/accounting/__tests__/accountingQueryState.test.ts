@@ -50,6 +50,20 @@ test('filter changes replace canonical values and reset pagination without dropp
   assert.equal(invoices.params.toString(), 'campaign=summer&status=READY');
 });
 
+test('every manual status change removes the semantic view, including a change back to the default', () => {
+  const contracts = patchContractsQuery(
+    new URLSearchParams('view=reviewable&page=3'),
+    { status: 'ALL' },
+  );
+  const invoices = patchInvoiceCandidatesQuery(
+    new URLSearchParams('view=actionable&page=3'),
+    { status: 'ALL' },
+  );
+
+  assert.equal(contracts.params.toString(), '');
+  assert.equal(invoices.params.toString(), '');
+});
+
 test('search and manual dates use their canonical representations', () => {
   const result = patchContractsQuery(
     new URLSearchParams('page=8&source=dashboard'),
@@ -67,4 +81,5 @@ test('invoiced period is canonical only for the invoiced semantic view', () => {
 
   assert.equal(invoiced.params.toString(), 'view=invoiced&period=1405-05');
   assert.equal(orphaned.params.toString(), '');
+  assert.equal(canonicalizeInvoiceCandidatesQuery(new URLSearchParams('view=invoiced&period=2026-08')).params.toString(), 'view=invoiced');
 });

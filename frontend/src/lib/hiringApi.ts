@@ -139,7 +139,8 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/collateral/${itemId}/return-confirm`),
   approveCollateral: (id: string) =>
     internal.post(`/applications/${id}/collateral/approve`),
-  collateralTemplates: () => internal.get("/collateral-templates"),
+  collateralTemplates: (params?: Record<string, string>) =>
+    internal.get("/collateral-templates", { params }),
   createCollateralTemplate: (data: any) =>
     internal.post("/collateral-templates", data),
   setCollateralTemplateActive: (id: string, isActive: boolean) =>

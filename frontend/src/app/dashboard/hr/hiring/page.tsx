@@ -1,6 +1,7 @@
 "use client";
 import { ErpInput, ErpPressable, ErpSelect } from "@/components/erp";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   FaCog,
@@ -62,6 +63,10 @@ const badgeTone = (status: HiringLifecycleStatus) => {
 };
 
 export default function HiringCasesPage() {
+  const searchParams = useSearchParams();
+  const representedView = searchParams.get("view") === "collateral-contracts"
+    ? "collateral-contracts"
+    : "";
   const [rows, setRows] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [form, setForm] = useState(blank);
@@ -83,6 +88,7 @@ export default function HiringCasesPage() {
         hiringAPI.list({
           ...buildHiringQueueParams(nextFilters),
           archived: String(archiveView),
+          ...(representedView ? { view: representedView } : {}),
         }),
         hrAPI.getFoundation(),
       ]);
@@ -106,7 +112,7 @@ export default function HiringCasesPage() {
     void load(blankFilters);
     // Initial queue load intentionally uses the stable empty filter set.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [archiveView]);
+  }, [archiveView, representedView]);
 
   const create = async () => {
     try {

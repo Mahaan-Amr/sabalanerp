@@ -5,6 +5,10 @@ import {
 } from "./hrHiringLifecycle";
 
 const FINANCE_AUTHORITIES = new Set(["FINANCE_RECORDER", "FINANCE_MANAGER"]);
+export const HR_HIRING_METRIC_VIEWS = {
+  actionableCollateralOrContracts: "collateral-contracts",
+  activeCollateralTemplates: "active",
+} as const;
 const ACTIONABLE_COLLATERAL_OR_CONTRACT_ACTIONS = new Set([
   "COMPLETE_COLLATERAL",
   "UPLOAD_CONTRACT",
@@ -40,11 +44,6 @@ export const activeHiringAuthoritiesAt = (
   .filter((grant) => grant.isActive && (!grant.expiresAt || new Date(grant.expiresAt) > at))
   .map((grant) => grant.authority);
 
-export const hrHiringDashboardMetricsResponse = (data: HrHiringDashboardMetrics) => ({
-  success: true as const,
-  data,
-});
-
 export const hiringLifecycleHasActionableCollateralOrContract = (
   lifecycle: HiringLifecycleProjection,
 ) => lifecycle.phases.some((phase) =>
@@ -52,6 +51,17 @@ export const hiringLifecycleHasActionableCollateralOrContract = (
     (action) => action && ACTIONABLE_COLLATERAL_OR_CONTRACT_ACTIONS.has(action.id),
   ),
 );
+
+export const resolveActionableCollateralOrContractApplications = <T extends HrHiringMetricApplication>(
+  applications: T[],
+  viewerAuthorities: Iterable<string>,
+  viewerUserId: string,
+) => {
+  const authorities = new Set(viewerAuthorities);
+  return applications.filter((application) => hiringLifecycleHasActionableCollateralOrContract(
+    projectHiringLifecycle(application, authorities, viewerUserId),
+  ));
+};
 
 export const buildHrHiringDashboardMetrics = ({
   viewerUserId,
@@ -75,11 +85,11 @@ export const buildHrHiringDashboardMetrics = ({
   }
 
   const actionableApplicationIds = new Set(
-    applications
-      .filter((application) => hiringLifecycleHasActionableCollateralOrContract(
-        projectHiringLifecycle(application, authorities, viewerUserId),
-      ))
-      .map((application) => application.id),
+    resolveActionableCollateralOrContractApplications(
+      applications,
+      authorities,
+      viewerUserId,
+    ).map((application) => application.id),
   );
 
   return {

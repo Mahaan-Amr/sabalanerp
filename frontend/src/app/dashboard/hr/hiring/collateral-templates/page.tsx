@@ -5,13 +5,14 @@ import { useSearchParams } from "next/navigation";
 import { FaPlus, FaSync } from "react-icons/fa";
 import { ErpButton, ErpCard, ErpLoading, ErpPage, ErpSheet } from "@/components/erp";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
+import { HR_HIRING_METRIC_VIEWS } from "@/features/hr-hiring/hrHiringMetricViews";
 
 const field =
   "w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]";
 
 export default function CollateralTemplatesPage() {
   const searchParams = useSearchParams();
-  const activeView = searchParams.get("view") === "active";
+  const activeView = searchParams.get("view") === HR_HIRING_METRIC_VIEWS.activeCollateralTemplates;
   const [rows, setRows] = useState<any[]>([]);
   const [name, setName] = useState("");
   const [items, setItems] = useState<any[]>([
@@ -27,7 +28,7 @@ export default function CollateralTemplatesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const load = useCallback(async () => {
     try {
-      setRows((await hiringAPI.collateralTemplates(activeView ? { view: "active" } : undefined)).data.data);
+      setRows((await hiringAPI.collateralTemplates(activeView ? { view: HR_HIRING_METRIC_VIEWS.activeCollateralTemplates } : undefined)).data.data);
     } catch (e) {
       setError(hiringError(e));
     }

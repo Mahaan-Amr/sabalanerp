@@ -3,7 +3,7 @@ import {
   activeHiringAuthoritiesAt,
   buildHrHiringDashboardMetrics,
   HR_HIRING_DASHBOARD_METRICS_CACHE_HEADERS,
-  hrHiringDashboardMetricsResponse,
+  resolveActionableCollateralOrContractApplications,
   type HrHiringMetricApplication,
 } from "../hrHiringDashboardMetrics";
 
@@ -77,6 +77,22 @@ const onboardingSource = (overrides: Partial<HrHiringMetricApplication> = {}): H
 
   assert.equal(managerResult.actionableCollateralOrContractCases, 1);
   assert.equal(uploaderResult.actionableCollateralOrContractCases, 0);
+  assert.deepEqual(
+    resolveActionableCollateralOrContractApplications(
+      [submittedForReview],
+      ["FINANCE_MANAGER"],
+      "manager-1",
+    ).map((application) => application.id),
+    ["application-1"],
+  );
+  assert.deepEqual(
+    resolveActionableCollateralOrContractApplications(
+      [submittedForReview],
+      ["FINANCE_MANAGER"],
+      "recorder-1",
+    ),
+    [],
+  );
 }
 
 {
@@ -117,7 +133,7 @@ const onboardingSource = (overrides: Partial<HrHiringMetricApplication> = {}): H
     activeCollateralTemplates: 0,
     generatedAt: new Date(0),
   });
-  const response = hrHiringDashboardMetricsResponse(data);
+  const response = { success: true, data };
   assert.deepEqual(Object.keys(response), ["success", "data"]);
   assert.deepEqual(Object.keys(response.data).sort(), [
     "actionableCollateralOrContractCases",

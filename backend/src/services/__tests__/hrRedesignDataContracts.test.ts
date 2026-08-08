@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import {
   HR_REDESIGN_CATALOG,
   buildHrRedesignBackfillReport,
+  canReadLegacyAssessmentCompatibility,
   classifyHrReconciliationRecord,
   projectLegacyHrAccess,
   planLegacyAssessmentMigration,
   projectLegacyHrWorkItem,
+  projectLegacyAssessmentCompatibility,
   projectLegacyPosition,
 } from '../hrRedesignDataContracts';
 
@@ -66,6 +68,27 @@ assert.deepEqual(planLegacyAssessmentMigration({
   },
 });
 
+assert.equal(canReadLegacyAssessmentCompatibility({ role: 'ADMIN', hasActiveHiringAuthority: false }), true);
+assert.equal(canReadLegacyAssessmentCompatibility({ role: 'USER', hasActiveHiringAuthority: true }), true);
+assert.equal(canReadLegacyAssessmentCompatibility({ role: 'USER', hasActiveHiringAuthority: false }), false);
+
+const legacyEvidence = [{ id: 'assessment-1', assessmentType: 'DISC', payload: { score: 74 } }];
+assert.deepEqual(projectLegacyAssessmentCompatibility({
+  applicationId: 'application-with-evidence',
+  completedAssessmentKinds: ['DISC'],
+  evidence: legacyEvidence,
+}), {
+  migration: {
+    applicationId: 'application-with-evidence',
+    plan: null,
+    neutralEvent: {
+      code: 'LEGACY_ASSESSMENT_EVIDENCE_PRESERVED',
+      details: { completedAssessmentKinds: ['DISC'] },
+    },
+  },
+  evidence: legacyEvidence,
+});
+
 assert.deepEqual(planLegacyAssessmentMigration({
   applicationId: 'application-with-legacy-disc',
   completedAssessmentKinds: ['DISC'],
@@ -83,6 +106,7 @@ assert.deepEqual(classifyHrReconciliationRecord({
   sourceId: 'user-1',
   isOperationallyCurrent: true,
   legacyOnlyReviewed: false,
+  personnelLinkExpected: true,
   userPersonnelLinkResolved: false,
   identityAmbiguous: false,
   hasCurrentOrganizationalAssignment: true,
@@ -100,7 +124,8 @@ assert.deepEqual(classifyHrReconciliationRecord({
   sourceType: 'PERSONNEL',
   sourceId: 'person-2',
   isOperationallyCurrent: false,
-  legacyOnlyReviewed: true,
+  legacyOnlyReviewed: false,
+  personnelLinkExpected: false,
   userPersonnelLinkResolved: true,
   identityAmbiguous: false,
   hasCurrentOrganizationalAssignment: false,
@@ -119,6 +144,7 @@ assert.deepEqual(classifyHrReconciliationRecord({
   sourceId: 'legacy-with-classification-error',
   isOperationallyCurrent: false,
   legacyOnlyReviewed: true,
+  personnelLinkExpected: false,
   userPersonnelLinkResolved: true,
   identityAmbiguous: false,
   hasCurrentOrganizationalAssignment: false,
@@ -137,7 +163,27 @@ assert.deepEqual(classifyHrReconciliationRecord({
   sourceId: 'person-without-login',
   isOperationallyCurrent: true,
   legacyOnlyReviewed: false,
+  personnelLinkExpected: false,
   userPersonnelLinkResolved: true,
+  identityAmbiguous: false,
+  hasCurrentOrganizationalAssignment: true,
+  employmentConsistent: true,
+  startDateReviewOpen: false,
+  assessmentPlanUnresolved: false,
+  classificationError: false,
+}), {
+  primaryState: 'READY',
+  attentionFlags: [],
+  cutoverBlocker: false,
+});
+
+assert.deepEqual(classifyHrReconciliationRecord({
+  sourceType: 'USER',
+  sourceId: 'access-only-user',
+  isOperationallyCurrent: true,
+  legacyOnlyReviewed: false,
+  personnelLinkExpected: false,
+  userPersonnelLinkResolved: false,
   identityAmbiguous: false,
   hasCurrentOrganizationalAssignment: true,
   employmentConsistent: true,

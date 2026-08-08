@@ -16,9 +16,19 @@ const run = async () => {
       lastName: 'User',
     } });
     const personnelWithoutLogin = await tx.personnel.create({ data: {
-      firstName: 'Personnel',
+      firstName: 'Same Name',
       lastName: `WithoutLogin-${suffix}`,
       isActive: false,
+    } });
+    const sameNamePersonnel = await tx.personnel.create({ data: {
+      firstName: 'Same Name',
+      lastName: `WithoutLogin-${suffix}`,
+      isActive: false,
+    } });
+    const currentPersonnel = await tx.personnel.create({ data: {
+      firstName: 'Current',
+      lastName: `WithoutAssignment-${suffix}`,
+      isActive: true,
     } });
     const planCountBefore = await tx.hrFormalAssessmentPlan.count();
     await runHrRedesignBackfill(tx, { apply: true });
@@ -39,27 +49,36 @@ const run = async () => {
     const unlinkedReconciliation = await tx.hrReconciliationRecord.findUniqueOrThrow({
       where: { stableKey: userReconciliationKey }, include: { attentionFlags: true },
     });
-    assert.equal(unlinkedReconciliation.cutoverBlocker, true);
-    assert.equal(unlinkedReconciliation.attentionFlags.some((flag) => flag.flagCode === 'USER_PERSONNEL_LINKAGE' && flag.isActive), true);
+    assert.equal(unlinkedReconciliation.primaryState, 'READY');
+    assert.equal(unlinkedReconciliation.cutoverBlocker, false);
+    assert.equal(unlinkedReconciliation.attentionFlags.some((flag) => flag.flagCode === 'USER_PERSONNEL_LINKAGE'), false);
     const personnelReconciliation = await tx.hrReconciliationRecord.findUniqueOrThrow({
       where: { stableKey: `hr-redesign-v1:reconciliation:PERSONNEL:${personnelWithoutLogin.id}` },
       include: { attentionFlags: true },
     });
+    assert.equal(personnelReconciliation.primaryState, 'LEGACY_ONLY_HISTORY');
     assert.equal(personnelReconciliation.attentionFlags.some((flag) => flag.flagCode === 'USER_PERSONNEL_LINKAGE'), false);
+    const sameNameReconciliation = await tx.hrReconciliationRecord.findUniqueOrThrow({
+      where: { stableKey: `hr-redesign-v1:reconciliation:PERSONNEL:${sameNamePersonnel.id}` },
+      include: { attentionFlags: true },
+    });
+    assert.equal(sameNameReconciliation.primaryState, 'LEGACY_ONLY_HISTORY');
+    assert.equal(sameNameReconciliation.attentionFlags.some((flag) => flag.flagCode === 'IDENTITY_AMBIGUITY'), false);
 
-    const linkedPersonnel = await tx.personnel.create({ data: {
-      firstName: 'Linked',
-      lastName: `Personnel-${suffix}`,
-      isActive: false,
-    } });
-    await tx.user.update({ where: { id: unlinkedUser.id }, data: { personnelId: linkedPersonnel.id } });
+    const currentKey = `hr-redesign-v1:reconciliation:PERSONNEL:${currentPersonnel.id}`;
+    const currentReconciliation = await tx.hrReconciliationRecord.findUniqueOrThrow({
+      where: { stableKey: currentKey }, include: { attentionFlags: true },
+    });
+    assert.equal(currentReconciliation.cutoverBlocker, true);
+    assert.equal(currentReconciliation.attentionFlags.some((flag) => flag.flagCode === 'CURRENT_ASSIGNMENT_GAP' && flag.isActive), true);
+    await tx.personnel.update({ where: { id: currentPersonnel.id }, data: { isActive: false } });
     await runHrRedesignBackfill(tx, { apply: true });
     const resolvedReconciliation = await tx.hrReconciliationRecord.findUniqueOrThrow({
-      where: { stableKey: userReconciliationKey },
+      where: { stableKey: currentKey },
       include: { attentionFlags: { orderBy: { version: 'desc' } }, cutoverBlockers: true },
     });
     assert.equal(resolvedReconciliation.cutoverBlocker, false);
-    assert.equal(resolvedReconciliation.attentionFlags[0].isActive, false);
+    assert.equal(resolvedReconciliation.attentionFlags.filter((flag) => ['CURRENT_ASSIGNMENT_GAP', 'EMPLOYMENT_INCONSISTENCY'].includes(flag.flagCode)).every((flag) => !flag.isActive), true);
     assert.equal(resolvedReconciliation.cutoverBlockers.every((blocker) => !blocker.isActive), true);
     throw rollback;
   }, { timeout: 180_000 }), (error) => error === rollback);

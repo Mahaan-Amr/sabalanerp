@@ -192,6 +192,23 @@ export const planLegacyAssessmentMigration = (input: {
   },
 });
 
+export const canReadLegacyAssessmentCompatibility = (input: {
+  role: string;
+  hasActiveHiringAuthority: boolean;
+}) => input.role === 'ADMIN' || input.hasActiveHiringAuthority;
+
+export const projectLegacyAssessmentCompatibility = <TEvidence>(input: {
+  applicationId: string;
+  evidence: TEvidence[];
+  completedAssessmentKinds: HrAssessmentKind[];
+}) => ({
+  migration: planLegacyAssessmentMigration({
+    applicationId: input.applicationId,
+    completedAssessmentKinds: input.completedAssessmentKinds,
+  }),
+  evidence: input.evidence,
+});
+
 export type HrReconciliationAttentionFlag =
   | 'USER_PERSONNEL_LINKAGE'
   | 'IDENTITY_AMBIGUITY'
@@ -206,6 +223,7 @@ export type HrReconciliationInput = {
   sourceId: string;
   isOperationallyCurrent: boolean;
   legacyOnlyReviewed: boolean;
+  personnelLinkExpected: boolean;
   userPersonnelLinkResolved: boolean;
   identityAmbiguous: boolean;
   hasCurrentOrganizationalAssignment: boolean;
@@ -221,7 +239,7 @@ export const classifyHrReconciliationRecord = (input: HrReconciliationInput) => 
   const addFlag = (condition: boolean, flag: HrReconciliationAttentionFlag) => {
     if (condition && !input.suppressedAttentionFlags?.includes(flag)) attentionFlags.push(flag);
   };
-  addFlag(input.sourceType === 'USER' && !input.userPersonnelLinkResolved, 'USER_PERSONNEL_LINKAGE');
+  addFlag(input.sourceType === 'USER' && input.personnelLinkExpected && !input.userPersonnelLinkResolved, 'USER_PERSONNEL_LINKAGE');
   addFlag(input.identityAmbiguous, 'IDENTITY_AMBIGUITY');
   if (input.sourceType === 'PERSONNEL' && input.isOperationallyCurrent && !input.hasCurrentOrganizationalAssignment) {
     addFlag(true, 'CURRENT_ASSIGNMENT_GAP');
@@ -236,7 +254,7 @@ export const classifyHrReconciliationRecord = (input: HrReconciliationInput) => 
       ? 'CLASSIFICATION_ERROR' as const
       : attentionFlags.length > 0
         ? 'NEEDS_REVIEW' as const
-        : input.legacyOnlyReviewed
+        : !input.isOperationallyCurrent
           ? 'LEGACY_ONLY_HISTORY' as const
         : 'READY' as const,
     attentionFlags,
@@ -369,11 +387,6 @@ export const runHrRedesignBackfill = async (
   });
 
   const now = new Date();
-  const normalizedNameCounts = personnel.reduce<Map<string, number>>((counts, person) => {
-    const key = `${person.firstName.trim().toLocaleLowerCase('fa-IR')}\u0000${person.lastName.trim().toLocaleLowerCase('fa-IR')}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-    return counts;
-  }, new Map());
   const reconciliationInputs: HrReconciliationInput[] = [];
   for (const person of personnel) {
     const currentRelationships = person.hrEmploymentRelationships.filter((relationship) => ['ACTIVE', 'SUSPENDED'].includes(relationship.status));
@@ -382,14 +395,16 @@ export const runHrRedesignBackfill = async (
       assignment.type === 'PRIMARY'
       && assignment.effectiveFrom <= now
       && (!assignment.effectiveTo || assignment.effectiveTo >= now)));
-    const nameKey = `${person.firstName.trim().toLocaleLowerCase('fa-IR')}\u0000${person.lastName.trim().toLocaleLowerCase('fa-IR')}`;
     reconciliationInputs.push({
       sourceType: 'PERSONNEL',
       sourceId: person.id,
       isOperationallyCurrent,
       legacyOnlyReviewed: false,
+      personnelLinkExpected: false,
       userPersonnelLinkResolved: true,
-      identityAmbiguous: (normalizedNameCounts.get(nameKey) ?? 0) > 1,
+      // Names are not identity evidence. Ambiguity is recorded only after an
+      // explicit reconciliation review supplies identity evidence.
+      identityAmbiguous: false,
       hasCurrentOrganizationalAssignment,
       employmentConsistent: person.isActive ? currentRelationships.length === 1 : currentRelationships.length === 0,
       startDateReviewOpen: currentRelationships.some((relationship) => !relationship.startDateVerified),
@@ -402,6 +417,9 @@ export const runHrRedesignBackfill = async (
     sourceId: user.id,
     isOperationallyCurrent: user.isActive,
     legacyOnlyReviewed: false,
+    // A User without a Personnel link is access-only unless independent
+    // evidence says the link is required; legacy data cannot infer that.
+    personnelLinkExpected: false,
     userPersonnelLinkResolved: Boolean(user.personnelId),
     identityAmbiguous: false,
     hasCurrentOrganizationalAssignment: true,
@@ -415,6 +433,7 @@ export const runHrRedesignBackfill = async (
     sourceId: application.id,
     isOperationallyCurrent: application.stage !== 'CLOSED',
     legacyOnlyReviewed: false,
+    personnelLinkExpected: false,
     userPersonnelLinkResolved: true,
     identityAmbiguous: false,
     hasCurrentOrganizationalAssignment: true,

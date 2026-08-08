@@ -14,7 +14,8 @@ import { commitStagedHiringFiles, planHiringFilesForDeletion, restoreStagedHirin
 import { PERSONNEL_ERASURE_LEASE_MS } from '../services/hrPersonnelErasureRecovery';
 import {
   HR_REDESIGN_CATALOG,
-  planLegacyAssessmentMigration,
+  canReadLegacyAssessmentCompatibility,
+  projectLegacyAssessmentCompatibility,
   projectLegacyHrAccess,
   projectLegacyHrWorkItem,
   projectLegacyPosition,
@@ -1030,8 +1031,7 @@ router.get('/redesign/compatibility/work-items', adminAccess, async (_req, res) 
 
 router.get('/redesign/compatibility/applications/:applicationId/assessments', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
-    if (req.user!.role !== 'ADMIN') {
-      const authority = await prisma.hrHiringAuthority.findFirst({
+    const authority = req.user!.role === 'ADMIN' ? null : await prisma.hrHiringAuthority.findFirst({
         where: {
           userId: actorId(req),
           authority: { in: ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HIRING_MANAGER'] },
@@ -1040,7 +1040,8 @@ router.get('/redesign/compatibility/applications/:applicationId/assessments', vi
         },
         select: { id: true },
       });
-      if (!authority) return res.status(403).json({ success: false, error: 'Hiring assessment authority is required.' });
+    if (!canReadLegacyAssessmentCompatibility({ role: req.user!.role, hasActiveHiringAuthority: Boolean(authority) })) {
+      return res.status(403).json({ success: false, error: 'Hiring assessment authority is required.' });
     }
     const application = await prisma.hrJobApplication.findUniqueOrThrow({
       where: { id: req.params.applicationId },
@@ -1051,10 +1052,11 @@ router.get('/redesign/compatibility/applications/:applicationId/assessments', vi
       .filter((kind): kind is 'DISC' | 'EQ' | 'BIG_FIVE' => ['DISC', 'EQ', 'BIG_FIVE'].includes(kind)))] as Array<'DISC' | 'EQ' | 'BIG_FIVE'>;
     res.json({
       success: true,
-      data: {
-        migration: planLegacyAssessmentMigration({ applicationId: application.id, completedAssessmentKinds }),
+      data: projectLegacyAssessmentCompatibility({
+        applicationId: application.id,
+        completedAssessmentKinds,
         evidence: application.assessments,
-      },
+      }),
     });
   } catch (error) { handleError(res, error, 'Project legacy HR assessment evidence'); }
 });

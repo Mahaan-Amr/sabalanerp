@@ -97,14 +97,14 @@ export default function AccountingDashboardPage() {
         items={[
           {
             title: 'قراردادهای قابل بررسی',
-            href: '/dashboard/accounting/contracts',
+            href: '/dashboard/accounting/contracts?view=reviewable',
             icon: FaClipboardCheck,
             tone: 'primary',
-            badge: <StatusBadge label={(queues.contracts?.length || 0).toLocaleString('fa-IR')} tone="primary" />,
+            badge: <StatusBadge label={(commandCenter.reviewableContracts?.count || 0).toLocaleString('fa-IR')} tone="primary" />,
           },
           {
             title: 'پیش‌نویس صورتحساب‌ها',
-            href: '/dashboard/accounting/invoice-candidates',
+            href: '/dashboard/accounting/invoice-candidates?view=actionable',
             icon: FaFileInvoice,
             tone: 'info',
             badge: <StatusBadge label={(commandCenter.invoiceCandidates?.count || 0).toLocaleString('fa-IR')} tone="info" />,

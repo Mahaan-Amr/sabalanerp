@@ -20,6 +20,12 @@ import {
 } from '@prisma/client';
 import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
 import { captureContractQuantityVersionAtFinancialApproval } from './shipmentQuantityProjectionStore';
+import {
+  ACCOUNTING_RECORD_STATUSES,
+  invoiceCandidatePopulationWhere,
+  orderReviewableContracts,
+  resolveInvoiceCandidatePopulation,
+} from './accountingPopulations';
 
 const prisma = new PrismaClient();
 
@@ -73,6 +79,7 @@ const publishAccountingActionWithinTransaction = async (
 };
 
 type ListContractsQuery = {
+  view?: string;
   search?: string;
   status?: string;
   sourceStatus?: string;
@@ -739,11 +746,13 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
   const search = query.search?.trim();
 
   const where: Prisma.SalesContractWhereInput = {};
-  if (query.status && query.status !== 'ALL') {
+  if (query.status && query.status !== 'ALL' && Object.values(ContractStatus).includes(query.status as ContractStatus)) {
     where.status = query.status as ContractStatus;
   }
 
+  const reviewableView = !where.status && query.view === 'reviewable';
   const orderBy: Prisma.SalesContractOrderByWithRelationInput =
+    reviewableView ? { createdAt: 'desc' } :
     query.sort === 'amount_desc' ? { totalAmount: 'desc' } :
     query.sort === 'amount_asc' ? { totalAmount: 'asc' } :
     query.sort === 'oldest' ? { createdAt: 'asc' } :
@@ -795,31 +804,23 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
     items = items.filter((item) => item.accounting.taxStatus === query.taxStatus);
   }
   if (query.dateFrom || query.dateTo) {
-    const from = query.dateFrom ? new Date(query.dateFrom) : null;
-    const to = query.dateTo ? new Date(query.dateTo) : null;
-    const fromTime = from && !Number.isNaN(from.getTime()) ? from.getTime() : null;
-    const toTime = to && !Number.isNaN(to.getTime()) ? to.getTime() : null;
+    const fromKey = /^\d{4}-\d{2}-\d{2}$/.test(query.dateFrom || '') ? query.dateFrom! : null;
+    const toKey = /^\d{4}-\d{2}-\d{2}$/.test(query.dateTo || '') ? query.dateTo! : null;
 
-    items = items.filter((item: any) => {
-      if (!item.contractDate) return false;
-      const date = new Date(item.contractDate);
-      if (Number.isNaN(date.getTime())) return false;
-      const time = date.getTime();
-      if (fromTime != null && time < fromTime) return false;
-      if (toTime != null && time > toTime) return false;
-      return true;
-    });
+    if (fromKey || toKey) {
+      items = items.filter((item: any) => {
+        if (!item.contractDate) return false;
+        const date = new Date(item.contractDate);
+        if (Number.isNaN(date.getTime())) return false;
+        const dateKey = getTehranDateKey(date);
+        if (fromKey && dateKey < fromKey) return false;
+        if (toKey && dateKey > toKey) return false;
+        return true;
+      });
+    }
   }
-  if (query.sort === 'attention') {
-    items.sort((a, b) => {
-      const score = (item: any) =>
-        (item.accounting.openCorrections * 4) +
-        (item.accounting.openFlags * 3) +
-        (item.accounting.receivableStatus === 'OVERDUE' ? 3 : 0) +
-        (item.accounting.taxStatus === TaxSubmissionStatus.NOT_READY ? 2 : 0) +
-        (item.accounting.eligibleForFinancialRecords && item.accounting.invoiceStatus === 'NONE' ? 1 : 0);
-      return score(b) - score(a);
-    });
+  if (reviewableView || query.sort === 'attention') {
+    items = orderReviewableContracts(items);
   }
 
   const total = items.length;
@@ -854,7 +855,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
 export const getAccountingWorkspace = async () => {
   const [period, contractResponse, records, receivables, payments, taxRecords, corrections, auditLogs] = await Promise.all([
     getOrCreateCurrentPeriod(),
-    listAccountingContracts({ page: 1, pageSize: 12, sort: 'attention' }),
+    listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }),
     prisma.accountingFinancialRecord.findMany({ orderBy: { createdAt: 'desc' }, take: 8 }),
     prisma.accountingReceivable.findMany({ orderBy: { dueDate: 'asc' }, take: 8 }),
     prisma.accountingPaymentStatus.findMany({ orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }], take: 8 }),
@@ -875,8 +876,9 @@ export const getAccountingWorkspace = async () => {
       checkStatus: { in: [CheckAccountingStatus.RECEIVED, CheckAccountingStatus.DEPOSITED, CheckAccountingStatus.PENDING_HANDOVER] }
     }
   });
+  const actionableInvoicePopulation = resolveInvoiceCandidatePopulation({ view: 'actionable' });
   const invoiceCandidates = await prisma.accountingFinancialRecord.findMany({
-    where: { kind: FinancialRecordKind.INVOICE_CANDIDATE, status: { in: [AccountingRecordStatus.DRAFT, AccountingRecordStatus.READY, AccountingRecordStatus.APPROVED_FOR_ISSUE] } }
+    where: invoiceCandidatePopulationWhere(actionableInvoicePopulation) as Prisma.AccountingFinancialRecordWhereInput
   });
   const taxNotReady = await prisma.accountingTaxRecord.findMany({
     where: { submissionStatus: { in: [TaxSubmissionStatus.NOT_READY, TaxSubmissionStatus.NEEDS_CORRECTION, TaxSubmissionStatus.REJECTED] } }
@@ -888,6 +890,9 @@ export const getAccountingWorkspace = async () => {
   return {
     period,
     commandCenter: {
+      reviewableContracts: {
+        count: contractResponse.total
+      },
       approvedAndSignedContractValue: contractResponse.items
         .filter((item) => ELIGIBLE_CONTRACT_STATUSES.includes(item.status))
         .reduce((sum, item) => sum.plus(item.accounting.totalContractAmount), new Prisma.Decimal(0))
@@ -2170,8 +2175,27 @@ const applyContractSearch = async (where: { contractId?: any }, query: any) => {
 
 export const listFinancialRecords = async (query: any = {}) => {
   const where: Prisma.AccountingFinancialRecordWhereInput = {};
-  if (query.kind && query.kind !== 'ALL') where.kind = query.kind;
-  if (query.status && query.status !== 'ALL') where.status = query.status;
+  const isInvoiceCandidateQuery = query.kind === FinancialRecordKind.INVOICE_CANDIDATE
+    || query.view === 'actionable'
+    || query.view === 'invoiced';
+  if (isInvoiceCandidateQuery) {
+    const population = resolveInvoiceCandidatePopulation({
+      view: query.view,
+      status: query.status,
+      period: query.period,
+    });
+    Object.assign(
+      where,
+      invoiceCandidatePopulationWhere(population) as Prisma.AccountingFinancialRecordWhereInput,
+    );
+  } else {
+    if (query.kind && query.kind !== 'ALL') where.kind = query.kind;
+    if (
+      query.status
+      && query.status !== 'ALL'
+      && (ACCOUNTING_RECORD_STATUSES as readonly string[]).includes(String(query.status))
+    ) where.status = query.status;
+  }
   if (query.contractId) where.contractId = query.contractId;
   Object.assign(where, dateRangeFilter(query, 'createdAt'));
   const { page, pageSize, skip } = getPagination(query);

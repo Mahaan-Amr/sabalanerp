@@ -983,6 +983,43 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
   assert.ok(!customerHtml.includes('خروجی فیزیکی تولید'));
   assert.ok(customerHtml.includes('سنگ مصرفی برای'));
   assert.ok(customerHtml.includes('عرض ۴۰cm × طول ۱۰m × ۱ عدد، جمع ۴ متر مربع'));
+  const confirmationRows = customerHtml.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) || [];
+  const confirmationCells = (row: string): string[] =>
+    Array.from(row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g), (match) =>
+      match[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    );
+  const requestedProductRow = confirmationRows.find((row) =>
+    row.includes('طولی مرمریت 40 عرض ارسنجان') && !row.includes('سنگ مصرفی برای')
+  ) || '';
+  const consumedStoneRow = confirmationRows.find((row) => row.includes('سنگ مصرفی برای')) || '';
+  assert.deepEqual(confirmationCells(requestedProductRow).slice(-2), ['', '']);
+  assert.deepEqual(
+    confirmationCells(consumedStoneRow).slice(-2),
+    ['۱٬۰۵۰٬۰۰۰ تومان', '۳٬۷۸۰٬۰۰۰ تومان'],
+    'new digital-confirmation HTML should present material pricing on consumed stone'
+  );
+
+  const alreadyPaidConfirmationHtml = generateContractHTML({
+    products: [{
+      ...recalculated.product,
+      originalTotalPrice: 0,
+      totalPrice: recalculated.product.cuttingCost || 0,
+      meta: {
+        ...(recalculated.product.meta || {}),
+        remainingSource: {
+          sourceProductRowId: 'source-row',
+          remainingStoneId: 'remaining-1'
+        }
+      }
+    }],
+    contractNumber: 'TEST-ALREADY-PAID',
+    contractDate: '1405/04/23',
+    customer: { firstName: 'Test', lastName: 'Customer' }
+  });
+  const alreadyPaidRow = (alreadyPaidConfirmationHtml.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) || [])
+    .find((row) => row.includes('سنگ مصرفی برای')) || '';
+  assert.ok(alreadyPaidRow.includes('محاسبه‌شده در محصول منبع'));
+  assert.deepEqual(confirmationCells(alreadyPaidRow).slice(-2), ['۰ تومان', '۰ تومان']);
 
   const legacySavedProduct = contractProduct({
     length: plan.requestedLengthM,

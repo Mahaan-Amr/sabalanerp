@@ -79,6 +79,25 @@ export const generateContractHTML = (data: any): string => {
           const sourceMaterialSummary = getSourceMaterialSummary(product);
           const physicalProductionSummary = getPhysicalProductionSummary(product);
           const isLayer = Boolean(product?.meta?.isLayer);
+          const layerSourcePlan = product?.meta?.layerSourcePlan || {};
+          const isEntirelyAlreadyPaidMaterial = Boolean(product?.meta?.remainingSource) || (
+            isLayer &&
+            Number(layerSourcePlan.fromAlreadyPaidSets || 0) > 0 &&
+            Number(layerSourcePlan.sourceStoneQuantity || 0) <= 0 &&
+            Number(layerSourcePlan.sourceAreaSqm || 0) <= 0
+          );
+          const materialUnitRate = isEntirelyAlreadyPaidMaterial
+            ? 0
+            : Number(product.pricePerSquareMeter ?? product.unitPrice ?? 0);
+          const hasMaterialTotalSnapshot =
+            product.originalTotalPrice !== undefined &&
+            product.originalTotalPrice !== null &&
+            Number.isFinite(Number(product.originalTotalPrice));
+          const materialTotal = isEntirelyAlreadyPaidMaterial
+            ? 0
+            : hasMaterialTotalSnapshot
+              ? Number(product.originalTotalPrice)
+              : Number(product.totalPrice || 0);
           const productName = product.stoneName || product.product?.namePersian || product.product?.name || product.namePersian || product.name || 'نامشخص';
           const kerfNote = product.sawKerfEnabled ? ' - خوراک اره لحاظ شده' : '';
           const requestedDimensions = product.length && product.width
@@ -90,17 +109,17 @@ export const generateContractHTML = (data: any): string => {
             <td style="border: 1px solid #ddd; padding: 8px;">${requestedDimensions}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatQuantity(product.quantity || 0)}</td>
             <td style="border: 1px solid #ddd; padding: 8px;">${formatSquareMeters(product.squareMeters || product.product?.squareMeter || product.squareMeter || 0)}</td>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.unitPrice ? formatPrice(product.unitPrice, product.currency || 'تومان') : 'نامشخص'}</td>
-            <td style="border: 1px solid #ddd; padding: 8px;">${product.totalPrice ? formatPrice(product.totalPrice, product.currency || 'تومان') : 'نامشخص'}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${sourceMaterialSummary ? '' : (product.unitPrice ? formatPrice(product.unitPrice, product.currency || 'تومان') : 'نامشخص')}</td>
+            <td style="border: 1px solid #ddd; padding: 8px;">${sourceMaterialSummary ? '' : (product.totalPrice ? formatPrice(product.totalPrice, product.currency || 'تومان') : 'نامشخص')}</td>
           </tr>
           ${sourceMaterialSummary ? `
             <tr>
-              <td style="border: 1px solid #ddd; padding: 8px;">سنگ مصرفی برای ${productName}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">سنگ مصرفی برای ${productName}${isEntirelyAlreadyPaidMaterial ? ' - محاسبه‌شده در محصول منبع' : ''}</td>
               <td style="border: 1px solid #ddd; padding: 8px;">${sourceMaterialSummary}</td>
               <td style="border: 1px solid #ddd; padding: 8px;">-</td>
               <td style="border: 1px solid #ddd; padding: 8px;">-</td>
-              <td style="border: 1px solid #ddd; padding: 8px;">-</td>
-              <td style="border: 1px solid #ddd; padding: 8px;">-</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">${formatPrice(materialUnitRate, product.currency || 'تومان')}</td>
+              <td style="border: 1px solid #ddd; padding: 8px;">${formatPrice(materialTotal, product.currency || 'تومان')}</td>
             </tr>
           ` : ''}
           ${physicalProductionSummary ? `

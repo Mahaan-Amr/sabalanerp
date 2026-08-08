@@ -332,12 +332,15 @@ A product catalog search that treats Persian, Arabic, and Latin digits as the sa
 _Avoid_: making users switch keyboard language to find numeric product values
 
 **سنگ مصرفی**:
-An informational customer-facing row that shows the full base stone consumed to create a sold cut product, including a quantity-zero longitudinal product. It explains actual source width, consumed source length, source quantity, and consumed area, but is not a second charged product row or a workshop cutting instruction; internal production-piece and remainder breakdowns stay outside customer PDF/print.
-_Avoid_: adding سنگ مصرفی to contract totals, delivery quantities, or inventory as a separate sale row
+The customer-facing material-charge presentation row for the full base stone consumed to create a sold cut product, including a quantity-zero longitudinal product. It shows actual source width, consumed source length, source quantity, consumed area, material unit rate, and base material total, but is not a second charged product row or a workshop cutting instruction; internal production-piece and remainder breakdowns stay outside customer PDF/print.
+_Avoid_: adding سنگ مصرفی to contract totals, delivery quantities, or inventory as a separate sale row, or treating its displayed material price as an additional charge
 
-**قیمت ردیف‌های توضیحی قرارداد**:
-Informational contract output rows such as سنگ مصرفی stay visible for clarity but do not show نرخ or مبلغ کل because they are not price-bearing invoice rows.
-_Avoid_: showing prices on explanatory rows, or making visible مبلغ کل values fail to reconcile with جمع کل فاکتور
+**نمایش قیمت سنگ مصرفی در خروجی قرارداد**:
+When a detailed customer, accounting, or custom output visibly includes a cut product's سنگ مصرفی row, its material unit rate and base material total are shown on that row and the corresponding price cells on the customer-requested product row stay blank. Cutting, tools, finishing, and other services keep their own priced rows; summarized outputs, custom outputs that hide explanatory rows, and products without a visible سنگ مصرفی row keep prices on their normal product row, while workshop output remains price-free. Regenerated historical output follows the current presentation rule without changing persisted calculations or the invoice total.
+For a stair layer with multiple source rows, only the physical newly charged `سنگ جدید مصرفی لایه` row shows the material unit rate and base material total. Previously paid material and intermediate allocation rows remain unpriced so the same charge is never presented twice.
+Newly generated digital-confirmation documents use the same placement for consistency. Stored or signed historical confirmation content remains immutable evidence, while historical PDFs may adopt the current placement when regenerated.
+When a product is made entirely from already-paid remaining stone, its physical سنگ مصرفی row explicitly shows a zero material unit rate and zero material total with the existing meaning that the stone was calculated in its source product; the customer-requested row remains unpriced. This visible zero is an authoritative zero charge, not a missing price.
+_Avoid_: showing the same material charge on both rows, pricing previously paid material again, hiding an authoritative zero as a blank value, putting the charge on an intermediate allocation row, moving dependent-operation prices onto سنگ مصرفی, hiding a material charge when its presentation row is suppressed, rewriting historical confirmation evidence, changing persisted financial facts for presentation, or making visible مبلغ کل values fail to reconcile with جمع کل فاکتور
 
 **قیمت صفر در خروجی قرارداد**:
 A zero price is printed as ۰ تومان only for a real price-bearing contract row that participates in invoice calculation with a zero amount.

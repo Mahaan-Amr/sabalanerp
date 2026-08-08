@@ -65,6 +65,7 @@ interface NormalizedSourceMaterial {
   description: string;
   dimensionsOrAmount: string;
   quantityOrArea: string;
+  presentsMaterialCharge?: boolean;
 }
 
 interface NormalizedProduct {
@@ -96,6 +97,7 @@ interface NormalizedProduct {
   sourceMaterialSummary: string;
   sourceMaterials: NormalizedSourceMaterial[];
   isLayer: boolean;
+  isFromRemainingStone: boolean;
 }
 
 interface NormalizedStandaloneService {
@@ -699,7 +701,8 @@ const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
       rows.push({
         description: 'سنگ جدید مصرفی لایه',
         dimensionsOrAmount: `عرض ${toFaNumber(sourceWidthCm, 4)}cm × طول ${toFaNumber(sourceLengthM, 4)}m${kerfNote}`,
-        quantityOrArea: `${toFaNumber(sourceQuantity, 0)} عدد، جمع ${toFaNumber(sourceAreaSqm, 4)} متر مربع`
+        quantityOrArea: `${toFaNumber(sourceQuantity, 0)} عدد، جمع ${toFaNumber(sourceAreaSqm, 4)} متر مربع`,
+        presentsMaterialCharge: true
       });
     }
     return rows;
@@ -756,7 +759,8 @@ const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
   return [{
     description: product?.stoneName || product?.product?.namePersian || product?.product?.name || EMPTY,
     dimensionsOrAmount: `عرض ${toFaNumber(sourceWidthCm, 4)}cm × طول ${toFaNumber(sourceLengthM, 4)}m${kerfNote}`,
-    quantityOrArea: `${toFaNumber(sourceQuantity, 0)} عدد، جمع ${toFaNumber(totalAreaSqm, 4)} متر مربع`
+    quantityOrArea: `${toFaNumber(sourceQuantity, 0)} عدد، جمع ${toFaNumber(totalAreaSqm, 4)} متر مربع`,
+    presentsMaterialCharge: true
   }];
 };
 
@@ -1001,7 +1005,8 @@ const normalizeProducts = (
           : EMPTY,
         sourceMaterialSummary,
         sourceMaterials,
-        isLayer: Boolean(product?.meta?.isLayer)
+        isLayer: Boolean(product?.meta?.isLayer),
+        isFromRemainingStone
       };
     });
   }
@@ -1034,7 +1039,8 @@ const normalizeProducts = (
     remainingSummary: EMPTY,
     sourceMaterialSummary: EMPTY,
     sourceMaterials: [],
-    isLayer: false
+    isLayer: false,
+    isFromRemainingStone: false
   }));
 };
 
@@ -1538,9 +1544,11 @@ const buildFlatProductRows = (
         });
       });
     }
-    const baseAmount = product.originalTotalPrice > 0
-      ? product.originalTotalPrice
-      : Math.max(product.totalPrice - addOnsTotal, 0) || product.totalPrice;
+    const baseAmount = product.isFromRemainingStone
+      ? 0
+      : product.originalTotalPrice > 0
+        ? product.originalTotalPrice
+        : Math.max(product.totalPrice - addOnsTotal, 0) || product.totalPrice;
     const preparedSummary = isPreparedProductType(product.productType)
       ? `نوع: ${product.preparedKind}، واحد: ${product.preparedUnit}`
       : EMPTY;
@@ -1549,6 +1557,23 @@ const buildFlatProductRows = (
       preparedSummary
     ].filter(Boolean).join(' - ');
     const productQuantityColumns = buildProductQuantityColumns(product);
+    const sourceMaterialRows = product.sourceMaterials.length > 0
+      ? product.sourceMaterials
+      : (product.sourceMaterialSummary && product.sourceMaterialSummary !== EMPTY
+        ? [{
+            description: product.name,
+            dimensionsOrAmount: product.sourceMaterialSummary,
+            quantityOrArea: '',
+            presentsMaterialCharge: true
+          }]
+        : []);
+    const pricedSourceMaterialIndex = sourceMaterialRows.findIndex(
+      (sourceMaterial) => sourceMaterial.presentsMaterialCharge
+    );
+    const presentMaterialChargeOnSource =
+      !isSummarized &&
+      showExplanatoryRows &&
+      pricedSourceMaterialIndex >= 0;
     rows.push({
       indexLabel: toFaNumber(productIndex + 1),
       code: product.code,
@@ -1556,27 +1581,18 @@ const buildFlatProductRows = (
       category: product.stairPart !== EMPTY ? product.stairPart : 'محصول',
       ...splitDimensionColumns(product.dimensions),
       ...productQuantityColumns,
-      rate: formatPrintMoneyCell(product.unitPrice, currency, options),
-      total: formatPrintMoneyCell(baseAmount, currency, options)
+      rate: presentMaterialChargeOnSource ? '' : formatPrintMoneyCell(product.unitPrice, currency, options),
+      total: presentMaterialChargeOnSource ? '' : formatPrintMoneyCell(baseAmount, currency, options)
     });
 
     if (isSummarized) return;
 
-    const sourceMaterialRows = product.sourceMaterials.length > 0
-      ? product.sourceMaterials
-      : (product.sourceMaterialSummary && product.sourceMaterialSummary !== EMPTY
-        ? [{
-            description: product.name,
-            dimensionsOrAmount: product.sourceMaterialSummary,
-            quantityOrArea: ''
-          }]
-        : []);
-
     if (showExplanatoryRows) {
-      sourceMaterialRows.forEach((sourceMaterial) => {
+      sourceMaterialRows.forEach((sourceMaterial, sourceMaterialIndex) => {
         const sourceQuantityColumns = splitSourceMaterialQuantity(
           sourceMaterial.quantityOrArea || sourceMaterial.dimensionsOrAmount
         );
+        const presentsMaterialCharge = sourceMaterialIndex === pricedSourceMaterialIndex;
         rows.push({
           indexLabel: '',
           code: product.code,
@@ -1584,8 +1600,8 @@ const buildFlatProductRows = (
           category: 'سنگ مصرفی',
           ...splitDimensionColumns(sourceMaterial.dimensionsOrAmount),
           ...sourceQuantityColumns,
-          rate: '',
-          total: ''
+          rate: presentsMaterialCharge ? formatPrintMoneyCell(product.unitPrice, currency, options) : '',
+          total: presentsMaterialCharge ? formatPrintMoneyCell(baseAmount, currency, options) : ''
         });
       });
     }

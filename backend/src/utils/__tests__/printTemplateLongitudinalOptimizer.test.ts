@@ -27,6 +27,9 @@ const contract = {
       widthUnit: 'cm',
       quantity: 5,
       squareMeters: 3.5,
+      pricePerSquareMeter: 1_450_000,
+      originalTotalPrice: 5_800_000,
+      totalPrice: 5_805_000,
       originalWidth: 40,
       isCut: true,
       smartCutDerivedQuantity: true,
@@ -84,6 +87,65 @@ const normalizePrintedRow = (value: string): string => value
   .replace(/٫/g, '.')
   .replace(/\s+/g, ' ')
   .trim();
+
+const printedCells = (row: string): string[] =>
+  Array.from(row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g), (match) => normalizePrintedRow(match[1]));
+
+const findPrintedRow = (documentHtml: string, category: string): string =>
+  (documentHtml.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) || [])
+    .find((row) => row.includes(`<td>${category}</td>`)) || '';
+
+const productCells = printedCells(findPrintedRow(html, 'محصول'));
+const sourceMaterialCells = printedCells(findPrintedRow(html, 'سنگ مصرفی'));
+const cutCells = printedCells(findPrintedRow(html, 'برش'));
+
+assert.deepEqual(productCells.slice(-2), ['—', '—'], 'requested product row should not repeat material price');
+assert.deepEqual(sourceMaterialCells.slice(-2), ['1,450,000', '5,800,000'], 'physical source row should present material rate and total');
+assert.deepEqual(cutCells.slice(-2), ['100', '5,000'], 'cutting should keep its own price row');
+
+const summaryHtml = renderContractHtml(contract as any, { variant: 'summary' });
+const summaryProductCells = printedCells(findPrintedRow(summaryHtml, 'محصول'));
+assert.deepEqual(
+  summaryProductCells.slice(-2),
+  ['1,450,000', '5,800,000'],
+  'summary output without source rows should keep material price on the product'
+);
+
+const hiddenExplanatoryHtml = renderContractHtml(contract as any, {
+  variant: 'custom',
+  customPrint: { showExplanatoryRows: false }
+});
+const hiddenExplanatoryProductCells = printedCells(findPrintedRow(hiddenExplanatoryHtml, 'محصول'));
+assert.deepEqual(
+  hiddenExplanatoryProductCells.slice(-2),
+  ['1,450,000', '5,800,000'],
+  'custom output that hides source rows should keep material price on the product'
+);
+
+const remainingStoneHtml = renderContractHtml({
+  ...contract,
+  contractNumber: 'TEST-ALREADY-PAID-REMAINDER',
+  contractData: {
+    products: [{
+      ...contract.contractData.products[0],
+      productId: 'remaining-stone-child',
+      stoneName: 'محصول از باقی‌مانده',
+      pricePerSquareMeter: 1_450_000,
+      originalTotalPrice: 0,
+      totalPrice: 5_000,
+      meta: {
+        remainingSource: {
+          sourceProductRowId: 'source-row',
+          remainingStoneId: 'remaining-1'
+        }
+      }
+    }]
+  }
+} as any);
+const remainingProductCells = printedCells(findPrintedRow(remainingStoneHtml, 'محصول'));
+const remainingSourceCells = printedCells(findPrintedRow(remainingStoneHtml, 'سنگ مصرفی'));
+assert.deepEqual(remainingProductCells.slice(-2), ['—', '—'], 'remaining-stone requested row should stay unpriced');
+assert.deepEqual(remainingSourceCells.slice(-2), ['0', '0'], 'already-paid physical source should show authoritative zero material charge');
 
 const canonicalDimensionGraph = parseCanonicalProductGraph({
   schemaVersion: 1,

@@ -33,8 +33,9 @@ const html = renderContractHtml({
       squareMeters: 2.288,
       originalWidth: 35,
       originalLength: 1.2,
-      totalPrice: 1,
-      pricePerSquareMeter: 1,
+      originalTotalPrice: 1_827_000,
+      totalPrice: 1_827_000,
+      pricePerSquareMeter: 1_450_000,
       meta: {
         isLayer: true,
         layerEdges: { front: true, left: true },
@@ -65,5 +66,27 @@ assert.ok(html.includes('لایه از سنگ قبلاً محاسبه‌شده')
 assert.ok(html.includes('لایه از سنگ جدید'));
 assert.ok(html.includes('سنگ جدید مصرفی لایه'));
 assert.ok(html.includes('۱٫۲۶'));
+
+const normalizeCell = (value: string): string => value
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+  .replace(/٬/g, ',')
+  .replace(/٫/g, '.')
+  .replace(/\s+/g, ' ')
+  .trim();
+const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) || [];
+const cellsFor = (text: string): string[] => {
+  const row = rows.find((candidate) => candidate.includes(text)) || '';
+  return Array.from(row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g), (match) => normalizeCell(match[1]));
+};
+
+assert.deepEqual(cellsFor('↳ لایه پله مرمریت').slice(-2), ['—', '—']);
+assert.deepEqual(cellsFor('لایه از سنگ قبلاً محاسبه‌شده').slice(-2), ['—', '—']);
+assert.deepEqual(cellsFor('لایه از سنگ جدید').slice(-2), ['—', '—']);
+assert.deepEqual(
+  cellsFor('سنگ جدید مصرفی لایه').slice(-2),
+  ['1,450,000', '1,827,000'],
+  'only the physical newly charged layer stone should present material price'
+);
 
 console.log('printTemplateStairLayer tests passed');

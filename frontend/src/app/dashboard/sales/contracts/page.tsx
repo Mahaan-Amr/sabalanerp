@@ -71,6 +71,12 @@ interface Contract {
     nationalCode?: string;
     projectManagerName?: string;
   };
+  createdByUser: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    username: string;
+  };
 }
 
 interface ContractPagination {
@@ -141,6 +147,15 @@ const getCustomerName = (contract: Contract) =>
     [
       `${contract.customer.firstName || ''} ${contract.customer.lastName || ''}`.trim(),
       contract.customer.companyName,
+    ],
+    'نامشخص'
+  );
+
+const getContractCreatorName = (contract: Contract) =>
+  sanitizeUiTextWithCandidates(
+    [
+      `${contract.createdByUser.firstName || ''} ${contract.createdByUser.lastName || ''}`.trim(),
+      contract.createdByUser.username,
     ],
     'نامشخص'
   );
@@ -247,6 +262,8 @@ export default function ContractsPage() {
       const companyName = contract.customer.companyName?.toLowerCase() || '';
       const nationalCode = contract.customer.nationalCode?.toLowerCase() || '';
       const projectManager = contract.customer.projectManagerName?.toLowerCase() || '';
+      const creatorName = `${contract.createdByUser.firstName || ''} ${contract.createdByUser.lastName || ''}`.trim().toLowerCase();
+      const creatorUsername = contract.createdByUser.username?.toLowerCase() || '';
       const creatorSequence = contract.creatorSequenceNumber != null ? String(contract.creatorSequenceNumber) : '';
       const accountingStatus = contract.accounting?.sourceStatus || '';
 
@@ -259,6 +276,8 @@ export default function ContractsPage() {
         companyName.includes(normalizedSearch) ||
         nationalCode.includes(normalizedSearch) ||
         projectManager.includes(normalizedSearch) ||
+        creatorName.includes(normalizedSearch) ||
+        creatorUsername.includes(normalizedSearch) ||
         accountingStatus.toLowerCase().includes(normalizedSearch) ||
         (sourceStatusLabels[accountingStatus] || '').toLowerCase().includes(normalizedSearch);
 
@@ -405,6 +424,17 @@ export default function ContractsPage() {
       ),
     },
     {
+      id: 'creator',
+      header: 'ثبت‌کننده قرارداد',
+      mobileLabel: 'ثبت‌کننده قرارداد',
+      priority: 'secondary',
+      cell: (contract) => (
+        <span className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+          {getContractCreatorName(contract)}
+        </span>
+      ),
+    },
+    {
       id: 'amount',
       header: 'مبلغ',
       mobileLabel: 'مبلغ',
@@ -543,7 +573,7 @@ export default function ContractsPage() {
           type: 'search',
           value: searchTerm,
           onChange: setSearchTerm,
-          placeholder: 'جستجو در شماره قرارداد، مشتری، شرکت یا مدیر پروژه...',
+          placeholder: 'جستجو در شماره قرارداد، مشتری، ثبت‌کننده، شرکت یا مدیر پروژه...',
         },
         {
           id: 'status',

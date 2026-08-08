@@ -26,7 +26,7 @@ import { getNextContractNumberPreview } from '../services/contractNumberService'
 import { contractConfirmationService } from '../services/contractConfirmationService';
 import { buildAccountingSummaryForContracts } from '../services/accountingService';
 import { getRequestEvidence } from '../utils/requestEvidence';
-import { parseContractStatuses } from '../services/contractListQuery';
+import { buildContractSearchConditions, parseContractStatuses } from '../services/contractListQuery';
 import {
   buildSalesContractPdfDownloadName,
   buildSalesContractPdfFingerprint,
@@ -533,26 +533,10 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     }
 
     if (search) {
-      const numericSearch = Number.parseInt(search, 10);
-      const searchConditions: any[] = [
-        { contractNumber: { contains: search, mode: 'insensitive' } },
-        { title: { contains: search, mode: 'insensitive' } },
-        { titlePersian: { contains: search, mode: 'insensitive' } },
-        { customer: { firstName: { contains: search, mode: 'insensitive' } } },
-        { customer: { lastName: { contains: search, mode: 'insensitive' } } },
-        { customer: { companyName: { contains: search, mode: 'insensitive' } } },
-        { customer: { nationalCode: { contains: search, mode: 'insensitive' } } },
-        { customer: { projectManagerName: { contains: search, mode: 'insensitive' } } }
-      ];
-
-      if (Number.isFinite(numericSearch)) {
-        searchConditions.push({ creatorSequenceNumber: numericSearch });
-      }
-
       whereClause = {
         AND: [
           whereClause,
-          { OR: searchConditions }
+          { OR: buildContractSearchConditions(search) }
         ]
       };
     }

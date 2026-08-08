@@ -1001,6 +1001,10 @@ _Avoid_: giving ordinary Sales users a selector for other sellers, or calculatin
 The seller commercially responsible for a Sales Contract, distinct from the user who entered it. A contract converted from a potential project defaults to that project's responsible seller; otherwise it defaults to its creator, and manager-authorized reassignment requires an audit reason.
 _Avoid_: treating technical data entry as sales ownership, silently changing ownership, or losing the CRM project owner during conversion
 
+**ثبت‌کننده قرارداد فروش**:
+The system user who originally entered a Sales Contract, preserved as creation provenance even when commercial responsibility later changes. Contract lists identify this user by full name with username as the fallback.
+_Avoid_: calling the current responsible seller the contract creator, changing creator provenance after reassignment, or presenting a blank display when a username exists
+
 **اعتبار فروش قطعی فروشنده**:
 The seller who receives realized-sales performance credit, snapshotted from the contract's responsible seller when the contract first becomes `SIGNED` or `PRINTED`. Pipeline follows current responsibility, but later reassignment does not rewrite historical realized performance.
 _Avoid_: recalculating historical seller credit from current ownership, or crediting the creator when another seller owned the commercial work

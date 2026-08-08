@@ -241,3 +241,126 @@ export const invoiceCandidatePopulationWhere = (population: InvoiceCandidatePopu
   }
   return where;
 };
+
+export const TAX_ATTENTION_STATUSES = [
+  'NOT_READY',
+  'NEEDS_CORRECTION',
+  'REJECTED',
+] as const;
+
+export const ACTIVE_CORRECTION_STATUSES = [
+  'OPEN',
+  'APPROVED_FOR_SALES_EDIT',
+  'SALES_EDITED',
+  'ACKNOWLEDGED',
+] as const;
+
+const TAX_RECORD_STATUSES = [
+  'NOT_READY',
+  'READY',
+  'SUBMITTED_MANUALLY',
+  'ACCEPTED',
+  'REJECTED',
+  'NEEDS_CORRECTION',
+] as const;
+
+const CORRECTION_REQUEST_STATUSES = [
+  ...ACTIVE_CORRECTION_STATUSES,
+  'RESOLVED',
+  'CANCELLED',
+] as const;
+
+type StatusPopulation = { statuses?: readonly string[] };
+type StatusPopulationQuery = { view?: unknown; status?: unknown };
+
+const resolveStatusPopulation = (
+  query: StatusPopulationQuery,
+  statuses: readonly string[],
+  semanticView: string,
+  semanticStatuses: readonly string[],
+): StatusPopulation => {
+  const requestedStatus = String(query.status || '');
+  if (statuses.includes(requestedStatus)) return { statuses: [requestedStatus] };
+  if (query.view === semanticView) return { statuses: semanticStatuses };
+  return {};
+};
+
+export const resolveTaxRecordPopulation = (query: StatusPopulationQuery = {}) => (
+  resolveStatusPopulation(query, TAX_RECORD_STATUSES, 'needs-attention', TAX_ATTENTION_STATUSES)
+);
+
+export const matchesTaxRecordPopulation = (
+  record: { submissionStatus: string },
+  population: StatusPopulation,
+) => !population.statuses || population.statuses.includes(record.submissionStatus);
+
+export const taxRecordPopulationWhere = (population: StatusPopulation) => (
+  population.statuses ? { submissionStatus: { in: [...population.statuses] } } : {}
+);
+
+export const resolveCorrectionRequestPopulation = (query: StatusPopulationQuery = {}) => (
+  resolveStatusPopulation(query, CORRECTION_REQUEST_STATUSES, 'active', ACTIVE_CORRECTION_STATUSES)
+);
+
+export const matchesCorrectionRequestPopulation = (
+  record: { status: string },
+  population: StatusPopulation,
+) => !population.statuses || population.statuses.includes(record.status);
+
+export const correctionRequestPopulationWhere = (population: StatusPopulation) => (
+  population.statuses ? { status: { in: [...population.statuses] } } : {}
+);
+
+export const authorizedAuditPopulationWhere = () => ({});
+
+export const authorizedAuditPopulationOrderBy = () => ([
+  { createdAt: 'desc' as const },
+  { id: 'desc' as const },
+]);
+
+type ActivityRange = { gte?: Date; lt?: Date; lte?: Date };
+
+export type AccountingActivityPopulation = { range: ActivityRange };
+
+type AccountingActivityPopulationQuery = {
+  view?: unknown;
+  dateFrom?: unknown;
+  dateTo?: unknown;
+};
+
+export const resolveAccountingActivityPopulation = (
+  query: AccountingActivityPopulationQuery = {},
+  now = new Date(),
+): AccountingActivityPopulation => {
+  const fromDay = resolveTehranDayRange(query.dateFrom);
+  const toDay = resolveTehranDayRange(query.dateTo);
+  if (fromDay || toDay) {
+    return {
+      range: {
+        ...(fromDay ? { gte: fromDay.gte } : {}),
+        ...(toDay ? { lt: toDay.lt } : {}),
+      },
+    };
+  }
+  return {
+    range: {
+      gte: new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000)),
+      lte: now,
+    },
+  };
+};
+
+export const matchesAccountingActivityPopulation = (
+  record: { createdAt: Date; actorId?: string },
+  population: AccountingActivityPopulation,
+) => (!population.range.gte || record.createdAt >= population.range.gte)
+  && (!population.range.lt || record.createdAt < population.range.lt)
+  && (!population.range.lte || record.createdAt <= population.range.lte);
+
+export const accountingActivityPopulationWhere = (population: AccountingActivityPopulation) => ({
+  createdAt: population.range,
+});
+
+export const resolveActiveAccountantIds = (rows: Array<{ actorId: string }>) => (
+  [...new Set(rows.map((row) => row.actorId))]
+);

@@ -21,10 +21,20 @@ import {
 import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
 import { captureContractQuantityVersionAtFinancialApproval } from './shipmentQuantityProjectionStore';
 import {
+  ACTIVE_CORRECTION_STATUSES,
   ACCOUNTING_RECORD_STATUSES,
+  accountingActivityPopulationWhere,
+  authorizedAuditPopulationOrderBy,
+  authorizedAuditPopulationWhere,
+  correctionRequestPopulationWhere,
   invoiceCandidatePopulationWhere,
   orderReviewableContracts,
+  resolveAccountingActivityPopulation,
+  resolveActiveAccountantIds,
+  resolveCorrectionRequestPopulation,
   resolveInvoiceCandidatePopulation,
+  resolveTaxRecordPopulation,
+  taxRecordPopulationWhere,
 } from './accountingPopulations';
 
 const prisma = new PrismaClient();
@@ -39,11 +49,8 @@ const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_CURRENCY = 'ریال';
 
 const activeCorrectionStatuses = () => [
-  CorrectionRequestStatus.OPEN,
-  CorrectionRequestStatus.APPROVED_FOR_SALES_EDIT,
-  CorrectionRequestStatus.SALES_EDITED,
-  CorrectionRequestStatus.ACKNOWLEDGED
-];
+  ...ACTIVE_CORRECTION_STATUSES
+] as CorrectionRequestStatus[];
 
 type Actor = {
   userId: string;
@@ -853,6 +860,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
 };
 
 export const getAccountingWorkspace = async () => {
+  const now = new Date();
   const [period, contractResponse, records, receivables, payments, taxRecords, corrections, auditLogs] = await Promise.all([
     getOrCreateCurrentPeriod(),
     listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }),
@@ -864,7 +872,6 @@ export const getAccountingWorkspace = async () => {
     prisma.accountingAuditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 8 })
   ]);
 
-  const now = new Date();
   const dueSoon = addDays(now, 7);
   const openReceivables = await prisma.accountingReceivable.findMany({
     where: { status: { in: [ReceivableStatus.OPEN, ReceivableStatus.PARTIALLY_PAID, ReceivableStatus.OVERDUE] } }
@@ -880,12 +887,25 @@ export const getAccountingWorkspace = async () => {
   const invoiceCandidates = await prisma.accountingFinancialRecord.findMany({
     where: invoiceCandidatePopulationWhere(actionableInvoicePopulation) as Prisma.AccountingFinancialRecordWhereInput
   });
-  const taxNotReady = await prisma.accountingTaxRecord.findMany({
-    where: { submissionStatus: { in: [TaxSubmissionStatus.NOT_READY, TaxSubmissionStatus.NEEDS_CORRECTION, TaxSubmissionStatus.REJECTED] } }
-  });
-  const openCorrections = await prisma.accountingCorrectionRequest.findMany({
-    where: { status: { in: activeCorrectionStatuses() } }
-  });
+  const taxAttentionPopulation = resolveTaxRecordPopulation({ view: 'needs-attention' });
+  const activeCorrectionPopulation = resolveCorrectionRequestPopulation({ view: 'active' });
+  const activityPopulation = resolveAccountingActivityPopulation({ view: 'last30days' }, now);
+  const [taxNotReady, openCorrections, authorizedAuditCount, activeAccountantRows] = await Promise.all([
+    prisma.accountingTaxRecord.findMany({
+      where: taxRecordPopulationWhere(taxAttentionPopulation) as Prisma.AccountingTaxRecordWhereInput
+    }),
+    prisma.accountingCorrectionRequest.findMany({
+      where: correctionRequestPopulationWhere(activeCorrectionPopulation) as Prisma.AccountingCorrectionRequestWhereInput
+    }),
+    prisma.accountingAuditLog.count({
+      where: authorizedAuditPopulationWhere() as Prisma.AccountingAuditLogWhereInput
+    }),
+    prisma.accountingAuditLog.findMany({
+      where: accountingActivityPopulationWhere(activityPopulation) as Prisma.AccountingAuditLogWhereInput,
+      select: { actorId: true },
+      distinct: ['actorId']
+    })
+  ]);
 
   return {
     period,
@@ -918,6 +938,12 @@ export const getAccountingWorkspace = async () => {
       correctionRequests: {
         count: openCorrections.length,
         urgentCount: openCorrections.filter((item) => item.priority === CorrectionRequestPriority.URGENT || item.priority === CorrectionRequestPriority.HIGH).length
+      },
+      auditHistory: {
+        count: authorizedAuditCount
+      },
+      accountantPerformance: {
+        count: resolveActiveAccountantIds(activeAccountantRows).length
       }
     },
     queues: {
@@ -2263,8 +2289,8 @@ export const listPaymentStatuses = async (query: any = {}) => {
 };
 
 export const listTaxRecords = async (query: any = {}) => {
-  const where: Prisma.AccountingTaxRecordWhereInput = {};
-  if (query.submissionStatus && query.submissionStatus !== 'ALL') where.submissionStatus = query.submissionStatus;
+  const population = resolveTaxRecordPopulation({ view: query.view, status: query.status || query.submissionStatus });
+  const where = taxRecordPopulationWhere(population) as Prisma.AccountingTaxRecordWhereInput;
   if (query.readinessStatus && query.readinessStatus !== 'ALL') where.readinessStatus = query.readinessStatus;
   if (query.contractId) where.contractId = query.contractId;
   Object.assign(where, dateRangeFilter(query, 'updatedAt'));
@@ -2284,8 +2310,8 @@ export const listTaxRecords = async (query: any = {}) => {
 };
 
 export const listCorrectionRequests = async (query: any = {}) => {
-  const where: Prisma.AccountingCorrectionRequestWhereInput = {};
-  if (query.status && query.status !== 'ALL') where.status = query.status;
+  const population = resolveCorrectionRequestPopulation(query);
+  const where = correctionRequestPopulationWhere(population) as Prisma.AccountingCorrectionRequestWhereInput;
   if (query.priority && query.priority !== 'ALL') where.priority = query.priority;
   if (query.contractId) where.contractId = query.contractId;
   Object.assign(where, dateRangeFilter(query, 'createdAt'));
@@ -2326,7 +2352,7 @@ export const listCorrectionRequests = async (query: any = {}) => {
 };
 
 export const listAuditLogs = async (query: any = {}) => {
-  const where: Prisma.AccountingAuditLogWhereInput = {};
+  const where = authorizedAuditPopulationWhere() as Prisma.AccountingAuditLogWhereInput;
   if (query.contractId) where.contractId = query.contractId;
   if (query.recordId) where.recordId = query.recordId;
   if (query.action && query.action !== 'ALL') where.action = query.action;
@@ -2338,7 +2364,7 @@ export const listAuditLogs = async (query: any = {}) => {
   const [rows, total] = await Promise.all([
     prisma.accountingAuditLog.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: authorizedAuditPopulationOrderBy(),
       skip,
       take: pageSize
     }),
@@ -2349,12 +2375,8 @@ export const listAuditLogs = async (query: any = {}) => {
 
 export const getAccountantPerformanceReport = async (query: any = {}) => {
   const { page, pageSize, skip } = getPagination(query);
-  const from = query.dateFrom ? new Date(String(query.dateFrom)) : addDays(new Date(), -30);
-  const to = query.dateTo ? new Date(String(query.dateTo)) : new Date();
-  const range = {
-    gte: Number.isNaN(from.getTime()) ? addDays(new Date(), -30) : from,
-    lte: Number.isNaN(to.getTime()) ? new Date() : to
-  };
+  const population = resolveAccountingActivityPopulation(query);
+  const range = population.range;
 
   const [records, payments, corrections, auditRows] = await Promise.all([
     prisma.accountingFinancialRecord.findMany({
@@ -2405,6 +2427,7 @@ export const getAccountantPerformanceReport = async (query: any = {}) => {
   };
 
   const buckets = new Map<string, Bucket>();
+  const activeAccountantIds = new Set(resolveActiveAccountantIds(auditRows));
   const getBucket = (userId: string) => {
     const actor = actorMap.get(userId) || { id: userId, displayName: 'کاربر حسابداری', username: userId };
     if (!buckets.has(userId)) {
@@ -2488,6 +2511,7 @@ export const getAccountantPerformanceReport = async (query: any = {}) => {
       averageHoursToRegisterReceipt: averageHours(bucket.receiptDelays),
       averageHoursToResolveCorrection: averageHours(bucket.correctionClosureDelays)
     }))
+    .filter((row) => activeAccountantIds.has(row.accountant.id))
     .filter((row) => !query.search || row.accountant.displayName.includes(String(query.search)) || row.accountant.username.includes(String(query.search)))
     .sort((left, right) => right.actionsLogged - left.actionsLogged);
 

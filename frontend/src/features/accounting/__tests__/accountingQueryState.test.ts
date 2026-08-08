@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  canonicalizeAuditQuery,
+  canonicalizeCorrectionRequestsQuery,
+  canonicalizePerformanceQuery,
+  canonicalizeTaxQuery,
+  patchAuditQuery,
+  patchCorrectionRequestsQuery,
+  patchPerformanceQuery,
+  patchTaxQuery,
   canonicalizeContractsQuery,
   canonicalizeInvoiceCandidatesQuery,
   patchContractsQuery,
@@ -82,4 +90,74 @@ test('invoiced period is canonical only for the invoiced semantic view', () => {
   assert.equal(invoiced.params.toString(), 'view=invoiced&period=1405-05');
   assert.equal(orphaned.params.toString(), '');
   assert.equal(canonicalizeInvoiceCandidatesQuery(new URLSearchParams('view=invoiced&period=2026-08')).params.toString(), 'view=invoiced');
+});
+
+test('operational drilldown views initialize canonical filters and status takes precedence', () => {
+  const tax = canonicalizeTaxQuery(new URLSearchParams('view=needs-attention&campaign=summer'));
+  const corrections = canonicalizeCorrectionRequestsQuery(new URLSearchParams('view=active'));
+
+  assert.equal(tax.params.toString(), 'campaign=summer&view=needs-attention');
+  assert.equal(tax.state.status, 'ALL');
+  assert.equal(corrections.params.toString(), 'view=active');
+  assert.equal(corrections.state.status, 'ALL');
+  assert.equal(canonicalizeTaxQuery(new URLSearchParams(
+    'view=needs-attention&status=READY',
+  )).params.toString(), 'status=READY');
+  assert.equal(canonicalizeCorrectionRequestsQuery(new URLSearchParams(
+    'view=active&status=ACKNOWLEDGED',
+  )).params.toString(), 'status=ACKNOWLEDGED');
+});
+
+test('operational register changes reset page, preserve unknown parameters, and trim search', () => {
+  const tax = patchTaxQuery(
+    new URLSearchParams('view=needs-attention&page=4&campaign=summer'),
+    { search: '  invoice  ' },
+  );
+  const corrections = patchCorrectionRequestsQuery(
+    new URLSearchParams('view=active&page=3&campaign=summer'),
+    { status: 'ACKNOWLEDGED' },
+  );
+  const audit = patchAuditQuery(
+    new URLSearchParams('page=8&campaign=summer'),
+    { action: 'CREATE_INVOICE' },
+  );
+
+  assert.equal(tax.params.toString(), 'campaign=summer&view=needs-attention&search=invoice');
+  assert.equal(corrections.params.toString(), 'campaign=summer&status=ACKNOWLEDGED');
+  assert.equal(audit.params.toString(), 'campaign=summer&action=CREATE_INVOICE');
+});
+
+test('manual performance range replaces last-30-days view with canonical dates', () => {
+  const result = patchPerformanceQuery(
+    new URLSearchParams('view=last30days&page=3&campaign=summer'),
+    { dateFrom: '2026-08-08', dateTo: '2026-08-09' },
+  );
+
+  assert.equal(result.params.toString(), 'campaign=summer&dateFrom=2026-08-08&dateTo=2026-08-09');
+  assert.deepEqual(result.state, {
+    view: null,
+    search: '',
+    dateFrom: '2026-08-08',
+    dateTo: '2026-08-09',
+    page: 1,
+  });
+  assert.equal(canonicalizePerformanceQuery(new URLSearchParams(
+    'view=invalid&dateFrom=2026-02-30&page=1&campaign=summer',
+  )).params.toString(), 'campaign=summer');
+});
+
+test('operational queries remove invalid defaults without dropping unknown parameters', () => {
+  const tax = canonicalizeTaxQuery(new URLSearchParams(
+    'view=invalid&status=ALL&page=1&pageSize=100&campaign=summer',
+  ));
+  const corrections = canonicalizeCorrectionRequestsQuery(new URLSearchParams(
+    'view=invalid&status=NOPE&page=-1&campaign=summer',
+  ));
+  const audit = canonicalizeAuditQuery(new URLSearchParams(
+    'action=NOPE&page=1&pageSize=100&campaign=summer',
+  ));
+
+  assert.equal(tax.params.toString(), 'campaign=summer');
+  assert.equal(corrections.params.toString(), 'campaign=summer');
+  assert.equal(audit.params.toString(), 'campaign=summer');
 });

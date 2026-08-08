@@ -189,14 +189,14 @@ export default function AccountingDashboardPage() {
           },
           {
             title: 'مالیات و سامانه مودیان',
-            href: '/dashboard/accounting/tax',
+            href: '/dashboard/accounting/tax?view=needs-attention',
             icon: FaBalanceScale,
             tone: 'purple',
             badge: <StatusBadge label={(commandCenter.taxNotReady?.count || 0).toLocaleString('fa-IR')} tone="purple" />,
           },
           {
             title: 'بررسی اصلاحات',
-            href: '/dashboard/accounting/correction-requests',
+            href: '/dashboard/accounting/correction-requests?view=active',
             icon: FaExclamationTriangle,
             tone: 'warning',
             badge: <StatusBadge label={(commandCenter.correctionRequests?.count || 0).toLocaleString('fa-IR')} tone="warning" />,
@@ -206,12 +206,14 @@ export default function AccountingDashboardPage() {
             href: '/dashboard/accounting/audit',
             icon: FaHistory,
             tone: 'neutral',
+            badge: <StatusBadge label={(commandCenter.auditHistory?.count || 0).toLocaleString('fa-IR')} tone="neutral" />,
           },
           {
             title: 'عملکرد حسابداران',
-            href: '/dashboard/accounting/performance',
+            href: '/dashboard/accounting/performance?view=last30days',
             icon: FaUserClock,
             tone: 'primary',
+            badge: <StatusBadge label={(commandCenter.accountantPerformance?.count || 0).toLocaleString('fa-IR')} tone="primary" />,
           },
         ]}
       />

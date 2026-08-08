@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+export { default as ErpPersianDateField } from './ErpPersianDateField';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';

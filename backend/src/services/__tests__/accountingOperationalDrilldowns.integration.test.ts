@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict';
+import { getAccountingWorkspaceResponse } from '../../routes/accounting';
 import {
   getAccountantPerformanceReport,
   getAccountingWorkspace,
   listAuditLogs,
   listCorrectionRequests,
+  listPaymentStatuses,
+  listReceivables,
   listTaxRecords,
 } from '../accountingService';
+
+const requestWorkspace = async (query: Record<string, string>) => {
+  let responseBody: any;
+  let statusCode = 200;
+  const response = {
+    status(code: number) { statusCode = code; return this; },
+    json(body: unknown) { responseBody = body; return this; },
+  };
+  await getAccountingWorkspaceResponse({ query } as never, response as never);
+  assert.equal(statusCode, 200);
+  assert.equal(responseBody?.success, true);
+  return responseBody.data;
+};
 
 const verifyOperationalDrilldowns = async () => {
   const workspace = await getAccountingWorkspace();
@@ -30,6 +46,30 @@ const verifyOperationalDrilldowns = async () => {
       previousTime > currentTime || (previousTime === currentTime && previous.id >= current.id),
       true,
     );
+  }
+
+  for (const due of ['overdue', 'next7', 'days8to30', 'later30'] as const) {
+    const [deadlineWorkspace, receivables, checks] = await Promise.all([
+      getAccountingWorkspace({ due }),
+      listReceivables({ view: 'open', due, page: 1, pageSize: 1 }),
+      listPaymentStatuses({ view: 'unsettled-checks', due, page: 1, pageSize: 1 }),
+    ]);
+    assert.equal(deadlineWorkspace.deadlines.bucketCounts[due].receivable, receivables.total);
+    assert.equal(deadlineWorkspace.deadlines.bucketCounts[due].check, checks.total);
+    assert.equal(deadlineWorkspace.deadlines.total, receivables.total + checks.total);
+
+    const receivableWorkspace = await getAccountingWorkspace({ due, deadlineType: 'receivable' });
+    const checkWorkspace = await getAccountingWorkspace({ due, deadlineType: 'check' });
+    assert.equal(receivableWorkspace.deadlines.total, receivables.total);
+    assert.equal(checkWorkspace.deadlines.total, checks.total);
+
+    if (due === 'next7') {
+      const apiWorkspace = await requestWorkspace({ due, deadlineType: 'receivable' });
+      assert.equal(apiWorkspace.deadlines.selection.due, due);
+      assert.equal(apiWorkspace.deadlines.selection.deadlineType, 'receivable');
+      assert.equal(apiWorkspace.deadlines.total, receivables.total);
+      assert.equal(apiWorkspace.deadlines.items.every((item: any) => item.type === 'receivable'), true);
+    }
   }
 };
 

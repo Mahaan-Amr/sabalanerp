@@ -861,7 +861,7 @@ export const inventoryAPI = {
 
 // Accounting Workspace API
 export const accountingAPI = {
-  getWorkspace: () => api.get('/accounting/workspace'),
+  getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
   getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
   decideDispatchCandidate: (id: string, data: { action: 'ACCEPT' | 'REJECT'; reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-candidates/${id}/decision`, data),

@@ -1,5 +1,6 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FaBalanceScale,
   FaClipboardCheck,
@@ -15,9 +16,9 @@ import {
 import {
   ErpActionGrid,
   ErpInlineState,
-  ErpLoading,
   ErpPage,
   ErpSection,
+  ErpSkeleton,
 } from '@/components/erp';
 import { accountingAPI, hrHiringMetricsAPI } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -38,29 +39,60 @@ import {
   resolveHrHiringMetrics,
   type HrHiringMetricsState,
 } from '@/features/accounting/hrHiringMetricsState';
+import AccountingDeadlinesPanel from '@/features/accounting/AccountingDeadlinesPanel';
+import {
+  reduceAccountingWorkspaceLoad,
+  type DeadlineBucket,
+} from '@/features/accounting/accountingDeadlines';
+import {
+  canonicalizeAccountingDashboardQuery,
+  patchAccountingDashboardQuery,
+} from '@/features/accounting/accountingQueryState';
 
 export default function AccountingDashboardPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const currentUserId = user?.id;
-  const [workspace, setWorkspace] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [workspaceState, dispatchWorkspace] = useReducer(reduceAccountingWorkspaceLoad<any>, {
+    data: null,
+    loading: true,
+    stale: false,
+    error: null,
+  });
   const [showPrototype, setShowPrototype] = useState(false);
   const [hrMetrics, setHrMetrics] = useState<HrHiringMetricsState>(pendingHrHiringMetrics);
   const hrRequestGeneration = useRef(0);
 
-  const loadWorkspace = async () => {
+  const workspaceRequestGeneration = useRef(0);
+  const rawSearchParams = searchParams.toString();
+  const dashboardQuery = useMemo(
+    () => canonicalizeAccountingDashboardQuery(new URLSearchParams(rawSearchParams)),
+    [rawSearchParams],
+  );
+  const workspace = workspaceState.data;
+  const loading = workspaceState.loading;
+
+  const loadWorkspace = useCallback(async () => {
+    const requestGeneration = ++workspaceRequestGeneration.current;
+    dispatchWorkspace({ type: 'start' });
     try {
-      setLoading(true);
-      const response = await accountingAPI.getWorkspace();
-      if (response.data.success) {
-        setWorkspace(response.data.data);
+      const response = await accountingAPI.getWorkspace({
+        due: dashboardQuery.state.due || undefined,
+        deadlineType: dashboardQuery.state.deadlineType === 'all' ? undefined : dashboardQuery.state.deadlineType,
+      });
+      if (requestGeneration !== workspaceRequestGeneration.current) return;
+      if (!response.data.success) {
+        dispatchWorkspace({ type: 'failure', message: 'داده‌های حسابداری دریافت نشد.' });
+        return;
       }
+      dispatchWorkspace({ type: 'success', data: response.data.data });
     } catch (error) {
+      if (requestGeneration !== workspaceRequestGeneration.current) return;
       console.error('Error loading accounting workspace:', error);
-    } finally {
-      setLoading(false);
+      dispatchWorkspace({ type: 'failure', message: 'ارتباط با حسابداری برقرار نشد.' });
     }
-  };
+  }, [dashboardQuery.state.deadlineType, dashboardQuery.state.due]);
 
   const loadHrMetrics = useCallback(async () => {
     const requestGeneration = ++hrRequestGeneration.current;
@@ -81,8 +113,13 @@ export default function AccountingDashboardPage() {
   }, []);
 
   useEffect(() => {
-    loadWorkspace();
-  }, []);
+    const canonicalSearch = dashboardQuery.params.toString();
+    if (canonicalSearch !== rawSearchParams) {
+      router.replace(`/dashboard/accounting${canonicalSearch ? `?${canonicalSearch}` : ''}`, { scroll: false });
+      return;
+    }
+    void loadWorkspace();
+  }, [dashboardQuery.params, loadWorkspace, rawSearchParams, router]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -118,8 +155,24 @@ export default function AccountingDashboardPage() {
     return <AccountingDashboardPrototype />;
   }
 
-  if (loading) {
-    return <ErpLoading />;
+  if (!workspace && loading) {
+    return (
+      <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری">
+        <ErpSkeleton lines={4} label="در حال بارگذاری سررسیدهای حسابداری" />
+      </ErpPage>
+    );
+  }
+
+  if (!workspace) {
+    return (
+      <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری">
+        <ErpInlineState
+          kind="error"
+          title={workspaceState.error || 'داده‌های حسابداری در دسترس نیست.'}
+          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadWorkspace, tone: 'primary' }}
+        />
+      </ErpPage>
+    );
   }
 
   const queues = workspace?.queues || {};
@@ -129,6 +182,11 @@ export default function AccountingDashboardPage() {
     if (currentUserId) void loadHrMetrics();
   };
   const hrMetricsAvailable = hrMetrics.status === 'available';
+  const dashboardHref = (patch: { due?: DeadlineBucket | ''; deadlineType?: 'all' | 'receivable' | 'check' }) => {
+    const result = patchAccountingDashboardQuery(new URLSearchParams(rawSearchParams), patch);
+    const query = result.params.toString();
+    return `/dashboard/accounting${query ? `?${query}` : ''}`;
+  };
 
   return (
     <ErpPage
@@ -138,6 +196,23 @@ export default function AccountingDashboardPage() {
         { label: 'به‌روزرسانی', icon: FaSync, onClick: refreshDashboard, tone: 'neutral' },
       ]}
     >
+      {workspaceState.stale && (
+        <ErpInlineState
+          kind="stale"
+          title="آخرین نمایش موفق حفظ شده است؛ به‌روزرسانی انجام نشد."
+          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadWorkspace, tone: 'warning' }}
+        />
+      )}
+      {loading && workspace && (
+        <p role="status" className="sds-text-muted text-sm">در حال به‌روزرسانی داده‌های حسابداری…</p>
+      )}
+
+      <AccountingDeadlinesPanel
+        deadlines={workspace.deadlines}
+        dashboardHref={dashboardHref}
+        onTypeChange={(deadlineType) => router.replace(dashboardHref({ deadlineType }), { scroll: false })}
+      />
+
       <ErpActionGrid
         columns={4}
         items={[

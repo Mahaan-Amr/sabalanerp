@@ -49,21 +49,60 @@ const run = async () => {
     const unlinkedReconciliation = await tx.hrReconciliationRecord.findUniqueOrThrow({
       where: { stableKey: userReconciliationKey }, include: { attentionFlags: true },
     });
-    assert.equal(unlinkedReconciliation.primaryState, 'READY');
-    assert.equal(unlinkedReconciliation.cutoverBlocker, false);
-    assert.equal(unlinkedReconciliation.attentionFlags.some((flag) => flag.flagCode === 'USER_PERSONNEL_LINKAGE'), false);
+    assert.equal(unlinkedReconciliation.primaryState, 'NEEDS_REVIEW');
+    assert.equal(unlinkedReconciliation.cutoverBlocker, true);
+    assert.equal(unlinkedReconciliation.attentionFlags.some((flag) => flag.flagCode === 'USER_PERSONNEL_LINKAGE' && flag.isActive), true);
     const personnelReconciliation = await tx.hrReconciliationRecord.findUniqueOrThrow({
       where: { stableKey: `hr-redesign-v1:reconciliation:PERSONNEL:${personnelWithoutLogin.id}` },
       include: { attentionFlags: true },
     });
-    assert.equal(personnelReconciliation.primaryState, 'LEGACY_ONLY_HISTORY');
+    assert.equal(personnelReconciliation.primaryState, 'READY');
     assert.equal(personnelReconciliation.attentionFlags.some((flag) => flag.flagCode === 'USER_PERSONNEL_LINKAGE'), false);
     const sameNameReconciliation = await tx.hrReconciliationRecord.findUniqueOrThrow({
       where: { stableKey: `hr-redesign-v1:reconciliation:PERSONNEL:${sameNamePersonnel.id}` },
       include: { attentionFlags: true },
     });
-    assert.equal(sameNameReconciliation.primaryState, 'LEGACY_ONLY_HISTORY');
+    assert.equal(sameNameReconciliation.primaryState, 'READY');
     assert.equal(sameNameReconciliation.attentionFlags.some((flag) => flag.flagCode === 'IDENTITY_AMBIGUITY'), false);
+
+    await tx.hrReconciliationReview.createMany({ data: [
+      {
+        stableKey: `review:access-only:${suffix}`,
+        reconciliationId: unlinkedReconciliation.id,
+        version: 1,
+        outcome: 'ACCEPTED_ACCESS_ONLY',
+        reason: 'Confirmed non-workforce system access',
+        reviewedByUserId: unlinkedUser.id,
+      },
+      {
+        stableKey: `review:legacy-only:${suffix}`,
+        reconciliationId: personnelReconciliation.id,
+        version: 1,
+        outcome: 'ACCEPTED_LEGACY_ONLY',
+        reason: 'Confirmed historical evidence with no operational dependency',
+        reviewedByUserId: unlinkedUser.id,
+      },
+    ] });
+    await tx.hrReconciliationAttentionFlag.create({ data: {
+      stableKey: `staged-identity-ambiguity:${suffix}`,
+      reconciliationId: sameNameReconciliation.id,
+      flagCode: 'IDENTITY_AMBIGUITY',
+      version: 1,
+      detailsJson: { evidenceSource: 'HUMAN_REVIEW' },
+    } });
+    await runHrRedesignBackfill(tx, { apply: true });
+    const reviewedAccessOnly = await tx.hrReconciliationRecord.findUniqueOrThrow({
+      where: { id: unlinkedReconciliation.id }, include: { attentionFlags: { orderBy: { version: 'desc' } } },
+    });
+    assert.equal(reviewedAccessOnly.cutoverBlocker, false);
+    assert.equal(reviewedAccessOnly.attentionFlags.find((flag) => flag.flagCode === 'USER_PERSONNEL_LINKAGE')?.isActive, false);
+    const reviewedLegacyOnly = await tx.hrReconciliationRecord.findUniqueOrThrow({ where: { id: personnelReconciliation.id } });
+    assert.equal(reviewedLegacyOnly.primaryState, 'LEGACY_ONLY_HISTORY');
+    const stagedAmbiguity = await tx.hrReconciliationRecord.findUniqueOrThrow({
+      where: { id: sameNameReconciliation.id }, include: { attentionFlags: true },
+    });
+    assert.equal(stagedAmbiguity.cutoverBlocker, true);
+    assert.equal(stagedAmbiguity.attentionFlags.some((flag) => flag.flagCode === 'IDENTITY_AMBIGUITY' && flag.isActive), true);
 
     const currentKey = `hr-redesign-v1:reconciliation:PERSONNEL:${currentPersonnel.id}`;
     const currentReconciliation = await tx.hrReconciliationRecord.findUniqueOrThrow({

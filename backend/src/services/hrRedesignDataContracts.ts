@@ -193,9 +193,9 @@ export const planLegacyAssessmentMigration = (input: {
 });
 
 export const canReadLegacyAssessmentCompatibility = (input: {
-  role: string;
+  hasAssignedAssessmentDuty: boolean;
   hasActiveHiringAuthority: boolean;
-}) => input.role === 'ADMIN' || input.hasActiveHiringAuthority;
+}) => input.hasAssignedAssessmentDuty && input.hasActiveHiringAuthority;
 
 export const projectLegacyAssessmentCompatibility = <TEvidence>(input: {
   applicationId: string;
@@ -254,7 +254,7 @@ export const classifyHrReconciliationRecord = (input: HrReconciliationInput) => 
       ? 'CLASSIFICATION_ERROR' as const
       : attentionFlags.length > 0
         ? 'NEEDS_REVIEW' as const
-        : !input.isOperationallyCurrent
+        : input.legacyOnlyReviewed && !input.isOperationallyCurrent
           ? 'LEGACY_ONLY_HISTORY' as const
         : 'READY' as const,
     attentionFlags,
@@ -417,9 +417,9 @@ export const runHrRedesignBackfill = async (
     sourceId: user.id,
     isOperationallyCurrent: user.isActive,
     legacyOnlyReviewed: false,
-    // A User without a Personnel link is access-only unless independent
-    // evidence says the link is required; legacy data cannot infer that.
-    personnelLinkExpected: false,
+    // The absence of a link cannot distinguish access-only from an unresolved
+    // workforce identity. A durable human review makes that classification.
+    personnelLinkExpected: !user.personnelId,
     userPersonnelLinkResolved: Boolean(user.personnelId),
     identityAmbiguous: false,
     hasCurrentOrganizationalAssignment: true,
@@ -463,9 +463,18 @@ export const runHrRedesignBackfill = async (
       .filter((flag) => !flag.isActive && flag.resolutionReason !== 'SOURCE_CONDITION_CLEARED_BY_BACKFILL')
       .map((flag) => flag.flagCode as HrReconciliationAttentionFlag);
     const legacyOnlyReviewed = existing?.reviews[0]?.outcome === 'ACCEPTED_LEGACY_ONLY';
+    const accessOnlyReviewed = existing?.reviews[0]?.outcome === 'ACCEPTED_ACCESS_ONLY';
+    const identityAmbiguous = latestFlagByCode.get('IDENTITY_AMBIGUITY')?.isActive === true;
+    const reviewedInput = {
+      ...input,
+      legacyOnlyReviewed,
+      personnelLinkExpected: input.personnelLinkExpected && !accessOnlyReviewed,
+      identityAmbiguous,
+      suppressedAttentionFlags,
+    };
     return {
-      input: { ...input, legacyOnlyReviewed, suppressedAttentionFlags },
-      classification: classifyHrReconciliationRecord({ ...input, legacyOnlyReviewed, suppressedAttentionFlags }),
+      input: reviewedInput,
+      classification: classifyHrReconciliationRecord(reviewedInput),
     };
   });
   const existingReconciliationCount = existingReconciliations.length;

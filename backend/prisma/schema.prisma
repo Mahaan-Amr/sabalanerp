@@ -4538,6 +4538,7 @@ enum HrReconciliationPrimaryState {
 enum HrReconciliationReviewOutcome {
   CONFIRMED
   REMEDIATION_REQUIRED
+  ACCEPTED_ACCESS_ONLY
   ACCEPTED_LEGACY_ONLY
   BLOCKED
 }

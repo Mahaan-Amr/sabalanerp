@@ -68,9 +68,9 @@ assert.deepEqual(planLegacyAssessmentMigration({
   },
 });
 
-assert.equal(canReadLegacyAssessmentCompatibility({ role: 'ADMIN', hasActiveHiringAuthority: false }), true);
-assert.equal(canReadLegacyAssessmentCompatibility({ role: 'USER', hasActiveHiringAuthority: true }), true);
-assert.equal(canReadLegacyAssessmentCompatibility({ role: 'USER', hasActiveHiringAuthority: false }), false);
+assert.equal(canReadLegacyAssessmentCompatibility({ hasAssignedAssessmentDuty: true, hasActiveHiringAuthority: true }), true);
+assert.equal(canReadLegacyAssessmentCompatibility({ hasAssignedAssessmentDuty: false, hasActiveHiringAuthority: true }), false);
+assert.equal(canReadLegacyAssessmentCompatibility({ hasAssignedAssessmentDuty: true, hasActiveHiringAuthority: false }), false);
 
 const legacyEvidence = [{ id: 'assessment-1', assessmentType: 'DISC', payload: { score: 74 } }];
 assert.deepEqual(projectLegacyAssessmentCompatibility({
@@ -124,7 +124,7 @@ assert.deepEqual(classifyHrReconciliationRecord({
   sourceType: 'PERSONNEL',
   sourceId: 'person-2',
   isOperationallyCurrent: false,
-  legacyOnlyReviewed: false,
+  legacyOnlyReviewed: true,
   personnelLinkExpected: false,
   userPersonnelLinkResolved: true,
   identityAmbiguous: false,
@@ -135,6 +135,25 @@ assert.deepEqual(classifyHrReconciliationRecord({
   classificationError: false,
 }), {
   primaryState: 'LEGACY_ONLY_HISTORY',
+  attentionFlags: [],
+  cutoverBlocker: false,
+});
+
+assert.deepEqual(classifyHrReconciliationRecord({
+  sourceType: 'PERSONNEL',
+  sourceId: 'reviewed-history-that-became-current',
+  isOperationallyCurrent: true,
+  legacyOnlyReviewed: true,
+  personnelLinkExpected: false,
+  userPersonnelLinkResolved: true,
+  identityAmbiguous: false,
+  hasCurrentOrganizationalAssignment: true,
+  employmentConsistent: true,
+  startDateReviewOpen: false,
+  assessmentPlanUnresolved: false,
+  classificationError: false,
+}), {
+  primaryState: 'READY',
   attentionFlags: [],
   cutoverBlocker: false,
 });

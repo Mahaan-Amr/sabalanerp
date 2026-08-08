@@ -1022,16 +1022,21 @@ router.get('/redesign/compatibility/positions', viewAccess, async (_req, res) =>
   } catch (error) { handleError(res, error, 'Project legacy HR Positions'); }
 });
 
-router.get('/redesign/compatibility/work-items', adminAccess, async (_req, res) => {
+router.get('/redesign/compatibility/work-items', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const workItems = await prisma.hrWorkItem.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
+    const workItems = await prisma.hrWorkItem.findMany({
+      where: { assignedToUserId: actorId(req) },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
     res.json({ success: true, data: workItems.map(projectLegacyHrWorkItem) });
   } catch (error) { handleError(res, error, 'Project legacy HR work items'); }
 });
 
 router.get('/redesign/compatibility/applications/:applicationId/assessments', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const authority = req.user!.role === 'ADMIN' ? null : await prisma.hrHiringAuthority.findFirst({
+    const [authority, assignedDuty] = await Promise.all([
+      prisma.hrHiringAuthority.findFirst({
         where: {
           userId: actorId(req),
           authority: { in: ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HIRING_MANAGER'] },
@@ -1039,9 +1044,24 @@ router.get('/redesign/compatibility/applications/:applicationId/assessments', vi
           OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
         },
         select: { id: true },
-      });
-    if (!canReadLegacyAssessmentCompatibility({ role: req.user!.role, hasActiveHiringAuthority: Boolean(authority) })) {
-      return res.status(403).json({ success: false, error: 'Hiring assessment authority is required.' });
+      }),
+      prisma.hrWorkItem.findFirst({
+        where: {
+          sourceType: 'HIRING_ACTION',
+          assignedToUserId: actorId(req),
+          status: { in: ['PENDING', 'IN_PROGRESS'] },
+          OR: ['COMPLETE_ASSESSMENT', 'DECIDE_ASSESSMENT', 'RECORD_ASSESSMENT'].map((action) => ({
+            sourceKey: { startsWith: `HIRING:${req.params.applicationId}:${action}:` },
+          })),
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (!canReadLegacyAssessmentCompatibility({
+      hasAssignedAssessmentDuty: Boolean(assignedDuty),
+      hasActiveHiringAuthority: Boolean(authority),
+    })) {
+      return res.status(403).json({ success: false, error: 'Assigned hiring assessment duty and active authority are required.' });
     }
     const application = await prisma.hrJobApplication.findUniqueOrThrow({
       where: { id: req.params.applicationId },

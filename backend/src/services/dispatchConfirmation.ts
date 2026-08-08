@@ -29,7 +29,7 @@ const appendAudit = async (tx: Tx, input: { aggregateType: string; aggregateId: 
 };
 
 export type EnrollmentTemplateInput = { finger: string; format: string; material: Buffer; deviceEvidence: Record<string, unknown>; provenance: 'APPROVED_CONNECTOR' };
-type OtpDelivery = (message: { phone: string; code: string; sessionId: string; expiresAt: Date }) => Promise<void>;
+type OtpDelivery = (message: { phone: string; code: string; dispatchNumber: string; sessionId: string; expiresAt: Date }) => Promise<void>;
 
 export class DispatchConfirmationService {
   constructor(private readonly prisma: PrismaClient, private readonly dependencies: {
@@ -132,7 +132,7 @@ export class DispatchConfirmationService {
     } } } });
   }
 
-  private async createOtp(sessionId: string, phone: string) {
+  private async createOtp(sessionId: string, phone: string, dispatchNumber: string) {
     const at = this.now();
     const current = await this.prisma.dispatchOtpChallenge.findFirst({ where: { sessionId, invalidatedAt: null }, orderBy: { createdAt: 'desc' } });
     if (current && current.resendAfter > at) throw new DispatchConfirmationConflictError('OTP resend is not available yet.');
@@ -144,7 +144,7 @@ export class DispatchConfirmationService {
       await tx.dispatchOtpChallenge.updateMany({ where: { sessionId, invalidatedAt: null }, data: { invalidatedAt: at } });
       await tx.dispatchOtpChallenge.create({ data: { id, sessionId, digest: this.otpDigest(id, code), expiresAt, resendAfter: addMinutes(at, 1) } });
     });
-    await this.dependencies.sendOtp({ phone, code, sessionId, expiresAt });
+    await this.dependencies.sendOtp({ phone, code, dispatchNumber, sessionId, expiresAt });
     return { expiresAt, resendAfter: addMinutes(at, 1) };
   }
 
@@ -187,7 +187,7 @@ export class DispatchConfirmationService {
         eventType: 'SESSION_STARTED', payload: { waybillId: waybill.id, method, waybillIntegrityHash: waybill.integrityHash }, actorId: input.actorId, at });
       return created;
     });
-    if (method === 'EXTERNAL_OTP_GUARD') await this.createOtp(session.id, phone!);
+    if (method === 'EXTERNAL_OTP_GUARD') await this.createOtp(session.id, phone!, String(waybill.number));
     return session;
   }
 
@@ -296,7 +296,7 @@ export class DispatchConfirmationService {
       await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id, eventType: 'FALLBACK_STARTED',
         payload: { failure: session.fallbackFailure }, actorId: input.actorId, at: this.now() });
     });
-    await this.createOtp(session.id, enrollment.confirmationPhone);
+    await this.createOtp(session.id, enrollment.confirmationPhone, String(session.waybill.number));
     return { sessionId: session.id, method: 'INTERNAL_FALLBACK' };
   }
 
@@ -309,7 +309,7 @@ export class DispatchConfirmationService {
       const driver = await this.prisma.internalDriverProfile.findUniqueOrThrow({ where: { id: session.driverId } });
       phone = (await this.prisma.driverBiometricEnrollment.findFirstOrThrow({ where: { personnelId: driver.personnelId, status: 'ACTIVE' } })).confirmationPhone;
     }
-    return this.createOtp(session.id, phone);
+    return this.createOtp(session.id, phone, String(session.waybill.number));
   }
 
   async verifyOtp(input: { sessionId: string; code: string; actorId?: string }) {

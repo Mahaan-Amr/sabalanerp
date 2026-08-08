@@ -10,19 +10,19 @@ Create the templates manually in the SMS.ir panel under **ارسال سریع**.
 
 Suggested portal values below are operational labels, not provider-documented field names:
 
-| Purpose | Suggested title | Exact text to paste | Dynamic keys |
-| --- | --- | --- | --- |
-| Driver OTP confirmation | `SabalanERP - تایید حواله حمل داخلی` | shown below | `DispatchNumber`, `Code` |
-| First exit notice and automatic retries | `SabalanERP - ثبت خروج حواله حمل داخلی` | shown below | `DispatchNumber`, `Plate` |
-| Authorized manual exit-notice retry | `SabalanERP - ارسال مجدد ثبت خروج` | shown below | `DispatchNumber`, `Plate` |
+| Purpose | Approved title | Template ID | Exact text to paste | Dynamic keys |
+| --- | --- | ---: | --- | --- |
+| Driver OTP confirmation | `driver OTP confirmation` | `173656` | shown below | `DISPATCHNUMBER`, `CODE` |
+| First exit notice and automatic retries | `خروج سبلان` | `153829` | shown below | `DNO`, `PLATE` |
+| Authorized manual exit-notice retry | `تکرار خروج` | `3429496` | shown below | `DNO`, `PLATE` |
 
 ### Template 1 — driver OTP confirmation
 
 ```text
 سبلان
-کد تأیید حواله حمل داخلی #DispatchNumber#:
-#Code#
-اعتبار: ۱۰ دقیقه
+شماره حواله: #DISPATCHNUMBER#
+کد تأیید: #CODE#
+اعتبار کد: ۱۰ دقیقه
 این کد را فقط در حضور مسئول حسابداری وارد کنید.
 ```
 
@@ -32,18 +32,18 @@ Use the same template for an External Driver Waybill Confirmation and an Interna
 
 ```text
 سبلان
-خروج حواله حمل داخلی ثبت شد.
-شماره حواله: #DispatchNumber#
-پلاک خودرو: #Plate#
+خروج ثبت شد
+حواله: #DNO#
+پلاک: #PLATE#
 ```
 
 ### Template 3 — reason-bound manual exit-notice retry
 
 ```text
 سبلان
-ارسال مجدد اطلاع‌رسانی خروج
-شماره حواله: #DispatchNumber#
-پلاک خودرو: #Plate#
+ارسال مجدد خروج
+حواله: #DNO#
+پلاک: #PLATE#
 ```
 
 Use Template 2 for the original exit notice and the automatic 1/5/15-minute attempts. Use Template 3 only after the authorized manual-retry action. Both exit-notice templates disclose only the approved internal dispatch-waybill number and vehicle plate. A Manual Outage Exit registration uses Template 2 for its first notification; the outage is an internal evidence classification and need not be disclosed to the recipient.
@@ -61,15 +61,15 @@ Template 1 OTP request:
 ```json
 {
   "mobile": "09123456789",
-  "templateId": 123456,
+  "templateId": 173656,
   "parameters": [
-    { "name": "DispatchNumber", "value": "DW-1405-000123" },
-    { "name": "Code", "value": "123456" }
+    { "name": "DISPATCHNUMBER", "value": "DW-1405-000123" },
+    { "name": "CODE", "value": "123456" }
   ]
 }
 ```
 
-Templates 2 and 3 send `DispatchNumber` and `Plate`; only their approved `templateId` differs.
+Templates 2 and 3 send `DNO` and `PLATE`; only their approved `templateId` differs.
 
 The parameter spelling and case should be treated as exact. The official API requires the key declared by the template, and SabalanERP already records an operational SMS.ir failure caused by unsuitable dynamic content and documents case-sensitive provider keys for existing templates ([hiring workflow](../workspaces/hr/HIRING-WORKFLOW.md), [HR regression record](../workspaces/hr/HR_Recruitment.md)). Do not translate the API names to Persian, change their case, or include `#` in JSON.
 
@@ -88,10 +88,12 @@ The existing backend already implements the required provider shape: it normaliz
 Implementation should therefore add explicit numeric configuration, following current naming:
 
 ```dotenv
-SMS_IR_DISPATCH_CONFIRM_OTP_TEMPLATE_ID=REPLACE_WITH_APPROVED_TEMPLATE_ID
-SMS_IR_DISPATCH_EXIT_TEMPLATE_ID=REPLACE_WITH_APPROVED_TEMPLATE_ID
-SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID=REPLACE_WITH_APPROVED_TEMPLATE_ID
+SMS_IR_DISPATCH_CONFIRM_OTP_TEMPLATE_ID=173656
+SMS_IR_DISPATCH_EXIT_TEMPLATE_ID=153829
+SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID=3429496
 ```
+
+`deploy/scripts/deploy.sh` synchronizes these approved non-secret IDs into the server-local `deploy/.env.prod` after pulling the deployment branch, while production Compose retains the same values as defaults. A deliberate future template replacement must update both locations together.
 
 Map the immutable notification snapshot to the provider as:
 
@@ -99,9 +101,9 @@ Map the immutable notification snapshot to the provider as:
 | --- | --- |
 | normalized, snapshotted driver or contract-confirmation phone | `mobile` |
 | configured approved template ID | `templateId` |
-| internal dispatch-waybill number snapshot | parameter `DispatchNumber` |
-| one-time driver confirmation code | parameter `Code` |
-| vehicle-plate snapshot | parameter `Plate` |
+| internal dispatch-waybill number snapshot | parameter `DISPATCHNUMBER` for OTP and `DNO` for exit notices |
+| one-time driver confirmation code | parameter `CODE` |
+| vehicle-plate snapshot | parameter `PLATE` |
 | accepted SMS.ir response ID | provider message ID used for delivery polling |
 
 The existing HR polling implementation maps SMS.ir delivery state `1` to delivered, `2`/`3` to failed, and other/null states to accepted, then treats report-call failure as unknown ([`hrHiringDeliveryPollingService.ts`](../../backend/src/services/hrHiringDeliveryPollingService.ts)). Issue #213's final state model should preserve the raw provider response/state alongside its own queued/accepted/delivered/failed/unknown projection rather than assuming undocumented numeric states.
@@ -109,8 +111,8 @@ The existing HR polling implementation maps SMS.ir delivery state `1` to deliver
 ## Portal handoff checklist
 
 1. In SMS.ir, open **ارسال سریع** and create Templates 1 and 2 with the exact text above.
-2. For Template 1 declare exactly `DispatchNumber` and `Code`; for Templates 2 and 3 declare exactly `DispatchNumber` and `Plate`.
-3. Verify the previews render `#DispatchNumber#`, `#Code#`, and `#Plate#` with the exact casing shown.
+2. For Template 1 declare exactly `DISPATCHNUMBER` and `CODE`; for Templates 2 and 3 declare exactly `DNO` and `PLATE`.
+3. Verify the previews render `#DISPATCHNUMBER#`, `#CODE#`, `#DNO#`, and `#PLATE#` with the exact casing shown.
 4. Submit them through whatever approval workflow the current panel presents. No public official approval SLA was found.
 5. Optionally create Template 3 for manual retries; otherwise configure manual retry to reuse Template 2.
 6. Copy the numeric approved IDs into deployment secrets; never retain the illustrative `123456` template ID.

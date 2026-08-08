@@ -17,7 +17,7 @@ interface SendVerificationCodeResponse {
   };
 }
 
-interface SmsTemplateParameter {
+export interface SmsTemplateParameter {
   name: string;
   value: string;
 }
@@ -37,6 +37,33 @@ export const buildHiringOfferTemplateParameters = (code: string): SmsTemplatePar
   return [{ name: 'CODE', value: code }];
 };
 
+export const buildDispatchConfirmationOtpTemplateParameters = (
+  dispatchNumber: string,
+  code: string
+): SmsTemplateParameter[] => {
+  const normalizedDispatchNumber = String(dispatchNumber || '').trim();
+  if (!normalizedDispatchNumber) throw new Error('Dispatch number is required for driver OTP delivery.');
+  if (!/^\d{6}$/.test(code)) throw new Error('Dispatch confirmation code must contain exactly six digits.');
+  return [
+    { name: 'DISPATCHNUMBER', value: normalizedDispatchNumber },
+    { name: 'CODE', value: code },
+  ];
+};
+
+export const buildDispatchExitTemplateParameters = (
+  dispatchNumber: string,
+  vehiclePlate: string
+): SmsTemplateParameter[] => {
+  const normalizedDispatchNumber = String(dispatchNumber || '').trim();
+  const normalizedVehiclePlate = String(vehiclePlate || '').trim();
+  if (!normalizedDispatchNumber) throw new Error('Dispatch number is required for exit notification.');
+  if (!normalizedVehiclePlate) throw new Error('Vehicle plate is required for exit notification.');
+  return [
+    { name: 'DNO', value: normalizedDispatchNumber },
+    { name: 'PLATE', value: normalizedVehiclePlate },
+  ];
+};
+
 function maskPhoneNumber(phoneNumber: string): string {
   if (phoneNumber.length <= 4) {
     return '****';
@@ -53,7 +80,9 @@ class SmsService {
   private hiringInvitationTemplateId: number;
   private hiringCorrectionTemplateId: number;
   private hiringOfferTemplateId: number;
+  private dispatchConfirmationOtpTemplateId: number;
   private dispatchExitTemplateId: number;
+  private dispatchExitManualRetryTemplateId: number;
   private environment: string;
   private requestTimeoutMs: number;
   private dnsServers: string[];
@@ -80,7 +109,18 @@ class SmsService {
       process.env.SMS_IR_HIRING_OFFER_TEMPLATE_ID || '894291',
       10
     );
-    this.dispatchExitTemplateId = parseInt(process.env.SMS_IR_DISPATCH_EXIT_TEMPLATE_ID || '0', 10);
+    this.dispatchConfirmationOtpTemplateId = parseInt(
+      process.env.SMS_IR_DISPATCH_CONFIRM_OTP_TEMPLATE_ID || '173656',
+      10
+    );
+    this.dispatchExitTemplateId = parseInt(
+      process.env.SMS_IR_DISPATCH_EXIT_TEMPLATE_ID || '153829',
+      10
+    );
+    this.dispatchExitManualRetryTemplateId = parseInt(
+      process.env.SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID || '3429496',
+      10
+    );
     this.environment = process.env.SMS_IR_ENVIRONMENT || 'sandbox';
     this.requestTimeoutMs = parseInt(process.env.SMS_IR_TIMEOUT_MS || '30000', 10);
     this.dnsServers = (process.env.SMS_IR_DNS_SERVERS || '')
@@ -438,15 +478,40 @@ class SmsService {
     }
   }
 
+  async sendDispatchConfirmationOtp(params: { phoneNumber: string; dispatchNumber: string; code: string }): Promise<SmsSendResult> {
+    if (this.environment === 'sandbox' && !this.apiKey) return { success: true, messageId: undefined };
+    if (!Number.isInteger(this.dispatchConfirmationOtpTemplateId) || this.dispatchConfirmationOtpTemplateId <= 0) {
+      return { success: false, error: 'Dispatch confirmation OTP template is not configured.' };
+    }
+    return this.sendTemplate(
+      this.formatPhoneNumber(params.phoneNumber),
+      this.dispatchConfirmationOtpTemplateId,
+      buildDispatchConfirmationOtpTemplateParameters(params.dispatchNumber, params.code)
+    );
+  }
+
   async sendDispatchExitNotice(params: { phoneNumber: string; dispatchNumber: string; vehiclePlate: string }): Promise<SmsSendResult> {
     if (this.environment === 'sandbox' && !this.apiKey) return { success: true, messageId: undefined };
     if (!Number.isInteger(this.dispatchExitTemplateId) || this.dispatchExitTemplateId <= 0) {
       return { success: false, error: 'Dispatch exit SMS template is not configured.' };
     }
-    return this.sendTemplate(this.formatPhoneNumber(params.phoneNumber), this.dispatchExitTemplateId, [
-      { name: 'DispatchNumber', value: params.dispatchNumber },
-      { name: 'Plate', value: params.vehiclePlate },
-    ]);
+    return this.sendTemplate(
+      this.formatPhoneNumber(params.phoneNumber),
+      this.dispatchExitTemplateId,
+      buildDispatchExitTemplateParameters(params.dispatchNumber, params.vehiclePlate)
+    );
+  }
+
+  async sendDispatchExitManualRetryNotice(params: { phoneNumber: string; dispatchNumber: string; vehiclePlate: string }): Promise<SmsSendResult> {
+    if (this.environment === 'sandbox' && !this.apiKey) return { success: true, messageId: undefined };
+    if (!Number.isInteger(this.dispatchExitManualRetryTemplateId) || this.dispatchExitManualRetryTemplateId <= 0) {
+      return { success: false, error: 'Dispatch exit manual-retry SMS template is not configured.' };
+    }
+    return this.sendTemplate(
+      this.formatPhoneNumber(params.phoneNumber),
+      this.dispatchExitManualRetryTemplateId,
+      buildDispatchExitTemplateParameters(params.dispatchNumber, params.vehiclePlate)
+    );
   }
 
   async getDeliveryReport(messageId: number): Promise<{

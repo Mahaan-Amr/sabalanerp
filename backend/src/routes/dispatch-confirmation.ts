@@ -28,7 +28,10 @@ const service = () => {
     vault: new ProtectedTemplateVault({ activeKeyId: 'dispatch-v1', keys: { 'dispatch-v1': key } }),
     otpSecret: process.env.DISPATCH_CONFIRMATION_OTP_SECRET || '',
     production: process.env.NODE_ENV === 'production', legalReadinessEnabled: process.env.BIOMETRIC_LEGAL_READY === 'true',
-    sendOtp: async ({ phone, code }) => { const result = await smsService.sendVerificationCode(phone, code); if (!result.success) throw new Error(result.error || 'OTP delivery failed'); } });
+    sendOtp: async ({ phone, code, dispatchNumber }) => {
+      const result = await smsService.sendDispatchConfirmationOtp({ phoneNumber: phone, code, dispatchNumber });
+      if (!result.success) throw new Error(result.error || 'OTP delivery failed');
+    } });
 };
 const handle = (res: Response, error: unknown) => {
   if (error instanceof DispatchConfirmationValidationError) return res.status(400).json({ success: false, error: error.message });

@@ -104,7 +104,9 @@ const validateProductionEnvironment = () => {
     "SMS_IR_API_KEY",
     "SMS_IR_HIRING_INVITATION_TEMPLATE_ID",
     "SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS",
+    "SMS_IR_DISPATCH_CONFIRM_OTP_TEMPLATE_ID",
     "SMS_IR_DISPATCH_EXIT_TEMPLATE_ID",
+    "SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID",
   ];
   const missingVars = requiredVars.filter((key) => !process.env[key]);
   const hiringTemplateId =
@@ -125,8 +127,14 @@ const validateProductionEnvironment = () => {
     hiringTemplateParameters[0] !== "Code";
   const hasInvalidSmsEnvironment =
     process.env.SMS_IR_ENVIRONMENT !== "production";
-  const dispatchExitTemplateId = process.env.SMS_IR_DISPATCH_EXIT_TEMPLATE_ID || "";
-  const hasInvalidDispatchExitTemplate = !/^\d+$/.test(dispatchExitTemplateId) || Number(dispatchExitTemplateId) <= 0;
+  const dispatchTemplateIds = [
+    process.env.SMS_IR_DISPATCH_CONFIRM_OTP_TEMPLATE_ID || "",
+    process.env.SMS_IR_DISPATCH_EXIT_TEMPLATE_ID || "",
+    process.env.SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID || "",
+  ];
+  const hasInvalidDispatchTemplates =
+    dispatchTemplateIds.some((value) => !/^\d+$/.test(value) || Number(value) <= 0) ||
+    new Set(dispatchTemplateIds).size !== dispatchTemplateIds.length;
   let hasInvalidPublicAppUrl = false;
   try {
     const publicAppUrl = new URL(process.env.PUBLIC_APP_URL || "");
@@ -141,7 +149,7 @@ const validateProductionEnvironment = () => {
     hasInvalidHiringTemplate ||
     hasInvalidHiringTemplateParameters ||
     hasInvalidSmsEnvironment ||
-    hasInvalidDispatchExitTemplate ||
+    hasInvalidDispatchTemplates ||
     hasInvalidPublicAppUrl
   ) {
     const details = [
@@ -156,7 +164,9 @@ const validateProductionEnvironment = () => {
         ? "SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS must be exactly Code."
         : "",
       hasInvalidSmsEnvironment ? "SMS_IR_ENVIRONMENT must be production." : "",
-      hasInvalidDispatchExitTemplate ? "SMS_IR_DISPATCH_EXIT_TEMPLATE_ID must be an approved positive numeric template ID." : "",
+      hasInvalidDispatchTemplates
+        ? "Dispatch SMS template IDs must be distinct approved positive numeric values."
+        : "",
       hasInvalidPublicAppUrl
         ? "PUBLIC_APP_URL must be a valid HTTPS origin used for the fixed applicant entry page."
         : "",

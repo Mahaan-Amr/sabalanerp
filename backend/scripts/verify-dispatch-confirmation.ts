@@ -11,7 +11,7 @@ const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const main = async () => {
   assert.ok(process.env.DATABASE_URL?.includes('127.0.0.1:55432'), 'Verification must target sabalanerp-local PostgreSQL.');
-  const deliveries: Array<{ phone: string; code: string; sessionId: string }> = [];
+  const deliveries: Array<{ phone: string; code: string; dispatchNumber: string; sessionId: string }> = [];
   let now = new Date();
   const service = new DispatchConfirmationService(prisma, { connector: new DeterministicBiometricSimulator(),
     vault: new ProtectedTemplateVault({ activeKeyId: 'verify-v1', keys: { 'verify-v1': randomBytes(32) } }),
@@ -86,6 +86,7 @@ const main = async () => {
   await assert.rejects(service.startSession({ waybillId: externalWaybill!.id, actorId: actor.id, workstationId: 'ACCOUNTING-02' }), /unique|active/i);
   assert.equal(external.method, 'EXTERNAL_OTP_GUARD');
   assert.equal(deliveries.at(-1)?.code.length, 6);
+  assert.equal(deliveries.at(-1)?.dispatchNumber, externalWaybill!.number.toString());
   await assert.rejects(service.resendOtp(external.id), /not available yet/i);
   await assert.rejects(service.verifyOtp({ sessionId: external.id, code: '999999' }), /incorrect/i);
   await service.verifyOtp({ sessionId: external.id, code: deliveries.at(-1)!.code, actorId: actor.id });

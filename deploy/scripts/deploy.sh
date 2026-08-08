@@ -31,6 +31,29 @@ git checkout "${DEPLOY_BRANCH}"
 git pull --ff-only "${DEPLOY_REMOTE}" "${DEPLOY_BRANCH}"
 git submodule update --init --recursive
 
+upsert_env_value() {
+  key="$1"
+  value="$2"
+  temp_file="${ENV_FILE}.tmp.$$"
+  awk -v key="${key}" -v value="${value}" '
+    BEGIN { prefix = "^" key "="; written = 0 }
+    $0 ~ prefix {
+      if (!written) print key "=" value
+      written = 1
+      next
+    }
+    { print }
+    END { if (!written) print key "=" value }
+  ' "${ENV_FILE}" > "${temp_file}"
+  chmod 600 "${temp_file}"
+  mv "${temp_file}" "${ENV_FILE}"
+}
+
+echo "Synchronizing approved SMS.ir dispatch template IDs..."
+upsert_env_value SMS_IR_DISPATCH_CONFIRM_OTP_TEMPLATE_ID 173656
+upsert_env_value SMS_IR_DISPATCH_EXIT_TEMPLATE_ID 153829
+upsert_env_value SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID 3429496
+
 echo "Building images..."
 docker compose --env-file "${ENV_FILE}" -f docker-compose.prod.yml build
 

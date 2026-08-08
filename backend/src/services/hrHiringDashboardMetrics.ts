@@ -12,6 +12,18 @@ const ACTIONABLE_COLLATERAL_OR_CONTRACT_ACTIONS = new Set([
   "APPROVE_CONTRACT",
 ]);
 
+export const HR_HIRING_DASHBOARD_METRICS_CACHE_HEADERS = {
+  "Cache-Control": "private, no-store",
+  Pragma: "no-cache",
+  Expires: "0",
+} as const;
+
+export type HrHiringAuthorityGrant = {
+  authority: string;
+  isActive: boolean;
+  expiresAt?: Date | string | null;
+};
+
 export type HrHiringMetricApplication = HiringLifecycleSource & { id: string };
 
 export type HrHiringDashboardMetrics = {
@@ -20,6 +32,18 @@ export type HrHiringDashboardMetrics = {
   activeCollateralTemplates?: number;
   generatedAt: string;
 };
+
+export const activeHiringAuthoritiesAt = (
+  grants: HrHiringAuthorityGrant[],
+  at: Date,
+) => grants
+  .filter((grant) => grant.isActive && (!grant.expiresAt || new Date(grant.expiresAt) > at))
+  .map((grant) => grant.authority);
+
+export const hrHiringDashboardMetricsResponse = (data: HrHiringDashboardMetrics) => ({
+  success: true as const,
+  data,
+});
 
 export const hiringLifecycleHasActionableCollateralOrContract = (
   lifecycle: HiringLifecycleProjection,

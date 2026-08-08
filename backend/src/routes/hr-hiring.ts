@@ -63,8 +63,11 @@ import { latestDecisionsByKind } from '../services/hrApplicationDecisionVersions
 import { normalizeHiringDocumentTitle } from '../services/hrHiringDocumentEvidence';
 import { assertHiringAuthorityMutationAllowed } from '../services/hrHiringAuthorityPolicy';
 import {
+  activeHiringAuthoritiesAt,
   buildHrHiringDashboardMetrics,
-  hiringLifecycleHasActionableCollateralOrContract
+  hiringLifecycleHasActionableCollateralOrContract,
+  HR_HIRING_DASHBOARD_METRICS_CACHE_HEADERS,
+  hrHiringDashboardMetricsResponse
 } from '../services/hrHiringDashboardMetrics';
 import {
   automaticHiringWorkItemBaseKey,
@@ -337,6 +340,14 @@ const requireAuthority = (...authorities: string[]) => asyncHandler(async (req: 
   (req as any).hiringAuthority = assigned.authority;
   next();
 });
+
+const activeHiringAuthoritiesForUser = async (userId: string, at = new Date()) => {
+  const grants = await prisma.hrHiringAuthority.findMany({
+    where: { userId },
+    select: { authority: true, isActive: true, expiresAt: true }
+  });
+  return activeHiringAuthoritiesAt(grants, at);
+};
 
 const requireArchiveManager = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (req.user!.role === 'ADMIN') return next();
@@ -841,31 +852,23 @@ router.use(protect);
 
 router.get('/dashboard-metrics', asyncHandler(async (req: AuthRequest, res: Response) => {
   const generatedAt = new Date();
-  const authorityRows = await prisma.hrHiringAuthority.findMany({
-    where: {
-      userId: actorId(req),
-      isActive: true,
-      OR: [{ expiresAt: null }, { expiresAt: { gt: generatedAt } }]
-    },
-    select: { authority: true }
-  });
-  const authorities = authorityRows.map((row) => row.authority);
+  const authorities = await activeHiringAuthoritiesForUser(actorId(req), generatedAt);
   const hasFinanceAuthority = authorities.some((authority) =>
     authority === 'FINANCE_RECORDER' || authority === 'FINANCE_MANAGER'
   );
 
-  res.set('Cache-Control', 'private, no-store');
-  res.set('Pragma', 'no-cache');
-  res.set('Expires', '0');
+  Object.entries(HR_HIRING_DASHBOARD_METRICS_CACHE_HEADERS).forEach(([name, value]) => {
+    res.set(name, value);
+  });
 
   if (!hasFinanceAuthority) {
-    return res.json({ success: true, data: buildHrHiringDashboardMetrics({
+    return res.json(hrHiringDashboardMetricsResponse(buildHrHiringDashboardMetrics({
       viewerUserId: actorId(req),
       viewerAuthorities: authorities,
       applications: [],
       activeCollateralTemplates: 0,
       generatedAt
-    }) });
+    })));
   }
 
   const [applications, activeCollateralTemplates] = await Promise.all([
@@ -882,7 +885,7 @@ router.get('/dashboard-metrics', asyncHandler(async (req: AuthRequest, res: Resp
     activeCollateralTemplates,
     generatedAt
   });
-  res.json({ success: true, data });
+  res.json(hrHiringDashboardMetricsResponse(data));
 }));
 
 // Authenticated hiring workspace.
@@ -1154,8 +1157,7 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
   const search = String(req.query.search || '').trim();
   const archived = String(req.query.archived || '') === 'true';
   const requestedView = String(req.query.view || '').trim();
-  const authorityRows = await prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } });
-  const authorities = authorityRows.map((item) => item.authority);
+  const authorities = await activeHiringAuthoritiesForUser(actorId(req));
   // The hiring workspace intentionally shows the complete contact number for operational follow-up.
   const canSeeFullMobile = true;
   const canSeeDecisionDetails = authorities.some((authority) => ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER'].includes(authority));
@@ -1185,9 +1187,9 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
       assessments: { select: { id: true } },
       preIdentityChecklistItems: { select: { status: true, managementResolution: true, dueAt: true } },
       hiringDecisions: { select: { kind: true, outcome: true, explanation: true, changeReason: true, version: true, decidedBy: true, decidedAt: true }, orderBy: [{ kind: 'asc' }, { version: 'desc' }] },
-      compensationSnapshots: { select: { hrApprovedAt: true, financeApprovedAt: true, candidateAcceptedAt: true, obsoleteAt: true }, orderBy: { version: 'desc' }, take: 3 },
+      compensationSnapshots: { select: { proposedBy: true, preparedAt: true, hrApprovedAt: true, financeApprovedAt: true, candidateAcceptedAt: true, obsoleteAt: true }, orderBy: { version: 'desc' }, take: 3 },
       collateralItems: { select: { required: true, status: true } },
-      contracts: { select: { approvedAt: true }, orderBy: { version: 'desc' }, take: 1 },
+      contracts: { select: { uploadedBy: true, submittedAt: true, returnedAt: true, approvedAt: true }, orderBy: { version: 'desc' }, take: 1 },
       payrollParticipation: { select: { id: true } },
       onboardingTasks: { select: { id: true, activationBlocker: true, status: true, ownerAuthority: true, title: true } },
       employmentRelationship: { include: { personnel: true } }

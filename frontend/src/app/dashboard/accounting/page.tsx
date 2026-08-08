@@ -14,6 +14,7 @@ import {
 } from 'react-icons/fa';
 import {
   ErpActionGrid,
+  ErpInlineState,
   ErpLoading,
   ErpPage,
   ErpSection,
@@ -215,13 +216,10 @@ export default function AccountingDashboardPage() {
       />
 
       {hrMetrics.status === 'failed' && (
-        <p
-          role="status"
-          aria-live="polite"
-          className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm text-[var(--sds-warning)]"
-        >
-          شاخص‌های استخدام در دسترس نیستند. برای تلاش دوباره از به‌روزرسانی استفاده کنید.
-        </p>
+        <ErpInlineState
+          kind="error"
+          title="شاخص‌های استخدام در دسترس نیستند. برای تلاش دوباره از به‌روزرسانی استفاده کنید."
+        />
       )}
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">

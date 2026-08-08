@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import {
+  activeHiringAuthoritiesAt,
   buildHrHiringDashboardMetrics,
+  HR_HIRING_DASHBOARD_METRICS_CACHE_HEADERS,
+  hrHiringDashboardMetricsResponse,
   type HrHiringMetricApplication,
 } from "../hrHiringDashboardMetrics";
 
@@ -90,6 +93,42 @@ const onboardingSource = (overrides: Partial<HrHiringMetricApplication> = {}): H
     generatedAt: new Date(0).toISOString(),
   });
   assert.deepEqual(Object.keys(result).sort(), ["availability", "generatedAt"]);
+}
+
+{
+  const at = new Date("2026-08-08T08:00:00.000Z");
+  assert.deepEqual(activeHiringAuthoritiesAt([
+    { authority: "FINANCE_RECORDER", isActive: true, expiresAt: null },
+    { authority: "FINANCE_MANAGER", isActive: true, expiresAt: at },
+    { authority: "HR_MANAGER", isActive: false, expiresAt: null },
+  ], at), ["FINANCE_RECORDER"]);
+}
+
+{
+  assert.deepEqual(HR_HIRING_DASHBOARD_METRICS_CACHE_HEADERS, {
+    "Cache-Control": "private, no-store",
+    Pragma: "no-cache",
+    Expires: "0",
+  });
+  const data = buildHrHiringDashboardMetrics({
+    viewerUserId: "recorder-1",
+    viewerAuthorities: ["FINANCE_RECORDER"],
+    applications: [],
+    activeCollateralTemplates: 0,
+    generatedAt: new Date(0),
+  });
+  const response = hrHiringDashboardMetricsResponse(data);
+  assert.deepEqual(Object.keys(response), ["success", "data"]);
+  assert.deepEqual(Object.keys(response.data).sort(), [
+    "actionableCollateralOrContractCases",
+    "activeCollateralTemplates",
+    "availability",
+    "generatedAt",
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(response),
+    /candidateId|applicationId|userId|personnelId|templateId|nationalCode|mobile/i,
+  );
 }
 
 console.log("HR hiring dashboard metric tests passed.");

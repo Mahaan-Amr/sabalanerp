@@ -778,16 +778,29 @@ export function ErpLoading() {
   );
 }
 
-export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions, emptyState, isLoading, footer, children, ...pageProps }: {
+export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions, focusedRowKey, emptyState, isLoading, footer, children, ...pageProps }: {
   rows: T[];
   rowKey: (row: T) => string;
   columns: ErpColumn<T>[];
   filters?: ErpFilter[];
   rowActions?: (row: T) => ErpAction[];
+  focusedRowKey?: string;
   emptyState?: React.ReactNode;
   isLoading?: boolean;
   footer?: React.ReactNode;
 } & Omit<Parameters<typeof ErpPage>[0], 'children'> & { children?: React.ReactNode }) {
+  React.useEffect(() => {
+    if (!focusedRowKey) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = Array.from(document.querySelectorAll<HTMLElement>('[data-erp-focused-row="true"]'))
+        .find((element) => element.getClientRects().length > 0);
+      if (!target) return;
+      const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+      target.scrollIntoView({ behavior, block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedRowKey, rows]);
+
   return (
     <ErpPage {...pageProps}>
       <ErpFilters filters={filters} />
@@ -801,7 +814,11 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
           <>
             <div className="space-y-3 lg:hidden">
               {rows.map((row) => (
-                <ErpCard key={rowKey(row)} interactive className="p-4">
+                <div key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined}>
+                <ErpCard
+                  interactive
+                  className={cx('scroll-mt-24 p-4', focusedRowKey === rowKey(row) && 'ring-2 ring-[var(--sds-focus-ring)]')}
+                >
                   <div className="space-y-3">
                     {columns.filter((column) => column.priority !== 'hidden-mobile').map((column) => (
                       <div key={column.id} className={column.priority === 'primary' ? '' : 'flex items-start justify-between gap-3 text-sm'}>
@@ -816,6 +833,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
                     )}
                   </div>
                 </ErpCard>
+                </div>
               ))}
             </div>
             <div className="hidden overflow-x-auto lg:block">
@@ -832,7 +850,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
                 </thead>
                 <tbody>
                   {rows.map((row) => (
-                    <tr key={rowKey(row)} className="border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]">
+                    <tr key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined} className={cx('border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]', focusedRowKey === rowKey(row) && 'bg-[var(--sds-accent-soft)] ring-2 ring-inset ring-[var(--sds-focus-ring)]')}>
                       {columns.map((column) => (
                         <td key={column.id} className={cx('px-3 py-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
                           {column.cell(row)}

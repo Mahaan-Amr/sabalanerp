@@ -157,14 +157,14 @@ export default function AccountingDashboardPage() {
           },
           {
             title: 'دریافت‌ها و چک‌ها',
-            href: '/dashboard/accounting/payments',
+            href: '/dashboard/accounting/payments?view=due-soon',
             icon: FaMoneyCheckAlt,
             tone: 'warning',
             badge: <StatusBadge label={(commandCenter.checksDue?.count || 0).toLocaleString('fa-IR')} tone="warning" />,
           },
           {
             title: 'دریافتنی‌ها',
-            href: '/dashboard/accounting/receivables',
+            href: '/dashboard/accounting/receivables?view=open',
             icon: FaReceipt,
             tone: 'success',
             badge: <StatusBadge label={(commandCenter.openReceivables?.count || 0).toLocaleString('fa-IR')} tone="success" />,

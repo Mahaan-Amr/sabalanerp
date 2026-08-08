@@ -2,17 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   canonicalizeAuditQuery,
+  canonicalizeContractsQuery,
   canonicalizeCorrectionRequestsQuery,
+  canonicalizeInvoiceCandidatesQuery,
+  canonicalizePaymentsQuery,
   canonicalizePerformanceQuery,
+  canonicalizeReceivablesQuery,
   canonicalizeTaxQuery,
   patchAuditQuery,
-  patchCorrectionRequestsQuery,
-  patchPerformanceQuery,
-  patchTaxQuery,
-  canonicalizeContractsQuery,
-  canonicalizeInvoiceCandidatesQuery,
   patchContractsQuery,
+  patchCorrectionRequestsQuery,
   patchInvoiceCandidatesQuery,
+  patchPaymentsQuery,
+  patchPerformanceQuery,
+  patchReceivablesQuery,
+  patchTaxQuery,
 } from '../accountingQueryState';
 
 test('contract query canonicalization preserves unknown parameters and removes invalid recognized values', () => {
@@ -90,6 +94,46 @@ test('invoiced period is canonical only for the invoiced semantic view', () => {
   assert.equal(invoiced.params.toString(), 'view=invoiced&period=1405-05');
   assert.equal(orphaned.params.toString(), '');
   assert.equal(canonicalizeInvoiceCandidatesQuery(new URLSearchParams('view=invoiced&period=2026-08')).params.toString(), 'view=invoiced');
+});
+
+test('collection register queries canonicalize semantic views, due buckets, focus, and unknown parameters', () => {
+  const receivables = canonicalizeReceivablesQuery(new URLSearchParams(
+    'view=open&due=next7&period=1405-05&recordId= legacy-receivable &page=1&campaign=summer',
+  ));
+  const payments = canonicalizePaymentsQuery(new URLSearchParams(
+    'view=received&due=days8to30&period=1405-05&recordId=legacy-payment&page=2&campaign=summer',
+  ));
+
+  assert.equal(receivables.params.toString(), 'campaign=summer&view=open&due=next7&recordId=legacy-receivable');
+  assert.equal(payments.params.toString(), 'campaign=summer&view=received&due=days8to30&period=1405-05&recordId=legacy-payment&page=2');
+  assert.equal(receivables.state.period, '');
+  assert.equal(payments.state.period, '1405-05');
+});
+
+test('collection status takes precedence and filter changes reset pagination without changing focus population', () => {
+  const receivables = patchReceivablesQuery(
+    new URLSearchParams('view=open&due=overdue&recordId=receivable-1&page=4&source=dashboard'),
+    { status: 'SETTLED' },
+  );
+  const payments = patchPaymentsQuery(
+    new URLSearchParams('view=unsettled-checks&due=next7&recordId=payment-1&page=3&source=dashboard'),
+    { status: 'CLEARED' },
+  );
+
+  assert.equal(receivables.params.toString(), 'source=dashboard&due=overdue&recordId=receivable-1&status=SETTLED');
+  assert.equal(payments.params.toString(), 'source=dashboard&due=next7&recordId=payment-1&status=CLEARED');
+});
+
+test('invalid collection parameters and defaults are removed while due today remains canonical', () => {
+  const receivables = canonicalizeReceivablesQuery(new URLSearchParams(
+    'view=nope&due=today&status=ALL&period=2026-08&recordId=%20&page=-1&source=dashboard',
+  ));
+  const payments = canonicalizePaymentsQuery(new URLSearchParams(
+    'view=due-soon&due=next7&status=ALL&period=1405-05&pageSize=100&source=dashboard',
+  ));
+
+  assert.equal(receivables.params.toString(), 'source=dashboard');
+  assert.equal(payments.params.toString(), 'source=dashboard&view=due-soon&due=next7');
 });
 
 test('operational drilldown views initialize canonical filters and status takes precedence', () => {

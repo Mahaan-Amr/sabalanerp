@@ -27,11 +27,20 @@ import {
   authorizedAuditPopulationWhere,
   correctionRequestPopulationWhere,
   invoiceCandidatePopulationWhere,
+  matchesPaymentPopulation,
+  matchesReceivablePopulation,
   orderReviewableContracts,
+  paymentPopulationWhere,
+  receivablePopulationWhere,
   resolveAccountingActivityPopulation,
   resolveActiveAccountantIds,
+  resolveCollectionFocus,
   resolveCorrectionRequestPopulation,
   resolveInvoiceCandidatePopulation,
+  resolvePaymentPopulation,
+  resolveReceivablePopulation,
+  resolveReceivedCollectionMovements,
+  resolveOutstandingReceivableProjection,
   resolveTaxRecordPopulation,
   taxRecordPopulationWhere,
 } from './accountingPopulations';
@@ -871,16 +880,15 @@ export const getAccountingWorkspace = async () => {
     prisma.accountingAuditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 8 })
   ]);
 
-  const dueSoon = addDays(now, 7);
+  const openReceivablePopulation = resolveReceivablePopulation({ view: 'open' }, now);
+  const dueSoonCheckPopulation = resolvePaymentPopulation({ view: 'due-soon' }, now);
+  const overdueReceivablePopulation = resolveReceivablePopulation({ view: 'open', due: 'overdue' }, now);
+  const overdueCheckPopulation = resolvePaymentPopulation({ view: 'unsettled-checks', due: 'overdue' }, now);
   const openReceivables = await prisma.accountingReceivable.findMany({
-    where: { status: { in: [ReceivableStatus.OPEN, ReceivableStatus.PARTIALLY_PAID, ReceivableStatus.OVERDUE] } }
+    where: receivablePopulationWhere(openReceivablePopulation) as Prisma.AccountingReceivableWhereInput
   });
   const checksDueSoon = await prisma.accountingPaymentStatus.findMany({
-    where: {
-      method: AccountingPaymentMethod.CHECK,
-      checkDueDate: { lte: dueSoon },
-      checkStatus: { in: [CheckAccountingStatus.RECEIVED, CheckAccountingStatus.DEPOSITED, CheckAccountingStatus.PENDING_HANDOVER] }
-    }
+    where: paymentPopulationWhere(dueSoonCheckPopulation) as Prisma.AccountingPaymentStatusWhereInput
   });
   const actionableInvoicePopulation = resolveInvoiceCandidatePopulation({ view: 'actionable' });
   const invoiceCandidates = await prisma.accountingFinancialRecord.findMany({
@@ -919,12 +927,12 @@ export const getAccountingWorkspace = async () => {
       openReceivables: {
         count: openReceivables.length,
         amount: decimalToString(openReceivables.reduce((sum, item) => sum.plus(item.remainingAmount), new Prisma.Decimal(0))),
-        urgentCount: openReceivables.filter((item) => item.dueDate < now).length
+        urgentCount: openReceivables.filter((item) => matchesReceivablePopulation(item, overdueReceivablePopulation)).length
       },
       checksDue: {
         count: checksDueSoon.length,
         amount: decimalToString(checksDueSoon.reduce((sum, item) => sum.plus(item.amount), new Prisma.Decimal(0))),
-        urgentCount: checksDueSoon.filter((item) => item.checkDueDate && item.checkDueDate < now).length
+        urgentCount: checksDueSoon.filter((item) => matchesPaymentPopulation(item, overdueCheckPopulation)).length
       },
       invoiceCandidates: {
         count: invoiceCandidates.length,
@@ -1501,7 +1509,14 @@ const registerReceipt = async (command: AccountingActionRequest, actor: Actor, n
         handoverDate: command.check?.handoverDate ? parseDate(command.check.handoverDate, occurredAt) : undefined,
         occurredAt,
         notes: command.note,
-        metadata: { nationalCode: command.check?.nationalCode },
+        metadata: {
+          nationalCode: command.check?.nationalCode,
+          collectionMovements: method === AccountingPaymentMethod.CHECK ? [] : [{
+            kind: 'RECEIVED',
+            effectiveAt: occurredAt.toISOString(),
+            amount: amount.toFixed(2),
+          }],
+        },
         createdBy: actor.userId
       }
     });
@@ -1556,13 +1571,53 @@ const updateCheckStatus = async (command: AccountingActionRequest, actor: Actor)
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.accountingPaymentStatus.findUnique({ where: { id: command.paymentEventId } });
     if (!before) throw new Error('Payment event not found');
+    const beforeMetadata = metadataObject(before.metadata);
+    const collectionMovements = Array.isArray(beforeMetadata.collectionMovements)
+      ? [...beforeMetadata.collectionMovements]
+      : [];
+    let realizedBalance = collectionMovements.reduce(
+      (sum: Prisma.Decimal, movement: any) => sum.plus(toDecimal(movement?.amount)),
+      new Prisma.Decimal(0),
+    );
+    if (
+      collectionMovements.length === 0
+      && before.checkStatus === CheckAccountingStatus.CLEARED
+      && realizedBalance.lte(0)
+    ) {
+      const legacyClearedAt = before.occurredAt || before.createdAt;
+      collectionMovements.push({
+        kind: 'CHECK_CLEARED',
+        effectiveAt: legacyClearedAt.toISOString(),
+        amount: before.amount.toFixed(2),
+        confidence: 'legacy-fallback',
+      });
+      realizedBalance = before.amount;
+    }
+    if (checkStatus === CheckAccountingStatus.CLEARED && realizedBalance.lte(0)) {
+      collectionMovements.push({
+        kind: 'CHECK_CLEARED',
+        effectiveAt: occurredAt.toISOString(),
+        amount: before.amount.toFixed(2),
+      });
+    }
+    if (
+      (checkStatus === CheckAccountingStatus.BOUNCED || checkStatus === CheckAccountingStatus.RETURNED)
+      && realizedBalance.gt(0)
+    ) {
+      collectionMovements.push({
+        kind: checkStatus === CheckAccountingStatus.BOUNCED ? 'CHECK_BOUNCED' : 'CHECK_RETURNED',
+        effectiveAt: occurredAt.toISOString(),
+        amount: realizedBalance.negated().toFixed(2),
+      });
+    }
     const payment = await tx.accountingPaymentStatus.update({
       where: { id: command.paymentEventId },
       data: {
         checkStatus,
         occurredAt,
         status: checkStatus === CheckAccountingStatus.CLEARED ? PaymentAccountingStatus.RECONCILED : before.status,
-        notes: command.note || before.notes
+        notes: command.note || before.notes,
+        metadata: { ...beforeMetadata, collectionMovements },
       }
     });
 
@@ -2236,13 +2291,59 @@ export const listFinancialRecords = async (query: any = {}) => {
 };
 
 export const listReceivables = async (query: any = {}) => {
-  const where: Prisma.AccountingReceivableWhereInput = {};
-  if (query.status && query.status !== 'ALL') where.status = query.status;
+  const population = resolveReceivablePopulation(query);
+  const where = receivablePopulationWhere(population) as Prisma.AccountingReceivableWhereInput;
   if (query.contractId) where.contractId = query.contractId;
-  Object.assign(where, dateRangeFilter(query, 'dueDate'));
+  if (!query.due) Object.assign(where, dateRangeFilter(query, 'dueDate'));
   const { page, pageSize, skip } = getPagination(query);
+  const focused = query.recordId
+    ? await prisma.accountingReceivable.findUnique({ where: { id: String(query.recordId) }, include: { paymentStatuses: true } })
+    : null;
+  const focusItems = focused ? await attachListContext([focused]) : [];
+  const emptyFocus = query.recordId ? {
+    focus: {
+      ...resolveCollectionFocus(query.recordId, [], focusItems[0] || null),
+      inPage: false,
+    },
+  } : {};
   const hasSearchMatches = await applyContractSearch(where, query);
-  if (!hasSearchMatches) return { items: [], page, pageSize, total: 0 };
+  if (!hasSearchMatches) return { items: [], page, pageSize, total: 0, ...emptyFocus };
+  if (population.outstandingAt) {
+    const sourceRows = await prisma.accountingReceivable.findMany({
+      where,
+      include: { invoiceRecord: true },
+      orderBy: { dueDate: 'asc' },
+    });
+    const receivableIds = sourceRows.map((row) => row.id);
+    const contractIds = sourceRows.map((row) => row.contractId).filter(Boolean) as string[];
+    if (!receivableIds.length) return { items: [], page, pageSize, total: 0, ...emptyFocus };
+    const payments = await prisma.accountingPaymentStatus.findMany({
+      where: {
+        OR: [
+          ...(receivableIds.length ? [{ receivableId: { in: receivableIds } }] : []),
+          ...(contractIds.length ? [{ contractId: { in: contractIds }, receivableId: null }] : []),
+        ],
+      },
+    });
+    const projections = resolveOutstandingReceivableProjection(sourceRows, payments, population).map((row) => ({
+      ...row,
+      remainingAmount: String(row.representedRemainingAmount),
+    }));
+    const contextualRows = await attachListContext(projections);
+    const pageItems = contextualRows.slice(skip, skip + pageSize);
+    return {
+      items: pageItems,
+      page,
+      pageSize,
+      total: contextualRows.length,
+      ...(query.recordId ? {
+        focus: {
+          ...resolveCollectionFocus(query.recordId, contextualRows.map((row) => row.id), focusItems[0] || null),
+          inPage: pageItems.some((row) => row.id === String(query.recordId)),
+        },
+      } : {}),
+    };
+  }
   const [rows, total] = await Promise.all([
     prisma.accountingReceivable.findMany({
       where,
@@ -2253,19 +2354,74 @@ export const listReceivables = async (query: any = {}) => {
     }),
     prisma.accountingReceivable.count({ where })
   ]);
-  return { items: await attachListContext(rows), page, pageSize, total };
+  const items = await attachListContext(rows);
+  const focusMatchesPopulation = focused
+    ? await prisma.accountingReceivable.count({ where: { AND: [where, { id: focused.id }] } }) > 0
+    : false;
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    ...(query.recordId ? {
+      focus: {
+        ...resolveCollectionFocus(query.recordId, focusMatchesPopulation ? [String(query.recordId)] : [], focusItems[0] || null),
+        inPage: rows.some((row) => row.id === String(query.recordId)),
+      },
+    } : {}),
+  };
 };
 
 export const listPaymentStatuses = async (query: any = {}) => {
-  const where: Prisma.AccountingPaymentStatusWhereInput = {};
-  if (query.status && query.status !== 'ALL') where.status = query.status;
-  if (query.checkStatus && query.checkStatus !== 'ALL') where.checkStatus = query.checkStatus;
+  const population = resolvePaymentPopulation(query);
+  const where = paymentPopulationWhere(population) as Prisma.AccountingPaymentStatusWhereInput;
+  if (query.checkStatus && query.checkStatus !== 'ALL' && !query.view) where.checkStatus = query.checkStatus;
   if (query.method && query.method !== 'ALL') where.method = query.method;
   if (query.contractId) where.contractId = query.contractId;
-  Object.assign(where, dateRangeFilter(query, 'createdAt'));
+  if (!query.period) Object.assign(where, dateRangeFilter(query, 'createdAt'));
   const { page, pageSize, skip } = getPagination(query);
+  const focused = query.recordId
+    ? await prisma.accountingPaymentStatus.findUnique({ where: { id: String(query.recordId) } })
+    : null;
+  const focusItems = focused ? await attachListContext([focused]) : [];
+  const emptyFocus = query.recordId ? {
+    focus: {
+      ...resolveCollectionFocus(query.recordId, [], focusItems[0] || null),
+      inPage: false,
+    },
+  } : {};
   const hasSearchMatches = await applyContractSearch(where, query);
-  if (!hasSearchMatches) return { items: [], page, pageSize, total: 0 };
+  if (!hasSearchMatches) return { items: [], page, pageSize, total: 0, ...emptyFocus };
+  if (population.received) {
+    const sourceRows = await prisma.accountingPaymentStatus.findMany({
+      where,
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+    });
+    const contextualRows = await attachListContext(sourceRows);
+    const projections = contextualRows.flatMap((row) => (
+      resolveReceivedCollectionMovements(row, population).map((movement) => ({
+        ...row,
+        projectionId: movement.projectionId,
+        collectionEffectAmount: String(movement.amount),
+        collectionEffectKind: movement.kind,
+        collectionEffectiveAt: movement.effectiveAt,
+        collectionEffectConfidence: movement.confidence,
+      }))
+    ));
+    const pageItems = projections.slice(skip, skip + pageSize);
+    return {
+      items: pageItems,
+      page,
+      pageSize,
+      total: projections.length,
+      ...(query.recordId ? {
+        focus: {
+          ...resolveCollectionFocus(query.recordId, projections.map((row) => row.id), focusItems[0] || null),
+          inPage: pageItems.some((row) => row.id === String(query.recordId)),
+        },
+      } : {}),
+    };
+  }
   const [rows, total] = await Promise.all([
     prisma.accountingPaymentStatus.findMany({
       where,
@@ -2275,7 +2431,22 @@ export const listPaymentStatuses = async (query: any = {}) => {
     }),
     prisma.accountingPaymentStatus.count({ where })
   ]);
-  return { items: await attachListContext(rows), page, pageSize, total };
+  const items = await attachListContext(rows);
+  const focusMatchesPopulation = focused
+    ? await prisma.accountingPaymentStatus.count({ where: { AND: [where, { id: focused.id }] } }) > 0
+    : false;
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    ...(query.recordId ? {
+      focus: {
+        ...resolveCollectionFocus(query.recordId, focusMatchesPopulation ? [String(query.recordId)] : [], focusItems[0] || null),
+        inPage: rows.some((row) => row.id === String(query.recordId)),
+      },
+    } : {}),
+  };
 };
 
 export const listTaxRecords = async (query: any = {}) => {

@@ -12,6 +12,7 @@ import { assertArchiveReason, assertArchivedRecordMutable, assertPermanentDeleti
 import { buildPersonnelErasurePlan, executePersonnelErasureGraph } from '../services/hrPersonnelErasureGraph';
 import { commitStagedHiringFiles, planHiringFilesForDeletion, restoreStagedHiringFiles, stagePlannedHiringFiles, type StagedHiringFile } from '../services/hrDeletionFileTransaction';
 import { PERSONNEL_ERASURE_LEASE_MS } from '../services/hrPersonnelErasureRecovery';
+import { HR_REDESIGN_CATALOG, projectLegacyHrAccess, runHrRedesignBackfill } from '../services/hrRedesignDataContracts';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -986,6 +987,43 @@ router.get('/migration/preview', adminAccess, async (_req, res) => {
     const duplicates = await prisma.$queryRaw<Array<{ firstName: string; lastName: string; count: bigint }>>`SELECT lower(trim("firstName")) AS "firstName", lower(trim("lastName")) AS "lastName", count(*) AS count FROM "personnel" GROUP BY 1, 2 HAVING count(*) > 1`;
     res.json({ success: true, data: { counts: { activePersonnel, inactivePersonnel, linkedUsers, unlinkedUsers, departments: departments.length, schedules, migrated }, departments, exceptions: exceptions.map((row) => ({ type: row.exceptionType, count: row._count })), conflicts: { duplicateNames: duplicates.map((row) => ({ ...row, count: Number(row.count) })), inactivePersonnelNeedReview: inactivePersonnel } } });
   } catch (error) { handleError(res, error, 'HR migration preview'); }
+});
+
+router.get('/redesign/data-contracts', viewAccess, (_req, res) => {
+  res.json({ success: true, data: HR_REDESIGN_CATALOG });
+});
+
+router.get('/redesign/compatibility/access/:userId', adminAccess, async (req, res) => {
+  try {
+    const [workspacePermission, featurePermissions, authorities] = await Promise.all([
+      prisma.workspacePermission.findUnique({ where: { userId_workspace: { userId: req.params.userId, workspace: 'hr' } } }),
+      prisma.featurePermission.findMany({ where: { userId: req.params.userId, workspace: 'hr' } }),
+      prisma.hrHiringAuthority.findMany({ where: { userId: req.params.userId } }),
+    ]);
+    res.json({ success: true, data: projectLegacyHrAccess({ userId: req.params.userId, workspacePermission, featurePermissions, authorities }) });
+  } catch (error) { handleError(res, error, 'Project legacy HR access'); }
+});
+
+router.get('/migration/redesign-preview', adminAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const report = await runHrRedesignBackfill(prisma, {
+      apply: false,
+      shakilaUserId: nullableText(req.query.shakilaUserId) || process.env.HR_SHAKILA_USER_ID,
+      actorUserId: actorId(req),
+    });
+    res.json({ success: true, data: report });
+  } catch (error) { handleError(res, error, 'Preview HR redesign backfill'); }
+});
+
+router.post('/migration/redesign-backfill', adminAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const report = await runHrRedesignBackfill(prisma, {
+      apply: true,
+      shakilaUserId: nullableText(req.body.shakilaUserId) || process.env.HR_SHAKILA_USER_ID,
+      actorUserId: actorId(req),
+    });
+    res.json({ success: true, data: report });
+  } catch (error) { handleError(res, error, 'Apply HR redesign backfill'); }
 });
 
 const migrationRecordTitles: Record<string, string> = {

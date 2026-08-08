@@ -25,8 +25,41 @@ const INVOICE_STATUSES = new Set([
   'NEEDS_CORRECTION',
 ]);
 
+const TAX_STATUSES = new Set([
+  'NOT_READY',
+  'READY',
+  'SUBMITTED_MANUALLY',
+  'ACCEPTED',
+  'REJECTED',
+  'NEEDS_CORRECTION',
+]);
+
+const CORRECTION_STATUSES = new Set([
+  'OPEN',
+  'ACKNOWLEDGED',
+  'APPROVED_FOR_SALES_EDIT',
+  'SALES_EDITED',
+  'RESOLVED',
+  'CANCELLED',
+]);
+
+const AUDIT_ACTIONS = new Set([
+  'CREATE_INVOICE',
+  'APPROVE_FINANCIAL_INVOICE',
+  'CREATE_RECEIVABLE',
+  'REGISTER_RECEIPT',
+  'UPDATE_CHECK_STATUS',
+  'TRACK_TAX_SUBMISSION',
+  'REQUEST_CORRECTION',
+  'RESOLVE_CORRECTION',
+  'FLAG_CONTRACT',
+]);
+
 const CONTRACT_KEYS = ['view', 'search', 'status', 'sourceStatus', 'dateFrom', 'dateTo', 'page', 'pageSize', 'sort'] as const;
 const INVOICE_KEYS = ['view', 'search', 'status', 'period', 'page', 'pageSize'] as const;
+const STATUS_DRILLDOWN_KEYS = ['view', 'search', 'status', 'page', 'pageSize'] as const;
+const AUDIT_KEYS = ['search', 'action', 'page', 'pageSize'] as const;
+const PERFORMANCE_KEYS = ['view', 'search', 'dateFrom', 'dateTo', 'page', 'pageSize'] as const;
 
 export type ContractsQueryState = {
   view: 'reviewable' | null;
@@ -43,6 +76,27 @@ export type InvoiceCandidatesQueryState = {
   search: string;
   status: string;
   period: string;
+  page: number;
+};
+
+export type StatusDrilldownQueryState<TView extends string> = {
+  view: TView | null;
+  search: string;
+  status: string;
+  page: number;
+};
+
+export type AuditQueryState = {
+  search: string;
+  action: string;
+  page: number;
+};
+
+export type PerformanceQueryState = {
+  view: 'last30days' | null;
+  search: string;
+  dateFrom: string;
+  dateTo: string;
   page: number;
 };
 
@@ -128,9 +182,70 @@ export const canonicalizeInvoiceCandidatesQuery = (
   return { state: { view, search, status, period, page }, params };
 };
 
+const canonicalizeStatusDrilldownQuery = <TView extends string>(
+  source: URLSearchParams,
+  statuses: Set<string>,
+  semanticView: TView,
+): CanonicalQuery<StatusDrilldownQueryState<TView>> => {
+  const params = withoutRecognized(source, STATUS_DRILLDOWN_KEYS);
+  const rawStatus = source.get('status') || '';
+  const status = statuses.has(rawStatus) ? rawStatus : 'ALL';
+  const view = status === 'ALL' && source.get('view') === semanticView ? semanticView : null;
+  const search = normalizedSearch(source);
+  const page = normalizedPage(source);
+
+  if (view) params.set('view', view);
+  if (search) params.set('search', search);
+  if (status !== 'ALL') params.set('status', status);
+  if (page > 1) params.set('page', String(page));
+  return { state: { view, search, status, page }, params };
+};
+
+export const canonicalizeTaxQuery = (source: URLSearchParams) => (
+  canonicalizeStatusDrilldownQuery(source, TAX_STATUSES, 'needs-attention')
+);
+
+export const canonicalizeCorrectionRequestsQuery = (source: URLSearchParams) => (
+  canonicalizeStatusDrilldownQuery(source, CORRECTION_STATUSES, 'active')
+);
+
+export const canonicalizeAuditQuery = (source: URLSearchParams): CanonicalQuery<AuditQueryState> => {
+  const params = withoutRecognized(source, AUDIT_KEYS);
+  const search = normalizedSearch(source);
+  const rawAction = source.get('action') || '';
+  const action = AUDIT_ACTIONS.has(rawAction) ? rawAction : 'ALL';
+  const page = normalizedPage(source);
+  if (search) params.set('search', search);
+  if (action !== 'ALL') params.set('action', action);
+  if (page > 1) params.set('page', String(page));
+  return { state: { search, action, page }, params };
+};
+
+export const canonicalizePerformanceQuery = (
+  source: URLSearchParams,
+): CanonicalQuery<PerformanceQueryState> => {
+  const params = withoutRecognized(source, PERFORMANCE_KEYS);
+  const search = normalizedSearch(source);
+  const rawDateFrom = source.get('dateFrom') || '';
+  const rawDateTo = source.get('dateTo') || '';
+  const dateFrom = isGregorianDateKey(rawDateFrom) ? rawDateFrom : '';
+  const dateTo = isGregorianDateKey(rawDateTo) ? rawDateTo : '';
+  const view = !dateFrom && !dateTo && source.get('view') === 'last30days' ? 'last30days' : null;
+  const page = normalizedPage(source);
+  if (view) params.set('view', view);
+  if (search) params.set('search', search);
+  if (dateFrom) params.set('dateFrom', dateFrom);
+  if (dateTo) params.set('dateTo', dateTo);
+  if (page > 1) params.set('page', String(page));
+  return { state: { view, search, dateFrom, dateTo, page }, params };
+};
+
 const applyPatch = (source: URLSearchParams, patch: QueryPatch) => {
   const next = new URLSearchParams(source.toString());
   if (Object.prototype.hasOwnProperty.call(patch, 'status')) next.delete('view');
+  if (Object.prototype.hasOwnProperty.call(patch, 'dateFrom') || Object.prototype.hasOwnProperty.call(patch, 'dateTo')) {
+    next.delete('view');
+  }
   for (const [key, value] of Object.entries(patch)) {
     if (value == null || value === '') next.delete(key);
     else next.set(key, String(value));
@@ -144,3 +259,15 @@ export const patchContractsQuery = (source: URLSearchParams, patch: QueryPatch) 
 
 export const patchInvoiceCandidatesQuery = (source: URLSearchParams, patch: QueryPatch) =>
   canonicalizeInvoiceCandidatesQuery(applyPatch(source, patch));
+
+export const patchTaxQuery = (source: URLSearchParams, patch: QueryPatch) =>
+  canonicalizeTaxQuery(applyPatch(source, patch));
+
+export const patchCorrectionRequestsQuery = (source: URLSearchParams, patch: QueryPatch) =>
+  canonicalizeCorrectionRequestsQuery(applyPatch(source, patch));
+
+export const patchAuditQuery = (source: URLSearchParams, patch: QueryPatch) =>
+  canonicalizeAuditQuery(applyPatch(source, patch));
+
+export const patchPerformanceQuery = (source: URLSearchParams, patch: QueryPatch) =>
+  canonicalizePerformanceQuery(applyPatch(source, patch));

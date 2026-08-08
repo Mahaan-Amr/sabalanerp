@@ -19,15 +19,20 @@ const accessFor = (req: WorkspaceRequest): SalesReportAccess => ({
   role: req.user!.role,
   departmentId: req.user!.departmentId,
   canManage: req.user!.role === 'ADMIN' || req.workspacePermission === WORKSPACE_PERMISSIONS.ADMIN,
-  canCompany: req.user!.role === 'ADMIN'
+  canCompany: req.user!.role === 'ADMIN',
+  canOpenSalesSource: true,
 });
 
 const escape = (value: unknown) => String(value ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const money = (value: unknown) => formatMoney(value);
+const rial = (value: unknown) => formatMoney(value, 'ریال');
+const reportDate = (value: Date | string) => new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+  year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Tehran',
+}).format(new Date(value));
 
 const safeConfig = (body: any) => {
-  const allowedSections = ['overview', 'contracts', 'customers', 'products', 'finance', 'delivery', 'sellers'];
+  const allowedSections = ['overview', 'contracts', 'customers', 'products', 'finance', 'delivery', 'sellers', 'accountingRegistered'];
   const allowedContractColumns = ['contractNumber', 'customer', 'project', 'status', 'statusDescription', 'amount', 'responsibleSeller', 'realizedSeller'];
   const sections = Array.isArray(body?.sections)
     ? body.sections.map(String).filter((section: string) => allowedSections.includes(section))
@@ -110,6 +115,17 @@ const renderReport = (report: any, config: ReturnType<typeof safeConfig>) => {
       ['بارگیری نهایی', report.delivery.finalizedLoadings.toLocaleString('fa-IR'), 'لجستیک'],
       ['خروج ثبت‌شده', report.delivery.exitedLoadings.toLocaleString('fa-IR'), 'گارد']
     ]))}</section>`,
+    accountingRegistered: report.permissions.canViewSellerComparisons ? `<section><h2>ثبت حسابداری فروشندگان</h2>${report.accountingRegistered.available ? optionalTable(`${table(
+      ['فروشندهٔ قطعی', 'تعداد قرارداد', 'جمع مبلغ (ریال)'],
+      [
+        ...report.accountingRegistered.rows.map((row: any) => [row.name, row.contractCount.toLocaleString('fa-IR'), rial(row.totalAmount)]),
+        ...(report.accountingRegistered.unassigned ? [['فروشندهٔ قطعی تخصیص‌نیافته', report.accountingRegistered.unassigned.contractCount.toLocaleString('fa-IR'), rial(report.accountingRegistered.unassigned.totalAmount)]] : []),
+        ['جمع کل', report.accountingRegistered.contractCount.toLocaleString('fa-IR'), rial(report.accountingRegistered.totalAmount)],
+      ]
+    )}${table(
+      ['شماره قرارداد', 'مشتری', 'فروشندهٔ قطعی', 'تاریخ تأیید مالی', 'مبلغ (ریال)', 'وضعیت'],
+      report.accountingRegistered.details.map((row: any) => [row.contractNumber, row.customer, row.sellerName, reportDate(row.financiallyApprovedAt), rial(row.amount), row.hasConflict ? 'تعارض رکورد مالی' : 'معتبر'])
+    )}`) : '<p class="coverage">دادهٔ حسابداری در دسترس نیست؛ مبلغ صفر گزارش نشده است.</p>'}</section>` : '',
     sellers: report.permissions.canViewSellerComparisons ? `<section><h2>عملکرد فروشندگان</h2>${optionalTable(table(
       ['فروشنده', 'ایجاد قرارداد', 'پایپ‌لاین', 'فروش قطعی', 'تعدیل', 'خالص', 'از دست رفته'],
       report.sellers.map((row: any) => [row.name, row.createdCount.toLocaleString('fa-IR'), money(row.pipelineValue), money(row.realizedValue), money(row.adjustments), money(row.netRealized), row.lostCount.toLocaleString('fa-IR')])
@@ -177,7 +193,10 @@ router.post('/export.pdf', ...reportAccess, async (req: WorkspaceRequest, res: R
   try {
     const report = await buildSalesReport(accessFor(req), req.body?.filters || {});
     const config = safeConfig(req.body?.configuration || {});
-    if (!report.permissions.canViewSellerComparisons) config.sections = config.sections.filter((section) => section !== 'sellers');
+    if (!report.permissions.canViewSellerComparisons) config.sections = config.sections.filter((section) => !['sellers', 'accountingRegistered'].includes(section));
+    if (config.sections.includes('accountingRegistered') && !report.accountingRegistered.available) {
+      throw new Error('Accounting data is unavailable');
+    }
     const isA3 = config.pageSize === 'A3';
     const landscape = config.orientation === 'landscape';
     const dimensions = isA3 ? (landscape ? { widthMm: 420, heightMm: 297 } : { widthMm: 297, heightMm: 420 }) : {};
@@ -208,6 +227,22 @@ router.post('/export.xlsx', ...reportAccess, async (req: WorkspaceRequest, res: 
     if (config.sections.includes('finance')) add('پرداخت و وصول', [roundMoneyFields({ ...report.finance, coverage: `${report.finance.coverage.coveredContracts}/${report.finance.coverage.totalContracts}` }, ['plannedPaymentAmount', 'receivedAmount', 'receivableAmount'])]);
     if (config.sections.includes('delivery')) add('تحویل و بارگیری', [{ ...report.delivery, coverage: `${report.delivery.coverage.coveredContracts}/${report.delivery.coverage.totalContracts}` }]);
     if (config.sections.includes('sellers') && report.permissions.canViewSellerComparisons) add('فروشندگان', report.sellers.map((row: any) => roundMoneyFields(row, ['pipelineValue', 'realizedValue', 'adjustments', 'netRealized'])));
+    if (config.sections.includes('accountingRegistered') && report.permissions.canViewSellerComparisons) {
+      if (!report.accountingRegistered.available) throw new Error('Accounting data is unavailable');
+      add('ثبت حسابداری فروشندگان', [
+        ...report.accountingRegistered.rows.map((row: any) => roundMoneyFields({ seller: row.name, contractCount: row.contractCount, totalAmountRial: row.totalAmount }, ['totalAmountRial'])),
+        ...(report.accountingRegistered.unassigned ? [roundMoneyFields({ seller: 'فروشندهٔ قطعی تخصیص‌نیافته', contractCount: report.accountingRegistered.unassigned.contractCount, totalAmountRial: report.accountingRegistered.unassigned.totalAmount }, ['totalAmountRial'])] : []),
+        roundMoneyFields({ seller: 'جمع کل', contractCount: report.accountingRegistered.contractCount, totalAmountRial: report.accountingRegistered.totalAmount }, ['totalAmountRial']),
+      ]);
+      add('جزئیات ثبت حسابداری', report.accountingRegistered.details.map((row: any) => roundMoneyFields({
+        contractNumber: row.contractNumber,
+        customer: row.customer,
+        realizedSeller: row.sellerName,
+        financiallyApprovedAt: row.financiallyApprovedAt,
+        amountRial: row.amount,
+        status: row.hasConflict ? 'تعارض رکورد مالی' : 'معتبر',
+      }, ['amountRial'])));
+    }
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="sales-report.xlsx"');

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { AccountingRecordStatus, FinancialRecordKind } from '@prisma/client';
 import { snapshotRealizedSale, recordRealizedAdjustment, recordContractCancellation } from '../salesAttributionService';
-import { buildRealizedSalesHeadline, buildSalesPipelineHeadline, buildSalesReportContractWhere, buildSalesReportScope, resolveAllTimeSalesReportPeriod, resolveSalesReportPeriod } from '../salesReportingService';
+import { buildRealizedSalesHeadline, buildSalesPipelineHeadline, buildSalesReportContractWhere, buildSalesReportScope, resolveAllTimeSalesReportPeriod, resolveSalesReportPeriod, selectAccountingRegisteredRecord } from '../salesReportingService';
 
 const contract: any = {
   id: 'contract-1',
@@ -58,6 +59,39 @@ const run = async () => {
   const defaultPeriod = resolveSalesReportPeriod({ period: 'month' });
   const persianDay = Number(new Intl.DateTimeFormat('en-US-u-ca-persian', { day: 'numeric' }).format(defaultPeriod.from));
   assert.equal(persianDay, 1, 'default report begins on the first day of the current Jalali month');
+
+  const previousMonth = resolveSalesReportPeriod({ period: 'previousMonth' }, new Date('2026-08-08T12:00:00+03:30'));
+  const previousPersianParts = (date: Date) => Object.fromEntries(
+    new Intl.DateTimeFormat('en-US-u-ca-persian', { year: 'numeric', month: 'numeric', day: 'numeric' })
+      .formatToParts(date)
+      .filter((part) => ['year', 'month', 'day'].includes(part.type))
+      .map((part) => [part.type, Number(part.value)]),
+  );
+  assert.deepEqual(previousPersianParts(previousMonth.from), { month: 4, day: 1, year: 1405 });
+  assert.deepEqual(previousPersianParts(previousMonth.to), { month: 4, day: 31, year: 1405 });
+
+  const approvedRecord = (id: string, approvedAt: string, metadata?: Record<string, unknown>): any => ({
+    id,
+    kind: FinancialRecordKind.INVOICE_CANDIDATE,
+    status: AccountingRecordStatus.ISSUED,
+    amount: id === 'replacement' ? 120 : 100,
+    financiallyApprovedAt: approvedAt,
+    metadata: metadata || null,
+  });
+  const replacementSelection = selectAccountingRegisteredRecord([
+    approvedRecord('source', '2026-07-10T08:00:00.000Z'),
+    approvedRecord('replacement', '2026-08-02T08:00:00.000Z', { replacesRecordId: 'source' }),
+    { ...approvedRecord('voided', '2026-08-03T08:00:00.000Z'), status: AccountingRecordStatus.VOIDED },
+  ]);
+  assert.equal(replacementSelection.record?.id, 'replacement', 'the valid replacement is the one contract-level accounting amount');
+  assert.equal(replacementSelection.hasConflict, false, 'a linked replacement chain is not an independent-record conflict');
+
+  const conflictSelection = selectAccountingRegisteredRecord([
+    approvedRecord('independent-old', '2026-08-01T08:00:00.000Z'),
+    approvedRecord('independent-new', '2026-08-04T08:00:00.000Z'),
+  ]);
+  assert.equal(conflictSelection.record?.id, 'independent-new');
+  assert.equal(conflictSelection.hasConflict, true, 'multiple independent valid records remain visible as a conflict');
 
   const personalAccess = { userId: 'seller-1', role: 'USER', departmentId: 'sales-dept', canManage: false, canCompany: false };
   assert.deepEqual(buildSalesReportContractWhere(personalAccess, {}), {

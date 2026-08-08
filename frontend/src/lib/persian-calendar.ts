@@ -239,6 +239,19 @@ export class PersianCalendar {
     ];
   }
 
+  /**
+   * Resolve a complete Persian calendar month, or the current month through now.
+   * Consumers keep using the same moment-jalaali calendar semantics as the date picker.
+   */
+  static getMonthRange(monthOffset: number = 0, throughNow: boolean = false): { start: Date; end: Date } {
+    const now = moment();
+    const target = now.clone().add(monthOffset, 'jMonth');
+    return {
+      start: target.clone().startOf('jMonth').startOf('day').toDate(),
+      end: throughNow && monthOffset === 0 ? now.toDate() : target.clone().endOf('jMonth').endOf('day').toDate(),
+    };
+  }
+
   static toGregorianDateOnly(persianDate: string, format: string = 'jYYYY/jMM/jDD'): string {
     return moment(persianDate, format).format('YYYY-MM-DD');
   }

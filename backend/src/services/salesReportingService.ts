@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { AccountingRecordStatus, FinancialRecordKind, Prisma, PrismaClient } from '@prisma/client';
 import { rankBiSellers } from './biRecommendationService';
 
 const prisma = new PrismaClient();
@@ -22,6 +22,41 @@ export type SalesReportQuery = {
   period?: unknown;
   departmentId?: unknown;
   sellerId?: unknown;
+};
+
+type AccountingRegisteredRecord = {
+  id: string;
+  kind: FinancialRecordKind;
+  status: AccountingRecordStatus;
+  amount: unknown;
+  financiallyApprovedAt?: Date | string | null;
+  metadata?: Prisma.JsonValue | null;
+};
+
+const recordMetadata = (value: Prisma.JsonValue | null | undefined): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+);
+
+export const selectAccountingRegisteredRecord = (records: AccountingRegisteredRecord[]) => {
+  const valid = records.filter((record) => (
+    record.kind === FinancialRecordKind.INVOICE_CANDIDATE
+    && (record.status === AccountingRecordStatus.ISSUED || record.status === AccountingRecordStatus.POSTED)
+    && Boolean(record.financiallyApprovedAt)
+  ));
+  if (!valid.length) return { record: null, hasConflict: false, validLeafCount: 0 };
+
+  const validIds = new Set(valid.map((record) => record.id));
+  const supersededIds = new Set(valid.flatMap((record) => {
+    const replacesRecordId = recordMetadata(record.metadata).replacesRecordId;
+    return typeof replacesRecordId === 'string' && validIds.has(replacesRecordId) ? [replacesRecordId] : [];
+  }));
+  const leaves = valid.filter((record) => !supersededIds.has(record.id));
+  const candidates = leaves.length ? leaves : valid;
+  candidates.sort((left, right) => {
+    const byApproval = new Date(right.financiallyApprovedAt!).getTime() - new Date(left.financiallyApprovedAt!).getTime();
+    return byApproval || right.id.localeCompare(left.id);
+  });
+  return { record: candidates[0], hasConflict: candidates.length > 1, validLeafCount: candidates.length };
 };
 
 const n = (value: unknown) => {
@@ -91,8 +126,7 @@ const startOfPersianMonthsAgo = (date: Date, monthsAgo: number) => {
   }
 };
 
-export const resolveSalesReportPeriod = (query: SalesReportQuery) => {
-  const now = new Date();
+export const resolveSalesReportPeriod = (query: SalesReportQuery, now = new Date()) => {
   const requestedFrom = parseDate(query.from);
   const requestedTo = parseDate(query.to);
   let from = requestedFrom || startOfPersianMonth(now);
@@ -106,6 +140,12 @@ export const resolveSalesReportPeriod = (query: SalesReportQuery) => {
       case 'quarter': from = startOfPersianQuarter(now); break;
       case 'year': from = startOfPersianYear(now); break;
       case 'last12': from = startOfPersianMonthsAgo(now, 11); break;
+      case 'previousMonth': {
+        const currentMonthStart = startOfPersianMonth(now);
+        from = startOfPersianMonthsAgo(now, 1);
+        to = endDay(new Date(currentMonthStart.getTime() - 1));
+        break;
+      }
       default: from = startOfPersianMonth(now);
     }
   }
@@ -172,6 +212,31 @@ export const buildSalesReportScope = (access: SalesReportAccess, query: SalesRep
     canManage: access.canManage,
     canCompany: access.canCompany
   };
+};
+
+const validateSalesReportScope = async (access: SalesReportAccess, query: SalesReportQuery) => {
+  const scope = buildSalesReportScope(access, query);
+  const requestedDepartment = typeof query.departmentId === 'string' && query.departmentId ? query.departmentId : null;
+  const requestedSeller = typeof query.sellerId === 'string' && query.sellerId ? query.sellerId : null;
+
+  if (requestedDepartment && !access.canCompany && requestedDepartment !== access.departmentId) {
+    throw new Error('Department scope is not permitted');
+  }
+  if (requestedDepartment && access.canCompany) {
+    const department = await prisma.department.findUnique({ where: { id: requestedDepartment }, select: { id: true } });
+    if (!department) throw new Error('Department scope is not permitted');
+  }
+  if (requestedSeller) {
+    const seller = await prisma.user.findUnique({
+      where: { id: requestedSeller },
+      select: { id: true, isActive: true, departmentId: true },
+    });
+    const requiredDepartment = scope.departmentId && scope.departmentId !== '__no_department__' ? scope.departmentId : null;
+    if (!seller?.isActive || (requiredDepartment && seller.departmentId !== requiredDepartment)) {
+      throw new Error('Seller scope is not permitted');
+    }
+  }
+  return scope;
 };
 
 export const buildSalesReportContractWhere = (
@@ -291,7 +356,7 @@ const bucketKey = (date: Date, monthly: boolean) => monthly
 export const buildSalesReport = async (access: SalesReportAccess, query: SalesReportQuery) => {
   const allTime = String(query.period || '') === 'all';
   let period = resolveSalesReportPeriod(query);
-  const scope = buildSalesReportScope(access, query);
+  const scope = await validateSalesReportScope(access, query);
   const where = buildSalesReportContractWhere(access, query);
 
   const contracts = await prisma.salesContract.findMany({
@@ -327,7 +392,18 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     contractIds.length ? Promise.all([
       prisma.accountingPaymentStatus.findMany({ where: { contractId: { in: contractIds } } }),
       prisma.accountingReceivable.findMany({ where: { contractId: { in: contractIds } } }),
-      prisma.accountingFinancialRecord.findMany({ where: { contractId: { in: contractIds } }, select: { contractId: true, financiallyApprovedAt: true, status: true } }),
+      prisma.accountingFinancialRecord.findMany({
+        where: { contractId: { in: contractIds } },
+        select: {
+          id: true,
+          contractId: true,
+          kind: true,
+          status: true,
+          amount: true,
+          financiallyApprovedAt: true,
+          metadata: true,
+        },
+      }),
     ]) : Promise.resolve([[], [], []] as [never[], never[], never[]]),
     contractIds.length ? prisma.logisticsLoadingLine.findMany({
       where: { sourceContractId: { in: contractIds } },
@@ -404,6 +480,77 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
     ...receivables.map((row) => row.contractId),
     ...financialRecords.map((row) => row.contractId)
   ].filter(Boolean)).size;
+
+  const accountingRegistered = (() => {
+    if (accountingEvidence.status !== 'fulfilled') {
+      return {
+        available: false,
+        rows: [],
+        unassigned: null,
+        details: [],
+        contractCount: null,
+        totalAmount: null,
+        conflictCount: null,
+      };
+    }
+
+    const recordsByContract = new Map<string, AccountingRegisteredRecord[]>();
+    financialRecords.forEach((record: any) => {
+      if (!record.contractId) return;
+      const rows = recordsByContract.get(record.contractId) || [];
+      rows.push(record);
+      recordsByContract.set(record.contractId, rows);
+    });
+
+    const accountingDetails = contracts.flatMap((contract) => {
+      if (scope.sellerId && contract.realizedSellerId !== scope.sellerId) return [];
+      const selected = selectAccountingRegisteredRecord(recordsByContract.get(contract.id) || []);
+      if (!selected.record || !inRange(selected.record.financiallyApprovedAt, period.from, period.to)) return [];
+      return [{
+        id: contract.id,
+        contractNumber: contract.contractNumber,
+        customer: customerName(contract.customer),
+        sellerId: contract.realizedSellerId,
+        sellerName: contract.realizedSeller ? userName(contract.realizedSeller) : 'فروشندهٔ قطعی تخصیص‌نیافته',
+        financialRecordId: selected.record.id,
+        financiallyApprovedAt: new Date(selected.record.financiallyApprovedAt!).toISOString(),
+        amount: n(selected.record.amount),
+        hasConflict: selected.hasConflict,
+        validLeafCount: selected.validLeafCount,
+        canOpenSource: Boolean(access.canOpenSalesSource),
+      }];
+    }).sort((left, right) => (
+      new Date(right.financiallyApprovedAt).getTime() - new Date(left.financiallyApprovedAt).getTime()
+      || right.contractNumber.localeCompare(left.contractNumber)
+    ));
+
+    const sellerRows = new Map<string, { id: string; name: string; contractCount: number; totalAmount: number }>();
+    accountingDetails.forEach((detail) => {
+      const id = detail.sellerId || 'legacy-unassigned';
+      const row = sellerRows.get(id) || { id, name: detail.sellerName, contractCount: 0, totalAmount: 0 };
+      row.contractCount += 1;
+      row.totalAmount += detail.amount;
+      sellerRows.set(id, row);
+    });
+    const unassigned = sellerRows.get('legacy-unassigned') || null;
+    const rows = Array.from(sellerRows.values())
+      .filter((row) => row.id !== 'legacy-unassigned')
+      .sort((left, right) => (
+        right.totalAmount - left.totalAmount
+        || right.contractCount - left.contractCount
+        || left.name.localeCompare(right.name, 'fa')
+      ));
+
+    return {
+      available: true,
+      rows,
+      unassigned,
+      details: accountingDetails,
+      contractCount: accountingDetails.length,
+      totalAmount: accountingDetails.reduce((sum, detail) => sum + detail.amount, 0),
+      conflictCount: accountingDetails.filter((detail) => detail.hasConflict).length,
+    };
+  })();
 
   const loadingById = new Map<string, any>();
   loadingLines.forEach((line: any) => loadingById.set(line.loading.id, line.loading));
@@ -612,12 +759,20 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       count: currentEvents.filter((event) => event.eventType === 'REALIZED' && !event.sellerId).length,
       value: currentEvents.filter((event) => event.eventType === 'REALIZED' && !event.sellerId).reduce((sum, event) => sum + n(event.amount), 0)
     },
+    accountingRegistered,
     created: { count: createdContracts.length, value: createdContracts.reduce((sum, contract) => sum + n(contract.totalAmount), 0) }
   };
 };
 
 export const getSalesReportSellers = async (access: SalesReportAccess, departmentId?: string | null) => {
   if (!access.canManage) return [];
+  if (departmentId && !access.canCompany && departmentId !== access.departmentId) {
+    throw new Error('Department scope is not permitted');
+  }
+  if (departmentId && access.canCompany) {
+    const department = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true } });
+    if (!department) throw new Error('Department scope is not permitted');
+  }
   const targetDepartment = access.canCompany ? departmentId || undefined : access.departmentId || '__no_department__';
   return prisma.user.findMany({
     where: { isActive: true, ...(targetDepartment ? { departmentId: targetDepartment } : {}) },

@@ -7,8 +7,10 @@ import {
   FaUsers,
 } from 'react-icons/fa';
 import { ErpNeumorphicActionGrid, ErpWorkspacePage } from '@/components/erp';
+import { useAuth } from '@/contexts/AuthContext';
+import { useWorkspace, WORKSPACE_PERMISSIONS, WORKSPACES } from '@/contexts/WorkspaceContext';
 
-const salesActions: Array<{
+const baseSalesActions: Array<{
   title: string;
   href: string;
   icon: typeof FaFileContract;
@@ -41,6 +43,18 @@ const salesActions: Array<{
 ];
 
 export default function SalesWorkspacePage() {
+  const { user } = useAuth();
+  const { hasPermission } = useWorkspace();
+  const canViewSellerComparisons = user?.role === 'ADMIN' || hasPermission(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.ADMIN);
+  const salesActions = [
+    ...baseSalesActions,
+    ...(canViewSellerComparisons ? [{
+      title: 'ثبت حسابداری فروشندگان',
+      href: '/dashboard/sales/reports?view=accounting-registered&period=month',
+      icon: FaChartLine,
+    }] : []),
+  ];
+
   return (
     <ErpWorkspacePage title="داشبورد فروش" className="sds-sales-dashboard-scope pb-24 lg:pb-2">
       <ErpNeumorphicActionGrid

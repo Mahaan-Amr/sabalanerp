@@ -1012,6 +1012,10 @@ _Avoid_: calling the current responsible seller the contract creator, changing c
 The seller who receives realized-sales performance credit, snapshotted from the contract's responsible seller when the contract first becomes `SIGNED` or `PRINTED`. Pipeline follows current responsibility, but later reassignment does not rewrite historical realized performance.
 _Avoid_: recalculating historical seller credit from current ownership, or crediting the creator when another seller owned the commercial work
 
+**مبلغ قرارداد ثبت‌شده حسابداری**:
+The full amount of one Sales Contract's latest currently valid financially approved invoice, attributed to its snapshotted realized seller and dated by that invoice's financial approval. A valid replacement moves the contract and its full amount to the replacement approval period, while an unassigned realized seller remains visible without invented attribution.
+_Avoid_: summing receipts or balances, counting one contract more than once, retaining a voided invoice beside its replacement, dating the amount by contract creation or signature, or attributing it from current responsibility
+
 **انتساب قدیمی فروشنده قرارداد**:
 The migration state for Sales Contracts created before explicit contract responsibility and realized-credit snapshots existed. A CRM-linked contract uses the seller at conversion only when CRM history can establish it reliably; otherwise its creator becomes the current operational owner and is labeled as a migrated initial value. Unverifiable realized credit remains in فروش قطعی تخصیص‌نیافته قدیمی until a Sales admin assigns it with an audit reason, while company and department totals still include its value.
 _Avoid_: treating a mutable current CRM owner as historical proof, silently crediting the creator for legacy realized sales, excluding unassigned legacy sales from aggregate totals, or resolving historical attribution without an audit reason

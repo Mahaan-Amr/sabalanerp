@@ -851,6 +851,10 @@ export const accountingAPI = {
   executeAction: (data: any) => api.post('/accounting/actions', data),
 };
 
+export const hrHiringMetricsAPI = {
+  getDashboardMetrics: () => api.get('/hr-hiring/dashboard-metrics'),
+};
+
 export const biAPI = {
   getSalesOverview: (params?: any) => api.get('/bi/sales/overview', { params }),
   getSalesAnalysis: (view: string, params?: any) => api.get(`/bi/sales/analysis/${view}`, { params }),

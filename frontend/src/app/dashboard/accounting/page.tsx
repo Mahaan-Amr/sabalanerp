@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FaBalanceScale,
   FaClipboardCheck,
@@ -18,7 +18,8 @@ import {
   ErpPage,
   ErpSection,
 } from '@/components/erp';
-import { accountingAPI } from '@/lib/api';
+import { accountingAPI, hrHiringMetricsAPI } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   CompactQueueItem,
   QueueList,
@@ -29,11 +30,21 @@ import {
   taxStatusLabels,
 } from '@/features/accounting/accountingUi';
 import { AccountingDashboardPrototype } from '@/features/accounting/prototype/AccountingDashboardPrototype';
+import {
+  clearHrHiringMetrics,
+  pendingHrHiringMetrics,
+  resolveHrHiringMetrics,
+  type HrHiringMetricsState,
+} from '@/features/accounting/hrHiringMetricsState';
 
 export default function AccountingDashboardPage() {
+  const { user, loading: authLoading } = useAuth();
+  const currentUserId = user?.id;
   const [workspace, setWorkspace] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showPrototype, setShowPrototype] = useState(false);
+  const [hrMetrics, setHrMetrics] = useState<HrHiringMetricsState>(pendingHrHiringMetrics);
+  const hrRequestGeneration = useRef(0);
 
   const loadWorkspace = async () => {
     try {
@@ -49,9 +60,49 @@ export default function AccountingDashboardPage() {
     }
   };
 
+  const loadHrMetrics = useCallback(async () => {
+    const requestGeneration = ++hrRequestGeneration.current;
+    setHrMetrics(pendingHrHiringMetrics());
+    try {
+      const response = await hrHiringMetricsAPI.getDashboardMetrics();
+      if (requestGeneration !== hrRequestGeneration.current) return;
+      if (!response.data.success) {
+        setHrMetrics(clearHrHiringMetrics('failed'));
+        return;
+      }
+      setHrMetrics(resolveHrHiringMetrics(response.data.data));
+    } catch {
+      if (requestGeneration === hrRequestGeneration.current) {
+        setHrMetrics(clearHrHiringMetrics('failed'));
+      }
+    }
+  }, []);
+
   useEffect(() => {
     loadWorkspace();
   }, []);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!currentUserId) {
+      hrRequestGeneration.current += 1;
+      setHrMetrics(clearHrHiringMetrics('unavailable'));
+      return;
+    }
+    void loadHrMetrics();
+  }, [authLoading, currentUserId, loadHrMetrics]);
+
+  useEffect(() => {
+    const revalidateOnFocus = () => {
+      if (document.visibilityState === 'visible' && currentUserId) void loadHrMetrics();
+    };
+    window.addEventListener('focus', revalidateOnFocus);
+    document.addEventListener('visibilitychange', revalidateOnFocus);
+    return () => {
+      window.removeEventListener('focus', revalidateOnFocus);
+      document.removeEventListener('visibilitychange', revalidateOnFocus);
+    };
+  }, [currentUserId, loadHrMetrics]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -71,13 +122,18 @@ export default function AccountingDashboardPage() {
 
   const queues = workspace?.queues || {};
   const commandCenter = workspace?.commandCenter || {};
+  const refreshDashboard = () => {
+    void loadWorkspace();
+    if (currentUserId) void loadHrMetrics();
+  };
+  const hrMetricsAvailable = hrMetrics.status === 'available';
 
   return (
     <ErpPage
       eyebrow="حسابداری"
       title="داشبورد حسابداری"
       actions={[
-        { label: 'به‌روزرسانی', icon: FaSync, onClick: loadWorkspace, tone: 'neutral' },
+        { label: 'به‌روزرسانی', icon: FaSync, onClick: refreshDashboard, tone: 'neutral' },
       ]}
     >
       <ErpActionGrid
@@ -113,15 +169,21 @@ export default function AccountingDashboardPage() {
           },
           {
             title: 'استخدام: وثیقه و قرارداد',
-            href: '/dashboard/hr/hiring',
+            href: '/dashboard/hr/hiring?view=collateral-contracts',
             icon: FaUserPlus,
             tone: 'info',
+            badge: hrMetricsAvailable
+              ? <StatusBadge label={hrMetrics.actionableCollateralOrContractCases.toLocaleString('fa-IR')} tone="info" />
+              : undefined,
           },
           {
             title: 'قالب وثیقه استخدام',
-            href: '/dashboard/hr/hiring/collateral-templates',
+            href: '/dashboard/hr/hiring/collateral-templates?view=active',
             icon: FaClipboardCheck,
             tone: 'neutral',
+            badge: hrMetricsAvailable
+              ? <StatusBadge label={hrMetrics.activeCollateralTemplates.toLocaleString('fa-IR')} tone="neutral" />
+              : undefined,
           },
           {
             title: 'مالیات و سامانه مودیان',
@@ -151,6 +213,16 @@ export default function AccountingDashboardPage() {
           },
         ]}
       />
+
+      {hrMetrics.status === 'failed' && (
+        <p
+          role="status"
+          aria-live="polite"
+          className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm text-[var(--sds-warning)]"
+        >
+          شاخص‌های استخدام در دسترس نیستند. برای تلاش دوباره از به‌روزرسانی استفاده کنید.
+        </p>
+      )}
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <QueueList

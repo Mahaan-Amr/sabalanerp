@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./hrHiringDashboardMetrics.test";
 import {
   buildHiringQueueItem,
   projectHiringTaskCapabilities,

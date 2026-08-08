@@ -63,6 +63,10 @@ import { latestDecisionsByKind } from '../services/hrApplicationDecisionVersions
 import { normalizeHiringDocumentTitle } from '../services/hrHiringDocumentEvidence';
 import { assertHiringAuthorityMutationAllowed } from '../services/hrHiringAuthorityPolicy';
 import {
+  buildHrHiringDashboardMetrics,
+  hiringLifecycleHasActionableCollateralOrContract
+} from '../services/hrHiringDashboardMetrics';
+import {
   automaticHiringWorkItemBaseKey,
   automaticHiringWorkItemSourceKey,
   eligibleUsersForHiringAction,
@@ -831,8 +835,58 @@ router.post('/public/application/compensation/decline', applicantSession, asyncH
   res.json({ success: true });
 }));
 
+// The aggregate endpoint is authenticated but intentionally sits outside the broader
+// HR workspace boundary so accounting-only users receive a non-leaking unavailable state.
+router.use(protect);
+
+router.get('/dashboard-metrics', asyncHandler(async (req: AuthRequest, res: Response) => {
+  const generatedAt = new Date();
+  const authorityRows = await prisma.hrHiringAuthority.findMany({
+    where: {
+      userId: actorId(req),
+      isActive: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: generatedAt } }]
+    },
+    select: { authority: true }
+  });
+  const authorities = authorityRows.map((row) => row.authority);
+  const hasFinanceAuthority = authorities.some((authority) =>
+    authority === 'FINANCE_RECORDER' || authority === 'FINANCE_MANAGER'
+  );
+
+  res.set('Cache-Control', 'private, no-store');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+
+  if (!hasFinanceAuthority) {
+    return res.json({ success: true, data: buildHrHiringDashboardMetrics({
+      viewerUserId: actorId(req),
+      viewerAuthorities: authorities,
+      applications: [],
+      activeCollateralTemplates: 0,
+      generatedAt
+    }) });
+  }
+
+  const [applications, activeCollateralTemplates] = await Promise.all([
+    prisma.hrJobApplication.findMany({
+      where: { archivedAt: null },
+      include: applicationInclude
+    }),
+    prisma.hrCollateralChecklistTemplate.count({ where: { isActive: true } })
+  ]);
+  const data = buildHrHiringDashboardMetrics({
+    viewerUserId: actorId(req),
+    viewerAuthorities: authorities,
+    applications,
+    activeCollateralTemplates,
+    generatedAt
+  });
+  res.json({ success: true, data });
+}));
+
 // Authenticated hiring workspace.
-router.use(protect, requireHiringRead);
+router.use(requireHiringRead);
 
 // A disposition pauses the case without destroying evidence. Ordinary mutations must
 // resume through the explicit reactivation command before work can continue.
@@ -1070,8 +1124,12 @@ router.post('/applications/:id/pre-identity/apply-template', requireAuthority('C
   res.status(201).json({ success: true, data: { itemCount: items.length } });
 }));
 
-router.get('/collateral-templates', requireAuthority('FINANCE_RECORDER', 'FINANCE_MANAGER'), asyncHandler(async (_req: AuthRequest, res: Response) => {
-  const rows = await prisma.hrCollateralChecklistTemplate.findMany({ include: { items: { orderBy: { sortOrder: 'asc' } } }, orderBy: [{ name: 'asc' }, { version: 'desc' }] });
+router.get('/collateral-templates', requireAuthority('FINANCE_RECORDER', 'FINANCE_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
+  const rows = await prisma.hrCollateralChecklistTemplate.findMany({
+    where: String(req.query.view || '') === 'active' ? { isActive: true } : undefined,
+    include: { items: { orderBy: { sortOrder: 'asc' } } },
+    orderBy: [{ name: 'asc' }, { version: 'desc' }]
+  });
   res.json({ success: true, data: rows });
 }));
 
@@ -1095,6 +1153,7 @@ router.patch('/collateral-templates/:id/active', requireAuthority('FINANCE_MANAG
 router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response) => {
   const search = String(req.query.search || '').trim();
   const archived = String(req.query.archived || '') === 'true';
+  const requestedView = String(req.query.view || '').trim();
   const authorityRows = await prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } });
   const authorities = authorityRows.map((item) => item.authority);
   // The hiring workspace intentionally shows the complete contact number for operational follow-up.
@@ -1106,7 +1165,7 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
       stage: req.query.stage ? req.query.stage as any : undefined,
       ...(req.query.outcome
         ? { outcome: req.query.outcome as any }
-        : String(req.query.includeHired || '') === 'true'
+        : String(req.query.includeHired || '') === 'true' || requestedView === 'collateral-contracts'
           ? {}
           : { OR: [{ outcome: null }, { outcome: { not: 'HIRED' as any } }] }),
       disposition: req.query.disposition ? req.query.disposition as any : undefined,
@@ -1143,7 +1202,12 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
   const requestedPhase = String(req.query.phase || '').trim();
   const requestedStatus = String(req.query.lifecycleStatus || '').trim();
   const myActions = String(req.query.myActions || '') === 'true';
-  const projected = rows.map((source) => {
+  const representedRows = requestedView === 'collateral-contracts'
+    ? rows.filter((source) => hiringLifecycleHasActionableCollateralOrContract(
+      projectHiringLifecycle(source as any, authorities, actorId(req))
+    ))
+    : rows;
+  const projected = representedRows.map((source) => {
     const row = {
       ...source,
       archivedByDisplayName: source.archivedBy ? archivedActorNames.get(source.archivedBy) || source.archivedBy : null,

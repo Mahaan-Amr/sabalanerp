@@ -9,5 +9,6 @@ export * from './accountingRoutes';
 export * from './adjustmentArtifactPreparer';
 export * from './prismaSourceReader';
 export * from './artifactPreparation';
+export * from './artifactStorageLock';
 export * from './integrityIncidentReporter';
 export * from './runtime';

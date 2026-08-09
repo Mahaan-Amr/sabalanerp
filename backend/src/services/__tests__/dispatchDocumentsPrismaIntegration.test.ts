@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient, type DispatchDocumentArtifact } from '@prisma/client';
 import { PrismaDispatchDocumentRepository } from '../dispatchDocuments/prismaRepository';
 import { DispatchDocumentConflictError } from '../dispatchDocuments/service';
+import { dispatchArtifactStorageLockKey, verifyDispatchArtifactStorageUnderLock } from '../dispatchDocuments/artifactStorageLock';
 
 const prisma = new PrismaClient();
 const rollback = Symbol('dispatch-documents-integration-rollback');
@@ -30,16 +31,21 @@ const run = async () => {
           return Reflect.get(target, property, receiver);
         },
       }) as unknown as PrismaClient;
+      const durableArtifacts = new Map<string, Uint8Array>();
       const repository = new PrismaDispatchDocumentRepository(transactionalClient, {
         assess: async () => ({ status: 'CURRENT', staleContracts: [] }),
-      });
+      }, { stage: async ({ storageKey, bytes }) => { durableArtifacts.set(storageKey, bytes); },
+        read: async storageKey => durableArtifacts.get(storageKey) ?? null });
       const runId = randomUUID();
       const artifacts: DispatchDocumentArtifact[] = [];
       for (const [index, kind] of (['WAYBILL', 'STATEMENT'] as const).entries()) {
+        const durableBytes = new TextEncoder().encode(`integration-${kind}`);
+        const storageKey = `dispatch-documents/${runId}-${index}.pdf`;
+        durableArtifacts.set(storageKey, durableBytes);
         artifacts.push(await tx.dispatchDocumentArtifact.create({ data: {
           id: `${runId}-${index}`, waybillId: waybill.id, kind, templateVersion: 'integration-v1',
-          storageKey: `dispatch-documents/${runId}-${index}.pdf`, mediaType: 'application/pdf', byteLength: 4n,
-          sha256: String(index).repeat(64), sourceIntegrityHash: 'a'.repeat(64), publishedBy: 'integration-verifier',
+          storageKey, mediaType: 'application/pdf', byteLength: BigInt(durableBytes.byteLength),
+          sha256: createHash('sha256').update(durableBytes).digest('hex'), sourceIntegrityHash: 'a'.repeat(64), publishedBy: 'integration-verifier',
         } }));
       }
       const published = artifacts.map(artifact => ({
@@ -49,6 +55,15 @@ const run = async () => {
         mediaType: 'application/pdf' as const, byteLength: Number(artifact.byteLength), sha256: artifact.sha256,
         publishedAt: artifact.publishedAt.toISOString(),
       }));
+      await verifyDispatchArtifactStorageUnderLock({ transaction: tx,
+        storage: { stage: async () => undefined, read: async storageKey => durableArtifacts.get(storageKey) ?? null },
+        artifacts: published });
+      const contender = new PrismaClient();
+      try {
+        const [{ acquired }] = await contender.$queryRawUnsafe<Array<{ acquired: boolean }>>(
+          'SELECT pg_try_advisory_xact_lock(hashtext($1)) AS acquired', dispatchArtifactStorageLockKey(published[0].storageKey));
+        assert.equal(acquired, false, 'quarantine/recovery cannot acquire the canonical storage-key lock during publication');
+      } finally { await contender.$disconnect(); }
       const operationIdempotencyKey = `${runId}:operation`;
       await repository.recordPrintHandoff({ waybillId: waybill.id, operationIdempotencyKey,
         attemptId: `${runId}:failed`, correlationId: `${runId}:failed`, actorId: 'integration-verifier',

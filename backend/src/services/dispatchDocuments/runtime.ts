@@ -16,6 +16,7 @@ export const configureDispatchDocumentsRuntime = (input: {
   generatorVersion: string;
   storageRoot?: string;
 }) => {
+  const storage = createFilesystemDispatchArtifactStorage(input.storageRoot || path.join(process.cwd(), 'storage', 'dispatch-documents'));
   const canReadAccountingDispatch = async (actorId: string) => {
     const actor = await input.prisma.user.findUnique({ where: { id: actorId }, select: { id: true, role: true, isActive: true } });
     if (!actor?.isActive) return false;
@@ -23,10 +24,10 @@ export const configureDispatchDocumentsRuntime = (input: {
       workspace: 'accounting', feature: 'accounting_dispatch_candidates_view', requiredPermission: 'view' })).allowed;
   };
   const service = createDispatchDocuments({
-    repository: new PrismaDispatchDocumentRepository(input.prisma, allocationPricingIntegrityVerifier),
+    repository: new PrismaDispatchDocumentRepository(input.prisma, allocationPricingIntegrityVerifier, storage),
     sourceReader: new PrismaDispatchDocumentSourceReader(input.prisma, input.templateVersion, input.generatorVersion),
     publisher: input.publisher,
-    storage: createFilesystemDispatchArtifactStorage(input.storageRoot || path.join(process.cwd(), 'storage', 'dispatch-documents')),
+    storage,
     incidents: createDispatchIntegrityIncidentReporter(input.prisma),
     access: { canReadWaybill: ({ actorId }) => canReadAccountingDispatch(actorId),
       canReadCandidate: ({ actorId }) => canReadAccountingDispatch(actorId) },

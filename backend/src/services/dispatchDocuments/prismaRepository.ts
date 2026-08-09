@@ -7,7 +7,7 @@ import {
   type DispatchDocumentKind as PrismaDispatchDocumentKind,
 } from '@prisma/client';
 import type { DispatchDocumentCommandScope, DispatchDocumentKind, PublishedDispatchArtifact } from './contracts';
-import type { DispatchDocumentRepository, DispatchSourceIntegrityVerifier } from './ports';
+import type { DispatchArtifactStorage, DispatchDocumentRepository, DispatchSourceIntegrityVerifier } from './ports';
 import { DispatchDocumentConflictError, DispatchDocumentValidationError } from './service';
 import { DispatchDocumentEvidenceConflictError } from './service';
 import { assertCanonicalDispatchCommandAllowed } from '../dispatchCutover';
@@ -15,6 +15,7 @@ import { isPostCutoverFinalization, isShipmentStatementFlowActive } from './feat
 import { refreshProjectionContracts } from '../dispatchAllocation';
 import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { createPrismaAllocationPricingBindingPort } from '../allocationPricingPrismaAdapter';
+import { verifyDispatchArtifactStorageUnderLock } from './artifactStorageLock';
 
 type Tx = Prisma.TransactionClient;
 const json = (value: unknown) => value as Prisma.InputJsonValue;
@@ -103,7 +104,8 @@ const completeCandidateWithoutIssue = async (tx: Tx, input: { candidateId: strin
 };
 
 export class PrismaDispatchDocumentRepository implements DispatchDocumentRepository {
-  constructor(private readonly prisma: PrismaClient, private readonly verifier: DispatchSourceIntegrityVerifier<Tx>) {}
+  constructor(private readonly prisma: PrismaClient, private readonly verifier: DispatchSourceIntegrityVerifier<Tx>,
+    private readonly artifactStorage: DispatchArtifactStorage) {}
 
   async findCommandResult(input: Parameters<DispatchDocumentRepository['findCommandResult']>[0]) {
     const row = await this.prisma.dispatchDocumentCommandResult.findUnique({ where: { scope_scopeId_idempotencyKey: {
@@ -163,6 +165,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
             staleContracts: freshness.staleContracts }, idempotencyKey: input.idempotencyKey,
           actorId: input.actorId, correlationId: input.correlationId, intentFingerprint: input.intentFingerprint });
       }
+      await verifyDispatchArtifactStorageUnderLock({ transaction: tx, storage: this.artifactStorage, artifacts: input.artifacts });
       const issuedAt = new Date(input.waybill.issuedAt);
       const waybill = await tx.accountingDispatchWaybill.create({ data: { id: input.waybill.id, number: BigInt(input.waybill.number),
         candidateId: input.candidateId, snapshot: json(input.waybillSnapshot), integrityHash: hash(input.waybillSnapshot),
@@ -275,6 +278,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       );
       const freshness = await this.verifier.assess({ transaction: tx, allocationRevisionId: input.allocationRevisionId, expectedSourceIntegrityHash: input.expectedSourceIntegrityHash });
       if (freshness.status !== 'CURRENT') throw new DispatchDocumentConflictError('Stale priced evidence requires a successor allocation, not document replacement.');
+      await verifyDispatchArtifactStorageUnderLock({ transaction: tx, storage: this.artifactStorage, artifacts: input.artifacts });
       const at = new Date(input.replacement.issuedAt);
       await tx.dispatchExitAuthorization.updateMany({ where: { waybillId: predecessor.id, status: 'ACTIVE' }, data: { status: 'REVOKED', revokedAt: at, revokedBy: input.actorId, revocationReason: input.reason } });
       await tx.accountingDispatchWaybill.update({ where: { id: predecessor.id }, data: { status: 'VOIDED', voidedAt: at, voidedBy: input.actorId, voidReason: input.reason } });

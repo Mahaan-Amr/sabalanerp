@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { PrismaDispatchDocumentRepository } from '../dispatchDocuments/prismaRepository';
 import { DispatchDocumentEvidenceConflictError } from '../dispatchDocuments/service';
+import { dispatchArtifactStorageLockKey } from '../dispatchDocuments/artifactStorageLock';
 
 const writes: string[] = [];
 const advisoryLocks: string[] = [];
@@ -33,9 +35,10 @@ const run = async () => {
   const previous = process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED;
   process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED = 'true';
   try {
+    const storage = { stage: async () => undefined, read: async () => null };
     const repository = new PrismaDispatchDocumentRepository(prisma, { assess: async () => ({
       status: 'STALE_REQUIRES_SUCCESSOR', staleContracts: [{ contractId: 'contract-1', boundPricingVersionId: 'price-1', currentPricingVersionId: 'price-2' }],
-    }) });
+    }) }, storage);
     const result = await repository.acceptAndIssue({ candidateId: 'candidate-1', allocationRevisionId: 'revision-1',
       expectedSourceIntegrityHash: 'source-hash', waybillSnapshot: {}, waybill: { id: 'waybill-1', number: '1',
         status: 'ISSUED', issuedAt: '2026-08-10T01:00:00.000Z', replacesWaybillId: null }, artifacts: [],
@@ -49,13 +52,33 @@ const run = async () => {
     writes.length = 0;
     const conflictingRepository = new PrismaDispatchDocumentRepository(prisma, { assess: async () => {
       throw new DispatchDocumentEvidenceConflictError('malformed priced evidence');
-    } });
+    } }, storage);
     const conflict = await conflictingRepository.acceptAndIssue({ candidateId: 'candidate-1', allocationRevisionId: 'revision-1',
       expectedSourceIntegrityHash: 'source-hash', waybillSnapshot: {}, waybill: { id: 'waybill-2', number: '2',
         status: 'ISSUED', issuedAt: '2026-08-10T01:00:00.000Z', replacesWaybillId: null }, artifacts: [],
       idempotencyKey: 'accept-conflict', actorId: 'accountant', correlationId: 'correlation-2', intentFingerprint: 'intent-2' });
     assert.equal(conflict.status, 'EVIDENCE_CONFLICT');
     assert.deepEqual(writes, ['candidate:EVIDENCE_CONFLICT', 'work-item:COMPLETED', 'command', 'audit']);
+
+    writes.length = 0;
+    advisoryLocks.length = 0;
+    const expectedBytes = new TextEncoder().encode('durable-pdf');
+    const publicationArtifact = { id: 'artifact-1', waybillId: 'waybill-publish', kind: 'WAYBILL' as const,
+      adjustmentSequence: null, templateVersion: 'v1', generatorVersion: 'generator-v1', sourceVersionIdentities: {},
+      storageKey: 'dispatch-documents/artifact-1.pdf', mediaType: 'application/pdf' as const,
+      byteLength: expectedBytes.byteLength, sha256: createHash('sha256').update(expectedBytes).digest('hex'),
+      publishedAt: '2026-08-10T01:00:00.000Z' };
+    const tamperedStorage = { stage: async () => undefined,
+      read: async () => new TextEncoder().encode('quarantined-or-tampered') };
+    const currentRepository = new PrismaDispatchDocumentRepository(prisma,
+      { assess: async () => ({ status: 'CURRENT', staleContracts: [] }) }, tamperedStorage);
+    await assert.rejects(() => currentRepository.acceptAndIssue({ candidateId: 'candidate-1', allocationRevisionId: 'revision-1',
+      expectedSourceIntegrityHash: 'source-hash', waybillSnapshot: {}, waybill: { id: 'waybill-publish', number: '3',
+        status: 'ISSUED', issuedAt: '2026-08-10T01:00:00.000Z', replacesWaybillId: null }, artifacts: [publicationArtifact],
+      idempotencyKey: 'accept-publish', actorId: 'accountant', correlationId: 'publish-1', intentFingerprint: 'publish-intent' }),
+    /changed before metadata publication/);
+    assert.equal(writes.includes('WAYBILL_CREATED'), false, 'primary metadata is not inserted after durable-byte mismatch');
+    assert.ok(advisoryLocks.includes(dispatchArtifactStorageLockKey(publicationArtifact.storageKey)));
 
     replacementMode = true;
     advisoryLocks.length = 0;
@@ -67,6 +90,15 @@ const run = async () => {
     assert.deepEqual(advisoryLocks.filter(key => key.startsWith('APPROVED_PRICING_HEAD:')),
       ['APPROVED_PRICING_HEAD:contract-a', 'APPROVED_PRICING_HEAD:contract-b'],
       'replacement locks the same deterministic approved-pricing heads before freshness assessment');
+
+    advisoryLocks.length = 0;
+    await assert.rejects(() => currentRepository.replaceWaybill({ waybillId: 'waybill-old', allocationRevisionId: 'revision-1',
+      expectedSourceIntegrityHash: 'source-hash', waybillSnapshot: {}, replacement: { id: 'waybill-publish', number: '4',
+        status: 'ISSUED', issuedAt: '2026-08-10T01:00:00.000Z', replacesWaybillId: 'waybill-old' }, artifacts: [publicationArtifact],
+      reason: 'replace', idempotencyKey: 'replace-publish', actorId: 'accountant', correlationId: 'replace-publish',
+      authority: {}, intentFingerprint: 'replace-publish-intent' }), /changed before metadata publication/);
+    assert.equal(writes.includes('WAYBILL_CREATED'), false, 'replacement metadata is not inserted after durable-byte mismatch');
+    assert.ok(advisoryLocks.includes(dispatchArtifactStorageLockKey(publicationArtifact.storageKey)));
   } finally {
     if (previous === undefined) delete process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED;
     else process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED = previous;

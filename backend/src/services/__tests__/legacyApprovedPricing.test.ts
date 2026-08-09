@@ -6,6 +6,7 @@ import {
   classifyLegacyPricingCandidate,
   runLegacyPricingSeal,
   parseLegacyPricingReviews,
+  loadLegacyPricingCandidates,
   toPersistedPricingReadiness,
   type LegacyPricingCandidate,
   type LegacyPricingReview,
@@ -17,7 +18,7 @@ const completeCandidate = (overrides: Partial<LegacyPricingCandidate> = {}): Leg
   return ({
   contractId: 'contract-1',
   sourceFinancialRecordId,
-  validApprovalLeaves: [{
+  approvalLeaves: [{
     id: sourceFinancialRecordId, kind: 'INVOICE_CANDIDATE', status: 'ISSUED',
     approvedAt: '2026-08-01T08:00:00.000Z', approvedBy: 'accountant-1',
   }],
@@ -33,10 +34,12 @@ const completeCandidate = (overrides: Partial<LegacyPricingCandidate> = {}): Leg
   rows: [{
     contractItemId: 'item-1', relationalProductRowId: 'row-1', snapshotProductRowId: 'row-1',
     relationalProductId: 'product-1', snapshotProductId: 'product-1', quantity: '2.000', unit: 'squareMeter',
+    currencyEvidence: { contract: 'IRR', approvalSnapshot: 'IRR', productSnapshot: 'IRR', financialRecord: 'IRR' },
     quantityEvidence: { contractItem: '2.000', approvalItem: '2.000', invoiceItem: '2.000' },
     canonicalAllInTotal: '100.000000000000', discountEligible: true,
     amountEvidence: { contractItem: '100.000000000000', approvalItem: '100.000000000000', invoiceItem: '100.000000000000' },
     componentEvidence: { material: '80.000000000000', cutting: '20.000000000000', discountBasis: '100.000000000000' },
+    componentEvidenceConflict: false,
     snapshotHash: 'a'.repeat(64),
   }],
   grossAmount: '100.000000000000',
@@ -104,15 +107,15 @@ test('similar position cannot replace stable identity and contradictory evidence
 });
 
 test('APPROVED_FOR_ISSUE and multiple valid leaves never count as approved truth', () => {
-  const invalid = completeCandidate({ validApprovalLeaves: [{
+  const invalid = completeCandidate({ approvalLeaves: [{
     id: 'invoice-1', kind: 'INVOICE_CANDIDATE', status: 'APPROVED_FOR_ISSUE',
     approvedAt: '2026-08-01T08:00:00.000Z', approvedBy: 'accountant-1',
   }] });
   assert.equal(classifyLegacyPricingCandidate(invalid).status, 'REPAIR_REQUIRED');
   assert.ok(classifyLegacyPricingCandidate(invalid).reasons.some(reason => reason.code === 'APPROVAL_NOT_VALID_LEAF'));
 
-  const duplicate = completeCandidate({ validApprovalLeaves: [completeCandidate().validApprovalLeaves[0], {
-    ...completeCandidate().validApprovalLeaves[0], id: 'invoice-2', status: 'POSTED',
+  const duplicate = completeCandidate({ approvalLeaves: [completeCandidate().approvalLeaves[0], {
+    ...completeCandidate().approvalLeaves[0], id: 'invoice-2', status: 'POSTED',
   }] });
   assert.equal(classifyLegacyPricingCandidate(duplicate).status, 'EVIDENCE_CONFLICT');
   assert.ok(classifyLegacyPricingCandidate(duplicate).reasons.some(reason => reason.code === 'MULTIPLE_VALID_APPROVALS'));
@@ -134,9 +137,8 @@ test('manifest is deterministic regardless of source order and contains exact to
   assert.deepEqual(first, second);
   assert.equal(first.counts.LEGACY_REVIEW_REQUIRED, 1);
   assert.equal(first.counts.REPAIR_REQUIRED, 1);
-  assert.equal(first.sourceRecordCount, '2');
   assert.equal(first.sourceContractCount, '2');
-  assert.equal(first.sourceFinancialRecordCount, '2');
+  assert.equal(first.sourceApprovalRecordCount, '2');
   assert.equal(first.quantityTotal, null);
   assert.equal(first.knownQuantitySubtotal, '2.000');
   assert.equal(first.amountTotal, '180.000000000000');
@@ -168,7 +170,7 @@ test('apply is idempotent and resumes after interruption without changing its ma
   } }), /simulated interruption/);
   const resumed = await runLegacyPricingSeal(candidates, writer);
   const repeated = await runLegacyPricingSeal([...candidates].reverse(), writer);
-  assert.deepEqual(resumed.manifest, repeated.manifest);
+  assert.deepEqual(resumed.beforeManifest, repeated.beforeManifest);
   assert.deepEqual(resumed.results.map(item => item.outcome), ['REPLAYED', 'SEALED']);
   assert.deepEqual(repeated.results.map(item => item.outcome), ['REPLAYED', 'REPLAYED']);
   assert.equal(new Set(calls).size, 2);
@@ -177,27 +179,37 @@ test('apply is idempotent and resumes after interruption without changing its ma
 test('source adapter binds rows only by exact stable identity and hashes the untouched approval source', () => {
   const candidate = buildLegacyPricingCandidate({
     contract: {
-      id: 'contract-1', currency: 'IRR', customerId: 'customer-1',
+      id: 'contract-1', currency: 'تومان', customerId: 'customer-1',
       items: [{ id: 'item-1', productId: 'product-1', productRowId: 'row-1', quantity: '2.000', totalPrice: '100.000000000000' }],
     },
     financialRecords: [{
       id: 'invoice-1', kind: 'INVOICE_CANDIDATE', status: 'ISSUED', approvedAt: '2026-08-01T08:00:00.000Z', approvedBy: 'accountant-1',
-      currency: 'IRR', customerId: 'customer-1', amount: '90.000000000000',
+      currency: 'ریال', customerId: 'customer-1', amount: '900.000000000000',
       sourceSnapshot: {
-        currency: 'IRR', customerId: 'customer-1',
+        currency: 'تومان', customerId: 'customer-1',
         items: [{ id: 'item-1', productId: 'product-1', quantity: '2.000', totalPrice: '100.000000000000' }],
         contractData: {
           customerId: 'customer-1', projectId: 'project-1', project: { id: 'project-1', address: 'Tehran warehouse' },
-          discount: { enabled: true, baseSubtotal: '100', amount: '10' },
-          products: [{ rowId: 'row-1', productId: 'product-1', productType: 'prepared', preparedQuantity: '2', preparedUnit: 'squareMeter', totalPrice: '100', discountEligible: true, componentEvidence: { material: '80', cutting: '20', discountBasis: '100' } }],
+          discount: { enabled: true, baseSubtotal: '70', amount: '10' },
+          products: [{
+            rowId: 'row-1', productId: 'product-1', productType: 'prepared', preparedQuantity: '2', preparedUnit: 'squareMeter',
+            currency: 'تومان', totalPrice: '100', originalTotalPrice: '70', isMandatory: false, mandatoryPercentage: '0', cuttingCost: '10',
+            totalSubServiceCost: '10', appliedSubServices: [{ id: 'tool-1', cost: '10' }], finishingId: 'finish-1', finishingCost: '10',
+          }],
         },
       },
-      invoiceItems: [{ contractItemId: 'item-1', productId: 'product-1', quantity: '2.000', totalPrice: '100.000000000000' }],
+      invoiceItems: [{ contractItemId: 'item-1', productId: 'product-1', quantity: '2.000', totalPrice: '1000.000000000000' }],
     }],
     existingSeal: null,
     review: null,
   });
   assert.equal(candidate.rows[0].snapshotProductRowId, 'row-1');
+  assert.equal(candidate.currency, 'ریال');
+  assert.equal(candidate.rows[0].canonicalAllInTotal, '1000.000000000000');
+  assert.deepEqual(candidate.rows[0].componentEvidence, {
+    material: '700.000000000000', mandatory: '0.000000000000', cutting: '100.000000000000',
+    tooling: '100.000000000000', finishing: '100.000000000000', discountBasis: '700.000000000000',
+  });
   assert.equal(candidate.sourceEvidenceHash.length, 64);
   assert.equal(classifyLegacyPricingCandidate(candidate).status, 'LEGACY_REVIEW_REQUIRED');
 
@@ -210,6 +222,20 @@ test('source adapter binds rows only by exact stable identity and hashes the unt
   const result = classifyLegacyPricingCandidate(legacyWithoutPersistedIdentity);
   assert.equal(result.status, 'REPAIR_REQUIRED');
   assert.ok(result.reasons.some(item => item.code === 'MISSING_STABLE_ROW_ID'));
+});
+
+test('Prisma source cohort includes graphless contracts with no invoice candidate', async () => {
+  const database = {
+    salesContract: { findMany: async () => [{
+      id: 'contract-without-candidate', currency: 'تومان', customerId: 'customer-1', items: [], approvedPricingVersions: [],
+    }] },
+    accountingFinancialRecord: { findMany: async () => [] },
+  };
+  const candidates = await loadLegacyPricingCandidates(database as never);
+  assert.equal(candidates.length, 1);
+  const classification = classifyLegacyPricingCandidate(candidates[0]);
+  assert.equal(classification.status, 'REPAIR_REQUIRED');
+  assert.ok(classification.reasons.some(item => item.code === 'APPROVAL_NOT_VALID_LEAF'));
 });
 
 test('every legacy reason maps to the frozen persistence contract without losing its precise code', () => {
@@ -233,11 +259,17 @@ test('review import rejects duplicate identities and any non-exact source hash',
   assert.throws(() => parseLegacyPricingReviews([decision, decision]), /duplicate source identities/);
 });
 
-test('post-seal recapture blocks a run if any source count, total, identity, or evidence hash changed', async () => {
+test('post-seal recapture returns a failed before/after manifest with explicit differences', async () => {
   const candidate = completeCandidate();
   const ready = { ...candidate, review: reviewed(candidate) };
   const writer: LegacyPricingSealWriter = { async seal() { return { outcome: 'SEALED', pricingVersionId: 'version-1' }; } };
-  await assert.rejects(runLegacyPricingSeal([ready], writer, {
+  const run = await runLegacyPricingSeal([ready], writer, {
     recapture: async () => [{ ...ready, sourceEvidenceHash: 'f'.repeat(64) }],
-  }), /source evidence changed during sealing/);
+  });
+  assert.equal(run.status, 'FAILED');
+  assert.equal(run.reason, 'SOURCE_EVIDENCE_CHANGED_DURING_SEALING');
+  assert.equal(run.sourceComparison.matched, false);
+  assert.ok(run.sourceComparison.differences.includes('SOURCE_EVIDENCE_HASH'));
+  assert.notEqual(run.beforeManifest.manifestHash, run.afterManifest.manifestHash);
+  assert.deepEqual(run.outcomeCounts, { SEALED: 1, REPLAYED: 0 });
 });

@@ -10,7 +10,7 @@ updates contract items, snapshots, invoices, PDFs, allocation evidence, or prior
   `productRowId` identity. Position or catalog similarity is diagnostic evidence only.
 - `classifyLegacyPricingCandidate` emits the five migration states and precise legacy reason codes. Missing or
   invalid decimals remain missing; they are never converted to zero.
-- `buildLegacyPricingManifest` produces deterministic schema-versioned counts, source identity/evidence hashes,
+- `buildLegacyPricingManifest` produces deterministic schema-versioned contract, approval-record, and row counts, source identity/evidence hashes,
   scale-three quantity totals, scale-twelve amount totals, known subtotals, and quarantine entries. It contains no
   customer names, addresses, prices by customer, or full source snapshots.
 - `runLegacyPricingSeal` consumes a `LegacyPricingSealWriter`. Its idempotency key is derived from contract,

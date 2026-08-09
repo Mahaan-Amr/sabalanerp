@@ -53,7 +53,9 @@ const run = async () => {
     mode: output.mode,
     manifestPath: destination,
     manifestHash: manifest.manifestHash,
-    sourceRecordCount: manifest.sourceRecordCount,
+    sourceContractCount: manifest.sourceContractCount,
+    sourceApprovalRecordCount: manifest.sourceApprovalRecordCount,
+    sourceRowCount: manifest.sourceRowCount,
     counts: manifest.counts,
   }));
 };

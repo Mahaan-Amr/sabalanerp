@@ -1,6 +1,7 @@
-import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import type { PricingReadinessReasonCode, PricingReadinessStatus } from '../dispatchDocuments/contracts';
+import { hashCanonicalEvidence } from './canonicalEvidence';
+import { isCompleteValidApprovalLeaf } from './approvalLeaf';
 
 export const LEGACY_PRICING_STATUSES = [
   'READY',
@@ -45,6 +46,7 @@ export type LegacyPricingRow = {
   snapshotProductRowId: string | null;
   relationalProductId: string | null;
   snapshotProductId: string | null;
+  currencyEvidence: { contract: string | null; approvalSnapshot: string | null; productSnapshot: string | null; financialRecord: string | null };
   quantity: string | null;
   quantityEvidence: { contractItem: string | null; approvalItem: string | null; invoiceItem: string | null };
   unit: string | null;
@@ -52,6 +54,7 @@ export type LegacyPricingRow = {
   amountEvidence: { contractItem: string | null; approvalItem: string | null; invoiceItem: string | null };
   discountEligible: boolean | null;
   componentEvidence: Readonly<Record<string, string | null>> | null;
+  componentEvidenceConflict: boolean;
   snapshotHash: string | null;
 };
 
@@ -66,7 +69,7 @@ export type LegacyPricingReview = {
 export type LegacyPricingCandidate = {
   contractId: string;
   sourceFinancialRecordId: string;
-  validApprovalLeaves: readonly LegacyPricingApprovalLeaf[];
+  approvalLeaves: readonly LegacyPricingApprovalLeaf[];
   currency: string | null;
   customerId: string | null;
   projectId: string | null;
@@ -139,13 +142,7 @@ export const toPersistedPricingReadiness = (classification: LegacyPricingClassif
   })),
 });
 
-const hash = (value: string): string => createHash('sha256').update(value).digest('hex');
 const hashIsValid = (value: string | null | undefined) => Boolean(value && /^[a-f0-9]{64}$/i.test(value));
-const validLeaf = (leaf: LegacyPricingApprovalLeaf) =>
-  leaf.kind === 'INVOICE_CANDIDATE'
-  && (leaf.status === 'ISSUED' || leaf.status === 'POSTED')
-  && Boolean(leaf.approvedAt && !Number.isNaN(Date.parse(leaf.approvedAt)))
-  && Boolean(leaf.approvedBy?.trim());
 
 const exact = (value: string | null, scale: number): Prisma.Decimal | null => {
   if (value == null || !value.trim()) return null;
@@ -165,7 +162,7 @@ const addReason = (reasons: LegacyPricingReason[], next: LegacyPricingReason) =>
 export const classifyLegacyPricingCandidate = (candidate: LegacyPricingCandidate): LegacyPricingClassification => {
   const repair: LegacyPricingReason[] = [];
   const conflicts: LegacyPricingReason[] = [];
-  const validLeaves = candidate.validApprovalLeaves.filter(validLeaf);
+  const validLeaves = candidate.approvalLeaves.filter(isCompleteValidApprovalLeaf);
   if (validLeaves.length === 0) addReason(repair, reason('APPROVAL_NOT_VALID_LEAF'));
   if (validLeaves.length > 1) addReason(conflicts, reason('MULTIPLE_VALID_APPROVALS', { count: String(validLeaves.length) }));
   if (validLeaves.length === 1 && validLeaves[0].id !== candidate.sourceFinancialRecordId) {
@@ -214,6 +211,9 @@ export const classifyLegacyPricingCandidate = (candidate: LegacyPricingCandidate
     if (row.relationalProductId && row.snapshotProductId && row.relationalProductId !== row.snapshotProductId) {
       addReason(conflicts, reason('IDENTITY_CONFLICT', { ...detail, source: 'catalog-product' }));
     }
+    const rowCurrencies = Object.values(row.currencyEvidence);
+    if (rowCurrencies.some(value => !value)) addReason(repair, reason('MISSING_CURRENCY', detail));
+    else if (new Set(rowCurrencies).size !== 1) addReason(conflicts, reason('FINANCIAL_MISMATCH', { ...detail, source: 'currency' }));
     const quantity = exact(row.quantity, 3);
     const quantityEvidence = Object.values(row.quantityEvidence).map(value => exact(value, 3));
     if (quantityEvidence.some(value => value == null)) addReason(repair, reason('MISSING_QUANTITY', detail));
@@ -232,6 +232,7 @@ export const classifyLegacyPricingCandidate = (candidate: LegacyPricingCandidate
       addReason(repair, reason('MISSING_TOTAL', detail));
     } else rowAmountTotal = rowAmountTotal.plus(total);
     const components = row.componentEvidence && Object.entries(row.componentEvidence);
+    if (row.componentEvidenceConflict) addReason(conflicts, reason('FINANCIAL_MISMATCH', { ...detail, source: 'attached-component-snapshots' }));
     if (!components?.length || components.some(([, value]) => exact(value, 12) == null)) {
       addReason(repair, reason('MISSING_ATTACHED_COST_EVIDENCE', detail));
     } else if (total && !components.filter(([key]) => key !== 'discountBasis').reduce((sum, [, value]) => sum.plus(value!), new Prisma.Decimal(0)).eq(total)) {
@@ -294,9 +295,8 @@ export const classifyLegacyPricingCandidate = (candidate: LegacyPricingCandidate
 export type LegacyPricingManifestEntry = LegacyPricingClassification & { quarantined: boolean };
 export type LegacyPricingManifest = {
   schemaVersion: 1;
-  sourceRecordCount: string;
   sourceContractCount: string;
-  sourceFinancialRecordCount: string;
+  sourceApprovalRecordCount: string;
   sourceRowCount: string;
   sourceIdentityHash: string;
   sourceEvidenceHash: string;
@@ -311,11 +311,6 @@ export type LegacyPricingManifest = {
   manifestHash: string;
 };
 
-const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => {
-  if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-  return Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right)));
-});
-
 export const buildLegacyPricingManifest = (candidates: readonly LegacyPricingCandidate[]): LegacyPricingManifest => {
   const entries = candidates.map(classifyLegacyPricingCandidate)
     .sort((left, right) => `${left.contractId}:${left.sourceFinancialRecordId}`.localeCompare(`${right.contractId}:${right.sourceFinancialRecordId}`))
@@ -329,12 +324,11 @@ export const buildLegacyPricingManifest = (candidates: readonly LegacyPricingCan
   const amountTotal = amountComplete ? knownAmountSubtotal : null;
   const body = {
     schemaVersion: 1 as const,
-    sourceRecordCount: String(entries.reduce((count, item) => count + item.sourceCount, 0)),
     sourceContractCount: String(entries.length),
-    sourceFinancialRecordCount: String(candidates.reduce((count, item) => count + item.validApprovalLeaves.length, 0)),
+    sourceApprovalRecordCount: String(candidates.reduce((count, item) => count + item.approvalLeaves.length, 0)),
     sourceRowCount: String(entries.reduce((count, item) => count + item.sourceCount, 0)),
-    sourceIdentityHash: hash(canonical(entries.map(item => ({ contractId: item.contractId, sourceFinancialRecordId: item.sourceFinancialRecordId, sourceIdentityHash: item.sourceIdentityHash })))),
-    sourceEvidenceHash: hash(canonical(entries.map(item => ({ contractId: item.contractId, sourceEvidenceHash: item.sourceEvidenceHash })))),
+    sourceIdentityHash: hashCanonicalEvidence(entries.map(item => ({ contractId: item.contractId, sourceFinancialRecordId: item.sourceFinancialRecordId, sourceIdentityHash: item.sourceIdentityHash }))),
+    sourceEvidenceHash: hashCanonicalEvidence(entries.map(item => ({ contractId: item.contractId, sourceEvidenceHash: item.sourceEvidenceHash }))),
     quantityTotal,
     amountTotal,
     knownQuantitySubtotal,
@@ -344,7 +338,7 @@ export const buildLegacyPricingManifest = (candidates: readonly LegacyPricingCan
     counts,
     entries,
   };
-  return { ...body, manifestHash: hash(canonical(body)) };
+  return { ...body, manifestHash: hashCanonicalEvidence(body) };
 };
 
 export type LegacyPricingSealCommand = {
@@ -369,22 +363,50 @@ export type LegacyPricingSealOptions = {
   recapture?: () => Promise<readonly LegacyPricingCandidate[]>;
 };
 
+export type LegacyPricingSourceDifference =
+  | 'SOURCE_CONTRACT_COUNT'
+  | 'SOURCE_APPROVAL_RECORD_COUNT'
+  | 'SOURCE_ROW_COUNT'
+  | 'SOURCE_IDENTITY_HASH'
+  | 'SOURCE_EVIDENCE_HASH'
+  | 'QUANTITY_TOTAL'
+  | 'AMOUNT_TOTAL'
+  | 'KNOWN_QUANTITY_SUBTOTAL'
+  | 'KNOWN_AMOUNT_SUBTOTAL';
+
+export const compareLegacyPricingSourceManifests = (
+  before: LegacyPricingManifest,
+  after: LegacyPricingManifest,
+): { matched: boolean; differences: LegacyPricingSourceDifference[] } => {
+  const differences: LegacyPricingSourceDifference[] = [];
+  if (before.sourceContractCount !== after.sourceContractCount) differences.push('SOURCE_CONTRACT_COUNT');
+  if (before.sourceApprovalRecordCount !== after.sourceApprovalRecordCount) differences.push('SOURCE_APPROVAL_RECORD_COUNT');
+  if (before.sourceRowCount !== after.sourceRowCount) differences.push('SOURCE_ROW_COUNT');
+  if (before.sourceIdentityHash !== after.sourceIdentityHash) differences.push('SOURCE_IDENTITY_HASH');
+  if (before.sourceEvidenceHash !== after.sourceEvidenceHash) differences.push('SOURCE_EVIDENCE_HASH');
+  if (before.quantityTotal !== after.quantityTotal) differences.push('QUANTITY_TOTAL');
+  if (before.amountTotal !== after.amountTotal) differences.push('AMOUNT_TOTAL');
+  if (before.knownQuantitySubtotal !== after.knownQuantitySubtotal) differences.push('KNOWN_QUANTITY_SUBTOTAL');
+  if (before.knownAmountSubtotal !== after.knownAmountSubtotal) differences.push('KNOWN_AMOUNT_SUBTOTAL');
+  return { matched: differences.length === 0, differences };
+};
+
 export const runLegacyPricingSeal = async (
   candidates: readonly LegacyPricingCandidate[],
   writer: LegacyPricingSealWriter,
   options: LegacyPricingSealOptions = {},
 ) => {
-  const manifest = buildLegacyPricingManifest(candidates);
+  const beforeManifest = buildLegacyPricingManifest(candidates);
   const byIdentity = new Map(candidates.map(item => [`${item.contractId}:${item.sourceFinancialRecordId}`, item]));
   const results: Array<{ contractId: string; sourceFinancialRecordId: string; outcome: 'SEALED' | 'REPLAYED'; pricingVersionId: string }> = [];
-  for (const entry of manifest.entries.filter(item => item.status === 'READY')) {
+  for (const entry of beforeManifest.entries.filter(item => item.status === 'READY')) {
     const candidate = byIdentity.get(`${entry.contractId}:${entry.sourceFinancialRecordId}`)!;
     if (candidate.existingSeal) {
       results.push({ contractId: entry.contractId, sourceFinancialRecordId: entry.sourceFinancialRecordId, outcome: 'REPLAYED', pricingVersionId: candidate.existingSeal.pricingVersionId });
     } else {
       if (!candidate.review) throw new Error('READY legacy pricing evidence requires an immutable review decision.');
       const result = await writer.seal({
-        idempotencyKey: hash(`legacy-pricing-seal:${candidate.contractId}:${candidate.sourceFinancialRecordId}:${candidate.sourceEvidenceHash}`),
+        idempotencyKey: hashCanonicalEvidence({ scope: 'legacy-pricing-seal', contractId: candidate.contractId, sourceFinancialRecordId: candidate.sourceFinancialRecordId, sourceEvidenceHash: candidate.sourceEvidenceHash }),
         origin: 'LEGACY_SEAL',
         candidate,
         review: candidate.review,
@@ -399,23 +421,23 @@ export const runLegacyPricingSeal = async (
     }
     await options.afterEach?.(results.length);
   }
-  if (options.recapture) {
-    const after = buildLegacyPricingManifest(await options.recapture());
-    if (after.sourceRecordCount !== manifest.sourceRecordCount
-      || after.sourceContractCount !== manifest.sourceContractCount
-      || after.sourceFinancialRecordCount !== manifest.sourceFinancialRecordCount
-      || after.sourceRowCount !== manifest.sourceRowCount
-      || after.sourceIdentityHash !== manifest.sourceIdentityHash
-      || after.sourceEvidenceHash !== manifest.sourceEvidenceHash
-      || after.quantityTotal !== manifest.quantityTotal
-      || after.amountTotal !== manifest.amountTotal
-      || after.knownQuantitySubtotal !== manifest.knownQuantitySubtotal
-      || after.knownAmountSubtotal !== manifest.knownAmountSubtotal) {
-      throw new Error('Legacy pricing source evidence changed during sealing; the run is quarantined.');
-    }
-  }
-  return { manifest, results };
+  const afterManifest = options.recapture ? buildLegacyPricingManifest(await options.recapture()) : beforeManifest;
+  const sourceComparison = compareLegacyPricingSourceManifests(beforeManifest, afterManifest);
+  return {
+    status: sourceComparison.matched ? 'COMPLETED' as const : 'FAILED' as const,
+    reason: sourceComparison.matched ? null : 'SOURCE_EVIDENCE_CHANGED_DURING_SEALING' as const,
+    beforeManifest,
+    afterManifest,
+    sourceComparison,
+    results,
+    outcomeCounts: {
+      SEALED: results.filter(item => item.outcome === 'SEALED').length,
+      REPLAYED: results.filter(item => item.outcome === 'REPLAYED').length,
+    },
+  };
 };
 
 export * from './source';
 export * from './prismaSource';
+export * from './canonicalEvidence';
+export * from './approvalLeaf';

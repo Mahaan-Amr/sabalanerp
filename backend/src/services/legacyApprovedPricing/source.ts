@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import { hashCanonicalEvidence } from './canonicalEvidence';
+import { isCompleteValidApprovalLeaf } from './approvalLeaf';
 import type {
   LegacyPricingApprovalLeaf,
   LegacyPricingCandidate,
@@ -59,17 +60,63 @@ const decimal = (value: unknown, scale: number): string | null => {
   }
 };
 
-const canonicalize = (value: unknown): unknown => {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : String(value);
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .filter(([, item]) => item !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, item]) => [key, canonicalize(item)]));
-  return String(value);
+type MoneyCurrency = 'TOMAN' | 'RIAL';
+const moneyCurrency = (currency: unknown): MoneyCurrency | null => {
+  const normalized = text(currency)?.toLowerCase();
+  if (normalized === 'تومان' || normalized === 'toman') return 'TOMAN';
+  if (normalized === 'ریال' || normalized === 'rial' || normalized === 'irr') return 'RIAL';
+  return null;
 };
-const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(canonicalize(value))).digest('hex');
+const rialCurrency = (currency: unknown): string | null => moneyCurrency(currency) ? 'ریال' : null;
+const toRial = (value: unknown, currency: unknown): string | null => {
+  const amount = decimal(value, 12);
+  const unit = moneyCurrency(currency);
+  if (!amount || !unit) return null;
+  return new Prisma.Decimal(amount).mul(unit === 'TOMAN' ? 10 : 1).toFixed(12);
+};
+const owns = (record: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(record, key);
+
+const legacyComponentEvidence = (product: Record<string, unknown>, currency: unknown) => {
+  const material = owns(product, 'originalTotalPrice') ? toRial(product.originalTotalPrice, currency) : null;
+  const cutting = owns(product, 'cuttingCost') ? toRial(product.cuttingCost, currency) : null;
+  const toolingSnapshot = owns(product, 'totalSubServiceCost') ? toRial(product.totalSubServiceCost, currency) : null;
+  const tools = Array.isArray(product.appliedSubServices) ? product.appliedSubServices.map(object) : [];
+  const toolAmounts = tools.map(tool => toRial(tool.cost, currency));
+  const toolingFromRows = toolAmounts.every((value): value is string => value != null)
+    ? toolAmounts.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)).toFixed(12)
+    : null;
+  let conflict = Boolean(toolingSnapshot && toolingFromRows && toolingSnapshot !== toolingFromRows);
+
+  const finishings = Array.isArray(product.finishings) ? product.finishings.map(object) : [];
+  const finishingAmounts = finishings.map(finishing => toRial(finishing.cost, currency));
+  const finishingFromRows = finishingAmounts.length && finishingAmounts.every((value): value is string => value != null)
+    ? finishingAmounts.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)).toFixed(12)
+    : null;
+  const hasFinishing = Boolean(text(product.finishingId) || finishings.length || object(product.meta).finishing);
+  const finishingSnapshot = owns(product, 'finishingCost')
+    ? toRial(product.finishingCost ?? (hasFinishing ? null : 0), currency)
+    : hasFinishing ? null : new Prisma.Decimal(0).toFixed(12);
+  if (finishingSnapshot && finishingFromRows && finishingSnapshot !== finishingFromRows) conflict = true;
+
+  const mandatoryEnabled = product.isMandatory === true;
+  const percentage = decimal(product.mandatoryPercentage, 12);
+  const mandatory = mandatoryEnabled
+    ? material && percentage ? new Prisma.Decimal(material).mul(percentage).div(100).toFixed(12) : null
+    : new Prisma.Decimal(0).toFixed(12);
+  const discountEligible = material == null ? null : new Prisma.Decimal(material).gt(0) && object(product.meta).isLayer !== true;
+  return {
+    discountEligible,
+    conflict,
+    evidence: {
+      material,
+      mandatory,
+      cutting,
+      tooling: toolingSnapshot,
+      finishing: finishingSnapshot,
+      discountBasis: discountEligible == null ? null : discountEligible ? material : new Prisma.Decimal(0).toFixed(12),
+    },
+  };
+};
 
 const approvedLeaf = (record: LegacyPricingSourceInput['financialRecords'][number]): LegacyPricingApprovalLeaf => ({
   id: record.id,
@@ -78,11 +125,6 @@ const approvedLeaf = (record: LegacyPricingSourceInput['financialRecords'][numbe
   approvedAt: record.approvedAt,
   approvedBy: record.approvedBy,
 });
-const isValidLeaf = (record: LegacyPricingSourceInput['financialRecords'][number]) =>
-  record.kind === 'INVOICE_CANDIDATE'
-  && ['ISSUED', 'POSTED'].includes(record.status)
-  && Boolean(record.approvedAt && record.approvedBy);
-
 const productQuantity = (product: Record<string, unknown>): string | null => {
   const type = text(product.productType)?.toLowerCase();
   if (type === 'prepared') return decimal(product.preparedQuantity ?? product.quantity, 3);
@@ -111,7 +153,7 @@ const productUnit = (product: Record<string, unknown>): string | null => {
 export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): LegacyPricingCandidate => {
   const records = [...source.financialRecords].sort((left, right) =>
     `${right.approvedAt ?? ''}:${right.id}`.localeCompare(`${left.approvedAt ?? ''}:${left.id}`));
-  const valid = records.filter(isValidLeaf);
+  const valid = records.filter(isCompleteValidApprovalLeaf);
   const selected = valid[0] ?? records[0] ?? null;
   const snapshot = object(selected?.sourceSnapshot);
   const contractData = object(snapshot.contractData);
@@ -120,6 +162,7 @@ export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): L
   const invoiceItems = selected?.invoiceItems ?? [];
   const project = object(contractData.project);
   const discount = object(contractData.discount);
+  const snapshotCurrency = text(snapshot.currency);
 
   const rows = source.contract.items.map(item => {
     const approvalItem = snapshotItems.find(candidate => text(candidate.id) === item.id) ?? null;
@@ -127,16 +170,20 @@ export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): L
     const product = item.productRowId
       ? products.find(candidate => text(candidate.rowId ?? candidate.productRowId) === item.productRowId) ?? null
       : null;
-    const componentSource = product ? object(product.componentEvidence) : {};
-    const componentEvidence = Object.keys(componentSource).length
-      ? Object.fromEntries(Object.entries(componentSource).map(([key, value]) => [key, decimal(value, 12)]))
-      : null;
+    const productCurrency = product ? text(product.currency) : null;
+    const components = product ? legacyComponentEvidence(product, productCurrency) : null;
     return {
       contractItemId: item.id,
       relationalProductRowId: item.productRowId,
       snapshotProductRowId: product ? text(product.rowId ?? product.productRowId) : null,
       relationalProductId: item.productId,
       snapshotProductId: product ? text(product.productId) : null,
+      currencyEvidence: {
+        contract: rialCurrency(source.contract.currency),
+        approvalSnapshot: rialCurrency(snapshotCurrency),
+        productSnapshot: rialCurrency(productCurrency),
+        financialRecord: rialCurrency(selected?.currency),
+      },
       quantity: product ? productQuantity(product) : null,
       quantityEvidence: {
         contractItem: decimal(item.quantity, 3),
@@ -144,22 +191,23 @@ export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): L
         invoiceItem: decimal(invoiceItem?.quantity, 3),
       },
       unit: product ? productUnit(product) : null,
-      canonicalAllInTotal: product ? decimal(product.totalPrice, 12) : null,
+      canonicalAllInTotal: product ? toRial(product.totalPrice, productCurrency) : null,
       amountEvidence: {
-        contractItem: decimal(item.totalPrice, 12),
-        approvalItem: decimal(approvalItem?.totalPrice, 12),
-        invoiceItem: decimal(invoiceItem?.totalPrice, 12),
+        contractItem: toRial(item.totalPrice, source.contract.currency),
+        approvalItem: toRial(approvalItem?.totalPrice, snapshotCurrency),
+        invoiceItem: toRial(invoiceItem?.totalPrice, selected?.currency),
       },
-      discountEligible: product && typeof product.discountEligible === 'boolean' ? product.discountEligible : null,
-      componentEvidence,
-      snapshotHash: product && approvalItem && invoiceItem ? digest({ product, approvalItem, invoiceItem }) : null,
+      discountEligible: components?.discountEligible ?? null,
+      componentEvidence: components?.evidence ?? null,
+      componentEvidenceConflict: components?.conflict ?? false,
+      snapshotHash: product && approvalItem && invoiceItem ? hashCanonicalEvidence({ product, approvalItem, invoiceItem }) : null,
     };
   });
   const rowTotals = rows.map(row => decimal(row.canonicalAllInTotal, 12));
   const grossAmount = rowTotals.length && rowTotals.every((value): value is string => value != null)
     ? rowTotals.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)).toFixed(12)
     : null;
-  const discountAmount = decimal(discount.amount, 12);
+  const discountAmount = toRial(discount.amount, snapshotCurrency);
   const evidence = {
     contract: source.contract,
     financialRecord: selected,
@@ -169,29 +217,29 @@ export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): L
   return {
     contractId: source.contract.id,
     sourceFinancialRecordId: selected?.id ?? '',
-    validApprovalLeaves: records.map(approvedLeaf),
-    currency: source.contract.currency,
+    approvalLeaves: records.map(approvedLeaf),
+    currency: rialCurrency(source.contract.currency),
     customerId: source.contract.customerId,
     projectId: text(contractData.projectId),
     destination: text(project.address),
     envelopeEvidence: {
-      financialCurrency: selected?.currency ?? null,
+      financialCurrency: rialCurrency(selected?.currency),
       financialCustomerId: selected?.customerId ?? null,
-      snapshotCurrency: text(snapshot.currency),
+      snapshotCurrency: rialCurrency(snapshotCurrency),
       snapshotCustomerId: text(snapshot.customerId ?? contractData.customerId),
       snapshotProjectId: text(contractData.projectId),
     },
     discount: Object.keys(discount).length ? {
       enabled: typeof discount.enabled === 'boolean' ? discount.enabled : false,
-      baseAmount: decimal(discount.baseSubtotal, 12),
+      baseAmount: toRial(discount.baseSubtotal, snapshotCurrency),
       amount: discountAmount,
     } : null,
     rows,
     grossAmount,
     discountAmount,
-    netAmount: decimal(selected?.amount ?? null, 12),
-    sourceIdentityHash: digest({ contractId: source.contract.id, financialRecordId: selected?.id ?? null, itemIds: source.contract.items.map(item => item.id) }),
-    sourceEvidenceHash: digest(evidence),
+    netAmount: toRial(selected?.amount ?? null, selected?.currency),
+    sourceIdentityHash: hashCanonicalEvidence({ contractId: source.contract.id, financialRecordId: selected?.id ?? null, itemIds: source.contract.items.map(item => item.id) }),
+    sourceEvidenceHash: hashCanonicalEvidence(evidence),
     existingSeal: source.existingSeal,
     review: source.review,
     rowCounts: {

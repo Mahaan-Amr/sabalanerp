@@ -21,14 +21,8 @@ export const loadLegacyPricingCandidates = async (
   database: LegacyPricingReadDatabase,
   reviews: readonly LegacyPricingReviewDecision[] = [],
 ): Promise<LegacyPricingCandidate[]> => {
-  const records = await database.accountingFinancialRecord.findMany({
-    where: { kind: 'INVOICE_CANDIDATE', contractId: { not: null } },
-    include: { invoiceItems: true },
-    orderBy: [{ contractId: 'asc' }, { financiallyApprovedAt: 'desc' }, { id: 'asc' }],
-  });
-  const contractIds = [...new Set(records.flatMap(record => record.contractId ? [record.contractId] : []))];
   const contracts = await database.salesContract.findMany({
-    where: { id: { in: contractIds } },
+    where: { productGraphState: { is: null } },
     include: {
       items: { orderBy: { id: 'asc' } },
       approvedPricingVersions: {
@@ -37,6 +31,12 @@ export const loadLegacyPricingCandidates = async (
       },
     },
     orderBy: { id: 'asc' },
+  });
+  const contractIds = contracts.map(contract => contract.id);
+  const records = await database.accountingFinancialRecord.findMany({
+    where: { kind: 'INVOICE_CANDIDATE', contractId: { in: contractIds } },
+    include: { invoiceItems: true },
+    orderBy: [{ contractId: 'asc' }, { financiallyApprovedAt: 'desc' }, { id: 'asc' }],
   });
   const recordsByContract = new Map<string, typeof records>();
   for (const record of records) {

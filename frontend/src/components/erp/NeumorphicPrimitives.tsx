@@ -413,6 +413,7 @@ export function ErpProgressRingCard({
   detail,
   emptyLabel = "بدون داده",
   href,
+  size = "default",
 }: {
   title: string;
   label: string;
@@ -420,6 +421,7 @@ export function ErpProgressRingCard({
   detail: string;
   emptyLabel?: string;
   href?: string;
+  size?: "default" | "compact";
 }) {
   const titleId = useId();
   const safePercentage =
@@ -442,7 +444,7 @@ export function ErpProgressRingCard({
               ? `${label}: ${emptyLabel}`
               : `${label}: ${safePercentage.toLocaleString("fa-IR")} درصد`
           }
-          className="relative h-36 w-36 shrink-0"
+          className={size === "compact" ? "relative h-20 w-20 shrink-0 lg:h-24 lg:w-24" : "relative h-36 w-36 shrink-0"}
         >
           <svg
             viewBox="0 0 128 128"
@@ -469,7 +471,7 @@ export function ErpProgressRingCard({
               strokeDashoffset={offset}
             />
           </svg>
-          <span className="absolute inset-0 flex items-center justify-center text-3xl font-black tabular-nums text-[var(--sds-text-primary)]">
+          <span className={`absolute inset-0 flex items-center justify-center font-black tabular-nums text-[var(--sds-text-primary)] ${size === "compact" ? "text-xl" : "text-3xl"}`}>
             {percentage === null
               ? "—"
               : `${safePercentage.toLocaleString("fa-IR")}٪`}

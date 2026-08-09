@@ -1,7 +1,7 @@
 export type PositionCapacityCoverage = {
   committed: number;
   total: number;
-  percentage: number;
+  percentage: number | null;
 };
 
 const nonNegativeCount = (value: number) =>
@@ -18,6 +18,6 @@ export function positionCapacityCoverage(
   return {
     committed,
     total,
-    percentage: total === 0 ? 0 : Math.round((committed / total) * 100),
+    percentage: total === 0 ? null : Math.round((committed / total) * 100),
   };
 }

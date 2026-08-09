@@ -31,8 +31,10 @@ import {
 } from "@/features/hr/hrUi";
 
 type Tab = "units" | "jobs" | "positions" | "contexts";
-const blankUnit = { code: "", name: "", type: "DEPARTMENT", parentId: "" };
-const blankJob = { code: "", title: "", description: "", responsibilities: "" };
+type BlockedDependency = { kind: string; count: number; href: string };
+const creationLifecycle = () => ({ status: "ACTIVE", effectiveFrom: new Date().toISOString().slice(0, 10) });
+const blankUnit = { code: "", name: "", type: "DEPARTMENT", parentId: "", ...creationLifecycle() };
+const blankJob = { code: "", title: "", description: "", responsibilities: "", ...creationLifecycle() };
 const blankPosition = {
   code: "",
   title: "",
@@ -42,12 +44,15 @@ const blankPosition = {
   costCenterId: "",
   supervisorPositionId: "",
   capacity: 1,
+  ...creationLifecycle(),
 };
 
 export default function HrStructurePage() {
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const inactiveOnly = searchParams.get("view") === "inactive";
+  const parentId = searchParams.get("parentId") || "";
+  const dependencyAt = searchParams.get("dependencyAt") || "";
   const visible = (rows: any[]) =>
     inactiveOnly ? rows.filter((item) => !item.isActive) : rows;
   const [tab, setTab] = useState<Tab>("units");
@@ -58,10 +63,12 @@ export default function HrStructurePage() {
     jobs: [],
     positions: [],
   });
+  const visibleUnits = visible(data.organizationalUnits).filter((item: any) => !parentId || (dependencyAt ? item.dependencyParentIdsFrom?.includes(parentId) : item.parentId === parentId));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [blockedDependencies, setBlockedDependencies] = useState<BlockedDependency[]>([]);
   const [unit, setUnit] = useState(blankUnit);
   const [job, setJob] = useState(blankJob);
   const [position, setPosition] = useState(blankPosition);
@@ -69,23 +76,25 @@ export default function HrStructurePage() {
     code: "",
     name: "",
     description: "",
+    ...creationLifecycle(),
   });
   const [costCenter, setCostCenter] = useState({
     code: "",
     name: "",
     description: "",
+    ...creationLifecycle(),
   });
   const load = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
-      setData((await hrAPI.getFoundation()).data.data);
+      setData((await hrAPI.getFoundation(dependencyAt ? { dependencyAt } : undefined)).data.data);
     } catch (err) {
       setError(apiError(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dependencyAt]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -105,12 +114,15 @@ export default function HrStructurePage() {
       setSaving(true);
       setError("");
       setSuccess("");
+      setBlockedDependencies([]);
       await action();
       reset?.();
       setSuccess(message);
       await load();
     } catch (err) {
       setError(apiError(err));
+      const dependencies = (err as any)?.response?.data?.dependencies;
+      setBlockedDependencies(Array.isArray(dependencies) ? dependencies : []);
     } finally {
       setSaving(false);
     }
@@ -133,6 +145,22 @@ export default function HrStructurePage() {
     >
       {error && <HrMessage>{error}</HrMessage>}
       {success && <HrMessage tone="success">{success}</HrMessage>}
+      {blockedDependencies.length > 0 && (
+        <ErpCard className="space-y-3 p-4">
+          <p className="text-sm font-semibold text-[var(--sds-text-primary)]">وابستگی‌های مانع غیرفعال‌سازی</p>
+          <div className="flex flex-wrap gap-2">
+            {blockedDependencies.map((dependency) => (
+              <ErpButton
+                key={`${dependency.kind}:${dependency.href}`}
+                label={`${dependency.kind} · ${dependency.count.toLocaleString("fa-IR")}`}
+                href={dependency.href}
+                tone="warning"
+                variant="outline"
+              />
+            ))}
+          </div>
+        </ErpCard>
+      )}
       {inactiveOnly && (
         <ErpCard className="flex flex-wrap items-center justify-between gap-3 p-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-[var(--sds-text-primary)]">
@@ -163,7 +191,7 @@ export default function HrStructurePage() {
         >
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(300px,0.55fr)]">
             <div className="space-y-3">
-              {visible(data.organizationalUnits).map((item: any) => (
+              {visibleUnits.map((item: any) => (
                 <ItemCard
                   key={item.id}
                   title={item.name}
@@ -172,16 +200,19 @@ export default function HrStructurePage() {
                   onToggle={() =>
                     run(
                       () =>
-                        hrAPI.updateOrganizationalUnit(item.id, {
-                          ...item,
-                          isActive: !item.isActive,
+                        hrAPI.changeFoundationLifecycle("organizational-unit", item.id, {
+                          status: item.isActive ? "INACTIVE" : "ACTIVE",
+                          effectiveFrom: new Date().toISOString().slice(0, 10),
+                          reason: item.isActive ? "غیرفعال‌سازی از مدیریت ساختار" : "فعال‌سازی از مدیریت ساختار",
+                          expectedUpdatedAt: item.updatedAt,
+                          idempotencyKey: crypto.randomUUID(),
                         }),
                       "وضعیت واحد به‌روزرسانی شد.",
                     )
                   }
                 />
               ))}
-              {!visible(data.organizationalUnits).length && (
+              {!visibleUnits.length && (
                 <ErpEmptyState icon={FaSitemap} title="واحدی تعریف نشده است" />
               )}
             </div>
@@ -233,6 +264,7 @@ export default function HrStructurePage() {
                       ))}
                   </ErpSelect>
                 </HrField>
+                <CreationLifecycleFields form={unit} setForm={setUnit} />
                 <ErpButton
                   label="ثبت واحد"
                   icon={FaPlus}
@@ -266,9 +298,12 @@ export default function HrStructurePage() {
                   onToggle={() =>
                     run(
                       () =>
-                        hrAPI.updateJob(item.id, {
-                          ...item,
-                          isActive: !item.isActive,
+                        hrAPI.changeFoundationLifecycle("job", item.id, {
+                          status: item.isActive ? "INACTIVE" : "ACTIVE",
+                          effectiveFrom: new Date().toISOString().slice(0, 10),
+                          reason: item.isActive ? "غیرفعال‌سازی از مدیریت ساختار" : "فعال‌سازی از مدیریت ساختار",
+                          expectedUpdatedAt: item.updatedAt,
+                          idempotencyKey: crypto.randomUUID(),
                         }),
                       "وضعیت شغل به‌روزرسانی شد.",
                     )
@@ -314,6 +349,7 @@ export default function HrStructurePage() {
                     }
                   />
                 </HrField>
+                <CreationLifecycleFields form={job} setForm={setJob} />
                 <ErpButton
                   label="ثبت شغل"
                   icon={FaPlus}
@@ -366,13 +402,12 @@ export default function HrStructurePage() {
                         onClick={() =>
                           run(
                             () =>
-                              hrAPI.updatePosition(item.id, {
-                                ...item,
-                                isActive: !item.isActive,
-                                workplaceId: item.workplaceId || "",
-                                costCenterId: item.costCenterId || "",
-                                supervisorPositionId:
-                                  item.supervisorPositionId || "",
+                              hrAPI.changeFoundationLifecycle("position", item.id, {
+                                status: item.isActive ? "INACTIVE" : "ACTIVE",
+                                effectiveFrom: new Date().toISOString().slice(0, 10),
+                                reason: item.isActive ? "غیرفعال‌سازی از مدیریت ساختار" : "فعال‌سازی از مدیریت ساختار",
+                                expectedUpdatedAt: item.updatedAt,
+                                idempotencyKey: crypto.randomUUID(),
                               }),
                             "وضعیت جایگاه به‌روزرسانی شد.",
                           )
@@ -521,6 +556,7 @@ export default function HrStructurePage() {
                       ))}
                   </ErpSelect>
                 </HrField>
+                <CreationLifecycleFields form={position} setForm={setPosition} />
               </div>
               <div className="mt-4">
                 <ErpButton
@@ -558,15 +594,18 @@ export default function HrStructurePage() {
               run(
                 () => hrAPI.createWorkplace(workplace),
                 "محل کار ثبت شد.",
-                () => setWorkplace({ code: "", name: "", description: "" }),
+                () => setWorkplace({ code: "", name: "", description: "", ...creationLifecycle() }),
               )
             }
             onToggle={(item: any) =>
               run(
                 () =>
-                  hrAPI.updateWorkplace(item.id, {
-                    ...item,
-                    isActive: !item.isActive,
+                  hrAPI.changeFoundationLifecycle("workplace", item.id, {
+                    status: item.isActive ? "INACTIVE" : "ACTIVE",
+                    effectiveFrom: new Date().toISOString().slice(0, 10),
+                    reason: item.isActive ? "غیرفعال‌سازی از مدیریت ساختار" : "فعال‌سازی از مدیریت ساختار",
+                    expectedUpdatedAt: item.updatedAt,
+                    idempotencyKey: crypto.randomUUID(),
                   }),
                 "وضعیت محل کار به‌روزرسانی شد.",
               )
@@ -582,15 +621,18 @@ export default function HrStructurePage() {
               run(
                 () => hrAPI.createCostCenter(costCenter),
                 "مرکز هزینه ثبت شد.",
-                () => setCostCenter({ code: "", name: "", description: "" }),
+                () => setCostCenter({ code: "", name: "", description: "", ...creationLifecycle() }),
               )
             }
             onToggle={(item: any) =>
               run(
                 () =>
-                  hrAPI.updateCostCenter(item.id, {
-                    ...item,
-                    isActive: !item.isActive,
+                  hrAPI.changeFoundationLifecycle("cost-center", item.id, {
+                    status: item.isActive ? "INACTIVE" : "ACTIVE",
+                    effectiveFrom: new Date().toISOString().slice(0, 10),
+                    reason: item.isActive ? "غیرفعال‌سازی از مدیریت ساختار" : "فعال‌سازی از مدیریت ساختار",
+                    expectedUpdatedAt: item.updatedAt,
+                    idempotencyKey: crypto.randomUUID(),
                   }),
                 "وضعیت مرکز هزینه به‌روزرسانی شد.",
               )
@@ -607,6 +649,21 @@ function FormTitle({ children }: { children: React.ReactNode }) {
     <h3 className="mb-4 font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
       {children}
     </h3>
+  );
+}
+function CreationLifecycleFields({ form, setForm }: { form: any; setForm: (value: any) => void }) {
+  return (
+    <>
+      <HrField label="وضعیت آغاز" required>
+        <ErpSelect value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}>
+          <option value="ACTIVE">فعال</option>
+          <option value="INACTIVE">غیرفعال</option>
+        </ErpSelect>
+      </HrField>
+      <HrField label={form.status === "ACTIVE" ? "تاریخ فعال‌سازی" : "تاریخ ثبت وضعیت"} required>
+        <ErpInput type="date" min={new Date().toISOString().slice(0, 10)} value={form.effectiveFrom} onChange={(event) => setForm({ ...form, effectiveFrom: event.target.value })} />
+      </HrField>
+    </>
   );
 }
 function ItemCard({
@@ -684,6 +741,7 @@ function CatalogSection({
                 />
               </HrField>
             </div>
+            <CreationLifecycleFields form={form} setForm={setForm} />
           </div>
           <div className="mt-3">
             <ErpButton

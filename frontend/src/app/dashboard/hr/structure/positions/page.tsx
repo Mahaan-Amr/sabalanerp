@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { FaBuilding, FaEdit, FaSync } from "react-icons/fa";
 import {
@@ -12,20 +12,25 @@ import {
   ErpPage,
   ErpProgressRingCard,
 } from "@/components/erp";
-import { positionCapacityCoverage } from "@/features/hr/hrDashboardViewModel";
 import { apiError, HrMessage } from "@/features/hr/hrUi";
 import { hrAPI } from "@/lib/api";
 
 const filters = [
   { id: "all", label: "همه جایگاه‌ها" },
   { id: "vacant", label: "ظرفیت خالی" },
-  { id: "committed", label: "ظرفیت متعهد" },
+  { id: "in-use", label: "در استفاده" },
+  { id: "reserved", label: "رزرو شروع" },
+  { id: "acting", label: "سرپرستی موقت" },
+  { id: "ended", label: "پایان‌یافته" },
+  { id: "future", label: "آینده" },
+  { id: "inactive", label: "غیرفعال" },
   { id: "vacant-supervisor", label: "سرپرستی بدون متصدی" },
 ] as const;
 
 export default function HrPositionCapacityPage() {
   const searchParams = useSearchParams();
   const activeFilter = searchParams.get("filter") || "all";
+  const dependencyAt = searchParams.get("dependencyAt") || "";
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -33,42 +38,40 @@ export default function HrPositionCapacityPage() {
     try {
       setLoading(true);
       setError("");
-      setData((await hrAPI.getFoundation()).data.data);
+      const [positionsResponse, summaryResponse] = await Promise.all([
+        hrAPI.getPositions({ filter: activeFilter, ...(dependencyAt ? { dependencyAt } : {}) }),
+        hrAPI.getPositionCapacitySummary(dependencyAt ? { dependencyAt } : undefined),
+      ]);
+      setData({
+        positions: positionsResponse.data.data.positions,
+        capacitySummary: summaryResponse.data.data,
+      });
     } catch (cause) {
       setError(apiError(cause));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeFilter, dependencyAt]);
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    const focus = searchParams.get("focus");
+    if (!loading && focus) {
+      const savedScroll = sessionStorage.getItem(`hr-position-list-scroll:${activeFilter}:${focus}`);
+      if (savedScroll) window.scrollTo({ top: Number(savedScroll), behavior: "auto" });
+      document.getElementById(`position-${focus}`)?.focus({ preventScroll: true });
+    }
+  }, [activeFilter, loading, searchParams]);
 
-  const positions = useMemo(
-    () =>
-      (data?.positions || []).filter((position: any) => {
-        if (activeFilter === "vacant") return position.vacancy > 0;
-        if (activeFilter === "committed")
-          return position.occupancy.committed > 0;
-        if (activeFilter === "vacant-supervisor")
-          return (
-            position._count?.subordinatePositions > 0 &&
-            position.occupancy.active === 0
-          );
-        return true;
-      }),
-    [activeFilter, data],
-  );
-  const committed = (data?.positions || []).reduce(
-    (sum: number, position: any) =>
-      sum + Number(position.occupancy.committed || 0),
-    0,
-  );
-  const vacant = (data?.positions || []).reduce(
-    (sum: number, position: any) => sum + Number(position.vacancy || 0),
-    0,
-  );
-  const coverage = positionCapacityCoverage(committed, vacant);
+  const positions = data?.positions || [];
+  const coverage = data?.capacitySummary || {
+    capacity: 0,
+    inUse: 0,
+    reservedForStart: 0,
+    vacancy: 0,
+    percentage: null,
+  };
 
   if (loading) return <ErpLoading />;
   return (
@@ -87,12 +90,19 @@ export default function HrPositionCapacityPage() {
     >
       {error && <HrMessage>{error}</HrMessage>}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
-        <ErpProgressRingCard
-          title="پوشش ظرفیت جایگاه‌ها"
-          label="ظرفیت متعهد"
-          percentage={coverage.percentage}
-          detail={`${coverage.committed.toLocaleString("fa-IR")} ظرفیت متعهد از ${coverage.total.toLocaleString("fa-IR")} ظرفیت جایگاه`}
-        />
+        <div className="xl:sticky xl:top-24 xl:self-start">
+          <ErpProgressRingCard
+            title="پوشش ظرفیت جایگاه‌ها"
+            label="در استفاده و رزرو شروع"
+            percentage={coverage.percentage}
+            emptyLabel="بدون ظرفیت فعال"
+            size="compact"
+            href="/dashboard/hr/structure/positions?filter=allocated"
+            detail={coverage.percentage === null
+              ? "هیچ جایگاه فعالی ظرفیت ندارد؛ بنابراین درصد پوشش تعریف‌نشده است."
+              : `${coverage.inUse.toLocaleString("fa-IR")} در استفاده · ${coverage.reservedForStart.toLocaleString("fa-IR")} رزرو شروع · ${coverage.vacancy.toLocaleString("fa-IR")} خالی`}
+          />
+        </div>
         <ErpNeumorphicCard className="p-4 sm:p-5">
           <div className="flex flex-wrap gap-2">
             {filters.map((filter) => (
@@ -111,7 +121,8 @@ export default function HrPositionCapacityPage() {
           </div>
           <div className="mt-4 space-y-3">
             {positions.map((position: any) => (
-              <ErpNeumorphicCard key={position.id} as="article" className="p-4">
+              <div key={position.id} id={`position-${position.id}`} tabIndex={-1}>
+              <ErpNeumorphicCard as="article" className="p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="font-bold text-[var(--sds-text-primary)]">
@@ -129,13 +140,13 @@ export default function HrPositionCapacityPage() {
                 </div>
                 <dl className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-[var(--sds-text-secondary)]">
                   <div>
-                    <dt>فعال</dt>
+                    <dt>در استفاده</dt>
                     <dd className="mt-1 font-black text-[var(--sds-text-primary)]">
                       {position.occupancy.active.toLocaleString("fa-IR")}
                     </dd>
                   </div>
                   <div>
-                    <dt>متعهد</dt>
+                    <dt>رزرو شروع</dt>
                     <dd className="mt-1 font-black text-[var(--sds-text-primary)]">
                       {position.occupancy.committed.toLocaleString("fa-IR")}
                     </dd>
@@ -147,7 +158,17 @@ export default function HrPositionCapacityPage() {
                     </dd>
                   </div>
                 </dl>
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <ErpButton
+                    label="سوابق و ظرفیت"
+                    href={`/dashboard/hr/structure/positions/${position.id}?origin=${encodeURIComponent(`/dashboard/hr/structure/positions${activeFilter === "all" ? "" : `?filter=${activeFilter}`}`)}&focus=${encodeURIComponent(position.id)}`}
+                    onClick={() => sessionStorage.setItem(`hr-position-list-scroll:${activeFilter}:${position.id}`, String(window.scrollY))}
+                    tone="neutral"
+                    variant="outline"
+                  />
+                </div>
               </ErpNeumorphicCard>
+              </div>
             ))}
             {!positions.length && (
               <ErpEmptyState

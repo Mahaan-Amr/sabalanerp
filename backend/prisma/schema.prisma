@@ -3505,6 +3505,7 @@ model HrPosition {
   assignments          HrEmploymentAssignment[]
   hiringApplications   HrJobApplication[]
   capacityChanges      HrPositionCapacityChange[]
+  recruitmentRequests  HrRecruitmentRequest[]
 
   @@index([organizationalUnitId, isActive])
   @@index([jobId, isActive])
@@ -4531,6 +4532,13 @@ enum HrFoundationLifecycleStatus {
   INACTIVE
 }
 
+enum HrRecruitmentRequestStatus {
+  DRAFT
+  APPROVED
+  CLOSED
+  CANCELLED
+}
+
 enum HrReconciliationPrimaryState {
   READY
   NEEDS_REVIEW
@@ -5045,6 +5053,38 @@ model HrPositionCapacityChange {
   @@unique([positionId, version])
   @@index([positionId, effectiveAt])
   @@map("hr_position_capacity_changes")
+}
+
+model HrRecruitmentRequest {
+  id                String                     @id @default(cuid())
+  stableKey         String                     @unique
+  positionId        String
+  status            HrRecruitmentRequestStatus @default(DRAFT)
+  approvedHeadcount Int
+  convertedHires    Int                        @default(0)
+  effectiveFrom     DateTime
+  effectiveTo       DateTime?
+  createdByUserId   String
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  position          HrPosition                 @relation(fields: [positionId], references: [id], onDelete: Restrict)
+
+  @@index([positionId, status, effectiveFrom, effectiveTo])
+  @@map("hr_recruitment_requests")
+}
+
+model HrFoundationReservedCode {
+  id              String   @id @default(cuid())
+  entityType      String
+  code            String
+  deletedEntityId String
+  deletedByUserId String
+  deletedAt       DateTime @default(now())
+  reason          String
+
+  @@unique([entityType, code])
+  @@unique([entityType, deletedEntityId])
+  @@map("hr_foundation_reserved_codes")
 }
 
 model HrReconciliationRecord {

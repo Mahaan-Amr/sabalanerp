@@ -85,6 +85,10 @@ export default function HrPersonnelPage() {
   const searchParams = useSearchParams();
   const relationshipStatus = searchParams.get("relationshipStatus") || "";
   const attention = searchParams.get("attention") || "";
+  const organizationalUnitId = searchParams.get("organizationalUnitId") || "";
+  const workplaceId = searchParams.get("workplaceId") || "";
+  const costCenterId = searchParams.get("costCenterId") || "";
+  const dependencyAt = searchParams.get("dependencyAt") || "";
   const [rows, setRows] = useState<any[]>([]);
   const [foundation, setFoundation] = useState<any>({
     positions: [],
@@ -124,6 +128,10 @@ export default function HrPersonnelPage() {
           archived: archiveView,
           ...(relationshipStatus ? { relationshipStatus } : {}),
           ...(attention ? { attention } : {}),
+          ...(organizationalUnitId ? { organizationalUnitId } : {}),
+          ...(workplaceId ? { workplaceId } : {}),
+          ...(costCenterId ? { costCenterId } : {}),
+          ...(dependencyAt ? { dependencyAt } : {}),
           page,
           pageSize: 50,
         }),
@@ -145,7 +153,7 @@ export default function HrPersonnelPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, archiveView, page, relationshipStatus, attention]);
+  }, [search, archiveView, page, relationshipStatus, attention, organizationalUnitId, workplaceId, costCenterId, dependencyAt]);
 
   useEffect(() => {
     void load();

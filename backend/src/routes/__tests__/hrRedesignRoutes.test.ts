@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import type { RequestHandler } from 'express';
 import { HR_REDESIGN_CATALOG } from '../../services/hrRedesignDataContracts';
-import router, { featureForPath } from '../hr';
+import router, { featureForPath, filterFoundationPositions } from '../hr';
 
 for (const personnelPath of ['/personnel', '/relationships/relationship-1', '/assignments/assignment-1', '/supervisor-candidates']) {
   assert.equal(featureForPath(personnelPath), 'PERSONNEL', `${personnelPath} must use the Personnel feature boundary`);
@@ -36,6 +36,14 @@ for (const route of [
   'POST /foundation/:entityType/:id/lifecycle',
   'DELETE /foundation/:entityType/:id/permanent',
 ]) assert.ok(registeredRoutes.includes(route), `missing lifecycle-safe organization route: ${route}`);
+
+const drilldownPositions = [
+  { id: 'p1', supervisorPositionId: 's1', organizationalUnitId: 'u1', jobId: 'j1', workplaceId: 'w1', costCenterId: 'c1', isActive: true, capacityBreakdown: { vacancy: 0, inUse: 1, reservedForStart: 0, acting: 0, ended: 0, future: 0 }, _count: { subordinatePositions: 0 } },
+  { id: 'p2', supervisorPositionId: null, organizationalUnitId: 'u2', jobId: 'j2', workplaceId: null, costCenterId: null, isActive: true, capacityBreakdown: { vacancy: 1, inUse: 0, reservedForStart: 0, acting: 0, ended: 0, future: 0 }, _count: { subordinatePositions: 0 } },
+] as any;
+for (const filter of ['supervisor:s1', 'organizational-unit:u1', 'job:j1', 'workplace:w1', 'cost_center:c1']) {
+  assert.deepEqual(filterFoundationPositions(drilldownPositions, filter).map((position) => position.id), ['p1'], `${filter} must be server-filtered`);
+}
 
 for (const legacyRoute of [
   'GET /migration/preview',

@@ -307,7 +307,13 @@ export const personnelAPI = {
 
 export const hrAPI = {
   getDashboard: () => api.get('/hr/dashboard'),
-  getFoundation: () => api.get('/hr/foundation'),
+  getFoundation: (params?: { dependencyAt?: string }) => api.get('/hr/foundation', { params }),
+  getPositions: (params?: { filter?: string; dependencyAt?: string }) => api.get('/hr/positions', { params }),
+  getPositionCapacitySummary: (params?: { dependencyAt?: string }) => api.get('/hr/positions/capacity-summary', { params }),
+  getPositionHistory: (id: string) => api.get(`/hr/positions/${id}/history`),
+  changePositionCapacity: (id: string, data: any) => api.post(`/hr/positions/${id}/capacity-changes`, data),
+  getFoundationDependencies: (entityType: string, id: string) => api.get(`/hr/foundation/${entityType}/${id}/dependencies`),
+  changeFoundationLifecycle: (entityType: string, id: string, data: any) => api.post(`/hr/foundation/${entityType}/${id}/lifecycle`, data),
   createOrganizationalUnit: (data: any) => api.post('/hr/organizational-units', data),
   updateOrganizationalUnit: (id: string, data: any) => api.put(`/hr/organizational-units/${id}`, data),
   createWorkplace: (data: any) => api.post('/hr/workplaces', data),

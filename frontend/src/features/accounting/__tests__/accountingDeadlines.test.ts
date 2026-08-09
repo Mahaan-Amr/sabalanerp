@@ -15,6 +15,10 @@ test('type-specific buckets open canonical registers even for an explicit empty 
     deadlineRegisterHref('check', 'later30'),
     '/dashboard/accounting/payments?view=unsettled-checks&due=later30',
   );
+  assert.equal(
+    deadlineRegisterHref('receivable'),
+    '/dashboard/accounting/receivables?view=open',
+  );
 });
 
 test('deadline rows use contract collection focus or legacy register identity focus', () => {

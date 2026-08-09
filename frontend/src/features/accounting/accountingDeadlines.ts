@@ -8,12 +8,12 @@ export type DeadlineNavigationRow = {
   contractId?: string | null;
 };
 
-export const deadlineRegisterHref = (type: DeadlineType, bucket: DeadlineBucket) => {
+export const deadlineRegisterHref = (type: DeadlineType, bucket?: DeadlineBucket) => {
   const pathname = type === 'receivable'
     ? '/dashboard/accounting/receivables'
     : '/dashboard/accounting/payments';
   const view = type === 'receivable' ? 'open' : 'unsettled-checks';
-  return `${pathname}?view=${view}&due=${bucket}`;
+  return `${pathname}?view=${view}${bucket ? `&due=${bucket}` : ''}`;
 };
 
 export const deadlineRowHref = (row: DeadlineNavigationRow) => {

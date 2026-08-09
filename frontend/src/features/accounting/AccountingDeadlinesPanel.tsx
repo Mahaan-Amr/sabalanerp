@@ -7,7 +7,7 @@ import {
   ErpBadge,
   ErpButton,
   ErpCard,
-  ErpEmptyState,
+  ErpInlineState,
   ErpSection,
   ErpSegmentedControl,
 } from '@/components/erp';
@@ -90,7 +90,7 @@ export default function AccountingDeadlinesPanel({
           }))}
         />
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {(Object.keys(bucketLabels) as DeadlineBucket[]).map((bucket) => {
             const counts = deadlines.bucketCounts[bucket];
             const active = selectedDue === bucket;
@@ -111,18 +111,18 @@ export default function AccountingDeadlinesPanel({
                     {selectedCount(counts, selectedType).toLocaleString('fa-IR')}
                   </span>
                 </Link>
-                <div className="grid grid-cols-2 gap-2 border-t border-[var(--sds-border-subtle)] p-2">
+                <div className="grid gap-2 border-t border-[var(--sds-border-subtle)] p-2">
                   <ErpButton
                     href={deadlineRegisterHref('receivable', bucket)}
                     label={`دریافتنی ${counts.receivable.toLocaleString('fa-IR')}`}
                     tone="success"
-                    className="min-h-11 px-2 text-xs"
+                    className="min-h-11 w-full justify-between px-3 text-xs"
                   />
                   <ErpButton
                     href={deadlineRegisterHref('check', bucket)}
                     label={`چک ${counts.check.toLocaleString('fa-IR')}`}
                     tone="warning"
-                    className="min-h-11 px-2 text-xs"
+                    className="min-h-11 w-full justify-between px-3 text-xs"
                   />
                 </div>
               </ErpCard>
@@ -131,10 +131,22 @@ export default function AccountingDeadlinesPanel({
         </div>
 
         {deadlines.items.length === 0 ? (
-          <ErpEmptyState
-            title="موردی در این فیلتر وجود ندارد"
-            description={`${typeLabels[selectedType]} در ${selectedDue ? bucketLabels[selectedDue] : 'همه سررسیدها'} نتیجه‌ای ندارد.`}
-            icon={FaCalendarAlt}
+          <ErpInlineState
+            kind="empty"
+            className="rounded-lg border"
+            title={`${typeLabels[selectedType]} در ${selectedDue ? bucketLabels[selectedDue] : 'همه سررسیدها'} نتیجه‌ای ندارد. فقط دریافتنی‌های باز و چک‌های تسویه‌نشده‌ای نمایش داده می‌شوند که تاریخ سررسید دارند.`}
+            actions={[
+              {
+                href: deadlineRegisterHref('receivable', selectedDue || undefined),
+                label: 'بررسی دریافتنی‌ها',
+                tone: 'success',
+              },
+              {
+                href: deadlineRegisterHref('check', selectedDue || undefined),
+                label: 'بررسی چک‌ها',
+                tone: 'warning',
+              },
+            ]}
           />
         ) : (
           <ul className="divide-y divide-[var(--sds-border-subtle)] rounded-lg border border-[var(--sds-border-default)]">

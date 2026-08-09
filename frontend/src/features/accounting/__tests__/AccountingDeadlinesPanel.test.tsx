@@ -76,6 +76,10 @@ test('empty deadline filter keeps bucket register actions without rendering stal
     total: 0,
   }));
   assert.match(html, /\/dashboard\/accounting\/receivables\?view=open&amp;due=days8to30/);
+  assert.match(html, /فقط دریافتنی‌های باز و چک‌های تسویه‌نشده‌ای نمایش داده می‌شوند که تاریخ سررسید دارند/);
+  assert.match(html, /\/dashboard\/accounting\/payments\?view=unsettled-checks&amp;due=days8to30/);
+  assert.match(html, /بررسی دریافتنی‌ها/);
+  assert.match(html, /بررسی چک‌ها/);
   assert.doesNotMatch(html, /<li/);
   assert.doesNotMatch(html, /recordId=/);
 });

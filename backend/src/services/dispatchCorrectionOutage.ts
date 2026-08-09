@@ -36,6 +36,7 @@ export const dispatchLifecycleAuditEventHash = (input: {
   at: Date;
   previousHash: string | null;
 }) => digest(input);
+export const dispatchCorrectionIntegrityHash = (value: unknown) => digest(value);
 const required = (value: unknown, name: string) => {
   const result = String(value || '').trim();
   if (!result) throw new DispatchRecoveryValidationError(`${name} is required.`);

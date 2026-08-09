@@ -16,9 +16,14 @@ import {
 import { createPrismaDispatchArtifactAuditPort } from './prisma';
 import { approvedPricingVersionIntegrityHash } from '../approvedPricing/domain';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
+import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
+import { guardPhysicalExitAuditIntegrityHash, guardPhysicalExitIntegrityHash } from '../physicalGateExit';
 import { decryptRecoveryArchive, sha256File } from '../recoveryCrypto';
 
 const execFileAsync = promisify(execFile);
+export const DISPATCH_DOCUMENT_STORAGE_CLAIM_NAMESPACE = 'DISPATCH_DOCUMENT_STORAGE_KEY';
+export const claimDispatchDocumentStorageKey = (tx: Prisma.TransactionClient, storageKey: string) =>
+  tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${DISPATCH_DOCUMENT_STORAGE_CLAIM_NAMESPACE}), hashtext(${storageKey}))`;
 
 const safePath = (root: string, storageKey: string) => {
   const normalized = storageKey.replace(/\\/g, '/');
@@ -38,7 +43,7 @@ const regularFiles = async (root: string, current = root): Promise<string[]> => 
   for (const entry of entries) {
     const absolute = path.join(current, entry.name);
     if (entry.isDirectory()) result.push(...await regularFiles(root, absolute));
-    else if (entry.isFile()) result.push(path.relative(root, absolute).replace(/\\/g, '/'));
+    else if (entry.isFile() && !entry.name.includes('.sabalan-restore-')) result.push(path.relative(root, absolute).replace(/\\/g, '/'));
   }
   return result;
 };
@@ -51,8 +56,12 @@ export const createDispatchDocumentFilesystem = (input: {
   const artifactRoot = input.artifactRoot ?? path.join(process.cwd(), 'storage', 'dispatch-documents');
   const quarantineRoot = input.quarantineRoot ?? path.join(process.cwd(), 'storage', 'dispatch-documents-quarantine');
   const cleanupStagingRoot = input.cleanupStagingRoot ?? path.join(process.cwd(), 'storage', 'dispatch-documents-cleanup-staging');
-  const restoreStagingRoot = `${artifactRoot}-restore-staging`;
-  const restorePreviousRoot = `${artifactRoot}-restore-previous`;
+  const restorePaths = (storageKey: string) => {
+    const destination = safePath(artifactRoot, storageKey); const directory = path.dirname(destination); const name = path.basename(destination);
+    return { destination, staged: path.join(directory, `.${name}.sabalan-restore-stage`), previous: path.join(directory, `.${name}.sabalan-restore-previous`), marker: path.join(directory, `.${name}.sabalan-restore-marker`) };
+  };
+  const syncFile = async (target: string, bytes: Buffer) => { const descriptor = await fs.promises.open(target, 'w'); try { await descriptor.writeFile(bytes); await descriptor.sync(); } finally { await descriptor.close(); } };
+  const marker = async (target: string, value: unknown) => syncFile(target, Buffer.from(JSON.stringify(value), 'utf8'));
   const move = async (fromRoot: string, toRoot: string, storageKey: string) => {
     const source = safePath(fromRoot, storageKey); const destination = safePath(toRoot, storageKey);
     await fs.promises.mkdir(path.dirname(destination), { recursive: true });
@@ -64,33 +73,39 @@ export const createDispatchDocumentFilesystem = (input: {
       const target = safePath(artifactRoot, storageKey);
       try { return await fs.promises.readFile(target); } catch (error: any) { if (error?.code === 'ENOENT') return null; throw error; }
     },
-    recoverInterruptedWrite: async (storageKey: string) => {
-      const destination = safePath(artifactRoot, storageKey); const staged = safePath(restoreStagingRoot, storageKey); const previous = safePath(restorePreviousRoot, storageKey);
-      if (fs.existsSync(previous)) { await fs.promises.rm(destination, { force: true }); await fs.promises.mkdir(path.dirname(destination), { recursive: true }); await fs.promises.rename(previous, destination); }
-      await fs.promises.rm(staged, { force: true });
+    recoverInterruptedWrite: async (storageKey: string, completed: boolean) => {
+      const targets = restorePaths(storageKey); if (!fs.existsSync(targets.marker)) { await fs.promises.rm(targets.staged, { force: true }); return; }
+      const state = JSON.parse(await fs.promises.readFile(targets.marker, 'utf8')) as { phase?: string; hadPrevious?: boolean };
+      if (!completed && state.phase !== 'COMPLETED') {
+        if (state.hadPrevious && fs.existsSync(targets.previous)) { const recovery = `${targets.staged}.rollback`; await fs.promises.copyFile(targets.previous, recovery); const handle = await fs.promises.open(recovery, 'r+'); try { await handle.sync(); } finally { await handle.close(); } await fs.promises.rename(recovery, targets.destination); }
+        else if (!state.hadPrevious && state.phase === 'SWAPPED') await fs.promises.rm(targets.destination, { force: true });
+      }
+      await Promise.all([targets.staged, targets.previous, targets.marker].map(target => fs.promises.rm(target, { force: true })));
     },
     stageOriginal: async (storageKey: string, bytes: Buffer) => {
-      const staged = safePath(restoreStagingRoot, storageKey); await fs.promises.mkdir(path.dirname(staged), { recursive: true }); await fs.promises.rm(staged, { force: true });
-      const descriptor = await fs.promises.open(staged, 'wx');
-      try { await descriptor.writeFile(bytes); await descriptor.sync(); } finally { await descriptor.close(); }
-      const verified = await fs.promises.readFile(staged); if (!verified.equals(bytes)) throw new Error('Staged original bytes failed verification.');
+      const targets = restorePaths(storageKey); await fs.promises.mkdir(path.dirname(targets.destination), { recursive: true });
+      await Promise.all([targets.staged, targets.previous, targets.marker].map(target => fs.promises.rm(target, { force: true })));
+      await syncFile(targets.staged, bytes);
+      const verified = await fs.promises.readFile(targets.staged); if (!verified.equals(bytes)) throw new Error('Staged original bytes failed verification.');
+      const hadPrevious = fs.existsSync(targets.destination);
+      if (hadPrevious) { await fs.promises.copyFile(targets.destination, targets.previous); const handle = await fs.promises.open(targets.previous, 'r+'); try { await handle.sync(); } finally { await handle.close(); } }
+      await marker(targets.marker, { phase: 'STAGED', hadPrevious });
     },
     commitStagedOriginal: async (storageKey: string) => {
-      const destination = safePath(artifactRoot, storageKey); const staged = safePath(restoreStagingRoot, storageKey); const previous = safePath(restorePreviousRoot, storageKey);
-      await fs.promises.mkdir(path.dirname(destination), { recursive: true }); await fs.promises.mkdir(path.dirname(previous), { recursive: true });
-      if (fs.existsSync(previous)) throw new Error('An interrupted restore must be recovered before another commit.');
-      if (fs.existsSync(destination)) await fs.promises.rename(destination, previous);
-      try { await fs.promises.rename(staged, destination); } catch (error) { if (fs.existsSync(previous)) await fs.promises.rename(previous, destination); throw error; }
-      try { const directory = await fs.promises.open(path.dirname(destination), 'r'); try { await directory.sync(); } finally { await directory.close(); } } catch { /* Windows may not fsync directory handles. File bytes were fsynced before rename. */ }
+      const targets = restorePaths(storageKey); const state = JSON.parse(await fs.promises.readFile(targets.marker, 'utf8')) as { hadPrevious: boolean };
+      await fs.promises.rename(targets.staged, targets.destination);
+      await marker(targets.marker, { phase: 'SWAPPED', hadPrevious: state.hadPrevious });
+      try { const directory = await fs.promises.open(path.dirname(targets.destination), 'r'); try { await directory.sync(); } finally { await directory.close(); } } catch { /* Windows may not fsync directory handles. */ }
     },
+    markStagedOriginalCompleted: async (storageKey: string) => { const targets = restorePaths(storageKey); const state = JSON.parse(await fs.promises.readFile(targets.marker, 'utf8')) as { hadPrevious: boolean }; await marker(targets.marker, { phase: 'COMPLETED', hadPrevious: state.hadPrevious }); },
     finalizeStagedOriginal: async (storageKey: string) => {
-      await fs.promises.rm(safePath(restorePreviousRoot, storageKey), { force: true }); await fs.promises.rm(safePath(restoreStagingRoot, storageKey), { force: true });
+      const targets = restorePaths(storageKey); await Promise.all([targets.staged, targets.previous, targets.marker].map(target => fs.promises.rm(target, { force: true })));
     },
     restorePrevious: async (storageKey: string, bytes: Buffer | null) => {
-      const destination = safePath(artifactRoot, storageKey); const staged = safePath(restoreStagingRoot, storageKey); const previous = safePath(restorePreviousRoot, storageKey);
-      if (fs.existsSync(previous)) { await fs.promises.rm(destination, { force: true }); await fs.promises.mkdir(path.dirname(destination), { recursive: true }); await fs.promises.rename(previous, destination); }
-      else if (bytes === null) await fs.promises.rm(destination, { force: true });
-      await fs.promises.rm(staged, { force: true });
+      const targets = restorePaths(storageKey);
+      if (bytes !== null) { const rollback = `${targets.staged}.rollback`; await syncFile(rollback, bytes); await fs.promises.rename(rollback, targets.destination); }
+      else await fs.promises.rm(targets.destination, { force: true });
+      await Promise.all([targets.staged, targets.previous, targets.marker].map(target => fs.promises.rm(target, { force: true })));
     },
     quarantine: (storageKey: string) => move(artifactRoot, quarantineRoot, storageKey),
     restoreQuarantined: (storageKey: string) => move(quarantineRoot, artifactRoot, storageKey),
@@ -132,13 +147,46 @@ const durableAudit = (prisma: PrismaClient) => ({
       // predecessor snapshot after a contending writer releases that lock.
       isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
     }).then(() => undefined),
+  hasCompletedRestoration: async (artifactId: string, idempotencyKey: string) => Boolean(await prisma.dispatchLifecycleAudit.findFirst({
+    where: { aggregateType: 'DISPATCH_DOCUMENT_RECOVERY', aggregateId: artifactId, eventType: 'RESTORATION_COMPLETED',
+      payload: { path: ['idempotencyKey'], equals: idempotencyKey } }, select: { id: true },
+  })),
 });
 
 const metadata = async (prisma: PrismaClient) => (await prisma.dispatchDocumentArtifact.findMany({
   select: { id: true, waybillId: true, storageKey: true, byteLength: true, sha256: true, sourceIntegrityHash: true },
 })).map(item => ({ ...item, byteLength: Number(item.byteLength) }));
 
-export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient, waybillId: string) => {
+export const parsePersistedOrphanEvidence = (payloadValue: unknown, storageKey: string) => {
+  const payload = payloadValue as Record<string, any>; const detail = payload?.detail as Record<string, any> | undefined;
+  const orphans = Array.isArray(detail?.orphans) ? detail.orphans : [];
+  const orphan = orphans.find(item => item?.storageKey === storageKey && item?.status === 'ORPHAN_CANDIDATE');
+  if (!orphan) return null;
+  const expected = dispatchRecoveryIntegrityHash({ artifacts: detail?.artifacts, orphans: detail?.orphans, observedAt: detail?.observedAt });
+  if (typeof detail?.reportHash !== 'string' || typeof detail?.observedAt !== 'string' || expected !== detail.reportHash
+    || !Number.isSafeInteger(orphan.observedByteLength) || orphan.observedByteLength < 0 || !/^[a-f0-9]{64}$/.test(orphan.observedSha256)
+    || orphan.observedAt !== detail.observedAt) return null;
+  return { reportHash: detail.reportHash, observedAt: detail.observedAt, observedByteLength: orphan.observedByteLength as number, observedSha256: orphan.observedSha256 as string };
+};
+
+export const verifyProductionDispatchAuditChains = (audits: readonly { aggregateType: string; aggregateId: string; eventType: string; payload: unknown; actorId: string; recordedAt: Date; previousHash: string | null; eventHash: string }[]) => {
+  const issues: Array<{ code: string; subjectId: string; detail: string }> = []; const previous = new Map<string, string | null>();
+  for (const audit of audits) {
+    const key = `${audit.aggregateType}:${audit.aggregateId}`; const expectedPrevious = previous.get(key) ?? null; const payload = audit.payload as Record<string, any>;
+    const expectedHash = audit.aggregateType === 'DISPATCH_CORRECTION'
+      ? dispatchLifecycleAuditEventHash({ aggregateType: audit.aggregateType, aggregateId: audit.aggregateId, eventType: audit.eventType, payload, actorId: audit.actorId, authority: payload.effectiveAuthority, at: audit.recordedAt, previousHash: audit.previousHash })
+      : audit.aggregateType === 'GUARD_PHYSICAL_EXIT'
+        ? guardPhysicalExitAuditIntegrityHash({ aggregateType: audit.aggregateType, aggregateId: audit.aggregateId, eventType: audit.eventType, payload, actorId: audit.actorId, at: audit.recordedAt, previousHash: audit.previousHash })
+        : dispatchRecoveryIntegrityHash({ aggregateType: audit.aggregateType, aggregateId: audit.aggregateId, eventType: audit.eventType, payload, actorId: audit.actorId, recordedAt: audit.recordedAt.toISOString(), previousHash: audit.previousHash });
+    if (audit.previousHash !== expectedPrevious || audit.eventHash !== expectedHash || !audit.actorId) issues.push({ code: 'AUDIT_CHAIN_BROKEN', subjectId: audit.aggregateId, detail: 'Lifecycle audit predecessor, writer-specific hash, or actor is invalid.' });
+    previous.set(key, audit.eventHash);
+  }
+  return issues;
+};
+
+export type DispatchReplayTruthVerifier = { verifyPrimarySource(input: { allocationRevisionId: string; allocationIntegrityHash: string; expectedSourceIntegrityHash: string; pricingVersionIds: readonly string[]; pricedEventIntegrityHashes: readonly string[] }): Promise<boolean> };
+
+export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient, waybillId: string, truthVerifier?: DispatchReplayTruthVerifier) => {
   const waybill = await prisma.accountingDispatchWaybill.findUnique({ where: { id: waybillId }, include: {
     candidate: { include: { allocationRevision: { include: {
       lines: true,
@@ -149,7 +197,6 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     printHandoffs: { include: { items: true } },
     physicalExit: true,
     dispatchCorrections: { include: { lines: true, statementAdjustment: { include: { artifact: true } } } },
-    commandResults: true,
   } });
   if (!waybill) throw new Error('Dispatch waybill does not exist.');
   const issues: Array<{ code: string; subjectId: string; detail: string }> = [];
@@ -196,22 +243,33 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     }
   }
   if (waybill.physicalExit) {
-    if (waybill.physicalExit.allocationRevisionId !== revision.id || dispatchRecoveryIntegrityHash(waybill.physicalExit.snapshot) !== waybill.physicalExit.integrityHash) issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: waybill.physicalExit.id, detail: 'Guard exit identity or snapshot hash differs from the issued chain.' });
+    if (waybill.physicalExit.allocationRevisionId !== revision.id || guardPhysicalExitIntegrityHash(waybill.physicalExit.snapshot) !== waybill.physicalExit.integrityHash) issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: waybill.physicalExit.id, detail: 'Guard exit identity or snapshot hash differs from the issued chain.' });
   }
   for (const correction of waybill.dispatchCorrections.filter(item => item.status === 'POSTED')) {
     const adjustment = correction.statementAdjustment;
     if (!correction.reason || !correction.postedAt || !correction.postedBy || !adjustment || !adjustment.artifact) issues.push({ code: 'MISSING_EVIDENCE', subjectId: correction.id, detail: 'Posted correction lacks reason/time/actor, adjustment, or retained artifact.' });
-    if (adjustment && dispatchRecoveryIntegrityHash(adjustment.snapshot) !== adjustment.integrityHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: adjustment.id, detail: 'Statement-adjustment snapshot hash changed.' });
+    if (adjustment && pricedAllocationIntegrityHash(adjustment.snapshot) !== adjustment.integrityHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: adjustment.id, detail: 'Statement-adjustment snapshot hash changed.' });
+    const correctionHash = dispatchCorrectionIntegrityHash({ correctionId: correction.id, waybillId: correction.waybillId, reason: correction.reason,
+      effectiveAt: correction.effectiveAt, lines: correction.lines, postedAt: correction.postedAt });
+    if (correction.integrityHash !== correctionHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: correction.id, detail: 'Posted correction hash changed.' });
     for (const line of correction.lines) if (!line.contractId || !line.contractItemId || !line.productRowId || !line.unit || line.quantity.toFixed(3) === '0.000') issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: line.id, detail: 'Correction line identity/unit/quantity evidence is incomplete.' });
   }
-  const objects = (value: unknown): Record<string, any>[] => {
-    if (Array.isArray(value)) return value.flatMap(objects);
-    if (!value || typeof value !== 'object') return [];
-    return [value as Record<string, any>, ...Object.values(value as Record<string, unknown>).flatMap(objects)];
-  };
-  const renderObjects = waybill.commandResults.flatMap(command => objects(command.result));
-  const statement = renderObjects.find(value => value.kind === 'STATEMENT' && value.payload && typeof value.payload === 'object');
-  const documentedLines = statement ? objects(statement.payload.contracts).filter(value => typeof value.productRowId === 'string' && typeof value.quantity === 'string') : [];
+  const waybillSnapshot = waybill.snapshot as Record<string, any>;
+  const provenance = waybillSnapshot?.documentProvenance as Record<string, any> | undefined;
+  const primaryArtifacts = waybill.documentArtifacts.filter(item => !item.statementAdjustmentId && (item.kind === 'WAYBILL' || item.kind === 'STATEMENT'));
+  const primarySourceHash = typeof provenance?.sourceIntegrityHash === 'string' ? provenance.sourceIntegrityHash : null;
+  if (!primarySourceHash || primaryArtifacts.length !== 2 || primaryArtifacts.some(artifact => artifact.sourceIntegrityHash !== primarySourceHash)) {
+    issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: waybill.id, detail: 'Retained primary artifacts do not bind the immutable waybill document-provenance snapshot.' });
+  }
+  if (primarySourceHash && truthVerifier && !await truthVerifier.verifyPrimarySource({ allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash,
+    expectedSourceIntegrityHash: primarySourceHash, pricingVersionIds: revision.pricingReferences.map(item => item.pricingVersionId).sort(),
+    pricedEventIntegrityHashes: revision.pricedAllocationEvents.map(item => item.integrityHash).sort() })) issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: waybill.id, detail: 'Writer-owned primary source verifier rejected the immutable pricing/allocation snapshot.' });
+  if (primarySourceHash && !truthVerifier) {
+    const identities = provenance?.sourceVersionIdentities as Record<string, unknown> | undefined; const pricingVersions = Array.isArray(provenance?.pricingVersions) ? provenance.pricingVersions : [];
+    if (provenance?.allocationRevisionId !== revision.id || provenance?.allocationIntegrityHash !== revision.integrityHash
+      || revision.pricingReferences.some(reference => !pricingVersions.some((item: any) => item?.pricingVersionId === reference.pricingVersionId && item?.integrityHash === reference.pricingVersion.integrityHash)
+        || !identities || !Object.values(identities).includes(reference.pricingVersionId))) issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: waybill.id, detail: 'Immutable document provenance does not map every bound pricing version and allocation hash.' });
+  }
   const currencyByVersion = new Map(revision.pricingReferences.map(reference => [reference.pricingVersionId, reference.pricingVersion.currency]));
   const pricedMoney = new Map<string, { gross: Prisma.Decimal; discount: Prisma.Decimal; net: Prisma.Decimal }>();
   for (const event of revision.pricedAllocationEvents) {
@@ -220,23 +278,30 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     pricedMoney.set(currency, { gross: current.gross.plus(event.grossAmount), discount: current.discount.plus(event.discountAmount), net: current.net.plus(event.netAmount) });
   }
   const posted = waybill.dispatchCorrections.filter(item => item.status === 'POSTED');
+  const runningNet = new Map([...pricedMoney].map(([currency, totals]) => [currency, totals.net]));
+  const adjustmentWitnesses: Array<{ id: string; currency: string; before: string; delta: string; after: string }> = [];
+  for (const correction of [...posted].sort((left, right) => (left.statementAdjustment?.sequence ?? 0) - (right.statementAdjustment?.sequence ?? 0))) {
+    const adjustment = correction.statementAdjustment; const snapshot = adjustment?.snapshot as Record<string, any> | undefined; const totals = snapshot?.totals as Record<string, any> | undefined;
+    if (!adjustment || !totals || typeof snapshot?.currency !== 'string' || adjustment.artifact?.sourceIntegrityHash !== adjustment.integrityHash) continue;
+    const before = runningNet.get(snapshot.currency); const delta = new Prisma.Decimal(String(totals.netAmountDelta ?? 'NaN'));
+    if (!before || !delta.isFinite()) continue;
+    const after = before.plus(delta); runningNet.set(snapshot.currency, after);
+    adjustmentWitnesses.push({ id: adjustment.id, currency: snapshot.currency, before: before.toFixed(12), delta: delta.toFixed(12), after: after.toFixed(12) });
+  }
   issues.push(...validateDispatchLifecycleConservation({
     candidate: { status: waybill.candidate.status, dispositionAt: waybill.candidate.dispositionAt?.toISOString() ?? null, dispositionBy: waybill.candidate.dispositionBy },
     lifecycle: { requiresPrintHandoff: waybill.printHandoffs.some(item => item.status === 'SUCCEEDED'), hasPrintHandoff: waybill.printHandoffs.some(item => item.status === 'SUCCEEDED'), requiresGuardExit: waybill.status === 'EXIT_RECORDED', hasGuardExit: Boolean(waybill.physicalExit), requiredAdjustmentIds: posted.map(item => item.statementAdjustment?.id ?? `missing:${item.id}`), actualAdjustmentIds: posted.flatMap(item => item.statementAdjustment ? [item.statementAdjustment.id] : []) },
     quantityWitnesses: [
       ...revision.lines.map(line => ({ stage: 'ALLOCATION' as const, rowId: line.productRowId, unit: line.unit, value: line.quantity.toFixed(3) })),
       ...revision.pricedAllocationEvents.map(event => { const line = lineById.get(event.allocationRevisionLineId); return { stage: 'PRICED' as const, rowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: event.quantity.toFixed(3) }; }),
-      ...documentedLines.map(line => ({ stage: 'DOCUMENTED' as const, rowId: String(line.productRowId), unit: String(line.unit ?? ''), value: String(line.quantity) })),
+      ...(primarySourceHash ? revision.pricedAllocationEvents.map(event => { const line = lineById.get(event.allocationRevisionLineId); return { stage: 'DOCUMENTED' as const, rowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: event.quantity.toFixed(3) }; }) : []),
       ...(waybill.physicalExit ? revision.lines.map(line => ({ stage: 'EXIT' as const, rowId: line.productRowId, unit: line.unit, value: line.quantity.toFixed(3) })) : []),
     ],
     moneyWitnesses: [
       ...[...pricedMoney].map(([currency, value]) => ({ stage: 'PRICED' as const, currency, gross: value.gross.toFixed(12), discount: value.discount.toFixed(12), net: value.net.toFixed(12) })),
-      ...(statement?.payload ? [{ stage: 'DOCUMENTED' as const, currency: String(statement.payload.currency ?? ''), gross: String(statement.payload.grossAmount ?? ''), discount: String(statement.payload.allocatedDiscount ?? statement.payload.discountAmount ?? ''), net: String(statement.payload.netAmount ?? '') }] : []),
+      ...(primarySourceHash ? [...pricedMoney].map(([currency, value]) => ({ stage: 'DOCUMENTED' as const, currency, gross: value.gross.toFixed(12), discount: value.discount.toFixed(12), net: value.net.toFixed(12) })) : []),
     ],
-    adjustmentWitnesses: posted.flatMap(item => {
-      const values = item.statementAdjustment ? objects(item.statementAdjustment.snapshot).find(value => value.beforeNetAmount !== undefined && value.netAmountDelta !== undefined && value.afterNetAmount !== undefined) : undefined;
-      return item.statementAdjustment && values ? [{ id: item.statementAdjustment.id, currency: String(values.currency ?? statement?.payload?.currency ?? ''), before: String(values.beforeNetAmount), delta: String(values.netAmountDelta), after: String(values.afterNetAmount) }] : [];
-    }),
+    adjustmentWitnesses,
   }));
   const expectedAggregates = [
     { aggregateType: 'LOGISTICS_ALLOCATION_REVISION', aggregateId: revision.id, sourceHash: revision.integrityHash },
@@ -249,27 +314,43 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
   for (const expected of expectedAggregates) {
     const rows = audits.filter(audit => audit.aggregateType === expected.aggregateType && audit.aggregateId === expected.aggregateId);
     if (!rows.length) { issues.push({ code: 'MISSING_EVIDENCE', subjectId: expected.aggregateId, detail: `No ${expected.aggregateType} parent audit binds this evidence.` }); continue; }
-    const payloads = rows.map(row => row.payload as Record<string, unknown>);
-    const linked = payloads.some(payload => Object.values(payload).some(value => value === expected.sourceHash)
+    const payloads = rows.map(row => row.payload as Record<string, any>);
+    const contains = (value: unknown, expectedValue: string): boolean => value === expectedValue || (Array.isArray(value) ? value.some(item => contains(item, expectedValue))
+      : Boolean(value && typeof value === 'object' && Object.values(value as Record<string, unknown>).some(item => contains(item, expectedValue))));
+    const linked = payloads.some(payload => contains(payload, expected.sourceHash)
       || (expected.aggregateType === 'ACCOUNTING_DISPATCH_CANDIDATE' && payload.allocationRevisionId === revision.id)
       || (expected.aggregateType === 'ACCOUNTING_DISPATCH_WAYBILL' && payload.candidateId === waybill.candidate.id)
       || (expected.aggregateType === 'GUARD_PHYSICAL_EXIT' && payload.waybillId === waybill.id)
       || (expected.aggregateType === 'DISPATCH_CORRECTION' && payload.waybillId === waybill.id && payload.integrityHash === expected.sourceHash));
     if (!linked) issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: expected.aggregateId, detail: 'Parent audit does not bind the expected immutable source identity/hash.' });
+    if (expected.aggregateType === 'ACCOUNTING_DISPATCH_WAYBILL') {
+      const issued = rows.find(row => row.eventType === 'PRIMARY_BUNDLE_ISSUED'); const payload = issued?.payload as Record<string, any> | undefined;
+      if (!issued || !payload?.correlationId || !payload?.idempotencyKey || payload?.sourceIntegrityHash !== primarySourceHash
+        || !primaryArtifacts.every(artifact => Array.isArray(payload?.artifactIds) && payload.artifactIds.includes(artifact.id))) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: waybill.id, detail: 'Primary issuance audit lacks source/artifact/correlation/idempotency binding.' });
+      for (const handoff of waybill.printHandoffs) if (!rows.some(row => {
+        const handoffPayload = row.payload as Record<string, any>; return row.eventType === 'PRINT_BYTES_HANDED_OFF' && handoffPayload.handoffId === handoff.id
+          && handoffPayload.correlationId === handoff.correlationId && Boolean(handoffPayload.operationIdempotencyKey);
+      })) issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: handoff.id, detail: 'Print handoff is not bound by its waybill parent audit.' });
+    }
+    if (expected.aggregateType === 'LOGISTICS_ALLOCATION_REVISION') {
+      const finalized = rows.find(row => contains(row.payload, revision.integrityHash));
+      if (!finalized || revision.pricingReferences.some(reference => !contains(finalized.payload, reference.pricingVersionId))
+        || revision.pricedAllocationEvents.some(event => !contains(finalized.payload, event.integrityHash))) issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: revision.id, detail: 'Allocation parent audit does not bind every pricing version and priced-event hash.' });
+    }
+    if (expected.aggregateType === 'DISPATCH_CORRECTION') {
+      const postedAudit = rows.find(row => row.eventType === 'CORRECTION_POSTED'); const payload = postedAudit?.payload as Record<string, any> | undefined;
+      const adjustment = waybill.dispatchCorrections.find(item => item.id === expected.aggregateId)?.statementAdjustment;
+      if (!postedAudit || payload?.reason !== waybill.dispatchCorrections.find(item => item.id === expected.aggregateId)?.reason
+        || !payload?.effectiveAuthority || !payload?.workspace || (adjustment && (payload.statementAdjustmentId !== adjustment.id
+          || payload.statementAdjustmentIntegrityHash !== adjustment.integrityHash || payload.statementAdjustmentArtifactId !== adjustment.artifact?.id))) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: expected.aggregateId, detail: 'Correction audit lacks reason/authority or immutable adjustment/artifact binding.' });
+    }
   }
-  const previous = new Map<string, string | null>();
-  for (const audit of audits) {
-    const key = `${audit.aggregateType}:${audit.aggregateId}`; const expectedPrevious = previous.get(key) ?? null;
-    const expectedHash = dispatchRecoveryIntegrityHash({ aggregateType: audit.aggregateType, aggregateId: audit.aggregateId, eventType: audit.eventType,
-      payload: audit.payload, actorId: audit.actorId, recordedAt: audit.recordedAt.toISOString(), previousHash: audit.previousHash });
-    if (audit.previousHash !== expectedPrevious || audit.eventHash !== expectedHash || !audit.actorId) issues.push({ code: 'AUDIT_CHAIN_BROKEN', subjectId: audit.aggregateId, detail: 'Lifecycle audit predecessor, hash, or actor is invalid.' });
-    previous.set(key, audit.eventHash);
-  }
+  issues.push(...verifyProductionDispatchAuditChains(audits));
   return { status: issues.length ? 'UNRESOLVED_INCIDENT' as const : 'VERIFIED' as const, waybillId, issues, evidenceCount: expectedAggregates.length, auditCount: audits.length,
     reportHash: dispatchRecoveryIntegrityHash({ waybillId, expectedAggregates, auditHashes: audits.map(item => item.eventHash), issues }) };
 };
 
-export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, filesystem = createDispatchDocumentFilesystem()) => {
+export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, filesystem = createDispatchDocumentFilesystem(), truthVerifier?: DispatchReplayTruthVerifier) => {
   const audit = durableAudit(prisma);
   const repository = {
     isReferenced: async (storageKey: string) => Boolean(await prisma.dispatchDocumentArtifact.findUnique({ where: { storageKey }, select: { id: true } })),
@@ -287,18 +368,14 @@ export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, f
     readPersistedOrphanEvidence: async (storageKey: string) => {
       const rows = await prisma.dispatchLifecycleAudit.findMany({ where: { aggregateType: 'DISPATCH_DOCUMENT_RECOVERY', eventType: 'RECONCILIATION_COMPLETED' }, orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }], take: 100 });
       for (const row of rows) {
-        const payload = row.payload as Record<string, any>; const detail = payload?.detail as Record<string, any> | undefined;
-        const orphans = Array.isArray(detail?.orphans) ? detail.orphans : [];
-        if (!orphans.some(item => item?.storageKey === storageKey && item?.status === 'ORPHAN_CANDIDATE')) continue;
-        const expected = dispatchRecoveryIntegrityHash({ artifacts: detail?.artifacts, orphans: detail?.orphans, observedAt: detail?.observedAt });
-        if (typeof detail?.reportHash === 'string' && typeof detail?.observedAt === 'string' && expected === detail.reportHash) return { reportHash: detail.reportHash, observedAt: detail.observedAt };
+        const parsed = parsePersistedOrphanEvidence(row.payload, storageKey); if (parsed) return parsed;
       }
       return null;
     },
   };
   return {
     replay: async (command: { waybillId: string; actorId: string; correlationId: string; idempotencyKey: string; authority: DispatchRecoveryAuthority; now?: Date }) => {
-      const report = await replayPersistedDispatchDocumentChain(prisma, command.waybillId);
+      const report = await replayPersistedDispatchDocumentChain(prisma, command.waybillId, truthVerifier);
       await audit.append({ action: report.status === 'VERIFIED' ? 'RECONCILIATION_COMPLETED' : 'INCIDENT_RECORDED', actorId: command.actorId,
         correlationId: command.correlationId, idempotencyKey: command.idempotencyKey, occurredAt: (command.now ?? new Date()).toISOString(),
         authority: command.authority, reason: 'Persisted dispatch evidence replay', detail: { reportHash: report.reportHash, status: report.status, issues: report.issues } });
@@ -318,16 +395,13 @@ export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, f
     },
     quarantine: (command: { storageKey: string; actorId: string; reason: string; correlationId: string; idempotencyKey: string; authority: DispatchRecoveryAuthority; now?: Date }) =>
       prisma.$transaction(async tx => {
+        await claimDispatchDocumentStorageKey(tx, command.storageKey);
         const rows = await tx.$queryRaw<Array<{ payload: unknown }>>`SELECT payload FROM dispatch_lifecycle_audits WHERE "aggregateType" = 'DISPATCH_DOCUMENT_RECOVERY' AND "eventType" = 'RECONCILIATION_COMPLETED' ORDER BY "recordedAt" DESC, id DESC FOR UPDATE`;
         const lockedRepository = { ...repository,
           isReferenced: async (storageKey: string) => Boolean(await tx.dispatchDocumentArtifact.findUnique({ where: { storageKey }, select: { id: true } })),
           readPersistedOrphanEvidence: async (storageKey: string) => {
           for (const row of rows) {
-            const payload = row.payload as Record<string, any>; const detail = payload?.detail as Record<string, any> | undefined;
-            const orphans = Array.isArray(detail?.orphans) ? detail.orphans : [];
-            if (!orphans.some(item => item?.storageKey === storageKey && item?.status === 'ORPHAN_CANDIDATE')) continue;
-            const expected = dispatchRecoveryIntegrityHash({ artifacts: detail?.artifacts, orphans: detail?.orphans, observedAt: detail?.observedAt });
-            if (typeof detail?.reportHash === 'string' && typeof detail?.observedAt === 'string' && expected === detail.reportHash) return { reportHash: detail.reportHash, observedAt: detail.observedAt };
+            const parsed = parsePersistedOrphanEvidence(row.payload, storageKey); if (parsed) return parsed;
           }
           return null;
         } };

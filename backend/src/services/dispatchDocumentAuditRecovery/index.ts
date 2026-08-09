@@ -320,7 +320,7 @@ export type DispatchArtifactAuditEvent = {
   detail: Readonly<Record<string, unknown>>;
 };
 
-type AuditPort = { append(event: DispatchArtifactAuditEvent): Promise<void> };
+type AuditPort = { append(event: DispatchArtifactAuditEvent): Promise<void>; hasCompletedRestoration?(artifactId: string, idempotencyKey: string): Promise<boolean> };
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
 export const reconcileDispatchDocumentArtifacts = async (input: {
@@ -333,6 +333,7 @@ export const reconcileDispatchDocumentArtifacts = async (input: {
   authority: DispatchRecoveryAuthority;
   now?: Date;
 }) => {
+  const occurredAt = (input.now ?? new Date()).toISOString();
   const artifacts: Array<{ artifactId: string; storageKey: string; status: 'HEALTHY' | 'MISSING' | 'CORRUPT'; actualByteLength: number | null; actualSha256: string | null }> = [];
   for (const item of [...input.metadata].sort((left, right) => left.id.localeCompare(right.id))) {
     const bytes = await input.storage.read(item.storageKey);
@@ -341,9 +342,11 @@ export const reconcileDispatchDocumentArtifacts = async (input: {
     artifacts.push({ artifactId: item.id, storageKey: item.storageKey, status, actualByteLength: bytes?.length ?? null, actualSha256 });
   }
   const referenced = new Set(input.metadata.map(item => item.storageKey));
-  const orphans = (await input.storage.listKeys()).filter(key => !referenced.has(key)).sort()
-    .map(storageKey => ({ storageKey, status: 'ORPHAN_CANDIDATE' as const }));
-  const occurredAt = (input.now ?? new Date()).toISOString();
+  const orphans = [] as Array<{ storageKey: string; status: 'ORPHAN_CANDIDATE'; observedByteLength: number; observedSha256: string; observedAt: string }>;
+  for (const storageKey of (await input.storage.listKeys()).filter(key => !referenced.has(key)).sort()) {
+    const bytes = await input.storage.read(storageKey);
+    if (bytes) orphans.push({ storageKey, status: 'ORPHAN_CANDIDATE', observedByteLength: bytes.length, observedSha256: sha256(bytes), observedAt: occurredAt });
+  }
   const unresolved = artifacts.filter(item => item.status !== 'HEALTHY');
   const reportHash = dispatchRecoveryIntegrityHash({ artifacts, orphans, observedAt: occurredAt });
   await input.audit.append({
@@ -378,7 +381,7 @@ export const restoreDispatchDocumentArtifact = async (input: {
   idempotencyKey: string;
   metadata: DispatchArtifactMetadata;
   encryptedBackup: { readOriginal(storageKey: string): Promise<{ bytes: Buffer; recoveryPackageId: string; encrypted: boolean } | null> };
-  storage: { recoverInterruptedWrite(storageKey: string): Promise<void>; stageOriginal(storageKey: string, bytes: Buffer): Promise<void>; commitStagedOriginal(storageKey: string): Promise<void>; finalizeStagedOriginal(storageKey: string): Promise<void>; read(storageKey: string): Promise<Buffer | null>; restorePrevious(storageKey: string, bytes: Buffer | null): Promise<void> };
+  storage: { recoverInterruptedWrite(storageKey: string, completed: boolean): Promise<void>; stageOriginal(storageKey: string, bytes: Buffer): Promise<void>; commitStagedOriginal(storageKey: string): Promise<void>; markStagedOriginalCompleted(storageKey: string): Promise<void>; finalizeStagedOriginal(storageKey: string): Promise<void>; read(storageKey: string): Promise<Buffer | null>; restorePrevious(storageKey: string, bytes: Buffer | null): Promise<void> };
   audit: AuditPort;
   authority: DispatchRecoveryAuthority;
   now?: Date;
@@ -391,7 +394,7 @@ export const restoreDispatchDocumentArtifact = async (input: {
     if (!backup?.encrypted || backup.bytes.length !== input.metadata.byteLength || sha256(backup.bytes) !== input.metadata.sha256) {
       throw new Error('Encrypted recovery does not contain the original verified artifact bytes.');
     }
-    await input.storage.recoverInterruptedWrite(input.metadata.storageKey);
+    await input.storage.recoverInterruptedWrite(input.metadata.storageKey, await input.audit.hasCompletedRestoration?.(input.metadata.id, input.idempotencyKey) ?? false);
     previous = await input.storage.read(input.metadata.storageKey);
     await input.audit.append({ action: 'RESTORATION_INTENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, artifactId: input.metadata.id,
@@ -407,6 +410,7 @@ export const restoreDispatchDocumentArtifact = async (input: {
       authority: input.authority,
       idempotencyKey: input.idempotencyKey, occurredAt, artifactId: input.metadata.id, storageKey: input.metadata.storageKey,
       reason: input.reason, detail: { byteLength: restored.length, sha256: input.metadata.sha256, recoveryPackageId: backup.recoveryPackageId } });
+    await input.storage.markStagedOriginalCompleted(input.metadata.storageKey);
     await input.storage.finalizeStagedOriginal(input.metadata.storageKey);
     return { status: 'RESTORED' as const, artifactId: input.metadata.id, byteLength: restored.length, sha256: input.metadata.sha256 };
   } catch (error) {
@@ -428,19 +432,21 @@ export const quarantineDispatchDocumentOrphan = async (input: {
   correlationId: string;
   idempotencyKey: string;
   authority: DispatchRecoveryAuthority;
-  repository: { isReferenced(storageKey: string): Promise<boolean>; readPersistedOrphanEvidence(storageKey: string): Promise<{ reportHash: string; observedAt: string } | null> };
-  storage: { quarantine(storageKey: string): Promise<void>; restoreQuarantined(storageKey: string): Promise<void> };
+  repository: { isReferenced(storageKey: string): Promise<boolean>; readPersistedOrphanEvidence(storageKey: string): Promise<{ reportHash: string; observedAt: string; observedByteLength: number; observedSha256: string } | null> };
+  storage: { read(storageKey: string): Promise<Buffer | null>; quarantine(storageKey: string): Promise<void>; restoreQuarantined(storageKey: string): Promise<void> };
   audit: AuditPort;
   now?: Date;
 }) => {
   const occurredAt = (input.now ?? new Date()).toISOString();
   const orphanEvidence = await input.repository.readPersistedOrphanEvidence(input.storageKey);
-  if (await input.repository.isReferenced(input.storageKey) || !orphanEvidence) {
+  const current = await input.storage.read(input.storageKey);
+  const stale = Boolean(orphanEvidence && (!current || current.length !== orphanEvidence.observedByteLength || sha256(current) !== orphanEvidence.observedSha256));
+  if (await input.repository.isReferenced(input.storageKey) || !orphanEvidence || stale) {
     await input.audit.append({ action: 'QUARANTINE_REJECTED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority,
       idempotencyKey: input.idempotencyKey, occurredAt, storageKey: input.storageKey, reason: input.reason,
-      detail: { code: orphanEvidence ? 'FILE_IS_REFERENCED' : 'PERSISTED_ORPHAN_EVIDENCE_MISSING' } });
-    throw new Error(orphanEvidence ? 'A referenced dispatch artifact can never be quarantined.' : 'Persisted reconciliation does not prove this storage key is an orphan.');
+      detail: { code: stale ? 'ORPHAN_EVIDENCE_STALE_OR_KEY_REUSED' : orphanEvidence ? 'FILE_IS_REFERENCED' : 'PERSISTED_ORPHAN_EVIDENCE_MISSING' } });
+    throw new Error(stale ? 'The orphan storage key changed or was reused after reconciliation.' : orphanEvidence ? 'A referenced dispatch artifact can never be quarantined.' : 'Persisted reconciliation does not prove this storage key is an orphan.');
   }
   await input.audit.append({ action: 'QUARANTINE_INTENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
     authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, storageKey: input.storageKey, reason: input.reason,

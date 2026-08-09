@@ -18,6 +18,9 @@ const stableValue = (value: unknown): unknown => {
   return value;
 };
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex');
+export const guardPhysicalExitIntegrityHash = (value: unknown) => digest(value);
+export const guardPhysicalExitAuditIntegrityHash = (input: { aggregateType: string; aggregateId: string; eventType: string; payload: unknown; actorId: string; at: Date | string; previousHash: string | null }) =>
+  digest({ ...input, at: input.at instanceof Date ? input.at : new Date(input.at), payload: stableValue(input.payload), previousHash: input.previousHash });
 const json = (value: unknown) => stableValue(value) as Prisma.InputJsonValue;
 const required = (value: unknown, name: string) => {
   const result = String(value || '').trim();

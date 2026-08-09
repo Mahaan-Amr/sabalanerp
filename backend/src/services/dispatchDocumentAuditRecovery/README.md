@@ -15,8 +15,9 @@ Guard exit, and posted Dispatch Corrections.
 - Reconciliation reads immutable artifact metadata but never edits it. Missing and corrupt referenced files are
   separate incidents. Unreferenced storage is only an orphan candidate until a second reference check confirms it.
 - Restoration accepts bytes only from an encrypted recovery package and verifies the original byte length and SHA-256
-  before and after writing. It records intent, stages and fsyncs verified bytes, atomically renames them, and retains the
-  previous bytes until completion audit succeeds. Interrupted swaps are rolled back on the next operation. Historical
+  before and after writing. It records intent, stages and fsyncs verified bytes beside the destination, performs one
+  atomic rename over the destination, and retains the previous bytes until completion audit succeeds. A durable phase
+  marker plus the persisted completion audit distinguish rollback from completed-cleanup after a crash. Historical
   PDFs are never regenerated.
 - Quarantine first records durable intent, rechecks that a key is unreferenced, and compensates the filesystem move if
   completion audit fails. Cleanup derives `quarantinedAt` from persisted completion evidence, uses the policy-owned
@@ -26,7 +27,8 @@ Guard exit, and posted Dispatch Corrections.
 - Every reconciliation, incident, restore, quarantine, rejection, and cleanup is appended through the audit port.
 - Reconciliation persists its canonical report hash plus complete artifact/orphan findings. Quarantine takes no caller
   report hash or observation time: it locks persisted reconciliation rows and proves the exact key was an unreferenced
-  orphan candidate before moving any bytes.
+  orphan candidate with the same observed byte length and SHA-256 before moving any bytes. The exported storage-key
+  advisory claim is the shared seam for publication/staging and quarantine, preventing key-reuse races.
 
 ## Operational recovery drill
 

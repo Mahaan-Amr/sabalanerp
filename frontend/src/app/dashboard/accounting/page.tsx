@@ -26,6 +26,7 @@ import {
 } from '@/components/erp';
 import { accountingAPI, dispatchConfirmationAPI } from '@/lib/api';
 import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
+import CustomerShipmentStatementAccountingPrototype from '@/features/accounting/prototypes/CustomerShipmentStatementAccountingPrototype';
 import {
   CompactQueueItem,
   QueueList,
@@ -220,6 +221,7 @@ export default function AccountingDashboardPage() {
           )}
         </div>
       </ErpSection>
+      <CustomerShipmentStatementAccountingPrototype />
       <ErpSection title="فرمان‌های ارسال حسابداری" description="پذیرش یا رد نامزد، بارنامه و تأیید راننده فقط در مالکیت حسابداری انجام می‌شود.">
         {dispatchNotice && <ErpInlineState kind={dispatchNotice.kind} title={dispatchNotice.text} />}
         <div className="mb-3"><ErpInput aria-label="دلیل فرمان ارسال" value={dispatchReason} onChange={(event) => setDispatchReason(event.target.value)} placeholder="دلیل رد، ابطال، جایگزینی یا لغو مجوز" /></div>

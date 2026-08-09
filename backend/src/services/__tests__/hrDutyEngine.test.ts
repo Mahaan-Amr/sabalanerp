@@ -32,8 +32,20 @@ assert.deepEqual(
   { scopeType: 'GLOBAL', scopeId: null },
 );
 assert.deepEqual(
-  deriveHrDutyRoutingContext(HR_DUTY_DEFINITIONS.HIRING_MANAGER_REVIEW, { sourceKey: 'HIRING:application-42:REVIEW:user-7' }),
-  { scopeType: 'APPLICATION', scopeId: 'application-42' },
+  deriveHrDutyRoutingContext(HR_DUTY_DEFINITIONS.HIRING_MANAGER_REVIEW, {
+    sourceKey: 'HIRING:application-42:REVIEW:user-7',
+    positionId: 'position-9',
+  }),
+  { scopeType: 'POSITION', scopeId: 'position-9' },
+);
+assert.equal(HR_DUTY_DEFINITIONS.HIRING_MANAGER_REVIEW.destinationWorkspaceCode, null);
+assert.equal(HR_DUTY_DEFINITIONS.COMPANY_MANAGER_DECISION.routingScope, 'GLOBAL');
+assert.equal(HR_DUTY_DEFINITIONS.COMPANY_MANAGER_DECISION.destinationWorkspaceCode, null);
+assert.throws(
+  () => deriveHrDutyRoutingContext(HR_DUTY_DEFINITIONS.RESPONSIBLE_SUPERVISOR_REVIEW, {
+    sourceKey: 'HIRING:application-42:REVIEW:user-7',
+  }),
+  /HR_DUTY_SOURCE_SCOPE_UNAVAILABLE/,
 );
 
 const validResponse = evaluateHrDutyResponse({

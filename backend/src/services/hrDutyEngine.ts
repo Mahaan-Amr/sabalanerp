@@ -16,7 +16,7 @@ function dutyDefinition(
   sourceActionCode: string,
   responsibilityTypeCode: string,
   destinationWorkspaceCode: string | null,
-  routingScope: 'GLOBAL' | 'HIRING_APPLICATION' = 'GLOBAL',
+  routingScope: 'GLOBAL' | 'HIRING_POSITION' = 'GLOBAL',
 ) {
   return {
     sourceActionCode,
@@ -47,9 +47,9 @@ export const HR_DUTY_DEFINITIONS = Object.freeze({
   },
   FINANCE_RECORDING: dutyDefinition('FINANCE_RECORDING', 'FINANCE_RECORDER', 'ACCOUNTING'),
   FINANCE_APPROVAL: dutyDefinition('FINANCE_APPROVAL', 'FINANCE_MANAGER', 'ACCOUNTING'),
-  HIRING_MANAGER_REVIEW: dutyDefinition('HIRING_MANAGER_REVIEW', 'HIRING_MANAGER', null, 'HIRING_APPLICATION'),
-  COMPANY_MANAGER_DECISION: dutyDefinition('COMPANY_MANAGER_DECISION', 'COMPANY_MANAGER', 'PERSONAL', 'HIRING_APPLICATION'),
-  RESPONSIBLE_SUPERVISOR_REVIEW: dutyDefinition('RESPONSIBLE_SUPERVISOR_REVIEW', 'RESPONSIBLE_SUPERVISOR', null, 'HIRING_APPLICATION'),
+  HIRING_MANAGER_REVIEW: dutyDefinition('HIRING_MANAGER_REVIEW', 'HIRING_MANAGER', null, 'HIRING_POSITION'),
+  COMPANY_MANAGER_DECISION: dutyDefinition('COMPANY_MANAGER_DECISION', 'COMPANY_MANAGER', null),
+  RESPONSIBLE_SUPERVISOR_REVIEW: dutyDefinition('RESPONSIBLE_SUPERVISOR_REVIEW', 'RESPONSIBLE_SUPERVISOR', null, 'HIRING_POSITION'),
   PAYROLL_PREPARATION: dutyDefinition('PAYROLL_PREPARATION', 'HR_PAYROLL_PROCESSOR', 'HUMAN_RESOURCES'),
   PAYROLL_APPROVAL: dutyDefinition('PAYROLL_APPROVAL', 'HR_PAYROLL_MANAGER', 'HUMAN_RESOURCES'),
 });
@@ -58,12 +58,11 @@ type DutyDefinition = typeof HR_DUTY_DEFINITIONS[keyof typeof HR_DUTY_DEFINITION
 
 export const deriveHrDutyRoutingContext = (
   definition: DutyDefinition,
-  source: { sourceKey: string | null },
+  source: { sourceKey: string | null; positionId?: string | null },
 ) => {
   if (definition.routingScope === 'GLOBAL') return { scopeType: 'GLOBAL', scopeId: null };
-  const applicationId = source.sourceKey?.match(/^HIRING:([^:]+):/)?.[1];
-  if (!applicationId) throw new Error('HR_DUTY_SOURCE_SCOPE_UNAVAILABLE');
-  return { scopeType: 'APPLICATION', scopeId: applicationId };
+  if (!source.positionId) throw new Error('HR_DUTY_SOURCE_SCOPE_UNAVAILABLE');
+  return { scopeType: 'POSITION', scopeId: source.positionId };
 };
 
 export type HrDutyActionCode = typeof HR_DUTY_DEFINITIONS.LEGACY_HR_WORK_ITEM_REVIEW.allowedActionCodes[number];
@@ -179,6 +178,18 @@ export const planHrDutyReassignment = (input: {
 type HrDutyDatabase = PrismaClient | Prisma.TransactionClient;
 
 const asJson = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
+const canonicalJson = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === 'object') return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, canonicalJson(nested)]),
+  );
+  return value;
+};
+const jsonMatches = (left: unknown, right: unknown) => (
+  JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right))
+);
 const definitionFor = (sourceActionCode: string): DutyDefinition => {
   const definition = Object.values(HR_DUTY_DEFINITIONS)
     .find((candidate) => candidate.sourceActionCode === sourceActionCode);
@@ -247,7 +258,7 @@ const writeDutyNotification = async (
     eventCode: input.eventCode,
   };
   const recipients: Array<string | null> = input.recipientUserIds.length ? input.recipientUserIds : [null];
-  await tx.hrDutyNotificationIdentity.createMany({
+  const identities = await tx.hrDutyNotificationIdentity.createMany({
     data: recipients.map((recipientUserId) => ({
       stableKey: `hr-duty-notification:${input.dutyId}:${input.auditVersion}:${input.eventCode}:${recipientUserId ?? 'UNASSIGNED'}`,
       dutyId: input.dutyId,
@@ -259,7 +270,7 @@ const writeDutyNotification = async (
     })),
     skipDuplicates: true,
   });
-  if (!input.recipientUserIds.length) return;
+  if (!input.recipientUserIds.length || identities.count === 0) return;
   await publishNotificationEvent(tx, {
     type: input.eventType,
     deduplicationKey: `hr-duty:${input.dutyId}:${input.auditVersion}:${input.eventCode}`,
@@ -278,30 +289,52 @@ const writeDutyNotification = async (
   });
 };
 
-const upsertDutyEnvelope = (
+const envelopeCodeFor = (definition: DutyDefinition, destinationWorkspaceCode: string) => (
+  definition.destinationWorkspaceCode
+    ? definition.envelopeCode
+    : `${definition.envelopeCode}@${destinationWorkspaceCode}`
+);
+
+const assertDutyEnvelopeCurrent = (
+  definition: DutyDefinition,
+  envelope: {
+    code: string;
+    version: number;
+    destinationWorkspaceCode: string;
+    allowedFieldsJson: unknown;
+    allowedEvidenceJson: unknown;
+    allowedActionCodesJson: unknown;
+    responseSchemaJson: unknown;
+    isActive: boolean;
+  },
+) => {
+  const isCurrent = envelope.code === envelopeCodeFor(definition, envelope.destinationWorkspaceCode)
+    && envelope.version === definition.envelopeVersion
+    && (!definition.destinationWorkspaceCode
+      || envelope.destinationWorkspaceCode === definition.destinationWorkspaceCode)
+    && envelope.isActive
+    && jsonMatches(envelope.allowedFieldsJson, definition.allowedFields)
+    && jsonMatches(envelope.allowedEvidenceJson, definition.allowedEvidence)
+    && jsonMatches(envelope.allowedActionCodesJson, definition.allowedActionCodes)
+    && jsonMatches(envelope.responseSchemaJson, definition.responseSchema);
+  if (!isCurrent) throw new Error('HR_DUTY_ENVELOPE_VERSION_STALE');
+};
+
+const upsertDutyEnvelope = async (
   tx: Prisma.TransactionClient,
   definition: DutyDefinition,
   createdByUserId: string,
   destinationWorkspaceCode: string,
-) => tx.hrDutyEnvelope.upsert({
+) => {
+  const code = envelopeCodeFor(definition, destinationWorkspaceCode);
+  const envelope = await tx.hrDutyEnvelope.upsert({
   where: { code_version: {
-    code: definition.destinationWorkspaceCode
-      ? definition.envelopeCode
-      : `${definition.envelopeCode}@${destinationWorkspaceCode}`,
+    code,
     version: definition.envelopeVersion,
   } },
-  update: {
-    destinationWorkspaceCode,
-    allowedFieldsJson: [...definition.allowedFields],
-    allowedEvidenceJson: [...definition.allowedEvidence],
-    allowedActionCodesJson: [...definition.allowedActionCodes],
-    responseSchemaJson: definition.responseSchema,
-    isActive: true,
-  },
+  update: {},
   create: {
-    code: definition.destinationWorkspaceCode
-      ? definition.envelopeCode
-      : `${definition.envelopeCode}@${destinationWorkspaceCode}`,
+    code,
     version: definition.envelopeVersion,
     destinationWorkspaceCode,
     allowedFieldsJson: [...definition.allowedFields],
@@ -310,7 +343,16 @@ const upsertDutyEnvelope = (
     responseSchemaJson: definition.responseSchema,
     createdByUserId,
   },
-});
+  });
+  const matchesDefinition = envelope.destinationWorkspaceCode === destinationWorkspaceCode
+    && envelope.isActive
+    && jsonMatches(envelope.allowedFieldsJson, definition.allowedFields)
+    && jsonMatches(envelope.allowedEvidenceJson, definition.allowedEvidence)
+    && jsonMatches(envelope.allowedActionCodesJson, definition.allowedActionCodes)
+    && jsonMatches(envelope.responseSchemaJson, definition.responseSchema);
+  if (!matchesDefinition) throw new Error('HR_DUTY_ENVELOPE_DEFINITION_CONFLICT');
+  return envelope;
+};
 
 export const syncHrDutyEnvelopeDefinitions = (
   database: HrDutyDatabase,
@@ -337,7 +379,16 @@ export const createHrDutyFromLegacyWorkItem = (
   const definition = definitionFor(input.sourceActionCode);
   const source = await tx.hrWorkItem.findUniqueOrThrow({ where: { id: input.sourceWorkItemId } });
   if (!['PENDING', 'IN_PROGRESS'].includes(source.status)) throw new Error('HR_DUTY_SOURCE_NOT_ACTIONABLE');
-  const routingContext = deriveHrDutyRoutingContext(definition, source);
+  const applicationId = definition.routingScope === 'HIRING_POSITION'
+    ? source.sourceKey?.match(/^HIRING:([^:]+):/)?.[1]
+    : null;
+  const application = applicationId
+    ? await tx.hrJobApplication.findUnique({ where: { id: applicationId }, select: { positionId: true } })
+    : null;
+  const routingContext = deriveHrDutyRoutingContext(definition, {
+    sourceKey: source.sourceKey,
+    positionId: application?.positionId,
+  });
   const sourceActorUserId = source.createdByUserId;
   const sourceVersion = await legacySourceVersion(tx, source.id);
   const stableKey = `hr-duty:${input.sourceActionCode}:${source.id}:v${sourceVersion}`;
@@ -372,53 +423,65 @@ export const createHrDutyFromLegacyWorkItem = (
   }
   const envelope = await upsertDutyEnvelope(tx, definition, input.actorUserId, destinationWorkspaceCode);
   const assigned = resolution.status === 'RESOLVED';
-  const duty = await tx.hrDuty.create({ data: {
-    stableKey,
-    sourceType: 'HR_WORK_ITEM',
-    sourceId: source.id,
-    sourceActionCode: input.sourceActionCode,
-    sourceVersion,
-    envelopeCode: envelope.code,
-    envelopeVersion: definition.envelopeVersion,
-    destinationWorkspaceCode,
-    destinationQueueCode,
-    currentAssigneeUserId: assigned ? resolution.assignedUserId : null,
-    responsibilityId: assigned ? resolution.responsibilityId : null,
-    routingResponsibilityTypeCode: definition.responsibilityTypeCode,
-    routingScopeType: routingContext.scopeType,
-    routingScopeId: routingContext.scopeId,
-    sourceActorUserId,
-    dueAt: source.dueDate,
-    createdByUserId: input.actorUserId,
-  } });
-  await tx.hrDutyAssignmentHistory.create({ data: {
-    dutyId: duty.id,
-    sequence: 1,
-    assignedUserId: duty.currentAssigneeUserId,
-    responsibilityId: duty.responsibilityId,
-    destinationWorkspaceCode,
-    destinationQueueCode,
-    startedAt: now,
-    changedByUserId: input.actorUserId,
-    policyVersion: input.policyVersion,
-  } });
-  const eventCode = assigned ? 'ASSIGNED' : 'UNASSIGNED_TRIAGE';
-  await tx.hrDutyAuditVersion.create({ data: {
-    dutyId: duty.id,
-    version: 1,
-    eventCode,
-    actorUserId: input.actorUserId,
-    sourceVersion,
-    envelopeVersion: definition.envelopeVersion,
-    policyVersion: input.policyVersion,
-    afterJson: asJson({
-      status: duty.status,
-      currentAssigneeUserId: duty.currentAssigneeUserId,
+  const duty = await tx.hrDuty.upsert({
+    where: { stableKey },
+    update: {},
+    create: {
+      stableKey,
+      sourceType: 'HR_WORK_ITEM',
+      sourceId: source.id,
+      sourceActionCode: input.sourceActionCode,
+      sourceVersion,
+      envelopeCode: envelope.code,
+      envelopeVersion: definition.envelopeVersion,
       destinationWorkspaceCode,
       destinationQueueCode,
-    }),
-    reason: assigned ? null : resolution.reason,
-  } });
+      currentAssigneeUserId: assigned ? resolution.assignedUserId : null,
+      responsibilityId: assigned ? resolution.responsibilityId : null,
+      routingResponsibilityTypeCode: definition.responsibilityTypeCode,
+      routingScopeType: routingContext.scopeType,
+      routingScopeId: routingContext.scopeId,
+      sourceActorUserId,
+      dueAt: source.dueDate,
+      createdByUserId: input.actorUserId,
+    },
+  });
+  await tx.hrDutyAssignmentHistory.upsert({
+    where: { dutyId_sequence: { dutyId: duty.id, sequence: 1 } },
+    update: {},
+    create: {
+      dutyId: duty.id,
+      sequence: 1,
+      assignedUserId: duty.currentAssigneeUserId,
+      responsibilityId: duty.responsibilityId,
+      destinationWorkspaceCode,
+      destinationQueueCode,
+      startedAt: now,
+      changedByUserId: input.actorUserId,
+      policyVersion: input.policyVersion,
+    },
+  });
+  const eventCode = assigned ? 'ASSIGNED' : 'UNASSIGNED_TRIAGE';
+  await tx.hrDutyAuditVersion.upsert({
+    where: { dutyId_version: { dutyId: duty.id, version: 1 } },
+    update: {},
+    create: {
+      dutyId: duty.id,
+      version: 1,
+      eventCode,
+      actorUserId: input.actorUserId,
+      sourceVersion,
+      envelopeVersion: definition.envelopeVersion,
+      policyVersion: input.policyVersion,
+      afterJson: asJson({
+        status: duty.status,
+        currentAssigneeUserId: duty.currentAssigneeUserId,
+        destinationWorkspaceCode,
+        destinationQueueCode,
+      }),
+      reason: assigned ? null : resolution.reason,
+    },
+  });
   const routedSource = await tx.hrWorkItem.update({
     where: { id: source.id },
     data: assigned
@@ -469,6 +532,8 @@ export const respondToHrDuty = (
   });
   const structuredResult = { actionCode: input.actionCode, reason: input.reason };
   if (duty.sourceType !== 'HR_WORK_ITEM') throw new Error('HR_DUTY_SOURCE_ADAPTER_NOT_REGISTERED');
+  const definition = definitionFor(duty.sourceActionCode);
+  assertDutyEnvelopeCurrent(definition, duty.envelope);
   const source = await tx.hrWorkItem.findUniqueOrThrow({ where: { id: duty.sourceId } });
   const currentSourceVersion = await legacySourceVersion(tx, source.id);
   const responsibility = duty.responsibility;
@@ -528,9 +593,7 @@ export const respondToHrDuty = (
       && currentResolution.assignedUserId === duty.currentAssigneeUserId,
     separationOfDutiesSatisfied: currentResolution?.status === 'RESOLVED',
     sourceActorUserId: duty.sourceActorUserId,
-    allowedActionCodes: Array.isArray(duty.envelope.allowedActionCodesJson)
-      ? duty.envelope.allowedActionCodesJson.filter((value): value is string => typeof value === 'string')
-      : [],
+    allowedActionCodes: definition.allowedActionCodes,
   });
   if (!decision.allowed) throw new Error(decision.code);
 

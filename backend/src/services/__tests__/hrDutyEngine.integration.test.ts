@@ -60,6 +60,15 @@ const run = async () => {
       await tx.hrDutyEnvelope.count({ where: { code: { in: staticEnvelopeCodes } } }),
       staticEnvelopeCodes.length,
     );
+    await tx.hrDutyEnvelope.update({
+      where: { code_version: { code: HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.envelopeCode, version: 1 } },
+      data: { responseSchemaJson: { type: 'string' } },
+    });
+    await assert.rejects(syncHrDutyEnvelopeDefinitions(tx, sourceActor.id), /HR_DUTY_ENVELOPE_DEFINITION_CONFLICT/);
+    await tx.hrDutyEnvelope.update({
+      where: { code_version: { code: HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.envelopeCode, version: 1 } },
+      data: { responseSchemaJson: HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.responseSchema },
+    });
     await tx.hrBusinessAuthorityGrant.create({ data: {
       stableKey: `duty-test-authority:${suffix}`,
       userId: assignee.id,
@@ -259,6 +268,55 @@ const run = async () => {
     await processHrDutyDeadlines(tx, { now: new Date('2026-08-09T08:05:00.000Z'), policyVersion: 1 });
     assert.equal(await tx.hrDutyAuditVersion.count({ where: { dutyId: deadlineDuty.id, eventCode: 'OVERDUE' } }), 1);
     assert.equal(await tx.hrDutyAuditVersion.count({ where: { dutyId: deadlineDuty.id, eventCode: 'MANAGER_ESCALATION' } }), 1);
+
+    const concurrentSource = await tx.hrWorkItem.create({ data: {
+      title: 'Concurrent accounting handoff', sourceType: 'MANUAL',
+      destinationHref: '/dashboard/accounting', dueDate: new Date('2026-08-14T08:00:00.000Z'),
+      createdByUserId: sourceActor.id,
+    } });
+    const concurrentCreations = await Promise.all([
+      createHrDutyFromLegacyWorkItem(tx, {
+        sourceWorkItemId: concurrentSource.id, sourceActionCode: 'FINANCE_APPROVAL',
+        actorUserId: sourceActor.id, policyVersion: 1, now: new Date('2026-08-09T09:10:00.000Z'),
+      }),
+      createHrDutyFromLegacyWorkItem(tx, {
+        sourceWorkItemId: concurrentSource.id, sourceActionCode: 'FINANCE_APPROVAL',
+        actorUserId: sourceActor.id, policyVersion: 1, now: new Date('2026-08-09T09:10:00.000Z'),
+      }),
+    ]);
+    assert.equal(concurrentCreations[0].id, concurrentCreations[1].id);
+    assert.equal(await tx.hrDuty.count({ where: { sourceId: concurrentSource.id } }), 1);
+    const concurrentDuty = concurrentCreations[0];
+    await tx.hrDutyEnvelope.update({
+      where: { code_version: { code: concurrentDuty.envelopeCode, version: concurrentDuty.envelopeVersion } },
+      data: { allowedActionCodesJson: ['APPROVE', 'UNREGISTERED_ACTION'] },
+    });
+    await assert.rejects(respondToHrDuty(tx, {
+      dutyId: concurrentDuty.id, actorUserId: successorOwner.id, actionCode: 'APPROVE',
+      expectedSourceVersion: concurrentDuty.sourceVersion, expectedEnvelopeVersion: concurrentDuty.envelopeVersion,
+      reason: null, policyVersion: 1, now: new Date('2026-08-09T09:10:30.000Z'),
+    }), /HR_DUTY_ENVELOPE_VERSION_STALE/);
+    await tx.hrDutyEnvelope.update({
+      where: { code_version: { code: concurrentDuty.envelopeCode, version: concurrentDuty.envelopeVersion } },
+      data: { allowedActionCodesJson: [...HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.allowedActionCodes] },
+    });
+    const concurrentResponses = await Promise.allSettled([
+      respondToHrDuty(tx, {
+        dutyId: concurrentDuty.id, actorUserId: successorOwner.id, actionCode: 'APPROVE',
+        expectedSourceVersion: concurrentDuty.sourceVersion, expectedEnvelopeVersion: concurrentDuty.envelopeVersion,
+        reason: null, policyVersion: 1, now: new Date('2026-08-09T09:11:00.000Z'),
+      }),
+      respondToHrDuty(tx, {
+        dutyId: concurrentDuty.id, actorUserId: successorOwner.id, actionCode: 'APPROVE',
+        expectedSourceVersion: concurrentDuty.sourceVersion, expectedEnvelopeVersion: concurrentDuty.envelopeVersion,
+        reason: null, policyVersion: 1, now: new Date('2026-08-09T09:11:00.000Z'),
+      }),
+    ]);
+    const completedResponseCount = concurrentResponses.filter((result) => (
+      result.status === 'fulfilled' && !result.value.replayed
+    )).length;
+    assert.equal(completedResponseCount, 1, 'concurrent retries perform the source transition exactly once');
+    assert.equal(await tx.hrDutyAuditVersion.count({ where: { dutyId: concurrentDuty.id, eventCode: 'COMPLETED' } }), 1);
 
     const externallyCompletedSource = await tx.hrWorkItem.create({ data: {
       title: 'Externally completed handoff', sourceType: 'MANUAL',

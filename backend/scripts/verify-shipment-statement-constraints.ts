@@ -10,14 +10,17 @@ const expectConstraintFailure = async (operation: () => Promise<unknown>, messag
 };
 
 const run = async () => {
-  const staleStatuses = await prisma.$queryRaw<Array<{ count: bigint }>>`
-    SELECT COUNT(*)::bigint AS "count"
+  const terminalStatuses = await prisma.$queryRaw<Array<{ enumlabel: string; count: bigint }>>`
+    SELECT enum_value.enumlabel, COUNT(*)::bigint AS "count"
     FROM pg_enum enum_value
     JOIN pg_type enum_type ON enum_type.oid = enum_value.enumtypid
     WHERE enum_type.typname = 'AccountingDispatchCandidateStatus'
-      AND enum_value.enumlabel = 'STALE_REQUIRES_SUCCESSOR'
+      AND enum_value.enumlabel IN ('STALE_REQUIRES_SUCCESSOR', 'EVIDENCE_CONFLICT')
+    GROUP BY enum_value.enumlabel
   `;
-  assert.equal(staleStatuses[0]?.count, 1n, 'The terminal stale candidate status must exist exactly once.');
+  const terminalStatusCounts = new Map(terminalStatuses.map(status => [status.enumlabel, status.count]));
+  assert.equal(terminalStatusCounts.get('STALE_REQUIRES_SUCCESSOR'), 1n, 'The terminal stale candidate status must exist exactly once.');
+  assert.equal(terminalStatusCounts.get('EVIDENCE_CONFLICT'), 1n, 'The terminal evidence-conflict candidate status must exist exactly once.');
 
   const [source] = await prisma.$queryRaw<Array<{
     contractId: string;

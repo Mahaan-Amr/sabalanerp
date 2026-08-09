@@ -51,6 +51,7 @@ assert.deepEqual(ACCOUNTING_DISPATCH_CANDIDATE_STATUSES, [
   'RETURNED',
   'WITHDRAWN',
   'STALE_REQUIRES_SUCCESSOR',
+  'EVIDENCE_CONFLICT',
 ]);
 
 console.log('dispatch document contract tests passed');

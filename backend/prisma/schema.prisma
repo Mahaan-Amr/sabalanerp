@@ -4408,6 +4408,7 @@ enum AccountingDispatchCandidateStatus {
   RETURNED
   WITHDRAWN
   STALE_REQUIRES_SUCCESSOR
+  EVIDENCE_CONFLICT
 }
 
 enum AccountingDispatchWorkItemStatus {

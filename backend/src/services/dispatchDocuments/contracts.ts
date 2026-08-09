@@ -12,6 +12,7 @@ export const ACCOUNTING_DISPATCH_CANDIDATE_STATUSES = [
   'RETURNED',
   'WITHDRAWN',
   'STALE_REQUIRES_SUCCESSOR',
+  'EVIDENCE_CONFLICT',
 ] as const;
 export type AccountingDispatchCandidateStatusContract =
   (typeof ACCOUNTING_DISPATCH_CANDIDATE_STATUSES)[number];

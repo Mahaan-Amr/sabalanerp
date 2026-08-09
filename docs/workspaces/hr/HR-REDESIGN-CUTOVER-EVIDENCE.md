@@ -1,6 +1,6 @@
 # HR redesign Cutover evidence
 
-Date: 2026-08-09
+Date: 2026-08-10
 Ticket: [#245](https://github.com/Mahaan-Amr/sabalanerp/issues/245)
 
 ## Current decision
@@ -28,7 +28,7 @@ Both post-apply dry-runs returned identical results. This proves the additive wr
 
 Configuration and ownership:
 
-- `MISSING_SHAKILA_STABLE_USER_ID`: 1. The local database has no Shakila Marzban User, so a stable identity cannot be inferred safely.
+- `MISSING_SHAKILA_STABLE_USER_ID`: 1. The local database contains an active Shakila Marzban Personnel row (`cmrgdl616000tixtxhkuqqqn8`) but no corresponding User. Because User/Personnel identity merger and automatic User creation are explicitly out of scope, the stable User identity cannot be inferred safely.
 - `HIRING_MANAGER_OPERATIONAL_WORKSPACE_UNRESOLVED`: 1.
 - `HIRING_MANAGER_POSITION_ASSIGNMENT_UNRESOLVED`: 1.
 
@@ -68,6 +68,7 @@ The release attestation is bound to `HR_REDESIGN_CUTOVER_REVISION` and must mark
 Passed:
 
 - backend TypeScript build;
+- frontend production build (completed successfully in 304.6 seconds);
 - HR redesign data-contract, authorization, route, Cutover-gate, Personnel collection, hiring lifecycle, Applicant access/correction/assessment, duty, organization-capacity, retention, erasure, decision-version, and schedule-governance suites;
 - `npm run design-system:check`;
 - `npm run test:design-system-foundation` (21/21).
@@ -75,8 +76,8 @@ Passed:
 Not passed or not proven:
 
 - `npm run test:design-system-adoption`: repository-wide baseline mismatch (134 hardcoded semantic colors, 11 raw-control risks, 2 duplicate-primitive risks). The changed-file gate reports no new violations.
-- frontend production build: exceeded the five-minute command limit without returning a result.
-- Docker verification and migration-deploy commands: exceeded their command limits without returning a result; service health remained reported as healthy by Compose.
+- Docker verification: exceeded its five-minute command limit while rebuilding the existing Compose project; service health remained reported as healthy by Compose, so this is not counted as a pass.
+- migration-deploy command: previously exceeded its command limit without returning a result.
 - 200% zoom: browser control did not provide a reliable zoom measurement.
 - production identity/ownership verification and full visual/E2E matrix: blocked by the active Cutover data above.
 

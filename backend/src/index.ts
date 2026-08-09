@@ -38,6 +38,7 @@ import logisticsRoutes from "./routes/logistics";
 import hrRoutes from "./routes/hr";
 import hrHiringRoutes from "./routes/hr-hiring";
 import hrApplicantExperienceRoutes from "./routes/hr-applicant-experience";
+import hrDutyRoutes from "./routes/hr-duties";
 import workspacePermissionsRoutes from "./routes/workspace-permissions";
 import permissionsRoutes from "./routes/permissions";
 import productsRoutes from "./routes/products";
@@ -72,6 +73,7 @@ import {
 } from "./services/systemRecoveryLifecycle";
 import { startNotificationOutboxDelivery } from "./services/notificationService";
 import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
+import { startHrDutyDeadlineMaintenance } from "./services/hrDutyEngine";
 
 const prisma = new PrismaClient();
 initializeRecoveryRuntime();
@@ -220,6 +222,7 @@ app.use("/api/accounting", accountingRoutes);
 app.use("/api/bi", biRoutes);
 app.use("/api/logistics", logisticsRoutes);
 app.use("/api/hr", hrRoutes);
+app.use("/api/hr-duties", hrDutyRoutes);
 app.use("/api/hr-hiring", hrApplicantExperienceRoutes);
 app.use("/api/hr-hiring", hrHiringRoutes);
 app.use("/api/workspace-permissions", workspacePermissionsRoutes);
@@ -360,6 +363,7 @@ initializeSystemRecovery(prisma).finally(() => {
       io.to(`user-${userId}`).emit("notification.created", notification);
     });
     startSupportTicketMaintenance(prisma);
+    startHrDutyDeadlineMaintenance(prisma);
   }
   server.listen(PORT, () => {
     console.log(`? Server running on port ${PORT}`);

@@ -31,6 +31,55 @@ export interface NotificationPolicyDraft {
 }
 
 const REGISTERED_NOTIFICATION_EVENTS = {
+  HR_DUTY_ASSIGNED: {
+    type: 'HR_DUTY_ASSIGNED', mandatory: true,
+    titleTemplate: 'وظیفه جدید', messageTemplate: 'یک وظیفه جدید در فضای کاری شما آماده رسیدگی است.',
+    priority: 'HIGH', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  HR_DUTY_UNASSIGNED_TRIAGE: {
+    type: 'HR_DUTY_UNASSIGNED_TRIAGE', mandatory: true,
+    titleTemplate: 'وظیفه بدون مسئول', messageTemplate: 'یک وظیفه برای تعیین مسئول در صف مدیریت فضای کاری قرار گرفت.',
+    priority: 'URGENT', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['WORKSPACE_MANAGERS'],
+  },
+  HR_DUTY_NEAR_DUE: {
+    type: 'HR_DUTY_NEAR_DUE', mandatory: true,
+    titleTemplate: 'مهلت وظیفه نزدیک است', messageTemplate: 'مهلت یکی از وظایف فضای کاری شما نزدیک است.',
+    priority: 'HIGH', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  HR_DUTY_OVERDUE: {
+    type: 'HR_DUTY_OVERDUE', mandatory: true,
+    titleTemplate: 'وظیفه معوق', messageTemplate: 'مهلت یکی از وظایف فضای کاری شما گذشته است.',
+    priority: 'URGENT', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  HR_DUTY_REASSIGNED: {
+    type: 'HR_DUTY_REASSIGNED', mandatory: true,
+    titleTemplate: 'تغییر مسئول وظیفه', messageTemplate: 'مسئولیت یک وظیفه به شما واگذار شده است.',
+    priority: 'HIGH', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  HR_DUTY_RESULT: {
+    type: 'HR_DUTY_RESULT', mandatory: true,
+    titleTemplate: 'نتیجه وظیفه ثبت شد', messageTemplate: 'نتیجه ساختاریافته یک وظیفه ثبت و به مبدأ بازگردانده شد.',
+    priority: 'HIGH', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER', 'WORKSPACE_MANAGERS'],
+  },
+  HR_DUTY_MANAGER_ESCALATION: {
+    type: 'HR_DUTY_MANAGER_ESCALATION', mandatory: true,
+    titleTemplate: 'وظیفه بیش از ۲۴ ساعت معوق است', messageTemplate: 'یک وظیفه معوق به صف مدیریت فضای کاری ارجاع شد.',
+    priority: 'URGENT', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['WORKSPACE_MANAGERS'],
+  },
   FAILED_LOGIN_ALERT: {
     type: 'FAILED_LOGIN_ALERT',
     mandatory: true,

@@ -110,6 +110,13 @@ export default function AccountingDashboardPage() {
             badge: <StatusBadge label={(commandCenter.invoiceCandidates?.count || 0).toLocaleString('fa-IR')} tone="info" />,
           },
           {
+            title: 'اسناد ارسال مشتری',
+            description: 'بررسی و صدور هم‌زمان بارنامه و صورت‌حساب محموله',
+            href: '/dashboard/accounting/dispatch-documents',
+            icon: FaFileInvoice,
+            tone: 'primary',
+          },
+          {
             title: 'دریافت‌ها و چک‌ها',
             href: '/dashboard/accounting/payments',
             icon: FaMoneyCheckAlt,

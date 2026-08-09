@@ -21,8 +21,9 @@ import {
   parsePersistedOrphanEvidence,
   verifyProductionDispatchAuditChains,
   createPrismaDispatchReplayTruthVerifier,
+  validatePersistedDocumentTransition,
 } from '../dispatchDocumentAuditRecovery';
-import { recoveryEngineInternals } from '../systemRecoveryEngine';
+import { recoveryEngineInternals, sanitizedDispatchArtifactMetadata } from '../systemRecoveryEngine';
 import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
 import { guardPhysicalExitAuditIntegrityHash, guardPhysicalExitIntegrityHash } from '../physicalGateExit';
 import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from '../approvedPricing/domain';
@@ -157,6 +158,19 @@ test('production replay uses writer-owned Guard and correction hash formats', ()
     { aggregateType: 'DISPATCH_CORRECTION', aggregateId: 'correction-1', eventType: 'CORRECTION_POSTED', payload: correctionPayload, actorId: 'actor-1', recordedAt: new Date('2026-08-09T09:00:00.000Z'), previousHash: null, eventHash: correctionAudit },
     { aggregateType: 'GUARD_PHYSICAL_EXIT', aggregateId: 'exit-1', eventType: 'PHYSICAL_EXIT_RECORDED', payload: { ...exitSnapshot, integrityHash: guardPhysicalExitIntegrityHash(exitSnapshot) }, actorId: 'guard-1', recordedAt: new Date('2026-08-09T10:00:00.000Z'), previousHash: null, eventHash: exitAudit },
   ]), []);
+});
+
+test('replacement replay follows the predecessor audit and does not require successor primary issuance', () => {
+  const at = new Date('2026-08-09T11:00:00.000Z');
+  const command = { id: 'replace-command', scope: 'WAYBILL', scopeId: 'waybill-old', command: 'REPLACE', status: 'SUCCEEDED',
+    waybillId: 'waybill-new', actorId: 'accounting-1', correlationId: 'replace-correlation', idempotencyKey: 'replace-1', completedAt: at };
+  const audit = { eventType: 'DOCUMENT_BUNDLE_REPLACED', actorId: 'accounting-1', recordedAt: at,
+    payload: { replacementWaybillId: 'waybill-new', reason: 'Damaged print', authority: { workspace: 'accounting' },
+      correlationId: 'replace-correlation', idempotencyKey: 'replace-1' } };
+  assert.equal(validatePersistedDocumentTransition({ waybill: { id: 'waybill-new', candidateId: 'candidate-1', replacesWaybillId: 'waybill-old',
+    issuedAt: at, issuedBy: 'accounting-1' }, primarySourceHash: 'a'.repeat(64), primaryArtifactIds: ['new-waybill', 'new-statement'], command, audit }), null);
+  assert.equal(validatePersistedDocumentTransition({ waybill: { id: 'waybill-new', candidateId: 'candidate-1', replacesWaybillId: 'waybill-old',
+    issuedAt: at, issuedBy: 'accounting-1' }, primarySourceHash: 'a'.repeat(64), primaryArtifactIds: [], command: undefined, audit }), 'LEGACY_UNRECONCILED');
 });
 
 test('mandatory Prisma truth verifier accepts only immutable writer-owned pricing/event/provenance sources', async () => {
@@ -466,4 +480,17 @@ test('system recovery rejects an incomplete backup until every referenced origin
   } finally {
     await fs.promises.rm(payloadRoot, { recursive: true, force: true });
   }
+});
+
+test('sanitized dispatch backup validates only against placeholder metadata in the sanitized database copy', async () => {
+  const payloadRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dispatch-sanitized-coverage-'));
+  const storageKey = 'issued/statement.pdf'; const placeholder = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
+  const placeholderMetadata = sanitizedDispatchArtifactMetadata(storageKey);
+  const database = { $queryRawUnsafe: async () => [], dispatchDocumentArtifact: { findMany: async () => [{ id: 'artifact-1', storageKey,
+    byteLength: BigInt(placeholderMetadata.byteLength), sha256: placeholderMetadata.sha256 }] } };
+  try {
+    const target = recoveryEngineInternals.dispatchArtifactBackupPath(payloadRoot, storageKey); await fs.promises.mkdir(path.dirname(target), { recursive: true }); await fs.promises.writeFile(target, placeholder);
+    await recoveryEngineInternals.validateStoredFileReferences(database as never, payloadRoot);
+    assert.notEqual(placeholderMetadata.sha256, createHash('sha256').update('original-production-pdf').digest('hex'));
+  } finally { await fs.promises.rm(payloadRoot, { recursive: true, force: true }); }
 });

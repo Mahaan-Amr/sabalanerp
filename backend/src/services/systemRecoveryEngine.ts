@@ -115,6 +115,21 @@ const restoreDatabase = async (databaseUrl: string, database: string, source: st
   });
 };
 
+const minimalPdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
+const minimalPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+const sanitizedText = Buffer.from('Sanitized test placeholder\n', 'utf8');
+
+const sanitizedPlaceholder = (fileName: string) => {
+  const extension = path.extname(fileName).toLowerCase();
+  if (extension === '.pdf') return minimalPdf;
+  if (['.png', '.jpg', '.jpeg', '.webp'].includes(extension)) return minimalPng;
+  return sanitizedText;
+};
+export const sanitizedDispatchArtifactMetadata = (storageKey: string) => {
+  const bytes = sanitizedPlaceholder(storageKey);
+  return { byteLength: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+};
+
 const sanitizeDatabase = async (databaseUrl: string) => {
   const disabledPassword = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
   const sql = `
@@ -160,6 +175,17 @@ const sanitizeDatabase = async (databaseUrl: string) => {
       "dataJson" = '{}'::jsonb, "correctionFieldsJson" = NULL, "correctionDetailsJson" = NULL,
       "correctionReason" = NULL, "declarationFullName" = NULL, "submittedIp" = NULL, "submittedUserAgent" = NULL;
     UPDATE "hr_hiring_audits" SET "payloadJson" = NULL, "ipAddress" = NULL, "userAgent" = NULL;
+    UPDATE "dispatch_document_artifacts" SET
+      "byteLength" = CASE
+        WHEN lower("storageKey") ~ '\\.pdf$' THEN ${sanitizedDispatchArtifactMetadata('artifact.pdf').byteLength}
+        WHEN lower("storageKey") ~ '\\.(png|jpg|jpeg|webp)$' THEN ${sanitizedDispatchArtifactMetadata('artifact.png').byteLength}
+        ELSE ${sanitizedDispatchArtifactMetadata('artifact.bin').byteLength}
+      END,
+      "sha256" = CASE
+        WHEN lower("storageKey") ~ '\\.pdf$' THEN '${sanitizedDispatchArtifactMetadata('artifact.pdf').sha256}'
+        WHEN lower("storageKey") ~ '\\.(png|jpg|jpeg|webp)$' THEN '${sanitizedDispatchArtifactMetadata('artifact.png').sha256}'
+        ELSE '${sanitizedDispatchArtifactMetadata('artifact.bin').sha256}'
+      END;
     DO $sanitization$
     DECLARE sensitive RECORD;
     BEGIN
@@ -202,16 +228,6 @@ const regularFiles = async (root: string, relative = ''): Promise<string[]> => {
     else if (entry.isFile()) files.push(child);
   }
   return files;
-};
-
-const minimalPdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
-const minimalPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
-
-const sanitizedPlaceholder = (fileName: string) => {
-  const extension = path.extname(fileName).toLowerCase();
-  if (extension === '.pdf') return minimalPdf;
-  if (['.png', '.jpg', '.jpeg', '.webp'].includes(extension)) return minimalPng;
-  return Buffer.from('Sanitized test placeholder\n', 'utf8');
 };
 
 const copyComponent = async (

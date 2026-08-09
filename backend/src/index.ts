@@ -4,6 +4,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import "dotenv/config";
 import path from "path";
+import { readFile } from "fs/promises";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { registerRealtimePublisher } from "./services/realtimePublisher";
@@ -76,6 +77,7 @@ import {
 import { startNotificationOutboxDelivery } from "./services/notificationService";
 import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
 import { startHrDutyDeadlineMaintenance } from "./services/hrDutyEngine";
+import { verifyHrRedesignCutover } from "./services/hrRedesignCutover";
 
 const prisma = new PrismaClient();
 initializeRecoveryRuntime();
@@ -102,6 +104,9 @@ const validateProductionEnvironment = () => {
     "SMS_IR_API_KEY",
     "SMS_IR_HIRING_INVITATION_TEMPLATE_ID",
     "SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS",
+    "HR_SHAKILA_USER_ID",
+    "HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH",
+    "HR_REDESIGN_CUTOVER_REVISION",
   ];
   const missingVars = requiredVars.filter((key) => !process.env[key]);
   const hiringTemplateId =
@@ -366,7 +371,15 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Start only after interrupted recovery has been finalized or safely rolled back.
-initializeSystemRecovery(prisma).finally(() => {
+initializeSystemRecovery(prisma).then(async () => {
+  if (isProduction) {
+    const acceptanceAttestation = JSON.parse(await readFile(process.env.HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH!, "utf8")) as unknown;
+    await verifyHrRedesignCutover(prisma, {
+      shakilaUserId: process.env.HR_SHAKILA_USER_ID,
+      acceptanceAttestation,
+      sourceRevision: process.env.HR_REDESIGN_CUTOVER_REVISION!,
+    });
+  }
   if (getRecoveryRuntimeState().mode === "NORMAL") {
     startAuthenticationRetentionCleanup(prisma);
     startHiringInvitationDeliveryPolling(prisma);
@@ -382,6 +395,9 @@ initializeSystemRecovery(prisma).finally(() => {
     console.log(`? Server running on port ${PORT}`);
     console.log(`? Health check: http://localhost:${PORT}/api/health`);
   });
+}).catch((error) => {
+  console.error("Backend startup blocked:", error);
+  process.exitCode = 1;
 });
 
 export { io };

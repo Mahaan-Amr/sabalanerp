@@ -45,6 +45,7 @@
     "verify:security-attendance-migration": "tsx scripts/verify-security-attendance-migration.ts",
     "hr-redesign:backfill:dry": "tsx src/scripts/hr-redesign-data-backfill.ts",
     "hr-redesign:backfill:apply": "tsx src/scripts/hr-redesign-data-backfill.ts --apply",
+    "hr-redesign:cutover:verify": "tsx src/scripts/verify-hr-redesign-cutover.ts",
     "preview:security-shift-pdf": "tsx scripts/render-security-completed-shift-preview.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"

@@ -8,6 +8,7 @@ import PersianCalendarComponent from "@/components/PersianCalendar";
 import PersianCalendar from "@/lib/persian-calendar";
 import { toIsoDate } from "@/features/hr/hrUi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
+import { ApplicantFormalAssessments } from "@/features/hr-hiring/ApplicantFormalAssessments";
 
 const questions = [
   "به چه فعالیت‌های هنری یا ورزشی علاقه دارید؟",
@@ -953,6 +954,11 @@ export default function ApplicantFormPage() {
             فرم نهایی ثبت شده و تا زمان درخواست اصلاح منابع انسانی قفل است.
           </p>
         )}
+        <ApplicantFormalAssessments
+          assessments={application?.formalAssessments}
+          busy={busy}
+          run={run}
+        />
         {application?.compensation && (
           <section className="mt-5 rounded-3xl bg-[var(--sds-surface-raised)] p-5 shadow-sm">
             <h2 className="text-lg font-black">حقوق و مزایا</h2>

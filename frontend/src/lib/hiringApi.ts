@@ -91,6 +91,12 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/pre-identity/release`),
   decideAssessment: (id: string, data: any) =>
     internal.post(`/applications/${id}/assessments/decision`, data),
+  createFormalAssessmentPlan: (id: string, data: any) =>
+    internal.post(`/applications/${id}/formal-assessment-plans`, data),
+  recordFormalAssessmentResult: (id: string, kind: string, data: any) =>
+    internal.post(`/applications/${id}/formal-assessments/${kind}/result`, data),
+  finallyReject: (id: string, data: any) =>
+    internal.post(`/applications/${id}/final-rejection`, data),
   reactivateDisposition: (id: string, reason: string) =>
     internal.post(`/applications/${id}/disposition/reactivate`, { reason }),
   authorizeReopening: (id: string, reason: string) =>
@@ -233,6 +239,8 @@ export const applicantHiringAPI = {
       category,
       note,
     }),
+  submitFormalAssessmentResult: (kind: string, result: Record<string, unknown>) =>
+    applicant.post(`/public/application/formal-assessments/${kind}/result`, { result }),
 };
 
 export const hiringError = (error: any) =>

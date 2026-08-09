@@ -1,16 +1,18 @@
 import { paperContractReviewState } from "./hrEmploymentContract";
 import { buildEmploymentActivationReadiness } from "./hrEmploymentActivation";
 import { latestDecisionsByKind } from "./hrApplicationDecisionVersions";
+import { projectFormalAssessmentEvidenceGate } from "./hrFormalAssessmentPolicy";
 
 export const HIRING_LIFECYCLE_PHASES = [
   { id: "APPLICATION", number: 1, title: "تشکیل پرونده و فرم متقاضی" },
-  { id: "PRE_IDENTITY", number: 2, title: "بررسی‌های پیش از احراز هویت" },
-  { id: "IDENTITY", number: 3, title: "بررسی و احراز هویت" },
-  { id: "ASSESSMENT", number: 4, title: "ارزیابی و تصمیم اولیه" },
-  { id: "OFFER", number: 5, title: "پیشنهاد همکاری و پذیرش" },
-  { id: "CONVERSION", number: 6, title: "وثیقه و تبدیل به پرسنل" },
-  { id: "ONBOARDING", number: 7, title: "آماده‌سازی شروع همکاری" },
-  { id: "ACTIVATION", number: 8, title: "فعال‌سازی همکاری" },
+  { id: "INITIAL_HR_REVIEW", number: 2, title: "بررسی اولیه منابع انسانی" },
+  { id: "FORMAL_ASSESSMENTS", number: 3, title: "ارزیابی‌های رسمی اختیاری" },
+  { id: "COMPANY_EVALUATION_PLAN", number: 4, title: "برنامه ارزیابی مدیریت شرکت" },
+  { id: "IDENTITY", number: 5, title: "بررسی و احراز هویت" },
+  { id: "OFFER", number: 6, title: "پیشنهاد همکاری و پذیرش" },
+  { id: "CONVERSION", number: 7, title: "وثیقه و تبدیل به پرسنل" },
+  { id: "ONBOARDING", number: 8, title: "آماده‌سازی شروع همکاری" },
+  { id: "ACTIVATION", number: 9, title: "فعال‌سازی همکاری" },
 ] as const;
 
 export type HiringLifecyclePhaseId =
@@ -53,7 +55,7 @@ export interface HiringLifecyclePhase {
 export interface HiringLifecycleProjection {
   currentPhaseId: HiringLifecyclePhaseId;
   currentPhaseNumber: number;
-  totalPhases: 8;
+  totalPhases: 9;
   terminal: boolean;
   phases: HiringLifecyclePhase[];
 }
@@ -126,6 +128,26 @@ interface HiringDecisionLike {
   version: number;
 }
 
+interface FormalAssessmentSelectionLike {
+  assessmentKind: "DISC" | "EQ" | "BIG_FIVE";
+  selected: boolean;
+  executionMethod?: "APPLICANT" | "COMPANY" | null;
+}
+
+interface FormalAssessmentResultLike {
+  assessmentKind: "DISC" | "EQ" | "BIG_FIVE";
+  resultVersion: number;
+  status: "PENDING" | "COMPLETED" | "INVALIDATED";
+}
+
+interface FormalAssessmentPlanLike {
+  version: number;
+  status: "ACTIVE" | "SUPERSEDED";
+  explicitlyNoAssessment: boolean;
+  selections?: FormalAssessmentSelectionLike[];
+  results?: FormalAssessmentResultLike[];
+}
+
 export interface HiringLifecycleSource {
   stage: string;
   outcome?: string | null;
@@ -141,6 +163,7 @@ export interface HiringLifecycleSource {
   preIdentityReleasedAt?: Date | string | null;
   preIdentityGrandfatheredAt?: Date | string | null;
   preIdentityChecklistItems?: PreIdentityChecklistLike[];
+  formalAssessmentPlans?: FormalAssessmentPlanLike[];
   hiringDecisions?: HiringDecisionLike[];
   compensationClearance?: string | null;
   compensationSnapshots?: CompensationLike[];
@@ -366,19 +389,83 @@ const applicationGate = (source: HiringLifecycleSource): Gate => {
 const latestDecision = (source: HiringLifecycleSource, kind: string) =>
   latestDecisionsByKind(source.hiringDecisions || []).get(kind);
 
-const preIdentityGate = (source: HiringLifecycleSource): Gate => {
+const completedGate = (requiredTotal = 1): Gate => ({
+  complete: true,
+  requiredComplete: requiredTotal,
+  requiredTotal,
+  blockers: [],
+  action: null,
+  secondaryActions: [],
+});
+
+const initialHrReviewGate = (source: HiringLifecycleSource): Gate => {
   if (source.preIdentityGrandfatheredAt) {
-    return {
-      complete: true,
-      requiredComplete: 4,
-      requiredTotal: 4,
-      blockers: [],
-      action: null,
-      secondaryActions: [],
-    };
+    return completedGate(2);
   }
   const interviewApproved = latestDecision(source, "HR_INTERVIEW")?.outcome === "POSITIVE";
   const hrApproved = latestDecision(source, "HR_PRELIMINARY_APPROVAL")?.outcome === "POSITIVE";
+  const completed = Number(interviewApproved) + Number(hrApproved);
+  return {
+    complete: completed === 2,
+    requiredComplete: completed,
+    requiredTotal: 2,
+    blockers: [],
+    action: !interviewApproved
+      ? action("RECORD_HR_INTERVIEW", "ثبت نتیجه مصاحبه اولیه HR", "HR_PROCESSOR")
+      : action("RECORD_HR_PRELIMINARY_APPROVAL", "ثبت تأیید اولیه HR", "HR_MANAGER"),
+    secondaryActions: [],
+  };
+};
+
+const formalAssessmentGate = (source: HiringLifecycleSource): Gate => {
+  if (source.preIdentityGrandfatheredAt) return completedGate();
+  const plans = source.formalAssessmentPlans || [];
+  const evidence = projectFormalAssessmentEvidenceGate(plans);
+  if (evidence.planVersion === null) {
+    return {
+      complete: false,
+      requiredComplete: 0,
+      requiredTotal: 1,
+      blockers: [blocker(
+        "FORMAL_ASSESSMENT_PLAN_UNRESOLVED",
+        "تصمیم صریح درباره ارزیابی‌های رسمی هنوز ثبت نشده است.",
+        "COMPANY_MANAGER",
+      )],
+      action: action("FINALIZE_FORMAL_ASSESSMENT_PLAN", "ثبت برنامه ارزیابی‌های رسمی", "COMPANY_MANAGER"),
+      secondaryActions: [],
+    };
+  }
+  if (evidence.explicitlyNoAssessment) return completedGate();
+  const nextCompanyResult = evidence.missingKinds.find((kind) => evidence.executionMethodByKind.get(kind) === "COMPANY");
+  return {
+    complete: evidence.complete,
+    requiredComplete: evidence.selectedKinds.length - evidence.missingKinds.length,
+    requiredTotal: evidence.selectedKinds.length || 1,
+    blockers: [
+      ...(!evidence.selectedKinds.length ? [blocker(
+        "FORMAL_ASSESSMENT_SELECTION_MISSING",
+        "برنامه باید ارزیابی انتخاب‌شده داشته باشد یا صریحاً بدون ارزیابی ثبت شود.",
+        "COMPANY_MANAGER",
+      )] : []),
+      ...evidence.missingKinds.map((kind) => blocker(
+        `FORMAL_ASSESSMENT_RESULT_MISSING:${kind}`,
+        `نتیجه ${kind} برای نسخه جاری برنامه تکمیل نشده است.`,
+        evidence.executionMethodByKind.get(kind) === "APPLICANT" ? "APPLICANT" : "HR_PROCESSOR",
+      )),
+    ],
+    action: nextCompanyResult
+      ? action(
+          `RECORD_COMPANY_ASSESSMENT_RESULT:${nextCompanyResult}`,
+          `ثبت نتیجه ${nextCompanyResult}`,
+          "HR_PROCESSOR",
+        )
+      : null,
+    secondaryActions: [action("REVISE_FORMAL_ASSESSMENT_PLAN", "بازنگری برنامه ارزیابی‌های رسمی", "COMPANY_MANAGER")],
+  };
+};
+
+const companyEvaluationPlanGate = (source: HiringLifecycleSource): Gate => {
+  if (source.preIdentityGrandfatheredAt) return completedGate(2);
   const requirementsFinalized = Boolean(source.preIdentityRequirementsFinalizedAt);
   const items = source.preIdentityChecklistItems || [];
   const incompleteItems = items.filter((item) =>
@@ -389,25 +476,21 @@ const preIdentityGate = (source: HiringLifecycleSource): Gate => {
   );
   const managementApproved = Boolean(source.preIdentityManagementApprovedAt);
   const released = Boolean(source.preIdentityReleasedAt);
-  const completed = [interviewApproved, hrApproved, requirementsFinalized, managementApproved && released]
-    .filter(Boolean).length;
-  let nextAction = action("RECORD_HR_INTERVIEW", "ثبت نتیجه مصاحبه اولیه HR", "HR_PROCESSOR");
-  if (interviewApproved && !hrApproved)
-    nextAction = action("RECORD_HR_PRELIMINARY_APPROVAL", "ثبت تأیید اولیه HR", "HR_MANAGER");
-  else if (interviewApproved && hrApproved && !requirementsFinalized)
-    nextAction = action("FINALIZE_PRE_IDENTITY_REQUIREMENTS", "تعیین و نهایی‌سازی الزامات پرونده", "COMPANY_MANAGER");
-  else if (requirementsFinalized && incompleteItems.length)
+  const companyApproved = latestDecision(source, "COMPANY_APPROVAL")?.outcome === "POSITIVE";
+  const completed = Number(requirementsFinalized) + Number(companyApproved && managementApproved && released);
+  let nextAction = action("FINALIZE_PRE_IDENTITY_REQUIREMENTS", "تعیین و نهایی‌سازی الزامات پرونده", "COMPANY_MANAGER");
+  if (requirementsFinalized && incompleteItems.length)
     nextAction = action("COMPLETE_PRE_IDENTITY_ITEM", "پیگیری و ثبت نتیجه الزامات", "HR_PROCESSOR");
   else if (requirementsFinalized && unresolvedNegative.length)
     nextAction = action("RESOLVE_NEGATIVE_PRE_IDENTITY_ITEM", "تصمیم درباره نتیجه منفی", "COMPANY_MANAGER");
-  else if (requirementsFinalized && !managementApproved)
+  else if (requirementsFinalized && (!managementApproved || !companyApproved))
     nextAction = action("APPROVE_PRE_IDENTITY", "تأیید ادامه پرونده توسط مدیریت شرکت", "COMPANY_MANAGER");
   else if (managementApproved && !released)
     nextAction = action("RELEASE_PRE_IDENTITY", "تأیید تکمیل اداری چک‌لیست", "HR_PROCESSOR");
   return {
-    complete: released && managementApproved && !incompleteItems.length && !unresolvedNegative.length,
+    complete: released && managementApproved && companyApproved && !incompleteItems.length && !unresolvedNegative.length,
     requiredComplete: completed,
-    requiredTotal: 4,
+    requiredTotal: 2,
     blockers: [],
     action: nextAction,
     secondaryActions: requirementsFinalized
@@ -745,9 +828,10 @@ export const projectHiringLifecycle = (
   const authorities = new Set(viewerAuthorities);
   const gates = [
     applicationGate(source),
-    preIdentityGate(source),
+    initialHrReviewGate(source),
+    formalAssessmentGate(source),
+    companyEvaluationPlanGate(source),
     identityGate(source),
-    assessmentGate(source),
     offerGate(source),
     conversionGate(source),
     onboardingGate(source, viewerUserId),
@@ -776,7 +860,10 @@ export const projectHiringLifecycle = (
       else status = "WAITING";
 
       const isFocused = index === effectiveIndex && !terminal;
-      const actionable = isFocused && gate.blockers.length === 0 && !source.disposition;
+      const actionableEvidenceGap = gate.blockers.every((item) =>
+        item.code.startsWith("FORMAL_ASSESSMENT_RESULT_MISSING:"),
+      );
+      const actionable = isFocused && (gate.blockers.length === 0 || actionableEvidenceGap) && !source.disposition;
       const permittedActions = actionable
         ? [gate.action, ...gate.secondaryActions].filter(
             (candidate): candidate is HiringLifecycleAction =>
@@ -818,7 +905,7 @@ export const projectHiringLifecycle = (
   return {
     currentPhaseId: HIRING_LIFECYCLE_PHASES[effectiveIndex].id,
     currentPhaseNumber: HIRING_LIFECYCLE_PHASES[effectiveIndex].number,
-    totalPhases: 8,
+    totalPhases: 9,
     terminal,
     phases,
   };

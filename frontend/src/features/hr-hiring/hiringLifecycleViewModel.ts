@@ -67,9 +67,10 @@ export const hiringLifecycleStatusLabel: Record<HiringLifecycleStatus, string> =
 
 export const hiringLifecyclePhaseOptions = [
   ["APPLICATION", "تشکیل پرونده و فرم متقاضی"],
-  ["PRE_IDENTITY", "بررسی‌های پیش از احراز هویت"],
+  ["INITIAL_HR_REVIEW", "بررسی اولیه منابع انسانی"],
+  ["FORMAL_ASSESSMENTS", "ارزیابی‌های رسمی اختیاری"],
+  ["COMPANY_EVALUATION_PLAN", "برنامه ارزیابی مدیریت شرکت"],
   ["IDENTITY", "بررسی و احراز هویت"],
-  ["ASSESSMENT", "ارزیابی و تصمیم اولیه"],
   ["OFFER", "پیشنهاد همکاری و پذیرش"],
   ["CONVERSION", "وثیقه و تبدیل به پرسنل"],
   ["ONBOARDING", "آماده‌سازی شروع همکاری"],

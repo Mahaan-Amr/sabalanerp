@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import type { PricingReadinessReasonCode, PricingReadinessStatus } from '../dispatchDocuments/contracts';
-import { hashCanonicalEvidence } from './canonicalEvidence';
+import { canonicalApprovedPricingHash } from '../approvedPricing';
 import { isCompleteValidApprovalLeaf } from './approvalLeaf';
 
 export const LEGACY_PRICING_STATUSES = [
@@ -327,8 +327,8 @@ export const buildLegacyPricingManifest = (candidates: readonly LegacyPricingCan
     sourceContractCount: String(entries.length),
     sourceApprovalRecordCount: String(candidates.reduce((count, item) => count + item.approvalLeaves.length, 0)),
     sourceRowCount: String(entries.reduce((count, item) => count + item.sourceCount, 0)),
-    sourceIdentityHash: hashCanonicalEvidence(entries.map(item => ({ contractId: item.contractId, sourceFinancialRecordId: item.sourceFinancialRecordId, sourceIdentityHash: item.sourceIdentityHash }))),
-    sourceEvidenceHash: hashCanonicalEvidence(entries.map(item => ({ contractId: item.contractId, sourceEvidenceHash: item.sourceEvidenceHash }))),
+    sourceIdentityHash: canonicalApprovedPricingHash(entries.map(item => ({ contractId: item.contractId, sourceFinancialRecordId: item.sourceFinancialRecordId, sourceIdentityHash: item.sourceIdentityHash }))),
+    sourceEvidenceHash: canonicalApprovedPricingHash(entries.map(item => ({ contractId: item.contractId, sourceEvidenceHash: item.sourceEvidenceHash }))),
     quantityTotal,
     amountTotal,
     knownQuantitySubtotal,
@@ -338,7 +338,7 @@ export const buildLegacyPricingManifest = (candidates: readonly LegacyPricingCan
     counts,
     entries,
   };
-  return { ...body, manifestHash: hashCanonicalEvidence(body) };
+  return { ...body, manifestHash: canonicalApprovedPricingHash(body) };
 };
 
 export type LegacyPricingSealCommand = {
@@ -406,7 +406,7 @@ export const runLegacyPricingSeal = async (
     } else {
       if (!candidate.review) throw new Error('READY legacy pricing evidence requires an immutable review decision.');
       const result = await writer.seal({
-        idempotencyKey: hashCanonicalEvidence({ scope: 'legacy-pricing-seal', contractId: candidate.contractId, sourceFinancialRecordId: candidate.sourceFinancialRecordId, sourceEvidenceHash: candidate.sourceEvidenceHash }),
+        idempotencyKey: canonicalApprovedPricingHash({ scope: 'legacy-pricing-seal', contractId: candidate.contractId, sourceFinancialRecordId: candidate.sourceFinancialRecordId, sourceEvidenceHash: candidate.sourceEvidenceHash }),
         origin: 'LEGACY_SEAL',
         candidate,
         review: candidate.review,
@@ -439,6 +439,5 @@ export const runLegacyPricingSeal = async (
 
 export * from './source';
 export * from './prismaSource';
-export * from './canonicalEvidence';
 export * from './approvalLeaf';
 export * from './approvedPricingWriter';

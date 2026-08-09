@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { hashCanonicalEvidence } from './canonicalEvidence';
+import { canonicalApprovedPricingHash } from '../approvedPricing';
 import { isCompleteValidApprovalLeaf } from './approvalLeaf';
 import type {
   LegacyPricingApprovalLeaf,
@@ -16,6 +16,7 @@ export type LegacyPricingSourceInput = {
       id: string;
       productId: string | null;
       productRowId: string | null;
+      productType: string | null;
       quantity: string | null;
       totalPrice: string | null;
     }[];
@@ -29,7 +30,9 @@ export type LegacyPricingSourceInput = {
     currency: string | null;
     customerId: string | null;
     amount: string | null;
+    sourceId: string | null;
     sourceSnapshot: unknown;
+    metadata: unknown;
     invoiceItems: readonly {
       contractItemId: string | null;
       productId: string | null;
@@ -200,7 +203,7 @@ export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): L
       discountEligible: components?.discountEligible ?? null,
       componentEvidence: components?.evidence ?? null,
       componentEvidenceConflict: components?.conflict ?? false,
-      snapshotHash: product && approvalItem && invoiceItem ? hashCanonicalEvidence({ product, approvalItem, invoiceItem }) : null,
+      snapshotHash: product && approvalItem && invoiceItem ? canonicalApprovedPricingHash({ product, approvalItem, invoiceItem }) : null,
     };
   });
   const rowTotals = rows.map(row => decimal(row.canonicalAllInTotal, 12));
@@ -238,8 +241,8 @@ export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): L
     grossAmount,
     discountAmount,
     netAmount: toRial(selected?.amount ?? null, selected?.currency),
-    sourceIdentityHash: hashCanonicalEvidence({ contractId: source.contract.id, financialRecordId: selected?.id ?? null, itemIds: source.contract.items.map(item => item.id) }),
-    sourceEvidenceHash: hashCanonicalEvidence(evidence),
+    sourceIdentityHash: canonicalApprovedPricingHash({ contractId: source.contract.id, financialRecordId: selected?.id ?? null, itemIds: source.contract.items.map(item => item.id) }),
+    sourceEvidenceHash: canonicalApprovedPricingHash(evidence),
     existingSeal: source.existingSeal,
     review: source.review,
     rowCounts: {

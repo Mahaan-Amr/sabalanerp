@@ -11,12 +11,81 @@ import {
 import { PrismaApprovedPricingRepository } from '../approvedPricing/prismaRepository';
 import { classifyLegacyPricingCandidate, type LegacyPricingSealCommand, type LegacyPricingSealWriter } from './index';
 import { isCompleteValidApprovalLeaf } from './approvalLeaf';
+import { buildLegacyPricingCandidate, type LegacyPricingSourceInput } from './source';
 
 export interface LegacyApprovedPricingWriterRepository extends ApprovedPricingRepository {
+  loadLegacyPricingRevalidationSource(contractId: string): Promise<Omit<LegacyPricingSourceInput, 'review'> | null>;
   readPersistenceContext(contractId: string, financialRecordId: string): Promise<{
     origin: ApprovedPricingVersionOrigin;
     legacySourceReference: unknown;
   } | null>;
+}
+
+class PrismaLegacyApprovedPricingRepository extends PrismaApprovedPricingRepository implements LegacyApprovedPricingWriterRepository {
+  constructor(private readonly legacyTx: Prisma.TransactionClient) { super(legacyTx); }
+
+  async loadLegacyPricingRevalidationSource(contractId: string) {
+    const contract = await this.legacyTx.salesContract.findUnique({
+      where: { id: contractId },
+      include: {
+        items: { orderBy: { id: 'asc' } },
+        productGraphState: true,
+        approvedPricingVersions: {
+          where: { origin: ApprovedPricingVersionOrigin.LEGACY_SEAL },
+          select: { id: true, sourceFinancialRecordId: true, legacySourceReference: true },
+        },
+      },
+    });
+    if (!contract || contract.productGraphState) return null;
+    const financialRecords = await this.legacyTx.accountingFinancialRecord.findMany({
+      where: { contractId, kind: 'INVOICE_CANDIDATE' },
+      include: { invoiceItems: { orderBy: { id: 'asc' } } },
+      orderBy: [{ financiallyApprovedAt: 'desc' }, { id: 'asc' }],
+    });
+    const records = financialRecords.map(leaf => ({
+      id: leaf.id,
+      kind: leaf.kind,
+      status: leaf.status,
+      approvedAt: leaf.financiallyApprovedAt?.toISOString() ?? null,
+      approvedBy: leaf.financiallyApprovedBy,
+      currency: leaf.currency,
+      customerId: leaf.customerId,
+      amount: leaf.amount.toFixed(12),
+      sourceId: leaf.sourceId,
+      sourceSnapshot: leaf.sourceSnapshot,
+      metadata: leaf.metadata,
+      invoiceItems: leaf.invoiceItems.map(item => ({
+        contractItemId: item.contractItemId,
+        productId: item.productId,
+        quantity: item.quantity.toFixed(3),
+        totalPrice: item.totalPrice.toFixed(12),
+      })),
+    }));
+    const selectedId = records.find(leaf => leaf.kind === 'INVOICE_CANDIDATE'
+      && ['ISSUED', 'POSTED'].includes(leaf.status)
+      && leaf.approvedAt && leaf.approvedBy)?.id ?? records[0]?.id ?? '';
+    const existing = contract.approvedPricingVersions.find(version => version.sourceFinancialRecordId === selectedId);
+    const reference = record(existing?.legacySourceReference);
+    return {
+      contract: {
+        id: contract.id,
+        currency: contract.currency,
+        customerId: contract.customerId,
+        items: contract.items.map(item => ({
+          id: item.id,
+          productId: item.productId,
+          productRowId: item.productRowId,
+          productType: item.productType,
+          quantity: item.quantity.toFixed(3),
+          totalPrice: item.totalPrice.toFixed(12),
+        })),
+      },
+      financialRecords: records,
+      existingSeal: existing && typeof reference.sourceEvidenceHash === 'string'
+        ? { pricingVersionId: existing.id, sourceEvidenceHash: reference.sourceEvidenceHash }
+        : null,
+    };
+  }
 }
 
 type IdFactory = { version: () => string; row: () => string };
@@ -38,20 +107,31 @@ export const sealLegacyPricingWithApprovedPricingRepository = async (
     || command.review.sourceEvidenceHash !== command.candidate.sourceEvidenceHash) {
     throw new Error('Legacy pricing seal command does not match its preflight evidence.');
   }
-  const leaf = await repository.readApprovalLeaf(command.candidate.sourceFinancialRecordId);
-  const preflightLeaf = leaf ? command.candidate.approvalLeaves.find(item => item.id === leaf.id) : null;
-  if (!leaf || !preflightLeaf || !isCompleteValidApprovalLeaf({
-    kind: leaf.kind,
-    status: leaf.status,
-    approvedAt: leaf.financiallyApprovedAt?.toISOString() ?? null,
-    approvedBy: leaf.financiallyApprovedBy,
-  }) || leaf.contractId !== command.candidate.contractId
-    || leaf.kind !== preflightLeaf.kind || leaf.status !== preflightLeaf.status
-    || leaf.financiallyApprovedAt?.toISOString() !== preflightLeaf.approvedAt
-    || leaf.financiallyApprovedBy !== preflightLeaf.approvedBy) {
-    throw new Error('Legacy pricing approval evidence changed after preflight.');
-  }
   return repository.withContractLock(command.candidate.contractId, async () => {
+    const source = await repository.loadLegacyPricingRevalidationSource(command.candidate.contractId);
+    if (!source) throw new Error('Legacy pricing source disappeared or is no longer in the legacy cohort.');
+    const refreshedCandidate = buildLegacyPricingCandidate({ ...source, review: command.review });
+    const refreshedClassification = classifyLegacyPricingCandidate(refreshedCandidate);
+    if (refreshedCandidate.sourceEvidenceHash !== command.review.sourceEvidenceHash
+      || refreshedCandidate.sourceEvidenceHash !== command.sourceReference.sourceEvidenceHash
+      || refreshedCandidate.sourceIdentityHash !== command.sourceReference.sourceIdentityHash
+      || refreshedCandidate.sourceFinancialRecordId !== command.sourceReference.sourceFinancialRecordId
+      || refreshedClassification.status !== 'READY') {
+      throw new Error('Legacy pricing source evidence changed after preflight.');
+    }
+    const leaf = await repository.readApprovalLeaf(command.candidate.sourceFinancialRecordId);
+    const preflightLeaf = leaf ? refreshedCandidate.approvalLeaves.find(item => item.id === leaf.id) : null;
+    if (!leaf || !preflightLeaf || !isCompleteValidApprovalLeaf({
+      kind: leaf.kind,
+      status: leaf.status,
+      approvedAt: leaf.financiallyApprovedAt?.toISOString() ?? null,
+      approvedBy: leaf.financiallyApprovedBy,
+    }) || leaf.contractId !== command.candidate.contractId
+      || leaf.kind !== preflightLeaf.kind || leaf.status !== preflightLeaf.status
+      || leaf.financiallyApprovedAt?.toISOString() !== preflightLeaf.approvedAt
+      || leaf.financiallyApprovedBy !== preflightLeaf.approvedBy) {
+      throw new Error('Legacy pricing approval evidence changed after preflight.');
+    }
     const existing = await repository.findByApproval(command.candidate.contractId, command.candidate.sourceFinancialRecordId);
     if (existing) {
       const context = await repository.readPersistenceContext(command.candidate.contractId, command.candidate.sourceFinancialRecordId);
@@ -128,7 +208,7 @@ export const sealLegacyPricingWithApprovedPricingRepository = async (
 
 export const createPrismaLegacyPricingSealWriter = (prisma: PrismaClient): LegacyPricingSealWriter => ({
   seal: command => prisma.$transaction(
-    tx => sealLegacyPricingWithApprovedPricingRepository(new PrismaApprovedPricingRepository(tx), command),
+    tx => sealLegacyPricingWithApprovedPricingRepository(new PrismaLegacyApprovedPricingRepository(tx), command),
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 10_000, timeout: 120_000 },
   ),
 });

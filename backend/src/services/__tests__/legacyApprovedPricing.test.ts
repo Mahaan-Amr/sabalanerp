@@ -16,6 +16,34 @@ import {
   type LegacyPricingSealWriter,
 } from '../legacyApprovedPricing';
 import type { ApprovedPricingPersistenceContext, ApprovedPricingVersionInsert } from '../approvedPricing';
+import type { LegacyPricingSourceInput } from '../legacyApprovedPricing/source';
+
+const completeLegacySource = (): LegacyPricingSourceInput => ({
+  contract: {
+    id: 'contract-1', currency: 'تومان', customerId: 'customer-1',
+    items: [{ id: 'item-1', productId: 'product-1', productRowId: 'row-1', productType: 'prepared', quantity: '2.000', totalPrice: '100.000000000000' }],
+  },
+  financialRecords: [{
+    id: 'invoice-1', kind: 'INVOICE_CANDIDATE', status: 'ISSUED', approvedAt: '2026-08-01T08:00:00.000Z', approvedBy: 'accountant-1',
+    currency: 'ریال', customerId: 'customer-1', amount: '900.000000000000', sourceId: 'contract-1', metadata: { mode: 'legacy' },
+    sourceSnapshot: {
+      currency: 'تومان', customerId: 'customer-1',
+      items: [{ id: 'item-1', productId: 'product-1', quantity: '2.000', totalPrice: '100.000000000000' }],
+      contractData: {
+        customerId: 'customer-1', projectId: 'project-1', project: { id: 'project-1', address: 'Tehran warehouse' },
+        discount: { enabled: true, baseSubtotal: '70', amount: '10' },
+        products: [{
+          rowId: 'row-1', productId: 'product-1', productType: 'prepared', preparedQuantity: '2', preparedUnit: 'squareMeter',
+          currency: 'تومان', totalPrice: '100', originalTotalPrice: '70', isMandatory: false, mandatoryPercentage: '0', cuttingCost: '10',
+          totalSubServiceCost: '10', appliedSubServices: [{ id: 'tool-1', cost: '10' }], finishingId: 'finish-1', finishingCost: '10',
+        }],
+      },
+    },
+    invoiceItems: [{ contractItemId: 'item-1', productId: 'product-1', quantity: '2.000', totalPrice: '1000.000000000000' }],
+  }],
+  existingSeal: null,
+  review: null,
+});
 
 const completeCandidate = (overrides: Partial<LegacyPricingCandidate> = {}): LegacyPricingCandidate => {
   const sourceFinancialRecordId = overrides.sourceFinancialRecordId ?? 'invoice-1';
@@ -184,11 +212,11 @@ test('source adapter binds rows only by exact stable identity and hashes the unt
   const candidate = buildLegacyPricingCandidate({
     contract: {
       id: 'contract-1', currency: 'تومان', customerId: 'customer-1',
-      items: [{ id: 'item-1', productId: 'product-1', productRowId: 'row-1', quantity: '2.000', totalPrice: '100.000000000000' }],
+      items: [{ id: 'item-1', productId: 'product-1', productRowId: 'row-1', productType: 'prepared', quantity: '2.000', totalPrice: '100.000000000000' }],
     },
     financialRecords: [{
       id: 'invoice-1', kind: 'INVOICE_CANDIDATE', status: 'ISSUED', approvedAt: '2026-08-01T08:00:00.000Z', approvedBy: 'accountant-1',
-      currency: 'ریال', customerId: 'customer-1', amount: '900.000000000000',
+      currency: 'ریال', customerId: 'customer-1', amount: '900.000000000000', sourceId: 'contract-1', metadata: { mode: 'legacy' },
       sourceSnapshot: {
         currency: 'تومان', customerId: 'customer-1',
         items: [{ id: 'item-1', productId: 'product-1', quantity: '2.000', totalPrice: '100.000000000000' }],
@@ -219,7 +247,7 @@ test('source adapter binds rows only by exact stable identity and hashes the unt
 
   const legacyWithoutPersistedIdentity = buildLegacyPricingCandidate({
     ...{
-      contract: { id: 'contract-1', currency: 'IRR', customerId: 'customer-1', items: [{ id: 'item-1', productId: 'product-1', productRowId: null, quantity: '2', totalPrice: '100' }] },
+      contract: { id: 'contract-1', currency: 'IRR', customerId: 'customer-1', items: [{ id: 'item-1', productId: 'product-1', productRowId: null, productType: null, quantity: '2', totalPrice: '100' }] },
       financialRecords: [], existingSeal: null, review: null,
     },
   });
@@ -279,7 +307,8 @@ test('post-seal recapture returns a failed before/after manifest with explicit d
 });
 
 test('real legacy writer port persists through approvedPricing with LEGACY_SEAL context and replays by source identity', async () => {
-  const candidate = completeCandidate();
+  const source = completeLegacySource();
+  const candidate = buildLegacyPricingCandidate(source);
   const ready = { ...candidate, review: reviewed(candidate) };
   let persisted: ApprovedPricingVersionInsert | null = null;
   let persistenceContext: ApprovedPricingPersistenceContext | null = null;
@@ -289,6 +318,7 @@ test('real legacy writer port persists through approvedPricing with LEGACY_SEAL 
       financiallyApprovedAt: new Date('2026-08-01T08:00:00.000Z'), financiallyApprovedBy: 'accountant-1',
       amount: '90', currency: 'IRR', sourceId: 'contract-1', sourceSnapshot: {}, metadata: {}, invoiceItems: [],
     }; },
+    async loadLegacyPricingRevalidationSource() { return source; },
     async withContractLock<T>(_contractId: string, work: () => Promise<T>) { return work(); },
     async findByApproval() { return persisted; },
     async readPersistenceContext() { return persisted ? { origin: ApprovedPricingVersionOrigin.LEGACY_SEAL, legacySourceReference: { sourceEvidenceHash: ready.sourceEvidenceHash } } : null; },
@@ -307,5 +337,41 @@ test('real legacy writer port persists through approvedPricing with LEGACY_SEAL 
   assert.deepEqual(first, { outcome: 'SEALED', pricingVersionId: 'version-1' });
   assert.deepEqual(replay, { outcome: 'REPLAYED', pricingVersionId: 'version-1' });
   assert.equal((persistenceContext as ApprovedPricingPersistenceContext | null)?.origin, ApprovedPricingVersionOrigin.LEGACY_SEAL);
-  assert.equal((persisted as ApprovedPricingVersionInsert | null)?.rows[0]?.componentEvidence.discountBasis, '100.000000000000');
+  assert.equal((persisted as ApprovedPricingVersionInsert | null)?.rows[0]?.componentEvidence.discountBasis, '700.000000000000');
+});
+
+test('writer revalidates the complete source envelope under the contract lock before any immutable write', async () => {
+  const reviewedSource = completeLegacySource();
+  const candidate = buildLegacyPricingCandidate(reviewedSource);
+  const ready = { ...candidate, review: reviewed(candidate) };
+  const changedSource: LegacyPricingSourceInput = {
+    ...reviewedSource,
+    financialRecords: reviewedSource.financialRecords.map(record => ({
+      ...record,
+      amount: '901.000000000000',
+      metadata: { mode: 'legacy', changedAfterReview: true },
+    })),
+  };
+  let inserted = false;
+  const repository: LegacyApprovedPricingWriterRepository = {
+    async loadLegacyPricingRevalidationSource() { return changedSource; },
+    async readApprovalLeaf() { throw new Error('must reject before approval persistence read'); },
+    async withContractLock<T>(_contractId: string, work: () => Promise<T>) { return work(); },
+    async findByApproval() { return null; },
+    async readPersistenceContext() { return null; },
+    async loadSource() { return null; },
+    async nextVersionNumber() { return 1; },
+    async insertAndAdvance(version: ApprovedPricingVersionInsert) { inserted = true; return version; },
+  };
+  const command = {
+    idempotencyKey: 'command-race', origin: 'LEGACY_SEAL' as const, candidate: ready, review: ready.review!,
+    sourceReference: {
+      contractId: ready.contractId,
+      sourceFinancialRecordId: ready.sourceFinancialRecordId,
+      sourceIdentityHash: ready.sourceIdentityHash,
+      sourceEvidenceHash: ready.sourceEvidenceHash,
+    },
+  };
+  await assert.rejects(sealLegacyPricingWithApprovedPricingRepository(repository, command), /source evidence changed after preflight/);
+  assert.equal(inserted, false);
 });

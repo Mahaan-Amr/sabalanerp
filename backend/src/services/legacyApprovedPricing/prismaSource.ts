@@ -35,7 +35,7 @@ export const loadLegacyPricingCandidates = async (
   const contractIds = contracts.map(contract => contract.id);
   const records = await database.accountingFinancialRecord.findMany({
     where: { kind: 'INVOICE_CANDIDATE', contractId: { in: contractIds } },
-    include: { invoiceItems: true },
+    include: { invoiceItems: { orderBy: { id: 'asc' } } },
     orderBy: [{ contractId: 'asc' }, { financiallyApprovedAt: 'desc' }, { id: 'asc' }],
   });
   const recordsByContract = new Map<string, typeof records>();
@@ -55,7 +55,9 @@ export const loadLegacyPricingCandidates = async (
       currency: record.currency,
       customerId: record.customerId,
       amount: record.amount.toFixed(12),
+      sourceId: record.sourceId,
       sourceSnapshot: record.sourceSnapshot,
+      metadata: record.metadata,
       invoiceItems: record.invoiceItems.map(item => ({
         contractItemId: item.contractItemId,
         productId: item.productId,
@@ -79,6 +81,7 @@ export const loadLegacyPricingCandidates = async (
           id: item.id,
           productId: item.productId,
           productRowId: item.productRowId,
+          productType: item.productType,
           quantity: item.quantity.toFixed(3),
           totalPrice: item.totalPrice.toFixed(12),
         })),

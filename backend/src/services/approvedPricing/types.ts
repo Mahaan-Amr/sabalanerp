@@ -1,4 +1,4 @@
-import type { AccountingRecordStatus, FinancialRecordKind } from '@prisma/client';
+import type { AccountingRecordStatus, ApprovedPricingVersionOrigin, FinancialRecordKind } from '@prisma/client';
 
 export const APPROVED_PRICING_SCHEMA_VERSION = 1;
 
@@ -109,6 +109,11 @@ export type ApprovedPricingVersionInsert = {
 
 export type ApprovedPricingVersionRecord = ApprovedPricingVersionInsert;
 
+export type ApprovedPricingPersistenceContext = {
+  origin: ApprovedPricingVersionOrigin;
+  legacySourceReference?: Readonly<Record<string, unknown>> | null;
+};
+
 export type ApprovedPricingSealResult = {
   outcome: 'SEALED' | 'REPLAYED';
   version: ApprovedPricingVersionRecord;
@@ -120,5 +125,5 @@ export interface ApprovedPricingRepository {
   findByApproval(contractId: string, financialRecordId: string): Promise<ApprovedPricingVersionRecord | null>;
   loadSource(financialRecordId: string): Promise<ApprovedPricingSource | null>;
   nextVersionNumber(contractId: string): Promise<number>;
-  insertAndAdvance(version: ApprovedPricingVersionInsert): Promise<ApprovedPricingVersionRecord>;
+  insertAndAdvance(version: ApprovedPricingVersionInsert, context?: ApprovedPricingPersistenceContext): Promise<ApprovedPricingVersionRecord>;
 }

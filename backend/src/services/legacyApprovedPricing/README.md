@@ -44,9 +44,17 @@ Optional reviews are supplied with `LEGACY_PRICING_REVIEWS_PATH`. The JSON file 
 }
 ```
 
-The review authorizes only the exact hash. A changed hash is `EVIDENCE_CONFLICT`, not an editable review. Apply
-remains behind the injected Issue 259 approved-pricing writer port; the script must not gain a second persistence
-implementation.
+The review authorizes only the exact hash. A changed hash is `EVIDENCE_CONFLICT`, not an editable review. Apply uses
+the Issue 259 `PrismaApprovedPricingRepository`; it does not implement a second persistence path:
+
+```powershell
+$env:LEGACY_PRICING_MANIFEST_PATH = 'C:\migration-evidence\legacy-pricing-apply.json'
+$env:LEGACY_PRICING_REVIEWS_PATH = 'C:\migration-evidence\legacy-pricing-reviews.json'
+npm run seal:legacy-approved-pricing
+```
+
+The apply manifest retains both pre/post manifests, their comparison, every `SEALED`/`REPLAYED` result, aggregate
+outcomes, and an explicit failure reason. A source mismatch makes the run `FAILED` without deleting derived rows.
 
 ## Repair boundary
 

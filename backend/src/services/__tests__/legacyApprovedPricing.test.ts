@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AccountingRecordStatus, ApprovedPricingVersionOrigin, FinancialRecordKind } from '@prisma/client';
 import {
   buildLegacyPricingManifest,
   buildLegacyPricingCandidate,
@@ -7,11 +8,14 @@ import {
   runLegacyPricingSeal,
   parseLegacyPricingReviews,
   loadLegacyPricingCandidates,
+  sealLegacyPricingWithApprovedPricingRepository,
+  type LegacyApprovedPricingWriterRepository,
   toPersistedPricingReadiness,
   type LegacyPricingCandidate,
   type LegacyPricingReview,
   type LegacyPricingSealWriter,
 } from '../legacyApprovedPricing';
+import type { ApprovedPricingPersistenceContext, ApprovedPricingVersionInsert } from '../approvedPricing';
 
 const completeCandidate = (overrides: Partial<LegacyPricingCandidate> = {}): LegacyPricingCandidate => {
   const sourceFinancialRecordId = overrides.sourceFinancialRecordId ?? 'invoice-1';
@@ -272,4 +276,36 @@ test('post-seal recapture returns a failed before/after manifest with explicit d
   assert.ok(run.sourceComparison.differences.includes('SOURCE_EVIDENCE_HASH'));
   assert.notEqual(run.beforeManifest.manifestHash, run.afterManifest.manifestHash);
   assert.deepEqual(run.outcomeCounts, { SEALED: 1, REPLAYED: 0 });
+});
+
+test('real legacy writer port persists through approvedPricing with LEGACY_SEAL context and replays by source identity', async () => {
+  const candidate = completeCandidate();
+  const ready = { ...candidate, review: reviewed(candidate) };
+  let persisted: ApprovedPricingVersionInsert | null = null;
+  let persistenceContext: ApprovedPricingPersistenceContext | null = null;
+  const repository: LegacyApprovedPricingWriterRepository = {
+    async readApprovalLeaf() { return {
+      id: 'invoice-1', contractId: 'contract-1', kind: FinancialRecordKind.INVOICE_CANDIDATE, status: AccountingRecordStatus.ISSUED,
+      financiallyApprovedAt: new Date('2026-08-01T08:00:00.000Z'), financiallyApprovedBy: 'accountant-1',
+      amount: '90', currency: 'IRR', sourceId: 'contract-1', sourceSnapshot: {}, metadata: {}, invoiceItems: [],
+    }; },
+    async withContractLock<T>(_contractId: string, work: () => Promise<T>) { return work(); },
+    async findByApproval() { return persisted; },
+    async readPersistenceContext() { return persisted ? { origin: ApprovedPricingVersionOrigin.LEGACY_SEAL, legacySourceReference: { sourceEvidenceHash: ready.sourceEvidenceHash } } : null; },
+    async loadSource() { return null; },
+    async nextVersionNumber() { return 1; },
+    async insertAndAdvance(version: ApprovedPricingVersionInsert, context?: ApprovedPricingPersistenceContext) {
+      persisted = version; persistenceContext = context ?? null; return version;
+    },
+  };
+  const command = {
+    idempotencyKey: 'command-1', origin: 'LEGACY_SEAL' as const, candidate: ready, review: ready.review!,
+    sourceReference: { contractId: ready.contractId, sourceFinancialRecordId: ready.sourceFinancialRecordId, sourceIdentityHash: ready.sourceIdentityHash, sourceEvidenceHash: ready.sourceEvidenceHash },
+  };
+  const first = await sealLegacyPricingWithApprovedPricingRepository(repository, command, { version: () => 'version-1', row: () => 'pricing-row-1' });
+  const replay = await sealLegacyPricingWithApprovedPricingRepository(repository, command);
+  assert.deepEqual(first, { outcome: 'SEALED', pricingVersionId: 'version-1' });
+  assert.deepEqual(replay, { outcome: 'REPLAYED', pricingVersionId: 'version-1' });
+  assert.equal((persistenceContext as ApprovedPricingPersistenceContext | null)?.origin, ApprovedPricingVersionOrigin.LEGACY_SEAL);
+  assert.equal((persisted as ApprovedPricingVersionInsert | null)?.rows[0]?.componentEvidence.discountBasis, '100.000000000000');
 });

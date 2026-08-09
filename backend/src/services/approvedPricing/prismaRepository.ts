@@ -8,6 +8,7 @@ import {
 } from '@sabalanerp/contract-product-graph';
 import type {
   ApprovalLeaf,
+  ApprovedPricingPersistenceContext,
   ApprovedPricingRepository,
   ApprovedPricingSource,
   ApprovedPricingVersionInsert,
@@ -207,15 +208,27 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
     return (latest?.versionNumber ?? 0) + 1;
   }
 
-  async insertAndAdvance(version: ApprovedPricingVersionInsert) {
-    const previousHead = await this.tx.contractApprovedPricingHead.findUnique({ where: { contractId: version.contractId }, select: { currentVersionId: true } });
+  async readPersistenceContext(contractId: string, financialRecordId: string) {
+    return this.tx.contractApprovedPricingVersion.findUnique({
+      where: { sourceFinancialRecordId_contractId: { sourceFinancialRecordId: financialRecordId, contractId } },
+      select: { origin: true, legacySourceReference: true },
+    });
+  }
+
+  async insertAndAdvance(version: ApprovedPricingVersionInsert, context: ApprovedPricingPersistenceContext = {
+    origin: ApprovedPricingVersionOrigin.FINANCIAL_APPROVAL,
+  }) {
+    const previousHead = await this.tx.contractApprovedPricingHead.findUnique({
+      where: { contractId: version.contractId },
+      select: { currentVersionId: true },
+    });
     const created = await this.tx.contractApprovedPricingVersion.create({
       data: {
         id: version.id,
         contractId: version.contractId,
         versionNumber: version.versionNumber,
         sourceFinancialRecordId: version.sourceFinancialRecordId,
-        origin: ApprovedPricingVersionOrigin.FINANCIAL_APPROVAL,
+        origin: context.origin,
         approvedAt: version.approvedAt,
         approvedBy: version.approvedBy,
         schemaVersion: version.schemaVersion,
@@ -224,6 +237,7 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
         discountAmount: version.discountAmount,
         netAmount: version.netAmount,
         sourceEvidence: version.sourceEvidence as Prisma.InputJsonValue,
+        legacySourceReference: context.legacySourceReference == null ? undefined : context.legacySourceReference as Prisma.InputJsonValue,
         integrityHash: version.integrityHash,
         rows: {
           create: version.rows.map(row => ({

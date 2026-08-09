@@ -25,8 +25,28 @@ export type PricingReadinessReasonCode = (typeof PRICING_READINESS_REASON_CODES)
 export const MIGRATION_RUN_STATUSES = ['STARTED', 'COMPLETED', 'FAILED'] as const;
 export type MigrationRunStatus = (typeof MIGRATION_RUN_STATUSES)[number];
 
+export const DISPATCH_DOCUMENT_COMMAND_SCOPES = [
+  'CANDIDATE',
+  'WAYBILL',
+  'CORRECTION',
+  'PRINT_HANDOFF',
+] as const;
+export type DispatchDocumentCommandScope = (typeof DISPATCH_DOCUMENT_COMMAND_SCOPES)[number];
+
 export type CanonicalQuantity = string;
 export type ExactMoney = string;
+
+export type ShipmentMoneyAllocation = {
+  grossAmount: ExactMoney;
+  allocatedDiscount: ExactMoney;
+  netAmount: ExactMoney;
+};
+
+export type ShipmentMoneyAllocationDelta = {
+  grossAmountDelta: ExactMoney;
+  discountDelta: ExactMoney;
+  netAmountDelta: ExactMoney;
+};
 
 export type DispatchDocumentLine = {
   contractItemId: string;
@@ -61,11 +81,7 @@ export type WaybillRenderInput = DispatchDocumentRenderBase & {
   };
 };
 
-export type StatementRenderLine = DispatchDocumentLine & {
-  grossAmount: ExactMoney;
-  allocatedDiscount: ExactMoney;
-  netAmount: ExactMoney;
-};
+export type StatementRenderLine = DispatchDocumentLine & ShipmentMoneyAllocation;
 
 export type StatementRenderInput = DispatchDocumentRenderBase & {
   kind: 'STATEMENT';
@@ -75,14 +91,8 @@ export type StatementRenderInput = DispatchDocumentRenderBase & {
       contractId: string;
       contractNumber: string;
       lines: StatementRenderLine[];
-      grossAmount: ExactMoney;
-      allocatedDiscount: ExactMoney;
-      netAmount: ExactMoney;
-    }>;
-    grossAmount: ExactMoney;
-    allocatedDiscount: ExactMoney;
-    netAmount: ExactMoney;
-  };
+    } & ShipmentMoneyAllocation>;
+  } & ShipmentMoneyAllocation;
 };
 
 export type StatementAdjustmentRenderInput = DispatchDocumentRenderBase & {
@@ -99,14 +109,8 @@ export type StatementAdjustmentRenderInput = DispatchDocumentRenderBase & {
       label: string;
       unit: string;
       quantityDelta: CanonicalQuantity;
-      grossAmountDelta: ExactMoney;
-      discountDelta: ExactMoney;
-      netAmountDelta: ExactMoney;
-    }>;
-    grossAmountDelta: ExactMoney;
-    discountDelta: ExactMoney;
-    netAmountDelta: ExactMoney;
-  };
+    } & ShipmentMoneyAllocationDelta>;
+  } & ShipmentMoneyAllocationDelta;
 };
 
 export type DispatchDocumentRenderInput =
@@ -163,6 +167,12 @@ export type PublishedDispatchArtifact = {
   sha256: string;
   publishedAt: string;
 };
+
+export type DispatchDocumentCommandIdentity =
+  | { scope: 'CANDIDATE'; scopeId: string; waybillId: null }
+  | { scope: 'WAYBILL'; scopeId: string; waybillId: string }
+  | { scope: 'CORRECTION'; scopeId: string; waybillId: string }
+  | { scope: 'PRINT_HANDOFF'; scopeId: string; waybillId: string };
 
 export interface DispatchArtifactPublisher {
   publish(input: DispatchDocumentRenderInput): Promise<{

@@ -3114,7 +3114,7 @@ model DispatchDocumentArtifact {
   storageKey            String                             @unique
   mediaType             String
   byteLength            BigInt
-  sha256                String                             @unique
+  sha256                String
   sourceIntegrityHash   String
   publishedAt           DateTime                           @default(now())
   publishedBy           String
@@ -3164,7 +3164,7 @@ model DispatchDocumentPrintHandoffItem {
 model DispatchDocumentCommandResult {
   id             String                        @id @default(cuid())
   waybillId      String?
-  scope          String
+  scope          DispatchDocumentCommandScope
   scopeId        String
   idempotencyKey String
   command        DispatchDocumentCommandType
@@ -4470,6 +4470,13 @@ enum DispatchDocumentCommandStatus {
   STARTED
   SUCCEEDED
   FAILED
+}
+
+enum DispatchDocumentCommandScope {
+  CANDIDATE
+  WAYBILL
+  CORRECTION
+  PRINT_HANDOFF
 }
 
 enum MigrationRunStatus {

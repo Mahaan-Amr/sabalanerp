@@ -30,11 +30,18 @@ for the same contract.
 - Gate: `isShipmentStatementFlowActive`; both the exact-case environment opt-in and the recorded database cutover
   must be enabled. Deployment time is never treated as cutover time.
 - Migration: `SHIPMENT_STATEMENT_PRESERVATION_SCOPES` and `compareMigrationEvidence` define the before/after
-  manifest contract.
+  manifest contract. `npm run verify:shipment-statement-migration` reads those scopes from the real database,
+  runs `prisma migrate deploy`, reads them again, and persists the comparison. Repeating the command records a
+  second immutable run that proves deploy idempotency.
 
 Primary `WAYBILL` and `STATEMENT` artifacts are each unique per waybill. Adjustment artifacts require a positive,
 waybill-local sequence linked one-to-one to a posted correction. Successful print handoff is represented by ordered
 artifact items; failed transfer attempts retain failure evidence and do not create successful items.
+
+A document-only replacement creates the existing successor `AccountingDispatchWaybill` aggregate and publishes a
+new per-waybill artifact pair. The predecessor artifacts remain immutable history. A SHA-256 checksum verifies bytes
+but is deliberately not a global document identity, so predecessor and successor records may retain equal verified
+bytes without collapsing their distinct history.
 
 The migration is additive and seeds only the disabled singleton cutover row. Rollback means disabling the external
 feature opt-in before activation; no evidence table or row is deleted.

@@ -6,6 +6,7 @@ import {
   isShipmentStatementFlowActive,
 } from '../dispatchDocuments/featureGate';
 import { compareMigrationEvidence } from '../dispatchDocuments/migrationManifest';
+import { DISPATCH_DOCUMENT_COMMAND_SCOPES } from '../dispatchDocuments/contracts';
 
 assert.equal(CUSTOMER_SHIPMENT_STATEMENTS_GATE, 'CUSTOMER_SHIPMENT_STATEMENTS_ENABLED');
 assert.equal(isCustomerShipmentStatementsEnabled({}), false);
@@ -41,5 +42,6 @@ assert.deepEqual(compareMigrationEvidence(preserved, {
   quantityTotal: '25693.000',
   evidenceHash: 'changed-evidence-hash',
 }).differences, ['QUANTITY_TOTAL', 'EVIDENCE_HASH']);
+assert.deepEqual(DISPATCH_DOCUMENT_COMMAND_SCOPES, ['CANDIDATE', 'WAYBILL', 'CORRECTION', 'PRINT_HANDOFF']);
 
 console.log('dispatch document contract tests passed');

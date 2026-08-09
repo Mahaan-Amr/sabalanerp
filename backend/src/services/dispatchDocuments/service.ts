@@ -15,6 +15,7 @@ import { prepareDispatchArtifact } from './artifactPreparation';
 
 export class DispatchDocumentValidationError extends Error {}
 export class DispatchDocumentConflictError extends Error {}
+export class DispatchDocumentEvidenceConflictError extends DispatchDocumentConflictError {}
 export class DispatchDocumentIntegrityError extends Error {}
 export class DispatchDocumentNotAvailableError extends Error {
   constructor() { super('Dispatch document is not available.'); }
@@ -124,7 +125,14 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
         reason: required(input.reason, 'reason'), idempotencyKey, actorId, correlationId });
     }
     const root = await identity();
-    const source = await dependencies.sourceReader.readPrimaryBundle({ candidateId, waybill: root });
+    let source;
+    try {
+      source = await dependencies.sourceReader.readPrimaryBundle({ candidateId, waybill: root });
+    } catch (error) {
+      if (!(error instanceof DispatchDocumentEvidenceConflictError)) throw error;
+      return dependencies.repository.recordEvidenceConflict({ candidateId, reason: error.message, idempotencyKey,
+        actorId, correlationId });
+    }
     if (source.candidateId !== candidateId) throw new DispatchDocumentConflictError('Dispatch source candidate changed.');
     const artifacts = await publish(source, root, actorId);
     const waybill: IssuedWaybill = { id: root.waybillId, number: root.number, status: 'ISSUED', issuedAt: root.issuedAt, replacesWaybillId: null };
@@ -173,7 +181,12 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
   const retrieveArtifact = async (input: { artifactId: string; waybillId: string; actorId: string; correlationId: string }) => {
     await assertAccess(required(input.actorId, 'actorId'), required(input.waybillId, 'waybillId'));
     const artifact = await dependencies.repository.getArtifact({ artifactId: required(input.artifactId, 'artifactId'), waybillId: input.waybillId });
-    if (!artifact) throw new DispatchDocumentNotAvailableError();
+    if (!artifact) {
+      await dependencies.incidents.report({ waybillId: input.waybillId, artifactId: input.artifactId,
+        actorId: input.actorId, correlationId: required(input.correlationId, 'correlationId'),
+        failureCode: 'ARTIFACT_METADATA_MISSING', evidence: { requestedArtifactId: input.artifactId } });
+      throw new DispatchDocumentNotAvailableError();
+    }
     try {
       const bytes = await verifiedBytes(artifact);
       await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact, actorId: input.actorId,
@@ -201,11 +214,17 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
       throw new DispatchDocumentConflictError('The print idempotency key was already used for another document set.');
     }
     const artifacts = await dependencies.repository.getPrintableArtifacts({ waybillId: input.waybillId, kinds });
+    const availableKinds = new Set(artifacts.map(artifact => artifact.kind));
+    if (kinds.some(kind => !availableKinds.has(kind)) || artifacts.some(artifact => !kinds.includes(artifact.kind))) {
+      await dependencies.repository.recordPrintHandoff({ waybillId: input.waybillId, operationIdempotencyKey,
+        attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'FAILED', artifacts,
+        failureCode: 'ARTIFACT_METADATA_MISSING' });
+      await dependencies.incidents.report({ waybillId: input.waybillId, artifactId: null, actorId: input.actorId,
+        correlationId: input.correlationId, failureCode: 'ARTIFACT_METADATA_MISSING',
+        evidence: { requestedKinds: kinds, availableKinds: [...availableKinds] } });
+      throw new DispatchDocumentIntegrityError('Requested dispatch bundle is incomplete.');
+    }
     try {
-      const availableKinds = new Set(artifacts.map(artifact => artifact.kind));
-      if (kinds.some(kind => !availableKinds.has(kind)) || artifacts.some(artifact => !kinds.includes(artifact.kind))) {
-        throw new DispatchDocumentIntegrityError('Requested dispatch bundle is incomplete.');
-      }
       const documents: Array<{ artifact: PublishedDispatchArtifact; bytes: Uint8Array }> = [];
       for (const artifact of artifacts) documents.push({ artifact, bytes: await verifiedBytes(artifact) });
       let completion: 'PENDING' | 'SUCCEEDED' | 'FAILED' = 'PENDING';

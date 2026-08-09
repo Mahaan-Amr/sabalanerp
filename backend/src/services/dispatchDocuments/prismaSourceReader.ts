@@ -3,7 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { assessBoundAllocationPricingFreshness, readBoundPricedAllocation,
   type BoundPricedAllocationReadModel } from '../allocationPricingReadModel';
 import type { DispatchDocumentSourceReader, DispatchSourceIntegrityVerifier, PrimaryBundleIdentity } from './ports';
-import { DispatchDocumentConflictError, DispatchDocumentValidationError } from './service';
+import { DispatchDocumentConflictError, DispatchDocumentEvidenceConflictError, DispatchDocumentValidationError } from './service';
 
 type Tx = Prisma.TransactionClient;
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -18,7 +18,12 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
     allocationRevision: { include: { lines: true } },
   } });
   if (!candidate) throw new DispatchDocumentValidationError('Accounting dispatch candidate was not found.');
-  const pricedAllocation = await readBoundPricedAllocation(tx, candidate.allocationRevisionId);
+  let pricedAllocation: BoundPricedAllocationReadModel;
+  try {
+    pricedAllocation = await readBoundPricedAllocation(tx, candidate.allocationRevisionId);
+  } catch (error) {
+    throw new DispatchDocumentEvidenceConflictError(error instanceof Error ? error.message : 'Priced allocation evidence is malformed.');
+  }
   const revisionSnapshot = record(candidate.allocationRevision.snapshot);
   const loading = record(revisionSnapshot.loading);
   const customer = record(loading.customer);
@@ -87,11 +92,16 @@ export class PrismaDispatchDocumentSourceReader implements DispatchDocumentSourc
 
 export const allocationPricingIntegrityVerifier: DispatchSourceIntegrityVerifier<Tx> = {
   async assess({ transaction, allocationRevisionId, expectedSourceIntegrityHash }) {
-    const revision = await transaction.logisticsAllocationRevision.findUnique({ where: { id: allocationRevisionId }, select: { integrityHash: true } });
-    if (!revision) throw new DispatchDocumentValidationError('Allocation revision was not found.');
-    const pricedAllocation = await readBoundPricedAllocation(transaction, allocationRevisionId);
-    const actual = dispatchDocumentSourceIntegrityHash({ allocationRevisionId, allocationIntegrityHash: revision.integrityHash, pricedAllocation });
-    if (actual !== expectedSourceIntegrityHash) throw new DispatchDocumentConflictError('Priced allocation source changed before issuance.');
-    return assessBoundAllocationPricingFreshness(transaction, allocationRevisionId);
+    try {
+      const revision = await transaction.logisticsAllocationRevision.findUnique({ where: { id: allocationRevisionId }, select: { integrityHash: true } });
+      if (!revision) throw new Error('Allocation revision was not found.');
+      const pricedAllocation = await readBoundPricedAllocation(transaction, allocationRevisionId);
+      const actual = dispatchDocumentSourceIntegrityHash({ allocationRevisionId, allocationIntegrityHash: revision.integrityHash, pricedAllocation });
+      if (actual !== expectedSourceIntegrityHash) throw new Error('Priced allocation source changed before issuance.');
+      return await assessBoundAllocationPricingFreshness(transaction, allocationRevisionId);
+    } catch (error) {
+      if (error instanceof DispatchDocumentEvidenceConflictError) throw error;
+      throw new DispatchDocumentEvidenceConflictError(error instanceof Error ? error.message : 'Priced allocation evidence is malformed.');
+    }
   },
 };

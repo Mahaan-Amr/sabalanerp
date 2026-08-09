@@ -52,6 +52,9 @@ import {
   verifyErpWideOutage,
 } from '../services/dispatchCorrectionOutage';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
+import { configureDispatchDocumentsRuntime, createAccountingDispatchDocumentRouter,
+  dispatchDocumentHttpStatus } from '../services/dispatchDocuments';
+import { renderDispatchDocumentPdf } from '../documents/dispatch/dispatchDocumentPdf';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -81,6 +84,17 @@ const accountingDispatchEdit = [
   requireNarrowFeatureAccess(FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE, FEATURE_PERMISSIONS.EDIT),
 ];
 
+const dispatchDocuments = configureDispatchDocumentsRuntime({
+  prisma,
+  templateVersion: 'dispatch-documents-v1',
+  generatorVersion: 'chromium-pdf-v1',
+  publisher: { async publish(input) {
+    const rendered = await renderDispatchDocumentPdf(input);
+    return { bytes: rendered.bytes, mediaType: rendered.metadata.mimeType };
+  } },
+});
+router.use(createAccountingDispatchDocumentRouter({ service: dispatchDocuments, view: accountingDispatchView }));
+
 const accountingCorrectionsEdit = [
   protect,
   requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
@@ -101,6 +115,8 @@ const managerReviewActions = new Set([
 ]);
 
 const dispatchError = (res: Response, error: unknown) => {
+  const documentStatus = dispatchDocumentHttpStatus(error);
+  if (documentStatus) return res.status(documentStatus).json({ success: false, error: (error as Error).message });
   if (error instanceof PilotSafetyPauseError || error instanceof DispatchAllocationConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
   if (error instanceof DispatchAllocationValidationError || error instanceof DispatchRecoveryValidationError) return res.status(400).json({ success: false, error: error.message });
   console.error('Accounting dispatch error:', error);

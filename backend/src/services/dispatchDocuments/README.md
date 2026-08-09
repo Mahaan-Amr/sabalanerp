@@ -44,5 +44,11 @@ new per-waybill artifact pair. The predecessor artifacts remain immutable histor
 but is deliberately not a global document identity, so predecessor and successor records may retain equal verified
 bytes without collapsing their distinct history.
 
+Production Accounting startup installs one `dispatchDocuments` runtime with the Chromium renderer. Existing
+decision, void, and replacement URLs remain the sole command surface and delegate post-cutover work into this module;
+the mounted document router adds only retrieval, print-handoff, and combined-read-model URLs. Pilot Safety Pause
+blocks issuance and replacement, while rejection/return may still release a pending allocation and terminal void may
+still revoke an unexited authorization without creating new dispatch work.
+
 The migration is additive and seeds only the disabled singleton cutover row. Rollback means disabling the external
 feature opt-in before activation; no evidence table or row is deleted.

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import express, { type RequestHandler, type Response } from 'express';
 import type { AuthRequest } from '../../middleware/auth';
 import type { DispatchDocumentKind } from './contracts';
+import { PilotSafetyPauseError } from '../dispatchCutover';
 import {
   DispatchDocumentConflictError,
   DispatchDocumentIntegrityError,
@@ -15,18 +16,27 @@ type Middleware = RequestHandler | RequestHandler[];
 
 const correlationId = (req: AuthRequest) => String(req.get('X-Correlation-Id') || randomUUID());
 const idempotencyKey = (req: AuthRequest) => String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '');
+export const dispatchDocumentHttpStatus = (error: unknown): 400 | 404 | 409 | null => {
+  if (error instanceof DispatchDocumentNotAvailableError) return 404;
+  if (error instanceof DispatchDocumentValidationError) return 400;
+  if (error instanceof DispatchDocumentConflictError || error instanceof DispatchDocumentIntegrityError
+    || error instanceof PilotSafetyPauseError) return 409;
+  return null;
+};
 const sendError = (res: Response, error: unknown) => {
-  if (error instanceof DispatchDocumentNotAvailableError) return res.status(404).json({ success: false, error: error.message });
-  if (error instanceof DispatchDocumentValidationError) return res.status(400).json({ success: false, error: error.message });
-  if (error instanceof DispatchDocumentConflictError || error instanceof DispatchDocumentIntegrityError) {
-    return res.status(409).json({ success: false, error: error.message });
-  }
+  const status = dispatchDocumentHttpStatus(error);
+  if (status) return res.status(status).json({ success: false, error: (error as Error).message });
   console.error('Accounting dispatch document error:', error);
   return res.status(500).json({ success: false, error: 'Accounting dispatch document operation failed.' });
 };
-const kinds = (value: unknown): DispatchDocumentKind[] => Array.isArray(value)
-  ? value.filter((item): item is DispatchDocumentKind => ['WAYBILL', 'STATEMENT', 'STATEMENT_ADJUSTMENT'].includes(String(item)))
-  : [];
+export const parseDispatchDocumentKinds = (value: unknown): DispatchDocumentKind[] => {
+  if (!Array.isArray(value)) return [];
+  const parsed = value.map(item => String(item));
+  if (parsed.some(item => !['WAYBILL', 'STATEMENT', 'STATEMENT_ADJUSTMENT'].includes(item))) {
+    throw new DispatchDocumentValidationError('Every requested dispatch document kind must be supported.');
+  }
+  return parsed as DispatchDocumentKind[];
+};
 
 const multipart = (documents: Array<{ artifact: { id: string; kind: DispatchDocumentKind }; bytes: Uint8Array }>, boundary: string) => {
   const chunks: Buffer[] = [];
@@ -57,24 +67,8 @@ export const bindPrintHandoffCompletion = (response: Pick<Response, 'once'>, com
 export const createAccountingDispatchDocumentRouter = (input: {
   service: DispatchDocuments;
   view: Middleware;
-  edit: Middleware;
 }) => {
   const router = express.Router();
-  router.post('/dispatch-candidates/:id/decision', input.edit, async (req: AuthRequest, res) => {
-    try { return res.json({ success: true, data: await input.service.decideCandidate({ candidateId: req.params.id,
-      action: req.body.action, reason: req.body.reason, idempotencyKey: idempotencyKey(req), actorId: req.user!.id,
-      correlationId: correlationId(req) }) }); } catch (error) { return sendError(res, error); }
-  });
-  router.post('/dispatch-waybills/:id/void', input.edit, async (req: AuthRequest, res) => {
-    try { return res.json({ success: true, data: await input.service.voidWaybill({ waybillId: req.params.id,
-      reason: req.body.reason, idempotencyKey: idempotencyKey(req), actorId: req.user!.id, correlationId: correlationId(req) }) }); }
-    catch (error) { return sendError(res, error); }
-  });
-  router.post('/dispatch-waybills/:id/replace', input.edit, async (req: AuthRequest, res) => {
-    try { return res.json({ success: true, data: await input.service.replaceWaybill({ waybillId: req.params.id,
-      reason: req.body.reason, idempotencyKey: idempotencyKey(req), actorId: req.user!.id, correlationId: correlationId(req) }) }); }
-    catch (error) { return sendError(res, error); }
-  });
   router.get('/dispatch-waybills/:waybillId/artifacts/:artifactId', input.view, async (req: AuthRequest, res) => {
     try {
       const result = await input.service.retrieveArtifact({ artifactId: req.params.artifactId, waybillId: req.params.waybillId,
@@ -87,7 +81,7 @@ export const createAccountingDispatchDocumentRouter = (input: {
   });
   router.post('/dispatch-waybills/:waybillId/print-handoffs', input.view, async (req: AuthRequest, res) => {
     try {
-      const result = await input.service.printHandoff({ waybillId: req.params.waybillId, kinds: kinds(req.body.kinds),
+      const result = await input.service.printHandoff({ waybillId: req.params.waybillId, kinds: parseDispatchDocumentKinds(req.body.kinds),
         idempotencyKey: idempotencyKey(req), actorId: req.user!.id, correlationId: correlationId(req) });
       const boundary = `dispatch-${randomUUID()}`;
       const body = multipart(result.documents, boundary);

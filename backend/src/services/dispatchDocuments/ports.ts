@@ -55,7 +55,7 @@ export type IssuedWaybill = {
 
 export type CandidateDecisionResult = {
   candidateId: string;
-  status: 'ACCEPTED' | 'REJECTED' | 'RETURNED' | 'STALE_REQUIRES_SUCCESSOR';
+  status: 'ACCEPTED' | 'REJECTED' | 'RETURNED' | 'STALE_REQUIRES_SUCCESSOR' | 'EVIDENCE_CONFLICT';
   waybill: IssuedWaybill | null;
 };
 
@@ -77,6 +77,8 @@ export interface DispatchDocumentRepository {
     actorId: string;
     correlationId: string;
   }): Promise<CandidateDecisionResult>;
+  recordEvidenceConflict(input: { candidateId: string; reason: string; idempotencyKey: string;
+    actorId: string; correlationId: string }): Promise<CandidateDecisionResult>;
   rejectCandidate(input: {
     candidateId: string;
     action: 'REJECT' | 'RETURN';
@@ -143,6 +145,6 @@ export interface DispatchDocumentAccessPolicy {
 }
 
 export interface DispatchIntegrityIncidentReporter {
-  report(input: { waybillId: string; artifactId: string; actorId: string; correlationId: string;
+  report(input: { waybillId: string; artifactId: string | null; actorId: string; correlationId: string;
     failureCode: string; evidence: Readonly<Record<string, unknown>> }): Promise<void>;
 }

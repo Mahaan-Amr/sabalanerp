@@ -9,10 +9,12 @@ import {
 import type { DispatchDocumentCommandScope, DispatchDocumentKind, PublishedDispatchArtifact } from './contracts';
 import type { DispatchDocumentRepository, DispatchSourceIntegrityVerifier } from './ports';
 import { DispatchDocumentConflictError, DispatchDocumentValidationError } from './service';
+import { DispatchDocumentEvidenceConflictError } from './service';
 import { assertCanonicalDispatchCommandAllowed } from '../dispatchCutover';
 import { isPostCutoverFinalization, isShipmentStatementFlowActive } from './featureGate';
 import { refreshProjectionContracts } from '../dispatchAllocation';
 import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
+import { createPrismaAllocationPricingBindingPort } from '../allocationPricingPrismaAdapter';
 
 type Tx = Prisma.TransactionClient;
 const json = (value: unknown) => value as Prisma.InputJsonValue;
@@ -77,6 +79,21 @@ const appendAudit = async (tx: Tx, input: { aggregateType: string; aggregateId: 
     eventType: input.eventType, payload: json(payload), actorId: input.actorId, recordedAt: input.at,
     previousHash: previous?.eventHash ?? null, eventHash: hash({ ...input, payload, previousHash: previous?.eventHash ?? null }) } });
 };
+const completeCandidateWithoutIssue = async (tx: Tx, input: { candidateId: string;
+  status: 'STALE_REQUIRES_SUCCESSOR' | 'EVIDENCE_CONFLICT'; reason: string; eventType: string;
+  eventPayload: Readonly<Record<string, unknown>>; idempotencyKey: string; actorId: string; correlationId: string }) => {
+  const at = new Date();
+  await tx.accountingDispatchCandidate.update({ where: { id: input.candidateId }, data: { status: input.status,
+    dispositionAt: at, dispositionBy: input.actorId, dispositionReason: input.reason } });
+  await tx.accountingDispatchWorkItem.update({ where: { candidateId: input.candidateId }, data: { status: 'COMPLETED', completedAt: at } });
+  const result = { candidateId: input.candidateId, status: input.status, waybill: null };
+  await tx.dispatchDocumentCommandResult.create({ data: { scope: 'CANDIDATE', scopeId: input.candidateId,
+    idempotencyKey: input.idempotencyKey, command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED', result: resultJson(result),
+    actorId: input.actorId, correlationId: input.correlationId, completedAt: at } });
+  await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: input.candidateId,
+    eventType: input.eventType, payload: { ...input.eventPayload, correlationId: input.correlationId }, actorId: input.actorId, at });
+  return result;
+};
 
 export class PrismaDispatchDocumentRepository implements DispatchDocumentRepository {
   constructor(private readonly prisma: PrismaClient, private readonly verifier: DispatchSourceIntegrityVerifier<Tx>) {}
@@ -108,21 +125,29 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
         || !cutover?.cutoverAt || !isPostCutoverFinalization(revision.finalizedAt, cutover.cutoverAt)) {
         throw new DispatchDocumentConflictError('This candidate belongs to the compatibility waybill-only path.');
       }
-      const freshness = await this.verifier.assess({ transaction: tx, allocationRevisionId: input.allocationRevisionId, expectedSourceIntegrityHash: input.expectedSourceIntegrityHash });
+      const pricingContracts = await tx.logisticsAllocationRevisionPricing.findMany({
+        where: { allocationRevisionId: input.allocationRevisionId }, select: { contractId: true }, orderBy: { contractId: 'asc' },
+      });
+      await createPrismaAllocationPricingBindingPort(tx).lockPricingScope(
+        pricingContracts.map(reference => `APPROVED_PRICING_HEAD:${reference.contractId}`),
+      );
+      let freshness;
+      try {
+        freshness = await this.verifier.assess({ transaction: tx, allocationRevisionId: input.allocationRevisionId,
+          expectedSourceIntegrityHash: input.expectedSourceIntegrityHash });
+      } catch (error) {
+        if (!(error instanceof DispatchDocumentEvidenceConflictError)) throw error;
+        return completeCandidateWithoutIssue(tx, { candidateId: candidate.id, status: 'EVIDENCE_CONFLICT',
+          reason: error.message, eventType: 'PRICING_EVIDENCE_CONFLICT',
+          eventPayload: { allocationRevisionId: input.allocationRevisionId, reason: error.message },
+          idempotencyKey: input.idempotencyKey, actorId: input.actorId, correlationId: input.correlationId });
+      }
       if (freshness.status === 'STALE_REQUIRES_SUCCESSOR') {
-        const at = new Date();
-        await tx.accountingDispatchCandidate.update({ where: { id: candidate.id }, data: { status: 'STALE_REQUIRES_SUCCESSOR',
-          dispositionAt: at, dispositionBy: input.actorId, dispositionReason: 'APPROVED_PRICING_CHANGED' } });
-        await tx.accountingDispatchWorkItem.update({ where: { candidateId: candidate.id }, data: { status: 'COMPLETED', completedAt: at } });
-        const result = { candidateId: candidate.id, status: 'STALE_REQUIRES_SUCCESSOR' as const, waybill: null };
-        await tx.dispatchDocumentCommandResult.create({ data: { scope: 'CANDIDATE', scopeId: candidate.id, idempotencyKey: input.idempotencyKey,
-          command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED', result: resultJson(result), actorId: input.actorId,
-          correlationId: input.correlationId, completedAt: at } });
-        await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id,
-          eventType: 'PRICING_STALE_REQUIRES_SUCCESSOR', payload: { allocationRevisionId: input.allocationRevisionId,
-            sourceIntegrityHash: input.expectedSourceIntegrityHash, correlationId: input.correlationId,
-            staleContracts: freshness.staleContracts }, actorId: input.actorId, at });
-        return result;
+        return completeCandidateWithoutIssue(tx, { candidateId: candidate.id, status: 'STALE_REQUIRES_SUCCESSOR',
+          reason: 'APPROVED_PRICING_CHANGED', eventType: 'PRICING_STALE_REQUIRES_SUCCESSOR',
+          eventPayload: { allocationRevisionId: input.allocationRevisionId, sourceIntegrityHash: input.expectedSourceIntegrityHash,
+            staleContracts: freshness.staleContracts }, idempotencyKey: input.idempotencyKey,
+          actorId: input.actorId, correlationId: input.correlationId });
       }
       const issuedAt = new Date(input.waybill.issuedAt);
       const waybill = await tx.accountingDispatchWaybill.create({ data: { id: input.waybill.id, number: BigInt(input.waybill.number),
@@ -141,6 +166,19 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
         payload: { candidateId: candidate.id, allocationRevisionId: input.allocationRevisionId, artifactIds: input.artifacts.map(item => item.id),
           sourceIntegrityHash: input.expectedSourceIntegrityHash, idempotencyKey: input.idempotencyKey, correlationId: input.correlationId }, actorId: input.actorId, at: issuedAt });
       return result;
+    });
+  }
+  async recordEvidenceConflict(input: Parameters<DispatchDocumentRepository['recordEvidenceConflict']>[0]) {
+    return serializable(this.prisma, async (tx) => {
+      await lock(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${input.candidateId}`]);
+      const prior = await commandResult(tx, 'CANDIDATE', input.candidateId, input.idempotencyKey);
+      if (prior) return prior as any;
+      const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: input.candidateId } });
+      if (!candidate) throw new DispatchDocumentValidationError('Accounting dispatch candidate was not found.');
+      if (candidate.status !== 'PENDING') throw new DispatchDocumentConflictError('Only a pending candidate can be quarantined for evidence conflict.');
+      return completeCandidateWithoutIssue(tx, { candidateId: candidate.id, status: 'EVIDENCE_CONFLICT',
+        reason: input.reason, eventType: 'PRICING_EVIDENCE_CONFLICT', eventPayload: { reason: input.reason },
+        idempotencyKey: input.idempotencyKey, actorId: input.actorId, correlationId: input.correlationId });
     });
   }
   async rejectCandidate(input: Parameters<DispatchDocumentRepository['rejectCandidate']>[0]) {

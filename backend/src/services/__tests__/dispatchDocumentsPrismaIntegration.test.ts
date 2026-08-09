@@ -70,6 +70,20 @@ const run = async () => {
         actorId: 'integration-verifier', aggregateId: waybill.id,
         payload: { path: ['operationIdempotencyKey'], equals: operationIdempotencyKey },
       } }), 2);
+
+      const pending = await tx.accountingDispatchCandidate.findFirst({
+        where: { status: 'PENDING', workItem: { status: 'OPEN' } }, select: { id: true }, orderBy: { createdAt: 'asc' },
+      });
+      assert.ok(pending, 'An open pending candidate is required for rollback-only evidence-conflict verification.');
+      const candidateWaybillsBefore = await tx.accountingDispatchWaybill.count({ where: { candidateId: pending.id } });
+      const evidenceConflict = await repository.recordEvidenceConflict({ candidateId: pending.id,
+        reason: 'integration malformed evidence', idempotencyKey: `${runId}:evidence-conflict`,
+        actorId: 'integration-verifier', correlationId: `${runId}:evidence-conflict` });
+      assert.equal(evidenceConflict.status, 'EVIDENCE_CONFLICT');
+      assert.equal((await tx.accountingDispatchCandidate.findUniqueOrThrow({ where: { id: pending.id } })).status, 'EVIDENCE_CONFLICT');
+      assert.equal((await tx.accountingDispatchWorkItem.findUniqueOrThrow({ where: { candidateId: pending.id } })).status, 'COMPLETED');
+      assert.equal(await tx.accountingDispatchWaybill.count({ where: { candidateId: pending.id } }), candidateWaybillsBefore,
+        'evidence conflict closes the work item without issuing a waybill');
       throw rollback;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {

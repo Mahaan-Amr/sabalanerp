@@ -3,20 +3,26 @@ import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   DispatchDocumentConflictError,
+  DispatchDocumentEvidenceConflictError,
   DispatchDocumentIntegrityError,
+  DispatchDocumentNotAvailableError,
+  DispatchDocumentValidationError,
   createDispatchDocuments,
   createStatementAdjustmentArtifactPreparer,
   bindPrintHandoffCompletion,
+  dispatchDocumentHttpStatus,
+  parseDispatchDocumentKinds,
   type DispatchArtifactStorage,
   type DispatchDocumentRepository,
   type DispatchDocumentSourceReader,
 } from '../dispatchDocuments';
 import type { DispatchDocumentKind, DispatchDocumentRenderInput, PublishedDispatchArtifact } from '../dispatchDocuments/contracts';
+import { PilotSafetyPauseError } from '../dispatchCutover';
 
 const bytes = (value: string) => new TextEncoder().encode(value);
 const sha256 = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 
-const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce?: boolean } = {}) => {
+const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce?: boolean; failSourceEvidence?: boolean } = {}) => {
   const files = new Map<string, Uint8Array>();
   const state = {
     commands: new Map<string, unknown>(),
@@ -36,6 +42,12 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       if (input.expectedSourceIntegrityHash !== 'source-hash') throw new DispatchDocumentConflictError('stale');
       const result = { candidateId: input.candidateId, status: 'ACCEPTED' as const, waybill: input.waybill };
       state.issued.push(input);
+      state.commands.set(`CANDIDATE:${input.candidateId}:${input.idempotencyKey}`, result);
+      return result;
+    },
+    recordEvidenceConflict: async (input) => {
+      const result = { candidateId: input.candidateId, status: 'EVIDENCE_CONFLICT' as const, waybill: null };
+      state.rejected.push(input);
       state.commands.set(`CANDIDATE:${input.candidateId}:${input.idempotencyKey}`, result);
       return result;
     },
@@ -123,6 +135,9 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
         payload: { currency: 'IRR', contracts: [{ contractId: 'contract-1', contractNumber: 'C-1', grossAmount: '10.000000000000', allocatedDiscount: '1.000000000000', netAmount: '9.000000000000', lines: [{ contractItemId: 'item-1', productRowId: 'row-1', label: 'سنگ', unit: 'count', quantity: '2.000', grossAmount: '10.000000000000', allocatedDiscount: '1.000000000000', netAmount: '9.000000000000' }] }], grossAmount: '10.000000000000', allocatedDiscount: '1.000000000000', netAmount: '9.000000000000' } },
     }),
   };
+  if (options.failSourceEvidence) sourceReader.readPrimaryBundle = async () => {
+    throw new DispatchDocumentEvidenceConflictError('malformed priced allocation evidence');
+  };
   let failedStatement = false;
   const service = createDispatchDocuments({ repository, storage, sourceReader,
     publisher: { publish: async (input: DispatchDocumentRenderInput) => {
@@ -141,6 +156,12 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
 };
 
 const run = async () => {
+  assert.deepEqual(parseDispatchDocumentKinds(['STATEMENT', 'WAYBILL']), ['STATEMENT', 'WAYBILL']);
+  assert.throws(() => parseDispatchDocumentKinds(['WAYBILL', 'UNKNOWN']), DispatchDocumentValidationError);
+  assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentValidationError('invalid')), 400);
+  assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentConflictError('conflict')), 409);
+  assert.equal(dispatchDocumentHttpStatus(new PilotSafetyPauseError('paused')), 409);
+  assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentNotAvailableError()), 404);
   const { service, state, files } = makeHarness();
   const issued = await service.decideCandidate({ candidateId: 'candidate-1', action: 'ACCEPT', idempotencyKey: 'accept-1', actorId: 'accountant' });
   assert.equal(issued.status, 'ACCEPTED');
@@ -227,6 +248,28 @@ const run = async () => {
     idempotencyKey: 'retry-key', actorId: 'accountant' });
   assert.equal(retried.status, 'ACCEPTED');
   assert.equal(retryHarness.state.issued.length, 1);
+
+  const evidenceConflictHarness = makeHarness({ failSourceEvidence: true });
+  const evidenceConflict = await evidenceConflictHarness.service.decideCandidate({ candidateId: 'candidate-conflict', action: 'ACCEPT',
+    idempotencyKey: 'conflict-key', actorId: 'accountant' });
+  assert.equal(evidenceConflict.status, 'EVIDENCE_CONFLICT');
+  assert.equal(evidenceConflictHarness.state.issued.length, 0);
+  assert.equal(evidenceConflictHarness.state.rejected.length, 1);
+
+  const missingMetadataHarness = makeHarness();
+  const missingMetadataIssued = await missingMetadataHarness.service.decideCandidate({ candidateId: 'candidate-missing', action: 'ACCEPT',
+    idempotencyKey: 'missing-issue', actorId: 'accountant' });
+  const missingWaybillId = missingMetadataIssued.waybill!.id;
+  await assert.rejects(() => missingMetadataHarness.service.retrieveArtifact({ artifactId: 'missing-artifact',
+    waybillId: missingWaybillId, actorId: 'allowed', correlationId: 'missing-retrieval' }), /not available/i);
+  assert.equal(missingMetadataHarness.state.incidents.at(-1).failureCode, 'ARTIFACT_METADATA_MISSING');
+  missingMetadataHarness.state.issued[0].artifacts = missingMetadataHarness.state.issued[0].artifacts
+    .filter((item: PublishedDispatchArtifact) => item.kind !== 'WAYBILL');
+  await assert.rejects(() => missingMetadataHarness.service.printHandoff({ waybillId: missingWaybillId,
+    kinds: ['WAYBILL'], idempotencyKey: 'missing-print', actorId: 'allowed', correlationId: 'missing-print-attempt' }),
+  DispatchDocumentIntegrityError);
+  assert.equal(missingMetadataHarness.state.incidents.at(-1).artifactId, null);
+  assert.equal(missingMetadataHarness.state.incidents.at(-1).failureCode, 'ARTIFACT_METADATA_MISSING');
 
   const storageRetry = makeHarness({ failSecondStageOnce: true });
   await assert.rejects(() => storageRetry.service.decideCandidate({ candidateId: 'candidate-storage-retry', action: 'ACCEPT',

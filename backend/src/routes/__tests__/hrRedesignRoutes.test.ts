@@ -65,6 +65,11 @@ for (const governedRoute of [
   assert.ok(route && route.stack.length >= 3, `${governedRoute} must enforce authority/responsibility server-side`);
 }
 
+assert.ok(
+  registeredRoutes.includes('GET /personnel/:id/work-schedule'),
+  'schedule details must be fetched only from the explicit disclosure route',
+);
+
 const dataContractsLayer = (router as unknown as {
   stack: Array<{ route?: { path: string; stack: Array<{ handle: RequestHandler }> } }>;
 }).stack.find((layer) => layer.route?.path === '/redesign/data-contracts')?.route;

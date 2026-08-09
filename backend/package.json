@@ -13,6 +13,7 @@
     "test:seller-product-history": "tsx src/services/__tests__/sellerProductHistory.test.ts",
     "migration:product-graph:dry": "node dist/scripts/dry-run-contract-product-graph-migration.js",
     "test:hr-personnel-boundary": "tsx src/services/__tests__/hrPersonnelBoundary.test.ts",
+    "test:hr-personnel-collection": "tsx src/services/__tests__/hrPersonnelCollection.test.ts && tsx src/routes/__tests__/hrRedesignRoutes.test.ts",
     "test:hr-candidate-access": "tsx src/services/__tests__/hrCandidateAccess.test.ts",
     "test:hr-candidate-correction": "tsx src/services/__tests__/hrCandidateCorrection.test.ts",
     "test:hr-offer-decision": "tsx src/services/__tests__/hrOfferDecision.test.ts",

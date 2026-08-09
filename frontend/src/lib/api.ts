@@ -325,6 +325,7 @@ export const hrAPI = {
   createPosition: (data: any) => api.post('/hr/positions', data),
   updatePosition: (id: string, data: any) => api.put(`/hr/positions/${id}`, data),
   getPersonnel: (params?: any) => api.get('/hr/personnel', { params }),
+  getPersonnelWorkSchedule: (id: string) => api.get(`/hr/personnel/${id}/work-schedule`),
   archivePersonnel: (id: string, data: { reason: string; effectiveDate: string }) => api.post(`/hr/personnel/${id}/archive`, data),
   restorePersonnel: (id: string, reason: string) => api.post(`/hr/personnel/${id}/restore`, { reason }),
   getPersonnelDeletionPreview: (id: string) => api.get(`/hr/personnel/${id}/deletion-preview`),

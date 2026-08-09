@@ -6,7 +6,7 @@ import { protect } from '../middleware/auth';
 import type { WorkspaceRequest } from '../middleware/workspace';
 import { requireHrFeature } from '../middleware/hrAuthorization';
 import { normalizeWorkSchedule } from '../utils/personnelWorkSchedule';
-import { archiveRosterMembershipEnd, assertSubsequentEmploymentRelationship, personnelSearchWhere } from '../services/hrPersonnelBoundary';
+import { archiveRosterMembershipEnd, assertSubsequentEmploymentRelationship } from '../services/hrPersonnelBoundary';
 import { assertWorkScheduleAction } from '../services/hrWorkScheduleGovernance';
 import { dateOnlyRangeIncludes, plannedStartHasArrived } from '../services/hrEmploymentActivation';
 import { assertArchiveReason, assertArchivedRecordMutable, assertPermanentDeletionConfirmation, assertPersonnelErasureTarget, projectRecordRetentionCapabilities } from '../services/hrRecordRetentionPolicy';
@@ -38,6 +38,7 @@ import {
 } from '../services/hrOrganizationCapacity';
 import { assertAutomatedHrMigrationOperationAllowed } from '../services/hrMigrationReconciliation';
 import { getHrReconciliationWorkspace, recordHrReconciliationReview } from '../services/hrMigrationReconciliationStore';
+import { buildPersonnelCollection } from '../services/hrPersonnelCollection';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -199,6 +200,18 @@ const personnelInclude = {
     }
   },
   hrPersonnelAudits: { orderBy: { createdAt: 'desc' as const }, take: 10 }
+} as const;
+
+const personnelListInclude = {
+  user: { select: { id: true, username: true, email: true, isActive: true } },
+  hrEmploymentRelationships: {
+    orderBy: { effectiveFrom: 'desc' as const },
+    include: {
+      assignments: { orderBy: { effectiveFrom: 'desc' as const }, include: assignmentInclude },
+      hiringApplication: { select: { id: true, stage: true, outcome: true, convertedAt: true, activatedAt: true } }
+    }
+  },
+  hrPersonnelAudits: { orderBy: { createdAt: 'desc' as const }, take: 1 }
 } as const;
 
 const assertActiveReference = async (client: any, model: 'hrOrganizationalUnit' | 'hrWorkplace' | 'hrCostCenter' | 'hrJob', id: string | null, label: string, at = new Date()) => {
@@ -1029,6 +1042,7 @@ router.put('/positions/:id', editAccess, async (req: WorkspaceRequest, res) => {
 router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
     const search = textValue(req.query.search);
+    const focusId = nullableText(req.query.focus);
     const archived = textValue(req.query.archived) === 'true';
     const relationshipStatus = textValue(req.query.relationshipStatus);
     const organizationalUnitId = textValue(req.query.organizationalUnitId);
@@ -1037,8 +1051,6 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
     const dependencyAt = req.query.dependencyAt ? parseDate(req.query.dependencyAt, 'تاریخ وابستگی') : new Date();
     const attention = textValue(req.query.attention);
     const page = Math.max(1, Number(req.query.page || 1));
-    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 50)));
-    const sortDirection = textValue(req.query.sortDirection) === 'desc' ? 'desc' : 'asc';
     const filterNow = new Date();
     const relationshipFilter: Prisma.HrEmploymentRelationshipWhereInput = {
       status: relationshipStatus && ['PLANNED', 'ACTIVE', 'SUSPENDED', 'ENDED', 'CANCELLED'].includes(relationshipStatus)
@@ -1060,57 +1072,36 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
     };
     const where: Prisma.PersonnelWhereInput = {
       archivedAt: archived ? { not: null } : null,
-      ...((relationshipStatus || attention === 'missing-primary' || organizationalUnitId || workplaceId || costCenterId) ? { hrEmploymentRelationships: { some: relationshipFilter } } : {}),
-      ...(personnelSearchWhere(search) || {})
+      ...((relationshipStatus || attention === 'missing-primary' || organizationalUnitId || workplaceId || costCenterId) ? { hrEmploymentRelationships: { some: relationshipFilter } } : {})
     };
-    const [rows, total, authorityRows] = await Promise.all([
-      prisma.personnel.findMany({ where, include: personnelInclude, orderBy: [{ lastName: sortDirection }, { firstName: sortDirection }], skip: (page - 1) * pageSize, take: pageSize }),
-      prisma.personnel.count({ where }),
+    // Authorization and structural filters are applied by middleware/where first. Search,
+    // Persian collation, focus canonicalization, and pagination then operate on that complete set.
+    const [authorizedRows, authorityRows] = await Promise.all([
+      prisma.personnel.findMany({
+        where,
+        select: { id: true, firstName: true, lastName: true, nationalCode: true, employeeNumber: true }
+      }),
       prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } })
     ]);
+    const collection = buildPersonnelCollection(authorizedRows, { search, page, focusId });
+    const pageIds = collection.rows.map((person) => person.id);
+    const unorderedRows = pageIds.length
+      ? await prisma.personnel.findMany({ where: { id: { in: pageIds } }, include: personnelListInclude })
+      : [];
+    const pageOrder = new Map(pageIds.map((id, index) => [id, index]));
+    const rows = unorderedRows.sort((left, right) => pageOrder.get(left.id)! - pageOrder.get(right.id)!);
     const archivedActorIds = [...new Set(rows.map((person) => person.archivedBy).filter(Boolean) as string[])];
     const archivedActors = archivedActorIds.length
       ? await prisma.user.findMany({ where: { id: { in: archivedActorIds } }, select: { id: true, firstName: true, lastName: true, username: true } })
       : [];
     const archivedActorNames = new Map(archivedActors.map((actor) => [actor.id, `${actor.firstName} ${actor.lastName}`.trim() || actor.username]));
     const authorities = new Set(authorityRows.map((row) => row.authority));
-    const now = new Date();
-    const isEffective = (from: Date, to: Date | null) => dateOnlyRangeIncludes(from, to, now);
-    const data = rows.map((person) => {
-      const relationship = person.hrEmploymentRelationships.find((candidate) =>
-        ['PLANNED', 'ACTIVE', 'SUSPENDED'].includes(candidate.status) &&
-        isEffective(candidate.effectiveFrom, candidate.effectiveTo)
-      );
-      const primary = relationship?.assignments.find((assignment) =>
-        assignment.type === 'PRIMARY' && isEffective(assignment.effectiveFrom, assignment.effectiveTo)
-      );
-      const change = person.workScheduleChanges[0];
-      const supervisorAssignment = primary?.responsibleSupervisorAssignment;
-      const supervisorRelationship = supervisorAssignment?.employmentRelationship;
-      const isResponsibleSupervisor = Boolean(
-        supervisorAssignment && supervisorRelationship &&
-        isEffective(supervisorAssignment.effectiveFrom, supervisorAssignment.effectiveTo) &&
-        ['ACTIVE', 'SUSPENDED'].includes(supervisorRelationship.status) &&
-        isEffective(supervisorRelationship.effectiveFrom, supervisorRelationship.effectiveTo) &&
-        supervisorRelationship.personnel.user?.id === actorId(req)
-      );
-      const separateReviewer = change?.preparedBy !== actorId(req);
-      const canSeeChangeDetails = Boolean(isResponsibleSupervisor) || authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
-      return {
-        ...person,
-        archivedByDisplayName: person.archivedBy ? archivedActorNames.get(person.archivedBy) || person.archivedBy : null,
-        retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities: [...authorities], archived: Boolean(person.archivedAt) }),
-        workScheduleChanges: canSeeChangeDetails ? person.workScheduleChanges : [],
-        workScheduleCapabilities: {
-          canPropose: Boolean(isResponsibleSupervisor) && (!change || change.status === 'APPROVED'),
-          canPrepare: authorities.has('HR_PROCESSOR') && Boolean(change && ['PROPOSED', 'RETURNED', 'DRAFT'].includes(change.status)),
-          canSubmit: authorities.has('HR_PROCESSOR') && change?.status === 'DRAFT',
-          canApprove: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer,
-          canReturn: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer
-        }
-      };
-    });
-    res.json({ success: true, data, meta: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } });
+    const data = rows.map((person) => ({
+      ...person,
+      archivedByDisplayName: person.archivedBy ? archivedActorNames.get(person.archivedBy) || person.archivedBy : null,
+      retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities: [...authorities], archived: Boolean(person.archivedAt) }),
+    }));
+    res.json({ success: true, data, meta: collection.meta });
   } catch (error) { handleError(res, error, 'List HR personnel'); }
 });
 
@@ -1392,6 +1383,85 @@ router.use('/assignments/:id', async (req: WorkspaceRequest, res, next) => {
     assertArchivedRecordMutable(assignment?.employmentRelationship.personnel.archivedAt);
     next();
   } catch (error) { handleError(res, error, 'Reject archived Personnel assignment mutation'); }
+});
+
+router.get('/personnel/:id/work-schedule', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const [person, authorityRows] = await Promise.all([
+      prisma.personnel.findUnique({
+        where: { id: req.params.id },
+        select: {
+          id: true,
+          archivedAt: true,
+          workSchedules: {
+            include: { days: { orderBy: { weekday: 'asc' } } },
+            orderBy: { effectiveFrom: 'desc' },
+            take: 1,
+          },
+          workScheduleChanges: { orderBy: { createdAt: 'desc' }, take: 5 },
+          hrEmploymentRelationships: {
+            orderBy: { effectiveFrom: 'desc' },
+            include: {
+              assignments: {
+                orderBy: { effectiveFrom: 'desc' },
+                include: {
+                  responsibleSupervisorAssignment: {
+                    include: {
+                      employmentRelationship: {
+                        include: { personnel: { select: { user: { select: { id: true } } } } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      prisma.hrHiringAuthority.findMany({
+        where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+        select: { authority: true },
+      }),
+    ]);
+    if (!person) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
+    const authorities = new Set(authorityRows.map((row) => row.authority));
+    const now = new Date();
+    const isEffective = (from: Date, to: Date | null) => dateOnlyRangeIncludes(from, to, now);
+    const relationship = person.hrEmploymentRelationships.find((candidate) =>
+      ['PLANNED', 'ACTIVE', 'SUSPENDED'].includes(candidate.status) && isEffective(candidate.effectiveFrom, candidate.effectiveTo)
+    );
+    const primary = relationship?.assignments.find((assignment) =>
+      assignment.type === 'PRIMARY' && isEffective(assignment.effectiveFrom, assignment.effectiveTo)
+    );
+    const supervisorAssignment = primary?.responsibleSupervisorAssignment;
+    const supervisorRelationship = supervisorAssignment?.employmentRelationship;
+    const isResponsibleSupervisor = Boolean(
+      supervisorAssignment && supervisorRelationship &&
+      isEffective(supervisorAssignment.effectiveFrom, supervisorAssignment.effectiveTo) &&
+      ['ACTIVE', 'SUSPENDED'].includes(supervisorRelationship.status) &&
+      isEffective(supervisorRelationship.effectiveFrom, supervisorRelationship.effectiveTo) &&
+      supervisorRelationship.personnel.user?.id === actorId(req)
+    );
+    const change = person.workScheduleChanges[0];
+    const canSeeChangeDetails = isResponsibleSupervisor || authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
+    const separateReviewer = change?.preparedBy !== actorId(req);
+    res.json({
+      success: true,
+      data: {
+        personnelId: person.id,
+        archived: Boolean(person.archivedAt),
+        workSchedules: person.workSchedules,
+        workScheduleChanges: canSeeChangeDetails ? person.workScheduleChanges : [],
+        workScheduleCapabilities: {
+          canPropose: isResponsibleSupervisor && (!change || change.status === 'APPROVED'),
+          canPrepare: authorities.has('HR_PROCESSOR') && Boolean(change && ['PROPOSED', 'RETURNED', 'DRAFT'].includes(change.status)),
+          canSubmit: authorities.has('HR_PROCESSOR') && change?.status === 'DRAFT',
+          canApprove: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer,
+          canReturn: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer,
+        },
+      },
+    });
+  } catch (error) { handleError(res, error, 'Get personnel work schedule on request'); }
 });
 
 router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, async (req: WorkspaceRequest, res) => {

@@ -86,9 +86,9 @@ test.describe('cross-role HR operational journeys', () => {
     expect(proposalResponse.ok()).toBeTruthy();
     const change = (await proposalResponse.json()).data;
     expect((await processor.put(`/hr/personnel/${personnelId}/work-schedule/changes/${change.id}/prepare`, { data: payload })).ok()).toBeTruthy();
-    const beforeApproval = await processor.get('/hr/personnel');
-    const personnelBeforeApproval = (await beforeApproval.json()).data.find((item: any) => item.id === personnelId);
-    expect(personnelBeforeApproval.workSchedules.some((item: any) => String(item.effectiveFrom).startsWith(payload.effectiveDate))).toBe(false);
+    const beforeApproval = await processor.get(`/hr/personnel/${personnelId}/work-schedule`);
+    const scheduleBeforeApproval = (await beforeApproval.json()).data;
+    expect(scheduleBeforeApproval.workSchedules.some((item: any) => String(item.effectiveFrom).startsWith(payload.effectiveDate))).toBe(false);
     expect((await processor.post(`/hr/personnel/${personnelId}/work-schedule/changes/${change.id}/submit`)).ok()).toBeTruthy();
     expect((await manager.post(`/hr/personnel/${personnelId}/work-schedule/changes/${change.id}/approve`)).ok()).toBeTruthy();
     await Promise.all([supervisor.dispose(), processor.dispose(), manager.dispose()]);
@@ -140,12 +140,12 @@ test.describe('HR archive and permanent-erasure acceptance', () => {
     const manager = await roleRequest(env('HR_E2E_HR_MANAGER_TOKEN'));
     const effectiveDate = env('HR_E2E_ARCHIVE_EFFECTIVE_DATE') || new Date().toISOString().slice(0, 10);
     expect((await manager.post(`/hr/personnel/${id}/archive`, { data: { reason: 'E2E controlled Personnel offboarding', effectiveDate } })).ok()).toBeTruthy();
-    const archived = await manager.get('/hr/personnel', { params: { archived: 'true', pageSize: '100' } });
+    const archived = await manager.get('/hr/personnel', { params: { archived: 'true', focus: id } });
     const archivedPerson = (await archived.json()).data.find((item: any) => item.id === id);
     expect(archivedPerson).toBeTruthy();
     expect(archivedPerson.user?.isActive).toBe(false);
     expect((await manager.post(`/hr/personnel/${id}/restore`, { data: { reason: 'E2E restore list visibility only' } })).ok()).toBeTruthy();
-    const active = await manager.get('/hr/personnel', { params: { pageSize: '100' } });
+    const active = await manager.get('/hr/personnel', { params: { focus: id } });
     const restored = (await active.json()).data.find((item: any) => item.id === id);
     expect(restored.user?.isActive).toBe(false);
     expect(restored.hrEmploymentRelationships.every((item: any) => item.status === 'ENDED')).toBe(true);
@@ -256,18 +256,21 @@ test.describe('browser-visible cross-role workflow controls', () => {
     const supervisor = await browser.newContext({ storageState: env('HR_E2E_SUPERVISOR_STORAGE') });
     const supervisorPage = await supervisor.newPage();
     await supervisorPage.goto(`/dashboard/hr/personnel?focus=${env('HR_E2E_PERSONNEL_ID')}`);
+    await supervisorPage.getByRole('button', { name: 'مشاهده برنامه کاری' }).click();
     await expect(supervisorPage.getByRole('button', { name: 'ثبت پیشنهاد توسط سرپرست مسئول' })).toBeVisible();
     await supervisor.close();
 
     const processor = await browser.newContext({ storageState: env('HR_E2E_HR_PROCESSOR_STORAGE') });
     const processorPage = await processor.newPage();
     await processorPage.goto(`/dashboard/hr/personnel?focus=${env('HR_E2E_PERSONNEL_ID')}`);
+    await processorPage.getByRole('button', { name: 'مشاهده برنامه کاری' }).click();
     await expect(processorPage.getByRole('button', { name: /ذخیره پیش‌نویس|ارسال برای تأیید/ })).toBeVisible();
     await processor.close();
 
     const manager = await browser.newContext({ storageState: env('HR_E2E_HR_MANAGER_STORAGE') });
     const managerPage = await manager.newPage();
     await managerPage.goto(`/dashboard/hr/personnel?focus=${env('HR_E2E_PERSONNEL_ID')}`);
+    await managerPage.getByRole('button', { name: 'مشاهده برنامه کاری' }).click();
     await expect(managerPage.getByRole('button', { name: /تأیید و ایجاد نسخه اجرایی|بازگرداندن/ })).toBeVisible();
     await manager.close();
   });

@@ -127,7 +127,7 @@ for (const evidence of [
       integrityHash: 'row-hash-count',
     }],
   };
-  mixed.readiness = { ...mixed.readiness, quantityTotal: null, amountTotal: '150.000000000000' };
+  mixed.readiness = { ...mixed.readiness, quantityTotal: '999.000', amountTotal: '150.000000000000' };
   const { port } = makePort({ loadLockedPricingEvidence: async () => [mixed] });
   assert.equal((await bindFinalizedAllocationPricing(port, input, { CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'true' })).path,
     'ATOMIC_WAYBILL_STATEMENT');

@@ -62,6 +62,7 @@ const lockRows = async (tx: Tx, table: string, column: string, ids: string[]) =>
   if (ids.length === 0) return;
   const target = new Map<string, { predicate: string; order: string }>([
     ['contract_approved_pricing_heads:contractId', { predicate: '"contract_approved_pricing_heads"."contractId"', order: '"contractId"' }],
+    ['sales_contracts:id', { predicate: '"sales_contracts"."id"', order: '"id"' }],
     ['contract_approved_pricing_rows:contractItemId', { predicate: '"contract_approved_pricing_rows"."contractItemId"', order: '"contractItemId", "id"' }],
     ['dispatch_priced_allocation_events:pricingRowId', { predicate: '"dispatch_priced_allocation_events"."pricingRowId"', order: '"pricingRowId", "recordedAt", "id"' }],
   ]).get(`${table}:${column}`);
@@ -84,6 +85,7 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
     const headContracts = keys.filter((key) => key.startsWith('APPROVED_PRICING_HEAD:')).map((key) => key.slice('APPROVED_PRICING_HEAD:'.length));
     const rowItems = keys.filter((key) => key.startsWith('APPROVED_PRICING_ROW:')).map((key) => key.split(':').slice(2).join(':'));
     const ledgerRows = keys.filter((key) => key.startsWith('PRICED_ALLOCATION_LEDGER:')).map((key) => key.slice('PRICED_ALLOCATION_LEDGER:'.length));
+    await lockRows(tx, 'sales_contracts', 'id', headContracts);
     await lockRows(tx, 'contract_approved_pricing_heads', 'contractId', headContracts);
     await lockRows(tx, 'contract_approved_pricing_rows', 'contractItemId', rowItems);
     await lockRows(tx, 'dispatch_priced_allocation_events', 'pricingRowId', ledgerRows);

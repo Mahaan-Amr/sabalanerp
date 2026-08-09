@@ -65,6 +65,20 @@ const lockShipmentTruth = async (tx: Tx, contractItemIds: string[]) => {
     WHERE "contractItemId" IN (${Prisma.join(ids)}) ORDER BY "contractItemId", "recordedAt", "id" FOR UPDATE`);
 };
 
+const lockQueueTurns = async (tx: Tx, queueTurnIds: string[]) => {
+  const ids = [...new Set(queueTurnIds)].sort();
+  if (ids.length === 0) return;
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "guard_driver_queue_turns"
+    WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
+};
+
+const lockPricingContracts = async (tx: Tx, contractIds: string[]) => {
+  const ids = [...new Set(contractIds)].sort();
+  if (ids.length === 0) return;
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts"
+    WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
+};
+
 const serializable = async <T>(prisma: Database, work: (tx: Tx) => Promise<T>): Promise<T> => {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -72,11 +86,15 @@ const serializable = async <T>(prisma: Database, work: (tx: Tx) => Promise<T>): 
       return await prisma.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       lastError = error;
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2034') throw error;
+      if (!isRetryableDispatchTransactionError(error)) throw error;
     }
   }
   throw lastError;
 };
+
+export const isRetryableDispatchTransactionError = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError
+  && (error.code === 'P2034'
+    || (error.code === 'P2010' && ['40001', '40P01'].includes(String(error.meta?.code || ''))));
 
 const bindRevisionPricing = async (tx: Tx, input: {
   allocationRevisionId: string;
@@ -309,6 +327,8 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
   if (loading.status !== 'DRAFT') throw new DispatchAllocationConflictError('Only a draft loading can be finalized.');
   if (loading.canonicalAllocationDrafts.length === 0) throw new DispatchAllocationValidationError('At least one canonical driver allocation is required.');
   const itemIds = loading.canonicalAllocationDrafts.flatMap((draft) => draft.lines.map((line) => line.sourceContractItemId));
+  const initialContractIds = [...new Set(loading.canonicalAllocationDrafts
+    .flatMap((draft) => draft.lines.map((line) => line.sourceContractId)))];
   const draftIds = loading.canonicalAllocationDrafts.map((draft) => draft.id);
   await lockKeys(tx, [
     ...loading.canonicalAllocationDrafts.map((draft) => `GUARD_QUEUE:${draft.queueTurnId}`),
@@ -316,9 +336,12 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     ...itemIds.map((id) => `SHIPMENT_CONTRACT_ITEM:${id}`),
     ...itemIds.map((id) => `SHIPMENT_EVIDENCE_HEAD:${id}`),
     ...itemIds.map((id) => `SHIPMENT_PROJECTION:${id}`),
+    ...initialContractIds.map((id) => `APPROVED_PRICING_CONTRACT:${id}`),
   ]);
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "logistics_allocation_drafts"
     WHERE "id" IN (${Prisma.join(draftIds.sort())}) ORDER BY "id" FOR UPDATE`);
+  await lockQueueTurns(tx, loading.canonicalAllocationDrafts.map((draft) => draft.queueTurnId));
+  await lockPricingContracts(tx, initialContractIds);
   await lockShipmentTruth(tx, itemIds);
   const refreshedDrafts = await tx.logisticsAllocationDraft.findMany({ where: { id: { in: draftIds } },
     include: { lines: true, queueTurn: true }, orderBy: { createdAt: 'asc' } });
@@ -415,45 +438,52 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
 }) => serializable(prisma, async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
-  await lockKeys(tx, [`LOGISTICS_ALLOCATION_REVISION:${input.predecessorRevisionId}`]);
-  const predecessor = await tx.logisticsAllocationRevision.findUnique({ where: { id: input.predecessorRevisionId },
-    include: { candidate: true, successorRevision: true, lines: true, pricingReferences: true,
+  const initialPredecessor = await tx.logisticsAllocationRevision.findUnique({ where: { id: input.predecessorRevisionId },
+    include: { candidate: true, successorRevision: true, lines: true,
       loading: { include: { customer: true, project: true, lines: true } }, queueTurn: true } });
-  if (!predecessor) throw new DispatchAllocationValidationError('Predecessor allocation revision was not found.');
+  if (!initialPredecessor) throw new DispatchAllocationValidationError('Predecessor allocation revision was not found.');
   const previousBatch = await tx.logisticsAllocationBatch.findUnique({
-    where: { loadingId_idempotencyKey: { loadingId: predecessor.loadingId, idempotencyKey } },
+    where: { loadingId_idempotencyKey: { loadingId: initialPredecessor.loadingId, idempotencyKey } },
     include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } },
   });
   if (previousBatch) return previousBatch;
-  if (!predecessor.candidate) throw new DispatchAllocationConflictError('Only an Accounting candidate can have a successor.');
-  if (predecessor.successorRevision) throw new DispatchAllocationConflictError('This allocation already has a successor revision.');
-  if (predecessor.queueTurn.status !== GuardDriverQueueTurnStatus.LOADING_FINALIZED || predecessor.queueTurn.loadingId !== predecessor.loadingId) {
-    throw new DispatchAllocationConflictError('The predecessor queue turn is no longer bound to the finalized loading.');
-  }
-  if (!await isGuardQueueTurnCurrentlyReady(tx, predecessor.queueTurn)) {
-    throw new DispatchAllocationConflictError('The driver or vehicle is no longer ready for a successor allocation.');
-  }
+  if (!initialPredecessor.candidate) throw new DispatchAllocationConflictError('Only an Accounting candidate can have a successor.');
   if (!Array.isArray(input.lines) || input.lines.length === 0) throw new DispatchAllocationValidationError('At least one successor line is required.');
   const itemIds = input.lines.map((line) => required(line.sourceContractItemId, 'sourceContractItemId'));
-  const transferItemIds = [...new Set([...itemIds, ...predecessor.lines.map((line) => line.sourceContractItemId)])];
-  await lockKeys(tx, [`LOGISTICS_LOADING:${predecessor.loadingId}`,
+  const initiallyRequestedItems = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, select: { id: true, contractId: true } });
+  const transferItemIds = [...new Set([...itemIds, ...initialPredecessor.lines.map((line) => line.sourceContractItemId)])];
+  const pricingContractIds = [...new Set([...initiallyRequestedItems.map((item) => item.contractId),
+    ...initialPredecessor.lines.map((line) => line.sourceContractId)])];
+  await lockKeys(tx, [`LOGISTICS_ALLOCATION_REVISION:${initialPredecessor.id}`,
+    `LOGISTICS_LOADING:${initialPredecessor.loadingId}`,
+    `ACCOUNTING_DISPATCH_CANDIDATE:${initialPredecessor.candidate.id}`,
+    `GUARD_QUEUE:${initialPredecessor.queueTurnId}`,
     ...transferItemIds.map((id) => `SHIPMENT_CONTRACT_ITEM:${id}`),
     ...transferItemIds.map((id) => `SHIPMENT_EVIDENCE_HEAD:${id}`),
-    ...transferItemIds.map((id) => `SHIPMENT_PROJECTION:${id}`)]);
+    ...transferItemIds.map((id) => `SHIPMENT_PROJECTION:${id}`),
+    ...pricingContractIds.map((id) => `APPROVED_PRICING_CONTRACT:${id}`)]);
+  await lockPricingContracts(tx, pricingContractIds);
   await lockShipmentTruth(tx, transferItemIds);
-  let stalePricingTransfer = false;
-  if (predecessor.candidate.status === AccountingDispatchCandidateStatus.PENDING && predecessor.pricingReferences.length > 0) {
-    const pricingContracts = [...new Set(predecessor.pricingReferences.map((reference) => reference.contractId))].sort();
-    await lockKeys(tx, pricingContracts.map((contractId) => `APPROVED_PRICING_HEAD:${contractId}`));
-    const currentHeads = await tx.contractApprovedPricingHead.findMany({ where: { contractId: { in: pricingContracts } },
-      include: { currentVersion: true }, orderBy: { contractId: 'asc' } });
-    const currentByContract = new Map(currentHeads.map((head) => [head.contractId, head.currentVersion]));
-    stalePricingTransfer = predecessor.pricingReferences.some((reference) => {
-      const current = currentByContract.get(reference.contractId);
-      return !current || current.id !== reference.pricingVersionId || current.integrityHash !== reference.expectedPricingHash;
-    });
+  await lockQueueTurns(tx, [initialPredecessor.queueTurnId]);
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "accounting_dispatch_candidates"
+    WHERE "id" = ${initialPredecessor.candidate.id} FOR UPDATE`);
+  const predecessor = await tx.logisticsAllocationRevision.findUnique({ where: { id: initialPredecessor.id },
+    include: { candidate: true, successorRevision: true, lines: true,
+      loading: { include: { customer: true, project: true, lines: true } }, queueTurn: true } });
+  if (!predecessor?.candidate) throw new DispatchAllocationConflictError('The predecessor changed during successor finalization.');
+  if (predecessor.successorRevision) throw new DispatchAllocationConflictError('This allocation already has a successor revision.');
+  const refreshedCandidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: predecessor.candidate.id } });
+  if (!refreshedCandidate) throw new DispatchAllocationConflictError('The predecessor candidate changed during successor finalization.');
+  const refreshedQueueTurn = await tx.guardDriverQueueTurn.findUnique({ where: { id: predecessor.queueTurnId } });
+  if (!refreshedQueueTurn || refreshedQueueTurn.status !== GuardDriverQueueTurnStatus.LOADING_FINALIZED
+    || refreshedQueueTurn.loadingId !== predecessor.loadingId) {
+    throw new DispatchAllocationConflictError('The predecessor queue turn is no longer bound to the finalized loading.');
   }
-  if (!['REJECTED', 'RETURNED'].includes(predecessor.candidate.status) && !stalePricingTransfer) {
+  if (!await isGuardQueueTurnCurrentlyReady(tx, refreshedQueueTurn)) {
+    throw new DispatchAllocationConflictError('The driver or vehicle is no longer ready for a successor allocation.');
+  }
+  const stalePricingTransfer = refreshedCandidate.status === AccountingDispatchCandidateStatus.STALE_REQUIRES_SUCCESSOR;
+  if (!['REJECTED', 'RETURNED'].includes(refreshedCandidate.status) && !stalePricingTransfer) {
     throw new DispatchAllocationConflictError('Only a rejected, returned, or stale-priced allocation can have a successor.');
   }
   const items = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, include: { contract: true, product: true } });
@@ -513,8 +543,8 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     loading: { id: predecessor.loading.id, number: predecessor.loading.loadingNumber,
       customer: { id: predecessor.loading.customer.id, name: `${predecessor.loading.customer.firstName} ${predecessor.loading.customer.lastName}`.trim(), companyName: predecessor.loading.customer.companyName },
       project: { id: predecessor.loading.project.id, name: predecessor.loading.project.projectName, address: predecessor.loading.project.address } },
-    queueTurn: { id: predecessor.queueTurn.id, driverSource: predecessor.queueTurn.driverSource,
-      admissionSnapshot: predecessor.queueTurn.admissionSnapshot, admissionIntegrityHash: predecessor.queueTurn.integrityHash },
+    queueTurn: { id: refreshedQueueTurn.id, driverSource: refreshedQueueTurn.driverSource,
+      admissionSnapshot: refreshedQueueTurn.admissionSnapshot, admissionIntegrityHash: refreshedQueueTurn.integrityHash },
     revisionNumber, finalizedAt: now,
     notification: { confirmationPhone, source: 'CONTRACT_PUBLIC_CONFIRMATION', capturedAt: now },
     lines: rows.map((line) => ({ contractId: line.sourceContractId,

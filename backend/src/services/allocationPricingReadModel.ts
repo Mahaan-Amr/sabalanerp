@@ -31,6 +31,36 @@ export type BoundPricedAllocationReadModel = {
   totals: { grossAmount: string; discountAmount: string; netAmount: string };
 };
 
+export type BoundAllocationPricingFreshness =
+  | { status: 'CURRENT'; staleContracts: [] }
+  | { status: 'STALE_REQUIRES_SUCCESSOR'; staleContracts: Array<{
+    contractId: string; boundPricingVersionId: string; currentPricingVersionId: string | null;
+  }> };
+
+export const assessBoundAllocationPricingFreshness = async (
+  tx: Tx,
+  allocationRevisionId: string,
+): Promise<BoundAllocationPricingFreshness> => {
+  const references = await tx.logisticsAllocationRevisionPricing.findMany({
+    where: { allocationRevisionId }, orderBy: { contractId: 'asc' },
+  });
+  if (references.length === 0) throw new Error('Allocation revision has no priced binding.');
+  const heads = await tx.contractApprovedPricingHead.findMany({
+    where: { contractId: { in: references.map((reference) => reference.contractId) } },
+    include: { currentVersion: true }, orderBy: { contractId: 'asc' },
+  });
+  const current = new Map(heads.map((head) => [head.contractId, head.currentVersion]));
+  const staleContracts = references.flatMap((reference) => {
+    const version = current.get(reference.contractId);
+    return version && version.id === reference.pricingVersionId && version.integrityHash === reference.expectedPricingHash
+      ? []
+      : [{ contractId: reference.contractId, boundPricingVersionId: reference.pricingVersionId,
+        currentPricingVersionId: version?.id || null }];
+  });
+  return staleContracts.length === 0 ? { status: 'CURRENT', staleContracts: [] }
+    : { status: 'STALE_REQUIRES_SUCCESSOR', staleContracts };
+};
+
 export const readBoundPricedAllocation = async (
   tx: Tx,
   allocationRevisionId: string,
@@ -41,7 +71,7 @@ export const readBoundPricedAllocation = async (
     }),
     tx.dispatchPricedAllocationEvent.findMany({
       where: { allocationRevisionId },
-      include: { allocationRevisionLine: true },
+      include: { allocationRevisionLine: true, pricingRow: true },
       orderBy: [{ pricingRowId: 'asc' }, { recordedAt: 'asc' }, { id: 'asc' }],
     }),
   ]);
@@ -53,6 +83,8 @@ export const readBoundPricedAllocation = async (
       throw new Error(`Approved pricing ${reference.pricingVersionId} failed bound hash verification.`);
     }
   }
+  const referencesByContract = new Map(references.map((reference) => [reference.contractId, reference]));
+  const sequencesByRow = new Map<string, number[]>();
   const lines = events.map((event) => {
     const evidence = record(event.evidence);
     const ledgerSequence = Number(evidence.ledgerSequence);
@@ -74,6 +106,16 @@ export const readBoundPricedAllocation = async (
       throw new Error(`Priced allocation event ${event.id} failed integrity verification.`);
     }
     const revisionLine = event.allocationRevisionLine;
+    const reference = referencesByContract.get(revisionLine.sourceContractId);
+    if (!reference || reference.pricingVersionId !== event.pricingVersionId
+      || event.pricingRow.pricingVersionId !== event.pricingVersionId
+      || event.pricingRow.contractItemId !== revisionLine.sourceContractItemId
+      || event.pricingRow.productRowId !== revisionLine.productRowId
+      || event.pricingRow.unit !== revisionLine.unit
+      || event.quantity.toFixed(3) !== revisionLine.quantity.toFixed(3)) {
+      throw new Error(`Priced allocation event ${event.id} attribution changed.`);
+    }
+    sequencesByRow.set(event.pricingRowId, [...(sequencesByRow.get(event.pricingRowId) || []), ledgerSequence]);
     return {
       allocationRevisionLineId: revisionLine.id,
       contractId: revisionLine.sourceContractId,
@@ -88,6 +130,11 @@ export const readBoundPricedAllocation = async (
     };
   }).sort((left, right) => left.contractId.localeCompare(right.contractId)
     || left.contractItemId.localeCompare(right.contractItemId) || left.ledgerSequence - right.ledgerSequence);
+  for (const [pricingRowId, sequences] of sequencesByRow) {
+    if (sequences.sort((left, right) => left - right).some((sequence, index) => sequence !== index + 1)) {
+      throw new Error(`Priced allocation row ${pricingRowId} has a non-contiguous ledger sequence.`);
+    }
+  }
   return {
     currency: currencies[0],
     pricingVersions: references.map((reference) => ({

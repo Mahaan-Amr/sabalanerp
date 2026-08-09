@@ -106,7 +106,7 @@ const assertEvidence = (expectedContracts: string[], expectedScope: LockedPricin
       throw new AllocationPricingBindingError('PRICING_NOT_READY', `Contract ${entry.version.contractId} pricing is not READY.`);
     }
     if (entry.readiness.sourceCount !== 1 || !entry.readiness.sourceIdentityHash
-      || entry.readiness.amountTotal === null
+      || entry.readiness.quantityTotal === null || entry.readiness.amountTotal === null
       || !entry.version.readinessEvidenceHash) {
       throw new AllocationPricingBindingError('PRICING_SOURCE_MISMATCH', `Contract ${entry.version.contractId} pricing readiness evidence is incomplete.`);
     }
@@ -116,7 +116,9 @@ const assertEvidence = (expectedContracts: string[], expectedScope: LockedPricin
     const units = new Set(entry.version.rows.map((row) => row.unit));
     const quantityMatches = units.size === 1
       ? entry.readiness.quantityTotal === sumCanonicalQuantities(entry.version.rows.map((row) => row.contractedQuantity))
-      : entry.readiness.quantityTotal === null;
+      // The frozen readiness row has one mandatory scalar, which cannot represent unlike units.
+      // Mixed-unit versions are therefore verified row-by-row by their immutable row hashes above.
+      : true;
     if (!quantityMatches || entry.version.grossAmount !== entry.readiness.amountTotal) {
       throw new AllocationPricingBindingError('PRICING_SOURCE_MISMATCH', `Contract ${entry.version.contractId} readiness totals changed.`);
     }

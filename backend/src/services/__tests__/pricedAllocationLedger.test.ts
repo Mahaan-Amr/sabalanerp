@@ -134,6 +134,16 @@ assert.throws(
   () => allocatePricedRevision({
     versions: [version()],
     priorEvents: [{ pricingRowId: 'pricing-row-1', pricingVersionId: 'pricing-1', quantity: '1.000',
+      grossAmount: '33.333333333333', discountAmount: '2.666666666666', integrityVerified: true, ledgerSequence: 2 }],
+    lines: [line('1.000')],
+  }),
+  (error: unknown) => error instanceof PricedAllocationInvariantError && error.code === 'PRIOR_EVENT_HASH_MISMATCH',
+);
+
+assert.throws(
+  () => allocatePricedRevision({
+    versions: [version()],
+    priorEvents: [{ pricingRowId: 'pricing-row-1', pricingVersionId: 'pricing-1', quantity: '1.000',
       grossAmount: '33.333333333333', discountAmount: '2.666666666666', integrityVerified: false, ledgerSequence: 1 }],
     lines: [line('1.000')],
   }),

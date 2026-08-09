@@ -25,7 +25,7 @@ const sha256 = (value: Uint8Array) => createHash('sha256').update(value).digest(
 const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce?: boolean; failSourceEvidence?: boolean } = {}) => {
   const files = new Map<string, Uint8Array>();
   const state = {
-    commands: new Map<string, unknown>(),
+    commands: new Map<string, { command: string; fingerprint: string; value: unknown }>(),
     issued: [] as Array<any>,
     rejected: [] as Array<any>,
     voided: [] as Array<any>,
@@ -36,54 +36,62 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
   };
   let nextNumber = 7000n;
   const repository: DispatchDocumentRepository = {
-    findCommandResult: async ({ scope, scopeId, idempotencyKey }) => state.commands.get(`${scope}:${scopeId}:${idempotencyKey}`) ?? null,
+    findCommandResult: async ({ scope, scopeId, idempotencyKey, command, intentFingerprint }) => {
+      const stored = state.commands.get(`${scope}:${scopeId}:${idempotencyKey}`);
+      if (!stored) return null;
+      if (stored.command !== command || stored.fingerprint !== intentFingerprint) throw new DispatchDocumentConflictError('intent conflict');
+      return stored.value;
+    },
     allocateWaybillNumber: async () => (++nextNumber).toString(),
     acceptAndIssue: async (input) => {
       if (input.expectedSourceIntegrityHash !== 'source-hash') throw new DispatchDocumentConflictError('stale');
       const result = { candidateId: input.candidateId, status: 'ACCEPTED' as const, waybill: input.waybill };
       state.issued.push(input);
-      state.commands.set(`CANDIDATE:${input.candidateId}:${input.idempotencyKey}`, result);
+      state.commands.set(`CANDIDATE:${input.candidateId}:${input.idempotencyKey}`, { command: 'ACCEPT_AND_ISSUE', fingerprint: input.intentFingerprint, value: result });
       return result;
     },
     recordEvidenceConflict: async (input) => {
       const result = { candidateId: input.candidateId, status: 'EVIDENCE_CONFLICT' as const, waybill: null };
       state.rejected.push(input);
-      state.commands.set(`CANDIDATE:${input.candidateId}:${input.idempotencyKey}`, result);
+      state.commands.set(`CANDIDATE:${input.candidateId}:${input.idempotencyKey}`, { command: 'ACCEPT_AND_ISSUE', fingerprint: input.intentFingerprint, value: result });
       return result;
     },
     rejectCandidate: async (input) => {
       const result = { candidateId: input.candidateId, status: input.action === 'REJECT' ? 'REJECTED' as const : 'RETURNED' as const, waybill: null };
       state.rejected.push(input);
-      state.commands.set(`CANDIDATE:${input.candidateId}:${input.idempotencyKey}`, result);
+      state.commands.set(`CANDIDATE:${input.candidateId}:${input.idempotencyKey}`, { command: 'REJECT', fingerprint: input.intentFingerprint, value: result });
       return result;
     },
     voidWaybill: async (input) => {
       const result = { id: input.waybillId, number: '7001', status: 'VOIDED' as const };
       state.voided.push(input);
-      state.commands.set(`WAYBILL:${input.waybillId}:${input.idempotencyKey}`, result);
+      state.commands.set(`WAYBILL:${input.waybillId}:${input.idempotencyKey}`, { command: 'VOID', fingerprint: input.intentFingerprint, value: result });
       return result;
     },
     replaceWaybill: async (input) => {
       state.replacements.push(input);
       state.issued.push({ waybill: input.replacement, artifacts: input.artifacts });
       const result = { voided: { id: input.waybillId, number: '7001', status: 'VOIDED' as const }, replacement: input.replacement };
-      state.commands.set(`WAYBILL:${input.waybillId}:${input.idempotencyKey}`, result);
+      state.commands.set(`WAYBILL:${input.waybillId}:${input.idempotencyKey}`, { command: 'REPLACE', fingerprint: input.intentFingerprint, value: result });
       return result;
     },
     getArtifact: async ({ artifactId }) => state.issued.flatMap((entry) => entry.artifacts).find((artifact: PublishedDispatchArtifact) => artifact.id === artifactId) ?? null,
     recordRetrieval: async (input) => { state.retrievals.push(input); },
+    isRequiredArtifactMetadataMissing: async ({ kinds }) => kinds.some(kind => kind === 'WAYBILL' || kind === 'STATEMENT'),
     getPrintableArtifacts: async ({ waybillId, kinds }) => state.issued.flatMap((entry) => entry.artifacts)
       .filter((artifact: PublishedDispatchArtifact) => artifact.waybillId === waybillId && kinds.includes(artifact.kind)),
     recordPrintHandoff: async (input) => {
       state.handoffs.push(input);
       if (input.status === 'SUCCEEDED') state.commands.set(
         `PRINT_HANDOFF:${input.waybillId}:${input.operationIdempotencyKey}`,
-        { kinds: input.kinds, artifactIds: input.artifacts.map(artifact => artifact.id) },
+        { command: 'PRINT_HANDOFF', fingerprint: input.intentFingerprint,
+          value: { kinds: input.kinds, artifactIds: input.artifacts.map(artifact => artifact.id) } },
       );
     },
-    getCombinedReadModel: async ({ candidateId, authorizedWaybillId }) => candidateId === 'candidate-1'
-      && state.issued.some(entry => entry.waybill.id === authorizedWaybillId)
-      ? { candidateId, status: 'ACCEPTED', waybills: state.issued.map((entry) => entry.waybill) } : null,
+    getCombinedReadModel: async ({ candidateId, authorizedWaybillId }) => !authorizedWaybillId && candidateId === 'candidate-pending'
+      ? { candidateId, status: 'PENDING', waybills: [] }
+      : candidateId === 'candidate-1' && state.issued.some(entry => entry.waybill.id === authorizedWaybillId)
+        ? { candidateId, status: 'ACCEPTED', waybills: state.issued.map((entry) => entry.waybill) } : null,
   };
   let stageCount = 0;
   let failedStage = false;
@@ -147,7 +155,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       }
       return { bytes: bytes(`pdf:${input.kind}`), mediaType: 'application/pdf' };
     } },
-    access: { canReadWaybill: async ({ actorId }) => actorId === 'allowed' },
+    access: { canReadWaybill: async ({ actorId }) => actorId === 'allowed', canReadCandidate: async ({ actorId }) => actorId === 'allowed' },
     incidents: { report: async input => { state.incidents.push(input); } },
     id: (() => { let value = 0; return () => `id-${++value}`; })(),
     now: () => new Date('2026-08-09T12:00:00.000Z'),
@@ -178,6 +186,8 @@ const run = async () => {
   const duplicate = await service.decideCandidate({ candidateId: 'candidate-1', action: 'ACCEPT', idempotencyKey: 'accept-1', actorId: 'accountant' });
   assert.deepEqual(duplicate, issued);
   assert.equal(state.issued.length, 1);
+  await assert.rejects(() => service.decideCandidate({ candidateId: 'candidate-1', action: 'REJECT', reason: 'different intent',
+    idempotencyKey: 'accept-1', actorId: 'accountant' }), /intent conflict/);
 
   const rejected = await service.decideCandidate({ candidateId: 'candidate-2', action: 'REJECT', reason: 'نیازمند اصلاح', idempotencyKey: 'reject-1', actorId: 'accountant' });
   assert.equal(rejected.status, 'REJECTED');
@@ -186,12 +196,16 @@ const run = async () => {
   const artifact = state.issued[0].artifacts[0] as PublishedDispatchArtifact;
   const retrieved = await service.retrieveArtifact({ artifactId: artifact.id, waybillId: artifact.waybillId, actorId: 'allowed', correlationId: 'read-1' });
   assert.equal(sha256(retrieved.bytes), artifact.sha256);
+  assert.equal(state.retrievals.length, 0, 'retrieval preparation is not a successful byte handoff');
+  await retrieved.complete.succeeded();
   assert.equal(state.retrievals[0].status, 'SUCCEEDED');
   await assert.rejects(() => service.retrieveArtifact({ artifactId: artifact.id, waybillId: artifact.waybillId, actorId: 'denied', correlationId: 'read-2' }), /not available/i);
   const readModel = await service.getCombinedReadModel({ candidateId: 'candidate-1', waybillId: artifact.waybillId, actorId: 'allowed' }) as any;
   assert.equal(readModel.candidateId, 'candidate-1');
   await assert.rejects(() => service.getCombinedReadModel({ candidateId: 'candidate-1', waybillId: artifact.waybillId, actorId: 'denied' }), /not available/i);
   await assert.rejects(() => service.getCombinedReadModel({ candidateId: 'candidate-other', waybillId: artifact.waybillId, actorId: 'allowed' }), /not available/i);
+  assert.equal((await service.getCombinedReadModel({ candidateId: 'candidate-pending', actorId: 'allowed' }) as any).status, 'PENDING');
+  await assert.rejects(() => service.getCombinedReadModel({ candidateId: 'candidate-pending', actorId: 'denied' }), /not available/i);
 
   const printed = await service.printHandoff({ waybillId: artifact.waybillId, kinds: ['STATEMENT', 'WAYBILL'],
     idempotencyKey: 'print-1', actorId: 'allowed', correlationId: 'print-correlation' });
@@ -205,7 +219,7 @@ const run = async () => {
   assert.equal(state.handoffs.length, 2, 'each actual transfer attempt retains append-only evidence');
   await assert.rejects(() => service.printHandoff({ waybillId: artifact.waybillId, kinds: ['WAYBILL'],
     idempotencyKey: 'print-1', actorId: 'allowed', correlationId: 'print-conflicting-retry' }),
-  /another document set/);
+  /intent conflict/);
   const adjustments = [1, 2].map(sequence => ({ ...artifact, id: `adjustment-artifact-${sequence}`,
     kind: 'STATEMENT_ADJUSTMENT' as const, adjustmentSequence: sequence,
     storageKey: `dispatch-documents/adjustment-${sequence}.pdf`, sha256: sha256(bytes(`adjustment-${sequence}`)),
@@ -262,7 +276,8 @@ const run = async () => {
   const missingWaybillId = missingMetadataIssued.waybill!.id;
   await assert.rejects(() => missingMetadataHarness.service.retrieveArtifact({ artifactId: 'missing-artifact',
     waybillId: missingWaybillId, actorId: 'allowed', correlationId: 'missing-retrieval' }), /not available/i);
-  assert.equal(missingMetadataHarness.state.incidents.at(-1).failureCode, 'ARTIFACT_METADATA_MISSING');
+  assert.equal(missingMetadataHarness.state.retrievals.at(-1).status, 'FAILED');
+  assert.equal(missingMetadataHarness.state.incidents.length, 0, 'arbitrary opaque 404 cannot trigger Pilot Safety Pause');
   missingMetadataHarness.state.issued[0].artifacts = missingMetadataHarness.state.issued[0].artifacts
     .filter((item: PublishedDispatchArtifact) => item.kind !== 'WAYBILL');
   await assert.rejects(() => missingMetadataHarness.service.printHandoff({ waybillId: missingWaybillId,

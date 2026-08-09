@@ -64,6 +64,8 @@ export interface DispatchDocumentRepository {
     scope: DispatchDocumentCommandScope;
     scopeId: string;
     idempotencyKey: string;
+    command: 'ACCEPT_AND_ISSUE' | 'REJECT' | 'VOID' | 'REPLACE' | 'PRINT_HANDOFF';
+    intentFingerprint: string;
   }): Promise<unknown | null>;
   allocateWaybillNumber(): Promise<string>;
   acceptAndIssue(input: {
@@ -76,9 +78,10 @@ export interface DispatchDocumentRepository {
     idempotencyKey: string;
     actorId: string;
     correlationId: string;
+    intentFingerprint: string;
   }): Promise<CandidateDecisionResult>;
   recordEvidenceConflict(input: { candidateId: string; reason: string; idempotencyKey: string;
-    actorId: string; correlationId: string }): Promise<CandidateDecisionResult>;
+    actorId: string; correlationId: string; intentFingerprint: string }): Promise<CandidateDecisionResult>;
   rejectCandidate(input: {
     candidateId: string;
     action: 'REJECT' | 'RETURN';
@@ -86,6 +89,7 @@ export interface DispatchDocumentRepository {
     idempotencyKey: string;
     actorId: string;
     correlationId: string;
+    intentFingerprint: string;
   }): Promise<CandidateDecisionResult>;
   voidWaybill(input: {
     waybillId: string;
@@ -94,6 +98,7 @@ export interface DispatchDocumentRepository {
     actorId: string;
     correlationId: string;
     authority: unknown;
+    intentFingerprint: string;
   }): Promise<unknown>;
   replaceWaybill(input: {
     waybillId: string;
@@ -107,16 +112,21 @@ export interface DispatchDocumentRepository {
     actorId: string;
     correlationId: string;
     authority: unknown;
+    intentFingerprint: string;
   }): Promise<unknown>;
   getArtifact(input: { artifactId: string; waybillId: string }): Promise<PublishedDispatchArtifact | null>;
   recordRetrieval(input: {
     waybillId: string;
-    artifact: PublishedDispatchArtifact;
+    artifact: PublishedDispatchArtifact | null;
+    requestedArtifactId: string;
+    attemptId: string;
     actorId: string;
     correlationId: string;
     status: 'SUCCEEDED' | 'FAILED';
     failureCode?: string;
+    intentFingerprint: string;
   }): Promise<void>;
+  isRequiredArtifactMetadataMissing(input: { waybillId: string; kinds: DispatchDocumentKind[] }): Promise<boolean>;
   getPrintableArtifacts(input: { waybillId: string; kinds: DispatchDocumentKind[] }): Promise<PublishedDispatchArtifact[]>;
   recordPrintHandoff(input: {
     waybillId: string;
@@ -128,8 +138,9 @@ export interface DispatchDocumentRepository {
     status: 'SUCCEEDED' | 'FAILED';
     artifacts: PublishedDispatchArtifact[];
     failureCode?: string;
+    intentFingerprint: string;
   }): Promise<void>;
-  getCombinedReadModel(input: { candidateId: string; authorizedWaybillId: string }): Promise<unknown | null>;
+  getCombinedReadModel(input: { candidateId: string; authorizedWaybillId?: string }): Promise<unknown | null>;
 }
 
 export interface DispatchSourceIntegrityVerifier<Transaction = unknown> {
@@ -142,6 +153,7 @@ export interface DispatchSourceIntegrityVerifier<Transaction = unknown> {
 
 export interface DispatchDocumentAccessPolicy {
   canReadWaybill(input: { actorId: string; waybillId: string }): Promise<boolean>;
+  canReadCandidate(input: { actorId: string }): Promise<boolean>;
 }
 
 export interface DispatchIntegrityIncidentReporter {

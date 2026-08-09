@@ -73,6 +73,7 @@ export const createAccountingDispatchDocumentRouter = (input: {
     try {
       const result = await input.service.retrieveArtifact({ artifactId: req.params.artifactId, waybillId: req.params.waybillId,
         actorId: req.user!.id, correlationId: correlationId(req) });
+      bindPrintHandoffCompletion(res, result.complete);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Length', String(result.bytes.byteLength));
       res.setHeader('Cache-Control', 'private, no-store');
@@ -94,7 +95,7 @@ export const createAccountingDispatchDocumentRouter = (input: {
   });
   router.get('/dispatch-candidates/:candidateId/document-read-model', input.view, async (req: AuthRequest, res) => {
     try { return res.json({ success: true, data: await input.service.getCombinedReadModel({ candidateId: req.params.candidateId,
-      waybillId: String(req.query.waybillId || ''), actorId: req.user!.id }) }); } catch (error) { return sendError(res, error); }
+      waybillId: req.query.waybillId ? String(req.query.waybillId) : undefined, actorId: req.user!.id }) }); } catch (error) { return sendError(res, error); }
   });
   return router;
 };

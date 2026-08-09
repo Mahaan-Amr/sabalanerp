@@ -16,18 +16,20 @@ export const configureDispatchDocumentsRuntime = (input: {
   generatorVersion: string;
   storageRoot?: string;
 }) => {
+  const canReadAccountingDispatch = async (actorId: string) => {
+    const actor = await input.prisma.user.findUnique({ where: { id: actorId }, select: { id: true, role: true, isActive: true } });
+    if (!actor?.isActive) return false;
+    return (await resolveNarrowFeatureAccess(input.prisma, { userId: actor.id, role: actor.role,
+      workspace: 'accounting', feature: 'accounting_dispatch_candidates_view', requiredPermission: 'view' })).allowed;
+  };
   const service = createDispatchDocuments({
     repository: new PrismaDispatchDocumentRepository(input.prisma, allocationPricingIntegrityVerifier),
     sourceReader: new PrismaDispatchDocumentSourceReader(input.prisma, input.templateVersion, input.generatorVersion),
     publisher: input.publisher,
     storage: createFilesystemDispatchArtifactStorage(input.storageRoot || path.join(process.cwd(), 'storage', 'dispatch-documents')),
     incidents: createDispatchIntegrityIncidentReporter(input.prisma),
-    access: { async canReadWaybill({ actorId }) {
-      const actor = await input.prisma.user.findUnique({ where: { id: actorId }, select: { id: true, role: true, isActive: true } });
-      if (!actor?.isActive) return false;
-      return (await resolveNarrowFeatureAccess(input.prisma, { userId: actor.id, role: actor.role,
-        workspace: 'accounting', feature: 'accounting_dispatch_candidates_view', requiredPermission: 'view' })).allowed;
-    } },
+    access: { canReadWaybill: ({ actorId }) => canReadAccountingDispatch(actorId),
+      canReadCandidate: ({ actorId }) => canReadAccountingDispatch(actorId) },
   });
   installDispatchDocumentsCommands(service);
   return service;

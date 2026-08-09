@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient, type DispatchDocumentArtifact } from '@prisma/client';
 import { PrismaDispatchDocumentRepository } from '../dispatchDocuments/prismaRepository';
+import { DispatchDocumentConflictError } from '../dispatchDocuments/service';
 
 const prisma = new PrismaClient();
 const rollback = Symbol('dispatch-documents-integration-rollback');
@@ -51,13 +52,13 @@ const run = async () => {
       const operationIdempotencyKey = `${runId}:operation`;
       await repository.recordPrintHandoff({ waybillId: waybill.id, operationIdempotencyKey,
         attemptId: `${runId}:failed`, correlationId: `${runId}:failed`, actorId: 'integration-verifier',
-        kinds: ['WAYBILL', 'STATEMENT'], status: 'FAILED', artifacts: published, failureCode: 'RESPONSE_CLOSED' });
+        kinds: ['WAYBILL', 'STATEMENT'], status: 'FAILED', artifacts: published, failureCode: 'RESPONSE_CLOSED', intentFingerprint: `${runId}:intent` });
       await repository.recordPrintHandoff({ waybillId: waybill.id, operationIdempotencyKey,
         attemptId: `${runId}:success`, correlationId: `${runId}:success`, actorId: 'integration-verifier',
-        kinds: ['WAYBILL', 'STATEMENT'], status: 'SUCCEEDED', artifacts: published });
+        kinds: ['WAYBILL', 'STATEMENT'], status: 'SUCCEEDED', artifacts: published, intentFingerprint: `${runId}:intent` });
       await repository.recordPrintHandoff({ waybillId: waybill.id, operationIdempotencyKey,
         attemptId: `${runId}:success`, correlationId: `${runId}:success`, actorId: 'integration-verifier',
-        kinds: ['WAYBILL', 'STATEMENT'], status: 'SUCCEEDED', artifacts: published });
+        kinds: ['WAYBILL', 'STATEMENT'], status: 'SUCCEEDED', artifacts: published, intentFingerprint: `${runId}:intent` });
 
       const attempts = await tx.dispatchDocumentPrintHandoff.findMany({
         where: { idempotencyKey: { startsWith: runId } }, orderBy: { requestedAt: 'asc' },
@@ -66,10 +67,25 @@ const run = async () => {
       assert.equal(await tx.dispatchDocumentCommandResult.count({ where: {
         scope: 'PRINT_HANDOFF', scopeId: waybill.id, idempotencyKey: operationIdempotencyKey, status: 'SUCCEEDED',
       } }), 1);
+      assert.ok(await repository.findCommandResult({ scope: 'PRINT_HANDOFF', scopeId: waybill.id,
+        idempotencyKey: operationIdempotencyKey, command: 'PRINT_HANDOFF', intentFingerprint: `${runId}:intent` }));
+      await assert.rejects(() => repository.findCommandResult({ scope: 'PRINT_HANDOFF', scopeId: waybill.id,
+        idempotencyKey: operationIdempotencyKey, command: 'PRINT_HANDOFF', intentFingerprint: `${runId}:different-intent` }),
+      DispatchDocumentConflictError);
       assert.equal(await tx.dispatchLifecycleAudit.count({ where: {
         actorId: 'integration-verifier', aggregateId: waybill.id,
         payload: { path: ['operationIdempotencyKey'], equals: operationIdempotencyKey },
       } }), 2);
+
+      await repository.recordRetrieval({ waybillId: waybill.id, artifact: published[0], requestedArtifactId: published[0].id,
+        attemptId: `${runId}:retrieval-failed`, actorId: 'integration-verifier', correlationId: `${runId}:retrieval-failed`,
+        status: 'FAILED', failureCode: 'RESPONSE_CLOSED', intentFingerprint: `${runId}:retrieval-intent` });
+      await repository.recordRetrieval({ waybillId: waybill.id, artifact: published[0], requestedArtifactId: published[0].id,
+        attemptId: `${runId}:retrieval-success`, actorId: 'integration-verifier', correlationId: `${runId}:retrieval-success`,
+        status: 'SUCCEEDED', intentFingerprint: `${runId}:retrieval-intent` });
+      assert.equal(await tx.dispatchDocumentCommandResult.count({ where: { scope: 'WAYBILL', scopeId: waybill.id,
+        idempotencyKey: { in: [`retrieve:${runId}:retrieval-failed`, `retrieve:${runId}:retrieval-success`] } } }), 2,
+      'failed and later successful retrieval attempts remain append-only');
 
       const pending = await tx.accountingDispatchCandidate.findFirst({
         where: { status: 'PENDING', workItem: { status: 'OPEN' } }, select: { id: true }, orderBy: { createdAt: 'asc' },
@@ -78,7 +94,7 @@ const run = async () => {
       const candidateWaybillsBefore = await tx.accountingDispatchWaybill.count({ where: { candidateId: pending.id } });
       const evidenceConflict = await repository.recordEvidenceConflict({ candidateId: pending.id,
         reason: 'integration malformed evidence', idempotencyKey: `${runId}:evidence-conflict`,
-        actorId: 'integration-verifier', correlationId: `${runId}:evidence-conflict` });
+        actorId: 'integration-verifier', correlationId: `${runId}:evidence-conflict`, intentFingerprint: `${runId}:conflict-intent` });
       assert.equal(evidenceConflict.status, 'EVIDENCE_CONFLICT');
       assert.equal((await tx.accountingDispatchCandidate.findUniqueOrThrow({ where: { id: pending.id } })).status, 'EVIDENCE_CONFLICT');
       assert.equal((await tx.accountingDispatchWorkItem.findUniqueOrThrow({ where: { candidateId: pending.id } })).status, 'COMPLETED');

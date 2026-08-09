@@ -38,6 +38,10 @@ const required = (value: unknown, name: string) => {
   return normalized;
 };
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonical(item)])) : value;
+const intentFingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 const ensureOpaqueStorageKey = (value: string) => {
   if (!/^dispatch-documents\/[A-Za-z0-9_-]+\.pdf$/.test(value)) {
     throw new DispatchDocumentValidationError('Artifact storage key must be opaque and relative.');
@@ -116,13 +120,16 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     const candidateId = required(input.candidateId, 'candidateId');
     const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
     const actorId = required(input.actorId, 'actorId');
-    const prior = await dependencies.repository.findCommandResult({ scope: 'CANDIDATE', scopeId: candidateId, idempotencyKey });
+    const command = input.action === 'ACCEPT' ? 'ACCEPT_AND_ISSUE' as const : 'REJECT' as const;
+    const fingerprint = intentFingerprint({ command, candidateId, action: input.action, reason: input.reason?.trim() || null });
+    const prior = await dependencies.repository.findCommandResult({ scope: 'CANDIDATE', scopeId: candidateId, idempotencyKey,
+      command, intentFingerprint: fingerprint });
     if (prior) return prior as CandidateDecisionResult;
     const correlationId = input.correlationId?.trim() || id();
     if (input.action !== 'ACCEPT') {
       if (!['REJECT', 'RETURN'].includes(input.action)) throw new DispatchDocumentValidationError('Unsupported candidate action.');
       return dependencies.repository.rejectCandidate({ candidateId, action: input.action as 'REJECT' | 'RETURN',
-        reason: required(input.reason, 'reason'), idempotencyKey, actorId, correlationId });
+        reason: required(input.reason, 'reason'), idempotencyKey, actorId, correlationId, intentFingerprint: fingerprint });
     }
     const root = await identity();
     let source;
@@ -131,29 +138,34 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     } catch (error) {
       if (!(error instanceof DispatchDocumentEvidenceConflictError)) throw error;
       return dependencies.repository.recordEvidenceConflict({ candidateId, reason: error.message, idempotencyKey,
-        actorId, correlationId });
+        actorId, correlationId, intentFingerprint: fingerprint });
     }
     if (source.candidateId !== candidateId) throw new DispatchDocumentConflictError('Dispatch source candidate changed.');
     const artifacts = await publish(source, root, actorId);
     const waybill: IssuedWaybill = { id: root.waybillId, number: root.number, status: 'ISSUED', issuedAt: root.issuedAt, replacesWaybillId: null };
     return dependencies.repository.acceptAndIssue({ candidateId, allocationRevisionId: source.allocationRevisionId,
       expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
-      waybill, artifacts, idempotencyKey, actorId, correlationId });
+      waybill, artifacts, idempotencyKey, actorId, correlationId, intentFingerprint: fingerprint });
   };
 
   const voidWaybill = async (input: { waybillId: string; reason: string; idempotencyKey: string; actorId: string; correlationId?: string; authority?: unknown }) => {
     const waybillId = required(input.waybillId, 'waybillId');
     const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
-    const prior = await dependencies.repository.findCommandResult({ scope: 'WAYBILL', scopeId: waybillId, idempotencyKey });
+    const fingerprint = intentFingerprint({ command: 'VOID', waybillId, reason: input.reason?.trim() || null, authority: input.authority ?? {} });
+    const prior = await dependencies.repository.findCommandResult({ scope: 'WAYBILL', scopeId: waybillId, idempotencyKey,
+      command: 'VOID', intentFingerprint: fingerprint });
     if (prior) return prior;
     return dependencies.repository.voidWaybill({ waybillId, reason: required(input.reason, 'reason'), idempotencyKey,
-      actorId: required(input.actorId, 'actorId'), correlationId: input.correlationId?.trim() || id(), authority: input.authority ?? {} });
+      actorId: required(input.actorId, 'actorId'), correlationId: input.correlationId?.trim() || id(), authority: input.authority ?? {},
+      intentFingerprint: fingerprint });
   };
 
   const replaceWaybill = async (input: { waybillId: string; reason: string; idempotencyKey: string; actorId: string; correlationId?: string; authority?: unknown }) => {
     const waybillId = required(input.waybillId, 'waybillId');
     const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
-    const prior = await dependencies.repository.findCommandResult({ scope: 'WAYBILL', scopeId: waybillId, idempotencyKey });
+    const fingerprint = intentFingerprint({ command: 'REPLACE', waybillId, reason: input.reason?.trim() || null, authority: input.authority ?? {} });
+    const prior = await dependencies.repository.findCommandResult({ scope: 'WAYBILL', scopeId: waybillId, idempotencyKey,
+      command: 'REPLACE', intentFingerprint: fingerprint });
     if (prior) return prior;
     const root = await identity();
     const source = await dependencies.sourceReader.readReplacementBundle({ waybillId, replacement: root });
@@ -163,7 +175,8 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     return dependencies.repository.replaceWaybill({ waybillId, allocationRevisionId: source.allocationRevisionId,
       expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
       replacement, artifacts, reason: required(input.reason, 'reason'), idempotencyKey,
-      actorId: required(input.actorId, 'actorId'), correlationId: input.correlationId?.trim() || id(), authority: input.authority ?? {} });
+      actorId: required(input.actorId, 'actorId'), correlationId: input.correlationId?.trim() || id(), authority: input.authority ?? {},
+      intentFingerprint: fingerprint });
   };
 
   const assertAccess = async (actorId: string, waybillId: string) => {
@@ -180,21 +193,33 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
 
   const retrieveArtifact = async (input: { artifactId: string; waybillId: string; actorId: string; correlationId: string }) => {
     await assertAccess(required(input.actorId, 'actorId'), required(input.waybillId, 'waybillId'));
+    const retrievalFingerprint = intentFingerprint({ command: 'RETRIEVE', waybillId: input.waybillId, artifactId: input.artifactId });
+    const attemptId = id();
     const artifact = await dependencies.repository.getArtifact({ artifactId: required(input.artifactId, 'artifactId'), waybillId: input.waybillId });
     if (!artifact) {
-      await dependencies.incidents.report({ waybillId: input.waybillId, artifactId: input.artifactId,
-        actorId: input.actorId, correlationId: required(input.correlationId, 'correlationId'),
-        failureCode: 'ARTIFACT_METADATA_MISSING', evidence: { requestedArtifactId: input.artifactId } });
+      await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact: null,
+        requestedArtifactId: input.artifactId, attemptId,
+        actorId: input.actorId, correlationId: input.correlationId, status: 'FAILED', failureCode: 'ARTIFACT_NOT_AVAILABLE',
+        intentFingerprint: retrievalFingerprint });
       throw new DispatchDocumentNotAvailableError();
     }
     try {
       const bytes = await verifiedBytes(artifact);
-      await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact, actorId: input.actorId,
-        correlationId: required(input.correlationId, 'correlationId'), status: 'SUCCEEDED' });
-      return { artifact, bytes };
+      let completion: 'PENDING' | 'SUCCEEDED' | 'FAILED' = 'PENDING';
+      return { artifact, bytes, complete: {
+        succeeded: async () => { if (completion !== 'PENDING') return; completion = 'SUCCEEDED';
+          await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact,
+            requestedArtifactId: artifact.id, attemptId, actorId: input.actorId,
+            correlationId: input.correlationId, status: 'SUCCEEDED', intentFingerprint: retrievalFingerprint }); },
+        failed: async (failureCode = 'BYTE_HANDOFF_FAILED') => { if (completion !== 'PENDING') return; completion = 'FAILED';
+          await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact,
+            requestedArtifactId: artifact.id, attemptId, actorId: input.actorId,
+            correlationId: input.correlationId, status: 'FAILED', failureCode, intentFingerprint: retrievalFingerprint }); },
+      } };
     } catch (error) {
-      await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact, actorId: input.actorId,
-        correlationId: required(input.correlationId, 'correlationId'), status: 'FAILED', failureCode: 'ARTIFACT_INTEGRITY_FAILURE' });
+      await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact, requestedArtifactId: artifact.id,
+        attemptId, actorId: input.actorId, correlationId: required(input.correlationId, 'correlationId'),
+        status: 'FAILED', failureCode: 'ARTIFACT_INTEGRITY_FAILURE', intentFingerprint: retrievalFingerprint });
       await dependencies.incidents.report({ waybillId: input.waybillId, artifactId: artifact.id, actorId: input.actorId,
         correlationId: input.correlationId, failureCode: 'ARTIFACT_INTEGRITY_FAILURE',
         evidence: { expectedSha256: artifact.sha256, expectedByteLength: artifact.byteLength, storageKey: artifact.storageKey } });
@@ -208,8 +233,9 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     if (!kinds.length) throw new DispatchDocumentValidationError('At least one document kind is required.');
     const operationIdempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
     const attemptId = required(input.correlationId, 'correlationId');
+    const fingerprint = intentFingerprint({ command: 'PRINT_HANDOFF', waybillId: input.waybillId, kinds });
     const prior = await dependencies.repository.findCommandResult({ scope: 'PRINT_HANDOFF', scopeId: input.waybillId,
-      idempotencyKey: operationIdempotencyKey }) as { kinds?: DispatchDocumentKind[] } | null;
+      idempotencyKey: operationIdempotencyKey, command: 'PRINT_HANDOFF', intentFingerprint: fingerprint }) as { kinds?: DispatchDocumentKind[] } | null;
     if (prior?.kinds && JSON.stringify(orderedKinds(prior.kinds)) !== JSON.stringify(kinds)) {
       throw new DispatchDocumentConflictError('The print idempotency key was already used for another document set.');
     }
@@ -218,10 +244,12 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     if (kinds.some(kind => !availableKinds.has(kind)) || artifacts.some(artifact => !kinds.includes(artifact.kind))) {
       await dependencies.repository.recordPrintHandoff({ waybillId: input.waybillId, operationIdempotencyKey,
         attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'FAILED', artifacts,
-        failureCode: 'ARTIFACT_METADATA_MISSING' });
-      await dependencies.incidents.report({ waybillId: input.waybillId, artifactId: null, actorId: input.actorId,
-        correlationId: input.correlationId, failureCode: 'ARTIFACT_METADATA_MISSING',
-        evidence: { requestedKinds: kinds, availableKinds: [...availableKinds] } });
+        failureCode: 'ARTIFACT_METADATA_MISSING', intentFingerprint: fingerprint });
+      if (await dependencies.repository.isRequiredArtifactMetadataMissing({ waybillId: input.waybillId, kinds })) {
+        await dependencies.incidents.report({ waybillId: input.waybillId, artifactId: null, actorId: input.actorId,
+          correlationId: input.correlationId, failureCode: 'ARTIFACT_METADATA_MISSING',
+          evidence: { requestedKinds: kinds, availableKinds: [...availableKinds] } });
+      }
       throw new DispatchDocumentIntegrityError('Requested dispatch bundle is incomplete.');
     }
     try {
@@ -233,19 +261,21 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
           if (completion !== 'PENDING') return;
           completion = 'SUCCEEDED';
           await dependencies.repository.recordPrintHandoff({ waybillId: input.waybillId, operationIdempotencyKey,
-            attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'SUCCEEDED', artifacts });
+            attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'SUCCEEDED', artifacts,
+            intentFingerprint: fingerprint });
         },
         failed: async (failureCode = 'BYTE_HANDOFF_FAILED') => {
           if (completion !== 'PENDING') return;
           completion = 'FAILED';
           await dependencies.repository.recordPrintHandoff({ waybillId: input.waybillId, operationIdempotencyKey,
-            attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'FAILED', artifacts, failureCode });
+            attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'FAILED', artifacts, failureCode,
+            intentFingerprint: fingerprint });
         },
       } };
     } catch (error) {
       await dependencies.repository.recordPrintHandoff({ waybillId: input.waybillId, operationIdempotencyKey,
         attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'FAILED', artifacts,
-        failureCode: 'ARTIFACT_INTEGRITY_FAILURE' });
+        failureCode: 'ARTIFACT_INTEGRITY_FAILURE', intentFingerprint: fingerprint });
       for (const artifact of artifacts) await dependencies.incidents.report({ waybillId: input.waybillId,
         artifactId: artifact.id, actorId: input.actorId, correlationId: input.correlationId,
         failureCode: 'ARTIFACT_INTEGRITY_FAILURE', evidence: { expectedSha256: artifact.sha256,
@@ -254,10 +284,13 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     }
   };
 
-  const getCombinedReadModel = async (input: { candidateId: string; waybillId: string; actorId: string }) => {
-    await assertAccess(required(input.actorId, 'actorId'), required(input.waybillId, 'waybillId'));
+  const getCombinedReadModel = async (input: { candidateId: string; waybillId?: string; actorId: string }) => {
+    const actorId = required(input.actorId, 'actorId');
+    const waybillId = input.waybillId?.trim() || undefined;
+    if (waybillId) await assertAccess(actorId, waybillId);
+    else if (!await dependencies.access.canReadCandidate({ actorId })) throw new DispatchDocumentNotAvailableError();
     const model = await dependencies.repository.getCombinedReadModel({ candidateId: required(input.candidateId, 'candidateId'),
-      authorizedWaybillId: input.waybillId });
+      authorizedWaybillId: waybillId });
     if (!model) throw new DispatchDocumentNotAvailableError();
     return model;
   };

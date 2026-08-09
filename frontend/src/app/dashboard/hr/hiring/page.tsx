@@ -1,7 +1,7 @@
 "use client";
 import { ErpInput, ErpPressable, ErpSelect } from "@/components/erp";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   FaCog,
@@ -31,6 +31,9 @@ import {
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
 import {
   buildHiringQueueParams,
+  buildHiringCaseHref,
+  buildHiringQueueHref,
+  parseHiringQueueContext,
   type HiringQueueFilters,
 } from "@/features/hr-hiring/hiringQueueViewModel";
 import { HR_HIRING_METRIC_VIEWS } from "@/features/hr-hiring/hrHiringMetricViews";
@@ -65,30 +68,32 @@ const badgeTone = (status: HiringLifecycleStatus) => {
 
 export default function HiringCasesPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const initialContext = parseHiringQueueContext(searchParams);
   const representedView = searchParams.get("view") === HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts
     ? HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts
     : "";
   const [rows, setRows] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [form, setForm] = useState(blank);
-  const [filters, setFilters] = useState<HiringQueueFilters>(blankFilters);
+  const [filters, setFilters] = useState<HiringQueueFilters>(initialContext.filters);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [meta, setMeta] = useState({ page: 1, totalPages: 1, total: 0 });
   const [decisionDetail, setDecisionDetail] = useState<any>(null);
-  const [archiveView, setArchiveView] = useState(false);
+  const [archiveView, setArchiveView] = useState(initialContext.archived);
   const [createOpen, setCreateOpen] = useState(false);
 
-  const load = async (nextFilters: HiringQueueFilters = filters) => {
+  const load = async (nextFilters: HiringQueueFilters = filters, nextArchiveView = archiveView) => {
     try {
       setLoading(true);
       setError("");
       const [cases, foundation] = await Promise.all([
         hiringAPI.list({
           ...buildHiringQueueParams(nextFilters),
-          archived: String(archiveView),
+          archived: String(nextArchiveView),
           ...(representedView ? { view: representedView } : {}),
         }),
         hrAPI.getFoundation(),
@@ -110,10 +115,25 @@ export default function HiringCasesPage() {
   };
 
   useEffect(() => {
-    void load(blankFilters);
-    // Initial queue load intentionally uses the stable empty filter set.
+    void load(filters);
+    const focus = searchParams.get("focus");
+    const storedScroll = sessionStorage.getItem("hrHiringQueueScroll");
+    window.setTimeout(() => {
+      if (focus) document.getElementById(`hiring-case-${focus}`)?.focus();
+      else if (storedScroll) window.scrollTo({ top: Number(storedScroll), behavior: "auto" });
+    }, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [archiveView, representedView]);
+  }, [representedView]);
+
+  const commitContext = (nextFilters: HiringQueueFilters, nextArchiveView = archiveView) => {
+    setFilters(nextFilters);
+    setArchiveView(nextArchiveView);
+    router.replace(buildHiringQueueHref(nextFilters, nextArchiveView, representedView));
+    void load(nextFilters, nextArchiveView);
+  };
+
+  const queueHref = buildHiringQueueHref(filters, archiveView, representedView);
+  const rememberQueuePosition = () => sessionStorage.setItem("hrHiringQueueScroll", String(window.scrollY));
 
   const create = async () => {
     try {
@@ -171,7 +191,7 @@ export default function HiringCasesPage() {
         {
           label: archiveView ? "فهرست فعال" : "بایگانی متقاضیان",
           icon: archiveView ? FaUndo : FaArchive,
-          onClick: () => setArchiveView((value) => !value),
+          onClick: () => commitContext({ ...filters, page: 1 }, !archiveView),
         },
         {
           label: "اختیارها",
@@ -394,15 +414,14 @@ export default function HiringCasesPage() {
             <ErpButton
               label="اعمال فیلتر"
               icon={FaFilter}
-              onClick={() => load(filters)}
+              onClick={() => commitContext({ ...filters, page: 1 })}
               disabled={loading}
             />
             <ErpPressable
               type="button"
               className="rounded-xl border border-[var(--sds-border-default)] px-3 py-2 text-xs font-bold dark:border-[var(--sds-border-strong)]"
               onClick={() => {
-                setFilters(blankFilters);
-                void load(blankFilters);
+                commitContext(blankFilters);
               }}
             >
               پاک‌کردن
@@ -443,12 +462,15 @@ export default function HiringCasesPage() {
                 return (
                   <tr
                     key={row.id}
+                    id={`hiring-case-${row.id}`}
+                    tabIndex={-1}
                     className="border-t align-top dark:border-[var(--sds-border-strong)]"
                   >
                     <td className="p-3">
                       <Link
                         className="font-black hover:text-[var(--sds-success)]"
-                        href={`/dashboard/hr/hiring/${row.id}`}
+                        href={buildHiringCaseHref(row.id, queueHref)}
+                        onClick={rememberQueuePosition}
                       >
                         {row.candidate.firstName} {row.candidate.lastName}
                       </Link>
@@ -544,7 +566,8 @@ export default function HiringCasesPage() {
                       <div className="flex flex-col gap-2">
                         <Link
                           className="rounded-lg bg-[var(--sds-surface-raised)] px-3 py-2 text-center font-bold text-[var(--sds-text-primary)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-primary)]"
-                          href={`/dashboard/hr/hiring/${row.id}`}
+                          href={buildHiringCaseHref(row.id, queueHref)}
+                          onClick={rememberQueuePosition}
                         >
                           بازکردن پرونده
                         </Link>
@@ -580,12 +603,14 @@ export default function HiringCasesPage() {
               "COMPANY_APPROVAL",
             ];
             return (
-              <ErpCard key={row.id} className="p-4">
+              <div key={row.id} id={`hiring-case-${row.id}`} tabIndex={-1}>
+              <ErpCard className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <Link
                       className="font-black text-[var(--sds-text-primary)]"
-                      href={`/dashboard/hr/hiring/${row.id}`}
+                      href={buildHiringCaseHref(row.id, queueHref)}
+                      onClick={rememberQueuePosition}
                     >
                       {row.candidate.firstName} {row.candidate.lastName}
                     </Link>
@@ -647,7 +672,8 @@ export default function HiringCasesPage() {
                   <div className="flex gap-2">
                     <ErpButton
                       label="بازکردن پرونده"
-                      href={`/dashboard/hr/hiring/${row.id}`}
+                      href={buildHiringCaseHref(row.id, queueHref)}
+                      onClick={rememberQueuePosition}
                       variant="soft"
                     />
                     {!row.archivedAt && (
@@ -661,6 +687,7 @@ export default function HiringCasesPage() {
                   </div>
                 </div>
               </ErpCard>
+              </div>
             );
           })}
           {!rows.length && (
@@ -682,8 +709,7 @@ export default function HiringCasesPage() {
               disabled={loading || meta.page <= 1}
               onClick={() => {
                 const next = { ...filters, page: meta.page - 1 };
-                setFilters(next);
-                void load(next);
+                commitContext(next);
               }}
             >
               صفحه قبل
@@ -694,8 +720,7 @@ export default function HiringCasesPage() {
               disabled={loading || meta.page >= meta.totalPages}
               onClick={() => {
                 const next = { ...filters, page: meta.page + 1 };
-                setFilters(next);
-                void load(next);
+                commitContext(next);
               }}
             >
               صفحه بعد
@@ -703,13 +728,14 @@ export default function HiringCasesPage() {
           </div>
         </div>
       </ErpSection>
-      {decisionDetail && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-raised)] p-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <ErpCard className="w-full max-w-lg p-5">
+      <ErpSheet
+        open={Boolean(decisionDetail)}
+        onClose={() => setDecisionDetail(null)}
+        title="شرح تصمیم پرونده"
+        presentation="modal"
+      >
+        {decisionDetail && (
+          <>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="font-black">شرح تصمیم پرونده</h3>
@@ -782,9 +808,9 @@ export default function HiringCasesPage() {
                 </div>
               </div>
             )}
-          </ErpCard>
-        </div>
-      )}
+          </>
+        )}
+      </ErpSheet>
     </ErpPage>
   );
 }

@@ -135,5 +135,6 @@ assert.equal(
 );
 assert.equal(validateApplicantReturnContext('https://attacker.example/steal', 'application-1'), '/dashboard/hr/hiring?focus=application-1');
 assert.equal(validateApplicantReturnContext('/dashboard/hr/hiring?unknown=secret', 'application-1'), '/dashboard/hr/hiring?focus=application-1');
+assert.equal(validateApplicantReturnContext('/dashboard/hr/hiring?view=actionable-collateral-or-contracts', 'application-1'), '/dashboard/hr/hiring?view=actionable-collateral-or-contracts&focus=application-1');
 
 console.log('HR Applicant experience tests passed.');

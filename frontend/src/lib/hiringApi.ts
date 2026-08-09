@@ -35,6 +35,12 @@ export const hiringAPI = {
   permanentlyDelete: (id: string, data: any) =>
     internal.post(`/applications/${id}/permanent-delete`, data),
   get: (id: string) => internal.get(`/applications/${id}`),
+  getOverview: (id: string, returnTo?: string) =>
+    internal.get(`/applications/${id}/overview`, { params: returnTo ? { returnTo } : undefined }),
+  getFullInformation: (id: string) =>
+    internal.get(`/applications/${id}/full-information`),
+  getClosureSummary: (id: string) =>
+    internal.get(`/applications/${id}/closure-summary`),
   myAuthorities: () => internal.get("/me/authorities"),
   workItemSummary: () => internal.get("/work-items/summary"),
   workItems: (params?: Record<string, string>) =>
@@ -214,6 +220,7 @@ export const applicantHiringAPI = {
   verify: (mobile: string, otp: string) =>
     axios.post(`${baseURL}/public/invitations/verify`, { mobile, otp }),
   get: () => applicant.get("/public/application"),
+  getClosedState: () => applicant.get("/public/application/closed-state"),
   saveDraft: (data: any) => applicant.put("/public/application/draft", data),
   submit: (data: any) => applicant.post("/public/application/submit", data),
   acceptCompensation: (fullName: string) =>

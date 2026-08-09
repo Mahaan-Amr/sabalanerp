@@ -37,6 +37,8 @@ import {
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
+import { ApplicantCaseOverview } from "@/features/hr-hiring/ApplicantCaseOverview";
+import { validateHiringQueueReturnHref } from "@/features/hr-hiring/hiringQueueViewModel";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
 import RetentionAction from "@/features/hr/RetentionActionSheet";
@@ -506,12 +508,13 @@ export default function HiringCasePage() {
                 : () => hiringAPI.downloadCollateral(id, item.id);
     return download(request, item.originalName || item.title);
   };
+  const returnHref = validateHiringQueueReturnHref(searchParams.get("returnTo"));
   return (
     <ErpPage
       eyebrow="منابع انسانی · پرونده استخدام"
       title={`${data.candidate.firstName} ${data.candidate.lastName}`}
       description={`${data.position.title} · ${data.candidate.mobile}`}
-      backHref="/dashboard/hr/hiring"
+      backHref={returnHref}
       actions={[
         { label: "به‌روزرسانی", icon: FaSync, onClick: load, disabled: busy },
         ...(data.retentionCapabilities?.canArchive ||
@@ -556,6 +559,10 @@ export default function HiringCasePage() {
           این پرونده بایگانی شده و تا زمان بازیابی فقط قابل مشاهده است.
         </p>
       )}
+      <ApplicantCaseOverview
+        applicationId={id}
+        returnTo={searchParams.get("returnTo") || undefined}
+      />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
         <Metric label="مرحله" value={data.stage} />
         <Metric label="هویت" value={data.identityClearance} />

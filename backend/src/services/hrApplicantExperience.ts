@@ -204,6 +204,7 @@ const allowedReturnKeys = new Set([
   'sortBy',
   'sortDirection',
   'page',
+  'view',
   'focus',
 ]);
 
@@ -213,7 +214,11 @@ export const validateApplicantReturnContext = (raw: unknown, applicationId: stri
   try {
     const url = new URL(raw, 'https://sabalan.invalid');
     if (url.pathname !== '/dashboard/hr/hiring') return fallback;
-    for (const key of url.searchParams.keys()) if (!allowedReturnKeys.has(key)) return fallback;
+    let containsUnknownKey = false;
+    url.searchParams.forEach((_value, key) => {
+      if (!allowedReturnKeys.has(key)) containsUnknownKey = true;
+    });
+    if (containsUnknownKey) return fallback;
     url.searchParams.set('focus', applicationId);
     return `${url.pathname}?${url.searchParams.toString()}`;
   } catch {

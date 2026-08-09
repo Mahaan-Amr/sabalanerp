@@ -70,6 +70,24 @@ export const activeHrAuthoritiesForUser = async (
     .map((grant) => grant.authorityCode);
 };
 
+export const activeCompanyManagerUserIds = async (
+  client: HrAuthorizationClient,
+  options: { excludeGrantId?: string; at?: Date } = {},
+) => {
+  const at = options.at ?? new Date();
+  const grants = await client.hrBusinessAuthorityGrant.findMany({
+    where: {
+      authorityCode: 'COMPANY_MANAGER',
+      id: options.excludeGrantId ? { not: options.excludeGrantId } : undefined,
+      ...activeHrGrantWhere(at),
+    },
+    select: { userId: true },
+  });
+  const userIds = [...new Set(grants.map(({ userId }) => userId))];
+  const authoritySets = await Promise.all(userIds.map((userId) => activeHrAuthoritiesForUser(client, userId, at)));
+  return userIds.filter((_userId, index) => authoritySets[index].includes('COMPANY_MANAGER'));
+};
+
 type SeparationRule = {
   disallowSourceActor?: boolean;
   disallowedUserIds?: string[];

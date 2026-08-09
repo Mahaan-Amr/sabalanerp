@@ -3,7 +3,7 @@ import express, { type NextFunction, type Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import type { AuthRequest } from '../middleware/auth';
 import { requireHrFeature } from '../middleware/hrAuthorization';
-import { activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
+import { activeCompanyManagerUserIds, activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
 import { HR_REDESIGN_CATALOG } from '../services/hrRedesignDataContracts';
 
 const router = express.Router();
@@ -181,15 +181,8 @@ router.post('/business-authorities/:id/revoke', administer, asyncHandler(async (
     if (current.userId === actorId(req)) throw forbidden('سلب اختیار از خود مجاز نیست.');
     if (current.status !== 'ACTIVE' || (current.effectiveTo && current.effectiveTo <= new Date())) throw conflict('این اختیار فعال نیست.');
     if (current.authorityCode === 'COMPANY_MANAGER') {
-      const otherGrants = await tx.hrBusinessAuthorityGrant.findMany({ where: {
-        authorityCode: 'COMPANY_MANAGER', status: 'ACTIVE', id: { not: current.id },
-        effectiveFrom: { lte: new Date() }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: new Date() } }],
-      }, select: { userId: true } });
-      const otherActiveManagerCount = await tx.user.count({ where: {
-        id: { in: [...new Set(otherGrants.map(({ userId }) => userId))] },
-        isActive: true,
-      } });
-      if (otherActiveManagerCount === 0) throw conflict('سلب اختیار آخرین مدیر شرکت مجاز نیست.');
+      const otherEligibleManagerIds = await activeCompanyManagerUserIds(tx, { excludeGrantId: current.id });
+      if (otherEligibleManagerIds.length === 0) throw conflict('سلب اختیار آخرین مدیر شرکت مجاز نیست.');
     }
     const effectiveAt = new Date();
     const updated = await tx.hrBusinessAuthorityGrant.update({ where: { id: current.id }, data: {

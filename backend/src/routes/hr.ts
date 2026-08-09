@@ -23,7 +23,7 @@ import {
   runHrRedesignBackfill,
 } from '../services/hrRedesignDataContracts';
 import hrAuthorizationRoutes from './hr-authorization';
-import { authorizeHrUser } from '../services/hrAuthorizationService';
+import { authorizeHrUser, resolveHrNamedResponsibility } from '../services/hrAuthorizationService';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -53,13 +53,38 @@ const editAccess: express.RequestHandler = (_req, _res, next) => next();
 const adminAccess: express.RequestHandler = (_req, _res, next) => next();
 const EXCEPTIONAL_PERSONNEL_SOURCES = new Set(['DATA_MIGRATION', 'HISTORICAL_CORRECTION', 'ORGANIZATIONAL_TRANSFER']);
 
+const requireHrResponsibility = (responsibilityTypeCode: 'HR_PROCESSOR' | 'HR_MANAGER') => async (
+  req: WorkspaceRequest,
+  res: Response,
+  next: express.NextFunction,
+) => {
+  try {
+    const resolution = await resolveHrNamedResponsibility(prisma, {
+      sourceActionCode: `${req.method}:${req.baseUrl}${req.route?.path ?? req.path}`,
+      responsibilityTypeCode,
+      scopeType: 'GLOBAL',
+      scopeId: null,
+      sourceActorUserId: actorId(req),
+    });
+    if (resolution.status === 'UNRESOLVED') {
+      return res.status(409).json({ success: false, error: 'HR_RESPONSIBILITY_UNRESOLVED', reason: resolution.reason });
+    }
+    if (resolution.assignedUserId !== actorId(req)) {
+      return res.status(403).json({ success: false, error: 'HR_RESPONSIBILITY_NOT_ASSIGNED' });
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const requireHrManagerAuthority = async (req: WorkspaceRequest, res: Response, next: express.NextFunction) => {
   try {
     const authority = await authorizeHrUser(prisma, req.user!.id, { authorityCodes: ['HR_MANAGER'] });
     if (!authority.allowed) {
       return res.status(403).json({ success: false, error: 'اختیار سازمانی HR_MANAGER برای ثبت استثنایی پرسنل الزامی است.' });
     }
-    next();
+    return requireHrResponsibility('HR_MANAGER')(req, res, next);
   } catch (error) {
     next(error);
   }
@@ -848,7 +873,7 @@ router.post('/personnel/:id/work-schedule/proposals', viewAccess, async (req: Wo
   } catch (error) { handleError(res, error, 'Propose personnel work schedule'); }
 });
 
-router.put('/personnel/:id/work-schedule/changes/:changeId/prepare', editAccess, async (req: WorkspaceRequest, res) => {
+router.put('/personnel/:id/work-schedule/changes/:changeId/prepare', editAccess, requireHrResponsibility('HR_PROCESSOR'), async (req: WorkspaceRequest, res) => {
   try {
     const [change, hasHrProcessor] = await Promise.all([
       prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
@@ -869,7 +894,7 @@ router.put('/personnel/:id/work-schedule/changes/:changeId/prepare', editAccess,
   } catch (error) { handleError(res, error, 'Prepare personnel work schedule'); }
 });
 
-router.post('/personnel/:id/work-schedule/changes/:changeId/submit', editAccess, async (req: WorkspaceRequest, res) => {
+router.post('/personnel/:id/work-schedule/changes/:changeId/submit', editAccess, requireHrResponsibility('HR_PROCESSOR'), async (req: WorkspaceRequest, res) => {
   try {
     const [change, hasHrProcessor] = await Promise.all([
       prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
@@ -882,7 +907,7 @@ router.post('/personnel/:id/work-schedule/changes/:changeId/submit', editAccess,
   } catch (error) { handleError(res, error, 'Submit personnel work schedule'); }
 });
 
-router.post('/personnel/:id/work-schedule/changes/:changeId/return', adminAccess, async (req: WorkspaceRequest, res) => {
+router.post('/personnel/:id/work-schedule/changes/:changeId/return', adminAccess, requireHrResponsibility('HR_MANAGER'), async (req: WorkspaceRequest, res) => {
   try {
     const [change, hasHrManager] = await Promise.all([
       prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
@@ -896,7 +921,7 @@ router.post('/personnel/:id/work-schedule/changes/:changeId/return', adminAccess
   } catch (error) { handleError(res, error, 'Return personnel work schedule'); }
 });
 
-router.post('/personnel/:id/work-schedule/changes/:changeId/approve', adminAccess, async (req: WorkspaceRequest, res) => {
+router.post('/personnel/:id/work-schedule/changes/:changeId/approve', adminAccess, requireHrResponsibility('HR_MANAGER'), async (req: WorkspaceRequest, res) => {
   try {
     const [change, hasHrManager] = await Promise.all([
       prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),

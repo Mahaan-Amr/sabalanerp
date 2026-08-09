@@ -37,16 +37,20 @@ export default function HrDashboardPage() {
     try {
       setLoading(true);
       setError("");
-      const [dashboard, work, currentUserResponse, authorizationResponse] = await Promise.all([
+      const [dashboard, currentUserResponse, authorizationResponse] = await Promise.all([
         hrAPI.getDashboard(),
-        hiringAPI.workItemSummary(),
         authAPI.getMe(),
         hrAuthorizationAPI.getMe(),
       ]);
       setData(dashboard.data.data);
-      setWorkSummary(work.data.data);
       setCurrentUser(currentUserResponse.data.data);
       setCanAdministerAuthority(Boolean(authorizationResponse.data.data.canAdministerAuthorityResponsibility));
+      try {
+        const work = await hiringAPI.workItemSummary();
+        setWorkSummary(work.data.data);
+      } catch {
+        setWorkSummary({ progress: { completed: 0, remaining: 0, total: 0, percentage: null }, items: [] });
+      }
     } catch (err) {
       setError(apiError(err));
     } finally {

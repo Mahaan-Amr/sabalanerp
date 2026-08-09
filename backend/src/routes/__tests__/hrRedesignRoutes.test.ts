@@ -25,11 +25,35 @@ for (const route of [
   'POST /migration/redesign-backfill',
 ]) assert.ok(registeredRoutes.includes(route), `missing HR redesign API route: ${route}`);
 
+for (const route of [
+  'GET /positions',
+  'GET /positions/capacity-summary',
+  'GET /positions/:id/history',
+  'POST /positions/:id/capacity-changes',
+  'GET /foundation/:entityType/:id/dependencies',
+  'POST /foundation/:entityType/:id/lifecycle',
+  'DELETE /foundation/:entityType/:id/permanent',
+]) assert.ok(registeredRoutes.includes(route), `missing lifecycle-safe organization route: ${route}`);
+
 for (const legacyRoute of [
   'GET /migration/preview',
   'GET /migration/records/:category',
   'POST /migration/apply',
 ]) assert.ok(registeredRoutes.includes(legacyRoute), `legacy HR compatibility route changed: ${legacyRoute}`);
+
+for (const governedRoute of [
+  '/personnel/:id/archive',
+  '/personnel/:id/restore',
+  '/personnel/exceptional',
+  '/personnel/:id/work-schedule/changes/:changeId/prepare',
+  '/personnel/:id/work-schedule/changes/:changeId/submit',
+  '/personnel/:id/work-schedule/changes/:changeId/return',
+  '/personnel/:id/work-schedule/changes/:changeId/approve',
+]) {
+  const route = (router as unknown as { stack: Array<{ route?: { path: string; stack: unknown[] } }> }).stack
+    .find((layer) => layer.route?.path === governedRoute)?.route;
+  assert.ok(route && route.stack.length >= 3, `${governedRoute} must enforce authority/responsibility server-side`);
+}
 
 const dataContractsLayer = (router as unknown as {
   stack: Array<{ route?: { path: string; stack: Array<{ handle: RequestHandler }> } }>;

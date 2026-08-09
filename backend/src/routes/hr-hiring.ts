@@ -311,41 +311,50 @@ const asyncHandler = (fn: (req: any, res: Response, next: NextFunction) => Promi
 const requireEffectiveResponsibilityOwner = async (
   req: AuthRequest,
   res: Response,
-  responsibilityTypeCode: string,
+  responsibilityTypeCodes: string | string[],
 ) => {
-  let scopeType = 'GLOBAL';
-  let scopeId: string | null = null;
-  if (responsibilityTypeCode === 'HIRING_MANAGER') {
-    const applicationId = String(req.params.id || '');
-    const application = applicationId
-      ? await prisma.hrJobApplication.findUnique({ where: { id: applicationId }, select: { positionId: true } })
-      : null;
-    scopeType = 'POSITION';
-    scopeId = application?.positionId ?? null;
-  }
-  const resolution = await resolveHrNamedResponsibility(prisma, {
-    sourceActionCode: `${req.method}:${req.baseUrl}${req.route?.path ?? req.path}`,
+  const requestedTypes = Array.isArray(responsibilityTypeCodes) ? responsibilityTypeCodes : [responsibilityTypeCodes];
+  const activeTypes = (await activeHiringAuthoritiesForUser(actorId(req))).filter((code) => requestedTypes.includes(code));
+  const applicationId = String(req.params.id || '');
+  const application = activeTypes.includes('HIRING_MANAGER') && applicationId
+    ? await prisma.hrJobApplication.findUnique({ where: { id: applicationId }, select: { positionId: true } })
+    : null;
+  const sourceActionCode = `${req.method}:${req.baseUrl}${req.route?.path ?? req.path}`;
+  const resolutions = await Promise.all(activeTypes.map((responsibilityTypeCode) => resolveHrNamedResponsibility(prisma, {
+    sourceActionCode,
     responsibilityTypeCode,
-    scopeType,
-    scopeId,
+    scopeType: responsibilityTypeCode === 'HIRING_MANAGER' ? 'POSITION' : 'GLOBAL',
+    scopeId: responsibilityTypeCode === 'HIRING_MANAGER' ? application?.positionId ?? null : null,
     sourceActorUserId: actorId(req),
-  });
-  if (resolution.status === 'UNRESOLVED') {
-    res.status(409).json({ success: false, error: 'HR_RESPONSIBILITY_UNRESOLVED', reason: resolution.reason });
+  })));
+  const owned = resolutions.filter((resolution) => resolution.status === 'RESOLVED' && resolution.assignedUserId === actorId(req));
+  if (owned.length > 1) {
+    res.status(409).json({ success: false, error: 'HR_RESPONSIBILITY_UNRESOLVED', reason: 'AMBIGUOUS_ASSIGNMENT' });
     return false;
   }
-  if (resolution.assignedUserId !== actorId(req)) {
+  if (owned.length === 0 && resolutions.some((resolution) => resolution.status === 'RESOLVED')) {
     res.status(403).json({ success: false, error: 'HR_RESPONSIBILITY_NOT_ASSIGNED' });
     return false;
   }
-  (req as any).hiringResponsibility = resolution;
+  if (owned.length === 0) {
+    const reasons = resolutions
+      .filter((resolution) => resolution.status === 'UNRESOLVED')
+      .map((resolution) => resolution.reason);
+    res.status(409).json({
+      success: false,
+      error: 'HR_RESPONSIBILITY_UNRESOLVED',
+      reason: reasons[0] ?? 'INELIGIBLE_ASSIGNEE',
+    });
+    return false;
+  }
+  (req as any).hiringResponsibility = owned[0];
   return true;
 };
 
 const requireAuthority = (...authorities: string[]) => asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
   const assigned = await authorizeHrUser(prisma, req.user!.id, { authorityCodes: authorities });
   if (!assigned.allowed) return res.status(403).json({ success: false, error: `اختیار سازمانی لازم است: ${authorities.join(', ')}` });
-  if (!['GET', 'HEAD'].includes(req.method) && !(await requireEffectiveResponsibilityOwner(req, res, authorities[0]))) return;
+  if (!['GET', 'HEAD'].includes(req.method) && !(await requireEffectiveResponsibilityOwner(req, res, authorities))) return;
   (req as any).hiringAuthority = authorities[0];
   next();
 });

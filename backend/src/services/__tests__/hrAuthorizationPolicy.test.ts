@@ -4,7 +4,7 @@ import {
   resolveNamedResponsibility,
   type HrAuthorizationSnapshot,
 } from '../hrAuthorizationPolicy';
-import { activeHrAuthoritiesForUser, resolveHrNamedResponsibility } from '../hrAuthorizationService';
+import { activeCompanyManagerUserIds, activeHrAuthoritiesForUser, resolveHrNamedResponsibility } from '../hrAuthorizationService';
 
 const now = new Date('2026-08-08T10:00:00.000Z');
 const activeWindow = { effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null };
@@ -167,6 +167,11 @@ const serviceRegressionTests = async () => {
     await activeHrAuthoritiesForUser(fakeClient, 'demoted-admin', now),
     [],
     'active-authority projections must exclude persisted bootstrap grants after demotion',
+  );
+  assert.deepEqual(
+    await activeCompanyManagerUserIds(fakeClient, { at: now }),
+    [],
+    'last-manager protection must not count a demoted admin bootstrap grant as eligible',
   );
   const resolution = await resolveHrNamedResponsibility(fakeClient, {
     sourceActionCode: 'HR_MANAGER_ACTION', responsibilityTypeCode: 'HR_MANAGER', scopeType: 'GLOBAL', scopeId: null, now,

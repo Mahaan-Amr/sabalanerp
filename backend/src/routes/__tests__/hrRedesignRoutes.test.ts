@@ -23,6 +23,8 @@ for (const route of [
   'GET /redesign/compatibility/applications/:applicationId/assessments',
   'GET /migration/redesign-preview',
   'POST /migration/redesign-backfill',
+  'GET /migration/reconciliation',
+  'POST /migration/reconciliation/:id/reviews',
 ]) assert.ok(registeredRoutes.includes(route), `missing HR redesign API route: ${route}`);
 
 for (const route of [

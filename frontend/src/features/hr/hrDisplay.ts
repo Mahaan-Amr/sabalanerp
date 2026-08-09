@@ -28,7 +28,7 @@ const labels: Record<string, string> = {
   RESERVE: "رد/ذخیره",
   REPEAT_REQUIRED: "نیازمند تکرار",
   DELIVERED: "تحویل‌شده",
-  UNKNOWN: "نامشخص",
+  UNKNOWN: "خطای طبقه‌بندی",
   SENT: "ارسال‌شده",
   FAILED: "ناموفق",
   ACCEPTED: "پذیرفته‌شده",
@@ -75,7 +75,7 @@ const labels: Record<string, string> = {
 };
 
 export const authorityLabel = (value?: string | null) =>
-  (value && labels[value]) || (value ? "نامشخص" : "—");
+  (value && labels[value]) || (value ? "خطای طبقه‌بندی" : "—");
 
 export const hrDisplayLabel = authorityLabel;
 

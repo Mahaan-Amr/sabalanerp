@@ -24,6 +24,8 @@ import {
 } from '../services/hrRedesignDataContracts';
 import hrAuthorizationRoutes from './hr-authorization';
 import { authorizeHrUser, resolveHrNamedResponsibility } from '../services/hrAuthorizationService';
+import { assertAutomatedHrMigrationOperationAllowed } from '../services/hrMigrationReconciliation';
+import { getHrReconciliationWorkspace, recordHrReconciliationReview } from '../services/hrMigrationReconciliationStore';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -1143,6 +1145,32 @@ router.post('/migration/redesign-backfill', adminAccess, async (req: WorkspaceRe
   } catch (error) { handleError(res, error, 'Apply HR redesign backfill'); }
 });
 
+router.get('/migration/reconciliation', adminAccess, async (req, res) => {
+  try {
+    const blockerValue = textValue(req.query.cutoverBlocker);
+    if (blockerValue && !['true', 'false'].includes(blockerValue)) throw new Error('HR_RECONCILIATION_BLOCKER_FILTER_INVALID');
+    const data = await getHrReconciliationWorkspace(prisma, {
+      primaryState: nullableText(req.query.primaryState) ?? undefined,
+      attentionFlag: nullableText(req.query.attentionFlag) ?? undefined,
+      sourceType: nullableText(req.query.sourceType) ?? undefined,
+      cutoverBlocker: blockerValue ? blockerValue === 'true' : undefined,
+    });
+    res.json({ success: true, data });
+  } catch (error) { handleError(res, error, 'List HR migration reconciliation'); }
+});
+
+router.post('/migration/reconciliation/:id/reviews', adminAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const review = await recordHrReconciliationReview(prisma, {
+      reconciliationId: req.params.id,
+      outcome: textValue(req.body.outcome),
+      reason: textValue(req.body.reason),
+      actorUserId: actorId(req),
+    });
+    res.status(201).json({ success: true, data: review });
+  } catch (error) { handleError(res, error, 'Review HR migration reconciliation'); }
+});
+
 const migrationRecordTitles: Record<string, string> = {
   'active-personnel': 'پرسنل فعال',
   'inactive-personnel': 'پرسنل غیرفعال',
@@ -1248,7 +1276,23 @@ router.post('/migration/apply', adminAccess, async (req: WorkspaceRequest, res) 
       const personnel = await tx.personnel.findMany({ where: { isActive: true }, select: { id: true } });
       let relationshipsCreated = 0;
       let relationshipsSkipped = 0;
+      let relationshipsBlocked = 0;
       for (const person of personnel) {
+        const reconciliation = await tx.hrReconciliationRecord.findUnique({
+          where: { sourceType_sourceId: { sourceType: 'PERSONNEL', sourceId: person.id } },
+          select: { id: true, attentionFlags: { where: { flagCode: 'POSSIBLE_DUPLICATE_IDENTITY', isActive: true }, select: { flagCode: true } } },
+        });
+        if (reconciliation) {
+          try {
+            assertAutomatedHrMigrationOperationAllowed({
+              reconciliationId: reconciliation.id,
+              activeAttentionFlags: reconciliation.attentionFlags.map((flag) => flag.flagCode),
+            });
+          } catch {
+            relationshipsBlocked += 1;
+            continue;
+          }
+        }
         const existing = await tx.hrEmploymentRelationship.findUnique({ where: { sourceSystem_sourceId: { sourceSystem: 'LEGACY_PERSONNEL', sourceId: person.id } } });
         const currentRelationship = await tx.hrEmploymentRelationship.findFirst({ where: { personnelId: person.id, ...overlaps(baseline, null) } });
         if (!existing && !currentRelationship) {
@@ -1258,7 +1302,7 @@ router.post('/migration/apply', adminAccess, async (req: WorkspaceRequest, res) 
           relationshipsSkipped += 1;
         }
       }
-      return { unitsCreated, relationshipsCreated, relationshipsSkipped };
+      return { unitsCreated, relationshipsCreated, relationshipsSkipped, relationshipsBlocked };
     });
     res.json({ success: true, data: result, message: 'مهاجرت کنترل‌شده انجام شد؛ موارد فاقد تخصیص اصلی همچنان برای تکمیل HR علامت‌گذاری می‌شوند.' });
   } catch (error) { handleError(res, error, 'Apply HR migration'); }

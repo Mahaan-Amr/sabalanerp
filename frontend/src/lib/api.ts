@@ -340,6 +340,10 @@ export const hrAPI = {
   getMigrationPreview: () => api.get('/hr/migration/preview'),
   getMigrationRecords: (category: string) => api.get(`/hr/migration/records/${encodeURIComponent(category)}`),
   applyMigration: (data: any) => api.post('/hr/migration/apply', data),
+  getMigrationReconciliation: (params?: Record<string, string | boolean | undefined>) => api.get('/hr/migration/reconciliation', { params }),
+  reviewMigrationReconciliation: (id: string, data: { outcome: string; reason: string }) => api.post(`/hr/migration/reconciliation/${encodeURIComponent(id)}/reviews`, data),
+  previewHrRedesignBackfill: () => api.get('/hr/migration/redesign-preview'),
+  applyHrRedesignBackfill: () => api.post('/hr/migration/redesign-backfill'),
 };
 
 // Posts API

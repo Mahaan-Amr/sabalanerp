@@ -1,4 +1,11 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
+import {
+  classifyHrMigrationRecord,
+  findPossibleDuplicateNationalIdentities,
+  type HrMigrationClassificationInput,
+  type HrReconciliationAttentionFlag as ActionableHrReconciliationFlag,
+  type HrReconciliationReviewOutcome as ActionableHrReconciliationOutcome,
+} from './hrMigrationReconciliation';
 
 export const HR_REDESIGN_CATALOG = Object.freeze({
   contractVersion: 1,
@@ -272,7 +279,8 @@ export type HrReconciliationInput = {
   personnelLinkExpected: boolean;
   userPersonnelLinkResolved: boolean;
   identityAmbiguous: boolean;
-  hasCurrentOrganizationalAssignment: boolean;
+  organizationalMappingComplete: boolean;
+  primaryAssignmentPresent: boolean;
   employmentConsistent: boolean;
   startDateReviewOpen: boolean;
   assessmentPlanUnresolved: boolean;
@@ -281,31 +289,32 @@ export type HrReconciliationInput = {
 };
 
 export const classifyHrReconciliationRecord = (input: HrReconciliationInput) => {
-  const attentionFlags: HrReconciliationAttentionFlag[] = [];
-  const addFlag = (condition: boolean, flag: HrReconciliationAttentionFlag) => {
-    if (condition && !input.suppressedAttentionFlags?.includes(flag)) attentionFlags.push(flag);
+  const flagMap: Partial<Record<HrReconciliationAttentionFlag, ActionableHrReconciliationFlag>> = {
+    USER_PERSONNEL_LINKAGE: 'UNRESOLVED_PERSONNEL_LINKAGE',
+    IDENTITY_AMBIGUITY: 'POSSIBLE_DUPLICATE_IDENTITY',
+    CURRENT_ASSIGNMENT_GAP: 'MISSING_PRIMARY_ASSIGNMENT',
+    EMPLOYMENT_INCONSISTENCY: 'EMPLOYMENT_STATE_INCONSISTENCY',
+    START_DATE_REVIEW: 'OPEN_START_DATE_REVIEW',
+    ASSESSMENT_PLAN_UNRESOLVED: 'ASSESSMENT_PLAN_RECONCILIATION',
+    CLASSIFICATION_ERROR: 'CLASSIFICATION_ERROR',
   };
-  addFlag(input.sourceType === 'USER' && input.personnelLinkExpected && !input.userPersonnelLinkResolved, 'USER_PERSONNEL_LINKAGE');
-  addFlag(input.identityAmbiguous, 'IDENTITY_AMBIGUITY');
-  if (input.sourceType === 'PERSONNEL' && input.isOperationallyCurrent && !input.hasCurrentOrganizationalAssignment) {
-    addFlag(true, 'CURRENT_ASSIGNMENT_GAP');
-  }
-  addFlag(!input.employmentConsistent, 'EMPLOYMENT_INCONSISTENCY');
-  addFlag(input.startDateReviewOpen, 'START_DATE_REVIEW');
-  addFlag(input.assessmentPlanUnresolved, 'ASSESSMENT_PLAN_UNRESOLVED');
-  addFlag(input.classificationError, 'CLASSIFICATION_ERROR');
-
-  return {
-    primaryState: input.classificationError
-      ? 'CLASSIFICATION_ERROR' as const
-      : attentionFlags.length > 0
-        ? 'NEEDS_REVIEW' as const
-        : input.legacyOnlyReviewed && !input.isOperationallyCurrent
-          ? 'LEGACY_ONLY_HISTORY' as const
-        : 'READY' as const,
-    attentionFlags,
-    cutoverBlocker: attentionFlags.length > 0,
-  };
+  return classifyHrMigrationRecord({
+    sourceType: input.classificationError ? 'UNREGISTERED_SOURCE' : input.sourceType,
+    sourceId: input.sourceId,
+    operationallyCurrent: input.isOperationallyCurrent,
+    personnelLinkResolved: input.userPersonnelLinkResolved,
+    organizationalMappingComplete: input.organizationalMappingComplete,
+    primaryAssignmentPresent: input.primaryAssignmentPresent,
+    employmentStateConsistent: input.employmentConsistent,
+    startDateReviewOpen: input.startDateReviewOpen,
+    assessmentPlanReconciliationOpen: input.assessmentPlanUnresolved,
+    possibleDuplicateIdentity: input.identityAmbiguous,
+    legacyOnly: input.legacyOnlyReviewed && !input.isOperationallyCurrent,
+    durableReviewOutcome: input.sourceType === 'USER' && !input.userPersonnelLinkResolved && !input.personnelLinkExpected
+      ? 'ACCESS_ONLY_USER'
+      : null,
+    suppressedAttentionFlags: input.suppressedAttentionFlags?.flatMap((flag) => flagMap[flag] ? [flagMap[flag]!] : []),
+  });
 };
 
 type BackfillReportRow = { code: string; count: number };
@@ -398,6 +407,7 @@ export const runHrRedesignBackfill = async (
       select: {
         id: true,
         stage: true,
+        candidate: { select: { firstName: true, lastName: true, nationalCode: true, linkedPersonnelId: true } },
         assessments: { select: { assessmentType: true } },
         formalAssessmentPlans: { where: { status: 'ACTIVE' }, select: { id: true }, take: 1 },
       },
@@ -407,12 +417,15 @@ export const runHrRedesignBackfill = async (
         id: true,
         firstName: true,
         lastName: true,
+        nationalCode: true,
+        employeeNumber: true,
         isActive: true,
         hrEmploymentRelationships: {
           select: {
+            id: true,
             status: true,
             startDateVerified: true,
-            assignments: { select: { type: true, effectiveFrom: true, effectiveTo: true } },
+            assignments: { select: { type: true, positionId: true, organizationalUnitId: true, effectiveFrom: true, effectiveTo: true } },
           },
         },
       },
@@ -489,13 +502,25 @@ export const runHrRedesignBackfill = async (
   });
 
   const reconciliationInputs: HrReconciliationInput[] = [];
+  const possibleDuplicateIdentityRecordIds = new Set(findPossibleDuplicateNationalIdentities([
+    ...personnel.map((person) => ({
+      id: person.id,
+      nationalCode: person.nationalCode,
+    })),
+    ...applications.filter((application) => !application.candidate.linkedPersonnelId).map((application) => ({
+      id: `APPLICATION:${application.id}`,
+      nationalCode: application.candidate.nationalCode,
+    })),
+  ]).flatMap(({ personnelIds }) => personnelIds));
   for (const person of personnel) {
     const currentRelationships = person.hrEmploymentRelationships.filter((relationship) => ['ACTIVE', 'SUSPENDED'].includes(relationship.status));
     const isOperationallyCurrent = person.isActive || currentRelationships.length > 0;
-    const hasCurrentOrganizationalAssignment = currentRelationships.some((relationship) => relationship.assignments.some((assignment) =>
+    const currentPrimaryAssignments = currentRelationships.flatMap((relationship) => relationship.assignments.filter((assignment) =>
       assignment.type === 'PRIMARY'
       && assignment.effectiveFrom <= now
       && (!assignment.effectiveTo || assignment.effectiveTo >= now)));
+    const primaryAssignmentPresent = currentPrimaryAssignments.length > 0;
+    const organizationalMappingComplete = currentPrimaryAssignments.some((assignment) => Boolean(assignment.organizationalUnitId));
     reconciliationInputs.push({
       sourceType: 'PERSONNEL',
       sourceId: person.id,
@@ -503,15 +528,37 @@ export const runHrRedesignBackfill = async (
       legacyOnlyReviewed: false,
       personnelLinkExpected: false,
       userPersonnelLinkResolved: true,
-      // Names are not identity evidence. Ambiguity is recorded only after an
-      // explicit reconciliation review supplies identity evidence.
-      identityAmbiguous: false,
-      hasCurrentOrganizationalAssignment,
+      // Only confirmed links or a valid national identity are evidence;
+      // employee numbers and name similarity never participate.
+      identityAmbiguous: possibleDuplicateIdentityRecordIds.has(person.id),
+      organizationalMappingComplete,
+      primaryAssignmentPresent,
       employmentConsistent: person.isActive ? currentRelationships.length === 1 : currentRelationships.length === 0,
       startDateReviewOpen: currentRelationships.some((relationship) => !relationship.startDateVerified),
       assessmentPlanUnresolved: false,
       classificationError: false,
     });
+    for (const relationship of person.hrEmploymentRelationships) {
+      const operationallyCurrent = ['ACTIVE', 'SUSPENDED'].includes(relationship.status);
+      const currentPrimaryAssignments = relationship.assignments.filter((assignment) => assignment.type === 'PRIMARY'
+        && assignment.effectiveFrom <= now
+        && (!assignment.effectiveTo || assignment.effectiveTo >= now));
+      reconciliationInputs.push({
+        sourceType: 'EMPLOYMENT_RELATIONSHIP',
+        sourceId: relationship.id,
+        isOperationallyCurrent: operationallyCurrent,
+        legacyOnlyReviewed: false,
+        personnelLinkExpected: false,
+        userPersonnelLinkResolved: true,
+        identityAmbiguous: false,
+        organizationalMappingComplete: !operationallyCurrent || currentPrimaryAssignments.some((assignment) => Boolean(assignment.organizationalUnitId)),
+        primaryAssignmentPresent: !operationallyCurrent || currentPrimaryAssignments.length > 0,
+        employmentConsistent: !operationallyCurrent || person.isActive,
+        startDateReviewOpen: !relationship.startDateVerified,
+        assessmentPlanUnresolved: false,
+        classificationError: false,
+      });
+    }
   }
   for (const user of users) reconciliationInputs.push({
     sourceType: 'USER',
@@ -523,7 +570,8 @@ export const runHrRedesignBackfill = async (
     personnelLinkExpected: !user.personnelId,
     userPersonnelLinkResolved: Boolean(user.personnelId),
     identityAmbiguous: false,
-    hasCurrentOrganizationalAssignment: true,
+    organizationalMappingComplete: true,
+    primaryAssignmentPresent: true,
     employmentConsistent: true,
     startDateReviewOpen: false,
     assessmentPlanUnresolved: false,
@@ -536,8 +584,9 @@ export const runHrRedesignBackfill = async (
     legacyOnlyReviewed: false,
     personnelLinkExpected: false,
     userPersonnelLinkResolved: true,
-    identityAmbiguous: false,
-    hasCurrentOrganizationalAssignment: true,
+    identityAmbiguous: possibleDuplicateIdentityRecordIds.has(`APPLICATION:${application.id}`),
+    organizationalMappingComplete: true,
+    primaryAssignmentPresent: true,
     employmentConsistent: true,
     startDateReviewOpen: false,
     assessmentPlanUnresolved: application.stage !== 'CLOSED' && application.formalAssessmentPlans.length === 0,
@@ -563,9 +612,11 @@ export const runHrRedesignBackfill = async (
     const suppressedAttentionFlags = [...latestFlagByCode.values()]
       .filter((flag) => !flag.isActive && flag.resolutionReason !== 'SOURCE_CONDITION_CLEARED_BY_BACKFILL')
       .map((flag) => flag.flagCode as HrReconciliationAttentionFlag);
-    const legacyOnlyReviewed = existing?.reviews[0]?.outcome === 'ACCEPTED_LEGACY_ONLY';
-    const accessOnlyReviewed = existing?.reviews[0]?.outcome === 'ACCEPTED_ACCESS_ONLY';
-    const identityAmbiguous = latestFlagByCode.get('IDENTITY_AMBIGUITY')?.isActive === true;
+    const reviewOutcome = String(existing?.reviews[0]?.outcome ?? '');
+    const legacyOnlyReviewed = ['ACCEPTED_LEGACY_ONLY', 'LEGACY_ONLY_CONFIRMED'].includes(reviewOutcome);
+    const accessOnlyReviewed = ['ACCEPTED_ACCESS_ONLY', 'ACCESS_ONLY_USER'].includes(reviewOutcome);
+    const identityAmbiguous = input.identityAmbiguous || ['IDENTITY_AMBIGUITY', 'POSSIBLE_DUPLICATE_IDENTITY']
+      .some((flag) => latestFlagByCode.get(flag)?.isActive === true);
     const reviewedInput = {
       ...input,
       legacyOnlyReviewed,
@@ -573,9 +624,29 @@ export const runHrRedesignBackfill = async (
       identityAmbiguous,
       suppressedAttentionFlags,
     };
+    const durableReviewOutcome = reviewOutcome === 'ACCEPTED_ACCESS_ONLY'
+      ? 'ACCESS_ONLY_USER'
+      : reviewOutcome === 'ACCEPTED_LEGACY_ONLY'
+        ? 'LEGACY_ONLY_CONFIRMED'
+        : reviewOutcome || null;
+    const actionableInput: HrMigrationClassificationInput = {
+      sourceType: reviewedInput.sourceType,
+      sourceId: reviewedInput.sourceId,
+      operationallyCurrent: reviewedInput.isOperationallyCurrent,
+      personnelLinkResolved: reviewedInput.userPersonnelLinkResolved,
+      organizationalMappingComplete: reviewedInput.organizationalMappingComplete,
+      primaryAssignmentPresent: reviewedInput.primaryAssignmentPresent,
+      employmentStateConsistent: reviewedInput.employmentConsistent,
+      startDateReviewOpen: reviewedInput.startDateReviewOpen,
+      assessmentPlanReconciliationOpen: reviewedInput.assessmentPlanUnresolved,
+      possibleDuplicateIdentity: identityAmbiguous,
+      legacyOnly: legacyOnlyReviewed && !reviewedInput.isOperationallyCurrent,
+      durableReviewOutcome: durableReviewOutcome as ActionableHrReconciliationOutcome | null,
+      suppressedAttentionFlags: suppressedAttentionFlags as ActionableHrReconciliationFlag[],
+    };
     return {
       input: reviewedInput,
-      classification: classifyHrReconciliationRecord(reviewedInput),
+      classification: classifyHrMigrationRecord(actionableInput),
     };
   });
   const existingReconciliationCount = existingReconciliations.length;

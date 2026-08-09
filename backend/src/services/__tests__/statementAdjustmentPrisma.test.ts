@@ -7,7 +7,7 @@ import type { ApprovedPricingVersionInsert } from '../approvedPricing/types';
 import { createDispatchCorrection, postDispatchCorrection } from '../dispatchCorrectionOutage';
 import { createStatementAdjustmentArtifactPreparer, type DispatchArtifactStorage } from '../dispatchDocuments';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
-import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
+import { readShipmentQuantityProjection, shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 
 const prisma = new PrismaClient();
 const rollback = Symbol('statement-adjustment-db-rollback');
@@ -59,6 +59,7 @@ const run = async () => {
           afr."createdBy", sc."currency", arl."quantity" AS "lineQuantity", arl."unit" AS "lineUnit", ar."loadingId"
         FROM "accounting_dispatch_waybills" w
         JOIN "accounting_dispatch_candidates" adc ON adc."id" = w."candidateId"
+        JOIN "guard_physical_exits" gpe ON gpe."waybillId" = w."id"
         JOIN "logistics_allocation_revisions" ar ON ar."id" = adc."allocationRevisionId"
         JOIN "logistics_allocation_revision_lines" arl ON arl."revisionId" = ar."id"
         JOIN "contract_items" ci ON ci."id" = arl."sourceContractItemId"
@@ -157,6 +158,7 @@ const run = async () => {
 
       const dispatchEvidence = await tx.shipmentQuantityEvidence.findFirstOrThrow({ where: {
         kind: 'PHYSICAL_EXIT', contractItemId: candidate.itemId,
+        metadata: { path: ['waybillId'], equals: candidate.waybillId },
       }, orderBy: { effectiveAt: 'desc' } });
       const returnQuantity = Prisma.Decimal.min(candidate.lineQuantity, new Prisma.Decimal('0.250')).toDecimalPlaces(3);
       const movementOccurredAt = new Date(Math.max(dispatchEvidence.effectiveAt.getTime() + 1, Date.now() - 2_000));
@@ -208,8 +210,11 @@ const run = async () => {
       } }), 1, 'a verified Guard return is consumed exactly once by the actual atomic post command');
       if (projectionBefore?.physicallyDispatched) {
         const projectionAfter = await tx.shipmentQuantityProjection.findUniqueOrThrow({ where: { contractItemId: candidate.itemId } });
-        assert.equal(projectionAfter.physicallyDispatched?.toFixed(3),
-          projectionBefore.physicallyDispatched.sub(returnQuantity).toFixed(3));
+        const rebuilt = await readShipmentQuantityProjection(tx as unknown as PrismaClient, { contractId: candidate.contractId });
+        const rebuiltRow = rebuilt.rows.find((row) => row.contractItemId === candidate.itemId);
+        assert.ok(rebuiltRow?.quantities, 'the corrected row must remain projection-ready');
+        assert.equal(projectionAfter.physicallyDispatched?.toFixed(3), rebuiltRow.quantities.physicallyDispatched);
+        assert.equal(projectionAfter.availableToLoad?.toFixed(3), rebuiltRow.quantities.availableToLoad);
       }
       assert.equal(await tx.dispatchStatementAdjustment.count({ where: { waybillId: candidate.waybillId } }), 3);
       assert.equal(await tx.dispatchDocumentArtifact.count({ where: { waybillId: candidate.waybillId,

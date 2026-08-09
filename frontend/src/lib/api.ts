@@ -824,6 +824,7 @@ export const inventoryAPI = {
 // Accounting Workspace API
 export const accountingAPI = {
   getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
+  getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getContracts: (params?: any) => api.get('/accounting/contracts', { params }),
   getContract: (contractId: string) => api.get(`/accounting/contracts/${contractId}`),
   getContractPdf: (contractId: string) => api.get(`/accounting/contracts/${contractId}/pdf`),

@@ -20,6 +20,12 @@ import {
 } from '@prisma/client';
 import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
 import {
+  buildAccountingFinancialTrend,
+  buildOutstandingContractSnapshots,
+  FINANCIAL_TREND_RANGES,
+  type FinancialTrendRange,
+} from './accountingFinancialTrend';
+import {
   ACTIVE_CORRECTION_STATUSES,
   ACCOUNTING_RECORD_STATUSES,
   accountingActivityPopulationWhere,
@@ -977,6 +983,49 @@ export const getAccountingWorkspace = async (query: any = {}) => {
       audit: auditLogs
     }
   };
+};
+
+export const getAccountingFinancialTrend = async (requestedRange: unknown, now = new Date()) => {
+  const range = (FINANCIAL_TREND_RANGES as readonly string[]).includes(String(requestedRange))
+    ? requestedRange as FinancialTrendRange
+    : '6m';
+  const [invoices, payments, auditEvents] = await Promise.all([
+    prisma.accountingFinancialRecord.findMany({
+      where: { kind: FinancialRecordKind.INVOICE_CANDIDATE },
+      select: {
+        id: true,
+        contractId: true,
+        status: true,
+        amount: true,
+        sepidarAmount: true,
+        financiallyApprovedAt: true,
+        systemInvoiceDate: true,
+        voidedAt: true,
+        createdAt: true,
+      },
+    }),
+    prisma.accountingPaymentStatus.findMany({
+      select: {
+        id: true,
+        contractId: true,
+        receivableId: true,
+        method: true,
+        status: true,
+        checkStatus: true,
+        amount: true,
+        occurredAt: true,
+        createdAt: true,
+        updatedAt: true,
+        metadata: true,
+      },
+    }),
+    prisma.accountingAuditLog.findMany({
+      where: { entityType: { in: ['AccountingFinancialRecord', 'AccountingPaymentStatus'] } },
+      select: { entityId: true, entityType: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    }),
+  ]);
+  return buildAccountingFinancialTrend({ range, now, invoices, payments, auditEvents });
 };
 
 export const getAccountingContractDetail = async (contractId: string) => {
@@ -2026,6 +2075,7 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
   const voidReason = String(command.reason || command.note || '').trim();
   const externalReference = String(command.externalReference || '').trim();
   const downstreamNote = String(command.downstreamNote || '').trim();
+  const voidedAt = parseDate(command.occurredAt, new Date());
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.accountingFinancialRecord.findUnique({
       where: { id: recordId },
@@ -2082,7 +2132,7 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
       where: { id: recordId },
       data: {
         status: AccountingRecordStatus.VOIDED,
-        voidedAt: new Date(),
+        voidedAt,
         metadata: {
           ...beforeMetadata,
           voidReason: voidReason || beforeMetadata.voidReason,
@@ -2268,6 +2318,7 @@ export const listFinancialRecords = async (query: any = {}) => {
       view: query.view,
       status: query.status,
       period: query.period,
+      date: query.date,
     });
     Object.assign(
       where,
@@ -2323,25 +2374,43 @@ export const listReceivables = async (query: any = {}) => {
   const hasSearchMatches = await applyContractSearch(where, query);
   if (!hasSearchMatches) return { items: [], page, pageSize, total: 0, ...emptyFocus };
   if (population.outstandingAt) {
-    const sourceRows = await prisma.accountingReceivable.findMany({
-      where,
-      include: { invoiceRecord: true },
-      orderBy: { dueDate: 'asc' },
-    });
-    const receivableIds = sourceRows.map((row) => row.id);
-    const contractIds = sourceRows.map((row) => row.contractId).filter(Boolean) as string[];
-    if (!receivableIds.length) return { items: [], page, pageSize, total: 0, ...emptyFocus };
-    const payments = await prisma.accountingPaymentStatus.findMany({
-      where: {
-        OR: [
-          ...(receivableIds.length ? [{ receivableId: { in: receivableIds } }] : []),
-          ...(contractIds.length ? [{ contractId: { in: contractIds }, receivableId: null }] : []),
-        ],
-      },
-    });
-    const projections = resolveOutstandingReceivableProjection(sourceRows, payments, population).map((row) => ({
-      ...row,
-      remainingAmount: String(row.representedRemainingAmount),
+    const contractFilter = where.contractId as Prisma.StringNullableFilter | string | undefined;
+    const [invoices, payments, auditEvents] = await Promise.all([
+      prisma.accountingFinancialRecord.findMany({
+        where: { kind: FinancialRecordKind.INVOICE_CANDIDATE, ...(contractFilter ? { contractId: contractFilter } : {}) },
+      }),
+      prisma.accountingPaymentStatus.findMany({
+        where: contractFilter ? { contractId: contractFilter } : {},
+      }),
+      prisma.accountingAuditLog.findMany({
+        where: {
+          entityType: { in: ['AccountingFinancialRecord', 'AccountingPaymentStatus'] },
+          ...(contractFilter ? { contractId: contractFilter } : {}),
+        },
+        select: { entityId: true, entityType: true, createdAt: true },
+      }),
+    ]);
+    const projections = buildOutstandingContractSnapshots({
+      invoices,
+      payments,
+      auditEvents,
+      cutoff: population.outstandingAt,
+    }).map((row) => ({
+      id: `outstanding:${row.contractId}:${population.outstandingAt!.toISOString()}`,
+      contractId: row.contractId,
+      invoiceRecordId: null,
+      sourcePaymentId: null,
+      customerId: null,
+      originalAmount: String(row.invoicedRial),
+      paidAmount: String(row.receivedRial),
+      remainingAmount: String(row.outstandingRial),
+      currency: DEFAULT_CURRENCY,
+      dueDate: population.outstandingAt!,
+      status: ReceivableStatus.OPEN,
+      metadata: { historicalOutstandingAt: population.outstandingAt!.toISOString() },
+      createdBy: 'historical-projection',
+      createdAt: population.outstandingAt!,
+      updatedAt: population.outstandingAt!,
     }));
     const contextualRows = await attachListContext(projections);
     const pageItems = contextualRows.slice(skip, skip + pageSize);

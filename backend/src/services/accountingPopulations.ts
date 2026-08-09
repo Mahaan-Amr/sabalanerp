@@ -38,6 +38,7 @@ type InvoiceCandidatePopulationQuery = {
   view?: unknown;
   status?: unknown;
   period?: unknown;
+  date?: unknown;
 };
 
 type InvoiceCandidateRecord = {
@@ -332,6 +333,28 @@ export const resolveTehranPeriodRange = (value: unknown): DateRange | null => {
   };
 };
 
+export const resolveTehranJalaliDayRange = (value: unknown): DateRange | null => {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const monthRange = resolveTehranPeriodRange(`${match[1]}-${match[2]}`);
+  if (!monthRange || day < 1) return null;
+  const start = jalaliToGregorianParts(year, month, day);
+  const startsAt = zonedMidnightToUtc(start.year, start.month, start.day);
+  if (startsAt < monthRange.gte || startsAt >= monthRange.lt) return null;
+  const nextGregorianDay = new Date(Date.UTC(start.year, start.month - 1, start.day + 1));
+  return {
+    gte: startsAt,
+    lt: zonedMidnightToUtc(
+      nextGregorianDay.getUTCFullYear(),
+      nextGregorianDay.getUTCMonth() + 1,
+      nextGregorianDay.getUTCDate(),
+    ),
+  };
+};
+
 export const resolveInvoiceCandidatePopulation = (
   query: InvoiceCandidatePopulationQuery = {},
 ): InvoiceCandidatePopulation => {
@@ -347,7 +370,7 @@ export const resolveInvoiceCandidatePopulation = (
   if (query.view === 'invoiced') {
     return {
       invoiced: true,
-      periodRange: resolveTehranPeriodRange(query.period) || undefined,
+      periodRange: resolveTehranJalaliDayRange(query.date) || resolveTehranPeriodRange(query.period) || undefined,
     };
   }
 
@@ -515,6 +538,7 @@ type ReceivablePopulationQuery = {
   status?: unknown;
   due?: unknown;
   period?: unknown;
+  date?: unknown;
 };
 
 export type ReceivablePopulation = {
@@ -540,7 +564,9 @@ export const resolveReceivablePopulation = (
       ? OPEN_RECEIVABLE_STATUSES
       : undefined;
   const dueRange = resolveTehranDeadlineRange(query.due, now) || undefined;
-  const periodRange = query.view === 'outstanding' ? resolveTehranPeriodRange(query.period) : null;
+  const periodRange = query.view === 'outstanding'
+    ? resolveTehranJalaliDayRange(query.date) || resolveTehranPeriodRange(query.period)
+    : null;
   return { statuses, dueRange, outstandingAt: periodRange?.lt };
 };
 
@@ -573,6 +599,7 @@ type PaymentPopulationQuery = {
   status?: unknown;
   due?: unknown;
   period?: unknown;
+  date?: unknown;
 };
 
 export type PaymentPopulation = {
@@ -622,7 +649,9 @@ export const resolvePaymentPopulation = (
     checksOnly: statusOverride || Boolean(semanticStatuses) || Boolean(dueRange),
     dueRange,
     received,
-    periodRange: received ? resolveTehranPeriodRange(query.period) || undefined : undefined,
+    periodRange: received
+      ? resolveTehranJalaliDayRange(query.date) || resolveTehranPeriodRange(query.period) || undefined
+      : undefined,
     empty: dueSoonConflict,
   };
 };

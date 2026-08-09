@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
-import { PrismaDispatchDocumentRepository } from '../dispatchDocuments/prismaRepository';
+import { PrismaDispatchDocumentRepository, runSerializableDispatchOperation } from '../dispatchDocuments/prismaRepository';
 import { DispatchDocumentConflictError } from '../dispatchDocuments/service';
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
 
@@ -108,21 +108,18 @@ const run = async () => {
       command: 'ACCEPT_AND_ISSUE' as const, status: 'SUCCEEDED' as const,
       result: { intentFingerprint: p2002Fingerprint, value: results[0] }, actorId: actor.id,
       correlationId: p2002Key, completedAt: new Date() };
-    const duplicateAttempts = await Promise.allSettled([
-      firstRaw.dispatchDocumentCommandResult.create({ data: duplicateCommandData }),
-      secondRaw.dispatchDocumentCommandResult.create({ data: duplicateCommandData }),
-    ]);
-    const duplicateFailure = duplicateAttempts.find((attempt): attempt is PromiseRejectedResult => attempt.status === 'rejected');
-    assert.equal((duplicateFailure?.reason as { code?: string })?.code, 'P2002',
-      'two real Prisma clients produce the unique collision handled by issuance');
-    const p2002Client = new Proxy(firstRaw, { get(target, property, receiver) {
-      if (property === '$transaction') return async () => { throw duplicateFailure!.reason; };
-      return Reflect.get(target, property, receiver);
-    } }) as PrismaClient;
-    const p2002Repository = new PrismaDispatchDocumentRepository(p2002Client, verifier, storage);
-    assert.deepEqual(await p2002Repository.acceptAndIssue({ ...input, idempotencyKey: p2002Key,
-      correlationId: p2002Key, intentFingerprint: p2002Fingerprint }), results[0],
-    'the production issuance boundary handles a real Prisma P2002 as unknown-commit and replays durable exact intent');
+    await firstRaw.dispatchDocumentCommandResult.create({ data: duplicateCommandData });
+    const durableReader = new PrismaDispatchDocumentRepository(secondRaw, verifier, storage);
+    let runnerErrorCode: string | undefined;
+    const replayed = await runSerializableDispatchOperation(secondRaw, async tx => {
+      try { await tx.dispatchDocumentCommandResult.create({ data: duplicateCommandData }); }
+      catch (error) { runnerErrorCode = (error as { code?: string }).code; throw error; }
+      return results[0];
+    }, async () => await durableReader.findCommandResult({ scope: 'CANDIDATE', scopeId: candidate.id,
+      idempotencyKey: p2002Key, command: 'ACCEPT_AND_ISSUE', intentFingerprint: p2002Fingerprint }) as typeof results[0] | null);
+    assert.equal(runnerErrorCode, 'P2002', 'a real Serializable transaction reaches the command-key unique violation');
+    assert.deepEqual(replayed, results[0],
+      'the production Serializable runner replays the exact durable result after its real P2002');
     assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id,
       idempotencyKey: p2002Key } }), 1);
 

@@ -31,7 +31,15 @@ const resultJson = (value: unknown) => json(stable(value));
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Record<string, any> : {};
 
-const serializable = async <T>(prisma: PrismaClient, work: (tx: Tx) => Promise<T>,
+const isDispatchCommandKeyUniqueViolation = (error: Prisma.PrismaClientKnownRequestError) => {
+  if (error.code !== 'P2002') return false;
+  const target = error.meta?.target;
+  if (target === 'dispatch_document_command_idempotency_key') return true;
+  return Array.isArray(target) && target.length === 3
+    && target[0] === 'scope' && target[1] === 'scopeId' && target[2] === 'idempotencyKey';
+};
+
+export const runSerializableDispatchOperation = async <T>(prisma: PrismaClient, work: (tx: Tx) => Promise<T>,
   replayAfterUniqueConflict?: () => Promise<T | null>) => {
   let error: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -39,7 +47,7 @@ const serializable = async <T>(prisma: PrismaClient, work: (tx: Tx) => Promise<T
     catch (caught) {
       error = caught;
       if (!(caught instanceof Prisma.PrismaClientKnownRequestError)) throw caught;
-      if (caught.code === 'P2002' && replayAfterUniqueConflict) {
+      if (isDispatchCommandKeyUniqueViolation(caught) && replayAfterUniqueConflict) {
         const replay = await replayAfterUniqueConflict();
         if (replay !== null) return replay;
         throw caught;
@@ -129,7 +137,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
     return rows[0].number.toString();
   }
   async acceptAndIssue(input: Parameters<DispatchDocumentRepository['acceptAndIssue']>[0]) {
-    return serializable(this.prisma, async (tx) => {
+    return runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${input.candidateId}`]);
       const prior = await commandResult(tx, 'CANDIDATE', input.candidateId, input.idempotencyKey, 'ACCEPT_AND_ISSUE', input.intentFingerprint);
       if (prior) return prior as any;
@@ -194,7 +202,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       idempotencyKey: input.idempotencyKey, command: 'ACCEPT_AND_ISSUE', intentFingerprint: input.intentFingerprint })) as any);
   }
   async recordEvidenceConflict(input: Parameters<DispatchDocumentRepository['recordEvidenceConflict']>[0]) {
-    return serializable(this.prisma, async (tx) => {
+    return runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${input.candidateId}`]);
       const prior = await commandResult(tx, 'CANDIDATE', input.candidateId, input.idempotencyKey, 'ACCEPT_AND_ISSUE', input.intentFingerprint);
       if (prior) return prior as any;
@@ -208,7 +216,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
     });
   }
   async rejectCandidate(input: Parameters<DispatchDocumentRepository['rejectCandidate']>[0]) {
-    return serializable(this.prisma, async (tx) => {
+    return runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${input.candidateId}`]);
       const prior = await commandResult(tx, 'CANDIDATE', input.candidateId, input.idempotencyKey, 'REJECT', input.intentFingerprint);
       if (prior) return prior as any;
@@ -241,7 +249,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
     });
   }
   async voidWaybill(input: Parameters<DispatchDocumentRepository['voidWaybill']>[0]) {
-    return serializable(this.prisma, async (tx) => {
+    return runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_WAYBILL:${input.waybillId}`]);
       const prior = await commandResult(tx, 'WAYBILL', input.waybillId, input.idempotencyKey, 'VOID', input.intentFingerprint);
       if (prior) return prior;
@@ -261,7 +269,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
     });
   }
   async replaceWaybill(input: Parameters<DispatchDocumentRepository['replaceWaybill']>[0]) {
-    return serializable(this.prisma, async (tx) => {
+    return runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_WAYBILL:${input.waybillId}`]);
       const prior = await commandResult(tx, 'WAYBILL', input.waybillId, input.idempotencyKey, 'REPLACE', input.intentFingerprint);
       if (prior) return prior;
@@ -312,7 +320,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
     return artifact ? publicArtifact(artifact) : null;
   }
   async recordRetrieval(input: Parameters<DispatchDocumentRepository['recordRetrieval']>[0]) {
-    await serializable(this.prisma, async (tx) => {
+    await runSerializableDispatchOperation(this.prisma, async (tx) => {
       const idempotencyKey = `retrieve:${input.attemptId}`;
       await lock(tx, [`DISPATCH_RETRIEVAL:${input.waybillId}:${idempotencyKey}`]);
       const prior = await tx.dispatchDocumentCommandResult.findUnique({ where: { scope_scopeId_idempotencyKey: {
@@ -358,7 +366,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
     return artifacts.map(publicArtifact).sort((left, right) => order[left.kind] - order[right.kind] || (left.adjustmentSequence ?? 0) - (right.adjustmentSequence ?? 0));
   }
   async recordPrintHandoff(input: Parameters<DispatchDocumentRepository['recordPrintHandoff']>[0]) {
-    await serializable(this.prisma, async (tx) => {
+    await runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`DISPATCH_PRINT_HANDOFF_ATTEMPT:${input.attemptId}`]);
       if (await tx.dispatchDocumentPrintHandoff.findUnique({ where: { idempotencyKey: input.attemptId } })) return;
       const completedAt = new Date();

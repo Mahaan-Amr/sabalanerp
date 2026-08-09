@@ -110,6 +110,18 @@ const run = async () => {
       expectedSourceIntegrityHash: 'race-source', waybillSnapshot: {}, waybill: replayValue.waybill, artifacts: [],
       idempotencyKey: 'unrelated-key', actorId: 'accountant', correlationId: 'race-correlation', intentFingerprint: 'race-intent' }),
     error => error === duplicateCommand, 'a P2002 without the exact durable command result is rethrown fail-closed');
+    const unrelatedTarget = new Prisma.PrismaClientKnownRequestError('duplicate waybill number', {
+      code: 'P2002', clientVersion: '5.16.1', meta: { target: ['number'] },
+    });
+    const unrelatedTargetRepository = new PrismaDispatchDocumentRepository({
+      $transaction: async () => { throw unrelatedTarget; },
+      dispatchDocumentCommandResult: racingPrisma.dispatchDocumentCommandResult,
+    } as any, { assess: async () => ({ status: 'CURRENT', staleContracts: [] }) }, storage);
+    await assert.rejects(() => unrelatedTargetRepository.acceptAndIssue({ candidateId: 'candidate-race', allocationRevisionId: 'revision-race',
+      expectedSourceIntegrityHash: 'race-source', waybillSnapshot: {}, waybill: replayValue.waybill, artifacts: [],
+      idempotencyKey: 'race-key', actorId: 'accountant', correlationId: 'race-correlation', intentFingerprint: 'race-intent' }),
+    error => error === unrelatedTarget,
+    'a P2002 for another unique target is rethrown even when an exact durable command result exists');
 
     replacementMode = true;
     advisoryLocks.length = 0;

@@ -36,3 +36,10 @@ test('initial failure is an error instead of a fictional empty view', () => {
   assert.equal(failed.data, null);
   assert.equal(failed.status, 'error');
 });
+
+test('range switching never relabels prior-range data as the newly requested range', () => {
+  const successful = resolveFinancialTrend(pendingFinancialTrend(), data);
+  const switching = pendingFinancialTrend(successful, '1m');
+  assert.equal(switching.data, null);
+  assert.equal(pendingFinancialTrend(successful, '3m').data, data);
+});

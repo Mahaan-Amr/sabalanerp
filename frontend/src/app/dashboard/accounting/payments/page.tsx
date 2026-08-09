@@ -84,6 +84,7 @@ export default function AccountingPaymentsPage() {
         due: query.due || undefined,
         period: query.period || undefined,
         date: query.date || undefined,
+        cutoff: query.cutoff || undefined,
         recordId: query.recordId || undefined,
         search: query.search || undefined,
         status: query.status,
@@ -101,7 +102,7 @@ export default function AccountingPaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.pageSize, query.date, query.due, query.page, query.period, query.recordId, query.search, query.status, query.view]);
+  }, [pagination.pageSize, query.cutoff, query.date, query.due, query.page, query.period, query.recordId, query.search, query.status, query.view]);
 
   useEffect(() => {
     loadRows();

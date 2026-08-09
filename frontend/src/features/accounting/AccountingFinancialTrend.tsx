@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { FaChartLine } from 'react-icons/fa';
 import {
   Area,
@@ -42,12 +43,13 @@ function DrilldownDot({ cx, cy, payload, series, stroke }: {
   series: SeriesKey;
   stroke: string;
 }) {
-  if (!payload?.marker || typeof cx !== 'number' || typeof cy !== 'number') return null;
+  if (!payload || typeof cx !== 'number' || typeof cy !== 'number') return null;
   const href = payload.destinations[series];
   const amount = payload[series];
   return (
     <a href={href} aria-label={`${seriesLabels[series]} ${payload.label}: ${formatToman(amount)}`}>
-      <circle cx={cx} cy={cy} r={4} fill="var(--sds-surface-raised)" stroke={stroke} strokeWidth={2.5} />
+      <circle cx={cx} cy={cy} r={22} fill="transparent" pointerEvents="all" />
+      <circle cx={cx} cy={cy} r={payload.marker ? 4 : 2.5} fill="var(--sds-surface-raised)" stroke={stroke} strokeWidth={2.5} pointerEvents="none" />
     </a>
   );
 }
@@ -118,7 +120,7 @@ export function AccountingFinancialTrend({
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke="var(--sds-border-subtle)" strokeDasharray="3 5" vertical={false} />
-                <XAxis dataKey="label" interval={range === '1m' ? 0 : 'preserveStartEnd'} tickFormatter={(label, index) => range !== '1m' || chartData[index]?.marker ? label : ''} minTickGap={12} tick={{ fill: 'var(--sds-text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <XAxis dataKey="label" interval={source.range === '1m' ? 0 : 'preserveStartEnd'} tickFormatter={(label, index) => source.range !== '1m' || chartData[index]?.marker ? label : ''} minTickGap={12} tick={{ fill: 'var(--sds-text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tickFormatter={(value) => compactToman.format(value)} tick={{ fill: 'var(--sds-text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
                 <Tooltip formatter={(value) => formatToman(Number(value))} contentStyle={{ background: 'var(--sds-surface-overlay)', border: '1px solid var(--sds-border-default)', borderRadius: 'var(--sds-radius-card)', color: 'var(--sds-text-primary)' }} />
                 <Legend wrapperStyle={{ color: 'var(--sds-text-secondary)', fontSize: 11 }} />
@@ -129,7 +131,7 @@ export function AccountingFinancialTrend({
             </ResponsiveContainer>
           </div>
           <div className="sr-only" aria-label="پیوندهای نقاط روند مالی">
-            {chartData.filter((point) => point.marker).flatMap((point) => (Object.keys(seriesLabels) as SeriesKey[]).map((series) => (
+            {chartData.flatMap((point) => (Object.keys(seriesLabels) as SeriesKey[]).map((series) => (
               <a key={`${point.periodKey}-${series}`} href={point.destinations[series]}>
                 {seriesLabels[series]} {point.label}: {formatToman(point[series])}
               </a>

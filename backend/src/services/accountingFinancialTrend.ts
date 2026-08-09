@@ -35,6 +35,9 @@ type TrendPayment = {
 type TrendAuditEvent = {
   entityId?: string | null;
   entityType?: string | null;
+  action?: string | null;
+  beforeState?: unknown;
+  afterState?: unknown;
   createdAt: Date;
 };
 
@@ -140,10 +143,10 @@ const finiteAmount = (value: unknown) => {
   return Number.isFinite(amount) ? amount : 0;
 };
 
-const auditTimesByEntity = (events: TrendAuditEvent[]) => {
+const auditTimesByEntity = (events: TrendAuditEvent[], accepts: (event: TrendAuditEvent) => boolean) => {
   const result = new Map<string, Date>();
   for (const event of events) {
-    if (!event.entityId) continue;
+    if (!event.entityId || !accepts(event)) continue;
     const existing = result.get(event.entityId);
     if (!existing || event.createdAt < existing) result.set(event.entityId, event.createdAt);
   }
@@ -151,36 +154,74 @@ const auditTimesByEntity = (events: TrendAuditEvent[]) => {
 };
 
 const invoiceMovements = (invoices: TrendInvoice[], auditEvents: TrendAuditEvent[]): TrendMovement[] => {
-  const audits = auditTimesByEntity(auditEvents.filter((event) => event.entityType === 'AccountingFinancialRecord'));
+  const invoiceAudits = auditEvents.filter((event) => event.entityType === 'AccountingFinancialRecord');
+  const approvalAudits = auditTimesByEntity(invoiceAudits, (event) => event.action === 'APPROVE_FINANCIAL_INVOICE');
+  const creationAudits = auditTimesByEntity(invoiceAudits, (event) => (
+    event.action === 'CREATE_INVOICE' || event.action === 'CREATE_REPLACEMENT_INVOICE'
+  ));
+  const voidAudits = auditTimesByEntity(invoiceAudits, (event) => event.action === 'VOID_ACCOUNTING_RECORD');
   return invoices.flatMap((invoice) => {
     if (!invoice.contractId || !invoice.financiallyApprovedAt || !['ISSUED', 'POSTED', 'VOIDED'].includes(invoice.status)) return [];
     const dedicatedAt = invoice.systemInvoiceDate;
-    const effectiveAt = dedicatedAt || audits.get(invoice.id) || invoice.createdAt;
+    const effectiveAt = dedicatedAt || approvalAudits.get(invoice.id) || creationAudits.get(invoice.id) || invoice.createdAt;
     const confidence = dedicatedAt ? 'authoritative' as const : 'legacy-fallback' as const;
     const amount = finiteAmount(invoice.sepidarAmount ?? invoice.amount);
     if (!amount || Number.isNaN(effectiveAt.getTime())) return [];
     const result: TrendMovement[] = [{ contractId: invoice.contractId, effectiveAt, amount, confidence }];
-    if (invoice.status === 'VOIDED' && invoice.voidedAt) {
-      result.push({ contractId: invoice.contractId, effectiveAt: invoice.voidedAt, amount: -amount, confidence: 'authoritative' });
+    if (invoice.status === 'VOIDED') {
+      const voidedAt = invoice.voidedAt || voidAudits.get(invoice.id) || invoice.createdAt;
+      result.push({
+        contractId: invoice.contractId,
+        effectiveAt: voidedAt,
+        amount: -amount,
+        confidence: invoice.voidedAt ? 'authoritative' : 'legacy-fallback',
+      });
     }
     return result;
   });
 };
 
 const collectionMovements = (payments: TrendPayment[], auditEvents: TrendAuditEvent[]): TrendMovement[] => {
-  const audits = auditTimesByEntity(auditEvents.filter((event) => event.entityType === 'AccountingPaymentStatus'));
+  const paymentAudits = auditEvents.filter((event) => event.entityType === 'AccountingPaymentStatus');
+  const receiptAudits = auditTimesByEntity(paymentAudits, (event) => event.action === 'REGISTER_RECEIPT');
+  const transitionAudit = (paymentId: string, status: string) => paymentAudits.find((event) => {
+    if (event.entityId !== paymentId || event.action !== 'UPDATE_CHECK_STATUS') return false;
+    const after = event.afterState && typeof event.afterState === 'object' ? event.afterState as Record<string, unknown> : {};
+    return after.checkStatus === status;
+  })?.createdAt;
   return payments.flatMap((payment) => {
-  if (!payment.contractId) return [];
-  return resolveReceivedCollectionMovements(payment).map((movement) => ({
-    contractId: payment.contractId!,
-    effectiveAt: movement.confidence === 'legacy-fallback' && !payment.occurredAt
-      ? audits.get(payment.id) || movement.effectiveAt
-      : movement.effectiveAt,
-    amount: movement.amount,
-    confidence: movement.confidence === 'legacy-fallback' && payment.occurredAt
-      ? 'authoritative'
-      : movement.confidence,
-  }));
+    if (!payment.contractId) return [];
+    const stored = payment.metadata && typeof payment.metadata === 'object'
+      ? (payment.metadata as Record<string, unknown>).collectionMovements
+      : undefined;
+    if (!Array.isArray(stored) && payment.method !== 'CHECK' && payment.status === 'REVERSED') {
+      const receivedAt = payment.occurredAt || receiptAudits.get(payment.id) || payment.createdAt;
+      const reversedAt = payment.updatedAt || payment.occurredAt || payment.createdAt;
+      const amount = finiteAmount(payment.amount);
+      return receivedAt && reversedAt && amount ? [
+        { contractId: payment.contractId, effectiveAt: receivedAt, amount, confidence: 'legacy-fallback' as const },
+        { contractId: payment.contractId, effectiveAt: reversedAt, amount: -amount, confidence: 'legacy-fallback' as const },
+      ] : [];
+    }
+    if (!Array.isArray(stored) && payment.method === 'CHECK' && ['BOUNCED', 'RETURNED'].includes(String(payment.checkStatus))) {
+      const clearedAt = transitionAudit(payment.id, 'CLEARED') || payment.createdAt;
+      const reversedAt = payment.occurredAt || transitionAudit(payment.id, String(payment.checkStatus)) || payment.updatedAt || payment.createdAt;
+      const amount = finiteAmount(payment.amount);
+      return clearedAt && reversedAt && amount ? [
+        { contractId: payment.contractId, effectiveAt: clearedAt, amount, confidence: 'legacy-fallback' as const },
+        { contractId: payment.contractId, effectiveAt: reversedAt, amount: -amount, confidence: 'legacy-fallback' as const },
+      ] : [];
+    }
+    return resolveReceivedCollectionMovements(payment).map((movement) => ({
+      contractId: payment.contractId!,
+      effectiveAt: movement.confidence === 'legacy-fallback' && !payment.occurredAt
+        ? receiptAudits.get(payment.id) || movement.effectiveAt
+        : movement.effectiveAt,
+      amount: movement.amount,
+      confidence: movement.confidence === 'legacy-fallback' && payment.occurredAt
+        ? 'authoritative'
+        : movement.confidence,
+    }));
   });
 };
 
@@ -190,7 +231,7 @@ const within = (movement: TrendMovement, period: FinancialTrendPeriod) => (
 
 const throughCutoff = (movement: TrendMovement, cutoff: Date) => movement.effectiveAt < cutoff;
 
-const outstandingAt = (invoices: TrendMovement[], collections: TrendMovement[], cutoff: Date) => {
+const contractBalancesAt = (invoices: TrendMovement[], collections: TrendMovement[], cutoff: Date) => {
   const contracts = new Map<string, { invoiced: number; received: number }>();
   for (const movement of invoices.filter((item) => throughCutoff(item, cutoff))) {
     const value = contracts.get(movement.contractId) || { invoiced: 0, received: 0 };
@@ -201,8 +242,13 @@ const outstandingAt = (invoices: TrendMovement[], collections: TrendMovement[], 
     const value = contracts.get(movement.contractId);
     if (value) value.received += movement.amount;
   }
-  return [...contracts.values()].reduce((total, contract) => total + Math.max(contract.invoiced - contract.received, 0), 0);
+  return contracts;
 };
+
+const outstandingAt = (invoices: TrendMovement[], collections: TrendMovement[], cutoff: Date) => (
+  [...contractBalancesAt(invoices, collections, cutoff).values()]
+    .reduce((total, contract) => total + Math.max(contract.invoiced - contract.received, 0), 0)
+);
 
 export const buildOutstandingContractSnapshots = ({ invoices, payments, auditEvents, cutoff }: {
   invoices: TrendInvoice[];
@@ -212,29 +258,25 @@ export const buildOutstandingContractSnapshots = ({ invoices, payments, auditEve
 }) => {
   const invoiceEvents = invoiceMovements(invoices, auditEvents);
   const collectionEvents = collectionMovements(payments, auditEvents);
-  const contracts = new Map<string, { invoicedRial: number; receivedRial: number }>();
-  for (const movement of invoiceEvents.filter((item) => throughCutoff(item, cutoff))) {
-    const value = contracts.get(movement.contractId) || { invoicedRial: 0, receivedRial: 0 };
-    value.invoicedRial += movement.amount;
-    contracts.set(movement.contractId, value);
-  }
-  for (const movement of collectionEvents.filter((item) => throughCutoff(item, cutoff))) {
-    const value = contracts.get(movement.contractId);
-    if (value) value.receivedRial += movement.amount;
-  }
-  return [...contracts.entries()].flatMap(([contractId, value]) => {
-    const outstandingRial = Math.max(value.invoicedRial - value.receivedRial, 0);
-    return outstandingRial > 0 ? [{ contractId, ...value, outstandingRial }] : [];
+  return [...contractBalancesAt(invoiceEvents, collectionEvents, cutoff).entries()].flatMap(([contractId, value]) => {
+    const outstandingRial = Math.max(value.invoiced - value.received, 0);
+    return outstandingRial > 0 ? [{
+      contractId,
+      invoicedRial: value.invoiced,
+      receivedRial: value.received,
+      outstandingRial,
+    }] : [];
   });
 };
 
 const destinationsFor = (period: FinancialTrendPeriod) => {
   const periodQuery = `period=${encodeURIComponent(period.monthKey)}`;
   const dateQuery = period.day ? `&date=${encodeURIComponent(period.key)}` : '';
+  const cutoffQuery = `&cutoff=${encodeURIComponent(period.endsAt.toISOString())}`;
   return {
-    invoiced: `/dashboard/accounting/invoice-candidates?view=invoiced&${periodQuery}${dateQuery}`,
-    received: `/dashboard/accounting/payments?view=received&${periodQuery}${dateQuery}`,
-    outstanding: `/dashboard/accounting/receivables?view=outstanding&${periodQuery}${dateQuery}`,
+    invoiced: `/dashboard/accounting/invoice-candidates?view=invoiced&${periodQuery}${dateQuery}${cutoffQuery}`,
+    received: `/dashboard/accounting/payments?view=received&${periodQuery}${dateQuery}${cutoffQuery}`,
+    outstanding: `/dashboard/accounting/receivables?view=outstanding&${periodQuery}${dateQuery}${cutoffQuery}`,
   };
 };
 

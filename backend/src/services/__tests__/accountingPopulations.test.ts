@@ -142,6 +142,16 @@ test('financial drilldowns can narrow a Jalali month to one exact Tehran civil d
   assert.equal(outstandingPopulation.outstandingAt?.toISOString(), '2026-08-01T20:30:00.000Z');
 });
 
+test('financial drilldowns cap current-period populations at the represented instant', () => {
+  const cutoff = '2026-08-08T12:00:00.000Z';
+  const invoice = resolveInvoiceCandidatePopulation({ view: 'invoiced', period: '1405-05', cutoff });
+  const payment = resolvePaymentPopulation({ view: 'received', period: '1405-05', cutoff });
+  const outstanding = resolveReceivablePopulation({ view: 'outstanding', period: '1405-05', cutoff });
+  assert.equal(invoice.periodRange?.lt.toISOString(), cutoff);
+  assert.equal(payment.periodRange?.lt.toISOString(), cutoff);
+  assert.equal(outstanding.outstandingAt?.toISOString(), cutoff);
+});
+
 test('manual Gregorian dates resolve to half-open Tehran civil days', () => {
   const range = resolveTehranDayRange('2026-08-08');
 

@@ -121,10 +121,11 @@ test('invoiced period is canonical only for the invoiced semantic view', () => {
 });
 
 test('daily trend drilldowns retain an exact Jalali day only inside their represented period', () => {
-  const invoice = canonicalizeInvoiceCandidatesQuery(new URLSearchParams('view=invoiced&period=1405-05&date=1405-05-10'));
+  const cutoff = '2026-08-01T12%3A00%3A00.000Z';
+  const invoice = canonicalizeInvoiceCandidatesQuery(new URLSearchParams(`view=invoiced&period=1405-05&date=1405-05-10&cutoff=${cutoff}`));
   const received = canonicalizePaymentsQuery(new URLSearchParams('view=received&period=1405-05&date=1405-05-10'));
   const outstanding = canonicalizeReceivablesQuery(new URLSearchParams('view=outstanding&period=1405-05&date=1405-05-10'));
-  assert.equal(invoice.params.toString(), 'view=invoiced&period=1405-05&date=1405-05-10');
+  assert.equal(invoice.params.toString(), `view=invoiced&period=1405-05&date=1405-05-10&cutoff=${cutoff}`);
   assert.equal(received.params.toString(), 'view=received&period=1405-05&date=1405-05-10');
   assert.equal(outstanding.params.toString(), 'view=outstanding&period=1405-05&date=1405-05-10');
   assert.equal(canonicalizePaymentsQuery(new URLSearchParams('view=received&period=1405-05&date=1405-04-10')).state.date, '');

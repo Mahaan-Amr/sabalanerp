@@ -64,11 +64,11 @@ const DEADLINE_TYPES = new Set(['all', 'receivable', 'check']);
 
 const ACCOUNTING_DASHBOARD_KEYS = ['due', 'deadlineType'] as const;
 const CONTRACT_KEYS = ['view', 'search', 'status', 'sourceStatus', 'dateFrom', 'dateTo', 'page', 'pageSize', 'sort'] as const;
-const INVOICE_KEYS = ['view', 'search', 'status', 'period', 'date', 'page', 'pageSize'] as const;
+const INVOICE_KEYS = ['view', 'search', 'status', 'period', 'date', 'cutoff', 'page', 'pageSize'] as const;
 const STATUS_DRILLDOWN_KEYS = ['view', 'search', 'status', 'page', 'pageSize'] as const;
 const AUDIT_KEYS = ['search', 'action', 'page', 'pageSize'] as const;
 const PERFORMANCE_KEYS = ['view', 'search', 'dateFrom', 'dateTo', 'page', 'pageSize'] as const;
-const COLLECTION_KEYS = ['view', 'search', 'status', 'due', 'period', 'date', 'recordId', 'page', 'pageSize'] as const;
+const COLLECTION_KEYS = ['view', 'search', 'status', 'due', 'period', 'date', 'cutoff', 'recordId', 'page', 'pageSize'] as const;
 
 export type ContractsQueryState = {
   view: 'reviewable' | null;
@@ -86,6 +86,7 @@ export type InvoiceCandidatesQueryState = {
   status: string;
   period: string;
   date: string;
+  cutoff: string;
   page: number;
 };
 
@@ -117,6 +118,7 @@ export type ReceivablesQueryState = {
   due: string;
   period: string;
   date: string;
+  cutoff: string;
   recordId: string;
   page: number;
 };
@@ -128,6 +130,7 @@ export type PaymentsQueryState = {
   due: string;
   period: string;
   date: string;
+  cutoff: string;
   recordId: string;
   page: number;
 };
@@ -189,6 +192,12 @@ const isJalaliDayInPeriod = (value: string, period: string) => {
   return month <= 6 ? day <= 31 : day <= 30;
 };
 
+const normalizedCutoff = (source: URLSearchParams, period: string) => {
+  const value = source.get('cutoff') || '';
+  const date = new Date(value);
+  return period && !Number.isNaN(date.getTime()) && date.toISOString() === value ? value : '';
+};
+
 export const canonicalizeContractsQuery = (
   source: URLSearchParams,
 ): CanonicalQuery<ContractsQueryState> => {
@@ -232,6 +241,7 @@ export const canonicalizeInvoiceCandidatesQuery = (
   const period = view === 'invoiced' && isPeriodKey(rawPeriod) ? rawPeriod : '';
   const rawDate = source.get('date') || '';
   const date = period && isJalaliDayInPeriod(rawDate, period) ? rawDate : '';
+  const cutoff = normalizedCutoff(source, period);
   const page = normalizedPage(source);
 
   if (view) params.set('view', view);
@@ -239,9 +249,10 @@ export const canonicalizeInvoiceCandidatesQuery = (
   if (status !== 'ALL') params.set('status', status);
   if (period) params.set('period', period);
   if (date) params.set('date', date);
+  if (cutoff) params.set('cutoff', cutoff);
   if (page > 1) params.set('page', String(page));
 
-  return { state: { view, search, status, period, date, page }, params };
+  return { state: { view, search, status, period, date, cutoff, page }, params };
 };
 
 const canonicalizeStatusDrilldownQuery = <TView extends string>(
@@ -317,6 +328,7 @@ export const canonicalizeReceivablesQuery = (
   const period = view === 'outstanding' && isPeriodKey(rawPeriod) ? rawPeriod : '';
   const rawDate = source.get('date') || '';
   const date = period && isJalaliDayInPeriod(rawDate, period) ? rawDate : '';
+  const cutoff = normalizedCutoff(source, period);
   const recordId = (source.get('recordId') || '').trim();
   const page = normalizedPage(source);
 
@@ -325,10 +337,11 @@ export const canonicalizeReceivablesQuery = (
   if (due) params.set('due', due);
   if (period) params.set('period', period);
   if (date) params.set('date', date);
+  if (cutoff) params.set('cutoff', cutoff);
   if (recordId) params.set('recordId', recordId);
   if (status !== 'ALL') params.set('status', status);
   if (page > 1) params.set('page', String(page));
-  return { state: { view, search, status, due, period, date, recordId, page }, params };
+  return { state: { view, search, status, due, period, date, cutoff, recordId, page }, params };
 };
 
 export const canonicalizePaymentsQuery = (
@@ -348,6 +361,7 @@ export const canonicalizePaymentsQuery = (
   const period = view === 'received' && isPeriodKey(rawPeriod) ? rawPeriod : '';
   const rawDate = source.get('date') || '';
   const date = period && isJalaliDayInPeriod(rawDate, period) ? rawDate : '';
+  const cutoff = normalizedCutoff(source, period);
   const recordId = (source.get('recordId') || '').trim();
   const page = normalizedPage(source);
 
@@ -356,10 +370,11 @@ export const canonicalizePaymentsQuery = (
   if (due) params.set('due', due);
   if (period) params.set('period', period);
   if (date) params.set('date', date);
+  if (cutoff) params.set('cutoff', cutoff);
   if (recordId) params.set('recordId', recordId);
   if (status !== 'ALL') params.set('status', status);
   if (page > 1) params.set('page', String(page));
-  return { state: { view, search, status, due, period, date, recordId, page }, params };
+  return { state: { view, search, status, due, period, date, cutoff, recordId, page }, params };
 };
 
 const applyPatch = (source: URLSearchParams, patch: QueryPatch) => {

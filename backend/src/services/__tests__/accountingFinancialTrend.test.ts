@@ -80,7 +80,10 @@ test('legacy event fallback is exposed and prefers audit time before creation ti
     range: '1m', now,
     invoices: [{ id: 'legacy', contractId: 'c1', status: 'ISSUED', amount: 100, financiallyApprovedAt: new Date('2026-08-02T00:00:00Z'), systemInvoiceDate: null, createdAt: new Date('2026-08-04T00:00:00Z') }],
     payments: [],
-    auditEvents: [{ entityId: 'legacy', entityType: 'AccountingFinancialRecord', createdAt: new Date('2026-08-03T00:00:00Z') }],
+    auditEvents: [
+      { entityId: 'legacy', entityType: 'AccountingFinancialRecord', action: 'CREATE_INVOICE', createdAt: new Date('2026-08-01T00:00:00Z') },
+      { entityId: 'legacy', entityType: 'AccountingFinancialRecord', action: 'APPROVE_FINANCIAL_INVOICE', createdAt: new Date('2026-08-03T00:00:00Z') },
+    ],
   });
   const attributed = result.points.find((point) => point.invoicedRial === 100);
   assert.equal(attributed?.periodKey, '1405-05-12');
@@ -96,8 +99,33 @@ test('legacy collection fallback prefers its dedicated occurrence, then audit, t
       { id: 'dedicated', contractId: 'c1', method: 'CASH', status: 'RECEIVED', amount: 100, occurredAt: new Date('2026-08-02T00:00:00Z'), createdAt: new Date('2026-08-06T00:00:00Z') },
       { id: 'audited', contractId: 'c1', method: 'CARD', status: 'RECEIVED', amount: 50, occurredAt: null, createdAt: new Date('2026-08-06T00:00:00Z') },
     ],
-    auditEvents: [{ entityId: 'audited', entityType: 'AccountingPaymentStatus', createdAt: new Date('2026-08-03T00:00:00Z') }],
+    auditEvents: [{ entityId: 'audited', entityType: 'AccountingPaymentStatus', action: 'REGISTER_RECEIPT', createdAt: new Date('2026-08-03T00:00:00Z') }],
   });
   assert.equal(result.points.find((point) => point.periodKey === '1405-05-11')?.receivedRial, 100);
   assert.equal(result.points.find((point) => point.periodKey === '1405-05-12')?.receivedRial, 50);
+});
+
+test('legacy void, reversed receipt, and bounced check replay both sides using event-specific audit fallbacks', () => {
+  const result = buildAccountingFinancialTrend({
+    range: '3m', now,
+    invoices: [{ id: 'void', contractId: 'c1', status: 'VOIDED', amount: 500, financiallyApprovedAt: new Date('2026-06-01T00:00:00Z'), systemInvoiceDate: new Date('2026-06-01T00:00:00Z'), voidedAt: null, createdAt: new Date('2026-06-01T00:00:00Z') }],
+    payments: [
+      { id: 'reversed', contractId: 'c1', method: 'CASH', status: 'REVERSED', amount: 100, createdAt: new Date('2026-06-02T00:00:00Z'), updatedAt: new Date('2026-07-02T00:00:00Z') },
+      { id: 'bounced', contractId: 'c1', method: 'CHECK', status: 'RECONCILED', checkStatus: 'BOUNCED', amount: 50, occurredAt: new Date('2026-07-03T00:00:00Z'), createdAt: new Date('2026-06-03T00:00:00Z') },
+    ],
+    auditEvents: [
+      { entityId: 'void', entityType: 'AccountingFinancialRecord', action: 'VOID_ACCOUNTING_RECORD', createdAt: new Date('2026-07-01T00:00:00Z') },
+      { entityId: 'reversed', entityType: 'AccountingPaymentStatus', action: 'REGISTER_RECEIPT', createdAt: new Date('2026-06-02T00:00:00Z') },
+      { entityId: 'bounced', entityType: 'AccountingPaymentStatus', action: 'UPDATE_CHECK_STATUS', afterState: { checkStatus: 'CLEARED' }, createdAt: new Date('2026-06-03T00:00:00Z') },
+    ],
+  });
+  assert.deepEqual(result.points.slice(0, 2).map((point) => [point.invoicedRial, point.receivedRial]), [[500, 150], [-500, -150]]);
+  assert.equal(result.hasLegacyFallback, true);
+});
+
+test('drilldowns carry the exact represented cutoff, including the in-progress current period', () => {
+  const result = buildAccountingFinancialTrend({ range: '1m', now, invoices: [], payments: [], auditEvents: [] });
+  const destination = result.points.at(-1)?.destinations.outstanding || '';
+  assert.match(destination, /date=1405-05-17/);
+  assert.match(destination, /cutoff=2026-08-08T12%3A00%3A00.000Z/);
 });

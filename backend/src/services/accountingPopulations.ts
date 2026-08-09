@@ -39,6 +39,7 @@ type InvoiceCandidatePopulationQuery = {
   status?: unknown;
   period?: unknown;
   date?: unknown;
+  cutoff?: unknown;
 };
 
 type InvoiceCandidateRecord = {
@@ -355,6 +356,13 @@ export const resolveTehranJalaliDayRange = (value: unknown): DateRange | null =>
   };
 };
 
+const capRangeAt = (range: DateRange | null, value: unknown): DateRange | null => {
+  if (!range || typeof value !== 'string') return range;
+  const cutoff = new Date(value);
+  if (Number.isNaN(cutoff.getTime()) || cutoff <= range.gte) return range;
+  return { ...range, lt: cutoff < range.lt ? cutoff : range.lt };
+};
+
 export const resolveInvoiceCandidatePopulation = (
   query: InvoiceCandidatePopulationQuery = {},
 ): InvoiceCandidatePopulation => {
@@ -370,7 +378,10 @@ export const resolveInvoiceCandidatePopulation = (
   if (query.view === 'invoiced') {
     return {
       invoiced: true,
-      periodRange: resolveTehranJalaliDayRange(query.date) || resolveTehranPeriodRange(query.period) || undefined,
+      periodRange: capRangeAt(
+        resolveTehranJalaliDayRange(query.date) || resolveTehranPeriodRange(query.period),
+        query.cutoff,
+      ) || undefined,
     };
   }
 
@@ -539,6 +550,7 @@ type ReceivablePopulationQuery = {
   due?: unknown;
   period?: unknown;
   date?: unknown;
+  cutoff?: unknown;
 };
 
 export type ReceivablePopulation = {
@@ -565,7 +577,10 @@ export const resolveReceivablePopulation = (
       : undefined;
   const dueRange = resolveTehranDeadlineRange(query.due, now) || undefined;
   const periodRange = query.view === 'outstanding'
-    ? resolveTehranJalaliDayRange(query.date) || resolveTehranPeriodRange(query.period)
+    ? capRangeAt(
+        resolveTehranJalaliDayRange(query.date) || resolveTehranPeriodRange(query.period),
+        query.cutoff,
+      )
     : null;
   return { statuses, dueRange, outstandingAt: periodRange?.lt };
 };
@@ -600,6 +615,7 @@ type PaymentPopulationQuery = {
   due?: unknown;
   period?: unknown;
   date?: unknown;
+  cutoff?: unknown;
 };
 
 export type PaymentPopulation = {
@@ -650,7 +666,10 @@ export const resolvePaymentPopulation = (
     dueRange,
     received,
     periodRange: received
-      ? resolveTehranJalaliDayRange(query.date) || resolveTehranPeriodRange(query.period) || undefined
+      ? capRangeAt(
+          resolveTehranJalaliDayRange(query.date) || resolveTehranPeriodRange(query.period),
+          query.cutoff,
+        ) || undefined
       : undefined,
     empty: dueSoonConflict,
   };

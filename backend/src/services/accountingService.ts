@@ -1021,7 +1021,7 @@ export const getAccountingFinancialTrend = async (requestedRange: unknown, now =
     }),
     prisma.accountingAuditLog.findMany({
       where: { entityType: { in: ['AccountingFinancialRecord', 'AccountingPaymentStatus'] } },
-      select: { entityId: true, entityType: true, createdAt: true },
+      select: { entityId: true, entityType: true, action: true, beforeState: true, afterState: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     }),
   ]);
@@ -2319,6 +2319,7 @@ export const listFinancialRecords = async (query: any = {}) => {
       status: query.status,
       period: query.period,
       date: query.date,
+      cutoff: query.cutoff,
     });
     Object.assign(
       where,
@@ -2387,7 +2388,7 @@ export const listReceivables = async (query: any = {}) => {
           entityType: { in: ['AccountingFinancialRecord', 'AccountingPaymentStatus'] },
           ...(contractFilter ? { contractId: contractFilter } : {}),
         },
-        select: { entityId: true, entityType: true, createdAt: true },
+        select: { entityId: true, entityType: true, action: true, beforeState: true, afterState: true, createdAt: true },
       }),
     ]);
     const projections = buildOutstandingContractSnapshots({

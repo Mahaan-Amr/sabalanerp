@@ -72,7 +72,8 @@ export class PhysicalGateExitService {
       admissionSnapshot: authorization.waybill.candidate.allocationRevision.queueTurn.admissionSnapshot }));
   }
 
-  async recordExit(input: { authorizationId: string; actorId: string; effectiveAuthority: unknown }) {
+  async recordExit(input: { authorizationId: string; actorId: string; effectiveAuthority: unknown; idempotencyKey?: string; reason?: string; effectiveAt?: Date }) {
+    const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey'); const reason = required(input.reason, 'reason');
     const authorizationId = required(input.authorizationId, 'authorizationId');
     const actorId = required(input.actorId, 'actorId');
     const initial = await this.prisma.dispatchExitAuthorization.findUnique({ where: { id: authorizationId }, include: { physicalExit: { include: { smsIntent: true } }, waybill: { include: { candidate: { include: { allocationRevision: true } } } } } });
@@ -160,6 +161,7 @@ export class PhysicalGateExitService {
           dispatchNumber: waybill.number.toString(), status: 'NEEDS_ATTENTION', detail: 'No confirmed buyer notification phone was snapshotted.' }) } });
       await appendAudit(tx, { aggregateType: 'GUARD_PHYSICAL_EXIT', aggregateId: exitId, eventType: 'PHYSICAL_EXIT_RECORDED',
         payload: { workspace: 'security', effectiveAuthority: input.effectiveAuthority,
+          reason, idempotencyKey, effectiveAt: (input.effectiveAt ?? at).toISOString(),
           authorizationId: authorization.id, authorizationIntegrityHash: authorization.integrityHash,
           waybillId: waybill.id, waybillIntegrityHash: waybill.integrityHash, queueTurnId: turn.id, queueTurnIntegrityHash: turn.integrityHash,
           allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash, sessionId: authorization.sessionId,

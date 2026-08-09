@@ -202,6 +202,8 @@ router.post('/dispatch-candidates/:id/decision', accountingDispatchEdit, async (
     const data = await decideAccountingDispatchCandidate(prisma, {
       candidateId: req.params.id, action: req.body.action, reason: req.body.reason,
       idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user!.id,
+      effectiveAuthority: { actorRole: req.user!.role, workspace: 'accounting', workspacePermission: 'EDIT',
+        feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE, featurePermission: 'MANAGE' },
     });
     return res.json({ success: true, data });
   } catch (error) { return dispatchError(res, error); }

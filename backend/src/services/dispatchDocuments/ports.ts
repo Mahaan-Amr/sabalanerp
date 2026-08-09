@@ -78,6 +78,7 @@ export interface DispatchDocumentRepository {
     idempotencyKey: string;
     actorId: string;
     correlationId: string;
+    authority?: unknown;
     intentFingerprint: string;
   }): Promise<CandidateDecisionResult>;
   recordEvidenceConflict(input: { candidateId: string; reason: string; idempotencyKey: string;

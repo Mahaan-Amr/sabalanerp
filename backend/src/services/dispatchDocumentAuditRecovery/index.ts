@@ -320,7 +320,8 @@ export type DispatchArtifactAuditEvent = {
   detail: Readonly<Record<string, unknown>>;
 };
 
-type AuditPort = { append(event: DispatchArtifactAuditEvent): Promise<void>; hasCompletedRestoration?(artifactId: string, idempotencyKey: string): Promise<boolean> };
+type AuditPort = { append(event: DispatchArtifactAuditEvent): Promise<void>; hasCompletedRestoration?(artifactId: string, idempotencyKey: string): Promise<boolean>;
+  hasCompletedCleanup?(storageKey: string, idempotencyKey: string): Promise<boolean> };
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
 export const reconcileDispatchDocumentArtifacts = async (input: {
@@ -499,6 +500,10 @@ export const cleanupQuarantinedDispatchDocumentOrphan = async (input: {
   audit: AuditPort;
 }) => {
   const occurredAt = input.now.toISOString();
+  if (await input.audit.hasCompletedCleanup?.(input.storageKey, input.idempotencyKey)) {
+    await input.storage.finalizeCleanup(input.storageKey);
+    return { status: 'REMOVED' as const, storageKey: input.storageKey, removedAt: occurredAt, resumed: true };
+  }
   const referenced = await input.repository.isReferenced(input.storageKey);
   const quarantineEvidence = await input.repository.readQuarantineEvidence(input.storageKey);
   const elapsed = quarantineEvidence ? input.now.getTime() - new Date(quarantineEvidence.quarantinedAt).getTime() : Number.NaN;

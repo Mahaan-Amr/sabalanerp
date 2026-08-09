@@ -50,7 +50,8 @@ router.get('/exit-desk/authorizations', protect, guardView, async (_req: Workspa
 router.post('/exit-desk/authorizations/:authorizationId/exit', protect, guardEdit, async (req: WorkspaceRequest, res) => {
   try { return res.status(201).json({ success: true, data: await physicalExitService.recordExit({ authorizationId: req.params.authorizationId,
     actorId: req.user!.id, effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace,
-      workspacePermission: req.workspacePermission } }) }); }
+      workspacePermission: req.workspacePermission }, idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''),
+    reason: String(req.body.reason || ''), effectiveAt: req.body.effectiveAt ? new Date(req.body.effectiveAt) : undefined }) }); }
   catch (error) { return fail(res, error, 'Record Guard physical exit'); }
 });
 

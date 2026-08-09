@@ -22,6 +22,8 @@ import {
   verifyProductionDispatchAuditChains,
   createPrismaDispatchReplayTruthVerifier,
   validatePersistedDocumentTransition,
+  validatesRetainedPrimaryPair,
+  validatesTerminalVoidTransition,
 } from '../dispatchDocumentAuditRecovery';
 import { recoveryEngineInternals, sanitizedDispatchArtifactMetadata } from '../systemRecoveryEngine';
 import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
@@ -186,6 +188,24 @@ test('replacement replay follows the predecessor audit and does not require succ
   assert.equal(validatePersistedDocumentTransition({ waybill, predecessor, primarySourceHash: 'a'.repeat(64),
     primaryArtifactIds: ['new-waybill', 'new-statement'], command, audit }), null);
   assert.equal(validatePersistedDocumentTransition({ waybill, predecessor, primarySourceHash: 'a'.repeat(64), primaryArtifactIds: [], command: undefined, audit }), 'LEGACY_UNRECONCILED');
+  const retained = [{ kind: 'WAYBILL', sourceIntegrityHash: 'a'.repeat(64), sha256: '1'.repeat(64) },
+    { kind: 'STATEMENT', sourceIntegrityHash: 'a'.repeat(64), sha256: '2'.repeat(64) }];
+  assert.equal(validatesRetainedPrimaryPair(retained, 'a'.repeat(64)), true);
+  assert.equal(validatesRetainedPrimaryPair(retained.slice(0, 1), 'a'.repeat(64)), false);
+  assert.equal(validatesRetainedPrimaryPair([{ ...retained[0], sourceIntegrityHash: 'b'.repeat(64) }, retained[1]], 'a'.repeat(64)), false);
+});
+
+test('terminal void replay requires exact writer command and audit metadata', () => {
+  const at = new Date('2026-08-20T10:00:00.000Z');
+  const waybill = { id: 'waybill-void', integrityHash: 'a'.repeat(64), voidedAt: at, voidedBy: 'accountant-1', voidReason: 'customer correction' };
+  const command = { scope: 'WAYBILL', scopeId: waybill.id, command: 'VOID', status: 'SUCCEEDED', waybillId: waybill.id,
+    actorId: 'accountant-1', correlationId: 'void-correlation', idempotencyKey: 'void-1', completedAt: at };
+  const audit = { eventType: 'DOCUMENT_BUNDLE_VOIDED', actorId: 'accountant-1', recordedAt: at,
+    payload: { reason: 'customer correction', authority: { workspace: 'accounting' }, correlationId: 'void-correlation',
+      idempotencyKey: 'void-1', waybillIntegrityHash: 'a'.repeat(64), before: { status: 'ISSUED' }, after: { status: 'VOIDED' } } };
+  assert.equal(validatesTerminalVoidTransition({ waybill, command, audit }), true);
+  assert.equal(validatesTerminalVoidTransition({ waybill, command,
+    audit: { ...audit, payload: { ...audit.payload, idempotencyKey: 'tampered' } } }), false);
 });
 
 test('mandatory Prisma truth verifier accepts only immutable writer-owned pricing/event/provenance sources', async () => {
@@ -384,6 +404,16 @@ test('quarantine and cleanup compensate filesystem mutations when durable comple
     audit: { append: async () => { appendCount += 1; if (appendCount === 2) throw new Error('audit unavailable'); } },
   }), /audit unavailable/);
   assert.deepEqual(movements, ['stage', 'restore']);
+});
+
+test('cleanup retry resumes finalization after durable completion without staging twice', async () => {
+  let staged = 0; let finalized = 0;
+  const result = await cleanupQuarantinedDispatchDocumentOrphan({ storageKey: 'staging/resume.pdf', actorId: 'support-1', reason: 'resume cleanup',
+    correlationId: 'cleanup-resume', idempotencyKey: 'cleanup-resume-1', authority, now: new Date('2026-08-20T00:00:00.000Z'),
+    repository: { isReferenced: async () => false, readQuarantineEvidence: async () => null },
+    storage: { stageCleanup: async () => { staged += 1; }, restoreStagedCleanup: async () => {}, finalizeCleanup: async () => { finalized += 1; } },
+    audit: { append: async () => {}, hasCompletedCleanup: async () => true } });
+  assert.equal(result.status, 'REMOVED'); assert.equal(staged, 0); assert.equal(finalized, 1);
 });
 
 test('compensation failure still records a terminal unresolved incident', async () => {

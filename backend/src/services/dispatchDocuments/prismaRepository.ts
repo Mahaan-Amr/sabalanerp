@@ -197,9 +197,16 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       await tx.accountingDispatchWorkItem.update({ where: { candidateId: candidate.id }, data: { status: 'COMPLETED', completedAt: issuedAt } });
       const result = { candidateId: candidate.id, status: 'ACCEPTED' as const,
         waybill: { id: waybill.id, number: waybill.number.toString(), status: 'ISSUED' as const, issuedAt: waybill.issuedAt.toISOString(), replacesWaybillId: null } };
-      await tx.dispatchDocumentCommandResult.create({ data: { scope: 'CANDIDATE', scopeId: candidate.id,
+      await tx.dispatchDocumentCommandResult.create({ data: { waybillId: waybill.id, scope: 'CANDIDATE', scopeId: candidate.id,
         idempotencyKey: input.idempotencyKey, command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED', result: storedCommandResult(result, input.intentFingerprint),
         actorId: input.actorId, correlationId: input.correlationId, completedAt: issuedAt } });
+      await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id,
+        eventType: 'CANDIDATE_ACCEPTED_FOR_ISSUANCE', payload: { reason: 'Accepted for atomic dispatch document issuance',
+          authority: input.authority, correlationId: input.correlationId, idempotencyKey: input.idempotencyKey,
+          before: { status: 'PENDING' }, after: { status: 'ACCEPTED', waybillId: waybill.id },
+          allocationRevisionId: input.allocationRevisionId,
+          allocationIntegrityHash: (input.waybillSnapshot as any)?.documentProvenance?.allocationIntegrityHash,
+          primarySourceHash: input.expectedSourceIntegrityHash, primaryArtifactIds: input.artifacts.map(item => item.id) }, actorId: input.actorId, at: issuedAt });
       await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id, eventType: 'PRIMARY_BUNDLE_ISSUED',
         payload: { candidateId: candidate.id, allocationRevisionId: input.allocationRevisionId, artifactIds: input.artifacts.map(item => item.id),
           sourceIntegrityHash: input.expectedSourceIntegrityHash, idempotencyKey: input.idempotencyKey, correlationId: input.correlationId }, actorId: input.actorId, at: issuedAt });
@@ -270,7 +277,8 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
         idempotencyKey: input.idempotencyKey, command: 'VOID', status: 'SUCCEEDED', result: storedCommandResult(result, input.intentFingerprint), actorId: input.actorId,
         correlationId: input.correlationId, completedAt: at } });
       await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id, eventType: 'DOCUMENT_BUNDLE_VOIDED',
-        payload: { reason: input.reason, authority: input.authority, correlationId: input.correlationId, idempotencyKey: input.idempotencyKey }, actorId: input.actorId, at });
+        payload: { reason: input.reason, authority: input.authority, correlationId: input.correlationId, idempotencyKey: input.idempotencyKey,
+          waybillIntegrityHash: waybill.integrityHash, before: { status: 'ISSUED' }, after: { status: 'VOIDED' } }, actorId: input.actorId, at });
       return result;
     });
   }

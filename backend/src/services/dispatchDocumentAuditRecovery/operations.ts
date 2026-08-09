@@ -118,7 +118,7 @@ export const createDispatchDocumentFilesystem = (input: {
     restoreQuarantined: (storageKey: string) => move(quarantineRoot, artifactRoot, storageKey),
     stageCleanup: (storageKey: string) => move(quarantineRoot, cleanupStagingRoot, storageKey),
     restoreStagedCleanup: (storageKey: string) => move(cleanupStagingRoot, quarantineRoot, storageKey),
-    finalizeCleanup: (storageKey: string) => fs.promises.rm(safePath(cleanupStagingRoot, storageKey), { force: false }),
+    finalizeCleanup: (storageKey: string) => fs.promises.rm(safePath(cleanupStagingRoot, storageKey), { force: true }),
   };
 };
 
@@ -156,6 +156,10 @@ const durableAudit = (prisma: PrismaClient) => ({
     }).then(() => undefined),
   hasCompletedRestoration: async (artifactId: string, idempotencyKey: string) => Boolean(await prisma.dispatchLifecycleAudit.findFirst({
     where: { aggregateType: 'DISPATCH_DOCUMENT_RECOVERY', aggregateId: artifactId, eventType: 'RESTORATION_COMPLETED',
+      payload: { path: ['idempotencyKey'], equals: idempotencyKey } }, select: { id: true },
+  })),
+  hasCompletedCleanup: async (storageKey: string, idempotencyKey: string) => Boolean(await prisma.dispatchLifecycleAudit.findFirst({
+    where: { aggregateType: 'DISPATCH_DOCUMENT_RECOVERY', aggregateId: dispatchRecoveryIntegrityHash({ storageKey }), eventType: 'CLEANUP_COMPLETED',
       payload: { path: ['idempotencyKey'], equals: idempotencyKey } }, select: { id: true },
   })),
 });
@@ -241,6 +245,24 @@ export const validatePersistedDocumentTransition = (input: {
     || payload.idempotencyKey !== command.idempotencyKey) return 'INCOMPLETE_AUDIT_METADATA' as const;
   return null;
 };
+export const validatesRetainedPrimaryPair = (artifacts: readonly { kind: string; sourceIntegrityHash: string; sha256: string }[], sourceHash: string | null) =>
+  Boolean(sourceHash && artifacts.length === 2 && ['WAYBILL', 'STATEMENT'].every(kind => artifacts.filter(item => item.kind === kind).length === 1)
+    && artifacts.every(item => item.sourceIntegrityHash === sourceHash && /^[a-f0-9]{64}$/.test(item.sha256)));
+export const validatesTerminalVoidTransition = (input: {
+  waybill: { id: string; integrityHash: string; voidedAt: Date | null; voidedBy: string | null; voidReason: string | null };
+  command?: { scope: string; scopeId: string; command: string; status: string; waybillId: string | null; actorId: string;
+    correlationId: string; idempotencyKey: string; completedAt: Date | null };
+  audit?: { eventType: string; actorId: string; recordedAt: Date; payload: unknown };
+}) => {
+  const { waybill, command, audit } = input; const payload = audit?.payload as Record<string, any> | undefined;
+  return Boolean(command && audit && command.scope === 'WAYBILL' && command.scopeId === waybill.id && command.command === 'VOID'
+    && command.status === 'SUCCEEDED' && command.waybillId === waybill.id && command.actorId === waybill.voidedBy
+    && command.completedAt?.toISOString() === waybill.voidedAt?.toISOString() && audit.eventType === 'DOCUMENT_BUNDLE_VOIDED'
+    && audit.actorId === waybill.voidedBy && audit.recordedAt.toISOString() === waybill.voidedAt?.toISOString()
+    && payload?.reason === waybill.voidReason && payload?.authority && payload?.correlationId === command.correlationId
+    && payload?.idempotencyKey === command.idempotencyKey && payload?.waybillIntegrityHash === waybill.integrityHash
+    && payload?.before?.status === 'ISSUED' && payload?.after?.status === 'VOIDED');
+};
 
 export const createPrismaDispatchReplayTruthVerifier = (prisma: PrismaClient): DispatchReplayTruthVerifier => ({
   verifyPrimarySource: input => prisma.$transaction(async tx => {
@@ -282,9 +304,11 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       lines: true,
       pricingReferences: { include: { pricingVersion: { include: { rows: { orderBy: { ordinal: 'asc' } } } } } },
       pricedAllocationEvents: true,
+      predecessorRevision: { include: { lines: true, candidate: true } },
     } } } },
     documentArtifacts: true,
-    replacesWaybill: { include: { replacementWaybill: { select: { id: true } } } },
+    replacesWaybill: { include: { replacementWaybill: { select: { id: true } }, documentArtifacts: true } },
+    replacementWaybill: { select: { id: true } },
     printHandoffs: { include: { items: true } },
     physicalExit: true,
     dispatchCorrections: { include: { lines: true, statementAdjustment: { include: { artifact: true } } } },
@@ -364,9 +388,12 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
   const primarySourceHash = typeof provenance?.sourceIntegrityHash === 'string' ? provenance.sourceIntegrityHash : null;
   if (waybill.replacesWaybill) {
     const predecessorProvenance = ((waybill.replacesWaybill.snapshot as Record<string, any>)?.documentProvenance ?? {}) as Record<string, any>;
+    const predecessorPrimary = waybill.replacesWaybill.documentArtifacts.filter(item => !item.statementAdjustmentId
+      && (item.kind === 'WAYBILL' || item.kind === 'STATEMENT'));
     if (predecessorProvenance.sourceIntegrityHash !== primarySourceHash
       || predecessorProvenance.allocationIntegrityHash !== provenance?.allocationIntegrityHash
       || JSON.stringify(predecessorProvenance.sourceVersionIdentities) !== JSON.stringify(provenance?.sourceVersionIdentities)
+      || !validatesRetainedPrimaryPair(predecessorPrimary, primarySourceHash)
       || waybill.replacesWaybill.replacementWaybill?.id !== waybill.id) issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: waybill.id,
         detail: 'Replacement and predecessor do not share one immutable source/snapshot identity or exactly-one successor.' });
   }
@@ -452,6 +479,13 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
         primarySourceHash, primaryArtifactIds: primaryArtifacts.map(artifact => artifact.id), command: issuanceCommand, audit: issued });
       if (transitionIssue) issues.push({ code: transitionIssue, subjectId: waybill.id,
         detail: 'Document transition lacks exact source/replacement/actor/time/reason/correlation/idempotency binding.' });
+      if (waybill.status === 'VOIDED' && !waybill.replacementWaybill && !waybill.replacesWaybillId) {
+        const voidCommand = commands.find(command => command.scope === 'WAYBILL' && command.scopeId === waybill.id
+          && command.command === 'VOID' && command.status === 'SUCCEEDED' && command.waybillId === waybill.id);
+        const voidAudit = rows.find(row => row.eventType === 'DOCUMENT_BUNDLE_VOIDED');
+        if (!validatesTerminalVoidTransition({ waybill, command: voidCommand, audit: voidAudit })) issues.push({ code: voidAudit ? 'INCOMPLETE_AUDIT_METADATA' : 'LEGACY_UNRECONCILED',
+          subjectId: waybill.id, detail: 'Terminal void lacks exact command/audit/state metadata.' });
+      }
       for (const handoff of waybill.printHandoffs) if (!rows.some(row => {
         const handoffPayload = row.payload as Record<string, any>; return row.eventType === 'PRINT_BYTES_HANDED_OFF' && handoffPayload.handoffId === handoff.id
           && handoffPayload.correlationId === handoff.correlationId && Boolean(handoffPayload.operationIdempotencyKey);
@@ -461,12 +495,41 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       const finalized = rows.find(row => contains(row.payload, revision.integrityHash));
       if (!finalized || revision.pricingReferences.some(reference => !contains(finalized.payload, reference.pricingVersionId))
         || revision.pricedAllocationEvents.some(event => !contains(finalized.payload, event.integrityHash))) issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: revision.id, detail: 'Allocation parent audit does not bind every pricing version and priced-event hash.' });
+      if (revision.predecessorRevisionId) {
+        const successorAudit = rows.find(row => row.eventType === 'SUCCESSOR_ALLOCATION_FINALIZED'); const successorPayload = successorAudit?.payload as Record<string, any> | undefined;
+        const snapshot = revision.snapshot as Record<string, any>; const predecessor = revision.predecessorRevision;
+        const stableLines = (lines: typeof revision.lines) => lines.map(line => [line.sourceContractId, line.sourceContractItemId,
+          line.productRowId, line.unit, line.quantity.toFixed(3)]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+        if (!predecessor || snapshot?.predecessorRevisionId !== predecessor.id || !successorAudit
+          || successorPayload?.predecessorRevisionId !== predecessor.id || successorAudit.actorId !== revision.finalizedBy
+          || successorAudit.recordedAt.toISOString() !== revision.finalizedAt.toISOString()
+          || (successorPayload?.stalePricingTransfer === true && (predecessor.candidate?.status !== 'STALE_REQUIRES_SUCCESSOR'
+            || JSON.stringify(stableLines(revision.lines)) !== JSON.stringify(stableLines(predecessor.lines))))) {
+          issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: revision.id,
+            detail: 'Successor snapshot/audit does not prove predecessor identity and exact stale reservation transfer.' });
+        }
+      }
     }
     if (expected.aggregateType === 'ACCOUNTING_DISPATCH_CANDIDATE') {
       const created = rows.find(row => row.eventType === 'CANDIDATE_CREATED'); const payload = created?.payload as Record<string, any> | undefined;
       if (!created || payload?.allocationRevisionId !== revision.id || created.actorId !== revision.finalizedBy
         || created.recordedAt.toISOString() !== revision.finalizedAt.toISOString()) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: waybill.candidate.id,
           detail: 'Candidate creation audit does not bind allocation finalization actor/time.' });
+      const accepted = rows.find(row => row.eventType === 'CANDIDATE_ACCEPTED_FOR_ISSUANCE'); const acceptance = accepted?.payload as Record<string, any> | undefined;
+      const acceptanceAuthority = acceptance?.authority as Record<string, unknown> | undefined;
+      if (!accepted || !issuanceCommand || accepted.actorId !== waybill.candidate.dispositionBy
+        || accepted.recordedAt.toISOString() !== waybill.candidate.dispositionAt?.toISOString()
+        || !acceptance?.reason || acceptanceAuthority?.workspace !== 'accounting' || acceptanceAuthority?.workspacePermission !== 'EDIT'
+        || acceptanceAuthority?.featurePermission !== 'MANAGE' || !acceptanceAuthority?.actorRole || !acceptanceAuthority?.feature
+        || acceptance?.correlationId !== issuanceCommand.correlationId
+        || acceptance?.idempotencyKey !== issuanceCommand.idempotencyKey || acceptance?.before?.status !== 'PENDING'
+        || acceptance?.after?.status !== 'ACCEPTED' || acceptance?.after?.waybillId !== waybill.id
+        || acceptance?.allocationRevisionId !== revision.id || acceptance?.allocationIntegrityHash !== revision.integrityHash
+        || acceptance?.primarySourceHash !== primarySourceHash
+        || JSON.stringify(acceptance?.primaryArtifactIds) !== JSON.stringify(primaryArtifacts.map(item => item.id))) {
+        issues.push({ code: accepted ? 'INCOMPLETE_AUDIT_METADATA' : 'LEGACY_UNRECONCILED', subjectId: waybill.candidate.id,
+          detail: 'Accounting acceptance lacks exact decision/command/authority/source/before-after evidence.' });
+      }
     }
     if (expected.aggregateType === 'APPROVED_PRICING_VERSION') {
       const version = revision.pricingReferences.find(reference => reference.pricingVersionId === expected.aggregateId)?.pricingVersion;
@@ -508,9 +571,15 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     }
     if (expected.aggregateType === 'GUARD_PHYSICAL_EXIT') {
       const exitAudit = rows.find(row => row.eventType === 'PHYSICAL_EXIT_RECORDED'); const payload = exitAudit?.payload as Record<string, any> | undefined;
+      const exitAuthority = payload?.effectiveAuthority as Record<string, unknown> | undefined;
       if (!exitAudit || payload?.waybillId !== waybill.id || payload?.allocationRevisionId !== revision.id
-        || !payload?.effectiveAuthority || !payload?.workspace || !payload?.sessionId || !payload?.correlationId
-        || !payload?.before || !payload?.after || exitAudit.actorId !== waybill.physicalExit?.recordedBy
+        || exitAuthority?.workspace !== 'security' || exitAuthority?.workspacePermission !== 'EDIT' || !exitAuthority?.actorRole
+        || payload?.workspace !== 'security' || !payload?.sessionId || !payload?.correlationId
+        || !payload?.reason || !payload?.idempotencyKey || !payload?.effectiveAt || !payload?.before || !payload?.after
+        || payload?.waybillIntegrityHash !== waybill.integrityHash || payload?.allocationIntegrityHash !== revision.integrityHash
+        || payload?.before?.authorization !== 'ACTIVE' || payload?.before?.waybill !== 'ISSUED'
+        || payload?.after?.authorization !== 'CONSUMED' || payload?.after?.waybill !== 'EXIT_RECORDED'
+        || exitAudit.actorId !== waybill.physicalExit?.recordedBy
         || exitAudit.recordedAt.toISOString() !== waybill.physicalExit?.recordedAt.toISOString()) {
         issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: expected.aggregateId,
           detail: 'Guard exit audit lacks exact actor/time/authority/session/correlation/source/before-after binding.' });

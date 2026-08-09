@@ -653,10 +653,10 @@ const publicCandidateResult = (candidate: any, waybill?: any) => ({
 });
 
 export const decideAccountingDispatchCandidate = async (prisma: Database, input: {
-  candidateId: string; action: 'ACCEPT' | 'REJECT' | 'RETURN'; reason?: string; idempotencyKey: string; actorId: string;
+  candidateId: string; action: 'ACCEPT' | 'REJECT' | 'RETURN'; reason?: string; idempotencyKey: string; actorId: string; effectiveAuthority?: unknown;
 }) => {
   if (await candidateRequiresAtomicDocuments(prisma, input.candidateId)) {
-    return requiredDispatchDocumentsCommands().decideCandidate(input);
+    return requiredDispatchDocumentsCommands().decideCandidate({ ...input, authority: input.effectiveAuthority });
   }
   return serializable(prisma, async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);

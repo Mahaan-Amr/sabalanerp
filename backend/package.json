@@ -54,6 +54,8 @@
     "verify:shipment-statement-constraints": "tsx scripts/verify-shipment-statement-constraints.ts",
     "test:dispatch-cutover": "tsx src/services/__tests__/dispatchCutoverPolicy.test.ts && tsx src/services/__tests__/dispatchCaseTimeline.test.ts",
     "test:dispatch-document-contracts": "tsx src/services/__tests__/dispatchDocumentContracts.test.ts && tsx src/services/__tests__/shipmentStatementMigration.test.ts",
+    "test:approved-pricing": "tsx src/services/__tests__/approvedPricing.test.ts",
+    "test:approved-pricing:db": "tsx src/services/__tests__/approvedPricingPrisma.test.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },

@@ -3,7 +3,8 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { protect } from '../middleware/auth';
-import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
+import type { WorkspaceRequest } from '../middleware/workspace';
+import { requireHrFeature } from '../middleware/hrAuthorization';
 import { normalizeWorkSchedule } from '../utils/personnelWorkSchedule';
 import { archiveRosterMembershipEnd, assertSubsequentEmploymentRelationship, personnelSearchWhere } from '../services/hrPersonnelBoundary';
 import { assertWorkScheduleAction } from '../services/hrWorkScheduleGovernance';
@@ -21,24 +22,40 @@ import {
   projectLegacyPosition,
   runHrRedesignBackfill,
 } from '../services/hrRedesignDataContracts';
+import hrAuthorizationRoutes from './hr-authorization';
+import { authorizeHrUser } from '../services/hrAuthorizationService';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 router.use(protect);
+router.use('/authorization', hrAuthorizationRoutes);
 
-const viewAccess = requireWorkspaceAccess(WORKSPACES.HR, WORKSPACE_PERMISSIONS.VIEW);
-const editAccess = requireWorkspaceAccess(WORKSPACES.HR, WORKSPACE_PERMISSIONS.EDIT);
-const adminAccess = requireWorkspaceAccess(WORKSPACES.HR, WORKSPACE_PERMISSIONS.ADMIN);
+const featureForPath = (path: string) => {
+  if (path === '/dashboard') return 'DASHBOARD';
+  if (path.startsWith('/personnel')) return 'PERSONNEL';
+  if (path.startsWith('/migration')) return 'DATA_MIGRATION_RECONCILIATION';
+  if (path.startsWith('/redesign/compatibility/work-items')) return 'HR_WORK_MANAGEMENT';
+  if (path.includes('/assessments')) return 'RECRUITMENT_CASES';
+  if (path.startsWith('/redesign/compatibility/access')) return 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION';
+  return 'ORGANIZATIONAL_STRUCTURE';
+};
+router.use((req: WorkspaceRequest, res, next) => {
+  const level = req.method === 'GET' ? 'VIEW' : req.path.startsWith('/migration') ? 'ADMIN' : 'EDIT';
+  return requireHrFeature(featureForPath(req.path), level)(req, res, next);
+});
+
+// Route-specific business authority and system-role middleware below remains
+// independent from the workspace/feature decision performed above.
+const viewAccess: express.RequestHandler = (_req, _res, next) => next();
+const editAccess: express.RequestHandler = (_req, _res, next) => next();
+const adminAccess: express.RequestHandler = (_req, _res, next) => next();
 const EXCEPTIONAL_PERSONNEL_SOURCES = new Set(['DATA_MIGRATION', 'HISTORICAL_CORRECTION', 'ORGANIZATIONAL_TRANSFER']);
 
 const requireHrManagerAuthority = async (req: WorkspaceRequest, res: Response, next: express.NextFunction) => {
   try {
-    if (req.user!.role === 'ADMIN') return next();
-    const authority = await prisma.hrHiringAuthority.findFirst({
-      where: { userId: req.user!.id, authority: 'HR_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }
-    });
-    if (!authority) {
+    const authority = await authorizeHrUser(prisma, req.user!.id, { authorityCodes: ['HR_MANAGER'] });
+    if (!authority.allowed) {
       return res.status(403).json({ success: false, error: 'اختیار سازمانی HR_MANAGER برای ثبت استثنایی پرسنل الزامی است.' });
     }
     next();
@@ -68,10 +85,7 @@ const isValidIranianNationalCode = (value: string) => {
 };
 const actorId = (req: WorkspaceRequest) => req.user!.id;
 const hasHiringAuthority = async (userId: string, authority: 'HR_PROCESSOR' | 'HR_MANAGER') => Boolean(
-  await prisma.hrHiringAuthority.findFirst({
-    where: { userId, authority, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-    select: { id: true }
-  })
+  (await authorizeHrUser(prisma, userId, { authorityCodes: [authority] })).allowed
 );
 const badRequest = (res: Response, error: unknown) => res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'اطلاعات واردشده معتبر نیست.' });
 const handleError = (res: Response, error: unknown, context: string) => {

@@ -4733,6 +4733,23 @@ model HrSeparationOfDutyConstraint {
   @@map("hr_separation_of_duty_constraints")
 }
 
+model HrAuthorizationAuditEvent {
+  id            String   @id @default(cuid())
+  entityType    String
+  entityId      String
+  action        String
+  actorUserId   String
+  reason        String
+  effectiveAt   DateTime
+  beforeJson    Json?
+  afterJson     Json?
+  createdAt     DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("hr_authorization_audit_events")
+}
+
 model HrDutyEnvelope {
   id                       String   @id @default(cuid())
   code                     String

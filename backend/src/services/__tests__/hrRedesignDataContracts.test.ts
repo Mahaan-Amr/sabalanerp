@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   HR_REDESIGN_CATALOG,
+  HR_QA_ACCESS_MATRIX,
   buildHrRedesignBackfillReport,
   canReadLegacyAssessmentCompatibility,
   classifyHrReconciliationRecord,
@@ -55,6 +56,22 @@ assert.deepEqual(HR_REDESIGN_CATALOG.workspaceFeatures.map((feature) => feature.
 assert.deepEqual(HR_REDESIGN_CATALOG.featureLevels, ['VIEW', 'EDIT', 'ADMIN']);
 assert.deepEqual(HR_REDESIGN_CATALOG.assessmentKinds, ['DISC', 'EQ', 'BIG_FIVE']);
 assert.equal(HR_REDESIGN_CATALOG.dutyEnvelopeVersion, 1);
+assert.deepEqual(Object.keys(HR_QA_ACCESS_MATRIX), [
+  'qa_no_hr_access',
+  'qa_hr_viewer',
+  'qa_finance_manager',
+  'qa_finance_recorder',
+  'qa_payroll_manager',
+  'qa_payroll_processor',
+  'qa_hiring_manager',
+  'qa_hr_manager',
+  'qa_hr_processor',
+]);
+assert.deepEqual(HR_QA_ACCESS_MATRIX.qa_no_hr_access, { workspaceLevel: null, features: {}, authority: null, responsibility: null, destinationWorkspace: null });
+assert.equal(HR_QA_ACCESS_MATRIX.qa_finance_manager.workspaceLevel, null);
+assert.equal(HR_QA_ACCESS_MATRIX.qa_hiring_manager.workspaceLevel, null);
+assert.equal(HR_QA_ACCESS_MATRIX.qa_hr_viewer.authority, null);
+assert.equal(HR_QA_ACCESS_MATRIX.qa_hr_manager.features.AUTHORITY_RESPONSIBILITY_ADMINISTRATION, 'ADMIN');
 
 assert.deepEqual(planLegacyAssessmentMigration({
   applicationId: 'application-without-assessments',

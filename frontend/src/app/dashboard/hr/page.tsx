@@ -19,11 +19,12 @@ import {
   ErpWorkList,
 } from "@/components/erp";
 import { apiError, HrMessage } from "@/features/hr/hrUi";
-import { hrAPI } from "@/lib/api";
+import { authAPI, hrAPI } from "@/lib/api";
 import { hiringAPI } from "@/lib/hiringApi";
 
 export default function HrDashboardPage() {
   const [data, setData] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [workSummary, setWorkSummary] = useState<any>({
     progress: { completed: 0, remaining: 0, total: 0, percentage: null },
     items: [],
@@ -35,12 +36,14 @@ export default function HrDashboardPage() {
     try {
       setLoading(true);
       setError("");
-      const [dashboard, work] = await Promise.all([
+      const [dashboard, work, currentUserResponse] = await Promise.all([
         hrAPI.getDashboard(),
         hiringAPI.workItemSummary(),
+        authAPI.getMe(),
       ]);
       setData(dashboard.data.data);
       setWorkSummary(work.data.data);
+      setCurrentUser(currentUserResponse.data.data);
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -150,6 +153,18 @@ export default function HrDashboardPage() {
             href: "/dashboard/hr/migration",
             icon: FaExchangeAlt,
           },
+          {
+            id: "authority",
+            title: "اختیار و مسئولیت",
+            href: "/dashboard/hr/hiring/authorities",
+            icon: FaClipboardCheck,
+          },
+          ...(["ADMIN", "MANAGER"].includes(currentUser?.role) ? [{
+            id: "users",
+            title: "مدیریت کاربران",
+            href: "/dashboard/users",
+            icon: FaUsers,
+          }] : []),
         ]}
       />
 

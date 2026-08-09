@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { PrismaClient } from '@prisma/client';
 import { HR_REDESIGN_CATALOG, runHrRedesignBackfill } from '../hrRedesignDataContracts';
+import { resolveHrNamedResponsibility } from '../hrAuthorizationService';
 
 const prisma = new PrismaClient();
 const rollback = new Error('ROLLBACK_HR_REDESIGN_INTEGRATION_TEST');
@@ -39,6 +40,22 @@ const run = async () => {
     assert.equal(await tx.hrFeatureCatalog.count(), HR_REDESIGN_CATALOG.workspaceFeatures.length);
     assert.equal(await tx.hrAuthorityCatalog.count(), HR_REDESIGN_CATALOG.businessAuthorities.length);
     assert.equal(await tx.hrResponsibilityTypeCatalog.count(), HR_REDESIGN_CATALOG.responsibilityTypes.length);
+    const financeManagerQa = await tx.user.findUniqueOrThrow({ where: { username: 'qa_finance_manager' } });
+    assert.equal(await tx.hrWorkspaceAccessGrant.count({ where: { userId: financeManagerQa.id, status: 'ACTIVE' } }), 0, 'Finance QA receives no ordinary HR workspace access');
+    assert.equal(await tx.hrFeatureAccessGrant.count({ where: { userId: financeManagerQa.id, status: 'ACTIVE' } }), 0, 'Finance QA receives no ordinary HR feature access');
+    assert.equal(await tx.hrBusinessAuthorityGrant.count({ where: { userId: financeManagerQa.id, authorityCode: 'FINANCE_MANAGER', status: 'ACTIVE' } }), 1);
+    const financeResolution = await resolveHrNamedResponsibility(tx, {
+      sourceActionCode: 'QA_FINANCE_APPROVAL', responsibilityTypeCode: 'FINANCE_MANAGER',
+      scopeType: 'GLOBAL', scopeId: null,
+    });
+    assert.equal(financeResolution.status, 'RESOLVED');
+    if (financeResolution.status === 'RESOLVED') {
+      assert.equal(financeResolution.assignedUserId, financeManagerQa.id);
+      assert.equal(financeResolution.destination.workspaceCode, 'ACCOUNTING');
+    }
+    const hrViewerQa = await tx.user.findUniqueOrThrow({ where: { username: 'qa_hr_viewer' } });
+    assert.equal(await tx.hrWorkspaceAccessGrant.count({ where: { userId: hrViewerQa.id, status: 'ACTIVE', level: 'VIEW' } }), 1);
+    assert.equal(await tx.hrBusinessAuthorityGrant.count({ where: { userId: hrViewerQa.id, status: 'ACTIVE' } }), 0);
     assert.equal(await tx.hrFormalAssessmentPlan.count(), planCountBefore, 'legacy evidence must not create an assessment plan');
     assert.equal(
       await tx.hrAssessmentMigrationEvent.count(),

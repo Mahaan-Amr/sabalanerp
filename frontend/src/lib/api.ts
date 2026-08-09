@@ -1198,6 +1198,30 @@ export const sabalanCalendarAPI = {
   updateEntry: (id: string, data: any) => api.put(`/sabalan-calendar/${id}`, data),
 };
 
+export const hrAuthorizationAPI = {
+  getMe: () => api.get('/hr/authorization/me'),
+  getContext: () => api.get('/hr/authorization/context'),
+  grantWorkspace: (data: { userId: string; level: 'VIEW' | 'EDIT' | 'ADMIN'; reason: string }) =>
+    api.post('/hr/authorization/workspace-grants', data),
+  grantFeature: (data: { userId: string; featureCode: string; level: 'VIEW' | 'EDIT' | 'ADMIN'; reason: string }) =>
+    api.post('/hr/authorization/feature-grants', data),
+  grantAuthority: (data: { userId: string; authorityCode: string; reason: string }) =>
+    api.post('/hr/authorization/business-authorities', data),
+  revokeAuthority: (id: string, reason: string) =>
+    api.post(`/hr/authorization/business-authorities/${id}/revoke`, { reason }),
+  assignResponsibility: (data: {
+    assignedUserId: string;
+    responsibilityTypeCode: string;
+    scopeType: string;
+    scopeId?: string;
+    assignmentKind: 'PRIMARY' | 'ACTING' | 'SUBSTITUTE';
+    principalResponsibilityId?: string;
+    reason: string;
+  }) => api.post('/hr/authorization/responsibilities', data),
+  endResponsibility: (id: string, reason: string) =>
+    api.post(`/hr/authorization/responsibilities/${id}/end`, { reason }),
+};
+
 // Permissions API
 export const permissionsAPI = {
   // Feature permissions

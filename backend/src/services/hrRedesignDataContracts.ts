@@ -25,6 +25,8 @@ export const HR_REDESIGN_CATALOG = Object.freeze({
     'FINANCE_MANAGER',
   ] as const,
   responsibilityTypes: [
+    'HR_PROCESSOR',
+    'HR_MANAGER',
     'RESPONSIBLE_SUPERVISOR',
     'HIRING_MANAGER',
     'COMPANY_MANAGER',
@@ -35,6 +37,46 @@ export const HR_REDESIGN_CATALOG = Object.freeze({
   ] as const,
   assessmentKinds: ['DISC', 'EQ', 'BIG_FIVE'] as const,
   dutyEnvelopeVersion: 1,
+});
+
+type QaFeatureLevels = Partial<Record<typeof HR_REDESIGN_CATALOG.workspaceFeatures[number]['code'], 'VIEW' | 'EDIT' | 'ADMIN'>>;
+type QaAccessContract = {
+  workspaceLevel: 'VIEW' | 'EDIT' | 'ADMIN' | null;
+  features: QaFeatureLevels;
+  authority: typeof HR_REDESIGN_CATALOG.businessAuthorities[number] | null;
+  responsibility: typeof HR_REDESIGN_CATALOG.responsibilityTypes[number] | null;
+  destinationWorkspace: string | null;
+};
+
+const everyFeatureAt = (level: 'VIEW' | 'EDIT' | 'ADMIN'): QaFeatureLevels => Object.fromEntries(
+  HR_REDESIGN_CATALOG.workspaceFeatures.map(({ code }) => [code, level]),
+) as QaFeatureLevels;
+
+export const HR_QA_ACCESS_MATRIX: Record<string, QaAccessContract> = Object.freeze({
+  qa_no_hr_access: { workspaceLevel: null, features: {}, authority: null, responsibility: null, destinationWorkspace: null },
+  qa_hr_viewer: { workspaceLevel: 'VIEW', features: everyFeatureAt('VIEW'), authority: null, responsibility: null, destinationWorkspace: null },
+  qa_finance_manager: { workspaceLevel: null, features: {}, authority: 'FINANCE_MANAGER', responsibility: 'FINANCE_MANAGER', destinationWorkspace: 'ACCOUNTING' },
+  qa_finance_recorder: { workspaceLevel: null, features: {}, authority: 'FINANCE_RECORDER', responsibility: 'FINANCE_RECORDER', destinationWorkspace: 'ACCOUNTING' },
+  qa_payroll_manager: {
+    workspaceLevel: 'EDIT',
+    features: { DASHBOARD: 'VIEW', PERSONNEL: 'VIEW', RECRUITMENT_CASES: 'VIEW', HR_WORK_MANAGEMENT: 'EDIT' },
+    authority: 'HR_PAYROLL_MANAGER', responsibility: 'HR_PAYROLL_MANAGER', destinationWorkspace: 'HUMAN_RESOURCES',
+  },
+  qa_payroll_processor: {
+    workspaceLevel: 'EDIT',
+    features: { DASHBOARD: 'VIEW', PERSONNEL: 'VIEW', RECRUITMENT_CASES: 'EDIT', HR_WORK_MANAGEMENT: 'EDIT' },
+    authority: 'HR_PAYROLL_PROCESSOR', responsibility: 'HR_PAYROLL_PROCESSOR', destinationWorkspace: 'HUMAN_RESOURCES',
+  },
+  qa_hiring_manager: { workspaceLevel: null, features: {}, authority: 'HIRING_MANAGER', responsibility: 'HIRING_MANAGER', destinationWorkspace: 'PERSONAL' },
+  qa_hr_manager: { workspaceLevel: 'ADMIN', features: everyFeatureAt('ADMIN'), authority: 'HR_MANAGER', responsibility: 'HR_MANAGER', destinationWorkspace: 'HUMAN_RESOURCES' },
+  qa_hr_processor: {
+    workspaceLevel: 'EDIT',
+    features: {
+      DASHBOARD: 'VIEW', ORGANIZATIONAL_STRUCTURE: 'VIEW', PERSONNEL: 'EDIT', RECRUITMENT_CASES: 'EDIT',
+      HR_WORK_MANAGEMENT: 'EDIT', AUTHORITY_RESPONSIBILITY_ADMINISTRATION: 'VIEW', DATA_MIGRATION_RECONCILIATION: 'VIEW',
+    },
+    authority: 'HR_PROCESSOR', responsibility: 'HR_PROCESSOR', destinationWorkspace: 'HUMAN_RESOURCES',
+  },
 });
 
 export type HrAssessmentKind = typeof HR_REDESIGN_CATALOG.assessmentKinds[number];
@@ -323,7 +365,7 @@ export const runHrRedesignBackfill = async (
     client.hrResponsibilityTypeCatalog.count({ where: { code: { in: responsibilityCodes } } }),
     client.user.findMany({
       where: { erasedAt: null },
-      select: { id: true, role: true, isActive: true, personnelId: true },
+      select: { id: true, username: true, role: true, isActive: true, personnelId: true },
     }),
     client.hrJobApplication.findMany({
       select: {
@@ -364,11 +406,23 @@ export const runHrRedesignBackfill = async (
     ...users.filter((user) => user.role === 'ADMIN' && user.isActive).map((user) => user.id),
     ...(shakilaUser?.isActive ? [shakilaUser.id] : []),
   ])];
-  const expectedGrantKeys = baselineUserIds.flatMap((userId) => [
+  const qaUsersByUsername = new Map(users
+    .filter((user) => user.isActive && Object.prototype.hasOwnProperty.call(HR_QA_ACCESS_MATRIX, user.username))
+    .map((user) => [user.username, user]));
+  const missingQaUsernames = Object.keys(HR_QA_ACCESS_MATRIX).filter((username) => !qaUsersByUsername.has(username));
+  const qaGrantKeys = [...qaUsersByUsername].flatMap(([username, user]) => {
+    const contract = HR_QA_ACCESS_MATRIX[username];
+    return [
+      ...(contract.workspaceLevel ? [stableKey('qa-workspace-grant', user.id)] : []),
+      ...Object.keys(contract.features).map((featureCode) => stableKey('qa-feature-grant', user.id, featureCode)),
+      ...(contract.authority ? [stableKey('qa-authority-grant', user.id, contract.authority)] : []),
+    ];
+  });
+  const expectedGrantKeys = [...baselineUserIds.flatMap((userId) => [
     stableKey('workspace-grant', userId, HR_REDESIGN_CATALOG.workspaceCode),
     ...featureCodes.map((code) => stableKey('feature-grant', userId, code)),
     ...authorityCodes.map((code) => stableKey('authority-grant', userId, code)),
-  ]);
+  ]), ...qaGrantKeys];
   const existingGrantCount = expectedGrantKeys.length === 0 ? 0 : await Promise.all([
     client.hrWorkspaceAccessGrant.count({ where: { stableKey: { in: expectedGrantKeys } } }),
     client.hrFeatureAccessGrant.count({ where: { stableKey: { in: expectedGrantKeys } } }),
@@ -509,7 +563,10 @@ export const runHrRedesignBackfill = async (
       { code: 'RECONCILIATION_STATE_CHANGES', count: reconciliationStateChangeCount },
       { code: 'RECONCILIATION_FLAG_CHANGES', count: reconciliationFlagChangeCount },
     ],
-    actionableConflicts: [{ code: 'CURRENT_HR_RECONCILIATION', count: actionableConflictCount }],
+    actionableConflicts: [
+      { code: 'CURRENT_HR_RECONCILIATION', count: actionableConflictCount },
+      { code: 'MISSING_PERSISTENT_QA_ACCOUNTS', count: missingQaUsernames.length },
+    ],
     neutralLegacyOutcomes: [
       { code: 'NO_LEGACY_ASSESSMENT_HISTORY', count: assessmentMigrations.filter(({ neutralEvent }) => neutralEvent.code === 'NO_LEGACY_ASSESSMENT_HISTORY').length },
       { code: 'LEGACY_ASSESSMENT_EVIDENCE_PRESERVED', count: assessmentMigrations.filter(({ neutralEvent }) => neutralEvent.code === 'LEGACY_ASSESSMENT_EVIDENCE_PRESERVED').length },
@@ -559,6 +616,117 @@ export const runHrRedesignBackfill = async (
         where: { stableKey: stableKey('authority-grant', userId, authorityCode) }, update: {},
         create: { stableKey: stableKey('authority-grant', userId, authorityCode), userId, authorityCode, effectiveFrom: now, grantedByUserId: options.actorUserId, reason: 'HR redesign baseline' },
       });
+    }
+
+    for (const [username, user] of qaUsersByUsername) {
+      const contract = HR_QA_ACCESS_MATRIX[username];
+      const featureEntries = Object.entries(contract.features) as Array<[string, 'VIEW' | 'EDIT' | 'ADMIN']>;
+      const expectedFeatureCodes = featureEntries.map(([featureCode]) => featureCode);
+      const expectedAuthorityCodes = contract.authority ? [contract.authority] : [];
+
+      await tx.hrWorkspaceAccessGrant.updateMany({
+        where: { userId: user.id, status: 'ACTIVE', ...(contract.workspaceLevel ? { stableKey: { not: stableKey('qa-workspace-grant', user.id) } } : {}) },
+        data: { status: 'REVOKED', effectiveTo: now, revokedAt: now, revokedByUserId: options.actorUserId, reason: 'Approved persistent QA matrix' },
+      });
+      if (!contract.workspaceLevel) {
+        await tx.workspacePermission.updateMany({ where: { userId: user.id, workspace: 'hr', isActive: true }, data: { isActive: false, expiresAt: now } });
+        await tx.featurePermission.updateMany({ where: { userId: user.id, workspace: 'hr', isActive: true }, data: { isActive: false, expiresAt: now } });
+      } else {
+        await tx.hrWorkspaceAccessGrant.upsert({
+          where: { stableKey: stableKey('qa-workspace-grant', user.id) },
+          update: { level: contract.workspaceLevel, status: 'ACTIVE', effectiveTo: null, revokedAt: null, revokedByUserId: null },
+          create: {
+            stableKey: stableKey('qa-workspace-grant', user.id), userId: user.id,
+            workspaceCode: HR_REDESIGN_CATALOG.workspaceCode, level: contract.workspaceLevel,
+            effectiveFrom: now, grantedByUserId: options.actorUserId, reason: 'Approved persistent QA matrix',
+          },
+        });
+      }
+
+      await tx.hrFeatureAccessGrant.updateMany({
+        where: { userId: user.id, status: 'ACTIVE', ...(expectedFeatureCodes.length ? { featureCode: { notIn: expectedFeatureCodes } } : {}) },
+        data: { status: 'REVOKED', effectiveTo: now, revokedAt: now, revokedByUserId: options.actorUserId, reason: 'Approved persistent QA matrix' },
+      });
+      for (const [featureCode, level] of featureEntries) await tx.hrFeatureAccessGrant.upsert({
+        where: { stableKey: stableKey('qa-feature-grant', user.id, featureCode) },
+        update: { level, status: 'ACTIVE', effectiveTo: null, revokedAt: null, revokedByUserId: null },
+        create: {
+          stableKey: stableKey('qa-feature-grant', user.id, featureCode), userId: user.id, featureCode,
+          level, effectiveFrom: now, grantedByUserId: options.actorUserId, reason: 'Approved persistent QA matrix',
+        },
+      });
+
+      await tx.hrBusinessAuthorityGrant.updateMany({
+        where: { userId: user.id, status: 'ACTIVE', ...(expectedAuthorityCodes.length ? { authorityCode: { notIn: expectedAuthorityCodes } } : {}) },
+        data: { status: 'REVOKED', effectiveTo: now, revokedAt: now, revokedByUserId: options.actorUserId, reason: 'Approved persistent QA matrix' },
+      });
+      if (contract.authority) await tx.hrBusinessAuthorityGrant.upsert({
+        where: { stableKey: stableKey('qa-authority-grant', user.id, contract.authority) },
+        update: { status: 'ACTIVE', effectiveTo: null, revokedAt: null, revokedByUserId: null },
+        create: {
+          stableKey: stableKey('qa-authority-grant', user.id, contract.authority), userId: user.id,
+          authorityCode: contract.authority, effectiveFrom: now, grantedByUserId: options.actorUserId,
+          reason: 'Approved persistent QA matrix',
+        },
+      });
+
+      await tx.hrNamedResponsibility.updateMany({
+        where: {
+          assignedUserId: user.id, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+          ...(contract.responsibility ? { stableKey: { not: stableKey('qa-responsibility', user.id, contract.responsibility) } } : {}),
+        },
+        data: { effectiveTo: now, reason: 'Approved persistent QA matrix' },
+      });
+      if (contract.responsibility && contract.destinationWorkspace) {
+        await tx.hrNamedResponsibility.upsert({
+          where: { stableKey: stableKey('qa-responsibility', user.id, contract.responsibility) },
+          update: { assignedUserId: user.id, effectiveTo: null, reason: 'Approved persistent QA matrix' },
+          create: {
+            stableKey: stableKey('qa-responsibility', user.id, contract.responsibility),
+            responsibilityTypeCode: contract.responsibility, scopeType: 'GLOBAL', scopeId: null,
+            assignedUserId: user.id, effectiveFrom: now, reason: 'Approved persistent QA matrix',
+            createdByUserId: options.actorUserId ?? user.id,
+          },
+        });
+        await tx.hrResponsibilityDestination.upsert({
+          where: { stableKey: stableKey('qa-destination', contract.responsibility, 'GLOBAL') },
+          update: { workspaceCode: contract.destinationWorkspace, isActive: true },
+          create: {
+            stableKey: stableKey('qa-destination', contract.responsibility, 'GLOBAL'),
+            responsibilityTypeCode: contract.responsibility, scopeType: 'GLOBAL', scopeId: null,
+            workspaceCode: contract.destinationWorkspace, queueCode: `${contract.responsibility}_QUEUE`,
+            createdByUserId: options.actorUserId ?? user.id,
+          },
+        });
+      }
+    }
+
+    const [auditedWorkspaceGrants, auditedFeatureGrants, auditedAuthorityGrants, auditedQaResponsibilities, auditedQaDestinations] = await Promise.all([
+      tx.hrWorkspaceAccessGrant.findMany({ where: { stableKey: { in: expectedGrantKeys } } }),
+      tx.hrFeatureAccessGrant.findMany({ where: { stableKey: { in: expectedGrantKeys } } }),
+      tx.hrBusinessAuthorityGrant.findMany({ where: { stableKey: { in: expectedGrantKeys } } }),
+      tx.hrNamedResponsibility.findMany({ where: { stableKey: { startsWith: stableKey('qa-responsibility') } } }),
+      tx.hrResponsibilityDestination.findMany({ where: { stableKey: { startsWith: stableKey('qa-destination') } } }),
+    ]);
+    const authorizationEntities = [
+      ...auditedWorkspaceGrants.map((row) => ({ entityType: 'WORKSPACE_GRANT', row })),
+      ...auditedFeatureGrants.map((row) => ({ entityType: 'FEATURE_GRANT', row })),
+      ...auditedAuthorityGrants.map((row) => ({ entityType: 'BUSINESS_AUTHORITY', row })),
+      ...auditedQaResponsibilities.map((row) => ({ entityType: 'NAMED_RESPONSIBILITY', row })),
+      ...auditedQaDestinations.map((row) => ({ entityType: 'RESPONSIBILITY_DESTINATION', row })),
+    ];
+    for (const { entityType, row } of authorizationEntities) {
+      const action = row.stableKey.includes(':qa-') ? 'QA_MATRIX_APPLIED' : 'BASELINE_GRANTED';
+      const existingAudit = await tx.hrAuthorizationAuditEvent.findFirst({ where: { entityType, entityId: row.id, action } });
+      if (!existingAudit) await tx.hrAuthorizationAuditEvent.create({ data: {
+        entityType,
+        entityId: row.id,
+        action,
+        actorUserId: options.actorUserId ?? ('userId' in row ? row.userId : 'createdByUserId' in row ? row.createdByUserId : 'SYSTEM'),
+        reason: 'Approved HR authorization baseline',
+        effectiveAt: 'effectiveFrom' in row ? row.effectiveFrom : row.createdAt,
+        afterJson: JSON.parse(JSON.stringify(row)),
+      } });
     }
 
     for (const migration of assessmentMigrations) await tx.hrAssessmentMigrationEvent.upsert({

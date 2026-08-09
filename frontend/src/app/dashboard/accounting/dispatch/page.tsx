@@ -17,6 +17,11 @@ import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCa
 import { accountingAPI, dispatchConfirmationAPI } from '@/lib/api';
 
 type DispatchNotice = { kind: 'success' | 'error'; text: string };
+const dispatchStatusLabels: Record<string, string> = {
+  PENDING: 'در انتظار بررسی',
+  ACCEPTED: 'پذیرفته‌شده',
+  REJECTED: 'ردشده',
+};
 
 export default function AccountingDispatchPage() {
   const [loading, setLoading] = useState(true);
@@ -115,7 +120,7 @@ export default function AccountingDispatchPage() {
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <strong>{candidate.id}</strong>
                     <ErpBadge tone={candidate.status === 'ACCEPTED' ? 'success' : candidate.status === 'REJECTED' ? 'danger' : 'warning'}>
-                      {candidate.status}
+                      {dispatchStatusLabels[candidate.status] || candidate.status}
                     </ErpBadge>
                   </div>
                   {candidate.status === 'PENDING' && dispatchCapabilities.canManageAccountingCandidates && (

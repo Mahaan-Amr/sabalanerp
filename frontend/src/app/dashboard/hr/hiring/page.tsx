@@ -85,14 +85,11 @@ export default function HiringCasesPage() {
     try {
       setLoading(true);
       setError("");
-      const [cases, foundation] = await Promise.all([
-        hiringAPI.list({
-          ...buildHiringQueueParams(nextFilters),
-          archived: String(archiveView),
-          ...(representedView ? { view: representedView } : {}),
-        }),
-        hrAPI.getFoundation(),
-      ]);
+      const cases = await hiringAPI.list({
+        ...buildHiringQueueParams(nextFilters),
+        archived: String(archiveView),
+        ...(representedView ? { view: representedView } : {}),
+      });
       setRows(cases.data.data);
       setMeta(
         cases.data.meta || {
@@ -101,7 +98,6 @@ export default function HiringCasesPage() {
           total: cases.data.data.length,
         },
       );
-      setPositions(foundation.data.data.positions || []);
     } catch (cause) {
       setError(hiringError(cause));
     } finally {
@@ -114,6 +110,20 @@ export default function HiringCasesPage() {
     // Initial queue load intentionally uses the stable empty filter set.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [archiveView, representedView]);
+
+  useEffect(() => {
+    let active = true;
+    hrAPI.getFoundation()
+      .then((foundation) => {
+        if (active) setPositions(foundation.data.data.positions || []);
+      })
+      .catch(() => {
+        if (active) setPositions([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const create = async () => {
     try {

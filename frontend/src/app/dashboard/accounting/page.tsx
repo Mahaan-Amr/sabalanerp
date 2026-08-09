@@ -59,6 +59,7 @@ export default function AccountingDashboardPage() {
     error: null,
   });
   const [hrMetrics, setHrMetrics] = useState<HrHiringMetricsState>(pendingHrHiringMetrics);
+  const [hrMetricsOwnerId, setHrMetricsOwnerId] = useState<string | null>(null);
   const [trendRange, setTrendRange] = useState<FinancialTrendRange>('6m');
   const [financialTrend, setFinancialTrend] = useState<FinancialTrendState>(pendingFinancialTrend);
   const hrRequestGeneration = useRef(0);
@@ -93,8 +94,9 @@ export default function AccountingDashboardPage() {
     }
   }, [dashboardQuery.state.deadlineType, dashboardQuery.state.due]);
 
-  const loadHrMetrics = useCallback(async () => {
+  const loadHrMetrics = useCallback(async (userId: string) => {
     const requestGeneration = ++hrRequestGeneration.current;
+    setHrMetricsOwnerId(userId);
     setHrMetrics(pendingHrHiringMetrics());
     try {
       const response = await hrHiringMetricsAPI.getDashboardMetrics();
@@ -146,15 +148,16 @@ export default function AccountingDashboardPage() {
     if (authLoading) return;
     if (!currentUserId) {
       hrRequestGeneration.current += 1;
+      setHrMetricsOwnerId(null);
       setHrMetrics(clearHrHiringMetrics('unavailable'));
       return;
     }
-    void loadHrMetrics();
+    void loadHrMetrics(currentUserId);
   }, [authLoading, currentUserId, loadHrMetrics]);
 
   useEffect(() => {
     const revalidateOnFocus = () => {
-      if (document.visibilityState === 'visible' && currentUserId) void loadHrMetrics();
+      if (document.visibilityState === 'visible' && currentUserId) void loadHrMetrics(currentUserId);
     };
     window.addEventListener('focus', revalidateOnFocus);
     document.addEventListener('visibilitychange', revalidateOnFocus);
@@ -200,10 +203,13 @@ export default function AccountingDashboardPage() {
   const refreshDashboard = () => {
     void loadWorkspace();
     void loadFinancialTrend(trendRange);
-    if (currentUserId) void loadHrMetrics();
+    if (currentUserId) void loadHrMetrics(currentUserId);
   };
-  const hrMetricsAvailable = hrMetrics.status === 'available';
-  const hrMetricsDescription = hrMetrics.status === 'pending' ? 'در حال بررسی دسترسی' : undefined;
+  const hrMetricsBelongToCurrentUser = Boolean(currentUserId && hrMetricsOwnerId === currentUserId);
+  const hrMetricsAvailable = hrMetricsBelongToCurrentUser && hrMetrics.status === 'available';
+  const hrMetricsDescription = !hrMetricsBelongToCurrentUser || hrMetrics.status === 'pending'
+    ? 'در حال بررسی دسترسی'
+    : undefined;
   const dashboardHref = (patch: { due?: DeadlineBucket | ''; deadlineType?: 'all' | 'receivable' | 'check' }) => {
     const result = patchAccountingDashboardQuery(new URLSearchParams(rawSearchParams), patch);
     const query = result.params.toString();
@@ -264,6 +270,7 @@ export default function AccountingDashboardPage() {
             href: '/dashboard/accounting/payments?view=due-soon',
             icon: FaMoneyCheckAlt,
             tone: 'warning',
+            description: 'چک‌های تسویه‌نشدهٔ سررسیدگذشته یا تا ۷ روز آینده',
             badge: <StatusBadge label={(commandCenter.checksDue?.count || 0).toLocaleString('fa-IR')} tone="warning" />,
           },
           {

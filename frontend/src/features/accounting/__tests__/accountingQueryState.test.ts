@@ -129,6 +129,8 @@ test('daily trend drilldowns retain an exact Jalali day only inside their repres
   assert.equal(received.params.toString(), 'view=received&period=1405-05&date=1405-05-10');
   assert.equal(outstanding.params.toString(), 'view=outstanding&period=1405-05&date=1405-05-10');
   assert.equal(canonicalizePaymentsQuery(new URLSearchParams('view=received&period=1405-05&date=1405-04-10')).state.date, '');
+  assert.equal(canonicalizePaymentsQuery(new URLSearchParams('view=received&period=1404-12&date=1404-12-30')).state.date, '');
+  assert.equal(canonicalizePaymentsQuery(new URLSearchParams('view=received&period=1403-12&date=1403-12-30')).state.date, '1403-12-30');
 });
 
 test('collection register queries canonicalize semantic views, due buckets, focus, and unknown parameters', () => {

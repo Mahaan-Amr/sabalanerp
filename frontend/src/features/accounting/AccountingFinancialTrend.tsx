@@ -36,7 +36,7 @@ const seriesLabels: Record<SeriesKey, string> = {
   outstanding: 'مانده مطالبات',
 };
 
-function DrilldownDot({ cx, cy, payload, series, stroke }: {
+function DrilldownDot({ cx, cy, payload, stroke }: {
   cx?: number;
   cy?: number;
   payload?: any;
@@ -44,13 +44,16 @@ function DrilldownDot({ cx, cy, payload, series, stroke }: {
   stroke: string;
 }) {
   if (!payload || typeof cx !== 'number' || typeof cy !== 'number') return null;
-  const href = payload.destinations[series];
-  const amount = payload[series];
   return (
-    <a href={href} aria-label={`${seriesLabels[series]} ${payload.label}: ${formatToman(amount)}`}>
-      <circle cx={cx} cy={cy} r={22} fill="transparent" pointerEvents="all" />
-      <circle cx={cx} cy={cy} r={payload.marker ? 4 : 2.5} fill="var(--sds-surface-raised)" stroke={stroke} strokeWidth={2.5} pointerEvents="none" />
-    </a>
+    <circle
+      cx={cx}
+      cy={cy}
+      r={payload.marker ? 4 : 2.5}
+      fill="var(--sds-surface-raised)"
+      stroke={stroke}
+      strokeWidth={2.5}
+      aria-hidden="true"
+    />
   );
 }
 
@@ -132,12 +135,24 @@ export function AccountingFinancialTrend({
               </AreaChart>
             </ResponsiveContainer>
           </div>
-          <div className="sr-only" aria-label="پیوندهای نقاط روند مالی">
-            {chartData.flatMap((point) => (Object.keys(seriesLabels) as SeriesKey[]).map((series) => (
-              <a key={`${point.periodKey}-${series}`} href={point.destinations[series]}>
-                {seriesLabels[series]} {point.label}: {formatToman(point[series])}
-              </a>
-            )))}
+          <div
+            className="mt-3 max-h-40 space-y-2 overflow-y-auto rounded-[var(--sds-radius-card)] border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] p-2"
+            aria-label="پیوندهای نقاط روند مالی"
+          >
+            {chartData.map((point) => (
+              <div key={point.periodKey} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="sds-text-muted min-w-12">{point.label}</span>
+                {(Object.keys(seriesLabels) as SeriesKey[]).map((series) => (
+                  <a
+                    key={`${point.periodKey}-${series}`}
+                    href={point.destinations[series]}
+                    className="sds-text-primary rounded-[var(--sds-radius-control)] px-2 py-1 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sds-focus-ring)]"
+                  >
+                    {seriesLabels[series]}: {formatToman(point[series])}
+                  </a>
+                ))}
+              </div>
+            ))}
           </div>
         </div>
       )}

@@ -1,3 +1,5 @@
+import moment from 'moment-jalaali';
+
 const CONTRACT_STATUSES = new Set([
   'DRAFT',
   'PENDING_APPROVAL',
@@ -189,7 +191,8 @@ const isJalaliDayInPeriod = (value: string, period: string) => {
   if (!match || value.slice(0, 7) !== period) return false;
   const month = Number(match[2]);
   const day = Number(match[3]);
-  return month <= 6 ? day <= 31 : day <= 30;
+  const withinNominalMonth = month <= 6 ? day <= 31 : day <= 30;
+  return withinNominalMonth && moment(value, 'jYYYY-jMM-jDD', true).format('jYYYY-jMM-jDD') === value;
 };
 
 const normalizedCutoff = (source: URLSearchParams, period: string) => {

@@ -17,21 +17,11 @@ import {
   ErpActionGrid,
   ErpInlineState,
   ErpPage,
-  ErpSection,
   ErpSkeleton,
 } from '@/components/erp';
 import { accountingAPI, hrHiringMetricsAPI } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import {
-  CompactQueueItem,
-  QueueList,
-  StatusBadge,
-  accountingIcons,
-  dateFa,
-  money,
-  taxStatusLabels,
-} from '@/features/accounting/accountingUi';
-import { AccountingDashboardPrototype } from '@/features/accounting/prototype/AccountingDashboardPrototype';
+import { StatusBadge } from '@/features/accounting/accountingUi';
 import { AccountingFinancialTrend } from '@/features/accounting/AccountingFinancialTrend';
 import {
   failFinancialTrend,
@@ -68,7 +58,6 @@ export default function AccountingDashboardPage() {
     stale: false,
     error: null,
   });
-  const [showPrototype, setShowPrototype] = useState(false);
   const [hrMetrics, setHrMetrics] = useState<HrHiringMetricsState>(pendingHrHiringMetrics);
   const [trendRange, setTrendRange] = useState<FinancialTrendRange>('6m');
   const [financialTrend, setFinancialTrend] = useState<FinancialTrendState>(pendingFinancialTrend);
@@ -175,14 +164,6 @@ export default function AccountingDashboardPage() {
     };
   }, [currentUserId, loadHrMetrics]);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    setShowPrototype(
-      process.env.NEXT_PUBLIC_ENABLE_PROTOTYPES === '1'
-      && params.get('prototype') === 'accounting-dashboard',
-    );
-  }, []);
-
   const financialTrendPanel = (
     <AccountingFinancialTrend
       range={trendRange}
@@ -192,13 +173,9 @@ export default function AccountingDashboardPage() {
     />
   );
 
-  if (showPrototype) {
-    return <AccountingDashboardPrototype />;
-  }
-
   if (!workspace && loading) {
     return (
-      <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری">
+      <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری" backHref="/dashboard">
         {financialTrendPanel}
         <ErpSkeleton lines={4} label="در حال بارگذاری سررسیدهای حسابداری" />
       </ErpPage>
@@ -207,7 +184,7 @@ export default function AccountingDashboardPage() {
 
   if (!workspace) {
     return (
-      <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری">
+      <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری" backHref="/dashboard">
         {financialTrendPanel}
         <ErpInlineState
           kind="error"
@@ -218,7 +195,6 @@ export default function AccountingDashboardPage() {
     );
   }
 
-  const queues = workspace?.queues || {};
   const commandCenter = workspace?.commandCenter || {};
   const refreshDashboard = () => {
     void loadWorkspace();
@@ -236,6 +212,7 @@ export default function AccountingDashboardPage() {
     <ErpPage
       eyebrow="حسابداری"
       title="داشبورد حسابداری"
+      backHref="/dashboard"
       actions={[
         { label: 'به‌روزرسانی', icon: FaSync, onClick: refreshDashboard, tone: 'neutral' },
       ]}
@@ -251,16 +228,20 @@ export default function AccountingDashboardPage() {
         <p role="status" className="sds-text-muted text-sm">در حال به‌روزرسانی داده‌های حسابداری…</p>
       )}
 
-      <AccountingDeadlinesPanel
-        deadlines={workspace.deadlines}
-        dashboardHref={dashboardHref}
-        onTypeChange={(deadlineType) => router.replace(dashboardHref({ deadlineType }), { scroll: false })}
-      />
-
-      {financialTrendPanel}
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,.9fr)]">
+        <div className="min-w-0">{financialTrendPanel}</div>
+        <div className="min-w-0">
+          <AccountingDeadlinesPanel
+            deadlines={workspace.deadlines}
+            dashboardHref={dashboardHref}
+            onTypeChange={(deadlineType) => router.replace(dashboardHref({ deadlineType }), { scroll: false })}
+          />
+        </div>
+      </div>
 
       <ErpActionGrid
-        columns={4}
+        columns={5}
+        compact
         items={[
           {
             title: 'قراردادهای قابل بررسی',
@@ -345,63 +326,6 @@ export default function AccountingDashboardPage() {
           title="شاخص‌های استخدام در دسترس نیستند. برای تلاش دوباره از به‌روزرسانی استفاده کنید."
         />
       )}
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <QueueList
-          title="دریافتنی‌های نزدیک سررسید"
-          items={queues.receivables || []}
-          emptyText="دریافتنی بازی برای نمایش وجود ندارد."
-          actions={[{ label: 'مشاهده همه', href: '/dashboard/accounting/receivables', icon: FaReceipt, tone: 'success' }]}
-          renderItem={(item: any) => (
-            <CompactQueueItem
-              key={item.id}
-              icon={accountingIcons.receivable}
-              title="دریافتنی قرارداد"
-              meta={`سررسید: ${dateFa(item.dueDate)}`}
-              amount={money(item.remainingAmount, item.currency)}
-              status={<StatusBadge status={item.status} />}
-            />
-          )}
-        />
-
-        <QueueList
-          title="مالیات و سامانه مودیان"
-          items={queues.tax || []}
-          emptyText="پرونده مالیاتی فعالی در صف نیست."
-          actions={[{ label: 'مشاهده همه', href: '/dashboard/accounting/tax', icon: FaBalanceScale, tone: 'purple' }]}
-          renderItem={(item: any) => (
-            <CompactQueueItem
-              key={item.id}
-              icon={FaBalanceScale}
-              title={taxStatusLabels[item.submissionStatus] || item.submissionStatus}
-              meta={item.trackingCode ? `کد پیگیری: ${item.trackingCode}` : `آخرین تغییر: ${dateFa(item.updatedAt)}`}
-              amount={money(item.taxableAmount)}
-              status={<StatusBadge status={item.submissionStatus} />}
-            />
-          )}
-        />
-      </div>
-
-      <ErpSection
-        title="بررسی اصلاحات"
-        description="درخواست‌هایی که حسابداری برای تکمیل اطلاعات فروش، مشتری، پرداخت، تحویل یا مالیات ثبت کرده است."
-        actions={[{ label: 'مشاهده همه', href: '/dashboard/accounting/correction-requests', icon: FaExclamationTriangle, tone: 'warning' }]}
-      >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {(queues.corrections || []).slice(0, 6).map((item: any) => (
-            <CompactQueueItem
-              key={item.id}
-              icon={FaExclamationTriangle}
-              title={item.accountantNote}
-              meta={`اولویت: ${item.priority} · ${dateFa(item.createdAt)}`}
-              status={<StatusBadge status={item.status} />}
-            />
-          ))}
-          {(!queues.corrections || queues.corrections.length === 0) && (
-            <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">درخواست اصلاح بازی وجود ندارد.</p>
-          )}
-        </div>
-      </ErpSection>
     </ErpPage>
   );
 }

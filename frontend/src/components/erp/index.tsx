@@ -386,12 +386,14 @@ export function ErpMetricGrid({ items }: { items: ErpMetric[] }) {
   );
 }
 
-export function ErpActionGrid({ items, columns = 3, compact = false }: { items: ErpActionTile[]; columns?: 1 | 2 | 3 | 4; compact?: boolean }) {
+export function ErpActionGrid({ items, columns = 3, compact = false }: { items: ErpActionTile[]; columns?: 1 | 2 | 3 | 4 | 5; compact?: boolean }) {
   if (!items.length) return null;
 
   const gridClass =
     columns === 1
       ? ''
+      : columns === 5
+      ? 'md:grid-cols-2 xl:grid-cols-5'
       : columns === 4
       ? 'sm:grid-cols-2 xl:grid-cols-4'
       : columns === 2

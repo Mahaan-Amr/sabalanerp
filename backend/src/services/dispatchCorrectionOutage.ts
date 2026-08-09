@@ -9,6 +9,7 @@ import {
   planStatementAdjustment,
 } from './statementAdjustmentPosting';
 import type { ConfiguredStatementAdjustmentArtifactPreparer } from './statementAdjustmentRuntime';
+import { verifyDispatchArtifactStorageUnderLock } from './dispatchDocuments';
 
 type Tx = Prisma.TransactionClient;
 type Authority = { actorRole: string; workspace: string; workspacePermission: string; feature?: string; featurePermission?: string };
@@ -210,6 +211,7 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
     const prepared = new Map<string, ReturnType<ConfiguredStatementAdjustmentArtifactPreparer['preparer']['prepare']>>();
     const artifactPreparer = dependencies.artifactPreparer ? {
       templateVersion: dependencies.artifactPreparer.templateVersion,
+      storage: dependencies.artifactPreparer.storage,
       preparer: { prepare: (renderInput: Parameters<ConfiguredStatementAdjustmentArtifactPreparer['preparer']['prepare']>[0]) => {
         const key = digest(renderInput);
         const existing = prepared.get(key);
@@ -313,6 +315,13 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
     const adjustmentPlan = await planStatementAdjustment(tx, { correctionId: correction.id, actorId: input.actorId,
       correctionIntegrityHash: integrityHash, issuedAt: at, artifactPreparer,
       id: () => adjustmentId });
+    if (adjustmentPlan && artifactPreparer) {
+      await verifyDispatchArtifactStorageUnderLock({
+        transaction: tx,
+        storage: artifactPreparer.storage,
+        artifacts: [adjustmentPlan.artifact],
+      });
+    }
     for (const line of correction.lines) {
       const evidence = { id: randomUUID(), contractId: line.contractId, contractItemId: line.contractItemId, productRowId: line.productRowId,
         unit: line.unit, kind: 'DISPATCH_CORRECTION_POSTED' as const, quantity: line.quantity.toFixed(3),

@@ -20,14 +20,21 @@ if (runConcurrency) {
 const record = (value: unknown): Readonly<Record<string, unknown>> => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Readonly<Record<string, unknown>> : {};
 const bytes = (value: string) => new TextEncoder().encode(value);
-const configuredArtifactPreparer = (options: { corruptRead?: boolean; onPublish?: () => void } = {}) => {
+const configuredArtifactPreparer = (options: { corruptOnReverify?: boolean;
+  onPublish?: () => void } = {}) => {
   const files = new Map<string, Uint8Array>();
+  let readCount = 0;
   const storage: DispatchArtifactStorage = {
     stage: async ({ storageKey, bytes: content }) => { files.set(storageKey, content); },
-    read: async (storageKey) => options.corruptRead ? bytes('different-durable-bytes') : files.get(storageKey) ?? null,
+    read: async (storageKey) => {
+      readCount += 1;
+      return options.corruptOnReverify && readCount > 1
+        ? bytes('different-durable-bytes') : files.get(storageKey) ?? null;
+    },
   };
   return {
     templateVersion: 'adjustment-v1',
+    storage,
     preparer: createStatementAdjustmentArtifactPreparer({
       publisher: { publish: async () => {
         options.onPublish?.();
@@ -133,8 +140,8 @@ const run = async () => {
 
       await assert.rejects(postDispatchCorrection(boundPrisma, { correctionId: correction.id, actorId: candidate.createdBy,
         authority, idempotencyKey: 'issue262-invalid-artifact' }, {
-          artifactPreparer: configuredArtifactPreparer({ corruptRead: true }),
-        }), /staged dispatch artifact failed verification/i);
+          artifactPreparer: configuredArtifactPreparer({ corruptOnReverify: true }),
+        }), /durable dispatch artifact changed before metadata publication/i);
       assert.equal((await tx.dispatchCorrection.findUniqueOrThrow({ where: { id: correction.id } })).status, 'DRAFT');
       assert.equal(await tx.dispatchStatementAdjustment.count({ where: { waybillId: candidate.waybillId } }), 0);
 

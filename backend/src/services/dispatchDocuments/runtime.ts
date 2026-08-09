@@ -37,6 +37,7 @@ export const configureDispatchDocumentsRuntime = (input: {
   installDispatchDocumentsCommands(service);
   installStatementAdjustmentArtifactPreparer({
     templateVersion: input.templateVersion,
+    storage,
     preparer: createStatementAdjustmentArtifactPreparer({
       publisher: input.publisher,
       storage,

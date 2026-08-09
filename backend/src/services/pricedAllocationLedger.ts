@@ -94,6 +94,8 @@ const formatFixed = (atoms: bigint, scale: number): string => {
 export const sumCanonicalQuantities = (values: string[]): string =>
   formatFixed(values.reduce((sum, value) => sum + parseFixed(value, QUANTITY_SCALE), 0n), QUANTITY_SCALE);
 
+export const isPositiveCanonicalQuantity = (value: string): boolean => parseFixed(value, QUANTITY_SCALE) > 0n;
+
 const stableValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(stableValue);
   if (value && typeof value === 'object') {
@@ -147,7 +149,7 @@ const prepareStates = (
         throw new PricedAllocationInvariantError('MISSING_DISCOUNT_BASIS', `Pricing row ${row.id} lacks explicit discount basis evidence.`);
       }
       const basis = rawBasis === undefined ? 0n : parseFixed(rawBasis, MONEY_SCALE);
-      if (basis < 0n || (!row.discountEligible && basis !== 0n)) {
+      if ((row.discountEligible && basis <= 0n) || (!row.discountEligible && basis !== 0n)) {
         throw new PricedAllocationInvariantError('MISSING_DISCOUNT_BASIS', `Pricing row ${row.id} has invalid discount basis evidence.`);
       }
       bases.set(row.id, basis);
@@ -188,10 +190,10 @@ export const allocatePricedRevision = (input: {
   versions: LockedApprovedPricingVersion[];
   priorEvents: PriorPricedAllocationEvent[];
   lines: PricedRevisionLine[];
-}): { events: CalculatedPricedAllocationEvent[]; totals: { quantity: string; grossAmount: string; discountAmount: string; netAmount: string } } => {
+}): { events: CalculatedPricedAllocationEvent[]; totals: { quantitiesByUnit: Record<string, string>; grossAmount: string; discountAmount: string; netAmount: string } } => {
   const { versionsByContract, statesByRow } = prepareStates(input.versions, input.priorEvents);
   const events: CalculatedPricedAllocationEvent[] = [];
-  let totalQuantity = 0n;
+  const quantitiesByUnit = new Map<string, bigint>();
   let totalGross = 0n;
   let totalDiscount = 0n;
   for (const line of input.lines) {
@@ -205,22 +207,23 @@ export const allocatePricedRevision = (input: {
     if (row.unit !== line.unit) throw new PricedAllocationInvariantError('UNIT_MISMATCH', `Contract item ${line.contractItemId} unit changed.`);
     const state = statesByRow.get(row.id)!;
     const quantity = parseFixed(line.quantity, QUANTITY_SCALE);
-    if (quantity <= 0n) throw new PricedAllocationInvariantError('INVALID_FIXED_POINT', 'Finalized allocation quantities must be positive.');
+    if (quantity === 0n) throw new PricedAllocationInvariantError('INVALID_FIXED_POINT', 'Priced allocation deltas cannot be zero.');
     const beforeQuantity = state.quantity;
     const beforeGross = state.gross;
     const beforeDiscount = state.discount;
     const afterQuantity = beforeQuantity + quantity;
     const consumesFinalRemainder = afterQuantity === state.contracted;
-    const gross = consumesFinalRemainder
-      ? state.grossTarget - beforeGross
-      : (state.grossTarget * quantity) / state.contracted;
-    const discount = consumesFinalRemainder
-      ? state.discountTarget - beforeDiscount
-      : (state.discountTarget * quantity) / state.contracted;
+    const returnsToZero = afterQuantity === 0n;
+    const gross = returnsToZero ? -beforeGross
+      : consumesFinalRemainder ? state.grossTarget - beforeGross
+        : (state.grossTarget * quantity) / state.contracted;
+    const discount = returnsToZero ? -beforeDiscount
+      : consumesFinalRemainder ? state.discountTarget - beforeDiscount
+        : (state.discountTarget * quantity) / state.contracted;
     state.quantity = afterQuantity;
     state.gross += gross;
     state.discount += discount;
-    totalQuantity += quantity;
+    quantitiesByUnit.set(line.unit, (quantitiesByUnit.get(line.unit) || 0n) + quantity);
     totalGross += gross;
     totalDiscount += discount;
     events.push({
@@ -252,7 +255,9 @@ export const allocatePricedRevision = (input: {
   return {
     events,
     totals: {
-      quantity: formatFixed(totalQuantity, QUANTITY_SCALE),
+      quantitiesByUnit: Object.fromEntries([...quantitiesByUnit.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([unit, value]) => [unit, formatFixed(value, QUANTITY_SCALE)])),
       grossAmount: formatFixed(totalGross, MONEY_SCALE),
       discountAmount: formatFixed(totalDiscount, MONEY_SCALE),
       netAmount: formatFixed(totalGross - totalDiscount, MONEY_SCALE),

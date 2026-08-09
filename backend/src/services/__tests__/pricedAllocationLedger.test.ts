@@ -73,6 +73,15 @@ const line = (quantity: string, overrides: Record<string, string> = {}) => ({
   assert.equal(final.events[0].netAmount, '61.333333333333');
   assert.equal(final.events[0].consumesFinalRemainder, true);
   assert.equal(final.totals.grossAmount, '66.666666666667');
+
+  const zero = allocatePricedRevision({
+    versions: [version()], priorEvents: [...first.events, ...final.events],
+    lines: [line('-3.000', { allocationRevisionLineId: 'line-zero' })],
+  });
+  assert.equal(zero.events[0].evidence.afterQuantity, '0.000');
+  assert.equal(zero.events[0].grossAmount, '-100.000000000000');
+  assert.equal(zero.events[0].discountAmount, '-8.000000000000');
+  assert.equal(zero.events[0].netAmount, '-92.000000000000');
 }
 
 {
@@ -93,7 +102,8 @@ const line = (quantity: string, overrides: Record<string, string> = {}) => ({
     ],
   });
   assert.deepEqual(multi.totals, {
-    quantity: '2.000', grossAmount: '83.333333333333', discountAmount: '2.666666666666', netAmount: '80.666666666667',
+    quantitiesByUnit: { count: '1.000', m2: '1.000' },
+    grossAmount: '83.333333333333', discountAmount: '2.666666666666', netAmount: '80.666666666667',
   });
   assert.equal(multi.events[1].pricingRowId, 'pricing-row-3');
 }
@@ -101,6 +111,11 @@ const line = (quantity: string, overrides: Record<string, string> = {}) => ({
 assert.throws(
   () => allocatePricedRevision({ versions: [version()], priorEvents: [], lines: [line('1.000', { unit: 'count' })] }),
   (error: unknown) => error instanceof PricedAllocationInvariantError && error.code === 'UNIT_MISMATCH',
+);
+
+assert.throws(
+  () => allocatePricedRevision({ versions: [version()], priorEvents: [], lines: [line('1.000', { productRowId: 'lookalike-row' })] }),
+  (error: unknown) => error instanceof PricedAllocationInvariantError && error.code === 'ROW_IDENTITY_MISMATCH',
 );
 
 assert.throws(

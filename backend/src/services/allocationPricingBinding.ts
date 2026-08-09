@@ -3,6 +3,7 @@ import { isPostCutoverFinalization, isShipmentStatementFlowActive, type Shipment
 import {
   PricedAllocationInvariantError,
   allocatePricedRevision,
+  isPositiveCanonicalQuantity,
   pricedAllocationIntegrityHash,
   sumCanonicalQuantities,
   type LockedApprovedPricingVersion,
@@ -13,6 +14,7 @@ import {
 export type LockedPricingEvidence = {
   version: LockedApprovedPricingVersion;
   readiness: PricingReadinessContract;
+  scope: { customerId: string; projectId: string; destination: string };
   versionIntegrityVerified: boolean;
   rowIntegrityVerified: boolean;
 };
@@ -64,12 +66,16 @@ export class AllocationPricingBindingError extends Error {
 
 const sortedUnique = (values: string[]) => [...new Set(values)].sort((left, right) => left.localeCompare(right));
 
-const assertEvidence = (expectedContracts: string[], evidence: LockedPricingEvidence[]) => {
+const assertEvidence = (expectedContracts: string[], expectedScope: LockedPricingEvidence['scope'], evidence: LockedPricingEvidence[]) => {
   const actualContracts = sortedUnique(evidence.map((entry) => entry.version.contractId));
   if (actualContracts.length !== expectedContracts.length || actualContracts.some((id, index) => id !== expectedContracts[index])) {
     throw new AllocationPricingBindingError('PRICING_SCOPE_MISMATCH', 'Current approved-pricing scope differs from the finalized allocation.');
   }
   for (const entry of evidence) {
+    if (entry.scope.customerId !== expectedScope.customerId || entry.scope.projectId !== expectedScope.projectId
+      || entry.scope.destination !== expectedScope.destination) {
+      throw new AllocationPricingBindingError('PRICING_SCOPE_MISMATCH', `Contract ${entry.version.contractId} pricing destination scope changed.`);
+    }
     if (entry.readiness.status !== 'READY' || entry.readiness.reasons.length !== 0) {
       throw new AllocationPricingBindingError('PRICING_NOT_READY', `Contract ${entry.version.contractId} pricing is not READY.`);
     }
@@ -94,6 +100,7 @@ export const bindFinalizedAllocationPricing = async (
     allocationRevisionId: string;
     finalizedAt: Date;
     actorId: string;
+    scope: LockedPricingEvidence['scope'];
     lines: PricedRevisionLine[];
   },
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -108,13 +115,16 @@ export const bindFinalizedAllocationPricing = async (
     || !isPostCutoverFinalization(input.finalizedAt, cutover.cutoverAt)) {
     return { path: 'LEGACY_WAYBILL_ONLY', pricingVersionIds: [], eventIntegrityHashes: [] };
   }
+  if (input.lines.some((line) => !isPositiveCanonicalQuantity(line.quantity))) {
+    throw new AllocationPricingBindingError('PRICED_ALLOCATION_INVALID', 'Finalized allocation quantities must be positive.');
+  }
   const contractIds = sortedUnique(input.lines.map((line) => line.contractId));
   await port.lockPricingScope(sortedUnique([
     ...contractIds.map((contractId) => `APPROVED_PRICING_HEAD:${contractId}`),
     ...input.lines.map((line) => `APPROVED_PRICING_ROW:${line.contractId}:${line.contractItemId}`),
   ]));
   const evidence = await port.loadLockedPricingEvidence(contractIds);
-  assertEvidence(contractIds, evidence);
+  assertEvidence(contractIds, input.scope, evidence);
   const versions = evidence.map((entry) => entry.version);
   const pricingRowIds = sortedUnique(versions.flatMap((version) => version.rows.map((row) => row.id)));
   await port.lockPricingScope(pricingRowIds.map((rowId) => `PRICED_ALLOCATION_LEDGER:${rowId}`));

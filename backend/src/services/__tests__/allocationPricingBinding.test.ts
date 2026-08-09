@@ -7,6 +7,7 @@ import {
 } from '../allocationPricingBinding';
 
 const lockedEvidence = (): LockedPricingEvidence => ({
+  scope: { customerId: 'customer-1', projectId: 'project-1', destination: 'Tehran' },
   version: {
     id: 'pricing-1', contractId: 'contract-1', versionNumber: 1, sourceFinancialRecordId: 'approval-1',
     approvedAt: '2026-08-09T10:00:00.000Z', approvedBy: 'finance-1', schemaVersion: 1, currency: 'TOMAN',
@@ -40,6 +41,7 @@ const makePort = (overrides: Partial<AllocationPricingBindingPort> = {}) => {
 
 const input = {
   allocationRevisionId: 'revision-1', finalizedAt: new Date('2026-08-09T12:00:00.000Z'), actorId: 'logistics-1',
+  scope: { customerId: 'customer-1', projectId: 'project-1', destination: 'Tehran' },
   lines: [{ allocationRevisionLineId: 'line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'stable-row-1', quantity: '1.000', unit: 'm2' }],
 };
 
@@ -97,6 +99,17 @@ for (const evidence of [
     (error: unknown) => error instanceof AllocationPricingBindingError,
   );
   assert.deepEqual(calls.references, []);
+  assert.deepEqual(calls.events, []);
+}
+
+{
+  const mismatched = lockedEvidence();
+  mismatched.scope = { ...mismatched.scope, destination: 'Shiraz' };
+  const { port, calls } = makePort({ loadLockedPricingEvidence: async () => [mismatched] });
+  await assert.rejects(
+    () => bindFinalizedAllocationPricing(port, input, { CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'true' }),
+    (error: unknown) => error instanceof AllocationPricingBindingError && error.code === 'PRICING_SCOPE_MISMATCH',
+  );
   assert.deepEqual(calls.events, []);
 }
 

@@ -13,6 +13,8 @@ import {
   shipmentQuantityEvidenceIntegrityHash,
 } from './shipmentQuantityProjectionStore';
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
+import { AllocationPricingBindingError, bindFinalizedAllocationPricing } from './allocationPricingBinding';
+import { createPrismaAllocationPricingBindingPort } from './allocationPricingPrismaAdapter';
 
 type Database = PrismaClient;
 type Tx = Prisma.TransactionClient;
@@ -52,6 +54,17 @@ const lockKeys = async (tx: Tx, keys: string[]) => {
   }
 };
 
+const lockShipmentTruth = async (tx: Tx, contractItemIds: string[]) => {
+  const ids = [...new Set(contractItemIds)].sort();
+  if (ids.length === 0) return;
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "contract_items"
+    WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`);
+  await tx.$queryRaw(Prisma.sql`SELECT "contractItemId" FROM "shipment_quantity_projections"
+    WHERE "contractItemId" IN (${Prisma.join(ids)}) ORDER BY "contractItemId" FOR UPDATE`);
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "shipment_quantity_evidence"
+    WHERE "contractItemId" IN (${Prisma.join(ids)}) ORDER BY "contractItemId", "recordedAt", "id" FOR UPDATE`);
+};
+
 const serializable = async <T>(prisma: Database, work: (tx: Tx) => Promise<T>): Promise<T> => {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -63,6 +76,28 @@ const serializable = async <T>(prisma: Database, work: (tx: Tx) => Promise<T>): 
     }
   }
   throw lastError;
+};
+
+const bindRevisionPricing = async (tx: Tx, input: {
+  allocationRevisionId: string;
+  finalizedAt: Date;
+  actorId: string;
+  scope: { customerId: string; projectId: string; destination: string };
+  lines: Array<{
+    allocationRevisionLineId: string;
+    contractId: string;
+    contractItemId: string;
+    productRowId: string;
+    quantity: string;
+    unit: string;
+  }>;
+}) => {
+  try {
+    return await bindFinalizedAllocationPricing(createPrismaAllocationPricingBindingPort(tx), input);
+  } catch (error) {
+    if (error instanceof AllocationPricingBindingError) throw new DispatchAllocationConflictError(error.message);
+    throw error;
+  }
 };
 
 const appendAudit = async (tx: Tx, input: {
@@ -209,7 +244,10 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
   await lockKeys(tx, [
     ...loading.canonicalAllocationDrafts.map((draft) => `GUARD_QUEUE:${draft.queueTurnId}`),
     ...itemIds.map((id) => `SHIPMENT_CONTRACT_ITEM:${id}`),
+    ...itemIds.map((id) => `SHIPMENT_EVIDENCE_HEAD:${id}`),
+    ...itemIds.map((id) => `SHIPMENT_PROJECTION:${id}`),
   ]);
+  await lockShipmentTruth(tx, itemIds);
   const refreshedTurns = await tx.guardDriverQueueTurn.findMany({ where: { id: { in: loading.canonicalAllocationDrafts.map((draft) => draft.queueTurnId) } } });
   const turns = new Map(refreshedTurns.map((turn) => [turn.id, turn]));
   for (const draft of loading.canonicalAllocationDrafts) {
@@ -263,6 +301,10 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
       snapshot: json(snapshot), integrityHash: digest(snapshot), finalizedAt: now, finalizedBy: input.actorId,
     } });
     const loadingLines = new Map(loading.lines.map((line) => [line.sourceContractItemId, line.id]));
+    const pricedLines: Array<{
+      allocationRevisionLineId: string; contractId: string; contractItemId: string;
+      productRowId: string; quantity: string; unit: string;
+    }> = [];
     for (const line of draft.lines) {
       const lineSnapshot = stableValue({ revisionId: revision.id, contractId: line.sourceContractId,
         contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
@@ -272,6 +314,9 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
         productRowId: line.productRowId, productId: line.productId, quantity: line.quantity, unit: line.unit,
         snapshot: json(line.snapshot || {}), integrityHash: digest(lineSnapshot),
       } });
+      pricedLines.push({ allocationRevisionLineId: revisionLine.id, contractId: line.sourceContractId,
+        contractItemId: line.sourceContractItemId, productRowId: line.productRowId,
+        quantity: line.quantity.toFixed(3), unit: line.unit });
       const evidence = {
         id: revisionLine.id, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
         productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_FINALIZED' as const,
@@ -287,6 +332,9 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
         integrityHash: evidence.integrityHash, metadata: json(evidence.metadata),
       } });
     }
+    const pricingBinding = await bindRevisionPricing(tx, { allocationRevisionId: revision.id, finalizedAt: now,
+      actorId: input.actorId, scope: { customerId: loading.customer.id, projectId: loading.project.id,
+        destination: loading.project.address }, lines: pricedLines });
     await tx.logisticsAllocationRevision.update({ where: { id: revision.id }, data: { sealedAt: now } });
     const candidate = await tx.accountingDispatchCandidate.create({ data: {
       allocationRevisionId: revision.id, createdAt: now, workItem: { create: { createdAt: now } },
@@ -295,7 +343,9 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id,
       eventType: 'CANDIDATE_CREATED', payload: { allocationRevisionId: revision.id, workItemId: workItem.id }, actorId: input.actorId, recordedAt: now });
     await appendAudit(tx, { aggregateType: 'LOGISTICS_ALLOCATION_REVISION', aggregateId: revision.id,
-      eventType: 'ALLOCATION_FINALIZED', payload: { candidateId: candidate.id, snapshotHash: revision.integrityHash }, actorId: input.actorId, recordedAt: now });
+      eventType: 'ALLOCATION_FINALIZED', payload: { candidateId: candidate.id, snapshotHash: revision.integrityHash,
+        documentPath: pricingBinding.path, pricingVersionIds: pricingBinding.pricingVersionIds,
+        pricedEventIntegrityHashes: pricingBinding.eventIntegrityHashes }, actorId: input.actorId, recordedAt: now });
   }
   await tx.logisticsLoading.update({ where: { id: loading.id }, data: { status: 'FINALIZED', finalizedAt: now, finalizedBy: input.actorId } });
   for (const turn of refreshedTurns) {
@@ -319,16 +369,15 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
   await lockKeys(tx, [`LOGISTICS_ALLOCATION_REVISION:${input.predecessorRevisionId}`]);
   const predecessor = await tx.logisticsAllocationRevision.findUnique({ where: { id: input.predecessorRevisionId },
-    include: { candidate: true, successorRevision: true, loading: { include: { customer: true, project: true, lines: true } }, queueTurn: true } });
+    include: { candidate: true, successorRevision: true, lines: true, pricingReferences: true,
+      loading: { include: { customer: true, project: true, lines: true } }, queueTurn: true } });
   if (!predecessor) throw new DispatchAllocationValidationError('Predecessor allocation revision was not found.');
   const previousBatch = await tx.logisticsAllocationBatch.findUnique({
     where: { loadingId_idempotencyKey: { loadingId: predecessor.loadingId, idempotencyKey } },
     include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } },
   });
   if (previousBatch) return previousBatch;
-  if (!predecessor.candidate || !['REJECTED', 'RETURNED'].includes(predecessor.candidate.status)) {
-    throw new DispatchAllocationConflictError('Only a rejected or returned allocation can have a successor.');
-  }
+  if (!predecessor.candidate) throw new DispatchAllocationConflictError('Only an Accounting candidate can have a successor.');
   if (predecessor.successorRevision) throw new DispatchAllocationConflictError('This allocation already has a successor revision.');
   if (predecessor.queueTurn.status !== GuardDriverQueueTurnStatus.LOADING_FINALIZED || predecessor.queueTurn.loadingId !== predecessor.loadingId) {
     throw new DispatchAllocationConflictError('The predecessor queue turn is no longer bound to the finalized loading.');
@@ -338,7 +387,27 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
   }
   if (!Array.isArray(input.lines) || input.lines.length === 0) throw new DispatchAllocationValidationError('At least one successor line is required.');
   const itemIds = input.lines.map((line) => required(line.sourceContractItemId, 'sourceContractItemId'));
-  await lockKeys(tx, [`LOGISTICS_LOADING:${predecessor.loadingId}`, ...itemIds.map((id) => `SHIPMENT_CONTRACT_ITEM:${id}`)]);
+  const transferItemIds = [...new Set([...itemIds, ...predecessor.lines.map((line) => line.sourceContractItemId)])];
+  await lockKeys(tx, [`LOGISTICS_LOADING:${predecessor.loadingId}`,
+    ...transferItemIds.map((id) => `SHIPMENT_CONTRACT_ITEM:${id}`),
+    ...transferItemIds.map((id) => `SHIPMENT_EVIDENCE_HEAD:${id}`),
+    ...transferItemIds.map((id) => `SHIPMENT_PROJECTION:${id}`)]);
+  await lockShipmentTruth(tx, transferItemIds);
+  let stalePricingTransfer = false;
+  if (predecessor.candidate.status === AccountingDispatchCandidateStatus.PENDING && predecessor.pricingReferences.length > 0) {
+    const pricingContracts = [...new Set(predecessor.pricingReferences.map((reference) => reference.contractId))].sort();
+    await lockKeys(tx, pricingContracts.map((contractId) => `APPROVED_PRICING_HEAD:${contractId}`));
+    const currentHeads = await tx.contractApprovedPricingHead.findMany({ where: { contractId: { in: pricingContracts } },
+      include: { currentVersion: true }, orderBy: { contractId: 'asc' } });
+    const currentByContract = new Map(currentHeads.map((head) => [head.contractId, head.currentVersion]));
+    stalePricingTransfer = predecessor.pricingReferences.some((reference) => {
+      const current = currentByContract.get(reference.contractId);
+      return !current || current.id !== reference.pricingVersionId || current.integrityHash !== reference.expectedPricingHash;
+    });
+  }
+  if (!['REJECTED', 'RETURNED'].includes(predecessor.candidate.status) && !stalePricingTransfer) {
+    throw new DispatchAllocationConflictError('Only a rejected, returned, or stale-priced allocation can have a successor.');
+  }
   const items = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, include: { contract: true, product: true } });
   const byId = new Map(items.map((item) => [item.id, item]));
   const rows = input.lines.map((line) => {
@@ -357,7 +426,11 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     const projection = await readShipmentQuantityProjection(tx as unknown as PrismaClient, { contractId });
     for (const row of projection.rows) {
       if (row.health !== 'CURRENT' || !row.quantities) throw new DispatchAllocationConflictError(`Shipment row ${row.contractItemId} is not current.`);
-      projections.set(row.contractItemId, { amount: new Prisma.Decimal(row.quantities.availableToLoad), unit: row.unit });
+      const transferred = stalePricingTransfer
+        ? predecessor.lines.filter((line) => line.sourceContractItemId === row.contractItemId)
+          .reduce((sum, line) => sum.add(line.quantity), new Prisma.Decimal(0))
+        : new Prisma.Decimal(0);
+      projections.set(row.contractItemId, { amount: new Prisma.Decimal(row.quantities.availableToLoad).add(transferred), unit: row.unit });
     }
   }
   for (const row of rows) requested.set(row.sourceContractItemId, (requested.get(row.sourceContractItemId) || new Prisma.Decimal(0)).add(row.quantity));
@@ -388,6 +461,35 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     queueTurnId: predecessor.queueTurnId, revisionNumber, predecessorRevisionId: predecessor.id,
     snapshot: json(snapshot), integrityHash: digest(snapshot), finalizedAt: now, finalizedBy: input.actorId } });
   const loadingLines = new Map(predecessor.loading.lines.map((line) => [line.sourceContractItemId, line.id]));
+  if (stalePricingTransfer) {
+    for (const line of predecessor.lines) {
+      const release = { id: `${revision.id}:${line.id}`, contractId: line.sourceContractId,
+        contractItemId: line.sourceContractItemId, productRowId: line.productRowId, unit: line.unit,
+        kind: 'ALLOCATION_RELEASED' as const, quantity: line.quantity.toFixed(3), effectiveAt: now.toISOString(),
+        recordedAt: now.toISOString(), sourceType: 'STALE_ALLOCATION_SUCCESSOR', sourceId: `${revision.id}:${line.id}`,
+        sourceVersion: 1, integrityHash: '', metadata: { predecessorRevisionId: predecessor.id, successorRevisionId: revision.id } };
+      release.integrityHash = shipmentQuantityEvidenceIntegrityHash(release);
+      await tx.shipmentQuantityEvidence.create({ data: { contractId: release.contractId,
+        contractItemId: release.contractItemId, productRowId: release.productRowId, unit: release.unit,
+        kind: release.kind, quantity: line.quantity, effectiveAt: now, recordedAt: now,
+        sourceType: release.sourceType, sourceId: release.sourceId, sourceVersion: 1,
+        integrityHash: release.integrityHash, metadata: json(release.metadata) } });
+    }
+    await tx.accountingDispatchCandidate.update({ where: { id: predecessor.candidate.id }, data: {
+      status: AccountingDispatchCandidateStatus.WITHDRAWN, dispositionAt: now, dispositionBy: input.actorId,
+      dispositionReason: 'APPROVED_PRICING_CHANGED',
+    } });
+    await tx.accountingDispatchWorkItem.update({ where: { candidateId: predecessor.candidate.id }, data: {
+      status: 'COMPLETED', completedAt: now,
+    } });
+    await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: predecessor.candidate.id,
+      eventType: 'CANDIDATE_WITHDRAWN_FOR_PRICING_STALENESS', payload: { predecessorRevisionId: predecessor.id,
+        successorRevisionId: revision.id, reason: 'APPROVED_PRICING_CHANGED' }, actorId: input.actorId, recordedAt: now });
+  }
+  const pricedLines: Array<{
+    allocationRevisionLineId: string; contractId: string; contractItemId: string;
+    productRowId: string; quantity: string; unit: string;
+  }> = [];
   for (const line of rows) {
     const lineSnapshot = stableValue({ revisionId: revision.id, contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
@@ -395,6 +497,9 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     const revisionLine = await tx.logisticsAllocationRevisionLine.create({ data: { revisionId: revision.id,
       sourceContractId: line.sourceContractId, sourceContractItemId: line.sourceContractItemId, productRowId: line.productRowId,
       productId: line.productId, quantity: line.quantity, unit: line.unit, snapshot: line.snapshot, integrityHash: digest(lineSnapshot) } });
+    pricedLines.push({ allocationRevisionLineId: revisionLine.id, contractId: line.sourceContractId,
+      contractItemId: line.sourceContractItemId, productRowId: line.productRowId,
+      quantity: line.quantity.toFixed(3), unit: line.unit });
     const evidence = { id: revisionLine.id, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
       productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_FINALIZED' as const, quantity: line.quantity.toFixed(3),
       effectiveAt: now.toISOString(), recordedAt: now.toISOString(), sourceType: 'LOGISTICS_ALLOCATION_REVISION',
@@ -406,6 +511,9 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
       recordedAt: now, sourceType: evidence.sourceType, sourceId: evidence.sourceId, sourceVersion: 1,
       integrityHash: evidence.integrityHash, metadata: json(evidence.metadata) } });
   }
+  const pricingBinding = await bindRevisionPricing(tx, { allocationRevisionId: revision.id, finalizedAt: now,
+    actorId: input.actorId, scope: { customerId: predecessor.loading.customer.id, projectId: predecessor.loading.project.id,
+      destination: predecessor.loading.project.address }, lines: pricedLines });
   await tx.logisticsAllocationRevision.update({ where: { id: revision.id }, data: { sealedAt: now } });
   const candidate = await tx.accountingDispatchCandidate.create({ data: { allocationRevisionId: revision.id, createdAt: now,
     workItem: { create: { createdAt: now } } } });
@@ -414,9 +522,14 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     eventType: 'CANDIDATE_CREATED', payload: { allocationRevisionId: revision.id, workItemId: workItem.id, predecessorRevisionId: predecessor.id },
     actorId: input.actorId, recordedAt: now });
   await appendAudit(tx, { aggregateType: 'LOGISTICS_ALLOCATION_REVISION', aggregateId: revision.id,
-    eventType: 'SUCCESSOR_ALLOCATION_FINALIZED', payload: { predecessorRevisionId: predecessor.id, candidateId: candidate.id },
+    eventType: 'SUCCESSOR_ALLOCATION_FINALIZED', payload: { predecessorRevisionId: predecessor.id, candidateId: candidate.id,
+      stalePricingTransfer, documentPath: pricingBinding.path, pricingVersionIds: pricingBinding.pricingVersionIds,
+      pricedEventIntegrityHashes: pricingBinding.eventIntegrityHashes },
     actorId: input.actorId, recordedAt: now });
-  await refreshProjectionContracts(tx, rows.map((line) => line.sourceContractId));
+  await refreshProjectionContracts(tx, [
+    ...rows.map((line) => line.sourceContractId),
+    ...(stalePricingTransfer ? predecessor.lines.map((line) => line.sourceContractId) : []),
+  ]);
   return tx.logisticsAllocationBatch.findUniqueOrThrow({ where: { id: batch.id },
     include: { revisions: { include: { lines: true, candidate: { include: { workItem: true, waybills: true } } } } } });
 });

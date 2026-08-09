@@ -58,6 +58,7 @@
     "test:approved-pricing:db": "tsx src/services/__tests__/approvedPricingPrisma.test.ts",
     "test:approved-pricing:concurrency": "tsx src/services/__tests__/approvedPricingConcurrency.test.ts",
     "test:priced-allocation-ledger": "tsx src/services/__tests__/pricedAllocationLedger.test.ts && tsx src/services/__tests__/allocationPricingBinding.test.ts",
+    "test:priced-allocation-ledger:db": "tsx src/services/__tests__/allocationPricingPrisma.test.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },

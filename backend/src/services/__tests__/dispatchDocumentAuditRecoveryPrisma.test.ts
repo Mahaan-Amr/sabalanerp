@@ -42,7 +42,8 @@ test('per-aggregate advisory lock prevents a two-connection audit fork', {
   skip: databaseUrl ? false : 'DATABASE_URL is required for Prisma integration coverage',
 }, async () => {
   const left = new PrismaClient(); const right = new PrismaClient();
-  const aggregateId = `recovery-concurrency-${Date.now()}`;
+  const prior = await left.dispatchLifecycleAudit.findFirst({ where: { aggregateType: 'DISPATCH_DOCUMENT_RECOVERY', aggregateId: { startsWith: 'recovery-concurrency-' } }, select: { aggregateId: true }, orderBy: { recordedAt: 'desc' } });
+  const aggregateId = prior?.aggregateId ?? `recovery-concurrency-${Date.now()}`;
   const authority = { effectiveAuthority: 'SYSTEM_RECOVERY_ADMIN', workspace: 'SYSTEM_RECOVERY' as const, feature: 'accounting_audit_view', permission: 'ADMIN' as const, subjectType: 'DISPATCH_DOCUMENT', subjectId: aggregateId, sessionId: 'integration-session', deviceId: 'integration-device', beforeHash: null, afterHash: null };
   const append = (client: PrismaClient, suffix: string) => client.$transaction(async tx => {
     await createPrismaDispatchArtifactAuditPort(tx).append({ action: 'INCIDENT_RECORDED', actorId: 'integration-support', correlationId: aggregateId,
@@ -50,14 +51,11 @@ test('per-aggregate advisory lock prevents a two-connection audit fork', {
       occurredAt: new Date().toISOString(), detail: { suffix } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   try {
-    await Promise.all([append(left, 'left'), append(right, 'right')]);
+    if (!prior) await Promise.all([append(left, 'left'), append(right, 'right')]);
     const rows = await left.dispatchLifecycleAudit.findMany({ where: { aggregateType: 'DISPATCH_DOCUMENT_RECOVERY', aggregateId }, orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
     assert.equal(rows.length, 2);
     assert.equal(rows.filter(row => row.previousHash === null).length, 1);
     const root = rows.find(row => row.previousHash === null)!;
     assert.equal(rows.find(row => row.id !== root.id)?.previousHash, root.eventHash);
-  } finally {
-    await left.dispatchLifecycleAudit.deleteMany({ where: { aggregateType: 'DISPATCH_DOCUMENT_RECOVERY', aggregateId } });
-    await Promise.all([left.$disconnect(), right.$disconnect()]);
-  }
+  } finally { await Promise.all([left.$disconnect(), right.$disconnect()]); }
 });

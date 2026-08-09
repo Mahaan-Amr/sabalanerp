@@ -156,7 +156,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     const payload = { allocationRevisionId: event.allocationRevisionId, allocationRevisionLineId: event.allocationRevisionLineId,
       pricingVersionId: event.pricingVersionId, pricingRowId: event.pricingRowId, quantity: event.quantity.toFixed(3),
       grossAmount: event.grossAmount.toFixed(12), discountAmount: event.discountAmount.toFixed(12), netAmount: event.netAmount.toFixed(12),
-      consumesFinalRemainder: event.consumesFinalRemainder, evidence: event.evidence };
+      consumesFinalRemainder: event.consumesFinalRemainder, evidence: event.evidence, recordedBy: event.recordedBy };
     const line = lineById.get(event.allocationRevisionLineId);
     if (!event.recordedAt || !event.recordedBy) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: event.id, detail: 'Priced allocation actor/time is missing.' });
     if (!line || line.quantity.toFixed(3) !== event.quantity.toFixed(3)) issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: event.id, detail: 'Allocation line and priced-event quantity differ.' });
@@ -166,8 +166,16 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
   for (const requiredKind of ['WAYBILL', 'STATEMENT'] as const) if (!waybill.documentArtifacts.some(item => item.kind === requiredKind && !item.statementAdjustmentId)) {
     issues.push({ code: 'MISSING_EVIDENCE', subjectId: requiredKind, detail: `Primary ${requiredKind.toLowerCase()} artifact is missing.` });
   }
+  for (const artifact of waybill.documentArtifacts) if (artifact.waybillId !== waybill.id || !/^[a-f0-9]{64}$/.test(artifact.sourceIntegrityHash) || !/^[a-f0-9]{64}$/.test(artifact.sha256)) {
+    issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: artifact.id, detail: 'Artifact waybill, source hash, or byte hash evidence is invalid.' });
+  }
+  const artifactById = new Map(waybill.documentArtifacts.map(artifact => [artifact.id, artifact]));
   for (const handoff of waybill.printHandoffs) {
     if (!handoff.correlationId || !handoff.idempotencyKey || (handoff.status === 'SUCCEEDED' && handoff.items.length !== handoff.requestedKinds.length)) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: handoff.id, detail: 'Print handoff identity or ordered retained artifacts are incomplete.' });
+    for (const item of handoff.items) {
+      const artifact = artifactById.get(item.artifactId);
+      if (!artifact || item.byteLength !== artifact.byteLength || item.sha256 !== artifact.sha256) issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: item.id, detail: 'Print handoff bytes do not bind the retained artifact.' });
+    }
   }
   if (waybill.physicalExit) {
     if (waybill.physicalExit.allocationRevisionId !== revision.id || dispatchRecoveryHash(waybill.physicalExit.snapshot) !== waybill.physicalExit.integrityHash) issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: waybill.physicalExit.id, detail: 'Guard exit identity or snapshot hash differs from the issued chain.' });
@@ -176,6 +184,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     const adjustment = correction.statementAdjustment;
     if (!correction.reason || !correction.postedAt || !correction.postedBy || !adjustment || !adjustment.artifact) issues.push({ code: 'MISSING_EVIDENCE', subjectId: correction.id, detail: 'Posted correction lacks reason/time/actor, adjustment, or retained artifact.' });
     if (adjustment && dispatchRecoveryHash(adjustment.snapshot) !== adjustment.integrityHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: adjustment.id, detail: 'Statement-adjustment snapshot hash changed.' });
+    for (const line of correction.lines) if (!line.contractId || !line.contractItemId || !line.productRowId || !line.unit || line.quantity.toFixed(3) === '0.000') issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: line.id, detail: 'Correction line identity/unit/quantity evidence is incomplete.' });
   }
   const aggregateIds = [waybill.id, revision.id, waybill.candidate.id, ...revision.pricingReferences.map(item => item.pricingVersionId),
     ...revision.pricedAllocationEvents.map(item => item.id), ...waybill.documentArtifacts.map(item => item.id), ...waybill.printHandoffs.map(item => item.id),

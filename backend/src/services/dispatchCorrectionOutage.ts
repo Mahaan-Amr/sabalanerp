@@ -1,8 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { AccountingDispatchWaybillStatus, GuardDriverQueueTurnStatus, Prisma, PrismaClient } from '@prisma/client';
-import { refreshProjectionContracts } from './dispatchAllocation';
+import { isRetryableDispatchTransactionError, refreshProjectionContracts } from './dispatchAllocation';
 import { appendQueueEvent } from './guardDriverQueue';
 import { guardReturnValidationFailure, shipmentQuantityEvidenceIntegrityHash } from './shipmentQuantityProjectionStore';
+import {
+  persistStatementAdjustment,
+  planStatementAdjustment,
+  type StatementAdjustmentArtifactPreparer,
+} from './statementAdjustmentPosting';
 
 type Tx = Prisma.TransactionClient;
 type Authority = { actorRole: string; workspace: string; workspacePermission: string; feature?: string; featurePermission?: string };
@@ -53,6 +58,25 @@ const appendAudit = async (tx: Tx, input: { aggregateType: string; aggregateId: 
 };
 const serializable = <T>(prisma: PrismaClient, work: (tx: Tx) => Promise<T>) =>
   prisma.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+const serializableCorrectionPosting = async <T>(prisma: PrismaClient, work: (tx: Tx) => Promise<T>) => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await serializable(prisma, work);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableDispatchTransactionError(error)) throw error;
+    }
+  }
+  throw lastError;
+};
+
+const isPureRowReattribution = (lines: Array<{ unit: string; quantity: Prisma.Decimal }>) => {
+  if (!lines.some((line) => line.quantity.lt(0)) || !lines.some((line) => line.quantity.gt(0))) return false;
+  const byUnit = new Map<string, Prisma.Decimal>();
+  for (const line of lines) byUnit.set(line.unit, (byUnit.get(line.unit) || new Prisma.Decimal(0)).add(line.quantity));
+  return [...byUnit.values()].every((quantity) => quantity.isZero());
+};
 
 const waybillContext = async (tx: Tx, waybillId: string) => {
   const waybill = await tx.accountingDispatchWaybill.findUnique({ where: { id: waybillId }, include: {
@@ -125,15 +149,27 @@ export const createDispatchCorrection = (prisma: PrismaClient, input: { waybillI
   return correction;
 });
 
-export const postDispatchCorrection = (prisma: PrismaClient, input: { correctionId: string; actorId: string; authority: Authority }) =>
-  serializable(prisma, async (tx) => {
+export const postDispatchCorrection = (prisma: PrismaClient, input: { correctionId: string; actorId: string; authority: Authority },
+  dependencies: { artifactPreparer?: StatementAdjustmentArtifactPreparer; now?: () => Date; id?: () => string } = {}) =>
+  serializableCorrectionPosting(prisma, async (tx) => {
     await lock(tx, [`DISPATCH_CORRECTION:${input.correctionId}`]);
+    const scope = await tx.dispatchCorrection.findUnique({ where: { id: input.correctionId }, select: {
+      waybillId: true, waybill: { select: { candidate: { select: { allocationRevision: { select: {
+        pricingReferences: { select: { pricingVersion: { select: { rows: { select: { id: true } } } } } },
+      } } } } } },
+    } });
+    if (!scope) throw new DispatchRecoveryValidationError('Dispatch correction was not found.');
+    const pricingRowIds = scope.waybill.candidate.allocationRevision.pricingReferences
+      .flatMap((reference) => reference.pricingVersion.rows.map((row) => row.id));
+    await lock(tx, [`ACCOUNTING_DISPATCH_WAYBILL:${scope.waybillId}`, `STATEMENT_ADJUSTMENT:${scope.waybillId}`,
+      ...pricingRowIds.map((id) => `PRICED_ALLOCATION_LEDGER:${id}`)]);
     const correction = await tx.dispatchCorrection.findUnique({ where: { id: input.correctionId }, include: { lines: true, waybill: true } });
     if (!correction) throw new DispatchRecoveryValidationError('Dispatch correction was not found.');
     if (correction.status === 'POSTED') return correction;
-    const at = new Date();
+    const at = dependencies.now?.() || new Date();
+    const reattribution = isPureRowReattribution(correction.lines);
     for (const line of correction.lines) {
-      if (line.quantity.lt(0) && !correction.reversalOfId) {
+      if (line.quantity.lt(0) && !correction.reversalOfId && !reattribution) {
         if (!line.returnEvidenceId) throw new DispatchRecoveryConflictError('Negative corrections require verified Guard return evidence.');
         const returnEvidence = await tx.shipmentQuantityEvidence.findUnique({ where: { id: line.returnEvidenceId }, include: {
           guardReturnMovement: true, dispatchEvidence: true,
@@ -157,6 +193,12 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
         const consumed = await tx.shipmentQuantityEvidence.findFirst({ where: { kind: 'DISPATCH_CORRECTION_POSTED', returnEvidenceId: line.returnEvidenceId } });
         if (consumed) throw new DispatchRecoveryConflictError('Verified Guard return evidence was already consumed by a posted correction.');
       }
+    }
+    const integrityHash = digest({ correctionId: correction.id, waybillId: correction.waybillId, reason: correction.reason,
+      effectiveAt: correction.effectiveAt, lines: correction.lines, postedAt: at });
+    const adjustmentPlan = await planStatementAdjustment(tx, { correctionId: correction.id, actorId: input.actorId,
+      correctionIntegrityHash: integrityHash, issuedAt: at, artifactPreparer: dependencies.artifactPreparer, id: dependencies.id });
+    for (const line of correction.lines) {
       const evidence = { id: randomUUID(), contractId: line.contractId, contractItemId: line.contractItemId, productRowId: line.productRowId,
         unit: line.unit, kind: 'DISPATCH_CORRECTION_POSTED' as const, quantity: line.quantity.toFixed(3),
         effectiveAt: correction.effectiveAt.toISOString(), recordedAt: at.toISOString(), sourceType: 'DISPATCH_CORRECTION',
@@ -166,14 +208,17 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
       await tx.shipmentQuantityEvidence.create({ data: { ...evidence, quantity: line.quantity, effectiveAt: correction.effectiveAt,
         recordedAt: at, metadata: json(evidence.metadata), returnEvidenceId: line.returnEvidenceId || null } });
     }
-    const integrityHash = digest({ correctionId: correction.id, waybillId: correction.waybillId, reason: correction.reason,
-      effectiveAt: correction.effectiveAt, lines: correction.lines, postedAt: at });
     const posted = await tx.dispatchCorrection.update({ where: { id: correction.id }, data: { status: 'POSTED', postedAt: at,
       postedBy: input.actorId, integrityHash }, include: { lines: true } });
+    const adjustment = adjustmentPlan ? await persistStatementAdjustment(tx, adjustmentPlan) : null;
     await refreshProjectionContracts(tx, correction.lines.map((line) => line.contractId));
     await appendAudit(tx, { aggregateType: 'DISPATCH_CORRECTION', aggregateId: correction.id, eventType: 'CORRECTION_POSTED',
       payload: { waybillId: correction.waybillId, beforeStatus: 'DRAFT', afterStatus: 'POSTED', integrityHash,
-        effectiveAt: correction.effectiveAt, recordedAt: at, reason: correction.reason }, actorId: input.actorId, authority: input.authority, at });
+        effectiveAt: correction.effectiveAt, recordedAt: at, reason: correction.reason,
+        statementAdjustmentId: adjustment?.adjustment.id || null,
+        statementAdjustmentSequence: adjustment?.adjustment.sequence || null,
+        statementAdjustmentIntegrityHash: adjustment?.adjustment.integrityHash || null,
+        statementAdjustmentArtifactId: adjustment?.artifact.id || null }, actorId: input.actorId, authority: input.authority, at });
     return posted;
   });
 

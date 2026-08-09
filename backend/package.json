@@ -4,6 +4,7 @@
   "description": "ERP Backend API",
   "main": "dist/index.js",
   "scripts": {
+    "dispatch-document:recovery": "tsx scripts/dispatch-document-recovery.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "test:contract-print": "tsx src/utils/__tests__/printTemplateLongitudinalOptimizer.test.ts && tsx src/utils/__tests__/printTemplateProjectName.test.ts && tsx src/utils/__tests__/printTemplateStairLayer.test.ts && tsx src/utils/__tests__/printTemplateOperationLookup.test.ts",

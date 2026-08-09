@@ -569,12 +569,35 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
       details: missing,
     });
   }
-  const dispatchArtifacts = await client.dispatchDocumentArtifact.findMany({ select: { id: true, storageKey: true } });
+  const dispatchArtifacts = await client.dispatchDocumentArtifact.findMany({ select: { id: true, storageKey: true, byteLength: true, sha256: true } });
   const missingDispatchArtifacts = dispatchArtifacts.filter(artifact => !fs.existsSync(dispatchArtifactBackupPath(payloadRoot, artifact.storageKey)));
   if (missingDispatchArtifacts.length) {
     throw Object.assign(new Error(`Recovery package has missing dispatch-document artifacts (${missingDispatchArtifacts.length}).`), {
       code: 'RECOVERY_DISPATCH_ARTIFACT_MISSING',
       details: missingDispatchArtifacts.slice(0, 25),
+    });
+  }
+  const corruptDispatchArtifacts: Array<{ id: string; storageKey: string; expectedByteLength: string; actualByteLength: number; expectedSha256: string; actualSha256: string }> = [];
+  for (const artifact of dispatchArtifacts) {
+    const artifactPath = dispatchArtifactBackupPath(payloadRoot, artifact.storageKey);
+    if (!fs.existsSync(artifactPath)) continue;
+    const stat = await fs.promises.stat(artifactPath);
+    const actualSha256 = stat.isFile() ? await sha256File(artifactPath) : '';
+    if (!stat.isFile() || BigInt(stat.size) !== BigInt(artifact.byteLength) || actualSha256 !== artifact.sha256) {
+      corruptDispatchArtifacts.push({
+        id: artifact.id,
+        storageKey: artifact.storageKey,
+        expectedByteLength: String(artifact.byteLength),
+        actualByteLength: stat.size,
+        expectedSha256: artifact.sha256,
+        actualSha256,
+      });
+    }
+  }
+  if (corruptDispatchArtifacts.length) {
+    throw Object.assign(new Error(`Recovery package has corrupt dispatch-document artifacts (${corruptDispatchArtifacts.length}).`), {
+      code: 'RECOVERY_DISPATCH_ARTIFACT_CORRUPT',
+      details: corruptDispatchArtifacts.slice(0, 25),
     });
   }
 };

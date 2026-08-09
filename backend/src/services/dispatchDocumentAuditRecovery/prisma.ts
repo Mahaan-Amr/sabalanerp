@@ -4,6 +4,7 @@ import { dispatchRecoveryIntegrityHash, type DispatchArtifactAuditEvent } from '
 export const createPrismaDispatchArtifactAuditPort = (tx: Prisma.TransactionClient) => ({
   append: async (event: DispatchArtifactAuditEvent) => {
     const aggregateId = event.artifactId ?? dispatchRecoveryIntegrityHash({ storageKey: event.storageKey });
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'DISPATCH_DOCUMENT_RECOVERY'}), hashtext(${aggregateId}))`;
     const previous = await tx.dispatchLifecycleAudit.findFirst({
       where: { aggregateType: 'DISPATCH_DOCUMENT_RECOVERY', aggregateId },
       orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
@@ -15,6 +16,7 @@ export const createPrismaDispatchArtifactAuditPort = (tx: Prisma.TransactionClie
       storageKey: event.storageKey ?? null,
       artifactId: event.artifactId ?? null,
       reason: event.reason ?? null,
+      authority: event.authority,
       detail: event.detail,
     };
     const recordedAt = new Date(event.occurredAt);

@@ -16,7 +16,10 @@ Guard exit, and posted Dispatch Corrections.
   separate incidents. Unreferenced storage is only an orphan candidate until a second reference check confirms it.
 - Restoration accepts bytes only from an encrypted recovery package and verifies the original byte length and SHA-256
   before and after writing. Historical PDFs are never regenerated.
-- Quarantine rechecks that a key is unreferenced. Cleanup rechecks again and requires the configured safety window.
+- Quarantine first records durable intent, rechecks that a key is unreferenced, and compensates the filesystem move if
+  completion audit fails. Cleanup derives `quarantinedAt` from persisted completion evidence, uses the policy-owned
+  seven-day minimum (callers cannot shorten it), stages the deletion, records durable intent and completion, and only
+  then removes staged bytes.
   Referenced metadata, source evidence, and issued files are never deleted.
 - Every reconciliation, incident, restore, quarantine, rejection, and cleanup is appended through the audit port.
 
@@ -34,5 +37,8 @@ Guard exit, and posted Dispatch Corrections.
 6. Rerun replay and reconciliation. Acceptance requires `VERIFIED`, unchanged immutable metadata/source evidence,
    and a complete append-only audit trail. Otherwise keep the incident open and do not enable cutover.
 
-The Accounting endpoint `GET /api/accounting/audit/dispatch-documents/recovery` exposes only the scoped recovery audit
-stream to existing Accounting-view permission holders. Mutation authority remains outside the query.
+The Accounting endpoint `GET /api/accounting/audit/dispatch-documents/recovery` requires the narrow
+`accounting_audit_view:view` feature; ordinary Accounting/dashboard view does not disclose storage keys or incidents.
+Production recovery mutations use `npm --prefix backend run dispatch-document:recovery -- ...`. The script requires an
+active ADMIN, explicit subject/session/device/correlation/idempotency/before/after hashes, and persists every outcome.
+The encrypted package passphrase is accepted only via `DISPATCH_RECOVERY_PASSPHRASE`, never a command-line argument.

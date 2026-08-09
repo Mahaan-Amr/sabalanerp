@@ -80,6 +80,13 @@ const accountingDispatchView = [
   requireNarrowFeatureAccess(FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_VIEW, FEATURE_PERMISSIONS.VIEW),
 ];
 
+// Recovery evidence contains storage identities and incident details. It is deliberately
+// not inherited from the broad Accounting workspace/dashboard permission.
+const accountingRecoveryEvidenceView = [
+  protect,
+  requireNarrowFeatureAccess(FEATURES.ACCOUNTING_AUDIT_VIEW, FEATURE_PERMISSIONS.VIEW),
+];
+
 const accountingDispatchEdit = [
   protect,
   requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
@@ -592,7 +599,7 @@ router.get('/correction-requests', accountingView, async (req: AuthRequest, res:
   }
 });
 
-router.get('/audit/dispatch-documents/recovery', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/audit/dispatch-documents/recovery', accountingRecoveryEvidenceView, async (req: AuthRequest, res: Response) => {
   try {
     const data = await listDispatchDocumentRecoveryAudit(prisma, req.query as Record<string, string>);
     res.json({ success: true, data });

@@ -15,6 +15,8 @@ import {
   type DispatchArtifactMetadata,
   type DispatchEvidenceNode,
   type DispatchEvidenceAudit,
+  type DispatchRecoveryAuthority,
+  createDispatchDocumentFilesystem,
 } from '../dispatchDocumentAuditRecovery';
 import { recoveryEngineInternals } from '../systemRecoveryEngine';
 
@@ -22,6 +24,11 @@ const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(
   : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>)
     .sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonical(item)])) : value;
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+const authority: DispatchRecoveryAuthority = {
+  effectiveAuthority: 'SYSTEM_RECOVERY_ADMIN', workspace: 'SYSTEM_RECOVERY', feature: 'accounting_audit_view', permission: 'ADMIN',
+  subjectType: 'DISPATCH_DOCUMENT', subjectId: 'waybill-1', sessionId: 'session-1', deviceId: 'device-1',
+  beforeHash: 'a'.repeat(64), afterHash: 'b'.repeat(64),
+};
 
 const node = (kind: DispatchEvidenceNode['kind'], id: string, parents: string[] = []): DispatchEvidenceNode => {
   const evidence = { kind, id, parents };
@@ -60,7 +67,11 @@ const completeChain = () => {
     audit.previousHash = null;
     audit.eventHash = digest({ ...audit, eventHash: undefined });
   }
-  return { nodes, audits };
+  return { nodes, audits, lifecycle: { requiresPrintHandoff: true, requiresGuardExit: true, requiredAdjustmentIds: ['adjustment-1'] }, conservation: {
+    quantityWitnesses: ['ALLOCATION', 'PRICED', 'DOCUMENTED', 'EXIT'].map(stage => ({ stage: stage as 'ALLOCATION' | 'PRICED' | 'DOCUMENTED' | 'EXIT', rowId: 'row-1', unit: 'squareMeter', value: '2.000' })),
+    moneyWitnesses: ['PRICED', 'DOCUMENTED'].map(stage => ({ stage: stage as 'PRICED' | 'DOCUMENTED', currency: 'TOMAN', gross: '100.000000000000', discount: '10.000000000000', net: '90.000000000000' })),
+    adjustmentWitnesses: [{ id: 'adjustment-1', currency: 'TOMAN', before: '90.000000000000', delta: '5.000000000000', after: '95.000000000000' }],
+  } };
 };
 
 test('replay verifies the complete pricing-to-adjustment evidence and audit chain', () => {
@@ -85,6 +96,21 @@ test('replay fails closed for a missing link, changed hash, or broken audit pred
   assert.ok(report.issues.some(item => item.code === 'MISSING_EVIDENCE' && item.subjectId === 'priced-event-1'));
 });
 
+test('replay distinguishes lifecycle-optional evidence and fails closed on quantity or money conservation', () => {
+  const optional = completeChain();
+  optional.nodes = optional.nodes.filter(item => !['PRINT_HANDOFF', 'GUARD_EXIT', 'STATEMENT_ADJUSTMENT'].includes(item.kind));
+  optional.audits = optional.audits.filter(item => optional.nodes.some(node => node.id === item.aggregateId));
+  optional.lifecycle = { requiresPrintHandoff: false, requiresGuardExit: false, requiredAdjustmentIds: [] };
+  optional.conservation.quantityWitnesses = optional.conservation.quantityWitnesses.filter(item => item.stage !== 'EXIT');
+  optional.conservation.adjustmentWitnesses = [];
+  assert.equal(replayDispatchDocumentEvidence(optional).status, 'VERIFIED');
+  optional.conservation.quantityWitnesses[1] = { ...optional.conservation.quantityWitnesses[1], value: '1.000' };
+  optional.conservation.moneyWitnesses[1] = { ...optional.conservation.moneyWitnesses[1], net: '89.000000000000' };
+  const failed = replayDispatchDocumentEvidence(optional);
+  assert.ok(failed.issues.some(item => item.code === 'QUANTITY_CONSERVATION_MISMATCH'));
+  assert.ok(failed.issues.some(item => item.code === 'MONEY_CONSERVATION_MISMATCH'));
+});
+
 const artifact = (id: string, storageKey: string, bytes: Buffer): DispatchArtifactMetadata => ({
   id, waybillId: 'waybill-1', storageKey, byteLength: bytes.length,
   sha256: createHash('sha256').update(bytes).digest('hex'), sourceIntegrityHash: 'a'.repeat(64),
@@ -97,7 +123,7 @@ test('reconciliation distinguishes healthy, missing, corrupt, and unreferenced s
   const metadata = [artifact('a-healthy', 'issued/healthy.pdf', healthy), artifact('a-missing', 'issued/missing.pdf', missing), artifact('a-corrupt', 'issued/corrupt.pdf', corrupt)];
   const audits: DispatchArtifactAuditEvent[] = [];
   const report = await reconcileDispatchDocumentArtifacts({
-    actorId: 'support-1', correlationId: 'reconcile-1', idempotencyKey: 'reconcile-command-1', metadata,
+    actorId: 'support-1', correlationId: 'reconcile-1', idempotencyKey: 'reconcile-command-1', metadata, authority,
     storage: {
       listKeys: async () => ['issued/healthy.pdf', 'issued/corrupt.pdf', 'staging/unreferenced.pdf'],
       read: async key => key === 'issued/healthy.pdf' ? healthy : key === 'issued/corrupt.pdf' ? Buffer.from('changed') : null,
@@ -118,9 +144,9 @@ test('restore accepts only original verified bytes and records failures without 
   const writes: Buffer[] = [];
   const audits: DispatchArtifactAuditEvent[] = [];
   const restored = await restoreDispatchDocumentArtifact({
-    actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-1', idempotencyKey: 'restore-command-1', metadata,
+    actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-1', idempotencyKey: 'restore-command-1', metadata, authority,
     encryptedBackup: { readOriginal: async () => ({ bytes: original, recoveryPackageId: 'backup-1', encrypted: true }) },
-    storage: { writeOriginal: async (_key, bytes) => { writes.push(bytes); }, read: async () => original },
+    storage: { writeOriginal: async (_key, bytes) => { writes.push(bytes); }, read: async () => original, restorePrevious: async () => {} },
     audit: { append: async event => { audits.push(event); } },
   });
   assert.equal(restored.status, 'RESTORED');
@@ -129,42 +155,76 @@ test('restore accepts only original verified bytes and records failures without 
 
   const rejectedWrites: Buffer[] = [];
   const rejected = await restoreDispatchDocumentArtifact({
-    actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-2', idempotencyKey: 'restore-command-2', metadata,
+    actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-2', idempotencyKey: 'restore-command-2', metadata, authority,
     encryptedBackup: { readOriginal: async () => ({ bytes: Buffer.from('regenerated-or-corrupt'), recoveryPackageId: 'backup-2', encrypted: true }) },
-    storage: { writeOriginal: async (_key, bytes) => { rejectedWrites.push(bytes); }, read: async () => null },
+    storage: { writeOriginal: async (_key, bytes) => { rejectedWrites.push(bytes); }, read: async () => null, restorePrevious: async () => {} },
     audit: { append: async event => { audits.push(event); } },
   });
   assert.equal(rejected.status, 'UNRESOLVED_INCIDENT');
   assert.deepEqual(rejectedWrites, []);
   assert.equal(audits.at(-1)?.action, 'RESTORATION_FAILED');
+
+  let auditCount = 0; let readCount = 0; const compensated: Array<Buffer | null> = [];
+  const failedAudit = await restoreDispatchDocumentArtifact({
+    actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-3', idempotencyKey: 'restore-command-3', metadata, authority,
+    encryptedBackup: { readOriginal: async () => ({ bytes: original, recoveryPackageId: 'backup-3', encrypted: true }) },
+    storage: { writeOriginal: async () => {}, read: async () => ++readCount === 1 ? Buffer.from('previous-corrupt') : original, restorePrevious: async (_key, bytes) => { compensated.push(bytes); } },
+    audit: { append: async () => { auditCount += 1; if (auditCount === 2) throw new Error('completion audit unavailable'); } },
+  });
+  assert.equal(failedAudit.status, 'UNRESOLVED_INCIDENT');
+  assert.equal(compensated[0]?.toString(), 'previous-corrupt');
 });
 
 test('orphan quarantine rechecks references and cleanup waits for the safety window', async () => {
   const actions: string[] = [];
   const audit: DispatchArtifactAuditEvent[] = [];
   await assert.rejects(quarantineDispatchDocumentOrphan({
-    storageKey: 'staging/file.pdf', actorId: 'support-1', reason: 'candidate', correlationId: 'q-1', idempotencyKey: 'q-command-1',
-    repository: { isReferenced: async () => true }, storage: { quarantine: async () => { actions.push('quarantine'); } },
+    storageKey: 'staging/file.pdf', actorId: 'support-1', reason: 'candidate', correlationId: 'q-1', idempotencyKey: 'q-command-1', authority,
+    reconciliationReportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z',
+    repository: { isReferenced: async () => true }, storage: { quarantine: async () => { actions.push('quarantine'); }, restoreQuarantined: async () => {} },
     audit: { append: async event => { audit.push(event); } },
   }), /referenced/);
   assert.equal(actions.length, 0);
 
   const quarantined = await quarantineDispatchDocumentOrphan({
-    storageKey: 'staging/file.pdf', actorId: 'support-1', reason: 'confirmed orphan', correlationId: 'q-2', idempotencyKey: 'q-command-2',
-    repository: { isReferenced: async () => false }, storage: { quarantine: async () => { actions.push('quarantine'); } },
+    storageKey: 'staging/file.pdf', actorId: 'support-1', reason: 'confirmed orphan', correlationId: 'q-2', idempotencyKey: 'q-command-2', authority,
+    reconciliationReportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z',
+    repository: { isReferenced: async () => false }, storage: { quarantine: async () => { actions.push('quarantine'); }, restoreQuarantined: async () => {} },
     audit: { append: async event => { audit.push(event); } },
   });
   assert.equal(quarantined.status, 'QUARANTINED');
   const cleanup = await cleanupQuarantinedDispatchDocumentOrphan({
-    ...quarantined, actorId: 'support-2', reason: 'safety window elapsed', correlationId: 'cleanup-1', idempotencyKey: 'cleanup-command-1',
-    now: new Date('2026-08-20T00:00:00.000Z'), safetyWindowMs: 7 * 24 * 60 * 60 * 1000,
-    repository: { isReferenced: async () => false }, storage: { removeQuarantined: async () => { actions.push('cleanup'); } },
+    storageKey: quarantined.storageKey, actorId: 'support-2', reason: 'safety window elapsed', correlationId: 'cleanup-1', idempotencyKey: 'cleanup-command-1', authority,
+    now: new Date('2026-08-20T00:00:00.000Z'),
+    repository: { isReferenced: async () => false, readQuarantineEvidence: async () => ({ quarantinedAt: quarantined.quarantinedAt, reconciliationReportHash: 'c'.repeat(64) }) },
+    storage: { stageCleanup: async () => { actions.push('cleanup'); }, restoreStagedCleanup: async () => {}, finalizeCleanup: async () => {} },
     audit: { append: async event => { audit.push(event); } },
   });
   assert.equal(cleanup.status, 'REMOVED');
   assert.deepEqual(actions, ['quarantine', 'cleanup']);
   assert.ok(audit.some(item => item.action === 'QUARANTINE_COMPLETED'));
   assert.ok(audit.some(item => item.action === 'CLEANUP_COMPLETED'));
+});
+
+test('quarantine and cleanup compensate filesystem mutations when durable completion audit fails', async () => {
+  const movements: string[] = [];
+  let appendCount = 0;
+  await assert.rejects(quarantineDispatchDocumentOrphan({
+    storageKey: 'staging/fail.pdf', actorId: 'support-1', reason: 'confirmed orphan', correlationId: 'q-fail', idempotencyKey: 'q-fail', authority,
+    reconciliationReportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z', repository: { isReferenced: async () => false },
+    storage: { quarantine: async () => { movements.push('quarantine'); }, restoreQuarantined: async () => { movements.push('restore'); } },
+    audit: { append: async () => { appendCount += 1; if (appendCount === 2) throw new Error('audit unavailable'); } },
+  }), /audit unavailable/);
+  assert.deepEqual(movements, ['quarantine', 'restore']);
+
+  movements.length = 0; appendCount = 0;
+  await assert.rejects(cleanupQuarantinedDispatchDocumentOrphan({
+    storageKey: 'staging/fail.pdf', actorId: 'support-1', reason: 'cleanup', correlationId: 'c-fail', idempotencyKey: 'c-fail', authority,
+    now: new Date('2026-08-20T00:00:00.000Z'), repository: { isReferenced: async () => false, readQuarantineEvidence: async () => ({ quarantinedAt: '2026-08-09T00:00:00.000Z', reconciliationReportHash: 'c'.repeat(64) }) },
+    storage: { stageCleanup: async () => { movements.push('stage'); }, restoreStagedCleanup: async () => { movements.push('restore'); }, finalizeCleanup: async () => { movements.push('delete'); } },
+    audit: { append: async () => { appendCount += 1; if (appendCount === 2) throw new Error('audit unavailable'); } },
+  }), /audit unavailable/);
+  assert.deepEqual(movements, ['stage', 'restore']);
 });
 
 test('Accounting recovery audit query is scoped, filtered, and paginated', async () => {
@@ -192,11 +252,29 @@ test('system recovery maps dispatch artifacts into encrypted package paths and r
   assert.ok(recoveryEngineInternals.dispatchDocumentStorageDirectory.replace(/\\/g, '/').endsWith('/storage/dispatch-documents'));
 });
 
+test('production filesystem adapter performs reversible quarantine and staged cleanup without path escape', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dispatch-recovery-storage-'));
+  const artifactRoot = path.join(root, 'artifacts'); const quarantineRoot = path.join(root, 'quarantine'); const cleanupStagingRoot = path.join(root, 'cleanup');
+  const storage = createDispatchDocumentFilesystem({ artifactRoot, quarantineRoot, cleanupStagingRoot });
+  try {
+    const target = path.join(artifactRoot, 'staging', 'orphan.pdf');
+    await fs.promises.mkdir(path.dirname(target), { recursive: true }); await fs.promises.writeFile(target, 'original');
+    await storage.quarantine('staging/orphan.pdf');
+    assert.equal(fs.existsSync(target), false);
+    await storage.restoreQuarantined('staging/orphan.pdf');
+    assert.equal((await storage.read('staging/orphan.pdf'))?.toString(), 'original');
+    await storage.quarantine('staging/orphan.pdf'); await storage.stageCleanup('staging/orphan.pdf'); await storage.finalizeCleanup('staging/orphan.pdf');
+    assert.equal(fs.existsSync(path.join(cleanupStagingRoot, 'staging', 'orphan.pdf')), false);
+    await assert.rejects(storage.read('../outside.pdf'), /unsafe/);
+  } finally { await fs.promises.rm(root, { recursive: true, force: true }); }
+});
+
 test('system recovery rejects an incomplete backup until every referenced original artifact is included', async () => {
   const payloadRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dispatch-recovery-coverage-'));
+  const original = Buffer.from('original-pdf');
   const database = {
     $queryRawUnsafe: async () => [],
-    dispatchDocumentArtifact: { findMany: async () => [{ id: 'artifact-1', storageKey: 'issued/original.pdf' }] },
+    dispatchDocumentArtifact: { findMany: async () => [{ id: 'artifact-1', storageKey: 'issued/original.pdf', byteLength: BigInt(original.length), sha256: createHash('sha256').update(original).digest('hex') }] },
   };
   try {
     await assert.rejects(
@@ -205,7 +283,12 @@ test('system recovery rejects an incomplete backup until every referenced origin
     );
     const originalPath = recoveryEngineInternals.dispatchArtifactBackupPath(payloadRoot, 'issued/original.pdf');
     await fs.promises.mkdir(path.dirname(originalPath), { recursive: true });
-    await fs.promises.writeFile(originalPath, Buffer.from('original-pdf'));
+    await fs.promises.writeFile(originalPath, Buffer.from('same-length!'));
+    await assert.rejects(
+      recoveryEngineInternals.validateStoredFileReferences(database as never, payloadRoot),
+      (error: any) => error?.code === 'RECOVERY_DISPATCH_ARTIFACT_CORRUPT',
+    );
+    await fs.promises.writeFile(originalPath, original);
     await recoveryEngineInternals.validateStoredFileReferences(database as never, payloadRoot);
   } finally {
     await fs.promises.rm(payloadRoot, { recursive: true, force: true });

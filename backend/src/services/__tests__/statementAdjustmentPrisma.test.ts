@@ -7,6 +7,7 @@ import type { ApprovedPricingVersionInsert } from '../approvedPricing/types';
 import { createDispatchCorrection, postDispatchCorrection } from '../dispatchCorrectionOutage';
 import { createStatementAdjustmentArtifactPreparer, type DispatchArtifactStorage } from '../dispatchDocuments';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
+import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 
 const prisma = new PrismaClient();
 const rollback = Symbol('statement-adjustment-db-rollback');
@@ -41,17 +42,21 @@ const run = async () => {
     corrections: await prisma.dispatchCorrection.count(),
     adjustments: await prisma.dispatchStatementAdjustment.count(),
     artifacts: await prisma.dispatchDocumentArtifact.count({ where: { kind: 'STATEMENT_ADJUSTMENT' } }),
+    movements: await prisma.securityVehicleMovement.count(),
+    quantityEvidence: await prisma.shipmentQuantityEvidence.count(),
+    commands: await prisma.dispatchDocumentCommandResult.count({ where: { scope: 'CORRECTION' } }),
+    audits: await prisma.dispatchLifecycleAudit.count({ where: { aggregateType: 'DISPATCH_CORRECTION' } }),
   };
   try {
     await prisma.$transaction(async (tx) => {
       const [candidate] = await tx.$queryRaw<Array<{
         waybillId: string; revisionId: string; revisionLineId: string; itemId: string; productRowId: string;
         contractId: string; financialRecordId: string; createdBy: string; currency: string;
-        lineQuantity: Prisma.Decimal; lineUnit: string;
+        lineQuantity: Prisma.Decimal; lineUnit: string; loadingId: string;
       }>>(Prisma.sql`
         SELECT w."id" AS "waybillId", ar."id" AS "revisionId", arl."id" AS "revisionLineId",
           ci."id" AS "itemId", ci."productRowId", ci."contractId", afr."id" AS "financialRecordId",
-          afr."createdBy", sc."currency", arl."quantity" AS "lineQuantity", arl."unit" AS "lineUnit"
+          afr."createdBy", sc."currency", arl."quantity" AS "lineQuantity", arl."unit" AS "lineUnit", ar."loadingId"
         FROM "accounting_dispatch_waybills" w
         JOIN "accounting_dispatch_candidates" adc ON adc."id" = w."candidateId"
         JOIN "logistics_allocation_revisions" ar ON ar."id" = adc."allocationRevisionId"
@@ -108,6 +113,7 @@ const run = async () => {
         kind: 'STATEMENT', templateVersion: 'statement-v1', storageKey: `dispatch-documents/${randomUUID()}.pdf`,
         mediaType: 'application/pdf', byteLength: 100n, sha256: hash('a'), sourceIntegrityHash: version.integrityHash,
         publishedBy: candidate.createdBy } });
+      const projectionBefore = await tx.shipmentQuantityProjection.findUnique({ where: { contractItemId: candidate.itemId } });
 
       const boundPrisma = { $transaction: async (work: (transaction: Prisma.TransactionClient) => Promise<unknown>) => work(tx) } as unknown as PrismaClient;
       const authority = { actorRole: 'ADMIN', workspace: 'accounting', workspacePermission: 'admin' };
@@ -148,9 +154,66 @@ const run = async () => {
       assert.equal(second.sequence, 2);
       assert.equal((second.snapshot as any).lines[0].grossAmountDelta,
         new Prisma.Decimal((first.snapshot as any).lines[0].grossAmountDelta).negated().toFixed(12));
-      assert.equal(await tx.dispatchStatementAdjustment.count({ where: { waybillId: candidate.waybillId } }), 2);
+
+      const dispatchEvidence = await tx.shipmentQuantityEvidence.findFirstOrThrow({ where: {
+        kind: 'PHYSICAL_EXIT', contractItemId: candidate.itemId,
+      }, orderBy: { effectiveAt: 'desc' } });
+      const returnQuantity = Prisma.Decimal.min(candidate.lineQuantity, new Prisma.Decimal('0.250')).toDecimalPlaces(3);
+      const movementOccurredAt = new Date(Math.max(dispatchEvidence.effectiveAt.getTime() + 1, Date.now() - 2_000));
+      const movementCompletedAt = new Date(movementOccurredAt.getTime() + 500);
+      const returnRecordedAt = new Date(movementCompletedAt.getTime() + 500);
+      const movement = await tx.securityVehicleMovement.create({ data: {
+        movementNumber: `I262-${randomUUID()}`,
+        direction: 'INBOUND',
+        purpose: 'SALES_RETURN',
+        status: 'INFO_COMPLETED',
+        loadingId: candidate.loadingId,
+        occurredAt: movementOccurredAt,
+        completedAt: movementCompletedAt,
+        createdBy: candidate.createdBy,
+      } });
+      const returnEvidenceBase = {
+        id: randomUUID(),
+        contractId: candidate.contractId,
+        contractItemId: candidate.itemId,
+        productRowId: candidate.productRowId,
+        unit: candidate.lineUnit,
+        kind: 'GUARD_RETURN_VERIFIED' as const,
+        quantity: returnQuantity.toFixed(3),
+        effectiveAt: movementOccurredAt.toISOString(),
+        recordedAt: returnRecordedAt.toISOString(),
+        sourceType: 'GUARD_RETURN_MOVEMENT',
+        sourceId: movement.id,
+        sourceVersion: 1,
+        integrityHash: '',
+        guardReturnMovementId: movement.id,
+        dispatchEvidenceId: dispatchEvidence.id,
+        metadata: { dispatchLoadingId: candidate.loadingId },
+      };
+      const returnEvidence = await tx.shipmentQuantityEvidence.create({ data: {
+        ...returnEvidenceBase,
+        quantity: returnQuantity,
+        effectiveAt: movementOccurredAt,
+        recordedAt: returnRecordedAt,
+        integrityHash: shipmentQuantityEvidenceIntegrityHash(returnEvidenceBase),
+      } });
+      const returned = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
+        reason: 'DB verified Guard return', effectiveAt: returnRecordedAt, actorId: candidate.createdBy, authority,
+        lines: [{ contractItemId: candidate.itemId, quantity: returnQuantity.negated().toFixed(3),
+          returnEvidenceId: returnEvidence.id }] });
+      await postDispatchCorrection(boundPrisma, { correctionId: returned.id, actorId: candidate.createdBy,
+        authority, idempotencyKey: 'issue262-verified-return' }, { artifactPreparer: configuredArtifactPreparer() });
+      assert.equal(await tx.shipmentQuantityEvidence.count({ where: {
+        kind: 'DISPATCH_CORRECTION_POSTED', returnEvidenceId: returnEvidence.id,
+      } }), 1, 'a verified Guard return is consumed exactly once by the actual atomic post command');
+      if (projectionBefore?.physicallyDispatched) {
+        const projectionAfter = await tx.shipmentQuantityProjection.findUniqueOrThrow({ where: { contractItemId: candidate.itemId } });
+        assert.equal(projectionAfter.physicallyDispatched?.toFixed(3),
+          projectionBefore.physicallyDispatched.sub(returnQuantity).toFixed(3));
+      }
+      assert.equal(await tx.dispatchStatementAdjustment.count({ where: { waybillId: candidate.waybillId } }), 3);
       assert.equal(await tx.dispatchDocumentArtifact.count({ where: { waybillId: candidate.waybillId,
-        kind: 'STATEMENT_ADJUSTMENT' } }), 2);
+        kind: 'STATEMENT_ADJUSTMENT' } }), 3);
       assert.deepEqual(await tx.dispatchDocumentArtifact.findUniqueOrThrow({ where: { id: originalStatement.id } }), originalStatement,
         'adjustments must not rewrite the original statement artifact');
       throw rollback;
@@ -165,6 +228,10 @@ const run = async () => {
     corrections: await prisma.dispatchCorrection.count(),
     adjustments: await prisma.dispatchStatementAdjustment.count(),
     artifacts: await prisma.dispatchDocumentArtifact.count({ where: { kind: 'STATEMENT_ADJUSTMENT' } }),
+    movements: await prisma.securityVehicleMovement.count(),
+    quantityEvidence: await prisma.shipmentQuantityEvidence.count(),
+    commands: await prisma.dispatchDocumentCommandResult.count({ where: { scope: 'CORRECTION' } }),
+    audits: await prisma.dispatchLifecycleAudit.count({ where: { aggregateType: 'DISPATCH_CORRECTION' } }),
   };
   assert.deepEqual(after, before, 'rollback must preserve every pre-test evidence count');
 };

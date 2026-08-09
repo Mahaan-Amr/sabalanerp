@@ -16,6 +16,18 @@ const PACKAGES_DIR = path.join(RECOVERY_ROOT, 'packages');
 const UPLOADS_DIR = path.join(RECOVERY_ROOT, 'uploads');
 const WORK_DIR = path.join(RECOVERY_ROOT, 'work');
 const INQUIRY_SOURCE_DIR = process.env.INQUIRY_RECOVERY_SOURCE_DIR || path.join(process.cwd(), 'recovery-sources', 'inquiry');
+const DISPATCH_DOCUMENT_STORAGE_DIR = path.join(process.cwd(), 'storage', 'dispatch-documents');
+
+const dispatchArtifactBackupPath = (payloadRoot: string, storageKey: string) => {
+  const normalized = storageKey.replace(/\\/g, '/');
+  if (!normalized || normalized.startsWith('/') || /^[a-z]:/i.test(normalized) || normalized.split('/').includes('..')) {
+    throw Object.assign(new Error('Dispatch artifact storage key is unsafe.'), { code: 'UNSAFE_RECOVERY_PATH' });
+  }
+  const root = path.resolve(payloadRoot, 'files', 'dispatch-documents');
+  const candidate = path.resolve(root, normalized);
+  if (!candidate.startsWith(`${root}${path.sep}`)) throw Object.assign(new Error('Dispatch artifact storage key is unsafe.'), { code: 'UNSAFE_RECOVERY_PATH' });
+  return candidate;
+};
 
 export type RecoveryManifest = {
   format: 'sabalan-recovery';
@@ -313,6 +325,7 @@ export const createRecoveryPackage = async (input: {
       copyComponent(path.join(process.cwd(), 'storage', 'contracts'), path.join(payloadRoot, 'files', 'contracts'), sanitized),
       copyComponent(path.join(process.cwd(), 'storage', 'hr-hiring'), path.join(payloadRoot, 'files', 'hr-hiring'), sanitized),
       copyComponent(path.join(process.cwd(), 'storage', 'accounting-contracts'), path.join(payloadRoot, 'files', 'accounting-contracts'), sanitized),
+      copyComponent(DISPATCH_DOCUMENT_STORAGE_DIR, path.join(payloadRoot, 'files', 'dispatch-documents'), sanitized),
       copyComponent(
         path.join(process.cwd(), 'storage', 'support-tickets'),
         path.join(payloadRoot, 'files', 'support-tickets'),
@@ -556,6 +569,14 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
       details: missing,
     });
   }
+  const dispatchArtifacts = await client.dispatchDocumentArtifact.findMany({ select: { id: true, storageKey: true } });
+  const missingDispatchArtifacts = dispatchArtifacts.filter(artifact => !fs.existsSync(dispatchArtifactBackupPath(payloadRoot, artifact.storageKey)));
+  if (missingDispatchArtifacts.length) {
+    throw Object.assign(new Error(`Recovery package has missing dispatch-document artifacts (${missingDispatchArtifacts.length}).`), {
+      code: 'RECOVERY_DISPATCH_ARTIFACT_MISSING',
+      details: missingDispatchArtifacts.slice(0, 25),
+    });
+  }
 };
 
 export const stageAndPromoteRecovery = async (input: {
@@ -635,6 +656,7 @@ export const stageAndPromoteRecovery = async (input: {
       ['files/contracts', path.join(process.cwd(), 'storage', 'contracts'), 'contracts'],
       ['files/hr-hiring', path.join(process.cwd(), 'storage', 'hr-hiring'), 'hr-hiring'],
       ['files/accounting-contracts', path.join(process.cwd(), 'storage', 'accounting-contracts'), 'accounting-contracts'],
+      ['files/dispatch-documents', DISPATCH_DOCUMENT_STORAGE_DIR, 'dispatch-documents'],
       ['files/support-tickets', path.join(process.cwd(), 'storage', 'support-tickets'), 'support-tickets'],
       ['files/uploads', path.join(process.cwd(), 'uploads'), 'uploads'],
       ['inquiry', INQUIRY_SOURCE_DIR, 'inquiry'],
@@ -683,6 +705,7 @@ export const stageAndPromoteRecovery = async (input: {
         ['contracts', path.join(process.cwd(), 'storage', 'contracts')],
         ['hr-hiring', path.join(process.cwd(), 'storage', 'hr-hiring')],
         ['accounting-contracts', path.join(process.cwd(), 'storage', 'accounting-contracts')],
+        ['dispatch-documents', DISPATCH_DOCUMENT_STORAGE_DIR],
         ['support-tickets', path.join(process.cwd(), 'storage', 'support-tickets')],
         ['uploads', path.join(process.cwd(), 'uploads')],
         ['inquiry', INQUIRY_SOURCE_DIR],
@@ -789,6 +812,7 @@ export const rollbackInterruptedRecovery = async (journal: RestoreJournal) => {
     ['contracts', path.join(process.cwd(), 'storage', 'contracts')],
     ['hr-hiring', path.join(process.cwd(), 'storage', 'hr-hiring')],
     ['accounting-contracts', path.join(process.cwd(), 'storage', 'accounting-contracts')],
+    ['dispatch-documents', DISPATCH_DOCUMENT_STORAGE_DIR],
     ['support-tickets', path.join(process.cwd(), 'storage', 'support-tickets')],
     ['uploads', path.join(process.cwd(), 'uploads')],
     ['inquiry', INQUIRY_SOURCE_DIR],
@@ -810,4 +834,7 @@ export const recoveryEngineInternals = {
   databaseConfig,
   databaseUrlWithName,
   safeDatabaseName,
+  dispatchArtifactBackupPath,
+  dispatchDocumentStorageDirectory: DISPATCH_DOCUMENT_STORAGE_DIR,
+  validateStoredFileReferences,
 };

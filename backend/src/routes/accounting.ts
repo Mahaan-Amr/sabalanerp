@@ -34,6 +34,7 @@ import {
 } from '../services/accountingService';
 import type { ContractCustomPrintOptions, ContractPrintVariant } from '../utils/printTemplate';
 import { publishNotificationEvent } from '../services/notificationService';
+import { listDispatchDocumentRecoveryAudit } from '../services/dispatchDocumentAuditRecovery';
 import {
   decideAccountingDispatchCandidate,
   DispatchAllocationConflictError,
@@ -587,6 +588,16 @@ router.get('/correction-requests', accountingView, async (req: AuthRequest, res:
     res.json({ success: true, data });
   } catch (error) {
     console.error('Accounting correction requests error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+router.get('/audit/dispatch-documents/recovery', accountingView, async (req: AuthRequest, res: Response) => {
+  try {
+    const data = await listDispatchDocumentRecoveryAudit(prisma, req.query as Record<string, string>);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Dispatch document recovery audit error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });

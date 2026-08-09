@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   HR_DUTY_DEFINITIONS,
+  deriveHrDutyRoutingContext,
   evaluateHrDutyResponse,
   formatHrDutyDeadlineTehran,
   planHrDutyDeadlineEvents,
@@ -13,6 +14,26 @@ assert.deepEqual(
   HR_DUTY_DEFINITIONS.LEGACY_HR_WORK_ITEM_REVIEW.allowedActionCodes,
   ['APPROVE', 'REJECT', 'RETURN', 'REQUEST_CLARIFICATION'],
   'supported actions are code-owned rather than accepted from request data',
+);
+assert.deepEqual(
+  HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.responseSchema,
+  {
+    type: 'object',
+    properties: {
+      actionCode: { type: 'string', enum: ['APPROVE', 'REJECT', 'RETURN', 'REQUEST_CLARIFICATION'] },
+      reason: { type: ['string', 'null'], minLength: 3 },
+    },
+    required: ['actionCode', 'reason'],
+    additionalProperties: false,
+  },
+);
+assert.deepEqual(
+  deriveHrDutyRoutingContext(HR_DUTY_DEFINITIONS.FINANCE_APPROVAL, { sourceKey: null }),
+  { scopeType: 'GLOBAL', scopeId: null },
+);
+assert.deepEqual(
+  deriveHrDutyRoutingContext(HR_DUTY_DEFINITIONS.HIRING_MANAGER_REVIEW, { sourceKey: 'HIRING:application-42:REVIEW:user-7' }),
+  { scopeType: 'APPLICATION', scopeId: 'application-42' },
 );
 
 const validResponse = evaluateHrDutyResponse({
@@ -32,6 +53,7 @@ const validResponse = evaluateHrDutyResponse({
   responsibilityIsCurrent: true,
   separationOfDutiesSatisfied: true,
   allowedActionCodes: HR_DUTY_DEFINITIONS.LEGACY_HR_WORK_ITEM_REVIEW.allowedActionCodes,
+  sourceActorUserId: 'source-1',
 });
 assert.deepEqual(validResponse, { allowed: true });
 
@@ -42,6 +64,7 @@ for (const [name, decision] of [
     expectedEnvelopeVersion: 1, reason: null, sourceIsCurrent: true, assigneeIsEligible: true,
     responsibilityIsCurrent: true, separationOfDutiesSatisfied: true,
     allowedActionCodes: HR_DUTY_DEFINITIONS.LEGACY_HR_WORK_ITEM_REVIEW.allowedActionCodes,
+    sourceActorUserId: 'source-1',
   })],
   ['revoked assignee', evaluateHrDutyResponse({
     duty: { status: 'OPEN', currentAssigneeUserId: 'assignee-1', sourceVersion: 3, envelopeVersion: 1 },
@@ -49,13 +72,15 @@ for (const [name, decision] of [
     expectedEnvelopeVersion: 1, reason: null, sourceIsCurrent: true, assigneeIsEligible: false,
     responsibilityIsCurrent: true, separationOfDutiesSatisfied: true,
     allowedActionCodes: HR_DUTY_DEFINITIONS.LEGACY_HR_WORK_ITEM_REVIEW.allowedActionCodes,
+    sourceActorUserId: 'source-1',
   })],
   ['self approval', evaluateHrDutyResponse({
     duty: { status: 'OPEN', currentAssigneeUserId: 'assignee-1', sourceVersion: 3, envelopeVersion: 1 },
     actorUserId: 'assignee-1', actionCode: 'APPROVE', expectedSourceVersion: 3,
     expectedEnvelopeVersion: 1, reason: null, sourceIsCurrent: true, assigneeIsEligible: true,
-    responsibilityIsCurrent: true, separationOfDutiesSatisfied: false,
+    responsibilityIsCurrent: true, separationOfDutiesSatisfied: true,
     allowedActionCodes: HR_DUTY_DEFINITIONS.LEGACY_HR_WORK_ITEM_REVIEW.allowedActionCodes,
+    sourceActorUserId: 'assignee-1',
   })],
 ] as const) {
   assert.equal(decision.allowed, false, `${name} must fail closed`);

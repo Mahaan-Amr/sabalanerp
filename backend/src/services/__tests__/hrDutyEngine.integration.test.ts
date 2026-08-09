@@ -25,7 +25,23 @@ const run = async () => {
         where: { code: 'FINANCE_MANAGER' }, update: { isActive: true },
         create: { code: 'FINANCE_MANAGER', displayName: 'Finance Manager' },
       }),
+      tx.hrAuthorityCatalog.upsert({
+        where: { code: 'FINANCE_RECORDER' }, update: { isActive: true },
+        create: { code: 'FINANCE_RECORDER', displayName: 'Finance Recorder' },
+      }),
+      tx.hrResponsibilityTypeCatalog.upsert({
+        where: { code: 'FINANCE_RECORDER' }, update: { isActive: true },
+        create: { code: 'FINANCE_RECORDER', displayName: 'Finance Recorder' },
+      }),
     ]);
+    await tx.hrNamedResponsibility.updateMany({
+      where: { responsibilityTypeCode: { in: ['FINANCE_MANAGER', 'FINANCE_RECORDER'] }, scopeType: 'GLOBAL', scopeId: null },
+      data: { effectiveTo: new Date('2026-07-31T23:59:59.000Z') },
+    });
+    await tx.hrResponsibilityDestination.updateMany({
+      where: { responsibilityTypeCode: { in: ['FINANCE_MANAGER', 'FINANCE_RECORDER'] }, scopeType: 'GLOBAL', scopeId: null },
+      data: { isActive: false },
+    });
     const [sourceActor, assignee] = await Promise.all([
       tx.user.create({ data: {
         email: `duty-source-${suffix}@example.invalid`, username: `duty-source-${suffix}`,
@@ -37,9 +53,12 @@ const run = async () => {
       } }),
     ]);
     await syncHrDutyEnvelopeDefinitions(tx, sourceActor.id);
+    const staticEnvelopeCodes = Object.values(HR_DUTY_DEFINITIONS)
+      .filter(({ destinationWorkspaceCode }) => Boolean(destinationWorkspaceCode))
+      .map(({ envelopeCode }) => envelopeCode);
     assert.equal(
-      await tx.hrDutyEnvelope.count({ where: { code: { in: Object.values(HR_DUTY_DEFINITIONS).map(({ envelopeCode }) => envelopeCode) } } }),
-      Object.keys(HR_DUTY_DEFINITIONS).length,
+      await tx.hrDutyEnvelope.count({ where: { code: { in: staticEnvelopeCodes } } }),
+      staticEnvelopeCodes.length,
     );
     await tx.hrBusinessAuthorityGrant.create({ data: {
       stableKey: `duty-test-authority:${suffix}`,
@@ -52,7 +71,7 @@ const run = async () => {
     const responsibility = await tx.hrNamedResponsibility.create({ data: {
       stableKey: `duty-test-responsibility:${suffix}`,
       responsibilityTypeCode: 'FINANCE_MANAGER',
-      scopeType: 'DUTY_ENGINE_TEST', scopeId: suffix,
+      scopeType: 'GLOBAL', scopeId: null,
       assignedUserId: assignee.id,
       effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
       createdByUserId: sourceActor.id,
@@ -60,7 +79,7 @@ const run = async () => {
     await tx.hrResponsibilityDestination.create({ data: {
       stableKey: `duty-test-destination:${suffix}`,
       responsibilityTypeCode: 'FINANCE_MANAGER',
-      scopeType: 'DUTY_ENGINE_TEST', scopeId: suffix,
+      scopeType: 'GLOBAL', scopeId: null,
       workspaceCode: 'ACCOUNTING', queueCode: 'FINANCE_APPROVALS',
       createdByUserId: sourceActor.id,
     } });
@@ -72,9 +91,7 @@ const run = async () => {
 
     const created = await createHrDutyFromLegacyWorkItem(tx, {
       sourceWorkItemId: source.id,
-      sourceActionCode: 'FINANCE_APPROVAL', responsibilityTypeCode: 'FINANCE_MANAGER',
-      scopeType: 'DUTY_ENGINE_TEST', scopeId: suffix,
-      sourceActorUserId: sourceActor.id, policyVersion: 1,
+      sourceActionCode: 'FINANCE_APPROVAL', actorUserId: sourceActor.id, policyVersion: 1,
       now: new Date('2026-08-09T08:00:00.000Z'),
     });
     assert.equal(created.currentAssigneeUserId, assignee.id);
@@ -86,9 +103,7 @@ const run = async () => {
 
     const replay = await createHrDutyFromLegacyWorkItem(tx, {
       sourceWorkItemId: source.id,
-      sourceActionCode: 'FINANCE_APPROVAL', responsibilityTypeCode: 'FINANCE_MANAGER',
-      scopeType: 'DUTY_ENGINE_TEST', scopeId: suffix,
-      sourceActorUserId: sourceActor.id, policyVersion: 1,
+      sourceActionCode: 'FINANCE_APPROVAL', actorUserId: sourceActor.id, policyVersion: 1,
       now: new Date('2026-08-09T08:00:00.000Z'),
     });
     assert.equal(replay.id, created.id, 'creation retry returns the one durable duty');
@@ -101,7 +116,7 @@ const run = async () => {
       email: `duty-successor-${suffix}@example.invalid`, username: `duty-successor-${suffix}`,
       password: 'not-a-login-secret', firstName: 'Duty', lastName: 'Successor',
     } });
-    await tx.hrBusinessAuthorityGrant.create({ data: {
+    const successorGrant = await tx.hrBusinessAuthorityGrant.create({ data: {
       stableKey: `duty-test-successor-authority:${suffix}`,
       userId: successorOwner.id, authorityCode: 'FINANCE_MANAGER',
       effectiveFrom: new Date('2026-08-09T08:30:00.000Z'),
@@ -109,7 +124,7 @@ const run = async () => {
     } });
     const successorResponsibility = await tx.hrNamedResponsibility.create({ data: {
       stableKey: `duty-test-successor-responsibility:${suffix}`,
-      responsibilityTypeCode: 'FINANCE_MANAGER', scopeType: 'DUTY_ENGINE_TEST', scopeId: suffix,
+      responsibilityTypeCode: 'FINANCE_MANAGER', scopeType: 'GLOBAL', scopeId: null,
       assignedUserId: successorOwner.id, effectiveFrom: new Date('2026-08-09T08:30:00.000Z'),
       createdByUserId: sourceActor.id,
     } });
@@ -166,21 +181,63 @@ const run = async () => {
     } });
     await tx.hrResponsibilityDestination.create({ data: {
       stableKey: `duty-test-unassigned-destination:${suffix}`,
-      responsibilityTypeCode: 'FINANCE_MANAGER',
-      scopeType: 'DUTY_ENGINE_UNASSIGNED_TEST', scopeId: suffix,
-      workspaceCode: 'ACCOUNTING', queueCode: 'FINANCE_MANAGER_TRIAGE',
+      responsibilityTypeCode: 'FINANCE_RECORDER',
+      scopeType: 'GLOBAL', scopeId: null,
+      workspaceCode: 'ACCOUNTING', queueCode: 'FINANCE_RECORDER_TRIAGE',
       createdByUserId: sourceActor.id,
     } });
     const unassigned = await createHrDutyFromLegacyWorkItem(tx, {
       sourceWorkItemId: unassignedSource.id,
-      sourceActionCode: 'FINANCE_APPROVAL', responsibilityTypeCode: 'FINANCE_MANAGER',
-      scopeType: 'DUTY_ENGINE_UNASSIGNED_TEST', scopeId: suffix,
-      sourceActorUserId: sourceActor.id, policyVersion: 1,
+      sourceActionCode: 'FINANCE_RECORDING', actorUserId: sourceActor.id, policyVersion: 1,
       now: new Date('2026-08-09T08:00:00.000Z'),
     });
     assert.equal(unassigned.currentAssigneeUserId, null);
     assert.equal((await tx.hrDutyAuditVersion.count({ where: { dutyId: unassigned.id, eventCode: 'UNASSIGNED_TRIAGE' } })), 1);
-    assert.equal((await tx.hrWorkItem.findUniqueOrThrow({ where: { id: unassignedSource.id } })).status, 'PENDING');
+    const blockedSource = await tx.hrWorkItem.findUniqueOrThrow({ where: { id: unassignedSource.id } });
+    assert.equal(blockedSource.status, 'PENDING');
+    assert.ok(blockedSource.dutyRoutingBlockedAt);
+
+    const recorder = await tx.user.create({ data: {
+      email: `duty-recorder-${suffix}@example.invalid`, username: `duty-recorder-${suffix}`,
+      password: 'not-a-login-secret', firstName: 'Duty', lastName: 'Recorder',
+    } });
+    await tx.hrBusinessAuthorityGrant.create({ data: {
+      stableKey: `duty-test-recorder-authority:${suffix}`,
+      userId: recorder.id, authorityCode: 'FINANCE_RECORDER',
+      effectiveFrom: new Date('2026-08-09T08:01:00.000Z'),
+      grantedByUserId: sourceActor.id, reason: 'Duty engine triage recovery test',
+    } });
+    await tx.hrNamedResponsibility.create({ data: {
+      stableKey: `duty-test-recorder-responsibility:${suffix}`,
+      responsibilityTypeCode: 'FINANCE_RECORDER', scopeType: 'GLOBAL', scopeId: null,
+      assignedUserId: recorder.id, effectiveFrom: new Date('2026-08-09T08:01:00.000Z'),
+      createdByUserId: sourceActor.id,
+    } });
+    const recovered = await reconcileHrDutyAssignment(tx, {
+      dutyId: unassigned.id, actorUserId: sourceActor.id, policyVersion: 1,
+      now: new Date('2026-08-09T08:02:00.000Z'),
+    });
+    assert.ok(recovered?.successor);
+    assert.equal(recovered.predecessor.status, 'WAIVED');
+    assert.equal(recovered.successor.currentAssigneeUserId, recorder.id);
+    assert.equal((await tx.hrWorkItem.findUniqueOrThrow({ where: { id: unassignedSource.id } })).dutyRoutingBlockedAt, null);
+
+    await tx.hrResponsibilityDestination.create({ data: {
+      stableKey: `duty-test-ambiguous-destination:${suffix}`,
+      responsibilityTypeCode: 'FINANCE_RECORDER', scopeType: 'GLOBAL', scopeId: null,
+      workspaceCode: 'ACCOUNTING', queueCode: 'SECOND_FINANCE_RECORDER_TRIAGE',
+      createdByUserId: sourceActor.id,
+    } });
+    const ambiguousDestinationSource = await tx.hrWorkItem.create({ data: {
+      title: 'Ambiguous accounting handoff', sourceType: 'MANUAL',
+      destinationHref: '/dashboard/accounting', dueDate: new Date('2026-08-12T09:00:00.000Z'),
+      createdByUserId: sourceActor.id,
+    } });
+    await assert.rejects(createHrDutyFromLegacyWorkItem(tx, {
+      sourceWorkItemId: ambiguousDestinationSource.id,
+      sourceActionCode: 'FINANCE_RECORDING', actorUserId: sourceActor.id, policyVersion: 1,
+      now: new Date('2026-08-09T08:03:00.000Z'),
+    }), /HR_DUTY_DESTINATION_UNRESOLVED/);
 
     const deadlineSource = await tx.hrWorkItem.create({ data: {
       title: 'Past-due accounting handoff', sourceType: 'MANUAL',
@@ -189,9 +246,7 @@ const run = async () => {
     } });
     const deadlineDuty = await createHrDutyFromLegacyWorkItem(tx, {
       sourceWorkItemId: deadlineSource.id,
-      sourceActionCode: 'FINANCE_APPROVAL', responsibilityTypeCode: 'FINANCE_MANAGER',
-      scopeType: 'DUTY_ENGINE_TEST', scopeId: suffix,
-      sourceActorUserId: sourceActor.id, policyVersion: 1,
+      sourceActionCode: 'FINANCE_APPROVAL', actorUserId: sourceActor.id, policyVersion: 1,
       now: new Date('2026-08-09T08:00:00.000Z'),
     });
     const deadlineResult = await processHrDutyDeadlines(tx, {
@@ -212,9 +267,7 @@ const run = async () => {
     } });
     const externallyCompletedDuty = await createHrDutyFromLegacyWorkItem(tx, {
       sourceWorkItemId: externallyCompletedSource.id,
-      sourceActionCode: 'FINANCE_APPROVAL', responsibilityTypeCode: 'FINANCE_MANAGER',
-      scopeType: 'DUTY_ENGINE_TEST', scopeId: suffix,
-      sourceActorUserId: sourceActor.id, policyVersion: 1,
+      sourceActionCode: 'FINANCE_APPROVAL', actorUserId: sourceActor.id, policyVersion: 1,
       now: new Date('2026-08-09T08:00:00.000Z'),
     });
     const externallyCompletedRow = await tx.hrWorkItem.update({
@@ -233,6 +286,21 @@ const run = async () => {
     assert.equal(cancelled!.predecessor.status, 'CANCELLED');
     assert.equal(cancelled!.successor, null, 'a terminal source cancels without inventing replacement work');
     assert.equal(await tx.hrDuty.count({ where: { predecessorDutyId: externallyCompletedDuty.id } }), 0);
+
+    await tx.hrBusinessAuthorityGrant.update({
+      where: { id: successorGrant.id },
+      data: {
+        status: 'REVOKED', revokedAt: new Date('2026-08-09T10:02:00.000Z'),
+        revokedByUserId: sourceActor.id, reason: 'Replay revalidation test',
+      },
+    });
+    await assert.rejects(respondToHrDuty(tx, {
+      dutyId: successorDuty.id, actorUserId: successorOwner.id, actionCode: 'APPROVE',
+      expectedSourceVersion: successorDuty.sourceVersion,
+      expectedEnvelopeVersion: successorDuty.envelopeVersion,
+      reason: null, policyVersion: 1,
+      now: new Date('2026-08-09T10:03:00.000Z'),
+    }), /DUTY_REPLAY_REVALIDATION_FAILED/);
 
     throw rollback;
   }, { timeout: 120_000 }), (error) => error === rollback);

@@ -937,6 +937,13 @@ router.post('/work-items', requireHrWorkManager, asyncHandler(async (req: AuthRe
 
 router.patch('/work-items/:id', asyncHandler(async (req: AuthRequest, res: Response) => {
   const current = await prisma.hrWorkItem.findUniqueOrThrow({ where: { id: req.params.id } });
+  if (current.dutyRoutingBlockedAt) {
+    return res.status(409).json({
+      success: false,
+      error: 'DUTY_ROUTING_BLOCKED',
+      reason: current.dutyRoutingBlockReason,
+    });
+  }
   const manager = await canManageHrWork(req);
   const isAssignee = current.assignedToUserId === actorId(req);
   if (!manager && !isAssignee) return res.status(403).json({ success: false, error: 'این وظیفه به شما محول نشده است.' });

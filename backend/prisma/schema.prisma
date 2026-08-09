@@ -4398,31 +4398,34 @@ model HrOnboardingTask {
 }
 
 model HrWorkItem {
-  id                String               @id @default(cuid())
-  title             String
-  description       String?
-  status            HrWorkItemStatus     @default(PENDING)
-  sourceType        HrWorkItemSourceType
-  sourceKey         String?              @unique
-  destinationHref   String
-  dueDate           DateTime
-  assignedToUserId  String?
-  createdByUserId   String?
-  completedByUserId String?
-  completedAt       DateTime?
-  waivedByUserId    String?
-  waivedAt          DateTime?
-  waiverReason      String?
-  assignmentReason  String?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  assignedTo        User?                @relation("HrWorkItemAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
-  createdBy         User?                @relation("HrWorkItemCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  completedBy       User?                @relation("HrWorkItemCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
-  waivedBy          User?                @relation("HrWorkItemWaiver", fields: [waivedByUserId], references: [id], onDelete: SetNull)
-  audits            HrWorkItemAudit[]
+  id                     String               @id @default(cuid())
+  title                  String
+  description            String?
+  status                 HrWorkItemStatus     @default(PENDING)
+  sourceType             HrWorkItemSourceType
+  sourceKey              String?              @unique
+  destinationHref        String
+  dueDate                DateTime
+  assignedToUserId       String?
+  createdByUserId        String?
+  completedByUserId      String?
+  completedAt            DateTime?
+  waivedByUserId         String?
+  waivedAt               DateTime?
+  waiverReason           String?
+  assignmentReason       String?
+  dutyRoutingBlockedAt   DateTime?
+  dutyRoutingBlockReason String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  assignedTo             User?                @relation("HrWorkItemAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  createdBy              User?                @relation("HrWorkItemCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  completedBy            User?                @relation("HrWorkItemCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  waivedBy               User?                @relation("HrWorkItemWaiver", fields: [waivedByUserId], references: [id], onDelete: SetNull)
+  audits                 HrWorkItemAudit[]
 
   @@index([assignedToUserId, status, dueDate])
+  @@index([dutyRoutingBlockedAt])
   @@index([sourceType, status])
   @@index([status, dueDate])
   @@map("hr_work_items")
@@ -4770,38 +4773,43 @@ model HrDutyEnvelope {
 }
 
 model HrDuty {
-  id                       String                       @id @default(cuid())
-  stableKey                String                       @unique
-  sourceType               String
-  sourceId                 String
-  sourceActionCode         String
-  sourceVersion            Int
-  envelopeCode             String
-  envelopeVersion          Int
-  destinationWorkspaceCode String
-  destinationQueueCode     String
-  status                   HrDutyStatus                 @default(OPEN)
-  currentAssigneeUserId    String?
-  responsibilityId         String?
-  dueAt                    DateTime
-  structuredResultJson     Json?
-  respondedAt              DateTime?
-  respondedByUserId        String?
-  predecessorDutyId        String?
-  createdByUserId          String
-  createdAt                DateTime                     @default(now())
-  updatedAt                DateTime                     @updatedAt
-  envelope                 HrDutyEnvelope               @relation(fields: [envelopeCode, envelopeVersion], references: [code, version], onDelete: Restrict)
-  responsibility           HrNamedResponsibility?       @relation(fields: [responsibilityId], references: [id], onDelete: Restrict)
-  predecessor              HrDuty?                      @relation("HrDutySuccessors", fields: [predecessorDutyId], references: [id], onDelete: Restrict)
-  successors               HrDuty[]                     @relation("HrDutySuccessors")
-  assignmentHistory        HrDutyAssignmentHistory[]
-  auditVersions            HrDutyAuditVersion[]
-  notificationIdentities   HrDutyNotificationIdentity[]
+  id                            String                       @id @default(cuid())
+  stableKey                     String                       @unique
+  sourceType                    String
+  sourceId                      String
+  sourceActionCode              String
+  sourceVersion                 Int
+  envelopeCode                  String
+  envelopeVersion               Int
+  destinationWorkspaceCode      String
+  destinationQueueCode          String
+  status                        HrDutyStatus                 @default(OPEN)
+  currentAssigneeUserId         String?
+  responsibilityId              String?
+  routingResponsibilityTypeCode String?
+  routingScopeType              String?
+  routingScopeId                String?
+  sourceActorUserId             String?
+  dueAt                         DateTime
+  structuredResultJson          Json?
+  respondedAt                   DateTime?
+  respondedByUserId             String?
+  predecessorDutyId             String?
+  createdByUserId               String
+  createdAt                     DateTime                     @default(now())
+  updatedAt                     DateTime                     @updatedAt
+  envelope                      HrDutyEnvelope               @relation(fields: [envelopeCode, envelopeVersion], references: [code, version], onDelete: Restrict)
+  responsibility                HrNamedResponsibility?       @relation(fields: [responsibilityId], references: [id], onDelete: Restrict)
+  predecessor                   HrDuty?                      @relation("HrDutySuccessors", fields: [predecessorDutyId], references: [id], onDelete: Restrict)
+  successors                    HrDuty[]                     @relation("HrDutySuccessors")
+  assignmentHistory             HrDutyAssignmentHistory[]
+  auditVersions                 HrDutyAuditVersion[]
+  notificationIdentities        HrDutyNotificationIdentity[]
 
   @@unique([sourceType, sourceId, sourceActionCode, sourceVersion])
   @@index([currentAssigneeUserId, status, dueAt])
   @@index([destinationWorkspaceCode, destinationQueueCode, status, dueAt])
+  @@index([routingResponsibilityTypeCode, routingScopeType, routingScopeId, status], map: "hr_duties_routingResponsibilityTypeCode_routingScopeType_idx")
   @@map("hr_duties")
 }
 

@@ -21,7 +21,7 @@ export interface LegacyApprovedPricingWriterRepository extends ApprovedPricingRe
   } | null>;
 }
 
-class PrismaLegacyApprovedPricingRepository extends PrismaApprovedPricingRepository implements LegacyApprovedPricingWriterRepository {
+export class PrismaLegacyApprovedPricingRepository extends PrismaApprovedPricingRepository implements LegacyApprovedPricingWriterRepository {
   constructor(private readonly legacyTx: Prisma.TransactionClient) { super(legacyTx); }
 
   async loadLegacyPricingRevalidationSource(contractId: string) {

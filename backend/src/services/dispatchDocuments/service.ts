@@ -6,10 +6,12 @@ import type {
   DispatchDocumentAccessPolicy,
   DispatchDocumentRepository,
   DispatchDocumentSourceReader,
+  DispatchIntegrityIncidentReporter,
   IssuedWaybill,
   PrimaryBundleIdentity,
   PrimaryBundleSource,
 } from './ports';
+import { prepareDispatchArtifact } from './artifactPreparation';
 
 export class DispatchDocumentValidationError extends Error {}
 export class DispatchDocumentConflictError extends Error {}
@@ -24,6 +26,7 @@ type Dependencies = {
   sourceReader: DispatchDocumentSourceReader;
   publisher: DispatchArtifactPublisher;
   access: DispatchDocumentAccessPolicy;
+  incidents: DispatchIntegrityIncidentReporter;
   id?: () => string;
   now?: () => Date;
 };
@@ -90,38 +93,12 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
       throw new DispatchDocumentConflictError('Dispatch document source does not match the reserved waybill identity.');
     }
     assertRenderSourceConsistency(source);
-    const rendered = await Promise.all([
-      dependencies.publisher.publish(source.waybill),
-      dependencies.publisher.publish(source.statement),
-    ]);
-    const inputs = [source.waybill, source.statement] as const;
-    const artifacts: PublishedDispatchArtifact[] = [];
-    for (let index = 0; index < inputs.length; index += 1) {
-      const output = rendered[index];
-      if (output.mediaType !== 'application/pdf' || output.bytes.byteLength === 0) {
-        throw new DispatchDocumentIntegrityError('Renderer did not produce a non-empty PDF artifact.');
-      }
-      const artifactId = id();
-      const storageKey = `dispatch-documents/${id()}.pdf`;
-      ensureOpaqueStorageKey(storageKey);
-      await dependencies.storage.stage({ storageKey, bytes: output.bytes });
-      const verified = await dependencies.storage.read(storageKey);
-      if (!verified || verified.byteLength !== output.bytes.byteLength || digest(verified) !== digest(output.bytes)) {
-        throw new DispatchDocumentIntegrityError('Staged dispatch artifact failed verification.');
-      }
-      artifacts.push({
-        id: artifactId,
-        waybillId: root.waybillId,
-        kind: inputs[index].kind,
-        adjustmentSequence: null,
-        templateVersion: inputs[index].templateVersion,
-        storageKey,
-        mediaType: 'application/pdf',
-        byteLength: verified.byteLength,
-        sha256: digest(verified),
-        publishedAt: root.issuedAt,
-      });
-    }
+    const prepared = await Promise.all([source.waybill, source.statement].map(renderInput => prepareDispatchArtifact({
+      publisher: dependencies.publisher, storage: dependencies.storage, id, now: () => new Date(root.issuedAt),
+    }, renderInput)));
+    const artifacts: PublishedDispatchArtifact[] = prepared.map(artifact => ({ ...artifact, waybillId: root.waybillId,
+      adjustmentSequence: null, generatorVersion: source.provenance.generatorVersion,
+      sourceVersionIdentities: source.provenance.sourceVersionIdentities }));
     if (artifacts.length !== 2) throw new DispatchDocumentIntegrityError('Primary dispatch bundle is incomplete.');
     void actorId;
     return artifacts;
@@ -205,6 +182,9 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     } catch (error) {
       await dependencies.repository.recordRetrieval({ waybillId: input.waybillId, artifact, actorId: input.actorId,
         correlationId: required(input.correlationId, 'correlationId'), status: 'FAILED', failureCode: 'ARTIFACT_INTEGRITY_FAILURE' });
+      await dependencies.incidents.report({ waybillId: input.waybillId, artifactId: artifact.id, actorId: input.actorId,
+        correlationId: input.correlationId, failureCode: 'ARTIFACT_INTEGRITY_FAILURE',
+        evidence: { expectedSha256: artifact.sha256, expectedByteLength: artifact.byteLength, storageKey: artifact.storageKey } });
       throw error;
     }
   };
@@ -213,29 +193,52 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     await assertAccess(required(input.actorId, 'actorId'), required(input.waybillId, 'waybillId'));
     const kinds = orderedKinds(input.kinds);
     if (!kinds.length) throw new DispatchDocumentValidationError('At least one document kind is required.');
+    const operationIdempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
+    const attemptId = required(input.correlationId, 'correlationId');
     const prior = await dependencies.repository.findCommandResult({ scope: 'PRINT_HANDOFF', scopeId: input.waybillId,
-      idempotencyKey: required(input.idempotencyKey, 'idempotencyKey') }) as { kinds?: DispatchDocumentKind[] } | null;
-    if (prior && JSON.stringify(prior.kinds) !== JSON.stringify(kinds)) {
+      idempotencyKey: operationIdempotencyKey }) as { kinds?: DispatchDocumentKind[] } | null;
+    if (prior?.kinds && JSON.stringify(orderedKinds(prior.kinds)) !== JSON.stringify(kinds)) {
       throw new DispatchDocumentConflictError('The print idempotency key was already used for another document set.');
     }
     const artifacts = await dependencies.repository.getPrintableArtifacts({ waybillId: input.waybillId, kinds });
     try {
-      if (artifacts.length !== kinds.length || artifacts.some((artifact, index) => artifact.kind !== kinds[index])) {
+      const availableKinds = new Set(artifacts.map(artifact => artifact.kind));
+      if (kinds.some(kind => !availableKinds.has(kind)) || artifacts.some(artifact => !kinds.includes(artifact.kind))) {
         throw new DispatchDocumentIntegrityError('Requested dispatch bundle is incomplete.');
       }
       const documents: Array<{ artifact: PublishedDispatchArtifact; bytes: Uint8Array }> = [];
       for (const artifact of artifacts) documents.push({ artifact, bytes: await verifiedBytes(artifact) });
-      if (!prior) await dependencies.repository.recordPrintHandoff({ ...input, kinds, status: 'SUCCEEDED', artifacts });
-      return { documents };
+      let completion: 'PENDING' | 'SUCCEEDED' | 'FAILED' = 'PENDING';
+      return { documents, complete: {
+        succeeded: async () => {
+          if (completion !== 'PENDING') return;
+          completion = 'SUCCEEDED';
+          await dependencies.repository.recordPrintHandoff({ waybillId: input.waybillId, operationIdempotencyKey,
+            attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'SUCCEEDED', artifacts });
+        },
+        failed: async (failureCode = 'BYTE_HANDOFF_FAILED') => {
+          if (completion !== 'PENDING') return;
+          completion = 'FAILED';
+          await dependencies.repository.recordPrintHandoff({ waybillId: input.waybillId, operationIdempotencyKey,
+            attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'FAILED', artifacts, failureCode });
+        },
+      } };
     } catch (error) {
-      await dependencies.repository.recordPrintHandoff({ ...input, kinds, status: 'FAILED', artifacts, failureCode: 'ARTIFACT_INTEGRITY_FAILURE' });
+      await dependencies.repository.recordPrintHandoff({ waybillId: input.waybillId, operationIdempotencyKey,
+        attemptId, correlationId: input.correlationId, actorId: input.actorId, kinds, status: 'FAILED', artifacts,
+        failureCode: 'ARTIFACT_INTEGRITY_FAILURE' });
+      for (const artifact of artifacts) await dependencies.incidents.report({ waybillId: input.waybillId,
+        artifactId: artifact.id, actorId: input.actorId, correlationId: input.correlationId,
+        failureCode: 'ARTIFACT_INTEGRITY_FAILURE', evidence: { expectedSha256: artifact.sha256,
+          expectedByteLength: artifact.byteLength, storageKey: artifact.storageKey } });
       throw error;
     }
   };
 
   const getCombinedReadModel = async (input: { candidateId: string; waybillId: string; actorId: string }) => {
     await assertAccess(required(input.actorId, 'actorId'), required(input.waybillId, 'waybillId'));
-    const model = await dependencies.repository.getCombinedReadModel({ candidateId: required(input.candidateId, 'candidateId') });
+    const model = await dependencies.repository.getCombinedReadModel({ candidateId: required(input.candidateId, 'candidateId'),
+      authorizedWaybillId: input.waybillId });
     if (!model) throw new DispatchDocumentNotAvailableError();
     return model;
   };

@@ -1,7 +1,8 @@
 # Dispatch document persistence contract
 
-This module freezes the shared contracts for Customer Shipment Statements. It does not orchestrate approval,
-allocation, issuance, correction posting, rendering, or cutover.
+This module freezes the shared contracts and owns dispatch-document orchestration: atomic primary bundle issuance,
+immutable artifact preparation, replacement, authorized retrieval, print handoff, and the combined read model. It
+does not own financial approval, Logistics pricing calculation, PDF layout, or Dispatch Correction posting.
 
 ## Ownership graph
 

@@ -38,6 +38,20 @@ const multipart = (documents: Array<{ artifact: { id: string; kind: DispatchDocu
   chunks.push(Buffer.from(`--${boundary}--\r\n`));
   return Buffer.concat(chunks);
 };
+export const bindPrintHandoffCompletion = (response: Pick<Response, 'once'>, complete: {
+  succeeded(): Promise<void>;
+  failed(code?: string): Promise<void>;
+}) => {
+  let responseFinished = false;
+  response.once('finish', () => { responseFinished = true;
+    void complete.succeeded().catch(error => console.error('Print handoff completion audit failed:', error)); });
+  response.once('close', () => { if (!responseFinished) {
+    void complete.failed('RESPONSE_CLOSED').catch(error => console.error('Print handoff failure audit failed:', error));
+  } });
+  response.once('error', () => {
+    void complete.failed('RESPONSE_ERROR').catch(error => console.error('Print handoff failure audit failed:', error));
+  });
+};
 
 /** Mount under `/api/accounting`; caller owns the canonical Accounting auth middleware. */
 export const createAccountingDispatchDocumentRouter = (input: {
@@ -77,6 +91,7 @@ export const createAccountingDispatchDocumentRouter = (input: {
         idempotencyKey: idempotencyKey(req), actorId: req.user!.id, correlationId: correlationId(req) });
       const boundary = `dispatch-${randomUUID()}`;
       const body = multipart(result.documents, boundary);
+      bindPrintHandoffCompletion(res, result.complete);
       res.setHeader('Content-Type', `multipart/mixed; boundary=${boundary}`);
       res.setHeader('Content-Length', String(body.byteLength));
       res.setHeader('Cache-Control', 'private, no-store');

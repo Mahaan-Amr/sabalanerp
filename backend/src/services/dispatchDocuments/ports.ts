@@ -4,6 +4,8 @@ import type {
   DispatchDocumentRenderInput,
   PublishedDispatchArtifact,
 } from './contracts';
+import type { BoundAllocationPricingFreshness as AllocationFreshness,
+  BoundPricedAllocationReadModel } from '../allocationPricingReadModel';
 
 export type PrimaryBundleIdentity = {
   waybillId: string;
@@ -18,6 +20,10 @@ export type PrimaryBundleSource = {
   allocationRevisionId: string;
   sourceIntegrityHash: string;
   pricedAllocation: BoundPricedAllocationSource;
+  provenance: {
+    generatorVersion: string;
+    sourceVersionIdentities: Readonly<Record<string, string>>;
+  };
   waybillSnapshot: Readonly<Record<string, unknown>>;
   waybill: Extract<DispatchDocumentRenderInput, { kind: 'WAYBILL' }>;
   statement: Extract<DispatchDocumentRenderInput, { kind: 'STATEMENT' }>;
@@ -26,32 +32,8 @@ export type PrimaryBundleSource = {
 export type ReplacementBundleSource = PrimaryBundleSource & { predecessorWaybillId: string };
 
 /** Mirrors issue 258's readBoundPricedAllocation output without importing its unstable branch. */
-export type BoundPricedAllocationSource = {
-  currency: string;
-  pricingVersions: Array<{
-    contractId: string;
-    pricingVersionId: string;
-    integrityHash: string;
-    readinessEvidenceHash: string;
-  }>;
-  lines: Array<{
-    allocationRevisionLineId: string;
-    contractId: string;
-    contractItemId: string;
-    productRowId: string;
-    unit: string;
-    quantity: string;
-    grossAmount: string;
-    discountAmount: string;
-    netAmount: string;
-    ledgerSequence: number;
-  }>;
-  totals: { grossAmount: string; discountAmount: string; netAmount: string };
-};
-
-export type BoundAllocationPricingFreshness =
-  | { status: 'CURRENT'; sourceIntegrityHash: string }
-  | { status: 'STALE_REQUIRES_SUCCESSOR'; sourceIntegrityHash: string; reason: string };
+export type BoundPricedAllocationSource = BoundPricedAllocationReadModel;
+export type BoundAllocationPricingFreshness = AllocationFreshness;
 
 export interface DispatchDocumentSourceReader {
   readPrimaryBundle(input: { candidateId: string; waybill: PrimaryBundleIdentity }): Promise<PrimaryBundleSource>;
@@ -73,7 +55,7 @@ export type IssuedWaybill = {
 
 export type CandidateDecisionResult = {
   candidateId: string;
-  status: 'ACCEPTED' | 'REJECTED' | 'RETURNED';
+  status: 'ACCEPTED' | 'REJECTED' | 'RETURNED' | 'STALE_REQUIRES_SUCCESSOR';
   waybill: IssuedWaybill | null;
 };
 
@@ -136,7 +118,8 @@ export interface DispatchDocumentRepository {
   getPrintableArtifacts(input: { waybillId: string; kinds: DispatchDocumentKind[] }): Promise<PublishedDispatchArtifact[]>;
   recordPrintHandoff(input: {
     waybillId: string;
-    idempotencyKey: string;
+    operationIdempotencyKey: string;
+    attemptId: string;
     correlationId: string;
     actorId: string;
     kinds: DispatchDocumentKind[];
@@ -144,17 +127,22 @@ export interface DispatchDocumentRepository {
     artifacts: PublishedDispatchArtifact[];
     failureCode?: string;
   }): Promise<void>;
-  getCombinedReadModel(input: { candidateId: string }): Promise<unknown | null>;
+  getCombinedReadModel(input: { candidateId: string; authorizedWaybillId: string }): Promise<unknown | null>;
 }
 
 export interface DispatchSourceIntegrityVerifier<Transaction = unknown> {
-  assertCurrent(input: {
+  assess(input: {
     transaction: Transaction;
     allocationRevisionId: string;
     expectedSourceIntegrityHash: string;
-  }): Promise<void>;
+  }): Promise<BoundAllocationPricingFreshness>;
 }
 
 export interface DispatchDocumentAccessPolicy {
   canReadWaybill(input: { actorId: string; waybillId: string }): Promise<boolean>;
+}
+
+export interface DispatchIntegrityIncidentReporter {
+  report(input: { waybillId: string; artifactId: string; actorId: string; correlationId: string;
+    failureCode: string; evidence: Readonly<Record<string, unknown>> }): Promise<void>;
 }

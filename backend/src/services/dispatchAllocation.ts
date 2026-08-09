@@ -13,11 +13,33 @@ import {
   shipmentQuantityEvidenceIntegrityHash,
 } from './shipmentQuantityProjectionStore';
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
+import { isPostCutoverFinalization } from './dispatchDocuments/featureGate';
+import type { createDispatchDocuments } from './dispatchDocuments/service';
 import { AllocationPricingBindingError, assertExactStableReservationTransfer, bindFinalizedAllocationPricing } from './allocationPricingBinding';
 import { createPrismaAllocationPricingBindingPort } from './allocationPricingPrismaAdapter';
 
 type Database = PrismaClient;
 type Tx = Prisma.TransactionClient;
+type DispatchDocumentsCommands = Pick<ReturnType<typeof createDispatchDocuments>, 'decideCandidate' | 'voidWaybill' | 'replaceWaybill'>;
+let dispatchDocumentsCommands: DispatchDocumentsCommands | null = null;
+export const installDispatchDocumentsCommands = (commands: DispatchDocumentsCommands) => { dispatchDocumentsCommands = commands; };
+
+const candidateRequiresAtomicDocuments = async (prisma: Database, candidateId: string) => {
+  const [candidate, cutover] = await Promise.all([
+    prisma.accountingDispatchCandidate.findUnique({ where: { id: candidateId },
+      select: { allocationRevision: { select: { finalizedAt: true } } } }),
+    prisma.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' } }),
+  ]);
+  return Boolean(candidate && cutover?.cutoverAt && isPostCutoverFinalization(candidate.allocationRevision.finalizedAt, cutover.cutoverAt));
+};
+const waybillRequiresAtomicDocuments = async (prisma: Database, waybillId: string) => {
+  const waybill = await prisma.accountingDispatchWaybill.findUnique({ where: { id: waybillId }, select: { candidateId: true } });
+  return waybill ? candidateRequiresAtomicDocuments(prisma, waybill.candidateId) : false;
+};
+const requiredDispatchDocumentsCommands = () => {
+  if (!dispatchDocumentsCommands) throw new DispatchAllocationConflictError('Atomic dispatch document commands are not configured.');
+  return dispatchDocumentsCommands;
+};
 
 export class DispatchAllocationValidationError extends Error {}
 export class DispatchAllocationConflictError extends Error {}
@@ -614,7 +636,11 @@ const publicCandidateResult = (candidate: any, waybill?: any) => ({
 
 export const decideAccountingDispatchCandidate = async (prisma: Database, input: {
   candidateId: string; action: 'ACCEPT' | 'REJECT' | 'RETURN'; reason?: string; idempotencyKey: string; actorId: string;
-}) => serializable(prisma, async (tx) => {
+}) => {
+  if (await candidateRequiresAtomicDocuments(prisma, input.candidateId)) {
+    return requiredDispatchDocumentsCommands().decideCandidate(input);
+  }
+  return serializable(prisma, async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);
   if (!['ACCEPT', 'REJECT', 'RETURN'].includes(input.action)) {
     throw new DispatchAllocationValidationError('action must be ACCEPT, REJECT, or RETURN.');
@@ -666,12 +692,17 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
     action: input.action, result: json(result), actorId: input.actorId } });
   await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id,
     eventType: `CANDIDATE_${input.action}ED`, payload: { reason, waybillId: waybill?.id || null, waybillNumber: waybill?.number.toString() || null }, actorId: input.actorId });
-  return result;
-});
+    return result;
+  });
+};
 
 export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
   waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
-}) => serializable(prisma, async (tx) => {
+}) => {
+  if (await waybillRequiresAtomicDocuments(prisma, input.waybillId)) {
+    return requiredDispatchDocumentsCommands().voidWaybill({ ...input, authority: input.effectiveAuthority });
+  }
+  return serializable(prisma, async (tx) => {
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
   const initial = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId } });
   if (!initial) throw new DispatchAllocationValidationError('Dispatch waybill was not found.');
@@ -698,12 +729,17 @@ export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
   const result = { id: voided.id, number: voided.number.toString(), status: voided.status };
   await tx.accountingDispatchCommand.create({ data: { candidateId: waybill.candidateId, idempotencyKey,
     action, result: json(result), actorId: input.actorId } });
-  return result;
-});
+    return result;
+  });
+};
 
 export const replaceAccountingDispatchWaybill = async (prisma: Database, input: {
   waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
-}) => serializable(prisma, async (tx) => {
+}) => {
+  if (await waybillRequiresAtomicDocuments(prisma, input.waybillId)) {
+    return requiredDispatchDocumentsCommands().replaceWaybill({ ...input, authority: input.effectiveAuthority });
+  }
+  return serializable(prisma, async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
   const initial = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId } });
@@ -736,5 +772,6 @@ export const replaceAccountingDispatchWaybill = async (prisma: Database, input: 
     replacement: { id: replacement.id, number: replacement.number.toString(), status: replacement.status } };
   await tx.accountingDispatchCommand.create({ data: { candidateId: waybill.candidateId, idempotencyKey,
     action, result: json(result), actorId: input.actorId } });
-  return result;
-});
+    return result;
+  });
+};

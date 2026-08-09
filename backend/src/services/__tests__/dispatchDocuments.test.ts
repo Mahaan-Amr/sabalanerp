@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import {
   DispatchDocumentConflictError,
   DispatchDocumentIntegrityError,
   createDispatchDocuments,
   createStatementAdjustmentArtifactPreparer,
+  bindPrintHandoffCompletion,
   type DispatchArtifactStorage,
   type DispatchDocumentRepository,
   type DispatchDocumentSourceReader,
@@ -24,6 +26,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
     replacements: [] as Array<any>,
     handoffs: [] as Array<any>,
     retrievals: [] as Array<any>,
+    incidents: [] as Array<any>,
   };
   let nextNumber = 7000n;
   const repository: DispatchDocumentRepository = {
@@ -61,9 +64,14 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       .filter((artifact: PublishedDispatchArtifact) => artifact.waybillId === waybillId && kinds.includes(artifact.kind)),
     recordPrintHandoff: async (input) => {
       state.handoffs.push(input);
-      if (input.status === 'SUCCEEDED') state.commands.set(`PRINT_HANDOFF:${input.waybillId}:${input.idempotencyKey}`, { kinds: input.kinds });
+      if (input.status === 'SUCCEEDED') state.commands.set(
+        `PRINT_HANDOFF:${input.waybillId}:${input.operationIdempotencyKey}`,
+        { kinds: input.kinds, artifactIds: input.artifacts.map(artifact => artifact.id) },
+      );
     },
-    getCombinedReadModel: async ({ candidateId }) => ({ candidateId, status: 'ACCEPTED', waybills: state.issued.map((entry) => entry.waybill) }),
+    getCombinedReadModel: async ({ candidateId, authorizedWaybillId }) => candidateId === 'candidate-1'
+      && state.issued.some(entry => entry.waybill.id === authorizedWaybillId)
+      ? { candidateId, status: 'ACCEPTED', waybills: state.issued.map((entry) => entry.waybill) } : null,
   };
   let stageCount = 0;
   let failedStage = false;
@@ -80,6 +88,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       candidateId,
       allocationRevisionId: 'revision-1',
       sourceIntegrityHash: 'source-hash',
+      provenance: { generatorVersion: 'generator-v1', sourceVersionIdentities: { allocationRevision: 'revision-1', approvedPricing: 'price-1' } },
       pricedAllocation: { currency: 'IRR', pricingVersions: [{ contractId: 'contract-1', pricingVersionId: 'price-1', integrityHash: 'price-hash', readinessEvidenceHash: 'ready-hash' }],
         lines: [{ allocationRevisionLineId: 'revision-line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'count', quantity: '2.000',
           grossAmount: '10.000000000000', discountAmount: '1.000000000000', netAmount: '9.000000000000', ledgerSequence: 1 }],
@@ -101,6 +110,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
     }),
     readReplacementBundle: async ({ waybillId, replacement }) => ({
       predecessorWaybillId: waybillId, candidateId: 'candidate-1', allocationRevisionId: 'revision-1', sourceIntegrityHash: 'source-hash',
+      provenance: { generatorVersion: 'generator-v1', sourceVersionIdentities: { allocationRevision: 'revision-1', approvedPricing: 'price-1' } },
       pricedAllocation: { currency: 'IRR', pricingVersions: [{ contractId: 'contract-1', pricingVersionId: 'price-1', integrityHash: 'price-hash', readinessEvidenceHash: 'ready-hash' }],
         lines: [{ allocationRevisionLineId: 'revision-line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'count', quantity: '2.000', grossAmount: '10.000000000000', discountAmount: '1.000000000000', netAmount: '9.000000000000', ledgerSequence: 1 }],
         totals: { grossAmount: '10.000000000000', discountAmount: '1.000000000000', netAmount: '9.000000000000' } },
@@ -123,6 +133,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       return { bytes: bytes(`pdf:${input.kind}`), mediaType: 'application/pdf' };
     } },
     access: { canReadWaybill: async ({ actorId }) => actorId === 'allowed' },
+    incidents: { report: async input => { state.incidents.push(input); } },
     id: (() => { let value = 0; return () => `id-${++value}`; })(),
     now: () => new Date('2026-08-09T12:00:00.000Z'),
   });
@@ -135,6 +146,7 @@ const run = async () => {
   assert.equal(issued.status, 'ACCEPTED');
   assert.equal(state.issued.length, 1);
   assert.deepEqual(state.issued[0].artifacts.map((artifact: PublishedDispatchArtifact) => artifact.kind), ['WAYBILL', 'STATEMENT']);
+  assert.equal(state.issued[0].artifacts[0].generatorVersion, 'generator-v1');
   assert.equal(files.size, 2);
   for (const artifact of state.issued[0].artifacts) {
     const content = files.get(artifact.storageKey)!;
@@ -158,20 +170,37 @@ const run = async () => {
   const readModel = await service.getCombinedReadModel({ candidateId: 'candidate-1', waybillId: artifact.waybillId, actorId: 'allowed' }) as any;
   assert.equal(readModel.candidateId, 'candidate-1');
   await assert.rejects(() => service.getCombinedReadModel({ candidateId: 'candidate-1', waybillId: artifact.waybillId, actorId: 'denied' }), /not available/i);
+  await assert.rejects(() => service.getCombinedReadModel({ candidateId: 'candidate-other', waybillId: artifact.waybillId, actorId: 'allowed' }), /not available/i);
 
   const printed = await service.printHandoff({ waybillId: artifact.waybillId, kinds: ['STATEMENT', 'WAYBILL'],
     idempotencyKey: 'print-1', actorId: 'allowed', correlationId: 'print-correlation' });
   assert.deepEqual(printed.documents.map(document => document.artifact.kind), ['WAYBILL', 'STATEMENT']);
+  assert.equal(state.handoffs.length, 0, 'preparation is not a successful byte handoff');
+  await printed.complete.succeeded();
   assert.equal(state.handoffs[0].status, 'SUCCEEDED');
-  await service.printHandoff({ waybillId: artifact.waybillId, kinds: ['WAYBILL', 'STATEMENT'],
+  const repeatedPrint = await service.printHandoff({ waybillId: artifact.waybillId, kinds: ['WAYBILL', 'STATEMENT'],
     idempotencyKey: 'print-1', actorId: 'allowed', correlationId: 'print-retry' });
-  assert.equal(state.handoffs.length, 1, 'a successful print handoff retry replays without duplicate evidence');
+  await repeatedPrint.complete.failed('RESPONSE_CLOSED');
+  assert.equal(state.handoffs.length, 2, 'each actual transfer attempt retains append-only evidence');
+  await assert.rejects(() => service.printHandoff({ waybillId: artifact.waybillId, kinds: ['WAYBILL'],
+    idempotencyKey: 'print-1', actorId: 'allowed', correlationId: 'print-conflicting-retry' }),
+  /another document set/);
+  const adjustments = [1, 2].map(sequence => ({ ...artifact, id: `adjustment-artifact-${sequence}`,
+    kind: 'STATEMENT_ADJUSTMENT' as const, adjustmentSequence: sequence,
+    storageKey: `dispatch-documents/adjustment-${sequence}.pdf`, sha256: sha256(bytes(`adjustment-${sequence}`)),
+    byteLength: bytes(`adjustment-${sequence}`).byteLength }));
+  state.issued[0].artifacts.push(...adjustments);
+  adjustments.forEach(item => files.set(item.storageKey, bytes(`adjustment-${item.adjustmentSequence}`)));
+  const adjustmentPrint = await service.printHandoff({ waybillId: artifact.waybillId, kinds: ['STATEMENT_ADJUSTMENT'],
+    idempotencyKey: 'print-adjustments', actorId: 'allowed', correlationId: 'print-adjustments-attempt' });
+  assert.deepEqual(adjustmentPrint.documents.map(item => item.artifact.adjustmentSequence), [1, 2]);
+  await adjustmentPrint.complete.succeeded();
 
   const replacement = await service.replaceWaybill({ waybillId: artifact.waybillId, reason: 'نسخه چاپی اشتباه',
     idempotencyKey: 'replace-1', actorId: 'accountant' });
   assert.equal((replacement as any).replacement.replacesWaybillId, artifact.waybillId);
   assert.equal(state.replacements[0].artifacts.length, 2);
-  assert.equal(state.issued[0].artifacts.length, 2, 'predecessor artifact history remains immutable');
+  assert.equal(state.issued[0].artifacts.length, 4, 'predecessor primary and adjustment artifact history remains immutable');
 
   const voided = await service.voidWaybill({ waybillId: 'waybill-other', reason: 'ابطال مستقل', idempotencyKey: 'void-1', actorId: 'accountant' });
   assert.equal((voided as any).status, 'VOIDED');
@@ -180,9 +209,15 @@ const run = async () => {
   files.set(artifact.storageKey, bytes('corrupt'));
   await assert.rejects(() => service.retrieveArtifact({ artifactId: artifact.id, waybillId: artifact.waybillId, actorId: 'allowed', correlationId: 'read-3' }), DispatchDocumentIntegrityError);
   assert.equal(state.retrievals.at(-1).status, 'FAILED');
+  assert.equal(state.incidents.at(-1).failureCode, 'ARTIFACT_INTEGRITY_FAILURE');
   await assert.rejects(() => service.printHandoff({ waybillId: artifact.waybillId, kinds: ['WAYBILL'], idempotencyKey: 'print-2',
     actorId: 'allowed', correlationId: 'print-corrupt' }), DispatchDocumentIntegrityError);
   assert.equal(state.handoffs.at(-1).status, 'FAILED');
+  files.set(artifact.storageKey, bytes('pdf:WAYBILL'));
+  const recoveredPrint = await service.printHandoff({ waybillId: artifact.waybillId, kinds: ['WAYBILL'], idempotencyKey: 'print-2',
+    actorId: 'allowed', correlationId: 'print-recovered' });
+  await recoveredPrint.complete.succeeded();
+  assert.deepEqual(state.handoffs.slice(-2).map(item => item.status), ['FAILED', 'SUCCEEDED']);
 
   const retryHarness = makeHarness({ failStatementOnce: true });
   await assert.rejects(() => retryHarness.service.decideCandidate({ candidateId: 'candidate-retry', action: 'ACCEPT',
@@ -210,13 +245,29 @@ const run = async () => {
       read: async storageKey => adjustmentFiles.get(storageKey) ?? null },
     id: (() => { let next = 0; return () => `adjustment-${++next}`; })(),
     now: () => new Date('2026-08-09T12:00:00.000Z'),
+    generatorVersion: 'generator-v1', sourceVersionIdentities: { correction: 'correction-v1' },
   });
   const prepared = await preparer.prepare({ schemaVersion: 1, kind: 'STATEMENT_ADJUSTMENT', documentId: 'adjustment-document-1',
     waybillNumber: '7001', issuedAt: '2026-08-09T12:00:00.000Z', customerName: 'مشتری', projectOrDestination: 'مقصد',
     vehiclePlate: '11الف111', templateVersion: 'v1', payload: { sequence: 1, originalStatementDocumentId: 'statement-1',
       reason: 'اصلاح', currency: 'IRR', lines: [], grossAmountDelta: '0.000000000000', discountDelta: '0.000000000000', netAmountDelta: '0.000000000000' } });
   assert.equal(prepared.sha256, sha256(bytes('adjustment-pdf')));
+  assert.equal(prepared.generatorVersion, 'generator-v1');
   assert.equal(adjustmentFiles.size, 1);
+
+  const finishedResponse = new EventEmitter();
+  const completionEvents: string[] = [];
+  bindPrintHandoffCompletion(finishedResponse as any, { succeeded: async () => { completionEvents.push('SUCCEEDED'); },
+    failed: async code => { completionEvents.push(`FAILED:${code}`); } });
+  finishedResponse.emit('finish'); finishedResponse.emit('close');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(completionEvents, ['SUCCEEDED']);
+  const closedResponse = new EventEmitter();
+  bindPrintHandoffCompletion(closedResponse as any, { succeeded: async () => { completionEvents.push('UNEXPECTED'); },
+    failed: async code => { completionEvents.push(`FAILED:${code}`); } });
+  closedResponse.emit('close');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(completionEvents.at(-1), 'FAILED:RESPONSE_CLOSED');
 };
 
 run().then(() => console.log('dispatch documents tests passed'));

@@ -173,6 +173,8 @@ export type PublishedDispatchArtifact = {
   kind: DispatchDocumentKind;
   adjustmentSequence: number | null;
   templateVersion: string;
+  generatorVersion: string | null;
+  sourceVersionIdentities: Readonly<Record<string, string>>;
   storageKey: string;
   mediaType: 'application/pdf';
   byteLength: number;

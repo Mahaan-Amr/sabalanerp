@@ -4,6 +4,7 @@ import { isValidFinanciallyApprovedInvoice } from '../accountingStatus';
 import {
   APPROVED_PRICING_SCHEMA_VERSION,
   type ApprovedPricingRepository,
+  type ApprovedPricingGraphRowSource,
   type ApprovedPricingSealResult,
   type ApprovedPricingSource,
   type ApprovedPricingVersionInsert,
@@ -127,32 +128,170 @@ const productRows = (contractData: unknown) => {
   return { data, products: data.products.map((item, index) => record(item, `Contract product snapshot ${index}`)) };
 };
 
-const rowQuantityAndUnit = (row: Record<string, unknown>, productType: string, label: string) => {
-  const type = productType.toLowerCase();
-  if (type === 'prepared') {
-    const unit = requiredString(row.preparedUnit ?? row.unit, `${label} unit`);
-    if (!['squareMeter', 'ton', 'count'].includes(unit)) throw new Error(`${label} has an unsupported unit`);
-    return { unit, quantity: quantity(row.preparedQuantity ?? row.quantity, `${label} quantity`) };
-  }
-  if (type === 'longitudinal') {
-    const lengthUnit = requiredString(row.lengthUnit, `${label} length unit`);
-    if (!['m', 'cm'].includes(lengthUnit)) throw new Error(`${label} has an unsupported length unit`);
-    const length = new Prisma.Decimal(requiredString(String(row.length ?? ''), `${label} length`));
-    const count = new Prisma.Decimal(requiredString(String(row.quantity ?? ''), `${label} count`));
-    if (!length.gt(0) || !count.gt(0)) throw new Error(`${label} quantity must be positive`);
-    return { unit: 'meter', quantity: quantity(lengthUnit === 'cm' ? length.div(100).mul(count) : length.mul(count), `${label} quantity`) };
-  }
-  if (type === 'slab') {
-    return { unit: 'squareMeter', quantity: quantity(row.squareMeters, `${label} quantity`) };
-  }
-  return { unit: 'count', quantity: quantity(row.quantity, `${label} quantity`) };
+type ProductQuantityPolicy = {
+  snapshot(row: Record<string, unknown>, label: string): { unit: string; quantity: string };
+  canonical(row: ApprovedPricingGraphRowSource, label: string): string;
 };
 
-export const buildApprovedPricingVersion = (
-  source: ApprovedPricingSource,
-  versionNumber: number,
-  versionId: string = randomUUID(),
-): ApprovedPricingVersionInsert => {
+const countQuantityPolicy: ProductQuantityPolicy = {
+  snapshot: (row, label) => ({ unit: 'count', quantity: quantity(row.quantity, `${label} quantity`) }),
+  canonical: (row, label) => quantity(row.requestedQuantity, `${label} quantity`),
+};
+
+const PRODUCT_QUANTITY_POLICIES: Readonly<Record<string, ProductQuantityPolicy>> = {
+  prepared: {
+    snapshot: (row, label) => {
+      const unit = requiredString(row.preparedUnit ?? row.unit, `${label} unit`);
+      if (!['squareMeter', 'ton', 'count'].includes(unit)) throw new Error(`${label} has an unsupported unit`);
+      return { unit, quantity: quantity(row.preparedQuantity ?? row.quantity, `${label} quantity`) };
+    },
+    canonical: (row, label) => quantity(row.requestedQuantity, `${label} quantity`),
+  },
+  longitudinal: {
+    snapshot: (row, label) => {
+      const lengthUnit = requiredString(row.lengthUnit, `${label} length unit`);
+      if (!['m', 'cm'].includes(lengthUnit)) throw new Error(`${label} has an unsupported length unit`);
+      const length = new Prisma.Decimal(requiredString(String(row.length ?? ''), `${label} length`));
+      const count = new Prisma.Decimal(requiredString(String(row.quantity ?? ''), `${label} count`));
+      if (!length.gt(0) || !count.gt(0)) throw new Error(`${label} quantity must be positive`);
+      return { unit: 'meter', quantity: quantity(lengthUnit === 'cm' ? length.div(100).mul(count) : length.mul(count), `${label} quantity`) };
+    },
+    canonical: (row, label) => quantity(
+      new Prisma.Decimal(requiredString(row.requestedLengthMeters, `${label} length`))
+        .mul(requiredString(row.requestedQuantity, `${label} count`)),
+      `${label} quantity`,
+    ),
+  },
+  slab: {
+    snapshot: (row, label) => ({ unit: 'squareMeter', quantity: quantity(row.squareMeters, `${label} quantity`) }),
+    canonical: (row, label) => quantity(row.requestedAreaSquareMeters, `${label} quantity`),
+  },
+  stair: countQuantityPolicy,
+  volumetric: countQuantityPolicy,
+};
+
+const productQuantityPolicy = (productType: string, label: string) => {
+  const policy = PRODUCT_QUANTITY_POLICIES[productType.toLowerCase()];
+  if (!policy) throw new Error(`${label} has an unsupported product type`);
+  return policy;
+};
+
+const pricingCurrencyKind = (currency: string) => {
+  const normalized = currency.trim().toLowerCase();
+  if (['تومان', 'toman', 'ØªÙˆÙ…Ø§Ù†'.toLowerCase()].includes(normalized)) return 'TOMAN';
+  if (['ریال', 'rial', 'Ø±ÛŒØ§Ù„'.toLowerCase()].includes(normalized)) return 'RIAL';
+  throw new Error(`Unsupported approved pricing currency: ${currency}`);
+};
+
+const invoiceCurrencyFactor = (contractCurrency: string, invoiceCurrency: string) => {
+  const contractKind = pricingCurrencyKind(contractCurrency);
+  const invoiceKind = pricingCurrencyKind(invoiceCurrency);
+  if (contractKind === invoiceKind) return new Prisma.Decimal(1);
+  if (contractKind === 'TOMAN' && invoiceKind === 'RIAL') return new Prisma.Decimal(10);
+  throw new Error('Invoice currency cannot be reconciled with contract pricing currency');
+};
+
+const explicitDiscountEligibility = (snapshot: Record<string, unknown>, base: string, productRowId: string) => {
+  const meta = record(snapshot.meta, `Product ${productRowId} discount metadata`);
+  if (typeof meta.isLayer !== 'boolean') throw new Error(`Product ${productRowId} discount eligibility evidence is missing`);
+  return meta.isLayer === false && new Prisma.Decimal(base).gt(0);
+};
+
+const destinationEvidence = (data: Record<string, unknown>) => {
+  const contractKind = requiredString(data.contractKind, 'Contract kind');
+  if (contractKind === 'collaboration') {
+    const projectId = typeof data.projectId === 'string' ? data.projectId.trim() : '';
+    if (!projectId && data.project == null) {
+      return { project: null, destination: { kind: 'COLLABORATION_SALE' as const, projectId: null, address: null } };
+    }
+    const project = record(data.project, 'Collaboration project snapshot');
+    if (!projectId || requiredString(project.id, 'Collaboration project identity') !== projectId) {
+      throw new Error('Collaboration sale has conflicting project destination evidence');
+    }
+    return {
+      project,
+      destination: {
+        kind: 'COLLABORATION_PROJECT_ADDRESS' as const,
+        projectId,
+        address: requiredString(project.address, 'Collaboration destination'),
+      },
+    };
+  }
+  if (contractKind !== 'standard') throw new Error('Contract kind is unsupported for approved pricing');
+  const projectId = requiredString(data.projectId, 'Contract project identity');
+  const project = record(data.project, 'Contract project snapshot');
+  if (requiredString(project.id, 'Project snapshot identity') !== projectId) throw new Error('Contract project identities conflict');
+  const address = requiredString(project.address, 'Contract destination');
+  return { project, destination: { kind: 'PROJECT_ADDRESS' as const, projectId, address } };
+};
+
+const projectApprovedPricingRows = (input: {
+  graphRows: readonly ApprovedPricingGraphRowSource[];
+  itemByRow: ReadonlyMap<string | null, ApprovedPricingSource['contract']['items'][number]>;
+  snapshotByRow: ReadonlyMap<string, Record<string, unknown>>;
+  versionId: string;
+  contractId: string;
+  sourceFinancialRecordId: string;
+  versionNumber: number;
+}) => {
+  let selectedEligibleBase = new Prisma.Decimal(0);
+  let gross = new Prisma.Decimal(0);
+  const rows = input.graphRows.map((graphRow, index) => {
+    const item = input.itemByRow.get(graphRow.productRowId);
+    const snapshot = input.snapshotByRow.get(graphRow.productRowId);
+    if (!item || !snapshot) throw new Error(`Canonical row ${graphRow.productRowId} has no exact contract source`);
+    if (item.productId !== graphRow.catalogProductId || requiredString(snapshot.productId, `Product ${graphRow.productRowId} catalog identity`) !== item.productId) {
+      throw new Error(`Canonical row ${graphRow.productRowId} product identities conflict`);
+    }
+    const snapshotType = requiredString(snapshot.productType, `Product ${graphRow.productRowId} type`);
+    if (snapshotType !== graphRow.productType || item.productType !== graphRow.productType) throw new Error(`Canonical row ${graphRow.productRowId} types conflict`);
+    const quantityPolicy = productQuantityPolicy(graphRow.productType, `Product ${graphRow.productRowId}`);
+    const contracted = quantityPolicy.snapshot(snapshot, `Product ${graphRow.productRowId}`);
+    if (!new Prisma.Decimal(contracted.quantity).gt(0)) throw new Error(`Product ${graphRow.productRowId} quantity must be positive`);
+    const snapshotItemQuantity = graphRow.productType === 'prepared' ? snapshot.preparedQuantity ?? snapshot.quantity : snapshot.quantity;
+    if (quantity(snapshotItemQuantity, `Product ${graphRow.productRowId} item quantity`) !== quantity(item.quantity, `Contract item ${item.id} quantity`)) {
+      throw new Error(`Product ${graphRow.productRowId} contract item quantity conflicts with snapshot`);
+    }
+    if (quantityPolicy.canonical(graphRow, `Canonical row ${graphRow.productRowId}`) !== contracted.quantity) {
+      throw new Error(`Product ${graphRow.productRowId} canonical quantity conflicts with contract snapshot`);
+    }
+    const base = money(graphRow.baseAmountToman, `Product ${graphRow.productRowId} base amount`);
+    const total = money(graphRow.totalAmountToman, `Product ${graphRow.productRowId} all-in amount`);
+    if (new Prisma.Decimal(base).lt(0) || new Prisma.Decimal(total).lt(0)) throw new Error(`Product ${graphRow.productRowId} pricing cannot be negative`);
+    const components: Record<string, string> = { base };
+    for (const operation of [...graphRow.operations].sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`))) {
+      const key = `${operation.kind}:${requiredString(operation.id, 'Attached component identity')}`;
+      if (components[key]) throw new Error(`Product ${graphRow.productRowId} attached component identities are duplicated`);
+      const amount = money(operation.amountToman, 'Attached component amount');
+      if (new Prisma.Decimal(amount).lt(0)) throw new Error('Attached component amount cannot be negative');
+      components[key] = amount;
+    }
+    const componentTotal = Object.values(components).reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0));
+    if (!componentTotal.eq(total)) throw new Error(`Product ${graphRow.productRowId} attached component evidence conflicts with all-in amount`);
+    const discountEligible = explicitDiscountEligibility(snapshot, base, graphRow.productRowId);
+    components.discountBasis = discountEligible ? base : money(0, 'Non-eligible discount basis');
+    if (discountEligible) selectedEligibleBase = selectedEligibleBase.plus(base);
+    gross = gross.plus(total);
+    const rowPayload: ApprovedPricingRowIntegrityInput = {
+      versionId: input.versionId,
+      contractId: input.contractId,
+      sourceFinancialRecordId: input.sourceFinancialRecordId,
+      versionNumber: input.versionNumber,
+      contractItemId: item.id,
+      productRowId: graphRow.productRowId,
+      ordinal: index + 1,
+      contractedQuantity: contracted.quantity,
+      unit: contracted.unit,
+      canonicalAllInTotal: total,
+      discountEligible,
+      componentEvidence: components,
+    };
+    return { id: randomUUID(), ...rowPayload, integrityHash: approvedPricingRowIntegrityHash(rowPayload) };
+  });
+  return { rows, selectedEligibleBase, gross };
+};
+
+const validateApprovalEnvelope = (source: ApprovedPricingSource, versionNumber: number) => {
   if (!isValidFinanciallyApprovedInvoice(source.leaf)) throw new Error('Financial record is not a valid approved invoice leaf');
   const contractId = requiredString(source.leaf.contractId, 'Approved invoice contract');
   if (contractId !== source.contract.id) throw new Error('Approved invoice and contract identities conflict');
@@ -160,17 +299,27 @@ export const buildApprovedPricingVersion = (
   if (!approvedAt || Number.isNaN(approvedAt.getTime())) throw new Error('Approval time is missing or null');
   const approvedBy = requiredString(source.leaf.financiallyApprovedBy, 'Approval identity');
   const currency = requiredString(source.contract.currency, 'Contract currency');
+  const invoiceCurrency = requiredString(source.leaf.currency, 'Approved invoice currency');
+  const financialSnapshot = record(source.leaf.sourceSnapshot, 'Invoice candidate source snapshot');
+  if (requiredString(financialSnapshot.id, 'Invoice candidate source contract identity') !== contractId || source.leaf.sourceId !== contractId) {
+    throw new Error('Invoice candidate source identities conflict with approved contract');
+  }
+  const mode = requiredString(record(source.leaf.metadata, 'Invoice candidate metadata').mode, 'Invoice candidate pricing mode');
+  if (!['FROM_CONTRACT_TOTAL', 'FROM_SELECTED_ITEMS', 'REPLACEMENT_AFTER_CORRECTION'].includes(mode)) {
+    throw new Error(`Invoice candidate pricing mode ${mode} cannot produce approved pricing`);
+  }
   if (!Number.isSafeInteger(versionNumber) || versionNumber < 1) throw new Error('Pricing version number is invalid');
-
   const graph = source.contract.productGraph;
   if (!graph) throw new Error('Canonical product graph is missing');
   requiredString(graph.inputHash, 'Canonical graph input hash');
   requiredString(graph.resultHash, 'Canonical graph result hash');
   if (!Number.isSafeInteger(graph.schemaVersion) || !Number.isSafeInteger(graph.revision)) throw new Error('Canonical graph version evidence is invalid');
+  return { contractId, approvedAt, approvedBy, currency, invoiceCurrency, currencyFactor: invoiceCurrencyFactor(currency, invoiceCurrency), mode, graph };
+};
 
+const validateContractPricingContext = (source: ApprovedPricingSource, currency: string) => {
   const { data, products } = productRows(source.contract.contractData);
-  const payment = record(data.payment, 'Contract payment evidence');
-  if (requiredString(payment.currency, 'Contract payment currency') !== currency) {
+  if (requiredString(record(data.payment, 'Contract payment evidence').currency, 'Contract payment currency') !== currency) {
     throw new Error('Contract payment currency conflicts with contract currency');
   }
   const snapshotCustomerId = requiredString(data.customerId, 'Contract snapshot customer identity');
@@ -178,19 +327,14 @@ export const buildApprovedPricingVersion = (
   if (snapshotCustomerId !== source.contract.customerId || requiredString(customer.id, 'Customer snapshot identity') !== snapshotCustomerId) {
     throw new Error('Contract customer identities conflict');
   }
-  const projectId = requiredString(data.projectId, 'Contract project identity');
-  const project = record(data.project, 'Contract project snapshot');
-  if (requiredString(project.id, 'Project snapshot identity') !== projectId) throw new Error('Contract project identities conflict');
-  const destination = requiredString(project.address, 'Contract destination');
-
+  const destination = destinationEvidence(data);
   const discount = record(data.discount, 'Contract discount evidence');
   if (typeof discount.enabled !== 'boolean') throw new Error('Contract discount enabled evidence is missing');
-  const discountCurrency = requiredString(discount.currency, 'Contract discount currency');
-  if (discountCurrency !== currency) throw new Error('Contract discount currency conflicts with contract currency');
+  if (requiredString(discount.currency, 'Contract discount currency') !== currency) throw new Error('Contract discount currency conflicts with contract currency');
   const discountBase = money(discount.baseSubtotal, 'Contract discount base subtotal');
   const discountPercent = money(discount.percent, 'Contract discount percent');
-  const discountAmount = money(discount.amount, 'Contract discount amount');
-  const discountValue = new Prisma.Decimal(discountAmount);
+  const contractDiscountAmount = money(discount.amount, 'Contract discount amount');
+  const discountValue = new Prisma.Decimal(contractDiscountAmount);
   if (discount.enabled !== discountValue.gt(0)) throw new Error('Contract discount enabled flag conflicts with amount');
   if (!discountValue.gte(0)) throw new Error('Contract discount amount cannot be negative');
   if (!discount.enabled && (new Prisma.Decimal(discountPercent).gt(0) || new Prisma.Decimal(discountBase).lt(0))) {
@@ -202,13 +346,23 @@ export const buildApprovedPricingVersion = (
     if (Number.isNaN(appliedAt.getTime())) throw new Error('Contract discount applied time is invalid');
     const maximumPercent = new Prisma.Decimal(money(discount.maxDiscountPercent, 'Contract maximum discount percent'));
     const appliedPercent = new Prisma.Decimal(discountPercent);
-    if (appliedPercent.lte(0) || appliedPercent.gt(maximumPercent) || maximumPercent.gt(100)) {
-      throw new Error('Contract discount percent conflicts with approved range');
-    }
+    if (appliedPercent.lte(0) || appliedPercent.gt(maximumPercent) || maximumPercent.gt(100)) throw new Error('Contract discount percent conflicts with approved range');
     if (!new Prisma.Decimal(discountBase).mul(appliedPercent).div(100).eq(discountValue)) {
       throw new Error('Contract discount amount conflicts with base subtotal and percent');
     }
   }
+  return { products, customer, destination, discount, discountBase, discountPercent, contractDiscountAmount, discountValue };
+};
+
+export const buildApprovedPricingVersion = (
+  source: ApprovedPricingSource,
+  versionNumber: number,
+  versionId: string = randomUUID(),
+): ApprovedPricingVersionInsert => {
+  const { contractId, approvedAt, approvedBy, currency, invoiceCurrency, currencyFactor, mode, graph } =
+    validateApprovalEnvelope(source, versionNumber);
+  const { products, customer, destination, discount, discountBase, discountPercent, contractDiscountAmount, discountValue } =
+    validateContractPricingContext(source, currency);
 
   if (graph.rows.length !== source.contract.items.length || products.length !== graph.rows.length) {
     throw new Error('Contract item, snapshot, and canonical graph row counts conflict');
@@ -222,88 +376,121 @@ export const buildApprovedPricingVersion = (
     throw new Error('Stable product row identities are missing or duplicated');
   }
 
-  let eligibleBase = new Prisma.Decimal(0);
-  let gross = new Prisma.Decimal(0);
-  const rows = graph.rows.map((graphRow, index) => {
-    const ordinal = index + 1;
-    const item = itemByRow.get(graphRow.productRowId);
+  const currentById = new Map(source.contract.currentItems.map(item => [item.id, item]));
+  if (currentById.size !== source.contract.items.length || source.contract.currentItems.length !== source.contract.items.length) {
+    throw new Error('Contract rows changed after invoice candidate snapshot');
+  }
+  for (const item of source.contract.items) {
+    const current = currentById.get(item.id);
+    if (!current || current.productId !== item.productId || current.productRowId !== item.productRowId ||
+      current.productType !== item.productType || quantity(current.quantity, `Current contract item ${item.id} quantity`) !== quantity(item.quantity, `Snapshotted contract item ${item.id} quantity`) ||
+      money(current.totalPrice, `Current contract item ${item.id} total`) !== money(item.totalPrice, `Snapshotted contract item ${item.id} total`)) {
+      throw new Error('Contract rows changed after invoice candidate snapshot');
+    }
+  }
+
+  if (source.leaf.invoiceItems.length === 0) throw new Error('Approved invoice item evidence is missing');
+  const invoiceByContractItem = new Map(source.leaf.invoiceItems.map(item => [item.contractItemId, item]));
+  if (invoiceByContractItem.size !== source.leaf.invoiceItems.length || invoiceByContractItem.has(null)) {
+    throw new Error('Approved invoice item identities are missing or duplicated');
+  }
+  for (const invoiceItem of source.leaf.invoiceItems) {
+    const sourceItem = source.contract.items.find(item => item.id === invoiceItem.contractItemId);
+    if (!sourceItem || invoiceItem.productId !== sourceItem.productId) throw new Error('Approved invoice item conflicts with source contract item');
+  }
+  if (mode !== 'FROM_SELECTED_ITEMS' && invoiceByContractItem.size !== source.contract.items.length) {
+    throw new Error(`Invoice candidate mode ${mode} requires the complete snapshotted contract item set`);
+  }
+  const selectedContractItemIds = new Set(invoiceByContractItem.keys() as Iterable<string>);
+  const selectedGraphRows = graph.rows.filter(row => {
+    const sourceItem = itemByRow.get(row.productRowId);
+    return sourceItem ? selectedContractItemIds.has(sourceItem.id) : false;
+  });
+  if (selectedGraphRows.length !== selectedContractItemIds.size) throw new Error('Approved invoice subset cannot be reconciled to canonical product rows');
+
+  let contractEligibleBase = new Prisma.Decimal(0);
+  for (const graphRow of graph.rows) {
     const snapshot = snapshotByRow.get(graphRow.productRowId);
-    if (!item || !snapshot) throw new Error(`Canonical row ${graphRow.productRowId} has no exact contract source`);
-    if (item.productId !== graphRow.catalogProductId || requiredString(snapshot.productId, `Product ${graphRow.productRowId} catalog identity`) !== item.productId) {
-      throw new Error(`Canonical row ${graphRow.productRowId} product identities conflict`);
-    }
-    const snapshotType = requiredString(snapshot.productType, `Product ${graphRow.productRowId} type`);
-    if (snapshotType !== graphRow.productType || item.productType !== graphRow.productType) throw new Error(`Canonical row ${graphRow.productRowId} types conflict`);
-    const contracted = rowQuantityAndUnit(snapshot, graphRow.productType, `Product ${graphRow.productRowId}`);
-    if (!new Prisma.Decimal(contracted.quantity).gt(0)) throw new Error(`Product ${graphRow.productRowId} quantity must be positive`);
-    const snapshotItemQuantity = graphRow.productType === 'prepared'
-      ? snapshot.preparedQuantity ?? snapshot.quantity
-      : snapshot.quantity;
-    if (quantity(snapshotItemQuantity, `Product ${graphRow.productRowId} item quantity`) !== quantity(item.quantity, `Contract item ${item.id} quantity`)) {
-      throw new Error(`Product ${graphRow.productRowId} contract item quantity conflicts with snapshot`);
-    }
-    const canonicalContractedQuantity = graphRow.productType === 'longitudinal'
-      ? quantity(
-        new Prisma.Decimal(requiredString(graphRow.requestedLengthMeters, `Canonical row ${graphRow.productRowId} length`))
-          .mul(requiredString(graphRow.requestedQuantity, `Canonical row ${graphRow.productRowId} count`)),
-        `Canonical row ${graphRow.productRowId} quantity`,
-      )
-      : graphRow.productType === 'slab'
-        ? quantity(graphRow.requestedAreaSquareMeters, `Canonical row ${graphRow.productRowId} quantity`)
-        : quantity(graphRow.requestedQuantity, `Canonical row ${graphRow.productRowId} quantity`);
-    if (canonicalContractedQuantity !== contracted.quantity) {
-      throw new Error(`Product ${graphRow.productRowId} canonical quantity conflicts with contract snapshot`);
-    }
+    if (!snapshot) throw new Error(`Canonical row ${graphRow.productRowId} has no product snapshot`);
     const base = money(graphRow.baseAmountToman, `Product ${graphRow.productRowId} base amount`);
-    const total = money(graphRow.totalAmountToman, `Product ${graphRow.productRowId} all-in amount`);
-    if (new Prisma.Decimal(base).lt(0) || new Prisma.Decimal(total).lt(0)) {
-      throw new Error(`Product ${graphRow.productRowId} pricing cannot be negative`);
-    }
-    const components: Record<string, string> = { base };
-    for (const operation of [...graphRow.operations].sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`))) {
-      const key = `${operation.kind}:${requiredString(operation.id, 'Attached component identity')}`;
-      if (components[key]) throw new Error(`Product ${graphRow.productRowId} attached component identities are duplicated`);
-      const amount = money(operation.amountToman, 'Attached component amount');
-      if (new Prisma.Decimal(amount).lt(0)) throw new Error('Attached component amount cannot be negative');
-      components[key] = amount;
-    }
-    const componentTotal = Object.values(components).reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0));
-    if (!componentTotal.eq(total)) throw new Error(`Product ${graphRow.productRowId} attached component evidence conflicts with all-in amount`);
-    const meta = snapshot.meta === undefined ? {} : record(snapshot.meta, `Product ${graphRow.productRowId} metadata`);
-    const discountEligible = meta.isLayer !== true && new Prisma.Decimal(base).gt(0);
-    components.discountBasis = discountEligible ? base : money(0, 'Non-eligible discount basis');
-    if (discountEligible) eligibleBase = eligibleBase.plus(base);
-    gross = gross.plus(total);
-    const rowPayload: ApprovedPricingRowIntegrityInput = {
-      versionId,
-      contractId,
-      sourceFinancialRecordId: source.leaf.id,
-      versionNumber,
-      contractItemId: item.id,
-      productRowId: graphRow.productRowId,
-      ordinal,
-      contractedQuantity: contracted.quantity,
-      unit: contracted.unit,
-      canonicalAllInTotal: total,
-      discountEligible,
-      componentEvidence: components,
-    };
-    return { id: randomUUID(), ...rowPayload, integrityHash: approvedPricingRowIntegrityHash(rowPayload) };
+    if (explicitDiscountEligibility(snapshot, base, graphRow.productRowId)) contractEligibleBase = contractEligibleBase.plus(base);
+  }
+  if (!contractEligibleBase.eq(discountBase)) throw new Error('Contract discount base subtotal conflicts with canonical eligible rows');
+  if (discountValue.gt(contractEligibleBase)) throw new Error('Contract discount exceeds eligible pricing');
+
+  const { rows, selectedEligibleBase, gross } = projectApprovedPricingRows({
+    graphRows: selectedGraphRows,
+    itemByRow,
+    snapshotByRow,
+    versionId,
+    contractId,
+    sourceFinancialRecordId: source.leaf.id,
+    versionNumber,
   });
 
-  if (!eligibleBase.eq(discountBase)) throw new Error('Contract discount base subtotal conflicts with canonical eligible rows');
-  if (discountValue.gt(eligibleBase)) throw new Error('Contract discount exceeds eligible pricing');
   const grossAmount = money(gross, 'Approved pricing gross amount');
-  if (grossAmount !== money(graph.totalAmountToman, 'Canonical graph total amount')) {
+  const completeGraphTotal = graph.rows.reduce(
+    (sum, row) => sum.plus(money(row.totalAmountToman, `Product ${row.productRowId} all-in amount`)),
+    new Prisma.Decimal(0),
+  );
+  if (money(completeGraphTotal, 'Complete canonical graph total') !== money(graph.totalAmountToman, 'Canonical graph total amount')) {
     throw new Error('Canonical graph total conflicts with ordered all-in rows');
   }
-  const netAmount = money(gross.minus(discountValue), 'Approved pricing net amount');
+  const selectedDiscountValue = discount.enabled
+    ? selectedEligibleBase.mul(new Prisma.Decimal(discountPercent)).div(100)
+    : new Prisma.Decimal(0);
+  const discountAmount = money(selectedDiscountValue, 'Approved pricing discount amount');
+  const netAmount = money(gross.minus(selectedDiscountValue), 'Approved pricing net amount');
+  const rowByItem = new Map(rows.map(row => [row.contractItemId, row]));
+  for (const invoiceItem of source.leaf.invoiceItems) {
+    const sourceItem = source.contract.items.find(item => item.id === invoiceItem.contractItemId);
+    const pricingRow = rowByItem.get(invoiceItem.contractItemId ?? '');
+    if (!sourceItem || !pricingRow) throw new Error('Approved invoice item has no sealed pricing row');
+    if (quantity(invoiceItem.quantity, `Invoice item ${invoiceItem.id} quantity`) !== quantity(sourceItem.quantity, `Contract item ${sourceItem.id} quantity`)) {
+      throw new Error('Approved invoice item quantity conflicts with source snapshot');
+    }
+    if (!new Prisma.Decimal(money(sourceItem.totalPrice, `Contract item ${sourceItem.id} total`)).eq(pricingRow.canonicalAllInTotal)) {
+      throw new Error('Source contract item total conflicts with canonical all-in pricing');
+    }
+    const expectedInvoiceGross = new Prisma.Decimal(pricingRow.canonicalAllInTotal).mul(currencyFactor);
+    if (!new Prisma.Decimal(invoiceItem.totalPrice).eq(expectedInvoiceGross)) {
+      throw new Error('Approved invoice item total conflicts with canonical all-in pricing');
+    }
+  }
+  const expectedInvoiceAmount = new Prisma.Decimal(netAmount).mul(currencyFactor);
+  if (!new Prisma.Decimal(source.leaf.amount).eq(expectedInvoiceAmount)) {
+    throw new Error('Approved invoice amount conflicts with sealed net pricing');
+  }
   const sourceEvidence = {
     contractNumber: source.contract.contractNumber,
     customer: canonicalize(customer),
-    project: canonicalize(project),
-    destination,
-    discount: canonicalize({ ...discount, baseSubtotal: discountBase, percent: discountPercent, amount: discountAmount }),
+    project: canonicalize(destination.project),
+    destination: destination.destination,
+    discount: canonicalize({
+      ...discount,
+      baseSubtotal: discountBase,
+      percent: discountPercent,
+      amount: contractDiscountAmount,
+      selectedBasis: money(selectedEligibleBase, 'Selected discount basis'),
+      selectedAmount: discountAmount,
+    }),
+    financialApproval: {
+      financialRecordId: source.leaf.id,
+      mode,
+      amount: money(source.leaf.amount, 'Approved invoice evidence amount'),
+      currency: invoiceCurrency,
+      sourceSnapshotHash: canonicalApprovedPricingHash(source.leaf.sourceSnapshot),
+      metadataHash: canonicalApprovedPricingHash(source.leaf.metadata),
+      invoiceItems: [...source.leaf.invoiceItems]
+        .sort((left, right) => `${left.contractItemId}:${left.id}`.localeCompare(`${right.contractItemId}:${right.id}`))
+        .map(item => ({
+        id: item.id,
+        contractItemId: item.contractItemId,
+        productId: item.productId,
+        quantity: quantity(item.quantity, `Invoice item ${item.id} evidence quantity`),
+        totalPrice: money(item.totalPrice, `Invoice item ${item.id} evidence total`),
+        })),
+    },
     graph: {
       schemaVersion: graph.schemaVersion,
       revision: graph.revision,

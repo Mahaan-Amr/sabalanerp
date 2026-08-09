@@ -59,7 +59,9 @@ test('freezes scale-three quantity, all-in attached costs, discount, context, an
   assert.equal(version.rows[0]?.unit, APPROVED_PRICING_FIXTURE_EXPECTED.unit);
   assert.equal(version.rows[0]?.integrityHash, APPROVED_PRICING_FIXTURE_EXPECTED.rowHash);
   assert.equal(version.integrityHash, APPROVED_PRICING_FIXTURE_EXPECTED.rootHash);
-  assert.equal(version.sourceEvidence.destination, 'تهران، خیابان نمونه');
+  assert.deepEqual(version.sourceEvidence.destination, {
+    kind: 'PROJECT_ADDRESS', projectId: 'project-1', address: 'تهران، خیابان نمونه',
+  });
 });
 
 test('accepts explicit no-discount evidence without deriving a default', () => {
@@ -67,6 +69,7 @@ test('accepts explicit no-discount evidence without deriving a default', () => {
   (source.contract.contractData as any).discount = {
     enabled: false, baseSubtotal: '1000', percent: '0', amount: '0', currency: 'تومان',
   };
+  source.leaf.amount = '12500';
   const version = buildApprovedPricingVersion(source, 1, 'no-discount-version');
   assert.equal(version.discountAmount, '0.000000000000');
   assert.equal(version.netAmount, version.grossAmount);
@@ -78,9 +81,86 @@ test('freezes a zero discount basis for a non-eligible row', () => {
   (source.contract.contractData as any).discount = {
     enabled: false, baseSubtotal: '0', percent: '0', amount: '0', currency: 'تومان',
   };
+  source.leaf.amount = '12500';
   const version = buildApprovedPricingVersion(source, 1, 'non-eligible-version');
   assert.equal(version.rows[0]?.discountEligible, false);
   assert.equal(version.rows[0]?.componentEvidence.discountBasis, '0.000000000000');
+});
+
+test('FROM_SELECTED_ITEMS seals only the financially approved subset and allocates its discount', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  data.discount = {
+    ...data.discount, baseSubtotal: '1500', amount: '150',
+  };
+  data.products.push({
+    rowId: 'row-2', productId: 'product-2', productType: 'prepared',
+    preparedUnit: 'count', preparedQuantity: '2', quantity: '2', meta: { isLayer: false },
+  });
+  source.contract.items = [...source.contract.items, {
+    id: 'item-2', productId: 'product-2', productRowId: 'row-2', productType: 'prepared',
+    quantity: '2', totalPrice: '600',
+  }];
+  source.contract.currentItems = [...source.contract.currentItems, {
+    id: 'item-2', productId: 'product-2', productRowId: 'row-2', productType: 'prepared',
+    quantity: '2', totalPrice: '600',
+  }];
+  source.contract.productGraph = {
+    ...source.contract.productGraph!,
+    totalAmountToman: '1850',
+    rows: [...source.contract.productGraph!.rows, {
+      productRowId: 'row-2', catalogProductId: 'product-2', contractualTitle: 'قطعه آماده',
+      productType: 'prepared', baseAmountToman: '500', totalAmountToman: '600',
+      requestedQuantity: '2', requestedLengthMeters: null, requestedAreaSquareMeters: null,
+      operations: [{ id: 'finish-2', kind: 'finishing', amountToman: '100' }],
+    }],
+  };
+  source.leaf.metadata = { mode: 'FROM_SELECTED_ITEMS' };
+  source.leaf.invoiceItems = [{
+    id: 'invoice-item-2', contractItemId: 'item-2', productId: 'product-2', quantity: '2', totalPrice: '6000',
+  }];
+  source.leaf.amount = '5500';
+
+  const version = buildApprovedPricingVersion(source, 1, 'selected-version');
+  assert.deepEqual(version.rows.map(row => row.contractItemId), ['item-2']);
+  assert.equal(version.grossAmount, '600.000000000000');
+  assert.equal(version.discountAmount, '50.000000000000');
+  assert.equal(version.netAmount, '550.000000000000');
+});
+
+test('financial-record evidence and post-candidate contract edits fail closed', () => {
+  const amountConflict = approvedPricingSourceFixture();
+  amountConflict.leaf.amount = '11499';
+  assert.throws(() => buildApprovedPricingVersion(amountConflict, 1, 'amount-conflict'), /invoice amount conflicts/);
+
+  const invoiceItemConflict = approvedPricingSourceFixture();
+  invoiceItemConflict.leaf.invoiceItems = [{ ...invoiceItemConflict.leaf.invoiceItems[0]!, totalPrice: '12499' }];
+  assert.throws(() => buildApprovedPricingVersion(invoiceItemConflict, 1, 'item-conflict'), /invoice item total conflicts/);
+
+  const mutableEdit = approvedPricingSourceFixture();
+  mutableEdit.contract.currentItems = [{ ...mutableEdit.contract.currentItems[0]!, totalPrice: '1251' }];
+  assert.throws(() => buildApprovedPricingVersion(mutableEdit, 1, 'mutable-edit'), /changed after invoice candidate/);
+
+  const manualMode = approvedPricingSourceFixture();
+  manualMode.leaf.metadata = { mode: 'MANUAL' };
+  assert.throws(() => buildApprovedPricingVersion(manualMode, 1, 'manual'), /cannot produce approved pricing/);
+});
+
+test('discount eligibility is explicit and collaboration sale has a valid no-project destination', () => {
+  const missingEligibility = approvedPricingSourceFixture();
+  delete (missingEligibility.contract.contractData as any).products[0].meta;
+  assert.throws(() => buildApprovedPricingVersion(missingEligibility, 1, 'missing-eligibility'), /discount metadata is missing or null/);
+
+  const collaboration = approvedPricingSourceFixture();
+  const data = collaboration.contract.contractData as any;
+  data.contractKind = 'collaboration';
+  data.projectId = '';
+  data.project = null;
+  const version = buildApprovedPricingVersion(collaboration, 1, 'collaboration');
+  assert.equal(version.sourceEvidence.project, null);
+  assert.deepEqual(version.sourceEvidence.destination, {
+    kind: 'COLLABORATION_SALE', projectId: null, address: null,
+  });
 });
 
 test('canonical hash is independent of object key insertion order', () => {

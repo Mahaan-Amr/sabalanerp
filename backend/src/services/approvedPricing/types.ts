@@ -9,6 +9,18 @@ export type ApprovalLeaf = {
   status: AccountingRecordStatus;
   financiallyApprovedAt: Date | null;
   financiallyApprovedBy: string | null;
+  amount: string;
+  currency: string;
+  sourceId: string | null;
+  sourceSnapshot: unknown;
+  metadata: unknown;
+  invoiceItems: readonly {
+    id: string;
+    contractItemId: string | null;
+    productId: string | null;
+    quantity: string;
+    totalPrice: string;
+  }[];
 };
 
 export type ApprovedPricingOperationSource = {
@@ -44,6 +56,15 @@ export type ApprovedPricingSource = {
       productRowId: string | null;
       productType: string | null;
       quantity: string;
+      totalPrice: string;
+    }[];
+    currentItems: readonly {
+      id: string;
+      productId: string;
+      productRowId: string | null;
+      productType: string | null;
+      quantity: string;
+      totalPrice: string;
     }[];
     productGraph: {
       schemaVersion: number;

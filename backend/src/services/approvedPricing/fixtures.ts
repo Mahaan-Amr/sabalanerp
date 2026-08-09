@@ -11,6 +11,15 @@ export const approvedPricingSourceFixture = (): ApprovedPricingSource => ({
     status: AccountingRecordStatus.ISSUED,
     financiallyApprovedAt: new Date('2026-08-09T08:30:00.000Z'),
     financiallyApprovedBy: 'accountant-1',
+    amount: '11500',
+    currency: 'ریال',
+    sourceId: 'contract-1',
+    sourceSnapshot: { id: 'contract-1', immutable: true },
+    metadata: { mode: 'FROM_CONTRACT_TOTAL' },
+    invoiceItems: [{
+      id: 'invoice-item-1', contractItemId: 'item-1', productId: 'product-1',
+      quantity: '4', totalPrice: '12500',
+    }],
   },
   contract: {
     id: 'contract-1',
@@ -18,6 +27,7 @@ export const approvedPricingSourceFixture = (): ApprovedPricingSource => ({
     customerId: 'customer-1',
     currency: 'تومان',
     contractData: {
+      contractKind: 'standard',
       customerId: 'customer-1',
       customer: { id: 'customer-1', firstName: 'سمیه', lastName: 'احمدی', companyName: 'سنگ آفتاب' },
       projectId: 'project-1',
@@ -35,7 +45,11 @@ export const approvedPricingSourceFixture = (): ApprovedPricingSource => ({
     },
     items: [{
       id: 'item-1', productId: 'product-1', productRowId: 'row-1',
-      productType: 'longitudinal', quantity: '4',
+      productType: 'longitudinal', quantity: '4', totalPrice: '1250',
+    }],
+    currentItems: [{
+      id: 'item-1', productId: 'product-1', productRowId: 'row-1', productType: 'longitudinal',
+      quantity: '4', totalPrice: '1250',
     }],
     productGraph: {
       schemaVersion: 3,
@@ -64,5 +78,5 @@ export const APPROVED_PRICING_FIXTURE_EXPECTED = {
   contractedQuantity: '10.000',
   unit: 'meter',
   rowHash: '7bcd7a08ae96a0667c9195416c391f06cebc5daf86229833036b5e7f24ca5fb9',
-  rootHash: '733a03ac725825553864b7ad2aabfa0d30fda18ad628d858b0d91904ea7af33b',
+  rootHash: 'a294bd71c8f94f5acc8f8f66304d8269e9892d56d190b4e8ad15c5cd4d622882',
 } as const;

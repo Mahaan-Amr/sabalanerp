@@ -1,7 +1,6 @@
 import {
   ApprovedPricingVersionOrigin,
   Prisma,
-  type AccountingFinancialRecord,
 } from '@prisma/client';
 import {
   parseCanonicalProductGraph,
@@ -24,14 +23,33 @@ const jsonRecord = (value: Prisma.JsonValue): Readonly<Record<string, unknown>> 
   return value as Readonly<Record<string, unknown>>;
 };
 
-const mapLeaf = (leaf: Pick<AccountingFinancialRecord, 'id' | 'contractId' | 'kind' | 'status' | 'financiallyApprovedAt' | 'financiallyApprovedBy'>): ApprovalLeaf => ({
+type LeafRecord = Prisma.AccountingFinancialRecordGetPayload<{ include: { invoiceItems: true } }>;
+
+const mapLeaf = (leaf: LeafRecord): ApprovalLeaf => ({
   id: leaf.id,
   contractId: leaf.contractId,
   kind: leaf.kind,
   status: leaf.status,
   financiallyApprovedAt: leaf.financiallyApprovedAt,
   financiallyApprovedBy: leaf.financiallyApprovedBy,
+  amount: leaf.amount.toString(),
+  currency: leaf.currency,
+  sourceId: leaf.sourceId,
+  sourceSnapshot: leaf.sourceSnapshot,
+  metadata: leaf.metadata,
+  invoiceItems: leaf.invoiceItems.map(item => ({
+    id: item.id,
+    contractItemId: item.contractItemId,
+    productId: item.productId,
+    quantity: item.quantity.toString(),
+    totalPrice: item.totalPrice.toString(),
+  })),
 });
+
+const unknownRecord = (value: unknown, label: string): Record<string, any> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} is missing or null`);
+  return value as Record<string, any>;
+};
 
 const mapVersion = (version: PersistedVersion): ApprovedPricingVersionRecord => ({
   id: version.id,
@@ -67,10 +85,7 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
   async readApprovalLeaf(financialRecordId: string) {
     const leaf = await this.tx.accountingFinancialRecord.findUnique({
       where: { id: financialRecordId },
-      select: {
-        id: true, contractId: true, kind: true, status: true,
-        financiallyApprovedAt: true, financiallyApprovedBy: true,
-      },
+      include: { invoiceItems: true },
     });
     return leaf ? mapLeaf(leaf) : null;
   }
@@ -92,26 +107,43 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
   }
 
   async loadSource(financialRecordId: string): Promise<ApprovedPricingSource | null> {
-    const leaf = await this.tx.accountingFinancialRecord.findUnique({ where: { id: financialRecordId } });
+    const leaf = await this.tx.accountingFinancialRecord.findUnique({
+      where: { id: financialRecordId }, include: { invoiceItems: true },
+    });
     if (!leaf?.contractId) return null;
     const contract = await this.tx.salesContract.findUnique({
       where: { id: leaf.contractId },
       include: { items: true, productGraphState: true },
     });
     if (!contract) return null;
+    const snapshot = unknownRecord(leaf.sourceSnapshot, 'Invoice candidate source snapshot');
+    if (snapshot.id !== contract.id || leaf.sourceId !== contract.id) {
+      throw new Error('Invoice candidate source identities conflict with contract');
+    }
+    const graphState = unknownRecord(snapshot.productGraphState, 'Invoice candidate canonical graph snapshot');
+    const snapshotUpdatedAt = new Date(String(snapshot.updatedAt ?? ''));
+    if (Number.isNaN(snapshotUpdatedAt.getTime()) || snapshotUpdatedAt.getTime() !== contract.updatedAt.getTime()) {
+      throw new Error('Contract changed after invoice candidate snapshot');
+    }
+    if (!contract.productGraphState ||
+      contract.productGraphState.revision !== Number(graphState.revision) ||
+      contract.productGraphState.inputHash !== String(graphState.inputHash ?? '') ||
+      contract.productGraphState.resultHash !== String(graphState.resultHash ?? '')) {
+      throw new Error('Canonical product graph changed after invoice candidate snapshot');
+    }
     let productGraph: ApprovedPricingSource['contract']['productGraph'] = null;
-    if (contract.productGraphState) {
-      const graph = parseCanonicalProductGraph(contract.productGraphState.graph);
-      if (graph.schemaVersion !== contract.productGraphState.schemaVersion || graph.revision !== contract.productGraphState.revision) {
+    if (graphState.graph) {
+      const graph = parseCanonicalProductGraph(graphState.graph);
+      if (graph.schemaVersion !== Number(graphState.schemaVersion) || graph.revision !== Number(graphState.revision)) {
         throw new Error('Canonical product graph version evidence conflicts with persisted state');
       }
       const projection = projectCanonicalProductGraph(graph, 'accounting');
       productGraph = {
-        schemaVersion: contract.productGraphState.schemaVersion,
-        revision: contract.productGraphState.revision,
-        inputHash: contract.productGraphState.inputHash,
-        resultHash: contract.productGraphState.resultHash,
-        totalAmountToman: contract.productGraphState.totalAmountToman.toString(),
+        schemaVersion: Number(graphState.schemaVersion),
+        revision: Number(graphState.revision),
+        inputHash: String(graphState.inputHash ?? ''),
+        resultHash: String(graphState.resultHash ?? ''),
+        totalAmountToman: String(graphState.totalAmountToman ?? ''),
         rows: projection.products.map(row => ({
           productRowId: row.productRowId,
           catalogProductId: graph.rows.find(item => item.productRowId === row.productRowId)?.catalogProductId ?? '',
@@ -133,17 +165,23 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
     return {
       leaf: mapLeaf(leaf),
       contract: {
-        id: contract.id,
-        contractNumber: contract.contractNumber,
-        customerId: contract.customerId,
-        currency: contract.currency,
-        contractData: contract.contractData,
-        items: contract.items.map(item => ({
-          id: item.id,
-          productId: item.productId,
-          productRowId: item.productRowId,
-          productType: item.productType,
-          quantity: item.quantity.toString(),
+        id: String(snapshot.id),
+        contractNumber: String(snapshot.contractNumber ?? ''),
+        customerId: String(snapshot.customerId ?? ''),
+        currency: snapshot.currency == null ? null : String(snapshot.currency),
+        contractData: snapshot.contractData,
+        items: Array.isArray(snapshot.items) ? snapshot.items.map((item: unknown) => {
+          const row = unknownRecord(item, 'Invoice candidate contract item snapshot');
+          return {
+            id: String(row.id ?? ''), productId: String(row.productId ?? ''),
+            productRowId: row.productRowId == null ? null : String(row.productRowId),
+            productType: row.productType == null ? null : String(row.productType),
+            quantity: String(row.quantity ?? ''), totalPrice: String(row.totalPrice ?? ''),
+          };
+        }) : [],
+        currentItems: contract.items.map(item => ({
+          id: item.id, productId: item.productId, productRowId: item.productRowId, productType: item.productType,
+          quantity: item.quantity.toString(), totalPrice: item.totalPrice.toString(),
         })),
         productGraph,
       },

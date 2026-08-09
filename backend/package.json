@@ -56,6 +56,7 @@
     "test:dispatch-document-contracts": "tsx src/services/__tests__/dispatchDocumentContracts.test.ts && tsx src/services/__tests__/shipmentStatementMigration.test.ts",
     "test:approved-pricing": "tsx src/services/__tests__/approvedPricing.test.ts",
     "test:approved-pricing:db": "tsx src/services/__tests__/approvedPricingPrisma.test.ts",
+    "test:approved-pricing:concurrency": "tsx src/services/__tests__/approvedPricingConcurrency.test.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },

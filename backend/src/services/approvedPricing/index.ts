@@ -3,6 +3,7 @@ import { sealApprovedPricing } from './domain';
 import { PrismaApprovedPricingRepository } from './prismaRepository';
 
 export * from './domain';
+export * from './approvalLock';
 export * from './fixtures';
 export * from './types';
 

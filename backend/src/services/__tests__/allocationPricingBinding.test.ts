@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   AllocationPricingBindingError,
+  assertExactStableReservationTransfer,
   bindFinalizedAllocationPricing,
   type AllocationPricingBindingPort,
   type LockedPricingEvidence,
@@ -42,6 +43,7 @@ const makePort = (overrides: Partial<AllocationPricingBindingPort> = {}) => {
 const input = {
   allocationRevisionId: 'revision-1', finalizedAt: new Date('2026-08-09T12:00:00.000Z'), actorId: 'logistics-1',
   scope: { customerId: 'customer-1', projectId: 'project-1', destination: 'Tehran' },
+  expectedCurrency: 'TOMAN',
   lines: [{ allocationRevisionLineId: 'line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'stable-row-1', quantity: '1.000', unit: 'm2' }],
 };
 
@@ -112,6 +114,36 @@ for (const evidence of [
   );
   assert.deepEqual(calls.events, []);
 }
+
+{
+  const mixed = lockedEvidence();
+  mixed.version = {
+    ...mixed.version,
+    grossAmount: '150.000000000000', netAmount: '145.000000000000',
+    rows: [...mixed.version.rows, {
+      id: 'pricing-row-count', contractItemId: 'item-count', productRowId: 'stable-row-count', ordinal: 2,
+      contractedQuantity: '7.000', unit: 'count', canonicalAllInTotal: '50.000000000000',
+      discountEligible: false, componentEvidence: { base: '50.000000000000', discountBasis: '0.000000000000' },
+      integrityHash: 'row-hash-count',
+    }],
+  };
+  mixed.readiness = { ...mixed.readiness, quantityTotal: null, amountTotal: '150.000000000000' };
+  const { port } = makePort({ loadLockedPricingEvidence: async () => [mixed] });
+  assert.equal((await bindFinalizedAllocationPricing(port, input, { CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'true' })).path,
+    'ATOMIC_WAYBILL_STATEMENT');
+}
+
+assert.doesNotThrow(() => assertExactStableReservationTransfer(
+  [{ contractId: 'c', contractItemId: 'i', productRowId: 'r', quantity: '1.250', unit: 'm2' }],
+  [
+    { contractId: 'c', contractItemId: 'i', productRowId: 'r', quantity: '1.000', unit: 'm2' },
+    { contractId: 'c', contractItemId: 'i', productRowId: 'r', quantity: '0.250', unit: 'm2' },
+  ],
+));
+assert.throws(() => assertExactStableReservationTransfer(
+  [{ contractId: 'c', contractItemId: 'i', productRowId: 'r', quantity: '1.250', unit: 'm2' }],
+  [{ contractId: 'c', contractItemId: 'i', productRowId: 'lookalike', quantity: '1.250', unit: 'm2' }],
+), (error: unknown) => error instanceof AllocationPricingBindingError && error.code === 'PRICING_SCOPE_MISMATCH');
 
 console.log('allocation pricing binding tests passed');
 };

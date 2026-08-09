@@ -13,7 +13,7 @@ import {
   shipmentQuantityEvidenceIntegrityHash,
 } from './shipmentQuantityProjectionStore';
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
-import { AllocationPricingBindingError, bindFinalizedAllocationPricing } from './allocationPricingBinding';
+import { AllocationPricingBindingError, assertExactStableReservationTransfer, bindFinalizedAllocationPricing } from './allocationPricingBinding';
 import { createPrismaAllocationPricingBindingPort } from './allocationPricingPrismaAdapter';
 
 type Database = PrismaClient;
@@ -83,6 +83,7 @@ const bindRevisionPricing = async (tx: Tx, input: {
   finalizedAt: Date;
   actorId: string;
   scope: { customerId: string; projectId: string; destination: string };
+  expectedCurrency: string;
   lines: Array<{
     allocationRevisionLineId: string;
     contractId: string;
@@ -98,6 +99,73 @@ const bindRevisionPricing = async (tx: Tx, input: {
     if (error instanceof AllocationPricingBindingError) throw new DispatchAllocationConflictError(error.message);
     throw error;
   }
+};
+
+type FinalizedAllocationRow = {
+  sourceContractId: string; sourceContractItemId: string; productRowId: string; productId: string;
+  quantity: Prisma.Decimal; unit: string; snapshot: unknown;
+};
+
+const persistFinalizedAllocationRevision = async (tx: Tx, input: {
+  revisionData: Prisma.LogisticsAllocationRevisionUncheckedCreateInput;
+  rows: FinalizedAllocationRow[];
+  loadingLines: Map<string, string>;
+  actorId: string;
+  scope: { customerId: string; projectId: string; destination: string };
+  expectedCurrency: string;
+  finalizedAt: Date;
+  revisionEventType: string;
+  revisionAuditPayload: (result: { candidateId: string; snapshotHash: string; pricingBinding: Awaited<ReturnType<typeof bindRevisionPricing>> }) => unknown;
+  afterRevisionCreated?: (revision: { id: string }) => Promise<void>;
+}) => {
+  const revision = await tx.logisticsAllocationRevision.create({ data: input.revisionData });
+  if (input.afterRevisionCreated) await input.afterRevisionCreated(revision);
+  const pricedLines: Array<{
+    allocationRevisionLineId: string; contractId: string; contractItemId: string;
+    productRowId: string; quantity: string; unit: string;
+  }> = [];
+  for (const line of input.rows) {
+    const lineSnapshot = stableValue({ revisionId: revision.id, contractId: line.sourceContractId,
+      contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
+      quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot });
+    const revisionLine = await tx.logisticsAllocationRevisionLine.create({ data: {
+      revisionId: revision.id, sourceContractId: line.sourceContractId, sourceContractItemId: line.sourceContractItemId,
+      productRowId: line.productRowId, productId: line.productId, quantity: line.quantity, unit: line.unit,
+      snapshot: json(line.snapshot || {}), integrityHash: digest(lineSnapshot),
+    } });
+    pricedLines.push({ allocationRevisionLineId: revisionLine.id, contractId: line.sourceContractId,
+      contractItemId: line.sourceContractItemId, productRowId: line.productRowId,
+      quantity: line.quantity.toFixed(3), unit: line.unit });
+    const evidence = { id: revisionLine.id, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
+      productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_FINALIZED' as const,
+      quantity: line.quantity.toFixed(3), effectiveAt: input.finalizedAt.toISOString(), recordedAt: input.finalizedAt.toISOString(),
+      sourceType: 'LOGISTICS_ALLOCATION_REVISION', sourceId: revisionLine.id, sourceVersion: 1, integrityHash: '',
+      metadata: { loadingId: input.revisionData.loadingId, revisionId: revision.id,
+        loadingLineId: input.loadingLines.get(line.sourceContractItemId) || null } };
+    evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
+    await tx.shipmentQuantityEvidence.create({ data: { contractId: evidence.contractId,
+      contractItemId: evidence.contractItemId, productRowId: evidence.productRowId, unit: evidence.unit,
+      kind: evidence.kind, quantity: line.quantity, effectiveAt: input.finalizedAt, recordedAt: input.finalizedAt,
+      sourceType: evidence.sourceType, sourceId: evidence.sourceId, sourceVersion: 1,
+      integrityHash: evidence.integrityHash, metadata: json(evidence.metadata) } });
+  }
+  const pricingBinding = await bindRevisionPricing(tx, { allocationRevisionId: revision.id,
+    finalizedAt: input.finalizedAt, actorId: input.actorId, scope: input.scope,
+    expectedCurrency: input.expectedCurrency, lines: pricedLines });
+  await tx.logisticsAllocationRevision.update({ where: { id: revision.id }, data: { sealedAt: input.finalizedAt } });
+  const candidate = await tx.accountingDispatchCandidate.create({ data: {
+    allocationRevisionId: revision.id, createdAt: input.finalizedAt, workItem: { create: { createdAt: input.finalizedAt } },
+  } });
+  const workItem = await tx.accountingDispatchWorkItem.findUniqueOrThrow({ where: { candidateId: candidate.id } });
+  await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id,
+    eventType: 'CANDIDATE_CREATED', payload: { allocationRevisionId: revision.id, workItemId: workItem.id,
+      predecessorRevisionId: input.revisionData.predecessorRevisionId || null },
+    actorId: input.actorId, recordedAt: input.finalizedAt });
+  await appendAudit(tx, { aggregateType: 'LOGISTICS_ALLOCATION_REVISION', aggregateId: revision.id,
+    eventType: input.revisionEventType,
+    payload: input.revisionAuditPayload({ candidateId: candidate.id, snapshotHash: revision.integrityHash, pricingBinding }),
+    actorId: input.actorId, recordedAt: input.finalizedAt });
+  return { revision, candidate, pricingBinding };
 };
 
 const appendAudit = async (tx: Tx, input: {
@@ -241,16 +309,35 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
   if (loading.status !== 'DRAFT') throw new DispatchAllocationConflictError('Only a draft loading can be finalized.');
   if (loading.canonicalAllocationDrafts.length === 0) throw new DispatchAllocationValidationError('At least one canonical driver allocation is required.');
   const itemIds = loading.canonicalAllocationDrafts.flatMap((draft) => draft.lines.map((line) => line.sourceContractItemId));
+  const draftIds = loading.canonicalAllocationDrafts.map((draft) => draft.id);
   await lockKeys(tx, [
     ...loading.canonicalAllocationDrafts.map((draft) => `GUARD_QUEUE:${draft.queueTurnId}`),
+    ...draftIds.map((id) => `LOGISTICS_ALLOCATION_DRAFT:${id}`),
     ...itemIds.map((id) => `SHIPMENT_CONTRACT_ITEM:${id}`),
     ...itemIds.map((id) => `SHIPMENT_EVIDENCE_HEAD:${id}`),
     ...itemIds.map((id) => `SHIPMENT_PROJECTION:${id}`),
   ]);
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "logistics_allocation_drafts"
+    WHERE "id" IN (${Prisma.join(draftIds.sort())}) ORDER BY "id" FOR UPDATE`);
   await lockShipmentTruth(tx, itemIds);
-  const refreshedTurns = await tx.guardDriverQueueTurn.findMany({ where: { id: { in: loading.canonicalAllocationDrafts.map((draft) => draft.queueTurnId) } } });
+  const refreshedDrafts = await tx.logisticsAllocationDraft.findMany({ where: { id: { in: draftIds } },
+    include: { lines: true, queueTurn: true }, orderBy: { createdAt: 'asc' } });
+  if (refreshedDrafts.length !== draftIds.length) throw new DispatchAllocationConflictError('An allocation draft changed during finalization.');
+  const lockedItems = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, include: { contract: true } });
+  const lockedItemsById = new Map(lockedItems.map((item) => [item.id, item]));
+  for (const line of refreshedDrafts.flatMap((draft) => draft.lines)) {
+    const item = lockedItemsById.get(line.sourceContractItemId);
+    if (!item || item.contractId !== line.sourceContractId || item.productRowId !== line.productRowId
+      || item.productId !== line.productId || item.contract.customerId !== loading.customerId) {
+      throw new DispatchAllocationConflictError(`Allocation draft row ${line.sourceContractItemId} changed after it was saved.`);
+    }
+  }
+  const currencies = [...new Set(lockedItems.map((item) => item.contract.currency))];
+  if (currencies.length !== 1) throw new DispatchAllocationConflictError('One allocation revision cannot mix contract currencies.');
+  const allocationCurrency = currencies[0];
+  const refreshedTurns = await tx.guardDriverQueueTurn.findMany({ where: { id: { in: refreshedDrafts.map((draft) => draft.queueTurnId) } } });
   const turns = new Map(refreshedTurns.map((turn) => [turn.id, turn]));
-  for (const draft of loading.canonicalAllocationDrafts) {
+  for (const draft of refreshedDrafts) {
     const turn = turns.get(draft.queueTurnId);
     if (!turn || turn.status !== GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING || turn.loadingId !== loading.id) {
       throw new DispatchAllocationConflictError('Every allocation queue turn must still be reserved by this loading.');
@@ -258,7 +345,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     if (!await isGuardQueueTurnCurrentlyReady(tx, turn)) throw new DispatchAllocationConflictError('A reserved driver or vehicle is no longer ready.');
     if (draft.lines.length === 0) throw new DispatchAllocationValidationError('Every driver allocation must contain a positive quantity.');
   }
-  const contractIds = [...new Set(loading.canonicalAllocationDrafts.flatMap((draft) => draft.lines.map((line) => line.sourceContractId)))];
+  const contractIds = [...new Set(refreshedDrafts.flatMap((draft) => draft.lines.map((line) => line.sourceContractId)))];
   const available = new Map<string, { amount: Prisma.Decimal; unit: string }>();
   for (const contractId of contractIds) {
     const projection = await readShipmentQuantityProjection(tx as unknown as PrismaClient, { contractId });
@@ -268,7 +355,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     }
   }
   const requested = new Map<string, { amount: Prisma.Decimal; unit: string }>();
-  for (const line of loading.canonicalAllocationDrafts.flatMap((draft) => draft.lines)) {
+  for (const line of refreshedDrafts.flatMap((draft) => draft.lines)) {
     const current = requested.get(line.sourceContractItemId);
     requested.set(line.sourceContractItemId, { amount: (current?.amount || new Prisma.Decimal(0)).add(line.quantity), unit: line.unit });
   }
@@ -282,7 +369,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
   const batch = await tx.logisticsAllocationBatch.create({ data: {
     loadingId: loading.id, idempotencyKey, finalizedAt: now, finalizedBy: input.actorId,
   } });
-  for (const draft of loading.canonicalAllocationDrafts) {
+  for (const draft of refreshedDrafts) {
     const confirmationPhone = await resolveRevisionConfirmationPhone(tx, draft.lines.map((line) => line.sourceContractId));
     const prior = await tx.logisticsAllocationRevision.aggregate({ where: { loadingId: loading.id, queueTurnId: draft.queueTurnId }, _max: { revisionNumber: true } });
     const revisionNumber = (prior._max.revisionNumber || 0) + 1;
@@ -296,56 +383,17 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
       lines: draft.lines.map((line) => ({ contractId: line.sourceContractId,
         contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
         quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot })) });
-    const revision = await tx.logisticsAllocationRevision.create({ data: {
-      batchId: batch.id, loadingId: loading.id, queueTurnId: draft.queueTurnId, revisionNumber,
-      snapshot: json(snapshot), integrityHash: digest(snapshot), finalizedAt: now, finalizedBy: input.actorId,
-    } });
     const loadingLines = new Map(loading.lines.map((line) => [line.sourceContractItemId, line.id]));
-    const pricedLines: Array<{
-      allocationRevisionLineId: string; contractId: string; contractItemId: string;
-      productRowId: string; quantity: string; unit: string;
-    }> = [];
-    for (const line of draft.lines) {
-      const lineSnapshot = stableValue({ revisionId: revision.id, contractId: line.sourceContractId,
-        contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
-        quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot });
-      const revisionLine = await tx.logisticsAllocationRevisionLine.create({ data: {
-        revisionId: revision.id, sourceContractId: line.sourceContractId, sourceContractItemId: line.sourceContractItemId,
-        productRowId: line.productRowId, productId: line.productId, quantity: line.quantity, unit: line.unit,
-        snapshot: json(line.snapshot || {}), integrityHash: digest(lineSnapshot),
-      } });
-      pricedLines.push({ allocationRevisionLineId: revisionLine.id, contractId: line.sourceContractId,
-        contractItemId: line.sourceContractItemId, productRowId: line.productRowId,
-        quantity: line.quantity.toFixed(3), unit: line.unit });
-      const evidence = {
-        id: revisionLine.id, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
-        productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_FINALIZED' as const,
-        quantity: line.quantity.toFixed(3), effectiveAt: now.toISOString(), recordedAt: now.toISOString(),
-        sourceType: 'LOGISTICS_ALLOCATION_REVISION', sourceId: revisionLine.id, sourceVersion: 1,
-        integrityHash: '', metadata: { loadingId: loading.id, revisionId: revision.id, loadingLineId: loadingLines.get(line.sourceContractItemId) || null },
-      };
-      evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
-      await tx.shipmentQuantityEvidence.create({ data: {
-        contractId: evidence.contractId, contractItemId: evidence.contractItemId, productRowId: evidence.productRowId,
-        unit: evidence.unit, kind: evidence.kind, quantity: line.quantity, effectiveAt: now, recordedAt: now,
-        sourceType: evidence.sourceType, sourceId: evidence.sourceId, sourceVersion: 1,
-        integrityHash: evidence.integrityHash, metadata: json(evidence.metadata),
-      } });
-    }
-    const pricingBinding = await bindRevisionPricing(tx, { allocationRevisionId: revision.id, finalizedAt: now,
-      actorId: input.actorId, scope: { customerId: loading.customer.id, projectId: loading.project.id,
-        destination: loading.project.address }, lines: pricedLines });
-    await tx.logisticsAllocationRevision.update({ where: { id: revision.id }, data: { sealedAt: now } });
-    const candidate = await tx.accountingDispatchCandidate.create({ data: {
-      allocationRevisionId: revision.id, createdAt: now, workItem: { create: { createdAt: now } },
-    } });
-    const workItem = await tx.accountingDispatchWorkItem.findUniqueOrThrow({ where: { candidateId: candidate.id } });
-    await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id,
-      eventType: 'CANDIDATE_CREATED', payload: { allocationRevisionId: revision.id, workItemId: workItem.id }, actorId: input.actorId, recordedAt: now });
-    await appendAudit(tx, { aggregateType: 'LOGISTICS_ALLOCATION_REVISION', aggregateId: revision.id,
-      eventType: 'ALLOCATION_FINALIZED', payload: { candidateId: candidate.id, snapshotHash: revision.integrityHash,
+    await persistFinalizedAllocationRevision(tx, {
+      revisionData: { batchId: batch.id, loadingId: loading.id, queueTurnId: draft.queueTurnId, revisionNumber,
+        snapshot: json(snapshot), integrityHash: digest(snapshot), finalizedAt: now, finalizedBy: input.actorId },
+      rows: draft.lines, loadingLines, actorId: input.actorId, finalizedAt: now,
+      scope: { customerId: loading.customer.id, projectId: loading.project.id, destination: loading.project.address },
+      expectedCurrency: allocationCurrency, revisionEventType: 'ALLOCATION_FINALIZED',
+      revisionAuditPayload: ({ candidateId, snapshotHash, pricingBinding }) => ({ candidateId, snapshotHash,
         documentPath: pricingBinding.path, pricingVersionIds: pricingBinding.pricingVersionIds,
-        pricedEventIntegrityHashes: pricingBinding.eventIntegrityHashes }, actorId: input.actorId, recordedAt: now });
+        pricedEventIntegrityHashes: pricingBinding.eventIntegrityHashes }),
+    });
   }
   await tx.logisticsLoading.update({ where: { id: loading.id }, data: { status: 'FINALIZED', finalizedAt: now, finalizedBy: input.actorId } });
   for (const turn of refreshedTurns) {
@@ -410,6 +458,8 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
   }
   const items = await tx.contractItem.findMany({ where: { id: { in: itemIds } }, include: { contract: true, product: true } });
   const byId = new Map(items.map((item) => [item.id, item]));
+  const currencies = [...new Set(items.map((item) => item.contract.currency))];
+  if (currencies.length !== 1) throw new DispatchAllocationConflictError('One successor revision cannot mix contract currencies.');
   const rows = input.lines.map((line) => {
     const item = byId.get(line.sourceContractItemId);
     if (!item || item.contract.customerId !== predecessor.loading.customerId || !item.productRowId) {
@@ -420,6 +470,19 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
       snapshot: json({ contractNumber: item.contract.contractNumber, contractItemId: item.id, productRowId: item.productRowId,
         productId: item.productId, productName: item.product.namePersian || item.product.name }) };
   });
+  if (stalePricingTransfer) {
+    try {
+      assertExactStableReservationTransfer(
+        predecessor.lines.map((line) => ({ contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
+          productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit })),
+        rows.map((line) => ({ contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
+          productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit })),
+      );
+    } catch (error) {
+      if (error instanceof AllocationPricingBindingError) throw new DispatchAllocationConflictError(error.message);
+      throw error;
+    }
+  }
   const requested = new Map<string, Prisma.Decimal>();
   const projections = new Map<string, { amount: Prisma.Decimal; unit: string }>();
   for (const contractId of [...new Set(rows.map((line) => line.sourceContractId))]) {
@@ -457,75 +520,34 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     lines: rows.map((line) => ({ contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
       quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot })) });
-  const revision = await tx.logisticsAllocationRevision.create({ data: { batchId: batch.id, loadingId: predecessor.loadingId,
-    queueTurnId: predecessor.queueTurnId, revisionNumber, predecessorRevisionId: predecessor.id,
-    snapshot: json(snapshot), integrityHash: digest(snapshot), finalizedAt: now, finalizedBy: input.actorId } });
   const loadingLines = new Map(predecessor.loading.lines.map((line) => [line.sourceContractItemId, line.id]));
-  if (stalePricingTransfer) {
-    for (const line of predecessor.lines) {
-      const release = { id: `${revision.id}:${line.id}`, contractId: line.sourceContractId,
-        contractItemId: line.sourceContractItemId, productRowId: line.productRowId, unit: line.unit,
-        kind: 'ALLOCATION_RELEASED' as const, quantity: line.quantity.toFixed(3), effectiveAt: now.toISOString(),
-        recordedAt: now.toISOString(), sourceType: 'STALE_ALLOCATION_SUCCESSOR', sourceId: `${revision.id}:${line.id}`,
-        sourceVersion: 1, integrityHash: '', metadata: { predecessorRevisionId: predecessor.id, successorRevisionId: revision.id } };
-      release.integrityHash = shipmentQuantityEvidenceIntegrityHash(release);
-      await tx.shipmentQuantityEvidence.create({ data: { contractId: release.contractId,
-        contractItemId: release.contractItemId, productRowId: release.productRowId, unit: release.unit,
-        kind: release.kind, quantity: line.quantity, effectiveAt: now, recordedAt: now,
-        sourceType: release.sourceType, sourceId: release.sourceId, sourceVersion: 1,
-        integrityHash: release.integrityHash, metadata: json(release.metadata) } });
-    }
-    await tx.accountingDispatchCandidate.update({ where: { id: predecessor.candidate.id }, data: {
-      status: AccountingDispatchCandidateStatus.WITHDRAWN, dispositionAt: now, dispositionBy: input.actorId,
-      dispositionReason: 'APPROVED_PRICING_CHANGED',
-    } });
-    await tx.accountingDispatchWorkItem.update({ where: { candidateId: predecessor.candidate.id }, data: {
-      status: 'COMPLETED', completedAt: now,
-    } });
-    await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: predecessor.candidate.id,
-      eventType: 'CANDIDATE_WITHDRAWN_FOR_PRICING_STALENESS', payload: { predecessorRevisionId: predecessor.id,
-        successorRevisionId: revision.id, reason: 'APPROVED_PRICING_CHANGED' }, actorId: input.actorId, recordedAt: now });
-  }
-  const pricedLines: Array<{
-    allocationRevisionLineId: string; contractId: string; contractItemId: string;
-    productRowId: string; quantity: string; unit: string;
-  }> = [];
-  for (const line of rows) {
-    const lineSnapshot = stableValue({ revisionId: revision.id, contractId: line.sourceContractId,
-      contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
-      quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot });
-    const revisionLine = await tx.logisticsAllocationRevisionLine.create({ data: { revisionId: revision.id,
-      sourceContractId: line.sourceContractId, sourceContractItemId: line.sourceContractItemId, productRowId: line.productRowId,
-      productId: line.productId, quantity: line.quantity, unit: line.unit, snapshot: line.snapshot, integrityHash: digest(lineSnapshot) } });
-    pricedLines.push({ allocationRevisionLineId: revisionLine.id, contractId: line.sourceContractId,
-      contractItemId: line.sourceContractItemId, productRowId: line.productRowId,
-      quantity: line.quantity.toFixed(3), unit: line.unit });
-    const evidence = { id: revisionLine.id, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
-      productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_FINALIZED' as const, quantity: line.quantity.toFixed(3),
-      effectiveAt: now.toISOString(), recordedAt: now.toISOString(), sourceType: 'LOGISTICS_ALLOCATION_REVISION',
-      sourceId: revisionLine.id, sourceVersion: 1, integrityHash: '', metadata: { loadingId: predecessor.loadingId,
-        revisionId: revision.id, loadingLineId: loadingLines.get(line.sourceContractItemId) || null } };
-    evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
-    await tx.shipmentQuantityEvidence.create({ data: { contractId: evidence.contractId, contractItemId: evidence.contractItemId,
-      productRowId: evidence.productRowId, unit: evidence.unit, kind: evidence.kind, quantity: line.quantity, effectiveAt: now,
-      recordedAt: now, sourceType: evidence.sourceType, sourceId: evidence.sourceId, sourceVersion: 1,
-      integrityHash: evidence.integrityHash, metadata: json(evidence.metadata) } });
-  }
-  const pricingBinding = await bindRevisionPricing(tx, { allocationRevisionId: revision.id, finalizedAt: now,
-    actorId: input.actorId, scope: { customerId: predecessor.loading.customer.id, projectId: predecessor.loading.project.id,
-      destination: predecessor.loading.project.address }, lines: pricedLines });
-  await tx.logisticsAllocationRevision.update({ where: { id: revision.id }, data: { sealedAt: now } });
-  const candidate = await tx.accountingDispatchCandidate.create({ data: { allocationRevisionId: revision.id, createdAt: now,
-    workItem: { create: { createdAt: now } } } });
-  const workItem = await tx.accountingDispatchWorkItem.findUniqueOrThrow({ where: { candidateId: candidate.id } });
-  await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id,
-    eventType: 'CANDIDATE_CREATED', payload: { allocationRevisionId: revision.id, workItemId: workItem.id, predecessorRevisionId: predecessor.id },
-    actorId: input.actorId, recordedAt: now });
-  await appendAudit(tx, { aggregateType: 'LOGISTICS_ALLOCATION_REVISION', aggregateId: revision.id,
-    eventType: 'SUCCESSOR_ALLOCATION_FINALIZED', payload: { predecessorRevisionId: predecessor.id, candidateId: candidate.id,
+  await persistFinalizedAllocationRevision(tx, {
+    revisionData: { batchId: batch.id, loadingId: predecessor.loadingId, queueTurnId: predecessor.queueTurnId,
+      revisionNumber, predecessorRevisionId: predecessor.id, snapshot: json(snapshot), integrityHash: digest(snapshot),
+      finalizedAt: now, finalizedBy: input.actorId },
+    rows, loadingLines, actorId: input.actorId, finalizedAt: now,
+    scope: { customerId: predecessor.loading.customer.id, projectId: predecessor.loading.project.id,
+      destination: predecessor.loading.project.address }, expectedCurrency: currencies[0],
+    revisionEventType: 'SUCCESSOR_ALLOCATION_FINALIZED',
+    revisionAuditPayload: ({ candidateId, pricingBinding }) => ({ predecessorRevisionId: predecessor.id, candidateId,
       stalePricingTransfer, documentPath: pricingBinding.path, pricingVersionIds: pricingBinding.pricingVersionIds,
-      pricedEventIntegrityHashes: pricingBinding.eventIntegrityHashes },
-    actorId: input.actorId, recordedAt: now });
+      pricedEventIntegrityHashes: pricingBinding.eventIntegrityHashes }),
+    afterRevisionCreated: stalePricingTransfer ? async (revision) => {
+      for (const line of predecessor.lines) {
+        const release = { id: `${revision.id}:${line.id}`, contractId: line.sourceContractId,
+          contractItemId: line.sourceContractItemId, productRowId: line.productRowId, unit: line.unit,
+          kind: 'ALLOCATION_RELEASED' as const, quantity: line.quantity.toFixed(3), effectiveAt: now.toISOString(),
+          recordedAt: now.toISOString(), sourceType: 'STALE_ALLOCATION_SUCCESSOR', sourceId: `${revision.id}:${line.id}`,
+          sourceVersion: 1, integrityHash: '', metadata: { predecessorRevisionId: predecessor.id, successorRevisionId: revision.id } };
+        release.integrityHash = shipmentQuantityEvidenceIntegrityHash(release);
+        await tx.shipmentQuantityEvidence.create({ data: { contractId: release.contractId,
+          contractItemId: release.contractItemId, productRowId: release.productRowId, unit: release.unit,
+          kind: release.kind, quantity: line.quantity, effectiveAt: now, recordedAt: now,
+          sourceType: release.sourceType, sourceId: release.sourceId, sourceVersion: 1,
+          integrityHash: release.integrityHash, metadata: json(release.metadata) } });
+      }
+    } : undefined,
+  });
   await refreshProjectionContracts(tx, [
     ...rows.map((line) => line.sourceContractId),
     ...(stalePricingTransfer ? predecessor.lines.map((line) => line.sourceContractId) : []),

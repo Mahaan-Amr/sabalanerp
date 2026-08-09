@@ -46,6 +46,7 @@ export type PriorPricedAllocationEvent = {
   grossAmount: string;
   discountAmount: string;
   integrityVerified?: boolean;
+  ledgerSequence?: number;
 };
 
 export type PricedAllocationEvidence = {
@@ -63,6 +64,7 @@ export type PricedAllocationEvidence = {
   pricingIntegrityHash: string;
   pricingRowIntegrityHash: string;
   readinessEvidenceHash: string;
+  ledgerSequence: number;
 };
 
 export type CalculatedPricedAllocationEvent = PricedRevisionLine & {
@@ -72,6 +74,7 @@ export type CalculatedPricedAllocationEvent = PricedRevisionLine & {
   discountAmount: string;
   netAmount: string;
   consumesFinalRemainder: boolean;
+  ledgerSequence: number;
   evidence: PricedAllocationEvidence;
 };
 
@@ -97,6 +100,9 @@ const formatFixed = (atoms: bigint, scale: number): string => {
 export const sumCanonicalQuantities = (values: string[]): string =>
   formatFixed(values.reduce((sum, value) => sum + parseFixed(value, QUANTITY_SCALE), 0n), QUANTITY_SCALE);
 
+export const sumExactMoney = (values: string[]): string =>
+  formatFixed(values.reduce((sum, value) => sum + parseFixed(value, MONEY_SCALE), 0n), MONEY_SCALE);
+
 export const isPositiveCanonicalQuantity = (value: string): boolean => parseFixed(value, QUANTITY_SCALE) > 0n;
 
 const stableValue = (value: unknown): unknown => {
@@ -121,6 +127,7 @@ type RowState = {
   quantity: bigint;
   gross: bigint;
   discount: bigint;
+  ledgerSequence: number;
 };
 
 const prepareStates = (
@@ -173,21 +180,25 @@ const prepareStates = (
       const grossTarget = parseFixed(row.canonicalAllInTotal, MONEY_SCALE);
       if (contracted <= 0n) throw new PricedAllocationInvariantError('INVALID_FIXED_POINT', `Pricing row ${row.id} quantity must be positive.`);
       rowGrossTotal += grossTarget;
-      statesByRow.set(row.id, { version, row, contracted, grossTarget, discountTarget, quantity: 0n, gross: 0n, discount: 0n });
+      statesByRow.set(row.id, { version, row, contracted, grossTarget, discountTarget,
+        quantity: 0n, gross: 0n, discount: 0n, ledgerSequence: 0 });
     });
     if (rowGrossTotal !== grossTotal || grossTotal - discountTotal !== netTotal || allocatedDiscount !== discountTotal) {
       throw new PricedAllocationInvariantError('PRICING_TOTAL_MISMATCH', `Pricing version ${version.id} totals do not reconcile.`);
     }
   }
-  for (const prior of priorEvents) {
+  for (const prior of [...priorEvents].sort((left, right) =>
+    left.pricingRowId.localeCompare(right.pricingRowId) || (left.ledgerSequence || 0) - (right.ledgerSequence || 0))) {
     const state = statesByRow.get(prior.pricingRowId);
     if (!state) throw new PricedAllocationInvariantError('MISSING_PRICING_ROW', `Prior event references unknown pricing row ${prior.pricingRowId}.`);
-    if (prior.integrityVerified === false || (prior.pricingVersionId && prior.pricingVersionId !== state.version.id)) {
+    if (prior.integrityVerified === false || (prior.pricingVersionId && prior.pricingVersionId !== state.version.id)
+      || prior.ledgerSequence !== state.ledgerSequence + 1) {
       throw new PricedAllocationInvariantError('PRIOR_EVENT_HASH_MISMATCH', `Prior event for pricing row ${prior.pricingRowId} failed integrity verification.`);
     }
     state.quantity += parseFixed(prior.quantity, QUANTITY_SCALE);
     state.gross += parseFixed(prior.grossAmount, MONEY_SCALE);
     state.discount += parseFixed(prior.discountAmount, MONEY_SCALE);
+    state.ledgerSequence = prior.ledgerSequence;
   }
   return { versionsByContract, statesByRow };
 };
@@ -229,6 +240,7 @@ export const allocatePricedRevision = (input: {
     state.quantity = afterQuantity;
     state.gross += gross;
     state.discount += discount;
+    state.ledgerSequence += 1;
     quantitiesByUnit.set(line.unit, (quantitiesByUnit.get(line.unit) || 0n) + quantity);
     totalGross += gross;
     totalDiscount += discount;
@@ -240,6 +252,7 @@ export const allocatePricedRevision = (input: {
       discountAmount: formatFixed(discount, MONEY_SCALE),
       netAmount: formatFixed(gross - discount, MONEY_SCALE),
       consumesFinalRemainder,
+      ledgerSequence: state.ledgerSequence,
       evidence: {
         schemaVersion: 1,
         algorithm: ALGORITHM,
@@ -255,6 +268,7 @@ export const allocatePricedRevision = (input: {
         pricingIntegrityHash: version.integrityHash,
         pricingRowIntegrityHash: row.integrityHash,
         readinessEvidenceHash: version.readinessEvidenceHash,
+        ledgerSequence: state.ledgerSequence,
       },
     });
   }

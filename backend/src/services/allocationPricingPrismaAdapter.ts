@@ -165,6 +165,8 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
         evidence: true, integrityHash: true, recordedBy: true },
     });
     return rows.map((row) => {
+      const evidence = record(row.evidence);
+      const ledgerSequence = Number(evidence.ledgerSequence);
       const payload = {
         allocationRevisionId: row.allocationRevisionId,
         allocationRevisionLineId: row.allocationRevisionLineId,
@@ -180,7 +182,9 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
       };
       return { pricingRowId: row.pricingRowId, pricingVersionId: row.pricingVersionId,
         quantity: payload.quantity, grossAmount: payload.grossAmount, discountAmount: payload.discountAmount,
-        integrityVerified: row.integrityHash === pricedAllocationIntegrityHash(payload) };
+        ledgerSequence,
+        integrityVerified: Number.isSafeInteger(ledgerSequence) && ledgerSequence > 0
+          && row.integrityHash === pricedAllocationIntegrityHash(payload) };
     });
   },
 

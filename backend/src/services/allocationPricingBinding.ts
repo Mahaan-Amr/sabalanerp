@@ -64,14 +64,40 @@ export class AllocationPricingBindingError extends Error {
   }
 }
 
+type StableReservationLine = Pick<PricedRevisionLine, 'contractId' | 'contractItemId' | 'productRowId' | 'quantity' | 'unit'>;
+
+export const assertExactStableReservationTransfer = (
+  predecessor: StableReservationLine[],
+  successor: StableReservationLine[],
+) => {
+  const totals = (lines: StableReservationLine[]) => {
+    const quantities = new Map<string, string[]>();
+    for (const line of lines) {
+      const key = [line.contractId, line.contractItemId, line.productRowId, line.unit].join('\u001f');
+      quantities.set(key, [...(quantities.get(key) || []), line.quantity]);
+    }
+    return new Map([...quantities].map(([key, values]) => [key, sumCanonicalQuantities(values)]));
+  };
+  const before = totals(predecessor);
+  const after = totals(successor);
+  if (before.size !== after.size || [...before].some(([key, value]) => after.get(key) !== value)) {
+    throw new AllocationPricingBindingError('PRICING_SCOPE_MISMATCH',
+      'A stale successor must transfer the exact same stable rows, units, and quantities.');
+  }
+};
+
 const sortedUnique = (values: string[]) => [...new Set(values)].sort((left, right) => left.localeCompare(right));
 
-const assertEvidence = (expectedContracts: string[], expectedScope: LockedPricingEvidence['scope'], evidence: LockedPricingEvidence[]) => {
+const assertEvidence = (expectedContracts: string[], expectedScope: LockedPricingEvidence['scope'],
+  expectedCurrency: string, evidence: LockedPricingEvidence[]) => {
   const actualContracts = sortedUnique(evidence.map((entry) => entry.version.contractId));
   if (actualContracts.length !== expectedContracts.length || actualContracts.some((id, index) => id !== expectedContracts[index])) {
     throw new AllocationPricingBindingError('PRICING_SCOPE_MISMATCH', 'Current approved-pricing scope differs from the finalized allocation.');
   }
   for (const entry of evidence) {
+    if (entry.version.currency !== expectedCurrency) {
+      throw new AllocationPricingBindingError('PRICING_SCOPE_MISMATCH', `Contract ${entry.version.contractId} pricing currency changed.`);
+    }
     if (entry.scope.customerId !== expectedScope.customerId || entry.scope.projectId !== expectedScope.projectId
       || entry.scope.destination !== expectedScope.destination) {
       throw new AllocationPricingBindingError('PRICING_SCOPE_MISMATCH', `Contract ${entry.version.contractId} pricing destination scope changed.`);
@@ -80,15 +106,18 @@ const assertEvidence = (expectedContracts: string[], expectedScope: LockedPricin
       throw new AllocationPricingBindingError('PRICING_NOT_READY', `Contract ${entry.version.contractId} pricing is not READY.`);
     }
     if (entry.readiness.sourceCount !== 1 || !entry.readiness.sourceIdentityHash
-      || entry.readiness.quantityTotal === null || entry.readiness.amountTotal === null
+      || entry.readiness.amountTotal === null
       || !entry.version.readinessEvidenceHash) {
       throw new AllocationPricingBindingError('PRICING_SOURCE_MISMATCH', `Contract ${entry.version.contractId} pricing readiness evidence is incomplete.`);
     }
     if (!entry.versionIntegrityVerified || !entry.rowIntegrityVerified) {
       throw new AllocationPricingBindingError('PRICING_HASH_MISMATCH', `Contract ${entry.version.contractId} approved-pricing integrity verification failed.`);
     }
-    const quantityTotal = sumCanonicalQuantities(entry.version.rows.map((row) => row.contractedQuantity));
-    if (quantityTotal !== entry.readiness.quantityTotal || entry.version.grossAmount !== entry.readiness.amountTotal) {
+    const units = new Set(entry.version.rows.map((row) => row.unit));
+    const quantityMatches = units.size === 1
+      ? entry.readiness.quantityTotal === sumCanonicalQuantities(entry.version.rows.map((row) => row.contractedQuantity))
+      : entry.readiness.quantityTotal === null;
+    if (!quantityMatches || entry.version.grossAmount !== entry.readiness.amountTotal) {
       throw new AllocationPricingBindingError('PRICING_SOURCE_MISMATCH', `Contract ${entry.version.contractId} readiness totals changed.`);
     }
   }
@@ -101,6 +130,7 @@ export const bindFinalizedAllocationPricing = async (
     finalizedAt: Date;
     actorId: string;
     scope: LockedPricingEvidence['scope'];
+    expectedCurrency: string;
     lines: PricedRevisionLine[];
   },
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -124,7 +154,7 @@ export const bindFinalizedAllocationPricing = async (
     ...input.lines.map((line) => `APPROVED_PRICING_ROW:${line.contractId}:${line.contractItemId}`),
   ]));
   const evidence = await port.loadLockedPricingEvidence(contractIds);
-  assertEvidence(contractIds, input.scope, evidence);
+  assertEvidence(contractIds, input.scope, input.expectedCurrency, evidence);
   const versions = evidence.map((entry) => entry.version);
   const pricingRowIds = sortedUnique(versions.flatMap((version) => version.rows.map((row) => row.id)));
   await port.lockPricingScope(pricingRowIds.map((rowId) => `PRICED_ALLOCATION_LEDGER:${rowId}`));

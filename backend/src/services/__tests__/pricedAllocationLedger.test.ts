@@ -53,6 +53,7 @@ const line = (quantity: string, overrides: Record<string, string> = {}) => ({
     contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'stable-row-1', unit: 'm2', quantity: '1.000',
     grossAmount: '33.333333333333', discountAmount: '2.666666666666', netAmount: '30.666666666667',
     consumesFinalRemainder: false,
+    ledgerSequence: 1,
     evidence: {
       schemaVersion: 1, algorithm: 'shipment-money-allocation-v1',
       beforeQuantity: '0.000', afterQuantity: '1.000', contractedQuantity: '3.000',
@@ -60,6 +61,7 @@ const line = (quantity: string, overrides: Record<string, string> = {}) => ({
       beforeGross: '0.000000000000', afterGross: '33.333333333333',
       beforeDiscount: '0.000000000000', afterDiscount: '2.666666666666',
       pricingIntegrityHash: 'pricing-hash-1', pricingRowIntegrityHash: 'row-hash-1', readinessEvidenceHash: 'ready-hash-1',
+      ledgerSequence: 1,
     },
   });
 
@@ -72,6 +74,7 @@ const line = (quantity: string, overrides: Record<string, string> = {}) => ({
   assert.equal(final.events[0].discountAmount, '5.333333333334');
   assert.equal(final.events[0].netAmount, '61.333333333333');
   assert.equal(final.events[0].consumesFinalRemainder, true);
+  assert.equal(final.events[0].evidence.ledgerSequence, 2);
   assert.equal(final.totals.grossAmount, '66.666666666667');
 
   const zero = allocatePricedRevision({
@@ -82,6 +85,7 @@ const line = (quantity: string, overrides: Record<string, string> = {}) => ({
   assert.equal(zero.events[0].grossAmount, '-100.000000000000');
   assert.equal(zero.events[0].discountAmount, '-8.000000000000');
   assert.equal(zero.events[0].netAmount, '-92.000000000000');
+  assert.equal(zero.events[0].evidence.ledgerSequence, 3);
 }
 
 {
@@ -130,7 +134,7 @@ assert.throws(
   () => allocatePricedRevision({
     versions: [version()],
     priorEvents: [{ pricingRowId: 'pricing-row-1', pricingVersionId: 'pricing-1', quantity: '1.000',
-      grossAmount: '33.333333333333', discountAmount: '2.666666666666', integrityVerified: false }],
+      grossAmount: '33.333333333333', discountAmount: '2.666666666666', integrityVerified: false, ledgerSequence: 1 }],
     lines: [line('1.000')],
   }),
   (error: unknown) => error instanceof PricedAllocationInvariantError && error.code === 'PRIOR_EVENT_HASH_MISMATCH',

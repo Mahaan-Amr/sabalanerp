@@ -83,6 +83,7 @@ export default function AccountingInvoiceCandidatesPage() {
         view: query.view || undefined,
         period: query.period || undefined,
         date: query.date || undefined,
+        cutoff: query.cutoff || undefined,
         search: query.search || undefined,
         status: query.status,
         page: query.page,
@@ -98,7 +99,7 @@ export default function AccountingInvoiceCandidatesPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.pageSize, query.date, query.page, query.period, query.search, query.status, query.view]);
+  }, [pagination.pageSize, query.cutoff, query.date, query.page, query.period, query.search, query.status, query.view]);
 
   useEffect(() => {
     loadRows();

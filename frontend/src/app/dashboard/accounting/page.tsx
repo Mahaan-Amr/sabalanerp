@@ -74,6 +74,7 @@ export default function AccountingDashboardPage() {
   const [financialTrend, setFinancialTrend] = useState<FinancialTrendState>(pendingFinancialTrend);
   const hrRequestGeneration = useRef(0);
   const workspaceRequestGeneration = useRef(0);
+  const trendRequestGeneration = useRef(0);
   const rawSearchParams = searchParams.toString();
   const dashboardQuery = useMemo(
     () => canonicalizeAccountingDashboardQuery(new URLSearchParams(rawSearchParams)),
@@ -122,16 +123,20 @@ export default function AccountingDashboardPage() {
   }, []);
 
   const loadFinancialTrend = useCallback(async (range: FinancialTrendRange) => {
-    setFinancialTrend((previous) => pendingFinancialTrend(previous));
+    const requestGeneration = ++trendRequestGeneration.current;
+    setFinancialTrend((previous) => pendingFinancialTrend(previous, range));
     try {
       const response = await accountingAPI.getFinancialTrend(range);
+      if (requestGeneration !== trendRequestGeneration.current) return;
       if (!response.data.success) {
         setFinancialTrend((previous) => failFinancialTrend(previous));
         return;
       }
       setFinancialTrend((previous) => resolveFinancialTrend(previous, response.data.data));
     } catch {
-      setFinancialTrend((previous) => failFinancialTrend(previous));
+      if (requestGeneration === trendRequestGeneration.current) {
+        setFinancialTrend((previous) => failFinancialTrend(previous));
+      }
     }
   }, []);
 
@@ -178,6 +183,15 @@ export default function AccountingDashboardPage() {
     );
   }, []);
 
+  const financialTrendPanel = (
+    <AccountingFinancialTrend
+      range={trendRange}
+      state={financialTrend}
+      onRangeChange={setTrendRange}
+      onRetry={() => void loadFinancialTrend(trendRange)}
+    />
+  );
+
   if (showPrototype) {
     return <AccountingDashboardPrototype />;
   }
@@ -185,12 +199,7 @@ export default function AccountingDashboardPage() {
   if (!workspace && loading) {
     return (
       <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری">
-        <AccountingFinancialTrend
-          range={trendRange}
-          state={financialTrend}
-          onRangeChange={setTrendRange}
-          onRetry={() => void loadFinancialTrend(trendRange)}
-        />
+        {financialTrendPanel}
         <ErpSkeleton lines={4} label="در حال بارگذاری سررسیدهای حسابداری" />
       </ErpPage>
     );
@@ -199,12 +208,7 @@ export default function AccountingDashboardPage() {
   if (!workspace) {
     return (
       <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری">
-        <AccountingFinancialTrend
-          range={trendRange}
-          state={financialTrend}
-          onRangeChange={setTrendRange}
-          onRetry={() => void loadFinancialTrend(trendRange)}
-        />
+        {financialTrendPanel}
         <ErpInlineState
           kind="error"
           title={workspaceState.error || 'داده‌های حسابداری در دسترس نیست.'}
@@ -253,12 +257,7 @@ export default function AccountingDashboardPage() {
         onTypeChange={(deadlineType) => router.replace(dashboardHref({ deadlineType }), { scroll: false })}
       />
 
-      <AccountingFinancialTrend
-        range={trendRange}
-        state={financialTrend}
-        onRangeChange={setTrendRange}
-        onRetry={() => void loadFinancialTrend(trendRange)}
-      />
+      {financialTrendPanel}
 
       <ErpActionGrid
         columns={4}

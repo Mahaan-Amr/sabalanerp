@@ -25,9 +25,12 @@ export type FinancialTrendState = {
   data: FinancialTrendData | null;
 };
 
-export const pendingFinancialTrend = (previous?: FinancialTrendState): FinancialTrendState => ({
+export const pendingFinancialTrend = (
+  previous?: FinancialTrendState,
+  requestedRange?: FinancialTrendRange,
+): FinancialTrendState => ({
   status: 'loading',
-  data: previous?.data || null,
+  data: previous?.data && (!requestedRange || previous.data.range === requestedRange) ? previous.data : null,
 });
 
 export const resolveFinancialTrend = (

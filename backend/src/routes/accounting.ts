@@ -318,15 +318,19 @@ export const getAccountingWorkspaceResponse = async (req: AuthRequest, res: Resp
 
 router.get('/workspace', accountingView, getAccountingWorkspaceResponse);
 
-router.get('/financial-trend', accountingView, async (req: AuthRequest, res: Response) => {
+export const createAccountingFinancialTrendResponse = (
+  loadTrend: typeof getAccountingFinancialTrend = getAccountingFinancialTrend,
+) => async (req: AuthRequest, res: Response) => {
   try {
-    const trend = await getAccountingFinancialTrend(req.query.range);
+    const trend = await loadTrend(req.query.range);
     res.json({ success: true, data: trend });
   } catch (error) {
     console.error('Accounting financial trend error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
-});
+};
+
+router.get('/financial-trend', accountingView, createAccountingFinancialTrendResponse());
 
 router.get('/contracts', accountingView, async (req: AuthRequest, res: Response) => {
   try {

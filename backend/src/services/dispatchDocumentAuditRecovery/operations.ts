@@ -19,11 +19,9 @@ import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
 import { guardPhysicalExitAuditIntegrityHash, guardPhysicalExitIntegrityHash } from '../physicalGateExit';
 import { decryptRecoveryArchive, sha256File } from '../recoveryCrypto';
+import { acquireDispatchArtifactStorageKeyLocks } from '../dispatchDocuments/artifactStorageLock';
 
 const execFileAsync = promisify(execFile);
-export const DISPATCH_DOCUMENT_STORAGE_CLAIM_NAMESPACE = 'DISPATCH_DOCUMENT_STORAGE_KEY';
-export const claimDispatchDocumentStorageKey = (tx: Prisma.TransactionClient, storageKey: string) =>
-  tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${DISPATCH_DOCUMENT_STORAGE_CLAIM_NAMESPACE}), hashtext(${storageKey}))`;
 
 const safePath = (root: string, storageKey: string) => {
   const normalized = storageKey.replace(/\\/g, '/');
@@ -419,7 +417,7 @@ export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, f
     },
     quarantine: (command: { storageKey: string; actorId: string; reason: string; correlationId: string; idempotencyKey: string; authority: DispatchRecoveryAuthority; now?: Date }) =>
       prisma.$transaction(async tx => {
-        await claimDispatchDocumentStorageKey(tx, command.storageKey);
+        await acquireDispatchArtifactStorageKeyLocks(tx, [command.storageKey]);
         const rows = await tx.$queryRaw<Array<{ payload: unknown }>>`SELECT payload FROM dispatch_lifecycle_audits WHERE "aggregateType" = 'DISPATCH_DOCUMENT_RECOVERY' AND "eventType" = 'RECONCILIATION_COMPLETED' ORDER BY "recordedAt" DESC, id DESC FOR UPDATE`;
         const lockedRepository = { ...repository,
           isReferenced: async (storageKey: string) => Boolean(await tx.dispatchDocumentArtifact.findUnique({ where: { storageKey }, select: { id: true } })),

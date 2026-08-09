@@ -6,6 +6,7 @@ import {
   listDispatchDocumentRecoveryAudit,
   type DispatchArtifactAuditEvent,
 } from '../dispatchDocumentAuditRecovery';
+import { acquireDispatchArtifactStorageKeyLocks } from '../dispatchDocuments/artifactStorageLock';
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
 
@@ -58,4 +59,25 @@ test('per-aggregate advisory lock prevents a two-connection audit fork', {
     const root = rows.find(row => row.previousHash === null)!;
     assert.equal(rows.find(row => row.id !== root.id)?.previousHash, root.eventHash);
   } finally { await Promise.all([left.$disconnect(), right.$disconnect()]); }
+});
+
+test('publication and quarantine share one storage-key advisory lock', {
+  skip: databaseUrl ? false : 'DATABASE_URL is required for Prisma integration coverage',
+}, async () => {
+  const publication = new PrismaClient(); const quarantine = new PrismaClient(); const storageKey = `dispatch-documents/storage-lock-${Date.now()}.pdf`;
+  let releasePublication!: () => void; const release = new Promise<void>(resolve => { releasePublication = resolve; });
+  let publicationLocked!: () => void; const locked = new Promise<void>(resolve => { publicationLocked = resolve; });
+  let quarantineStarted!: () => void; const started = new Promise<void>(resolve => { quarantineStarted = resolve; });
+  let quarantineAcquired = false;
+  try {
+    const publishing = publication.$transaction(async tx => { await acquireDispatchArtifactStorageKeyLocks(tx, [storageKey]); publicationLocked(); await release; });
+    await locked;
+    const quarantining = quarantine.$transaction(async tx => { quarantineStarted(); await acquireDispatchArtifactStorageKeyLocks(tx, [storageKey]); quarantineAcquired = true; });
+    await started;
+    await new Promise(resolve => setTimeout(resolve, 75));
+    assert.equal(quarantineAcquired, false);
+    releasePublication();
+    await Promise.all([publishing, quarantining]);
+    assert.equal(quarantineAcquired, true);
+  } finally { releasePublication?.(); await Promise.all([publication.$disconnect(), quarantine.$disconnect()]); }
 });

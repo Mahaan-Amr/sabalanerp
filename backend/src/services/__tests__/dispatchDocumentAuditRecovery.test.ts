@@ -25,8 +25,10 @@ import {
 import { recoveryEngineInternals } from '../systemRecoveryEngine';
 import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
 import { guardPhysicalExitAuditIntegrityHash, guardPhysicalExitIntegrityHash } from '../physicalGateExit';
-import { approvedPricingVersionIntegrityHash } from '../approvedPricing/domain';
+import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from '../approvedPricing/domain';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
+import { dispatchDocumentLifecycleAuditEventHash } from '../dispatchDocuments/prismaRepository';
+import { dispatchDocumentSourceIntegrityHash } from '../dispatchDocuments/prismaSourceReader';
 
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>)
@@ -146,31 +148,52 @@ test('production replay uses writer-owned Guard and correction hash formats', ()
   assert.match(guardPhysicalExitIntegrityHash(exitSnapshot), /^[a-f0-9]{64}$/);
   const exitAudit = guardPhysicalExitAuditIntegrityHash({ aggregateType: 'GUARD_PHYSICAL_EXIT', aggregateId: 'exit-1', eventType: 'PHYSICAL_EXIT_RECORDED', payload: { ...exitSnapshot, integrityHash: guardPhysicalExitIntegrityHash(exitSnapshot) }, actorId: 'guard-1', at: '2026-08-09T10:00:00.000Z', previousHash: null });
   assert.match(exitAudit, /^[a-f0-9]{64}$/);
+  const issuance = { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: 'waybill-1', eventType: 'PRIMARY_BUNDLE_ISSUED',
+    payload: { candidateId: 'candidate-1', allocationRevisionId: 'revision-1', artifactIds: ['waybill-pdf', 'statement-pdf'], sourceIntegrityHash: 'f'.repeat(64), idempotencyKey: 'issue-1', correlationId: 'correlation-1' },
+    actorId: 'accounting-1', at: new Date('2026-08-09T08:00:00.000Z'), previousHash: null };
+  const issuanceHash = dispatchDocumentLifecycleAuditEventHash(issuance);
   assert.deepEqual(verifyProductionDispatchAuditChains([
+    { ...issuance, recordedAt: issuance.at, eventHash: issuanceHash },
     { aggregateType: 'DISPATCH_CORRECTION', aggregateId: 'correction-1', eventType: 'CORRECTION_POSTED', payload: correctionPayload, actorId: 'actor-1', recordedAt: new Date('2026-08-09T09:00:00.000Z'), previousHash: null, eventHash: correctionAudit },
     { aggregateType: 'GUARD_PHYSICAL_EXIT', aggregateId: 'exit-1', eventType: 'PHYSICAL_EXIT_RECORDED', payload: { ...exitSnapshot, integrityHash: guardPhysicalExitIntegrityHash(exitSnapshot) }, actorId: 'guard-1', recordedAt: new Date('2026-08-09T10:00:00.000Z'), previousHash: null, eventHash: exitAudit },
   ]), []);
 });
 
 test('mandatory Prisma truth verifier accepts only immutable writer-owned pricing/event/provenance sources', async () => {
+  const decimal = (value: string) => ({ toFixed: () => value });
   const versionBase = { id: 'pricing-1', contractId: 'contract-1', versionNumber: 1, sourceFinancialRecordId: 'financial-1',
     approvedAt: new Date('2026-08-09T07:00:00.000Z'), approvedBy: 'finance-1', schemaVersion: 1, currency: 'TOMAN',
-    grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000', sourceEvidence: { source: 'approved' }, rowHashes: ['a'.repeat(64)] };
+    grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000', sourceEvidence: { source: 'approved' } };
+  const rowBase = { versionId: versionBase.id, contractId: versionBase.contractId, sourceFinancialRecordId: versionBase.sourceFinancialRecordId,
+    versionNumber: 1, contractItemId: 'item-1', productRowId: 'product-row-1', ordinal: 1, contractedQuantity: '2.000', unit: 'M3',
+    canonicalAllInTotal: '100.000000000000', discountEligible: true, componentEvidence: { material: '100.000000000000' } };
+  const row = { id: 'pricing-row-1', pricingVersionId: versionBase.id, ...rowBase,
+    contractedQuantity: decimal(rowBase.contractedQuantity), canonicalAllInTotal: decimal(rowBase.canonicalAllInTotal), integrityHash: approvedPricingRowIntegrityHash(rowBase) };
+  const versionHashInput = { ...versionBase, rowHashes: [row.integrityHash] };
   const version = { ...versionBase, grossAmount: { toFixed: () => versionBase.grossAmount }, discountAmount: { toFixed: () => versionBase.discountAmount }, netAmount: { toFixed: () => versionBase.netAmount },
-    rows: [{ ordinal: 1, integrityHash: 'a'.repeat(64) }], integrityHash: approvedPricingVersionIntegrityHash(versionBase) };
+    rows: [row], integrityHash: approvedPricingVersionIntegrityHash(versionHashInput) };
   const eventPayload = { allocationRevisionId: 'revision-1', allocationRevisionLineId: 'line-1', pricingVersionId: version.id, pricingRowId: 'pricing-row-1',
     quantity: '2.000', grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000', consumesFinalRemainder: true,
     evidence: { ledgerSequence: 1 }, recordedBy: 'logistics-1' };
-  const decimal = (value: string) => ({ toFixed: () => value });
-  const event = { ...eventPayload, quantity: decimal(eventPayload.quantity), grossAmount: decimal(eventPayload.grossAmount), discountAmount: decimal(eventPayload.discountAmount), netAmount: decimal(eventPayload.netAmount), integrityHash: pricedAllocationIntegrityHash(eventPayload) };
-  const sourceHash = 'b'.repeat(64);
+  const revisionLine = { id: 'line-1', sourceContractId: 'contract-1', sourceContractItemId: 'item-1', productRowId: 'product-row-1', unit: 'M3', quantity: decimal('2.000') };
+  const event = { ...eventPayload, quantity: decimal(eventPayload.quantity), grossAmount: decimal(eventPayload.grossAmount), discountAmount: decimal(eventPayload.discountAmount), netAmount: decimal(eventPayload.netAmount), integrityHash: pricedAllocationIntegrityHash(eventPayload),
+    allocationRevisionLine: revisionLine, pricingRow: row };
+  const pricedAllocation = { currency: 'TOMAN', pricingVersions: [{ contractId: 'contract-1', pricingVersionId: version.id, integrityHash: version.integrityHash, readinessEvidenceHash: 'd'.repeat(64) }],
+    lines: [{ allocationRevisionLineId: 'line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'product-row-1', unit: 'M3', quantity: '2.000', grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000', ledgerSequence: 1 }],
+    totals: { grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000' } };
+  const sourceHash = dispatchDocumentSourceIntegrityHash({ allocationRevisionId: 'revision-1', allocationIntegrityHash: 'c'.repeat(64), pricedAllocation });
   const revision = { id: 'revision-1', integrityHash: 'c'.repeat(64), pricingReferences: [{ pricingVersionId: version.id, expectedPricingHash: version.integrityHash, pricingVersion: version }],
     pricedAllocationEvents: [event], candidate: { waybills: [{ snapshot: { documentProvenance: { sourceIntegrityHash: sourceHash, allocationRevisionId: 'revision-1', allocationIntegrityHash: 'c'.repeat(64) } },
       documentArtifacts: [{ kind: 'WAYBILL', statementAdjustmentId: null, sourceIntegrityHash: sourceHash }, { kind: 'STATEMENT', statementAdjustmentId: null, sourceIntegrityHash: sourceHash }] }] } };
-  const verifier = createPrismaDispatchReplayTruthVerifier({ logisticsAllocationRevision: { findUnique: async () => revision } } as never);
+  const tx = { logisticsAllocationRevision: { findUnique: async () => revision },
+    logisticsAllocationRevisionPricing: { findMany: async () => [{ contractId: 'contract-1', pricingVersionId: version.id, expectedPricingHash: version.integrityHash, readinessEvidenceHash: 'd'.repeat(64), pricingVersion: version }] },
+    dispatchPricedAllocationEvent: { findMany: async () => [event] } };
+  const verifier = createPrismaDispatchReplayTruthVerifier({ $transaction: async (work: (database: typeof tx) => unknown) => work(tx) } as never);
   const input = { allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash, expectedSourceIntegrityHash: sourceHash, pricingVersionIds: [version.id], pricedEventIntegrityHashes: [event.integrityHash] };
   assert.equal(await verifier.verifyPrimarySource(input), true);
   assert.equal(await verifier.verifyPrimarySource({ ...input, pricedEventIntegrityHashes: ['0'.repeat(64)] }), false);
+  row.canonicalAllInTotal = decimal('101.000000000000');
+  assert.equal(await verifier.verifyPrimarySource(input), false);
 });
 
 const artifact = (id: string, storageKey: string, bytes: Buffer): DispatchArtifactMetadata => ({
@@ -400,6 +423,22 @@ test('production restore stages and fsyncs bytes, atomically swaps, and recovers
     await storage.stageOriginal('issued/document.pdf', Buffer.from('original')); await storage.commitStagedOriginal('issued/document.pdf'); await storage.markStagedOriginalCompleted('issued/document.pdf');
     await storage.recoverInterruptedWrite('issued/document.pdf', true);
     assert.equal((await storage.read('issued/document.pdf'))?.toString(), 'original');
+  } finally { await fs.promises.rm(root, { recursive: true, force: true }); }
+});
+
+test('production restore sidecars are isolated by run identity', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dispatch-run-restore-'));
+  const artifactRoot = path.join(root, 'artifacts'); const storage = createDispatchDocumentFilesystem({ artifactRoot });
+  try {
+    const destination = path.join(artifactRoot, 'issued', 'document.pdf'); await fs.promises.mkdir(path.dirname(destination), { recursive: true }); await fs.promises.writeFile(destination, 'corrupt');
+    await storage.stageOriginal('issued/document.pdf', Buffer.from('first'), 'run-a');
+    await storage.stageOriginal('issued/document.pdf', Buffer.from('second'), 'run-b');
+    const names = await fs.promises.readdir(path.dirname(destination));
+    assert.ok(names.some(name => name.includes('run-a-stage')));
+    assert.ok(names.some(name => name.includes('run-b-stage')));
+    await storage.recoverInterruptedWrite('issued/document.pdf', false, 'run-a');
+    assert.ok((await fs.promises.readdir(path.dirname(destination))).some(name => name.includes('run-b-stage')));
+    await storage.recoverInterruptedWrite('issued/document.pdf', false, 'run-b');
   } finally { await fs.promises.rm(root, { recursive: true, force: true }); }
 });
 

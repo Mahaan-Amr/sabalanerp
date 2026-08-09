@@ -27,6 +27,10 @@ const stable = (value: unknown): unknown => {
   return typeof value === 'bigint' ? value.toString() : value;
 };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
+export const dispatchDocumentLifecycleAuditEventHash = (input: {
+  aggregateType: string; aggregateId: string; eventType: string; payload: unknown;
+  actorId: string; at: Date; previousHash: string | null;
+}) => hash({ ...input, payload: stable(input.payload) });
 const resultJson = (value: unknown) => json(stable(value));
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Record<string, any> : {};
@@ -99,7 +103,9 @@ const appendAudit = async (tx: Tx, input: { aggregateType: string; aggregateId: 
   const payload = stable(input.payload);
   await tx.dispatchLifecycleAudit.create({ data: { aggregateType: input.aggregateType, aggregateId: input.aggregateId,
     eventType: input.eventType, payload: json(payload), actorId: input.actorId, recordedAt: input.at,
-    previousHash: previous?.eventHash ?? null, eventHash: hash({ ...input, payload, previousHash: previous?.eventHash ?? null }) } });
+    previousHash: previous?.eventHash ?? null,
+    eventHash: dispatchDocumentLifecycleAuditEventHash({ ...input, payload, previousHash: previous?.eventHash ?? null }),
+  } });
 };
 const completeCandidateWithoutIssue = async (tx: Tx, input: { candidateId: string;
   status: 'STALE_REQUIRES_SUCCESSOR' | 'EVIDENCE_CONFLICT'; reason: string; eventType: string;

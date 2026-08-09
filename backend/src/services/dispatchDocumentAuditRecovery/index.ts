@@ -381,12 +381,13 @@ export const restoreDispatchDocumentArtifact = async (input: {
   idempotencyKey: string;
   metadata: DispatchArtifactMetadata;
   encryptedBackup: { readOriginal(storageKey: string): Promise<{ bytes: Buffer; recoveryPackageId: string; encrypted: boolean } | null> };
-  storage: { recoverInterruptedWrite(storageKey: string, completed: boolean): Promise<void>; stageOriginal(storageKey: string, bytes: Buffer): Promise<void>; commitStagedOriginal(storageKey: string): Promise<void>; markStagedOriginalCompleted(storageKey: string): Promise<void>; finalizeStagedOriginal(storageKey: string): Promise<void>; read(storageKey: string): Promise<Buffer | null>; restorePrevious(storageKey: string, bytes: Buffer | null): Promise<void> };
+  storage: { recoverInterruptedWrite(storageKey: string, completed: boolean, runId?: string): Promise<void>; stageOriginal(storageKey: string, bytes: Buffer, runId?: string): Promise<void>; commitStagedOriginal(storageKey: string, runId?: string): Promise<void>; markStagedOriginalCompleted(storageKey: string, runId?: string): Promise<void>; finalizeStagedOriginal(storageKey: string, runId?: string): Promise<void>; read(storageKey: string): Promise<Buffer | null>; restorePrevious(storageKey: string, bytes: Buffer | null, runId?: string): Promise<void> };
   audit: AuditPort;
   authority: DispatchRecoveryAuthority;
   now?: Date;
 }) => {
   const occurredAt = (input.now ?? new Date()).toISOString();
+  const runId = dispatchRecoveryIntegrityHash({ artifactId: input.metadata.id, idempotencyKey: input.idempotencyKey }).slice(0, 24);
   let previous: Buffer | null = null;
   let mutated = false;
   try {
@@ -394,14 +395,14 @@ export const restoreDispatchDocumentArtifact = async (input: {
     if (!backup?.encrypted || backup.bytes.length !== input.metadata.byteLength || sha256(backup.bytes) !== input.metadata.sha256) {
       throw new Error('Encrypted recovery does not contain the original verified artifact bytes.');
     }
-    await input.storage.recoverInterruptedWrite(input.metadata.storageKey, await input.audit.hasCompletedRestoration?.(input.metadata.id, input.idempotencyKey) ?? false);
+    await input.storage.recoverInterruptedWrite(input.metadata.storageKey, await input.audit.hasCompletedRestoration?.(input.metadata.id, input.idempotencyKey) ?? false, runId);
     previous = await input.storage.read(input.metadata.storageKey);
     await input.audit.append({ action: 'RESTORATION_INTENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, artifactId: input.metadata.id,
       storageKey: input.metadata.storageKey, reason: input.reason, detail: { expectedByteLength: input.metadata.byteLength, expectedSha256: input.metadata.sha256, recoveryPackageId: backup.recoveryPackageId } });
     mutated = true;
-    await input.storage.stageOriginal(input.metadata.storageKey, backup.bytes);
-    await input.storage.commitStagedOriginal(input.metadata.storageKey);
+    await input.storage.stageOriginal(input.metadata.storageKey, backup.bytes, runId);
+    await input.storage.commitStagedOriginal(input.metadata.storageKey, runId);
     const restored = await input.storage.read(input.metadata.storageKey);
     if (!restored || restored.length !== input.metadata.byteLength || sha256(restored) !== input.metadata.sha256) {
       throw new Error('Restored artifact failed post-write integrity verification.');
@@ -412,8 +413,8 @@ export const restoreDispatchDocumentArtifact = async (input: {
       reason: input.reason, detail: { byteLength: restored.length, sha256: input.metadata.sha256, recoveryPackageId: backup.recoveryPackageId } });
     let cleanupWarning: string | null = null;
     try {
-      await input.storage.markStagedOriginalCompleted(input.metadata.storageKey);
-      await input.storage.finalizeStagedOriginal(input.metadata.storageKey);
+      await input.storage.markStagedOriginalCompleted(input.metadata.storageKey, runId);
+      await input.storage.finalizeStagedOriginal(input.metadata.storageKey, runId);
     } catch (cleanupError) {
       cleanupWarning = cleanupError instanceof Error ? cleanupError.message : 'Restoration cleanup failed.';
       await input.audit.append({ action: 'INCIDENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
@@ -425,14 +426,14 @@ export const restoreDispatchDocumentArtifact = async (input: {
     const message = error instanceof Error ? error.message : 'Artifact restoration failed.';
     const completionDurable = await input.audit.hasCompletedRestoration?.(input.metadata.id, input.idempotencyKey).catch(() => false) ?? false;
     if (completionDurable) {
-      await input.storage.recoverInterruptedWrite(input.metadata.storageKey, true).catch(() => undefined);
+      await input.storage.recoverInterruptedWrite(input.metadata.storageKey, true, runId).catch(() => undefined);
       await input.audit.append({ action: 'INCIDENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
         authority: input.authority, idempotencyKey: `${input.idempotencyKey}:ambiguous-completion`, occurredAt, artifactId: input.metadata.id,
         storageKey: input.metadata.storageKey, reason: input.reason, detail: { code: 'RESTORATION_COMPLETION_DURABLE_AFTER_AMBIGUOUS_RESPONSE', warning: message } }).catch(() => undefined);
       return { status: 'RESTORED' as const, artifactId: input.metadata.id, byteLength: input.metadata.byteLength, sha256: input.metadata.sha256, cleanupWarning: message };
     }
     let compensationError: string | null = null;
-    if (mutated) try { await input.storage.restorePrevious(input.metadata.storageKey, previous); } catch (compensation) { compensationError = compensation instanceof Error ? compensation.message : 'Restore compensation failed.'; }
+    if (mutated) try { await input.storage.restorePrevious(input.metadata.storageKey, previous, runId); } catch (compensation) { compensationError = compensation instanceof Error ? compensation.message : 'Restore compensation failed.'; }
     await input.audit.append({ action: 'RESTORATION_FAILED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority,
       idempotencyKey: input.idempotencyKey, occurredAt, artifactId: input.metadata.id, storageKey: input.metadata.storageKey,

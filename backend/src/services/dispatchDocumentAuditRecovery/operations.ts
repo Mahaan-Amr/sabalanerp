@@ -15,11 +15,15 @@ import {
 } from './index';
 import { createPrismaDispatchArtifactAuditPort } from './prisma';
 import { approvedPricingVersionIntegrityHash } from '../approvedPricing/domain';
+import { persistedApprovedPricingRowIntegrityMatches, persistedApprovedPricingVersionIntegrityMatches } from '../approvedPricing/prismaEvidence';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
 import { guardPhysicalExitAuditIntegrityHash, guardPhysicalExitIntegrityHash } from '../physicalGateExit';
 import { decryptRecoveryArchive, sha256File } from '../recoveryCrypto';
 import { acquireDispatchArtifactStorageKeyLocks } from '../dispatchDocuments/artifactStorageLock';
+import { dispatchDocumentLifecycleAuditEventHash } from '../dispatchDocuments/prismaRepository';
+import { dispatchDocumentSourceIntegrityHash } from '../dispatchDocuments/prismaSourceReader';
+import { readBoundPricedAllocation } from '../allocationPricingReadModel';
 
 const execFileAsync = promisify(execFile);
 
@@ -54,9 +58,10 @@ export const createDispatchDocumentFilesystem = (input: {
   const artifactRoot = input.artifactRoot ?? path.join(process.cwd(), 'storage', 'dispatch-documents');
   const quarantineRoot = input.quarantineRoot ?? path.join(process.cwd(), 'storage', 'dispatch-documents-quarantine');
   const cleanupStagingRoot = input.cleanupStagingRoot ?? path.join(process.cwd(), 'storage', 'dispatch-documents-cleanup-staging');
-  const restorePaths = (storageKey: string) => {
+  const restorePaths = (storageKey: string, runId = 'legacy') => {
     const destination = safePath(artifactRoot, storageKey); const directory = path.dirname(destination); const name = path.basename(destination);
-    return { destination, staged: path.join(directory, `.${name}.sabalan-restore-stage`), previous: path.join(directory, `.${name}.sabalan-restore-previous`), marker: path.join(directory, `.${name}.sabalan-restore-marker`) };
+    if (!/^[a-z0-9-]{1,64}$/.test(runId)) throw new Error('Restoration run identity is invalid.');
+    return { destination, staged: path.join(directory, `.${name}.sabalan-restore-${runId}-stage`), previous: path.join(directory, `.${name}.sabalan-restore-${runId}-previous`), marker: path.join(directory, `.${name}.sabalan-restore-${runId}-marker`) };
   };
   const syncFile = async (target: string, bytes: Buffer) => { const descriptor = await fs.promises.open(target, 'w'); try { await descriptor.writeFile(bytes); await descriptor.sync(); } finally { await descriptor.close(); } };
   const marker = async (target: string, value: unknown) => syncFile(target, Buffer.from(JSON.stringify(value), 'utf8'));
@@ -71,8 +76,8 @@ export const createDispatchDocumentFilesystem = (input: {
       const target = safePath(artifactRoot, storageKey);
       try { return await fs.promises.readFile(target); } catch (error: any) { if (error?.code === 'ENOENT') return null; throw error; }
     },
-    recoverInterruptedWrite: async (storageKey: string, completed: boolean) => {
-      const targets = restorePaths(storageKey); if (!fs.existsSync(targets.marker)) { await fs.promises.rm(targets.staged, { force: true }); return; }
+    recoverInterruptedWrite: async (storageKey: string, completed: boolean, runId?: string) => {
+      const targets = restorePaths(storageKey, runId); if (!fs.existsSync(targets.marker)) { await fs.promises.rm(targets.staged, { force: true }); return; }
       const state = JSON.parse(await fs.promises.readFile(targets.marker, 'utf8')) as { phase?: string; hadPrevious?: boolean };
       if (!completed && state.phase !== 'COMPLETED') {
         if (state.hadPrevious && fs.existsSync(targets.previous)) { const recovery = `${targets.staged}.rollback`; await fs.promises.copyFile(targets.previous, recovery); const handle = await fs.promises.open(recovery, 'r+'); try { await handle.sync(); } finally { await handle.close(); } await fs.promises.rename(recovery, targets.destination); }
@@ -80,8 +85,8 @@ export const createDispatchDocumentFilesystem = (input: {
       }
       await Promise.all([targets.staged, targets.previous, targets.marker].map(target => fs.promises.rm(target, { force: true })));
     },
-    stageOriginal: async (storageKey: string, bytes: Buffer) => {
-      const targets = restorePaths(storageKey); await fs.promises.mkdir(path.dirname(targets.destination), { recursive: true });
+    stageOriginal: async (storageKey: string, bytes: Buffer, runId?: string) => {
+      const targets = restorePaths(storageKey, runId); await fs.promises.mkdir(path.dirname(targets.destination), { recursive: true });
       await Promise.all([targets.staged, targets.previous, targets.marker].map(target => fs.promises.rm(target, { force: true })));
       await syncFile(targets.staged, bytes);
       const verified = await fs.promises.readFile(targets.staged); if (!verified.equals(bytes)) throw new Error('Staged original bytes failed verification.');
@@ -89,18 +94,18 @@ export const createDispatchDocumentFilesystem = (input: {
       if (hadPrevious) { await fs.promises.copyFile(targets.destination, targets.previous); const handle = await fs.promises.open(targets.previous, 'r+'); try { await handle.sync(); } finally { await handle.close(); } }
       await marker(targets.marker, { phase: 'STAGED', hadPrevious });
     },
-    commitStagedOriginal: async (storageKey: string) => {
-      const targets = restorePaths(storageKey); const state = JSON.parse(await fs.promises.readFile(targets.marker, 'utf8')) as { hadPrevious: boolean };
+    commitStagedOriginal: async (storageKey: string, runId?: string) => {
+      const targets = restorePaths(storageKey, runId); const state = JSON.parse(await fs.promises.readFile(targets.marker, 'utf8')) as { hadPrevious: boolean };
       await fs.promises.rename(targets.staged, targets.destination);
       await marker(targets.marker, { phase: 'SWAPPED', hadPrevious: state.hadPrevious });
       try { const directory = await fs.promises.open(path.dirname(targets.destination), 'r'); try { await directory.sync(); } finally { await directory.close(); } } catch { /* Windows may not fsync directory handles. */ }
     },
-    markStagedOriginalCompleted: async (storageKey: string) => { const targets = restorePaths(storageKey); const state = JSON.parse(await fs.promises.readFile(targets.marker, 'utf8')) as { hadPrevious: boolean }; await marker(targets.marker, { phase: 'COMPLETED', hadPrevious: state.hadPrevious }); },
-    finalizeStagedOriginal: async (storageKey: string) => {
-      const targets = restorePaths(storageKey); await Promise.all([targets.staged, targets.previous, targets.marker].map(target => fs.promises.rm(target, { force: true })));
+    markStagedOriginalCompleted: async (storageKey: string, runId?: string) => { const targets = restorePaths(storageKey, runId); const state = JSON.parse(await fs.promises.readFile(targets.marker, 'utf8')) as { hadPrevious: boolean }; await marker(targets.marker, { phase: 'COMPLETED', hadPrevious: state.hadPrevious }); },
+    finalizeStagedOriginal: async (storageKey: string, runId?: string) => {
+      const targets = restorePaths(storageKey, runId); await Promise.all([targets.staged, targets.previous, targets.marker].map(target => fs.promises.rm(target, { force: true })));
     },
-    restorePrevious: async (storageKey: string, bytes: Buffer | null) => {
-      const targets = restorePaths(storageKey);
+    restorePrevious: async (storageKey: string, bytes: Buffer | null, runId?: string) => {
+      const targets = restorePaths(storageKey, runId);
       if (bytes !== null) { const rollback = `${targets.staged}.rollback`; await syncFile(rollback, bytes); await fs.promises.rename(rollback, targets.destination); }
       else await fs.promises.rm(targets.destination, { force: true });
       await Promise.all([targets.staged, targets.previous, targets.marker].map(target => fs.promises.rm(target, { force: true })));
@@ -154,6 +159,13 @@ const durableAudit = (prisma: PrismaClient) => ({
 const metadata = async (prisma: PrismaClient) => (await prisma.dispatchDocumentArtifact.findMany({
   select: { id: true, waybillId: true, storageKey: true, byteLength: true, sha256: true, sourceIntegrityHash: true },
 })).map(item => ({ ...item, byteLength: Number(item.byteLength) }));
+const lockedMetadata = async (tx: Prisma.TransactionClient, artifactId: string) => {
+  const item = await tx.dispatchDocumentArtifact.findUnique({ where: { id: artifactId },
+    select: { id: true, waybillId: true, storageKey: true, byteLength: true, sha256: true, sourceIntegrityHash: true } });
+  if (!item) throw new Error('Dispatch artifact does not exist.');
+  await acquireDispatchArtifactStorageKeyLocks(tx, [item.storageKey]);
+  return { ...item, byteLength: Number(item.byteLength) };
+};
 
 export const parsePersistedOrphanEvidence = (payloadValue: unknown, storageKey: string) => {
   const payload = payloadValue as Record<string, any>; const detail = payload?.detail as Record<string, any> | undefined;
@@ -175,6 +187,8 @@ export const verifyProductionDispatchAuditChains = (audits: readonly { aggregate
       ? dispatchLifecycleAuditEventHash({ aggregateType: audit.aggregateType, aggregateId: audit.aggregateId, eventType: audit.eventType, payload, actorId: audit.actorId, authority: payload.effectiveAuthority, at: audit.recordedAt, previousHash: audit.previousHash })
       : audit.aggregateType === 'GUARD_PHYSICAL_EXIT'
         ? guardPhysicalExitAuditIntegrityHash({ aggregateType: audit.aggregateType, aggregateId: audit.aggregateId, eventType: audit.eventType, payload, actorId: audit.actorId, at: audit.recordedAt, previousHash: audit.previousHash })
+        : audit.aggregateType === 'ACCOUNTING_DISPATCH_WAYBILL' || audit.aggregateType === 'ACCOUNTING_DISPATCH_CANDIDATE'
+          ? dispatchDocumentLifecycleAuditEventHash({ aggregateType: audit.aggregateType, aggregateId: audit.aggregateId, eventType: audit.eventType, payload, actorId: audit.actorId, at: audit.recordedAt, previousHash: audit.previousHash })
         : dispatchRecoveryIntegrityHash({ aggregateType: audit.aggregateType, aggregateId: audit.aggregateId, eventType: audit.eventType, payload, actorId: audit.actorId, recordedAt: audit.recordedAt.toISOString(), previousHash: audit.previousHash });
     if (audit.previousHash !== expectedPrevious || audit.eventHash !== expectedHash || !audit.actorId) issues.push({ code: 'AUDIT_CHAIN_BROKEN', subjectId: audit.aggregateId, detail: 'Lifecycle audit predecessor, writer-specific hash, or actor is invalid.' });
     previous.set(key, audit.eventHash);
@@ -185,8 +199,8 @@ export const verifyProductionDispatchAuditChains = (audits: readonly { aggregate
 export type DispatchReplayTruthVerifier = { verifyPrimarySource(input: { allocationRevisionId: string; allocationIntegrityHash: string; expectedSourceIntegrityHash: string; pricingVersionIds: readonly string[]; pricedEventIntegrityHashes: readonly string[] }): Promise<boolean> };
 
 export const createPrismaDispatchReplayTruthVerifier = (prisma: PrismaClient): DispatchReplayTruthVerifier => ({
-  verifyPrimarySource: async input => {
-    const revision = await prisma.logisticsAllocationRevision.findUnique({ where: { id: input.allocationRevisionId }, include: {
+  verifyPrimarySource: input => prisma.$transaction(async tx => {
+    const revision = await tx.logisticsAllocationRevision.findUnique({ where: { id: input.allocationRevisionId }, include: {
       pricingReferences: { include: { pricingVersion: { include: { rows: { orderBy: { ordinal: 'asc' } } } } } }, pricedAllocationEvents: true,
       candidate: { include: { waybills: { include: { documentArtifacts: true } } } },
     } });
@@ -195,15 +209,19 @@ export const createPrismaDispatchReplayTruthVerifier = (prisma: PrismaClient): D
     if (JSON.stringify(versionIds) !== JSON.stringify([...input.pricingVersionIds].sort()) || JSON.stringify(eventHashes) !== JSON.stringify([...input.pricedEventIntegrityHashes].sort())) return false;
     for (const reference of revision.pricingReferences) {
       const version = reference.pricingVersion;
-      if (reference.expectedPricingHash !== version.integrityHash || approvedPricingVersionIntegrityHash({ id: version.id, contractId: version.contractId,
-        versionNumber: version.versionNumber, sourceFinancialRecordId: version.sourceFinancialRecordId, approvedAt: version.approvedAt, approvedBy: version.approvedBy,
-        schemaVersion: version.schemaVersion, currency: version.currency, grossAmount: version.grossAmount.toFixed(12), discountAmount: version.discountAmount.toFixed(12),
-        netAmount: version.netAmount.toFixed(12), sourceEvidence: version.sourceEvidence as Record<string, unknown>, rowHashes: version.rows.map(row => row.integrityHash) }) !== version.integrityHash) return false;
+      if (reference.expectedPricingHash !== version.integrityHash
+        || version.rows.some(row => !persistedApprovedPricingRowIntegrityMatches(version, row))
+        || !persistedApprovedPricingVersionIntegrityMatches(version)) return false;
     }
     for (const event of revision.pricedAllocationEvents) if (pricedAllocationIntegrityHash({ allocationRevisionId: event.allocationRevisionId,
       allocationRevisionLineId: event.allocationRevisionLineId, pricingVersionId: event.pricingVersionId, pricingRowId: event.pricingRowId,
       quantity: event.quantity.toFixed(3), grossAmount: event.grossAmount.toFixed(12), discountAmount: event.discountAmount.toFixed(12), netAmount: event.netAmount.toFixed(12),
       consumesFinalRemainder: event.consumesFinalRemainder, evidence: event.evidence, recordedBy: event.recordedBy }) !== event.integrityHash) return false;
+    let pricedAllocation;
+    try { pricedAllocation = await readBoundPricedAllocation(tx, revision.id); } catch { return false; }
+    const actualSourceHash = dispatchDocumentSourceIntegrityHash({ allocationRevisionId: revision.id,
+      allocationIntegrityHash: revision.integrityHash, pricedAllocation });
+    if (actualSourceHash !== input.expectedSourceIntegrityHash) return false;
     return Boolean(revision.candidate?.waybills.some(waybill => {
       const provenance = (waybill.snapshot as Record<string, any>)?.documentProvenance as Record<string, any> | undefined;
       const primary = waybill.documentArtifacts.filter(artifact => !artifact.statementAdjustmentId && (artifact.kind === 'WAYBILL' || artifact.kind === 'STATEMENT'));
@@ -211,7 +229,7 @@ export const createPrismaDispatchReplayTruthVerifier = (prisma: PrismaClient): D
         && provenance?.allocationIntegrityHash === revision.integrityHash && primary.length === 2
         && primary.every(artifact => artifact.sourceIntegrityHash === input.expectedSourceIntegrityHash);
     }));
-  },
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }),
 });
 
 export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient, waybillId: string, truthVerifier: DispatchReplayTruthVerifier) => {
@@ -242,7 +260,9 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       discountAmount: version.discountAmount.toFixed(12), netAmount: version.netAmount.toFixed(12),
       sourceEvidence: version.sourceEvidence as Record<string, unknown>, rowHashes: version.rows.map(row => row.integrityHash),
     });
-    if (recomputed !== version.integrityHash || reference.expectedPricingHash !== version.integrityHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: version.id, detail: 'Approved-pricing binding or immutable hash changed.' });
+    if (!version.approvedAt || !version.approvedBy) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: version.id, detail: 'Approved-pricing approval actor/time is missing.' });
+    if (version.rows.some(row => !persistedApprovedPricingRowIntegrityMatches(version, row))
+      || recomputed !== version.integrityHash || reference.expectedPricingHash !== version.integrityHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: version.id, detail: 'Approved-pricing row/root binding or immutable hash changed.' });
   }
   const lineById = new Map(revision.lines.map(line => [line.id, line]));
   for (const event of revision.pricedAllocationEvents) {
@@ -252,6 +272,14 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       consumesFinalRemainder: event.consumesFinalRemainder, evidence: event.evidence, recordedBy: event.recordedBy };
     const line = lineById.get(event.allocationRevisionLineId);
     if (!event.recordedAt || !event.recordedBy) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: event.id, detail: 'Priced allocation actor/time is missing.' });
+    const eventEvidence = event.evidence as Record<string, any>;
+    const pricingVersion = revision.pricingReferences.find(reference => reference.pricingVersionId === event.pricingVersionId)?.pricingVersion;
+    const pricingRow = pricingVersion?.rows.find(row => row.id === event.pricingRowId);
+    if (!pricingVersion || !pricingRow || eventEvidence?.pricingIntegrityHash !== pricingVersion.integrityHash
+      || eventEvidence?.pricingRowIntegrityHash !== pricingRow.integrityHash
+      || eventEvidence?.readinessEvidenceHash !== revision.pricingReferences.find(reference => reference.pricingVersionId === event.pricingVersionId)?.readinessEvidenceHash) {
+      issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: event.id, detail: 'Priced-event decision evidence does not bind approved pricing, row, and readiness hashes.' });
+    }
     if (!line || line.quantity.toFixed(3) !== event.quantity.toFixed(3)) issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: event.id, detail: 'Allocation line and priced-event quantity differ.' });
     if (event.grossAmount.minus(event.discountAmount).toFixed(12) !== event.netAmount.toFixed(12)) issues.push({ code: 'MONEY_CONSERVATION_MISMATCH', subjectId: event.id, detail: 'Priced-event gross minus discount differs from net.' });
     if (pricedAllocationIntegrityHash(payload) !== event.integrityHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: event.id, detail: 'Priced-allocation evidence hash changed.' });
@@ -333,6 +361,18 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     ...waybill.dispatchCorrections.filter(item => item.status === 'POSTED').map(item => ({ aggregateType: 'DISPATCH_CORRECTION', aggregateId: item.id, sourceHash: item.integrityHash! })),
   ];
   const audits = await prisma.dispatchLifecycleAudit.findMany({ where: { OR: expectedAggregates.map(item => ({ aggregateType: item.aggregateType, aggregateId: item.aggregateId })) }, orderBy: [{ aggregateType: 'asc' }, { aggregateId: 'asc' }, { recordedAt: 'asc' }, { id: 'asc' }] });
+  const commands = await prisma.dispatchDocumentCommandResult.findMany({ where: { OR: [
+    { scope: 'CANDIDATE', scopeId: waybill.candidate.id }, { waybillId: waybill.id },
+  ] }, orderBy: [{ startedAt: 'asc' }, { id: 'asc' }] });
+  const issuanceCommand = commands.find(command => command.scope === 'CANDIDATE' && command.scopeId === waybill.candidate.id
+    && command.command === 'ACCEPT_AND_ISSUE' && command.status === 'SUCCEEDED' && command.waybillId === waybill.id);
+  if (!issuanceCommand) issues.push({ code: 'LEGACY_UNRECONCILED', subjectId: waybill.candidate.id,
+    detail: 'No persisted ACCEPT_AND_ISSUE command binds the accepted candidate to this waybill.' });
+  else if (!issuanceCommand.actorId || !issuanceCommand.correlationId || !issuanceCommand.idempotencyKey || !issuanceCommand.completedAt
+    || issuanceCommand.actorId !== waybill.issuedBy || issuanceCommand.completedAt.toISOString() !== waybill.issuedAt.toISOString()) {
+    issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: issuanceCommand.id,
+      detail: 'Issuance command actor/time/correlation/idempotency does not bind the issued waybill.' });
+  }
   for (const expected of expectedAggregates) {
     const rows = audits.filter(audit => audit.aggregateType === expected.aggregateType && audit.aggregateId === expected.aggregateId);
     if (!rows.length) { issues.push({ code: 'MISSING_EVIDENCE', subjectId: expected.aggregateId, detail: `No ${expected.aggregateType} parent audit binds this evidence.` }); continue; }
@@ -348,7 +388,10 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     if (expected.aggregateType === 'ACCOUNTING_DISPATCH_WAYBILL') {
       const issued = rows.find(row => row.eventType === 'PRIMARY_BUNDLE_ISSUED'); const payload = issued?.payload as Record<string, any> | undefined;
       if (!issued || !payload?.correlationId || !payload?.idempotencyKey || payload?.sourceIntegrityHash !== primarySourceHash
-        || !primaryArtifacts.every(artifact => Array.isArray(payload?.artifactIds) && payload.artifactIds.includes(artifact.id))) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: waybill.id, detail: 'Primary issuance audit lacks source/artifact/correlation/idempotency binding.' });
+        || issued.actorId !== waybill.issuedBy || issued.recordedAt.toISOString() !== waybill.issuedAt.toISOString()
+        || (issuanceCommand && (payload.correlationId !== issuanceCommand.correlationId || payload.idempotencyKey !== issuanceCommand.idempotencyKey
+          || issued.actorId !== issuanceCommand.actorId))
+        || !primaryArtifacts.every(artifact => Array.isArray(payload?.artifactIds) && payload.artifactIds.includes(artifact.id))) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: waybill.id, detail: 'Primary issuance audit lacks exact source/artifact/actor/time/correlation/idempotency binding.' });
       for (const handoff of waybill.printHandoffs) if (!rows.some(row => {
         const handoffPayload = row.payload as Record<string, any>; return row.eventType === 'PRINT_BYTES_HANDED_OFF' && handoffPayload.handoffId === handoff.id
           && handoffPayload.correlationId === handoff.correlationId && Boolean(handoffPayload.operationIdempotencyKey);
@@ -358,6 +401,12 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       const finalized = rows.find(row => contains(row.payload, revision.integrityHash));
       if (!finalized || revision.pricingReferences.some(reference => !contains(finalized.payload, reference.pricingVersionId))
         || revision.pricedAllocationEvents.some(event => !contains(finalized.payload, event.integrityHash))) issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: revision.id, detail: 'Allocation parent audit does not bind every pricing version and priced-event hash.' });
+    }
+    if (expected.aggregateType === 'ACCOUNTING_DISPATCH_CANDIDATE') {
+      const created = rows.find(row => row.eventType === 'CANDIDATE_CREATED'); const payload = created?.payload as Record<string, any> | undefined;
+      if (!created || payload?.allocationRevisionId !== revision.id || created.actorId !== revision.finalizedBy
+        || created.recordedAt.toISOString() !== revision.finalizedAt.toISOString()) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: waybill.candidate.id,
+          detail: 'Candidate creation audit does not bind allocation finalization actor/time.' });
     }
     if (expected.aggregateType === 'DISPATCH_CORRECTION') {
       const postedAudit = rows.find(row => row.eventType === 'CORRECTION_POSTED'); const payload = postedAudit?.payload as Record<string, any> | undefined;
@@ -406,14 +455,16 @@ export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, f
     reconcile: (command: { actorId: string; correlationId: string; idempotencyKey: string; authority: DispatchRecoveryAuthority; now?: Date }) =>
       metadata(prisma).then(items => reconcileDispatchDocumentArtifacts({ ...command, metadata: items, storage: filesystem, audit })),
     restore: async (command: { artifactId: string; actorId: string; reason: string; correlationId: string; idempotencyKey: string; authority: DispatchRecoveryAuthority; encryptedBackup: { readOriginal(storageKey: string): Promise<{ bytes: Buffer; recoveryPackageId: string; encrypted: boolean } | null> }; now?: Date }) => {
-      const item = (await metadata(prisma)).find(candidate => candidate.id === command.artifactId);
-      if (!item) throw new Error('Dispatch artifact does not exist.');
-      return restoreDispatchDocumentArtifact({ ...command, metadata: item, storage: filesystem, audit });
+      return prisma.$transaction(async tx => restoreDispatchDocumentArtifact({ ...command,
+        metadata: await lockedMetadata(tx, command.artifactId), storage: filesystem, audit }),
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 120_000 });
     },
     restoreFromRecoveryPackage: async (command: { artifactId: string; recoveryPackagePath: string; passphrase: string; actorId: string; reason: string; correlationId: string; idempotencyKey: string; authority: DispatchRecoveryAuthority; now?: Date }) => {
-      const item = (await metadata(prisma)).find(candidate => candidate.id === command.artifactId);
-      if (!item) throw new Error('Dispatch artifact does not exist.');
-      return restoreDispatchDocumentArtifact({ ...command, metadata: item, encryptedBackup: createEncryptedRecoveryPackageReader({ sourcePath: command.recoveryPackagePath, passphrase: command.passphrase }), storage: filesystem, audit });
+      return prisma.$transaction(async tx => restoreDispatchDocumentArtifact({ ...command,
+        metadata: await lockedMetadata(tx, command.artifactId),
+        encryptedBackup: createEncryptedRecoveryPackageReader({ sourcePath: command.recoveryPackagePath, passphrase: command.passphrase }),
+        storage: filesystem, audit }),
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 120_000 });
     },
     quarantine: (command: { storageKey: string; actorId: string; reason: string; correlationId: string; idempotencyKey: string; authority: DispatchRecoveryAuthority; now?: Date }) =>
       prisma.$transaction(async tx => {

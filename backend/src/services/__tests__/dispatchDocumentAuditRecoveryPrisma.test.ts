@@ -81,3 +81,22 @@ test('publication and quarantine share one storage-key advisory lock', {
     assert.equal(quarantineAcquired, true);
   } finally { releasePublication?.(); await Promise.all([publication.$disconnect(), quarantine.$disconnect()]); }
 });
+
+test('two restore critical sections serialize on the canonical storage-key lock', {
+  skip: databaseUrl ? false : 'DATABASE_URL is required for Prisma integration coverage',
+}, async () => {
+  const first = new PrismaClient(); const second = new PrismaClient(); const storageKey = `dispatch-documents/restore-lock-${Date.now()}.pdf`;
+  let releaseFirst!: () => void; const release = new Promise<void>(resolve => { releaseFirst = resolve; });
+  let firstLocked!: () => void; const locked = new Promise<void>(resolve => { firstLocked = resolve; });
+  let secondStarted!: () => void; const started = new Promise<void>(resolve => { secondStarted = resolve; });
+  const order: string[] = [];
+  try {
+    const left = first.$transaction(async tx => { await acquireDispatchArtifactStorageKeyLocks(tx, [storageKey]); order.push('first'); firstLocked(); await release; });
+    await locked;
+    const right = second.$transaction(async tx => { secondStarted(); await acquireDispatchArtifactStorageKeyLocks(tx, [storageKey]); order.push('second'); });
+    await started; await new Promise(resolve => setTimeout(resolve, 75));
+    assert.deepEqual(order, ['first']);
+    releaseFirst(); await Promise.all([left, right]);
+    assert.deepEqual(order, ['first', 'second']);
+  } finally { releaseFirst?.(); await Promise.all([first.$disconnect(), second.$disconnect()]); }
+});

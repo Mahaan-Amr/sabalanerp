@@ -45,7 +45,8 @@ const run = async () => {
         };
         const rowHash = approvedPricingRowIntegrityHash(rowInput);
         const sourceEvidence = {
-          customer: { id: 'integration-customer' }, project: { id: 'integration-project' }, destination: 'integration-destination',
+          customer: { id: 'integration-customer' }, project: { id: 'integration-project' },
+          destination: { kind: 'PROJECT_ADDRESS', projectId: 'integration-project', address: 'integration-destination' },
         };
         const rootInput = {
           id: versionId, contractId: candidate.contractId, versionNumber,

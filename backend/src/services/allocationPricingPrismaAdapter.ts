@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { AllocationPricingBindingPort, LockedPricingEvidence, PricedEventWrite, PricingReferenceWrite } from './allocationPricingBinding';
 import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from './approvedPricing';
+import { pricedAllocationIntegrityHash } from './pricedAllocationLedger';
 
 type Tx = Prisma.TransactionClient;
 const persistedPricingInclude = { rows: { orderBy: [{ ordinal: 'asc' as const }, { id: 'asc' as const }] } };
@@ -106,11 +107,12 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
       const sourceEvidence = record(storedVersion.sourceEvidence);
       const customer = record(sourceEvidence.customer);
       const project = record(sourceEvidence.project);
+      const destination = record(sourceEvidence.destination);
       result.push({
         scope: {
           customerId: String(customer.id || ''),
-          projectId: String(project.id || ''),
-          destination: String(sourceEvidence.destination || ''),
+          projectId: String(destination.projectId || project.id || ''),
+          destination: String(destination.address || ''),
         },
         version: {
           id: storedVersion.id,
@@ -158,14 +160,28 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
     const rows = await tx.dispatchPricedAllocationEvent.findMany({
       where: { pricingRowId: { in: pricingRowIds } },
       orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }],
-      select: { pricingRowId: true, quantity: true, grossAmount: true, discountAmount: true },
+      select: { allocationRevisionId: true, allocationRevisionLineId: true, pricingVersionId: true, pricingRowId: true,
+        quantity: true, grossAmount: true, discountAmount: true, netAmount: true, consumesFinalRemainder: true,
+        evidence: true, integrityHash: true, recordedBy: true },
     });
-    return rows.map((row) => ({
-      pricingRowId: row.pricingRowId,
-      quantity: row.quantity.toFixed(3),
-      grossAmount: row.grossAmount.toFixed(12),
-      discountAmount: row.discountAmount.toFixed(12),
-    }));
+    return rows.map((row) => {
+      const payload = {
+        allocationRevisionId: row.allocationRevisionId,
+        allocationRevisionLineId: row.allocationRevisionLineId,
+        pricingVersionId: row.pricingVersionId,
+        pricingRowId: row.pricingRowId,
+        quantity: row.quantity.toFixed(3),
+        grossAmount: row.grossAmount.toFixed(12),
+        discountAmount: row.discountAmount.toFixed(12),
+        netAmount: row.netAmount.toFixed(12),
+        consumesFinalRemainder: row.consumesFinalRemainder,
+        evidence: row.evidence,
+        recordedBy: row.recordedBy,
+      };
+      return { pricingRowId: row.pricingRowId, pricingVersionId: row.pricingVersionId,
+        quantity: payload.quantity, grossAmount: payload.grossAmount, discountAmount: payload.discountAmount,
+        integrityVerified: row.integrityHash === pricedAllocationIntegrityHash(payload) };
+    });
   },
 
   createPricingReference: async (reference: PricingReferenceWrite) => {

@@ -126,6 +126,16 @@ assert.throws(
   (error: unknown) => error instanceof PricedAllocationInvariantError && error.code === 'MISSING_DISCOUNT_BASIS',
 );
 
+assert.throws(
+  () => allocatePricedRevision({
+    versions: [version()],
+    priorEvents: [{ pricingRowId: 'pricing-row-1', pricingVersionId: 'pricing-1', quantity: '1.000',
+      grossAmount: '33.333333333333', discountAmount: '2.666666666666', integrityVerified: false }],
+    lines: [line('1.000')],
+  }),
+  (error: unknown) => error instanceof PricedAllocationInvariantError && error.code === 'PRIOR_EVENT_HASH_MISMATCH',
+);
+
 {
   const over = allocatePricedRevision({
     versions: [version()], priorEvents: [], lines: [line('4.000')],

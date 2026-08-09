@@ -10,6 +10,7 @@ export type PricedAllocationInvariantCode =
   | 'DUPLICATE_PRICING_ROW'
   | 'MISSING_PRICING_VERSION'
   | 'MISSING_PRICING_ROW'
+  | 'PRIOR_EVENT_HASH_MISMATCH'
   | 'ROW_IDENTITY_MISMATCH'
   | 'UNIT_MISMATCH'
   | 'MISSING_DISCOUNT_BASIS'
@@ -40,9 +41,11 @@ export type PricedRevisionLine = {
 
 export type PriorPricedAllocationEvent = {
   pricingRowId: string;
+  pricingVersionId?: string;
   quantity: string;
   grossAmount: string;
   discountAmount: string;
+  integrityVerified?: boolean;
 };
 
 export type PricedAllocationEvidence = {
@@ -179,6 +182,9 @@ const prepareStates = (
   for (const prior of priorEvents) {
     const state = statesByRow.get(prior.pricingRowId);
     if (!state) throw new PricedAllocationInvariantError('MISSING_PRICING_ROW', `Prior event references unknown pricing row ${prior.pricingRowId}.`);
+    if (prior.integrityVerified === false || (prior.pricingVersionId && prior.pricingVersionId !== state.version.id)) {
+      throw new PricedAllocationInvariantError('PRIOR_EVENT_HASH_MISMATCH', `Prior event for pricing row ${prior.pricingRowId} failed integrity verification.`);
+    }
     state.quantity += parseFixed(prior.quantity, QUANTITY_SCALE);
     state.gross += parseFixed(prior.grossAmount, MONEY_SCALE);
     state.discount += parseFixed(prior.discountAmount, MONEY_SCALE);

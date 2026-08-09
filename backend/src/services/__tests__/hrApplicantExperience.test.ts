@@ -17,7 +17,7 @@ const source = {
   candidate: {
     firstName: 'سارا',
     lastName: 'احمدی',
-    mobile: '09120000000',
+    mobile: '09990000000',
     nationalCode: '0012345678',
     foreignIdentityType: null,
     foreignIdentityNumber: null,
@@ -33,6 +33,11 @@ const source = {
       status: 'SUBMITTED',
       submittedAt: new Date('2026-08-08T10:00:00.000Z'),
       dataJson: {
+        firstName: 'سارا',
+        lastName: 'احمدی',
+        mobile: '09120000000',
+        nationalCode: '0012345678',
+        postalCode: '1234567890',
         birthDate: '1995-01-01',
         address: 'private address',
         fatherName: 'private family value',
@@ -68,7 +73,7 @@ assert.deepEqual(
   ],
 );
 const restrictedJson = JSON.stringify(restricted);
-for (const secret of ['09120000000', '0012345678', 'private address', 'private family value', 'private answer', 'identity.pdf', 'never-serialize-storage-name', 'never-serialize-sha', 'protected evidence']) {
+for (const secret of ['09120000000', '09990000000', '0012345678', 'private address', 'private family value', 'private answer', 'identity.pdf', 'never-serialize-storage-name', 'never-serialize-sha', 'protected evidence']) {
   assert.equal(restrictedJson.includes(secret), false, `restricted projection serialized ${secret}`);
 }
 

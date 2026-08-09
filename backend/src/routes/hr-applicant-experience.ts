@@ -111,6 +111,8 @@ router.get('/applications/:id/full-information', asyncHandler(async (req: AuthRe
       formRevisions: { orderBy: { revisionNumber: 'desc' } },
       documents: { orderBy: [{ category: 'asc' }, { customTitle: 'asc' }, { version: 'desc' }] },
       identityChecks: { orderBy: { fieldKey: 'asc' } },
+      assessments: { orderBy: { recordedAt: 'desc' } },
+      preIdentityChecklistItems: { orderBy: { createdAt: 'asc' } },
     },
   });
   if (!row) return res.status(404).json({ success: false, error: 'پرونده متقاضی پیدا نشد.' });
@@ -129,13 +131,17 @@ router.get('/applications/:id/closure-summary', asyncHandler(async (req: AuthReq
       audits: {
         where: { eventType: { in: ['APPLICATION_CLOSED', 'ASSESSMENT_DECISION_RECORDED'] } },
         orderBy: { createdAt: 'desc' },
-        take: 1,
-        select: { actorUserId: true, createdAt: true, payloadJson: true },
+        take: 20,
+        select: { eventType: true, actorUserId: true, createdAt: true, payloadJson: true },
       },
     },
   });
   if (!row) return res.status(404).json({ success: false, error: 'پرونده متقاضی پیدا نشد.' });
-  const closureAudit = row.audits[0] || null;
+  const closureAudit = row.audits.find((event) => {
+    if (event.eventType === 'APPLICATION_CLOSED') return true;
+    const payload = event.payloadJson as Record<string, unknown> | null;
+    return payload?.decision === 'REJECTED';
+  }) || null;
   const [authorities, actor] = await Promise.all([
     activeHrAuthoritiesForUser(prisma, req.user!.id),
     closureAudit?.actorUserId

@@ -744,7 +744,7 @@ export default function ApplicantFormPage() {
                   }
                 />
                 <ErpInput
-                  placeholder="آخرین حقوق و مزایا"
+                  placeholder="آخرین حقوق و مزایا (ریال)"
                   className={inputClass}
                   value={row.lastSalaryBenefits}
                   onChange={(e) =>
@@ -752,7 +752,7 @@ export default function ApplicantFormPage() {
                       "workHistory",
                       i,
                       "lastSalaryBenefits",
-                      e.target.value,
+                      e.target.value.replace(/[^0-9۰-۹٠-٩٬,،\s]/g, ""),
                     )
                   }
                 />
@@ -868,13 +868,13 @@ export default function ApplicantFormPage() {
                   onChange={(e) => set("requestedPosition", e.target.value)}
                 />
               </Field>
-              <Field label="حقوق پیشنهادی">
+              <Field label="حقوق پیشنهادی (ریال)">
                 <ErpInput
                   inputMode="numeric"
                   className={inputClass}
                   value={data.desiredSalary}
                   onChange={(e) =>
-                    set("desiredSalary", e.target.value.replace(/\D/g, ""))
+                    set("desiredSalary", e.target.value.replace(/[^0-9۰-۹٠-٩٬,،\s]/g, ""))
                   }
                 />
               </Field>

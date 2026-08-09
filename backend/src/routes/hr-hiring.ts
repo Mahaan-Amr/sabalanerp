@@ -77,6 +77,7 @@ import {
 } from '../services/hrWorkItems';
 import { requireHrFeature } from '../middleware/hrAuthorization';
 import { activeHrAuthoritiesForUser, authorizeHrUser, resolveHrNamedResponsibility } from '../services/hrAuthorizationService';
+import { normalizeCoveredHiringAmounts, normalizeHiringRial } from '../services/hrApplicantExperience';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -677,28 +678,29 @@ router.get('/public/application', applicantSession, asyncHandler(async (req: App
 
 router.put('/public/application/draft', applicantSession, asyncHandler(async (req: ApplicantRequest, res: Response) => {
   const applicationId = req.applicant!.applicationId;
+  const normalizedBody = normalizeCoveredHiringAmounts(req.body || {});
   const latest = await prisma.hrApplicationFormRevision.findFirst({ where: { applicationId }, orderBy: { revisionNumber: 'desc' } });
   const allowedCorrectionFields = Array.isArray(latest?.correctionFieldsJson) ? latest.correctionFieldsJson.map(String) : [];
   if (latest && allowedCorrectionFields.length) {
     const previous = latest.dataJson as Record<string, unknown>;
-    const attempted = Object.keys(req.body || {}).filter((key) => !allowedCorrectionFields.includes(key) && JSON.stringify(req.body[key]) !== JSON.stringify(previous[key]));
+    const attempted = Object.keys(normalizedBody).filter((key) => !allowedCorrectionFields.includes(key) && JSON.stringify(normalizedBody[key]) !== JSON.stringify(previous[key]));
     if (attempted.length) return res.status(422).json({ success: false, error: `فقط فیلدهای مشخص‌شده قابل اصلاح‌اند: ${allowedCorrectionFields.join(', ')}` });
   }
   let revision;
   if (!latest) {
-    revision = await prisma.hrApplicationFormRevision.create({ data: { applicationId, revisionNumber: 1, dataJson: req.body as Prisma.InputJsonValue } });
+    revision = await prisma.hrApplicationFormRevision.create({ data: { applicationId, revisionNumber: 1, dataJson: normalizedBody as Prisma.InputJsonValue } });
   } else if (latest.status === 'RETURNED') {
     revision = await prisma.hrApplicationFormRevision.create({ data: {
       applicationId, revisionNumber: latest.revisionNumber + 1,
-      dataJson: { ...(latest.dataJson as any), ...req.body } as Prisma.InputJsonValue,
+      dataJson: { ...(latest.dataJson as any), ...normalizedBody } as Prisma.InputJsonValue,
       correctionFieldsJson: latest.correctionFieldsJson as Prisma.InputJsonValue,
       correctionDetailsJson: latest.correctionDetailsJson as Prisma.InputJsonValue,
       correctionReason: latest.correctionReason
     }});
   } else if (latest.status === 'DRAFT') {
     const dataJson = allowedCorrectionFields.length
-      ? { ...(latest.dataJson as any), ...req.body }
-      : req.body;
+      ? { ...(latest.dataJson as any), ...normalizedBody }
+      : normalizedBody;
     revision = await prisma.hrApplicationFormRevision.update({
       where: { id: latest.id },
       data: { dataJson: dataJson as Prisma.InputJsonValue }
@@ -1149,7 +1151,7 @@ router.post('/collateral-templates', requireAuthority('FINANCE_MANAGER'), asyncH
   const latest = await prisma.hrCollateralChecklistTemplate.aggregate({ where: { name }, _max: { version: true } });
   const row = await prisma.hrCollateralChecklistTemplate.create({ data: {
     name, version: (latest._max.version || 0) + 1, scopeType: req.body.scopeType || 'GLOBAL', scopeId: req.body.scopeId || null, createdBy: actorId(req),
-    items: { create: items.map((item: any, index: number) => ({ type: item.type, label: item.label, required: item.required !== false, defaultAmountRials: item.defaultAmountRials || null, sortOrder: index })) }
+    items: { create: items.map((item: any, index: number) => ({ type: item.type, label: item.label, required: item.required !== false, defaultAmountRials: item.defaultAmountRials === '' || item.defaultAmountRials == null ? null : normalizeHiringRial(item.defaultAmountRials), sortOrder: index })) }
   }, include: { items: { orderBy: { sortOrder: 'asc' } } } });
   res.status(201).json({ success: true, data: row });
 }));
@@ -1249,7 +1251,18 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 50)));
   const page = Math.max(1, Number(req.query.page || 1));
   const start = (page - 1) * pageSize;
-  res.json({ success: true, data: projected.slice(start, start + pageSize), meta: { page, pageSize, total: projected.length, totalPages: Math.max(1, Math.ceil(projected.length / pageSize)) } });
+  res.json({
+    success: true,
+    data: projected.slice(start, start + pageSize),
+    meta: {
+      page,
+      pageSize,
+      total: projected.length,
+      recordCount: projected.length,
+      aggregateQuantity: projected.length,
+      totalPages: Math.max(1, Math.ceil(projected.length / pageSize)),
+    },
+  });
 }));
 
 router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -1268,6 +1281,12 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
     archiveEligible: row.stage === 'CLOSED' && Boolean(row.outcome),
   });
   data.readOnlyArchived = Boolean(row.archivedAt);
+  data.informationGroups = [
+    { key: 'PROFILE_IDENTITY', status: canSeeHrSensitive ? 'AVAILABLE' : 'RESTRICTED' },
+    { key: 'EXPERIENCE_QUALIFICATIONS', status: canSeeDecisionDetails ? 'AVAILABLE' : 'RESTRICTED' },
+    { key: 'APPLICATION_ANSWERS', status: canSeeDecisionDetails ? 'AVAILABLE' : 'RESTRICTED' },
+    { key: 'DOCUMENT_EVIDENCE', status: canSeeHrSensitive ? 'AVAILABLE' : 'RESTRICTED' }
+  ];
   data.lifecycle = projectHiringLifecycle(row, authorities, actorId(req));
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities, actorId(req));
   data.documentIndex = buildHiringDocumentIndex(row, authorities);
@@ -1283,6 +1302,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   data.documents = canSeeHrSensitive ? data.documents.map(({ storageName: _storageName, sha256: _sha256, ...document }: any) => document) : [];
   data.assessments = canSeeDecisionDetails ? data.assessments.map(({ storageName: _storageName, sha256: _sha256, ...assessment }: any) => assessment) : [];
   if (!canSeeHrSensitive) {
+    data.candidate.mobile = `${data.candidate.mobile.slice(0, 4)}***${data.candidate.mobile.slice(-2)}`;
     data.candidate.profileJson = null;
     data.candidate.nationalCode = null;
     data.candidate.foreignIdentityType = null;
@@ -2366,7 +2386,7 @@ router.post('/applications/:id/reopen/authorize', requireAuthority('COMPANY_MANA
 }));
 
 router.post('/applications/:id/reopen/execute', requireAuthority('HR_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
-  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { position: true } });
+  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { position: true, candidate: true } });
   if (application.stage !== 'CLOSED' || !application.outcome || application.outcome === 'HIRED') throw new Error('این پرونده قابل بازگشایی نیست.');
   const reopening = await prisma.hrApplicationReopening.findFirstOrThrow({ where: { applicationId: application.id, status: 'AUTHORIZED' }, orderBy: { createdAt: 'desc' } });
   const reason = String(req.body.reason || '').trim();
@@ -2386,8 +2406,32 @@ router.post('/applications/:id/reopen/execute', requireAuthority('HR_MANAGER'), 
     if (latestOffer) await tx.hrCompensationSnapshot.update({ where: { id: latestOffer.id }, data: { obsoleteAt: now, obsoleteBy: actorId(req), obsoleteReason: 'بازگشایی پرونده بسته؛ صدور نسخه جدید پیشنهاد الزامی است.' } });
     return tx.hrJobApplication.update({ where: { id: application.id }, data: { stage: application.preClosureStage || 'RECEIVED', outcome: null, outcomeReason: null, acceptedOfferAt: null, compensationClearance: latestOffer ? 'NOT_STARTED' : application.compensationClearance, disposition: null, dispositionReason: null, dispositionBy: null, dispositionAt: null } });
   });
+  const mobile = normalizeApplicantMobile(application.candidate.mobile);
+  if (!mobile) throw new Error('شماره همراه متقاضی برای صدور دعوت‌نامه جدید معتبر نیست.');
+  const { invitation, otp } = await createApplicantInvitation(application.id, mobile, actorId(req));
+  const sms = await hrHiringSmsGateway.sendInvitation({ phoneNumber: mobile, code: otp });
+  await prisma.hrCandidateInvitation.update({
+    where: { id: invitation.id },
+    data: {
+      providerMessageId: sms.messageId ? String(sms.messageId) : null,
+      providerDeliveryState: sms.success ? (sms.messageId ? 'ACCEPTED' : 'UNKNOWN') : 'FAILED',
+      providerLastCheckedAt: new Date(),
+    },
+  });
   await audit(application.id, 'APPLICATION_REOPENED', req, { reopeningId: reopening.id, reason, restoredStage: row.stage });
-  res.json({ success: true, data: row });
+  await audit(application.id, 'APPLICATION_REOPENING_INVITATION_ISSUED', req, {
+    reopeningId: reopening.id,
+    invitationId: invitation.id,
+    deliveryState: sms.success ? 'ACCEPTED' : 'FAILED',
+  });
+  res.json({
+    success: true,
+    data: {
+      application: row,
+      invitation: { id: invitation.id, expiresAt: invitation.expiresAt, deliveryState: sms.success ? 'ACCEPTED' : 'FAILED' },
+      ...(process.env.NODE_ENV === 'production' ? {} : { debugOtp: otp }),
+    },
+  });
 }));
 
 router.post('/applications/:id/collateral-requirements', requireAuthority('COMPANY_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -2398,7 +2442,7 @@ router.post('/applications/:id/collateral-requirements', requireAuthority('COMPA
   const latestOffer = await prisma.hrCompensationSnapshot.findFirst({ where: { applicationId: req.params.id, obsoleteAt: null }, orderBy: { version: 'desc' } });
   const row = await prisma.$transaction(async (tx) => {
     if (latest) await tx.hrCollateralRequirement.update({ where: { id: latest.id }, data: { status: 'SUPERSEDED' } });
-    const created = await tx.hrCollateralRequirement.create({ data: { applicationId: req.params.id, version: (latest?.version || 0) + 1, type, amountRials: req.body.amountRials || null, obligation: null, dueTiming: String(req.body.dueTiming || '').trim() || null, candidateExplanation: explanation, proposedBy: actorId(req), supersedesId: latest?.id || null } });
+    const created = await tx.hrCollateralRequirement.create({ data: { applicationId: req.params.id, version: (latest?.version || 0) + 1, type, amountRials: req.body.amountRials === '' || req.body.amountRials == null ? null : normalizeHiringRial(req.body.amountRials), obligation: null, dueTiming: String(req.body.dueTiming || '').trim() || null, candidateExplanation: explanation, proposedBy: actorId(req), supersedesId: latest?.id || null } });
     if (latestOffer?.candidateAcceptedAt) {
       await tx.hrCompensationSnapshot.update({ where: { id: latestOffer.id }, data: { obsoleteAt: new Date(), obsoleteBy: actorId(req), obsoleteReason: 'تغییر الزام وثیقه پس از پذیرش؛ نسخه جدید پیشنهاد الزامی است.' } });
       await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { acceptedOfferAt: null, compensationClearance: 'NOT_STARTED' } });
@@ -2453,7 +2497,7 @@ router.post('/applications/:id/collateral', requireAuthority('FINANCE_RECORDER')
     }
     const itemData = {
       type: req.body.type, required: req.body.required !== 'false',
-      amountRials: req.body.amountRials || null, identifier: req.body.identifier || null,
+      amountRials: req.body.amountRials === '' || req.body.amountRials == null ? null : normalizeHiringRial(req.body.amountRials), identifier: req.body.identifier || null,
       issuerOrGuarantor: req.body.issuerOrGuarantor || null, receivedAt: req.body.receivedAt ? parseDate(req.body.receivedAt, 'تاریخ دریافت') : null,
       custodyLocation: req.body.custodyLocation || null, status: 'RECEIVED' as const,
       storageName: req.file?.filename, originalName: req.file?.originalname, mimeType: req.file?.mimetype, size: req.file?.size,

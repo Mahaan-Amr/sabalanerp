@@ -74,24 +74,24 @@ export const projectApplicantFullInformation = (
           return {
             ...revisionIdentity(revision),
             identity: {
-              firstName: source.candidate.firstName,
-              lastName: source.candidate.lastName,
+              firstName: data.firstName ?? null,
+              lastName: data.lastName ?? null,
               alias: data.alias ?? null,
               birthDate: data.birthDate ?? null,
               birthPlace: data.birthPlace ?? null,
-              nationalCode: source.candidate.nationalCode,
-              foreignIdentityType: source.candidate.foreignIdentityType,
-              foreignIdentityNumber: source.candidate.foreignIdentityNumber,
+              nationalCode: data.nationalCode ?? null,
+              foreignIdentityType: data.foreignIdentityType ?? null,
+              foreignIdentityNumber: data.foreignIdentityNumber ?? null,
             },
             contact: {
-              mobile: source.candidate.mobile,
+              mobile: data.mobile ?? null,
               homePhone: data.homePhone ?? null,
               email: data.email ?? null,
               socialMedia: data.socialMedia ?? null,
             },
             residence: {
               address: data.address ?? null,
-              postalCode: source.candidate.postalCode,
+              postalCode: data.postalCode ?? null,
             },
             family: {
               fatherName: data.fatherName ?? null,
@@ -150,6 +150,23 @@ export const projectApplicantFullInformation = (
         status: check.status,
         note: check.note,
         reviewedAt: check.reviewedAt,
+      })),
+      assessments: (source.assessments || []).map((assessment: any) => ({
+        id: assessment.id,
+        type: assessment.type,
+        version: assessment.version,
+        recordedAt: assessment.recordedAt,
+        resultJson: assessment.resultJson,
+        originalName: assessment.originalName,
+      })),
+      preIdentityEvidence: (source.preIdentityChecklistItems || []).map((item: any) => ({
+        id: item.id,
+        title: item.title,
+        status: item.status,
+        evidencePolicy: item.evidencePolicy,
+        resultNote: item.resultNote,
+        originalName: item.originalName,
+        recordedAt: item.recordedAt,
       })),
     });
   });

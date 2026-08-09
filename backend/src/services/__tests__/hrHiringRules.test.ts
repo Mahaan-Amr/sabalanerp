@@ -31,6 +31,10 @@ assert.deepEqual(normalizeCompensationComponents([
   { category: 'BASE_SALARY', label: 'حقوق پایه', amountRials: '1000' },
   { category: 'OTHER', label: 'حق ایاب و ذهاب ویژه', amountRials: '250' },
 ]);
+assert.deepEqual(normalizeCompensationComponents([
+  { category: 'BASE_SALARY', amountRials: '۱۲٬۳۴۵' },
+  { category: 'OTHER', label: 'مزایای ویژه', amountRials: '١٠,٠٠٠' },
+]).map((item) => item.amountRials), ['12345', '10000']);
 assert.throws(
   () => normalizeCompensationComponents([{ category: 'OTHER', label: '  ', amountRials: '1000' }]),
   /عنوان مورد سایر/,

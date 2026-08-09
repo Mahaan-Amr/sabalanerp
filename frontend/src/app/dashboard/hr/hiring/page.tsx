@@ -15,6 +15,7 @@ import {
   ErpBadge,
   ErpButton,
   ErpCard,
+  ErpInlineState,
   ErpLoading,
   ErpPage,
   ErpSection,
@@ -85,6 +86,7 @@ export default function HiringCasesPage() {
   const [decisionDetail, setDecisionDetail] = useState<any>(null);
   const [archiveView, setArchiveView] = useState(initialContext.archived);
   const [createOpen, setCreateOpen] = useState(false);
+  const [inviteTarget, setInviteTarget] = useState<any>(null);
 
   const load = async (nextFilters: HiringQueueFilters = filters, nextArchiveView = archiveView) => {
     try {
@@ -115,15 +117,20 @@ export default function HiringCasesPage() {
   };
 
   useEffect(() => {
-    void load(filters);
-    const focus = searchParams.get("focus");
-    const storedScroll = sessionStorage.getItem("hrHiringQueueScroll");
-    window.setTimeout(() => {
-      if (focus) document.getElementById(`hiring-case-${focus}`)?.focus();
-      else if (storedScroll) window.scrollTo({ top: Number(storedScroll), behavior: "auto" });
-    }, 0);
+    const restored = parseHiringQueueContext(searchParams);
+    setFilters(restored.filters);
+    setArchiveView(restored.archived);
+    void load(restored.filters, restored.archived).then(() => {
+      const focus = searchParams.get("focus");
+      const storedScroll = sessionStorage.getItem("hrHiringQueueScroll");
+      window.setTimeout(() => {
+        if (focus) document.getElementById(`hiring-case-${focus}`)?.focus();
+        else if (storedScroll) window.scrollTo({ top: Number(storedScroll), behavior: "auto" });
+      }, 50);
+    });
+    // URL-owned state is intentionally reloaded after browser Back or in-app return.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [representedView]);
+  }, [searchParams, representedView]);
 
   const commitContext = (nextFilters: HiringQueueFilters, nextArchiveView = archiveView) => {
     setFilters(nextFilters);
@@ -161,8 +168,10 @@ export default function HiringCasesPage() {
       setMessage(
         `دعوت‌نامه ارسال شد.${result.data.data.debugOtp ? ` کد محیط آزمایشی: ${result.data.data.debugOtp}` : ""}`,
       );
+      return true;
     } catch (cause) {
       setError(hiringError(cause));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -575,7 +584,7 @@ export default function HiringCasesPage() {
                           <ErpPressable
                             type="button"
                             disabled={busy || row.stage === "CLOSED"}
-                            onClick={() => invite(row.id)}
+                            onClick={() => setInviteTarget(row)}
                             className="rounded-lg border px-3 py-2 disabled:opacity-50"
                           >
                             ارسال مجدد دعوت
@@ -680,7 +689,7 @@ export default function HiringCasesPage() {
                       <ErpButton
                         label="ارسال دعوت"
                         disabled={busy || row.stage === "CLOSED"}
-                        onClick={() => invite(row.id)}
+                        onClick={() => setInviteTarget(row)}
                         variant="ghost"
                       />
                     )}
@@ -810,6 +819,31 @@ export default function HiringCasesPage() {
             )}
           </>
         )}
+      </ErpSheet>
+      <ErpSheet
+        open={Boolean(inviteTarget)}
+        onClose={() => setInviteTarget(null)}
+        title="ارسال دوباره دعوت‌نامه"
+        presentation="modal"
+        dismissible={!busy}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => setInviteTarget(null)} />
+            <ErpButton
+              label="ارسال دعوت‌نامه جدید"
+              tone="primary"
+              disabled={busy}
+              onClick={async () => {
+                if (await invite(inviteTarget.id)) setInviteTarget(null);
+              }}
+            />
+          </div>
+        }
+      >
+        <ErpInlineState
+          kind="stale"
+          title={`کد ورود جدید برای ${inviteTarget?.candidate?.firstName || "متقاضی"} صادر می‌شود و کدهای قبلی دیگر مبنای ورود نخواهند بود.`}
+        />
       </ErpSheet>
     </ErpPage>
   );

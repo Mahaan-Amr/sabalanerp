@@ -121,7 +121,29 @@ function EvidenceGroup({ group }: { group: any }) {
           </div>
         </ErpCard>
       ))}
-      {!group.documents?.length && <ErpInlineState kind="empty" title="مدرکی در این پرونده ثبت نشده است." />}
+      {(group.assessments || []).map((assessment: any) => (
+        <ErpCard key={assessment.id} className="p-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <ErpFieldView label="ارزیابی" value={hrDisplayLabel(assessment.type)} />
+            <ErpFieldView label="نسخه" value={Number(assessment.version || 1).toLocaleString("fa-IR")} />
+            <ErpFieldView label="زمان ثبت" value={assessment.recordedAt ? dateTimeFa(assessment.recordedAt) : "—"} />
+            <ErpFieldView label="فایل شاهد" value={value(assessment.originalName)} />
+          </div>
+        </ErpCard>
+      ))}
+      {(group.preIdentityEvidence || []).map((item: any) => (
+        <ErpCard key={item.id} className="p-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <ErpFieldView label="شاهد پیش از احراز هویت" value={item.title} />
+            <ErpFieldView label="وضعیت" value={hrDisplayLabel(item.status)} />
+            <ErpFieldView label="فایل شاهد" value={value(item.originalName)} />
+            <ErpFieldView label="یادداشت نتیجه" value={value(item.resultNote)} />
+          </div>
+        </ErpCard>
+      ))}
+      {!group.documents?.length && !group.assessments?.length && !group.preIdentityEvidence?.length && (
+        <ErpInlineState kind="empty" title="مدرک یا شاهدی در این پرونده ثبت نشده است." />
+      )}
     </div>
   );
 }

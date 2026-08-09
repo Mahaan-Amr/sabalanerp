@@ -365,4 +365,119 @@ const run = async () => {
   console.log('HR duty engine integration tests passed.');
 };
 
-run().finally(() => prisma.$disconnect());
+const runCompetingTransactionTest = async () => {
+  const suffix = `concurrency-${Date.now()}`;
+  const seeded = await prisma.$transaction(async (tx) => {
+    await Promise.all([
+      tx.hrAuthorityCatalog.upsert({
+        where: { code: 'FINANCE_MANAGER' }, update: { isActive: true },
+        create: { code: 'FINANCE_MANAGER', displayName: 'Finance Manager' },
+      }),
+      tx.hrResponsibilityTypeCatalog.upsert({
+        where: { code: 'FINANCE_MANAGER' }, update: { isActive: true },
+        create: { code: 'FINANCE_MANAGER', displayName: 'Finance Manager' },
+      }),
+    ]);
+    const [sourceActor, assignee] = await Promise.all([
+      tx.user.create({ data: {
+        email: `${suffix}-source@example.invalid`, username: `${suffix}-source`,
+        password: 'not-a-login-secret', firstName: 'Concurrent', lastName: 'Source',
+      } }),
+      tx.user.create({ data: {
+        email: `${suffix}-assignee@example.invalid`, username: `${suffix}-assignee`,
+        password: 'not-a-login-secret', firstName: 'Concurrent', lastName: 'Assignee',
+      } }),
+    ]);
+    await syncHrDutyEnvelopeDefinitions(tx, 'SYSTEM');
+    const grant = await tx.hrBusinessAuthorityGrant.create({ data: {
+      stableKey: `${suffix}:grant`, userId: assignee.id, authorityCode: 'FINANCE_MANAGER',
+      effectiveFrom: new Date('2026-08-01T00:00:00.000Z'), grantedByUserId: sourceActor.id,
+      reason: 'True competing-transaction duty response test',
+    } });
+    const responsibility = await tx.hrNamedResponsibility.create({ data: {
+      stableKey: `${suffix}:responsibility`, responsibilityTypeCode: 'FINANCE_MANAGER',
+      scopeType: 'CONCURRENCY_TEST', scopeId: suffix, assignedUserId: assignee.id,
+      effectiveFrom: new Date('2026-08-01T00:00:00.000Z'), createdByUserId: sourceActor.id,
+    } });
+    const destination = await tx.hrResponsibilityDestination.create({ data: {
+      stableKey: `${suffix}:destination`, responsibilityTypeCode: 'FINANCE_MANAGER',
+      scopeType: 'CONCURRENCY_TEST', scopeId: suffix,
+      workspaceCode: 'ACCOUNTING', queueCode: 'FINANCE_APPROVALS', createdByUserId: sourceActor.id,
+    } });
+    const source = await tx.hrWorkItem.create({ data: {
+      title: 'Competing transaction response', sourceType: 'MANUAL',
+      destinationHref: '/dashboard/accounting', dueDate: new Date('2026-08-14T08:00:00.000Z'),
+      createdByUserId: sourceActor.id,
+    } });
+    const duty = await tx.hrDuty.create({ data: {
+      stableKey: `${suffix}:duty`, sourceType: 'HR_WORK_ITEM', sourceId: source.id,
+      sourceActionCode: 'FINANCE_APPROVAL', sourceVersion: 1,
+      envelopeCode: HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.envelopeCode, envelopeVersion: 1,
+      destinationWorkspaceCode: 'ACCOUNTING', destinationQueueCode: 'FINANCE_APPROVALS',
+      currentAssigneeUserId: assignee.id, responsibilityId: responsibility.id,
+      routingResponsibilityTypeCode: 'FINANCE_MANAGER', routingScopeType: 'CONCURRENCY_TEST',
+      routingScopeId: suffix, sourceActorUserId: sourceActor.id,
+      dueAt: source.dueDate, createdByUserId: sourceActor.id,
+    } });
+    await Promise.all([
+      tx.hrDutyAssignmentHistory.create({ data: {
+        dutyId: duty.id, sequence: 1, assignedUserId: assignee.id, responsibilityId: responsibility.id,
+        destinationWorkspaceCode: 'ACCOUNTING', destinationQueueCode: 'FINANCE_APPROVALS',
+        changedByUserId: sourceActor.id, policyVersion: 1,
+      } }),
+      tx.hrDutyAuditVersion.create({ data: {
+        dutyId: duty.id, version: 1, eventCode: 'ASSIGNED', actorUserId: sourceActor.id,
+        sourceVersion: 1, envelopeVersion: 1, policyVersion: 1,
+        afterJson: { status: 'OPEN', currentAssigneeUserId: assignee.id },
+      } }),
+    ]);
+    return { sourceActor, assignee, grant, responsibility, destination, source, duty };
+  });
+
+  const firstClient = new PrismaClient();
+  const secondClient = new PrismaClient();
+  try {
+    const response = {
+      dutyId: seeded.duty.id, actorUserId: seeded.assignee.id, actionCode: 'APPROVE',
+      expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null,
+      policyVersion: 1, now: new Date('2026-08-09T11:00:00.000Z'),
+    };
+    const outcomes = await Promise.allSettled([
+      respondToHrDuty(firstClient, response),
+      respondToHrDuty(secondClient, response),
+    ]);
+    const durableWinners = outcomes.filter((outcome) => (
+      outcome.status === 'fulfilled' && !outcome.value.replayed
+    ));
+    assert.equal(durableWinners.length, 1, 'competing transactions perform exactly one durable response');
+    assert.equal(await prisma.hrDutyAuditVersion.count({
+      where: { dutyId: seeded.duty.id, eventCode: 'COMPLETED' },
+    }), 1);
+    assert.equal((await prisma.hrWorkItem.findUniqueOrThrow({ where: { id: seeded.source.id } })).status, 'COMPLETE');
+  } finally {
+    await Promise.all([firstClient.$disconnect(), secondClient.$disconnect()]);
+    await prisma.$transaction(async (tx) => {
+      const events = await tx.notificationEvent.findMany({
+        where: { resourceType: 'HR_DUTY', resourceId: seeded.duty.id }, select: { id: true },
+      });
+      const eventIds = events.map(({ id }) => id);
+      await tx.notification.deleteMany({ where: { eventId: { in: eventIds } } });
+      await tx.notificationEvent.deleteMany({ where: { id: { in: eventIds } } });
+      await tx.hrDutyNotificationIdentity.deleteMany({ where: { dutyId: seeded.duty.id } });
+      await tx.hrDutyAuditVersion.deleteMany({ where: { dutyId: seeded.duty.id } });
+      await tx.hrDutyAssignmentHistory.deleteMany({ where: { dutyId: seeded.duty.id } });
+      await tx.hrDuty.delete({ where: { id: seeded.duty.id } });
+      await tx.hrWorkItemAudit.deleteMany({ where: { workItemId: seeded.source.id } });
+      await tx.hrWorkItem.delete({ where: { id: seeded.source.id } });
+      await tx.hrNamedResponsibility.delete({ where: { id: seeded.responsibility.id } });
+      await tx.hrResponsibilityDestination.delete({ where: { id: seeded.destination.id } });
+      await tx.hrBusinessAuthorityGrant.delete({ where: { id: seeded.grant.id } });
+      await tx.user.deleteMany({ where: { id: { in: [seeded.sourceActor.id, seeded.assignee.id] } } });
+    });
+  }
+  console.log('HR duty competing-transaction test passed.');
+};
+
+run()
+  .then(runCompetingTransactionTest)
+  .finally(() => prisma.$disconnect());

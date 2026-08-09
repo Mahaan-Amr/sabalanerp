@@ -7,7 +7,6 @@ import {
   ErpBadge,
   ErpButton,
   ErpCard,
-  ErpInlineState,
   ErpSection,
   ErpSegmentedControl,
 } from '@/components/erp';
@@ -76,6 +75,7 @@ export default function AccountingDeadlinesPanel({
 
   return (
     <ErpSection
+      className="h-full"
       title="سررسیدها"
       description="دریافتنی‌های باز و چک‌های تسویه‌نشده بر پایه روز تقویم تهران"
     >
@@ -104,7 +104,7 @@ export default function AccountingDeadlinesPanel({
                   href={dashboardHref({ due: bucket })}
                   scroll={false}
                   aria-current={active ? 'page' : undefined}
-                  className="block min-h-11 rounded-t-lg p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]"
+                  className="flex min-h-32 flex-col justify-between rounded-t-lg p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]"
                 >
                   <span className="sds-text-muted block text-xs">{bucketLabels[bucket]}</span>
                   <span className="sds-text-primary mt-1 block text-2xl font-semibold">
@@ -130,13 +130,7 @@ export default function AccountingDeadlinesPanel({
           })}
         </div>
 
-        {deadlines.items.length === 0 ? (
-          <ErpInlineState
-            kind="empty"
-            className="rounded-lg border"
-            title={`${typeLabels[selectedType]} در ${selectedDue ? bucketLabels[selectedDue] : 'همه سررسیدها'} نتیجه‌ای ندارد. فقط دریافتنی‌های باز و چک‌های تسویه‌نشده‌ای نمایش داده می‌شوند که تاریخ سررسید دارند.`}
-          />
-        ) : (
+        {deadlines.items.length > 0 && (
           <ul className="divide-y divide-[var(--sds-border-subtle)] rounded-lg border border-[var(--sds-border-default)]">
             {deadlines.items.map((item) => {
               const Icon = item.type === 'receivable' ? FaReceipt : FaMoneyCheckAlt;

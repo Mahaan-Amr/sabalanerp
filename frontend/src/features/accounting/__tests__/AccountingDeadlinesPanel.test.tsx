@@ -50,6 +50,7 @@ const renderPanel = (data: AccountingDeadlines) => renderToStaticMarkup(
 
 test('combined deadline panel links buckets and rows to their canonical destinations', () => {
   const html = renderPanel(deadlines());
+  assert.equal((html.match(/flex min-h-32 flex-col justify-between/g) || []).length, 4);
   assert.match(html, /\/dashboard\/accounting\?due=next7&amp;deadlineType=all/);
   assert.match(html, /\/dashboard\/accounting\/contracts\/contract-1\?focus=receivable&amp;recordId=receivable-1#collections/);
   assert.match(html, /\/dashboard\/accounting\/payments\?view=unsettled-checks&amp;due=next7&amp;recordId=check-1/);
@@ -68,7 +69,7 @@ test('type-specific deadline panel renders the selected actionable population', 
   assert.match(html, /recordId=check-1/);
 });
 
-test('empty deadline filter stays compact without redundant register recovery actions', () => {
+test('empty deadline filter omits helper text and stale rows', () => {
   const html = renderPanel(deadlines({
     selection: { due: 'days8to30', deadlineType: 'receivable' },
     typeCounts: counts(0, 0, 0),
@@ -76,7 +77,7 @@ test('empty deadline filter stays compact without redundant register recovery ac
     total: 0,
   }));
   assert.match(html, /\/dashboard\/accounting\/receivables\?view=open&amp;due=days8to30/);
-  assert.match(html, /فقط دریافتنی‌های باز و چک‌های تسویه‌نشده‌ای نمایش داده می‌شوند که تاریخ سررسید دارند/);
+  assert.doesNotMatch(html, /فقط دریافتنی‌های باز و چک‌های تسویه‌نشده‌ای نمایش داده می‌شوند که تاریخ سررسید دارند/);
   assert.match(html, /\/dashboard\/accounting\/payments\?view=unsettled-checks&amp;due=days8to30/);
   assert.match(html, /xl:grid-cols-4/);
   assert.doesNotMatch(html, /بررسی دریافتنی‌ها/);

@@ -79,8 +79,8 @@ export function AccountingFinancialTrend({
   ));
 
   return (
-    <section aria-labelledby="accounting-financial-trend-title">
-    <ErpCard className="overflow-hidden">
+    <section aria-labelledby="accounting-financial-trend-title" className="h-full">
+    <ErpCard className="h-full overflow-hidden">
       <div className="flex flex-col gap-4 p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div>

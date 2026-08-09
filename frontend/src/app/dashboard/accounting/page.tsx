@@ -218,7 +218,7 @@ export default function AccountingDashboardPage() {
         <p role="status" className="sds-text-muted text-sm">در حال به‌روزرسانی داده‌های حسابداری…</p>
       )}
 
-      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,.9fr)]">
+      <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,.9fr)]">
         <div className="min-w-0">{financialTrendPanel}</div>
         <div className="min-w-0">
           <AccountingDeadlinesPanel

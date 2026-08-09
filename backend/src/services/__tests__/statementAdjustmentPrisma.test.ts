@@ -12,6 +12,11 @@ import { readShipmentQuantityProjection, shipmentQuantityEvidenceIntegrityHash }
 const prisma = new PrismaClient();
 const rollback = Symbol('statement-adjustment-db-rollback');
 const hash = (character: string) => character.repeat(64);
+const runConcurrency = process.env.ISSUE262_TWO_CONNECTION_RACE === '1';
+if (runConcurrency) {
+  assert.match(process.env.DATABASE_URL || '', /\/sabalanerp_issue262_[a-z0-9_]+(?:\?|$)/,
+    'Two-connection proof may run only in an explicit issue262 temporary database.');
+}
 const record = (value: unknown): Readonly<Record<string, unknown>> => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Readonly<Record<string, unknown>> : {};
 const bytes = (value: string) => new TextEncoder().encode(value);
@@ -49,8 +54,10 @@ const run = async () => {
     commands: await prisma.dispatchDocumentCommandResult.count({ where: { scope: 'CORRECTION' } }),
     audits: await prisma.dispatchLifecycleAudit.count({ where: { aggregateType: 'DISPATCH_CORRECTION' } }),
   };
+  let committedFixture: { waybillId: string; correctionIds: [string, string]; actorId: string;
+    authority: { actorRole: string; workspace: string; workspacePermission: string } } | null = null;
   try {
-    await prisma.$transaction(async (tx) => {
+    committedFixture = await prisma.$transaction(async (tx) => {
       const [candidate] = await tx.$queryRaw<Array<{
         waybillId: string; revisionId: string; revisionLineId: string; itemId: string; productRowId: string;
         contractId: string; financialRecordId: string; createdBy: string; currency: string;
@@ -241,10 +248,43 @@ const run = async () => {
         kind: 'STATEMENT_ADJUSTMENT' } }), 3);
       assert.deepEqual(await tx.dispatchDocumentArtifact.findUniqueOrThrow({ where: { id: originalStatement.id } }), originalStatement,
         'adjustments must not rewrite the original statement artifact');
+      if (runConcurrency) {
+        const raceA = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
+          reason: 'DB sequence race A', effectiveAt: new Date(), actorId: candidate.createdBy, authority,
+          lines: [{ contractItemId: candidate.itemId, quantity: '0.001' }] });
+        const raceB = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
+          reason: 'DB sequence race B', effectiveAt: new Date(), actorId: candidate.createdBy, authority,
+          lines: [{ contractItemId: candidate.itemId, quantity: '0.001' }] });
+        return { waybillId: candidate.waybillId, correctionIds: [raceA.id, raceB.id] as [string, string],
+          actorId: candidate.createdBy, authority };
+      }
       throw rollback;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
     if (error !== rollback) throw error;
+  }
+  if (runConcurrency) {
+    assert.ok(committedFixture, 'temporary DB race fixture must commit before opening independent connections');
+    const [firstClient, secondClient] = [new PrismaClient(), new PrismaClient()];
+    try {
+      await Promise.all(committedFixture.correctionIds.map((correctionId, index) =>
+        postDispatchCorrection(index === 0 ? firstClient : secondClient, {
+          correctionId,
+          actorId: committedFixture!.actorId,
+          authority: committedFixture!.authority,
+          idempotencyKey: `issue262-two-connection-${index + 1}`,
+        }, { artifactPreparer: configuredArtifactPreparer() })));
+      const raced = await prisma.dispatchStatementAdjustment.findMany({ where: {
+        correctionId: { in: committedFixture.correctionIds },
+      }, include: { artifact: true }, orderBy: { sequence: 'asc' } });
+      assert.deepEqual(raced.map((item) => item.sequence), [4, 5],
+        'two independent connections must serialize into unique adjacent waybill sequences');
+      assert.equal(new Set(raced.map((item) => item.artifact?.id)).size, 2);
+      assert.ok(raced.every((item) => item.artifact?.sourceIntegrityHash === item.integrityHash));
+    } finally {
+      await Promise.all([firstClient.$disconnect(), secondClient.$disconnect()]);
+    }
+    return;
   }
   const after = {
     versions: await prisma.contractApprovedPricingVersion.count(),
@@ -262,5 +302,7 @@ const run = async () => {
 };
 
 run()
-  .then(() => console.log('statement adjustment Prisma integration: rollback/count/sequence/artifact-failure ok'))
+  .then(() => console.log(runConcurrency
+    ? 'statement adjustment Prisma integration: two-connection sequence race ok'
+    : 'statement adjustment Prisma integration: rollback/count/sequence/artifact-failure ok'))
   .finally(() => prisma.$disconnect());

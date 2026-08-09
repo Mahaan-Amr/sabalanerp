@@ -8,14 +8,16 @@ import { createDispatchCorrection, dispatchLifecycleAuditEventHash, postDispatch
 import { createStatementAdjustmentArtifactPreparer, type DispatchArtifactStorage } from '../dispatchDocuments';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 import { readShipmentQuantityProjection, shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
+import { assertStatementAdjustmentRaceEvidence } from './shipmentStatementConcurrency/statementAdjustmentEvidence';
 
 const prisma = new PrismaClient();
 const rollback = Symbol('statement-adjustment-db-rollback');
 const hash = (character: string) => character.repeat(64);
 const runConcurrency = process.env.ISSUE262_TWO_CONNECTION_RACE === '1';
 if (runConcurrency) {
-  assert.match(process.env.DATABASE_URL || '', /\/sabalanerp_issue262_[a-z0-9_]+(?:\?|$)/,
-    'Two-connection proof may run only in an explicit issue262 temporary database.');
+  assert.match(process.env.DATABASE_URL || '',
+    /\/(?:sabalanerp_issue262_[a-z0-9_]+|sabalanerp_concurrency_[a-f0-9]{16})(?:\?|$)/,
+    'Two-connection proof may run only in an explicit issue262 or issue260 temporary database.');
 }
 const record = (value: unknown): Readonly<Record<string, unknown>> => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Readonly<Record<string, unknown>> : {};
@@ -61,7 +63,8 @@ const run = async () => {
     commands: await prisma.dispatchDocumentCommandResult.count({ where: { scope: 'CORRECTION' } }),
     audits: await prisma.dispatchLifecycleAudit.count({ where: { aggregateType: 'DISPATCH_CORRECTION' } }),
   };
-  let committedFixture: { waybillId: string; correctionIds: [string, string]; actorId: string;
+  let committedFixture: { waybillId: string; correctionIds: [string, string]; returnAndReshipIds: [string, string];
+    returnEvidenceId: string; actorId: string;
     authority: { actorRole: string; workspace: string; workspacePermission: string } } | null = null;
   try {
     committedFixture = await prisma.$transaction(async (tx) => {
@@ -194,7 +197,7 @@ const run = async () => {
         kind: 'PHYSICAL_EXIT', contractItemId: candidate.itemId,
         metadata: { path: ['waybillId'], equals: candidate.waybillId },
       }, orderBy: { effectiveAt: 'desc' } });
-      const returnQuantity = Prisma.Decimal.min(candidate.lineQuantity, new Prisma.Decimal('0.250')).toDecimalPlaces(3);
+      const returnQuantity = Prisma.Decimal.min(candidate.lineQuantity, new Prisma.Decimal('0.002')).toDecimalPlaces(3);
       const movementOccurredAt = new Date(Math.max(dispatchEvidence.effectiveAt.getTime() + 1, Date.now() - 2_000));
       const movementCompletedAt = new Date(movementOccurredAt.getTime() + 500);
       const returnRecordedAt = new Date(movementCompletedAt.getTime() + 500);
@@ -262,7 +265,32 @@ const run = async () => {
         const raceB = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
           reason: 'DB sequence race B', effectiveAt: new Date(), actorId: candidate.createdBy, authority,
           lines: [{ contractItemId: candidate.itemId, quantity: '0.001' }] });
+        const concurrentMovementAt = new Date(returnRecordedAt.getTime() + 1);
+        const concurrentMovement = await tx.securityVehicleMovement.create({ data: {
+          movementNumber: `I260-${randomUUID()}`,
+          direction: 'INBOUND', purpose: 'SALES_RETURN', status: 'INFO_COMPLETED', loadingId: candidate.loadingId,
+          occurredAt: concurrentMovementAt, completedAt: new Date(concurrentMovementAt.getTime() + 1),
+          createdBy: candidate.createdBy,
+        } });
+        const concurrentReturnBase = { id: randomUUID(), contractId: candidate.contractId,
+          contractItemId: candidate.itemId, productRowId: candidate.productRowId, unit: candidate.lineUnit,
+          kind: 'GUARD_RETURN_VERIFIED' as const, quantity: '0.001', effectiveAt: concurrentMovementAt.toISOString(),
+          recordedAt: new Date(concurrentMovementAt.getTime() + 2).toISOString(), sourceType: 'GUARD_RETURN_MOVEMENT',
+          sourceId: concurrentMovement.id, sourceVersion: 1, integrityHash: '', guardReturnMovementId: concurrentMovement.id,
+          dispatchEvidenceId: dispatchEvidence.id, metadata: { dispatchLoadingId: candidate.loadingId },
+        };
+        const concurrentReturn = await tx.shipmentQuantityEvidence.create({ data: { ...concurrentReturnBase,
+          quantity: '0.001', effectiveAt: concurrentMovementAt, recordedAt: new Date(concurrentReturnBase.recordedAt),
+          integrityHash: shipmentQuantityEvidenceIntegrityHash(concurrentReturnBase) } });
+        const returnedAgain = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
+          reason: 'DB concurrent verified return', effectiveAt: new Date(concurrentReturnBase.recordedAt),
+          actorId: candidate.createdBy, authority,
+          lines: [{ contractItemId: candidate.itemId, quantity: '-0.001', returnEvidenceId: concurrentReturn.id }] });
+        const reship = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
+          reason: 'DB concurrent reship', effectiveAt: new Date(concurrentReturnBase.recordedAt),
+          actorId: candidate.createdBy, authority, lines: [{ contractItemId: candidate.itemId, quantity: '0.001' }] });
         return { waybillId: candidate.waybillId, correctionIds: [raceA.id, raceB.id] as [string, string],
+          returnAndReshipIds: [returnedAgain.id, reship.id] as [string, string], returnEvidenceId: concurrentReturn.id,
           actorId: candidate.createdBy, authority };
       }
       throw rollback;
@@ -288,6 +316,63 @@ const run = async () => {
         'two independent connections must serialize into unique adjacent waybill sequences');
       assert.equal(new Set(raced.map((item) => item.artifact?.id)).size, 2);
       assert.ok(raced.every((item) => item.artifact?.sourceIntegrityHash === item.integrityHash));
+
+      const returnAndReshipResults = await Promise.allSettled(committedFixture.returnAndReshipIds.map((correctionId, index) =>
+        postDispatchCorrection(index === 0 ? firstClient : secondClient, { correctionId,
+          actorId: committedFixture!.actorId, authority: committedFixture!.authority,
+          idempotencyKey: `issue260-return-reship-${index + 1}` }, { artifactPreparer: configuredArtifactPreparer() })));
+      assert.equal(returnAndReshipResults[0].status, 'fulfilled', 'the verified return must always commit');
+      let reshipRetried = false;
+      if (returnAndReshipResults[1].status === 'rejected') {
+        reshipRetried = true;
+        await postDispatchCorrection(secondClient, { correctionId: committedFixture.returnAndReshipIds[1],
+          actorId: committedFixture.actorId, authority: committedFixture.authority,
+          idempotencyKey: 'issue260-return-reship-2' }, { artifactPreparer: configuredArtifactPreparer() });
+      }
+      const allCorrectionIds = [...committedFixture.correctionIds, ...committedFixture.returnAndReshipIds];
+      const proofRows = await prisma.dispatchCorrection.findMany({ where: { id: { in: allCorrectionIds } }, include: {
+        statementAdjustment: { include: { artifact: true } },
+      } });
+      const proofFor = async (correctionId: string) => {
+        const correction = proofRows.find((row) => row.id === correctionId)!;
+        const adjustment = correction.statementAdjustment!;
+        const [commands, audits] = await Promise.all([
+          prisma.dispatchDocumentCommandResult.findMany({ where: { scope: 'CORRECTION', scopeId: correctionId,
+            command: 'ISSUE_ADJUSTMENT', status: 'SUCCEEDED' } }),
+          prisma.dispatchLifecycleAudit.findMany({ where: { aggregateType: 'DISPATCH_CORRECTION', aggregateId: correctionId,
+            eventType: 'CORRECTION_POSTED' } }),
+        ]);
+        const commandResponse = record(record(commands[0]?.result).response);
+        const commandAdjustment = record(commandResponse.statementAdjustment);
+        const auditPayload = record(audits[0]?.payload);
+        const auditAuthority = record(auditPayload.effectiveAuthority) as typeof committedFixture.authority;
+        return { reason: correction.reason, adjustmentId: adjustment.id, sequence: adjustment.sequence,
+          integrityHash: adjustment.integrityHash,
+          artifact: adjustment.artifact ? { id: adjustment.artifact.id,
+            sourceIntegrityHash: adjustment.artifact.sourceIntegrityHash } : null,
+          commandCount: commands.length, commandAdjustmentId: String(commandAdjustment.id || ''), auditCount: audits.length,
+          adjustmentIntegrityVerified: pricedAllocationIntegrityHash(adjustment.snapshot) === adjustment.integrityHash,
+          auditIntegrityVerified: Boolean(audits[0]) && audits[0].eventHash === dispatchLifecycleAuditEventHash({
+            aggregateType: audits[0].aggregateType, aggregateId: audits[0].aggregateId, eventType: audits[0].eventType,
+            payload: auditPayload, actorId: audits[0].actorId, authority: auditAuthority, at: audits[0].recordedAt,
+            previousHash: audits[0].previousHash,
+          }), adjustment };
+      };
+      const sequenceProof = await Promise.all(committedFixture.correctionIds.map(proofFor));
+      const returnProof = await Promise.all(committedFixture.returnAndReshipIds.map(proofFor));
+      const verified = assertStatementAdjustmentRaceEvidence({
+        sequencePosts: sequenceProof.map(({ adjustment: _adjustment, ...proof }) => proof),
+        returnAndReship: returnProof.map(({ adjustment, ...proof }) => ({ ...proof,
+          line: (adjustment.snapshot as any).lines[0] })),
+        consumedReturnEvidenceCount: await prisma.shipmentQuantityEvidence.count({ where: {
+          kind: 'DISPATCH_CORRECTION_POSTED', returnEvidenceId: committedFixture.returnEvidenceId,
+        } }),
+      });
+      assert.deepEqual(verified.sequenceRange, [4, 7]);
+      console.log(JSON.stringify({ kind: 'issue260-statement-adjustment-concurrency-proof',
+        scenarios: ['concurrent-correction-adjustment-sequence-posting',
+          'verified-return-vs-reship-final-remainder-attribution'],
+        reshipInitialStatus: returnAndReshipResults[1].status, reshipRetried, ...verified }));
     } finally {
       await Promise.all([firstClient.$disconnect(), secondClient.$disconnect()]);
     }

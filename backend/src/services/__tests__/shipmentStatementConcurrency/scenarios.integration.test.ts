@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { Prisma } from '@prisma/client';
@@ -216,6 +217,41 @@ const run = async () => {
     assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id,
       idempotencyKey: `${operationKey}-different` } }), 0, 'different-key duplicate bundle leaves no partial command result');
     results.push({ name: 'issuance-idempotency-artifact-commit-retry', repetitions: 1, anomalies: [] });
+
+    const adjustmentStarted = performance.now();
+    trace.record({ scenario: 'concurrent-correction-adjustment-sequence-posting', actor: 'issue262-production-seam',
+      phase: 'two-connection-run', outcome: 'started', detail: { databaseName: database.databaseName } });
+    const adjustmentRun = spawnSync(process.execPath, [
+      path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      path.resolve(process.cwd(), 'src', 'services', '__tests__', 'statementAdjustmentPrisma.test.ts'),
+    ], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000, env: {
+      ...process.env, DATABASE_URL: database.databaseUrl, ISSUE262_TWO_CONNECTION_RACE: '1',
+    } });
+    assert.equal(adjustmentRun.error, undefined,
+      `statement adjustment production-seam subprocess failed: ${adjustmentRun.error?.message || ''}`);
+    assert.equal(adjustmentRun.signal, null,
+      `statement adjustment production-seam subprocess timed out or was killed: ${adjustmentRun.signal || ''}`);
+    assert.equal(adjustmentRun.status, 0,
+      `statement adjustment production-seam subprocess failed\n${adjustmentRun.stdout}\n${adjustmentRun.stderr}`);
+    const adjustmentProof = adjustmentRun.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+      .map(line => { try { return JSON.parse(line) as Record<string, unknown>; } catch { return null; } })
+      .find(line => line?.kind === 'issue260-statement-adjustment-concurrency-proof');
+    assert.ok(adjustmentProof, `statement adjustment proof was not emitted\n${adjustmentRun.stdout}`);
+    assert.deepEqual(adjustmentProof.scenarios, ['concurrent-correction-adjustment-sequence-posting',
+      'verified-return-vs-reship-final-remainder-attribution']);
+    assert.deepEqual(adjustmentProof.sequenceRange, [4, 7]);
+    assert.equal(adjustmentProof.artifactCount, 4);
+    assert.equal(adjustmentProof.zeroNetQuantity, '0.000');
+    assert.equal(adjustmentProof.zeroNetAmount, '0.000000000000');
+    const adjustmentDurationMs = Number((performance.now() - adjustmentStarted).toFixed(3));
+    trace.record({ scenario: 'concurrent-correction-adjustment-sequence-posting', actor: 'issue262-production-seam',
+      phase: 'two-connection-run', outcome: 'committed', detail: { ...adjustmentProof, durationMs: adjustmentDurationMs } });
+    trace.record({ scenario: 'verified-return-vs-reship-final-remainder-attribution', actor: 'issue262-production-seam',
+      phase: 'return-reship-settled', outcome: 'zero-anomaly', detail: { ...adjustmentProof, durationMs: adjustmentDurationMs } });
+    results.push({ name: 'concurrent-correction-adjustment-sequence-posting', repetitions: 1, anomalies: [],
+      durationMs: adjustmentDurationMs });
+    results.push({ name: 'verified-return-vs-reship-final-remainder-attribution', repetitions: 1, anomalies: [],
+      durationMs: adjustmentDurationMs });
 
     const report = await trace.finish(results);
     assert.equal(report.summary.status, 'ZERO_ANOMALIES');

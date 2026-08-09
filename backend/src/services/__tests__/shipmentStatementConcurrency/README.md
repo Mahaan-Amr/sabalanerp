@@ -22,12 +22,18 @@ The DB command runs three independent snapshots. Every scenario uses at least tw
 - first-valid candidate acceptance versus rejection/successor disposition;
 - document void/replacement decision versus Guard exit decision;
 - same-key issuance replay, different-key duplicate conflict, artifact/DB rollback, storage-key locking, and retry
-  after an unknown response.
+  after an unknown response;
+- concurrent correction posting through the production issue262 command, with adjacent immutable statement-adjustment
+  sequences, distinct verified artifacts, exact command results, and exact lifecycle audits;
+- a verified Guard return racing a reship on the same stable row, including deterministic retry when the reship
+  reaches the pricing lock before the return, zero-net scale-three/scale-twelve deltas, stable attribution, and one
+  final-remainder consumer.
 
 Each scenario asserts the relevant persisted invariants after both connections settle: unique source identities,
 contiguous ledger evidence, exact scale-three quantity and scale-twelve amount sums, one final remainder, one terminal
-decision, one artifact, one command result, and one lifecycle audit. Expected serialization/deadlock aborts and their
-retries are retained rather than hidden.
+decision, one artifact per issued document, one command result, and one lifecycle audit. The adjustment scenarios call
+the production `postDispatchCorrection` seam with two independent Prisma clients; they do not reproduce its writer in
+the harness. Expected serialization/deadlock/business-order aborts and their retries are retained rather than hidden.
 
 ## Machine-readable evidence
 

@@ -6,6 +6,7 @@ import { TwoPartyBarrier, ConcurrencyBarrierTimeoutError } from './barrier';
 import { assertTemporaryConcurrencyDatabaseName, temporaryDatabaseUrl } from './database';
 import { ConcurrencyTrace } from './trace';
 import { isRetryableConcurrencyError } from './retry';
+import { assertStatementAdjustmentRaceEvidence } from './statementAdjustmentEvidence';
 
 const run = async () => {
   const barrier = new TwoPartyBarrier('pricing-head-locked', 1000);
@@ -30,6 +31,35 @@ const run = async () => {
   assert.equal(isRetryableConcurrencyError({ code: 'P2010', meta: { code: '40001' } }), true);
   assert.equal(isRetryableConcurrencyError({ code: 'P2010', meta: { code: '40P01' } }), true);
   assert.equal(isRetryableConcurrencyError({ code: 'P2002' }), false);
+
+  assert.deepEqual(assertStatementAdjustmentRaceEvidence({
+    sequencePosts: [
+      { reason: 'DB sequence race A', adjustmentId: 'adjustment-a', sequence: 4, integrityHash: 'a'.repeat(64),
+        artifact: { id: 'artifact-a', sourceIntegrityHash: 'a'.repeat(64) }, commandCount: 1,
+        commandAdjustmentId: 'adjustment-a', auditCount: 1, adjustmentIntegrityVerified: true, auditIntegrityVerified: true },
+      { reason: 'DB sequence race B', adjustmentId: 'adjustment-b', sequence: 5, integrityHash: 'b'.repeat(64),
+        artifact: { id: 'artifact-b', sourceIntegrityHash: 'b'.repeat(64) }, commandCount: 1,
+        commandAdjustmentId: 'adjustment-b', auditCount: 1, adjustmentIntegrityVerified: true, auditIntegrityVerified: true },
+    ],
+    returnAndReship: [
+      { reason: 'DB concurrent verified return', adjustmentId: 'adjustment-return', sequence: 6, integrityHash: 'c'.repeat(64),
+        artifact: { id: 'artifact-return', sourceIntegrityHash: 'c'.repeat(64) }, commandCount: 1,
+        commandAdjustmentId: 'adjustment-return', auditCount: 1, adjustmentIntegrityVerified: true, auditIntegrityVerified: true,
+        line: { contractId: 'contract', contractItemId: 'item', productRowId: 'row', quantityDelta: '-0.001',
+          grossAmountDelta: '-0.100000000000', discountDelta: '0.000000000000', netAmountDelta: '-0.100000000000',
+          consumesFinalRemainder: false } },
+      { reason: 'DB concurrent reship', adjustmentId: 'adjustment-reship', sequence: 7, integrityHash: 'd'.repeat(64),
+        artifact: { id: 'artifact-reship', sourceIntegrityHash: 'd'.repeat(64) }, commandCount: 1,
+        commandAdjustmentId: 'adjustment-reship', auditCount: 1, adjustmentIntegrityVerified: true, auditIntegrityVerified: true,
+        line: { contractId: 'contract', contractItemId: 'item', productRowId: 'row', quantityDelta: '0.001',
+          grossAmountDelta: '0.100000000000', discountDelta: '0.000000000000', netAmountDelta: '0.100000000000',
+          consumesFinalRemainder: true } },
+    ],
+    consumedReturnEvidenceCount: 1,
+  }), { sequenceRange: [4, 7], artifactCount: 4, zeroNetQuantity: '0.000', zeroNetAmount: '0.000000000000' });
+  assert.throws(() => assertStatementAdjustmentRaceEvidence({
+    sequencePosts: [], returnAndReship: [], consumedReturnEvidenceCount: 0,
+  }), /exactly two sequence posts/i);
 
   const output = await mkdtemp(path.join(os.tmpdir(), 'sabalan-concurrency-trace-'));
   try {

@@ -186,7 +186,37 @@ export const verifyProductionDispatchAuditChains = (audits: readonly { aggregate
 
 export type DispatchReplayTruthVerifier = { verifyPrimarySource(input: { allocationRevisionId: string; allocationIntegrityHash: string; expectedSourceIntegrityHash: string; pricingVersionIds: readonly string[]; pricedEventIntegrityHashes: readonly string[] }): Promise<boolean> };
 
-export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient, waybillId: string, truthVerifier?: DispatchReplayTruthVerifier) => {
+export const createPrismaDispatchReplayTruthVerifier = (prisma: PrismaClient): DispatchReplayTruthVerifier => ({
+  verifyPrimarySource: async input => {
+    const revision = await prisma.logisticsAllocationRevision.findUnique({ where: { id: input.allocationRevisionId }, include: {
+      pricingReferences: { include: { pricingVersion: { include: { rows: { orderBy: { ordinal: 'asc' } } } } } }, pricedAllocationEvents: true,
+      candidate: { include: { waybills: { include: { documentArtifacts: true } } } },
+    } });
+    if (!revision || revision.integrityHash !== input.allocationIntegrityHash) return false;
+    const versionIds = revision.pricingReferences.map(item => item.pricingVersionId).sort(); const eventHashes = revision.pricedAllocationEvents.map(item => item.integrityHash).sort();
+    if (JSON.stringify(versionIds) !== JSON.stringify([...input.pricingVersionIds].sort()) || JSON.stringify(eventHashes) !== JSON.stringify([...input.pricedEventIntegrityHashes].sort())) return false;
+    for (const reference of revision.pricingReferences) {
+      const version = reference.pricingVersion;
+      if (reference.expectedPricingHash !== version.integrityHash || approvedPricingVersionIntegrityHash({ id: version.id, contractId: version.contractId,
+        versionNumber: version.versionNumber, sourceFinancialRecordId: version.sourceFinancialRecordId, approvedAt: version.approvedAt, approvedBy: version.approvedBy,
+        schemaVersion: version.schemaVersion, currency: version.currency, grossAmount: version.grossAmount.toFixed(12), discountAmount: version.discountAmount.toFixed(12),
+        netAmount: version.netAmount.toFixed(12), sourceEvidence: version.sourceEvidence as Record<string, unknown>, rowHashes: version.rows.map(row => row.integrityHash) }) !== version.integrityHash) return false;
+    }
+    for (const event of revision.pricedAllocationEvents) if (pricedAllocationIntegrityHash({ allocationRevisionId: event.allocationRevisionId,
+      allocationRevisionLineId: event.allocationRevisionLineId, pricingVersionId: event.pricingVersionId, pricingRowId: event.pricingRowId,
+      quantity: event.quantity.toFixed(3), grossAmount: event.grossAmount.toFixed(12), discountAmount: event.discountAmount.toFixed(12), netAmount: event.netAmount.toFixed(12),
+      consumesFinalRemainder: event.consumesFinalRemainder, evidence: event.evidence, recordedBy: event.recordedBy }) !== event.integrityHash) return false;
+    return Boolean(revision.candidate?.waybills.some(waybill => {
+      const provenance = (waybill.snapshot as Record<string, any>)?.documentProvenance as Record<string, any> | undefined;
+      const primary = waybill.documentArtifacts.filter(artifact => !artifact.statementAdjustmentId && (artifact.kind === 'WAYBILL' || artifact.kind === 'STATEMENT'));
+      return provenance?.sourceIntegrityHash === input.expectedSourceIntegrityHash && provenance?.allocationRevisionId === revision.id
+        && provenance?.allocationIntegrityHash === revision.integrityHash && primary.length === 2
+        && primary.every(artifact => artifact.sourceIntegrityHash === input.expectedSourceIntegrityHash);
+    }));
+  },
+});
+
+export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient, waybillId: string, truthVerifier: DispatchReplayTruthVerifier) => {
   const waybill = await prisma.accountingDispatchWaybill.findUnique({ where: { id: waybillId }, include: {
     candidate: { include: { allocationRevision: { include: {
       lines: true,
@@ -261,15 +291,9 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
   if (!primarySourceHash || primaryArtifacts.length !== 2 || primaryArtifacts.some(artifact => artifact.sourceIntegrityHash !== primarySourceHash)) {
     issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: waybill.id, detail: 'Retained primary artifacts do not bind the immutable waybill document-provenance snapshot.' });
   }
-  if (primarySourceHash && truthVerifier && !await truthVerifier.verifyPrimarySource({ allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash,
+  if (primarySourceHash && !await truthVerifier.verifyPrimarySource({ allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash,
     expectedSourceIntegrityHash: primarySourceHash, pricingVersionIds: revision.pricingReferences.map(item => item.pricingVersionId).sort(),
     pricedEventIntegrityHashes: revision.pricedAllocationEvents.map(item => item.integrityHash).sort() })) issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: waybill.id, detail: 'Writer-owned primary source verifier rejected the immutable pricing/allocation snapshot.' });
-  if (primarySourceHash && !truthVerifier) {
-    const identities = provenance?.sourceVersionIdentities as Record<string, unknown> | undefined; const pricingVersions = Array.isArray(provenance?.pricingVersions) ? provenance.pricingVersions : [];
-    if (provenance?.allocationRevisionId !== revision.id || provenance?.allocationIntegrityHash !== revision.integrityHash
-      || revision.pricingReferences.some(reference => !pricingVersions.some((item: any) => item?.pricingVersionId === reference.pricingVersionId && item?.integrityHash === reference.pricingVersion.integrityHash)
-        || !identities || !Object.values(identities).includes(reference.pricingVersionId))) issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: waybill.id, detail: 'Immutable document provenance does not map every bound pricing version and allocation hash.' });
-  }
   const currencyByVersion = new Map(revision.pricingReferences.map(reference => [reference.pricingVersionId, reference.pricingVersion.currency]));
   const pricedMoney = new Map<string, { gross: Prisma.Decimal; discount: Prisma.Decimal; net: Prisma.Decimal }>();
   for (const event of revision.pricedAllocationEvents) {
@@ -350,7 +374,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     reportHash: dispatchRecoveryIntegrityHash({ waybillId, expectedAggregates, auditHashes: audits.map(item => item.eventHash), issues }) };
 };
 
-export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, filesystem = createDispatchDocumentFilesystem(), truthVerifier?: DispatchReplayTruthVerifier) => {
+export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, filesystem: ReturnType<typeof createDispatchDocumentFilesystem>, truthVerifier: DispatchReplayTruthVerifier) => {
   const audit = durableAudit(prisma);
   const repository = {
     isReferenced: async (storageKey: string) => Boolean(await prisma.dispatchDocumentArtifact.findUnique({ where: { storageKey }, select: { id: true } })),

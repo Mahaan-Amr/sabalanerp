@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { createDispatchDocumentRecoveryOperations, type DispatchRecoveryAuthority } from '../src/services/dispatchDocumentAuditRecovery';
+import { createDispatchDocumentFilesystem, createDispatchDocumentRecoveryOperations, createPrismaDispatchReplayTruthVerifier, type DispatchRecoveryAuthority } from '../src/services/dispatchDocumentAuditRecovery';
 
 const args = new Map<string, string>();
 for (let index = 2; index < process.argv.length; index += 2) {
@@ -22,7 +22,7 @@ try {
   const actor = await prisma.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
   if (!actor?.isActive || actor.role !== 'ADMIN') throw new Error('An active ADMIN operator is required for dispatch-document recovery mutation.');
   if (command === 'restore' && !process.env.DISPATCH_RECOVERY_PASSPHRASE) throw new Error('DISPATCH_RECOVERY_PASSPHRASE is required and must not be passed on the command line.');
-  const operations = createDispatchDocumentRecoveryOperations(prisma);
+  const operations = createDispatchDocumentRecoveryOperations(prisma, createDispatchDocumentFilesystem(), createPrismaDispatchReplayTruthVerifier(prisma));
   const result = command === 'replay' ? await operations.replay({ ...common, waybillId: required('waybill-id') })
     : command === 'reconcile' ? await operations.reconcile(common)
       : command === 'quarantine' ? await operations.quarantine({ ...common, storageKey: required('storage-key'), reason: required('reason') })

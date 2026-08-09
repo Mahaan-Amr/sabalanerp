@@ -20,10 +20,13 @@ import {
   validateDispatchLifecycleConservation,
   parsePersistedOrphanEvidence,
   verifyProductionDispatchAuditChains,
+  createPrismaDispatchReplayTruthVerifier,
 } from '../dispatchDocumentAuditRecovery';
 import { recoveryEngineInternals } from '../systemRecoveryEngine';
 import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
 import { guardPhysicalExitAuditIntegrityHash, guardPhysicalExitIntegrityHash } from '../physicalGateExit';
+import { approvedPricingVersionIntegrityHash } from '../approvedPricing/domain';
+import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>)
@@ -149,6 +152,27 @@ test('production replay uses writer-owned Guard and correction hash formats', ()
   ]), []);
 });
 
+test('mandatory Prisma truth verifier accepts only immutable writer-owned pricing/event/provenance sources', async () => {
+  const versionBase = { id: 'pricing-1', contractId: 'contract-1', versionNumber: 1, sourceFinancialRecordId: 'financial-1',
+    approvedAt: new Date('2026-08-09T07:00:00.000Z'), approvedBy: 'finance-1', schemaVersion: 1, currency: 'TOMAN',
+    grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000', sourceEvidence: { source: 'approved' }, rowHashes: ['a'.repeat(64)] };
+  const version = { ...versionBase, grossAmount: { toFixed: () => versionBase.grossAmount }, discountAmount: { toFixed: () => versionBase.discountAmount }, netAmount: { toFixed: () => versionBase.netAmount },
+    rows: [{ ordinal: 1, integrityHash: 'a'.repeat(64) }], integrityHash: approvedPricingVersionIntegrityHash(versionBase) };
+  const eventPayload = { allocationRevisionId: 'revision-1', allocationRevisionLineId: 'line-1', pricingVersionId: version.id, pricingRowId: 'pricing-row-1',
+    quantity: '2.000', grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000', consumesFinalRemainder: true,
+    evidence: { ledgerSequence: 1 }, recordedBy: 'logistics-1' };
+  const decimal = (value: string) => ({ toFixed: () => value });
+  const event = { ...eventPayload, quantity: decimal(eventPayload.quantity), grossAmount: decimal(eventPayload.grossAmount), discountAmount: decimal(eventPayload.discountAmount), netAmount: decimal(eventPayload.netAmount), integrityHash: pricedAllocationIntegrityHash(eventPayload) };
+  const sourceHash = 'b'.repeat(64);
+  const revision = { id: 'revision-1', integrityHash: 'c'.repeat(64), pricingReferences: [{ pricingVersionId: version.id, expectedPricingHash: version.integrityHash, pricingVersion: version }],
+    pricedAllocationEvents: [event], candidate: { waybills: [{ snapshot: { documentProvenance: { sourceIntegrityHash: sourceHash, allocationRevisionId: 'revision-1', allocationIntegrityHash: 'c'.repeat(64) } },
+      documentArtifacts: [{ kind: 'WAYBILL', statementAdjustmentId: null, sourceIntegrityHash: sourceHash }, { kind: 'STATEMENT', statementAdjustmentId: null, sourceIntegrityHash: sourceHash }] }] } };
+  const verifier = createPrismaDispatchReplayTruthVerifier({ logisticsAllocationRevision: { findUnique: async () => revision } } as never);
+  const input = { allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash, expectedSourceIntegrityHash: sourceHash, pricingVersionIds: [version.id], pricedEventIntegrityHashes: [event.integrityHash] };
+  assert.equal(await verifier.verifyPrimarySource(input), true);
+  assert.equal(await verifier.verifyPrimarySource({ ...input, pricedEventIntegrityHashes: ['0'.repeat(64)] }), false);
+});
+
 const artifact = (id: string, storageKey: string, bytes: Buffer): DispatchArtifactMetadata => ({
   id, waybillId: 'waybill-1', storageKey, byteLength: bytes.length,
   sha256: createHash('sha256').update(bytes).digest('hex'), sourceIntegrityHash: 'a'.repeat(64),
@@ -219,6 +243,33 @@ test('restore accepts only original verified bytes and records failures without 
   });
   assert.equal(failedAudit.status, 'UNRESOLVED_INCIDENT');
   assert.equal(compensated[0]?.toString(), 'previous-corrupt');
+
+  for (const failurePhase of ['marker', 'finalize'] as const) {
+    let reads = 0; let rollbackCalled = false; const phaseAudits: DispatchArtifactAuditEvent[] = [];
+    const completed = await restoreDispatchDocumentArtifact({
+      actorId: 'support-1', reason: 'restore drill', correlationId: `restore-${failurePhase}`, idempotencyKey: `restore-${failurePhase}`, metadata, authority,
+      encryptedBackup: { readOriginal: async () => ({ bytes: original, recoveryPackageId: 'backup-cleanup', encrypted: true }) },
+      storage: { recoverInterruptedWrite: async () => {}, stageOriginal: async () => {}, commitStagedOriginal: async () => {},
+        markStagedOriginalCompleted: async () => { if (failurePhase === 'marker') throw new Error('marker cleanup failed'); },
+        finalizeStagedOriginal: async () => { if (failurePhase === 'finalize') throw new Error('finalize cleanup failed'); },
+        read: async () => ++reads === 1 ? Buffer.from('previous-corrupt') : original, restorePrevious: async () => { rollbackCalled = true; } },
+      audit: { append: async event => { phaseAudits.push(event); } },
+    });
+    assert.equal(completed.status, 'RESTORED');
+    assert.equal(rollbackCalled, false);
+    assert.equal(phaseAudits.at(-1)?.action, 'INCIDENT_RECORDED');
+    assert.equal(phaseAudits.at(-1)?.detail.code, 'RESTORATION_COMPLETED_CLEANUP_PENDING');
+  }
+  let ambiguousReads = 0; let ambiguousRollback = false; let ambiguousAuditCalls = 0;
+  const ambiguous = await restoreDispatchDocumentArtifact({
+    actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-ambiguous', idempotencyKey: 'restore-ambiguous', metadata, authority,
+    encryptedBackup: { readOriginal: async () => ({ bytes: original, recoveryPackageId: 'backup-ambiguous', encrypted: true }) },
+    storage: { recoverInterruptedWrite: async () => {}, stageOriginal: async () => {}, commitStagedOriginal: async () => {}, markStagedOriginalCompleted: async () => {}, finalizeStagedOriginal: async () => {},
+      read: async () => ++ambiguousReads === 1 ? Buffer.from('previous-corrupt') : original, restorePrevious: async () => { ambiguousRollback = true; } },
+    audit: { append: async () => { ambiguousAuditCalls += 1; if (ambiguousAuditCalls === 2) throw new Error('connection lost after commit'); }, hasCompletedRestoration: async () => true },
+  });
+  assert.equal(ambiguous.status, 'RESTORED');
+  assert.equal(ambiguousRollback, false);
 });
 
 test('orphan quarantine rechecks references and cleanup waits for the safety window', async () => {

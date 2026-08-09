@@ -85,6 +85,7 @@ router.post('/allocation-revisions/:id/successor', canEdit, canFinalizeLoadings,
     const batch = await createSuccessorAllocationRevision(prisma, {
       predecessorRevisionId: req.params.id, lines: Array.isArray(req.body.lines) ? req.body.lines : [],
       idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user.id,
+      effectiveAuthority: { actorRole: req.user.role, workspace: 'logistics', workspacePermission: String((req as any).workspacePermission || 'MANAGE') },
     });
     return res.status(201).json({ success: true, data: batch });
   } catch (error) {
@@ -1102,7 +1103,8 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
     const canonicalDraftCount = await prisma.logisticsAllocationDraft.count({ where: { loadingId: req.params.id } });
     if (canonicalDraftCount > 0) {
       const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim();
-      const batch = await finalizeCanonicalLoadingAllocations(prisma, { loadingId: req.params.id, idempotencyKey, actorId: req.user.id });
+      const batch = await finalizeCanonicalLoadingAllocations(prisma, { loadingId: req.params.id, idempotencyKey, actorId: req.user.id,
+        effectiveAuthority: { actorRole: req.user.role, workspace: 'logistics', workspacePermission: String((req as any).workspacePermission || 'MANAGE') } });
       return res.json({ success: true, data: batch });
     }
     const loading = await loadLoading(req.params.id);

@@ -88,6 +88,7 @@ type ListContractsQuery = {
 type AccountingActionRequest = {
   kind: string;
   idempotencyKey?: string;
+  correlationId?: string;
   contractId?: string;
   recordId?: string;
   invoiceId?: string;
@@ -1262,6 +1263,9 @@ const createReplacementInvoiceCandidate = async (command: AccountingActionReques
 const approveFinancialInvoice = async (command: AccountingActionRequest, actor: Actor, notificationHook?: AccountingActionNotificationHook) => {
   const invoiceId = command.invoiceId || command.recordId;
   if (!invoiceId) throw new Error('invoiceId is required');
+  const approvalIdempotencyKey = String(command.idempotencyKey || '').trim();
+  const approvalCorrelationId = String(command.correlationId || '').trim();
+  if (!approvalIdempotencyKey || !approvalCorrelationId) throw new Error('Financial approval idempotency and correlation identities are required');
 
   const systemInvoiceNumber = normalizeDigits(command.systemInvoiceNumber || '').trim();
   if (!systemInvoiceNumber) throw new Error('System invoice number is required');
@@ -1340,7 +1344,11 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       }
     });
 
-    await sealApprovedPricingAtFinancialApproval(tx, updated.id);
+    await sealApprovedPricingAtFinancialApproval(tx, updated.id, {
+      reason: String(command.note || 'Financial invoice approval').trim(), correlationId: approvalCorrelationId,
+      idempotencyKey: approvalIdempotencyKey,
+      effectiveAuthority: { actorRole: actor.role, workspace: 'accounting', workspacePermission: 'MANAGE' },
+    });
 
     if (updated.contractId) {
       await captureContractQuantityVersionAtFinancialApproval(tx, {

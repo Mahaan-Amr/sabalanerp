@@ -13,8 +13,18 @@ import type {
   ApprovedPricingVersionInsert,
   ApprovedPricingVersionRecord,
 } from './types';
+import { createHash } from 'node:crypto';
 
 const pricingVersionInclude = { rows: { orderBy: { ordinal: 'asc' as const } } };
+const stableAudit = (value: unknown): unknown => Array.isArray(value) ? value.map(stableAudit)
+  : value instanceof Date ? value.toISOString()
+    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, stableAudit(item)])) : value;
+export const approvedPricingLifecycleAuditHash = (input: { aggregateType: 'APPROVED_PRICING_VERSION'; aggregateId: string;
+  eventType: 'APPROVED_PRICING_VERSION_CREATED'; payload: unknown; actorId: string; recordedAt: Date; previousHash: string | null }) =>
+  createHash('sha256').update(JSON.stringify(stableAudit(input))).digest('hex');
+export type ApprovedPricingAuditContext = { reason: string; correlationId: string; idempotencyKey: string;
+  effectiveAuthority: { actorRole: string; workspace: string; workspacePermission: string } };
 
 type PersistedVersion = Prisma.ContractApprovedPricingVersionGetPayload<{ include: typeof pricingVersionInclude }>;
 
@@ -80,7 +90,7 @@ const mapVersion = (version: PersistedVersion): ApprovedPricingVersionRecord => 
 });
 
 export class PrismaApprovedPricingRepository implements ApprovedPricingRepository {
-  constructor(private readonly tx: Prisma.TransactionClient) {}
+  constructor(private readonly tx: Prisma.TransactionClient, private readonly auditContext?: ApprovedPricingAuditContext) {}
 
   async readApprovalLeaf(financialRecordId: string) {
     const leaf = await this.tx.accountingFinancialRecord.findUnique({
@@ -198,6 +208,7 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
   }
 
   async insertAndAdvance(version: ApprovedPricingVersionInsert) {
+    const previousHead = await this.tx.contractApprovedPricingHead.findUnique({ where: { contractId: version.contractId }, select: { currentVersionId: true } });
     const created = await this.tx.contractApprovedPricingVersion.create({
       data: {
         id: version.id,
@@ -245,6 +256,18 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
         advancedBy: version.approvedBy,
       },
     });
+    if (this.auditContext) {
+      const payload = stableAudit({ workspace: 'accounting', effectiveAuthority: this.auditContext.effectiveAuthority,
+        reason: this.auditContext.reason, correlationId: this.auditContext.correlationId, idempotencyKey: this.auditContext.idempotencyKey,
+        before: { currentVersionId: previousHead?.currentVersionId ?? null }, after: { currentVersionId: version.id },
+        sourceFinancialRecordId: version.sourceFinancialRecordId, contractId: version.contractId,
+        versionIntegrityHash: version.integrityHash, rowIntegrityHashes: version.rows.map(row => row.integrityHash) });
+      const audit = { aggregateType: 'APPROVED_PRICING_VERSION' as const, aggregateId: version.id,
+        eventType: 'APPROVED_PRICING_VERSION_CREATED' as const, payload, actorId: version.approvedBy,
+        recordedAt: version.approvedAt, previousHash: null };
+      await this.tx.dispatchLifecycleAudit.create({ data: { ...audit, payload: payload as Prisma.InputJsonValue,
+        eventHash: approvedPricingLifecycleAuditHash(audit) } });
+    }
     return mapVersion(created);
   }
 }

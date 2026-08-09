@@ -100,3 +100,19 @@ test('two restore critical sections serialize on the canonical storage-key lock'
     assert.deepEqual(order, ['first', 'second']);
   } finally { releaseFirst?.(); await Promise.all([first.$disconnect(), second.$disconnect()]); }
 });
+
+test('cleanup and artifact publication cannot cross the canonical storage-key lock', {
+  skip: databaseUrl ? false : 'DATABASE_URL is required for Prisma integration coverage',
+}, async () => {
+  const cleanup = new PrismaClient(); const publication = new PrismaClient(); const storageKey = `dispatch-documents/cleanup-lock-${Date.now()}.pdf`;
+  let releaseCleanup!: () => void; const release = new Promise<void>(resolve => { releaseCleanup = resolve; });
+  let cleanupLocked!: () => void; const locked = new Promise<void>(resolve => { cleanupLocked = resolve; });
+  let publicationAcquired = false;
+  try {
+    const cleaning = cleanup.$transaction(async tx => { await acquireDispatchArtifactStorageKeyLocks(tx, [storageKey]); cleanupLocked(); await release; });
+    await locked;
+    const publishing = publication.$transaction(async tx => { await acquireDispatchArtifactStorageKeyLocks(tx, [storageKey]); publicationAcquired = true; });
+    await new Promise(resolve => setTimeout(resolve, 75)); assert.equal(publicationAcquired, false);
+    releaseCleanup(); await Promise.all([cleaning, publishing]); assert.equal(publicationAcquired, true);
+  } finally { releaseCleanup?.(); await Promise.all([cleanup.$disconnect(), publication.$disconnect()]); }
+});

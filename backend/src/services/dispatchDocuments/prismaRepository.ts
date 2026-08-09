@@ -316,6 +316,9 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
         correlationId: input.correlationId, completedAt: at } });
       await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: predecessor.id, eventType: 'DOCUMENT_BUNDLE_REPLACED',
         payload: { replacementWaybillId: replacement.id, reason: input.reason, authority: input.authority,
+          predecessorWaybillIntegrityHash: predecessor.integrityHash, replacementWaybillIntegrityHash: replacement.integrityHash,
+          primaryArtifactIds: input.artifacts.map(artifact => artifact.id), primarySourceHash: input.expectedSourceIntegrityHash,
+          before: { predecessorStatus: 'ISSUED', successorId: null }, after: { predecessorStatus: 'VOIDED', successorId: replacement.id },
           correlationId: input.correlationId, idempotencyKey: input.idempotencyKey }, actorId: input.actorId, at });
       return result;
     });

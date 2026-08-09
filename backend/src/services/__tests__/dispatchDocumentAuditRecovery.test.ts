@@ -30,6 +30,8 @@ import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } 
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 import { dispatchDocumentLifecycleAuditEventHash } from '../dispatchDocuments/prismaRepository';
 import { dispatchDocumentSourceIntegrityHash } from '../dispatchDocuments/prismaSourceReader';
+import { approvedPricingLifecycleAuditHash } from '../approvedPricing/prismaRepository';
+import { dispatchAllocationLifecycleAuditHash } from '../dispatchAllocation';
 
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>)
@@ -153,7 +155,15 @@ test('production replay uses writer-owned Guard and correction hash formats', ()
     payload: { candidateId: 'candidate-1', allocationRevisionId: 'revision-1', artifactIds: ['waybill-pdf', 'statement-pdf'], sourceIntegrityHash: 'f'.repeat(64), idempotencyKey: 'issue-1', correlationId: 'correlation-1' },
     actorId: 'accounting-1', at: new Date('2026-08-09T08:00:00.000Z'), previousHash: null };
   const issuanceHash = dispatchDocumentLifecycleAuditEventHash(issuance);
+  const pricingAudit = { aggregateType: 'APPROVED_PRICING_VERSION' as const, aggregateId: 'pricing-1', eventType: 'APPROVED_PRICING_VERSION_CREATED' as const,
+    payload: { reason: 'Financial approval', correlationId: 'approval-correlation', idempotencyKey: 'approval-1', effectiveAuthority: { workspace: 'accounting' }, before: { currentVersionId: null }, after: { currentVersionId: 'pricing-1' } },
+    actorId: 'finance-1', recordedAt: new Date('2026-08-09T07:00:00.000Z'), previousHash: null };
+  const pricedAudit = { aggregateType: 'PRICED_ALLOCATION_EVENT', aggregateId: 'priced-event-1', eventType: 'PRICED_ALLOCATION_RECORDED',
+    payload: { reason: 'Finalized allocation pricing', correlationId: 'revision-1:finalize-1', idempotencyKey: 'finalize-1', effectiveAuthority: { workspace: 'logistics' }, before: { state: 'UNPRICED' }, after: { state: 'PRICED' } },
+    actorId: 'logistics-1', recordedAt: new Date('2026-08-09T07:30:00.000Z'), previousHash: null };
   assert.deepEqual(verifyProductionDispatchAuditChains([
+    { ...pricingAudit, eventHash: approvedPricingLifecycleAuditHash(pricingAudit) },
+    { ...pricedAudit, eventHash: dispatchAllocationLifecycleAuditHash(pricedAudit) },
     { ...issuance, recordedAt: issuance.at, eventHash: issuanceHash },
     { aggregateType: 'DISPATCH_CORRECTION', aggregateId: 'correction-1', eventType: 'CORRECTION_POSTED', payload: correctionPayload, actorId: 'actor-1', recordedAt: new Date('2026-08-09T09:00:00.000Z'), previousHash: null, eventHash: correctionAudit },
     { aggregateType: 'GUARD_PHYSICAL_EXIT', aggregateId: 'exit-1', eventType: 'PHYSICAL_EXIT_RECORDED', payload: { ...exitSnapshot, integrityHash: guardPhysicalExitIntegrityHash(exitSnapshot) }, actorId: 'guard-1', recordedAt: new Date('2026-08-09T10:00:00.000Z'), previousHash: null, eventHash: exitAudit },
@@ -164,13 +174,18 @@ test('replacement replay follows the predecessor audit and does not require succ
   const at = new Date('2026-08-09T11:00:00.000Z');
   const command = { id: 'replace-command', scope: 'WAYBILL', scopeId: 'waybill-old', command: 'REPLACE', status: 'SUCCEEDED',
     waybillId: 'waybill-new', actorId: 'accounting-1', correlationId: 'replace-correlation', idempotencyKey: 'replace-1', completedAt: at };
+  const predecessor = { id: 'waybill-old', status: 'VOIDED', integrityHash: 'b'.repeat(64), voidedAt: at,
+    voidedBy: 'accounting-1', voidReason: 'Damaged print', replacementWaybillId: 'waybill-new' };
   const audit = { eventType: 'DOCUMENT_BUNDLE_REPLACED', actorId: 'accounting-1', recordedAt: at,
     payload: { replacementWaybillId: 'waybill-new', reason: 'Damaged print', authority: { workspace: 'accounting' },
+      predecessorWaybillIntegrityHash: predecessor.integrityHash, replacementWaybillIntegrityHash: 'c'.repeat(64),
+      primaryArtifactIds: ['new-waybill', 'new-statement'], primarySourceHash: 'a'.repeat(64),
+      before: { predecessorStatus: 'ISSUED', successorId: null }, after: { predecessorStatus: 'VOIDED', successorId: 'waybill-new' },
       correlationId: 'replace-correlation', idempotencyKey: 'replace-1' } };
-  assert.equal(validatePersistedDocumentTransition({ waybill: { id: 'waybill-new', candidateId: 'candidate-1', replacesWaybillId: 'waybill-old',
-    issuedAt: at, issuedBy: 'accounting-1' }, primarySourceHash: 'a'.repeat(64), primaryArtifactIds: ['new-waybill', 'new-statement'], command, audit }), null);
-  assert.equal(validatePersistedDocumentTransition({ waybill: { id: 'waybill-new', candidateId: 'candidate-1', replacesWaybillId: 'waybill-old',
-    issuedAt: at, issuedBy: 'accounting-1' }, primarySourceHash: 'a'.repeat(64), primaryArtifactIds: [], command: undefined, audit }), 'LEGACY_UNRECONCILED');
+  const waybill = { id: 'waybill-new', candidateId: 'candidate-1', integrityHash: 'c'.repeat(64), replacesWaybillId: 'waybill-old', issuedAt: at, issuedBy: 'accounting-1' };
+  assert.equal(validatePersistedDocumentTransition({ waybill, predecessor, primarySourceHash: 'a'.repeat(64),
+    primaryArtifactIds: ['new-waybill', 'new-statement'], command, audit }), null);
+  assert.equal(validatePersistedDocumentTransition({ waybill, predecessor, primarySourceHash: 'a'.repeat(64), primaryArtifactIds: [], command: undefined, audit }), 'LEGACY_UNRECONCILED');
 });
 
 test('mandatory Prisma truth verifier accepts only immutable writer-owned pricing/event/provenance sources', async () => {
@@ -453,6 +468,22 @@ test('production restore sidecars are isolated by run identity', async () => {
     await storage.recoverInterruptedWrite('issued/document.pdf', false, 'run-a');
     assert.ok((await fs.promises.readdir(path.dirname(destination))).some(name => name.includes('run-b-stage')));
     await storage.recoverInterruptedWrite('issued/document.pdf', false, 'run-b');
+  } finally { await fs.promises.rm(root, { recursive: true, force: true }); }
+});
+
+test('no-previous restore removes a destination swapped before the SWAPPED marker', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dispatch-pre-swap-crash-'));
+  const artifactRoot = path.join(root, 'artifacts'); const storage = createDispatchDocumentFilesystem({ artifactRoot });
+  try {
+    const storageKey = 'issued/new-document.pdf'; const destination = path.join(artifactRoot, storageKey);
+    await storage.stageOriginal(storageKey, Buffer.from('original'), 'crash-run');
+    const directory = path.dirname(destination); const name = path.basename(destination);
+    const staged = path.join(directory, `.${name}.sabalan-restore-crash-run-stage`);
+    const marker = path.join(directory, `.${name}.sabalan-restore-crash-run-marker`);
+    await fs.promises.writeFile(marker, JSON.stringify({ phase: 'PRE_SWAP', hadPrevious: false }));
+    await fs.promises.rename(staged, destination);
+    await storage.recoverInterruptedWrite(storageKey, false, 'crash-run');
+    assert.equal(await storage.read(storageKey), null);
   } finally { await fs.promises.rm(root, { recursive: true, force: true }); }
 });
 

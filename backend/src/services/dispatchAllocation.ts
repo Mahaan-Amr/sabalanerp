@@ -140,6 +140,8 @@ const bindRevisionPricing = async (tx: Tx, input: {
     throw error;
   }
 };
+export const dispatchAllocationLifecycleAuditHash = (input: { aggregateType: string; aggregateId: string; eventType: string;
+  payload: unknown; actorId: string; recordedAt: Date; previousHash: string | null }) => digest(input);
 
 type FinalizedAllocationRow = {
   sourceContractId: string; sourceContractItemId: string; productRowId: string; productId: string;
@@ -155,6 +157,8 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
   expectedCurrency: string;
   finalizedAt: Date;
   revisionEventType: string;
+  idempotencyKey: string;
+  effectiveAuthority: unknown;
   revisionAuditPayload: (result: { candidateId: string; snapshotHash: string; pricingBinding: Awaited<ReturnType<typeof bindRevisionPricing>> }) => unknown;
   afterRevisionCreated?: (revision: { id: string }) => Promise<void>;
 }) => {
@@ -192,6 +196,18 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
   const pricingBinding = await bindRevisionPricing(tx, { allocationRevisionId: revision.id,
     finalizedAt: input.finalizedAt, actorId: input.actorId, scope: input.scope,
     expectedCurrency: input.expectedCurrency, lines: pricedLines });
+  if (pricingBinding.path === 'ATOMIC_WAYBILL_STATEMENT') {
+    const events = await tx.dispatchPricedAllocationEvent.findMany({ where: { allocationRevisionId: revision.id },
+      orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
+    for (const event of events) await appendAudit(tx, { aggregateType: 'PRICED_ALLOCATION_EVENT', aggregateId: event.id,
+      eventType: 'PRICED_ALLOCATION_RECORDED', actorId: input.actorId, recordedAt: event.recordedAt,
+      payload: { workspace: 'logistics', effectiveAuthority: input.effectiveAuthority,
+        reason: 'Finalized allocation pricing', correlationId: `${revision.id}:${input.idempotencyKey}`,
+        idempotencyKey: input.idempotencyKey, before: { state: 'UNPRICED' }, after: { state: 'PRICED' },
+        allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash,
+        pricingVersionId: event.pricingVersionId, pricingRowId: event.pricingRowId,
+        pricedEventIntegrityHash: event.integrityHash } });
+  }
   await tx.logisticsAllocationRevision.update({ where: { id: revision.id }, data: { sealedAt: input.finalizedAt } });
   const candidate = await tx.accountingDispatchCandidate.create({ data: {
     allocationRevisionId: revision.id, createdAt: input.finalizedAt, workItem: { create: { createdAt: input.finalizedAt } },
@@ -221,7 +237,7 @@ const appendAudit = async (tx: Tx, input: {
     aggregateType: input.aggregateType, aggregateId: input.aggregateId, eventType: input.eventType,
     payload: payload as Prisma.InputJsonValue, actorId: input.actorId, recordedAt,
     previousHash: previous?.eventHash || null,
-    eventHash: digest({ aggregateType: input.aggregateType, aggregateId: input.aggregateId, eventType: input.eventType,
+    eventHash: dispatchAllocationLifecycleAuditHash({ aggregateType: input.aggregateType, aggregateId: input.aggregateId, eventType: input.eventType,
       payload, actorId: input.actorId, recordedAt, previousHash: previous?.eventHash || null }),
   } });
 };
@@ -330,7 +346,7 @@ export const refreshProjectionContracts = async (tx: Tx, contractIds: string[]) 
 };
 
 export const finalizeCanonicalLoadingAllocations = async (prisma: Database, input: {
-  loadingId: string; idempotencyKey: string; actorId: string;
+  loadingId: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
 }) => serializable(prisma, async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
@@ -435,6 +451,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
       rows: draft.lines, loadingLines, actorId: input.actorId, finalizedAt: now,
       scope: { customerId: loading.customer.id, projectId: loading.project.id, destination: loading.project.address },
       expectedCurrency: allocationCurrency, revisionEventType: 'ALLOCATION_FINALIZED',
+      idempotencyKey, effectiveAuthority: input.effectiveAuthority,
       revisionAuditPayload: ({ candidateId, snapshotHash, pricingBinding }) => ({ candidateId, snapshotHash,
         documentPath: pricingBinding.path, pricingVersionIds: pricingBinding.pricingVersionIds,
         pricedEventIntegrityHashes: pricingBinding.eventIntegrityHashes }),
@@ -456,7 +473,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
 });
 
 export const createSuccessorAllocationRevision = async (prisma: Database, input: {
-  predecessorRevisionId: string; lines: CanonicalAllocationLineInput[]; idempotencyKey: string; actorId: string;
+  predecessorRevisionId: string; lines: CanonicalAllocationLineInput[]; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
 }) => serializable(prisma, async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
@@ -578,6 +595,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
       revisionNumber, predecessorRevisionId: predecessor.id, snapshot: json(snapshot), integrityHash: digest(snapshot),
       finalizedAt: now, finalizedBy: input.actorId },
     rows, loadingLines, actorId: input.actorId, finalizedAt: now,
+    idempotencyKey, effectiveAuthority: input.effectiveAuthority,
     scope: { customerId: predecessor.loading.customer.id, projectId: predecessor.loading.project.id,
       destination: predecessor.loading.project.address }, expectedCurrency: currencies[0],
     revisionEventType: 'SUCCESSOR_ALLOCATION_FINALIZED',

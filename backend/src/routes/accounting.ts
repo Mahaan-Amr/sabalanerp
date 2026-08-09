@@ -700,7 +700,10 @@ router.post(
         });
       }
 
-      const result = await executeAccountingAction(req.body, {
+      const result = await executeAccountingAction({ ...req.body,
+        idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''),
+        correlationId: String(req.get('X-Correlation-ID') || req.body.correlationId || ''),
+      }, {
         userId: req.user!.id,
         role: req.user!.role
       }, async (tx, notification) => {

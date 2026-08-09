@@ -17,6 +17,7 @@ import {
   type DispatchEvidenceAudit,
   type DispatchRecoveryAuthority,
   createDispatchDocumentFilesystem,
+  validateDispatchLifecycleConservation,
 } from '../dispatchDocumentAuditRecovery';
 import { recoveryEngineInternals } from '../systemRecoveryEngine';
 
@@ -58,7 +59,7 @@ const completeChain = () => {
       aggregateId: item.id, eventType: `${item.kind}_RECORDED`, actorId: item.actorId,
       recordedAt: item.serverTime, reason: item.reason, correlationId: item.correlationId,
       idempotencyKey: item.idempotencyKey, sourceHash: item.integrityHash,
-      previousHash: index ? undefined : null,
+      previousHash: index ? undefined : null, authority,
     };
     const previousHash = index ? '' : null;
     return { ...body, previousHash, eventHash: '' };
@@ -111,6 +112,21 @@ test('replay distinguishes lifecycle-optional evidence and fails closed on quant
   assert.ok(failed.issues.some(item => item.code === 'MONEY_CONSERVATION_MISMATCH'));
 });
 
+test('state-aware production validator covers disposition, required lifecycle, document, and before-delta-after witnesses', () => {
+  const issues = validateDispatchLifecycleConservation({
+    candidate: { status: 'PENDING', dispositionAt: null, dispositionBy: null },
+    lifecycle: { requiresPrintHandoff: true, hasPrintHandoff: false, requiresGuardExit: true, hasGuardExit: false, requiredAdjustmentIds: ['adjustment-1'], actualAdjustmentIds: [] },
+    quantityWitnesses: [{ stage: 'ALLOCATION', rowId: 'row-1', unit: 'squareMeter', value: '2.000' }, { stage: 'PRICED', rowId: 'row-1', unit: 'squareMeter', value: '2.000' }],
+    moneyWitnesses: [{ stage: 'PRICED', currency: 'TOMAN', gross: '100.000000000000', discount: '10.000000000000', net: '90.000000000000' }],
+    adjustmentWitnesses: [{ id: 'adjustment-1', currency: 'TOMAN', before: '90.000000000000', delta: '5.000000000000', after: '94.000000000000' }],
+  });
+  assert.ok(issues.some(item => item.subjectId === 'CANDIDATE_DISPOSITION'));
+  assert.ok(issues.some(item => item.subjectId === 'PRINT_HANDOFF'));
+  assert.ok(issues.some(item => item.subjectId === 'GUARD_EXIT'));
+  assert.ok(issues.some(item => item.code === 'QUANTITY_CONSERVATION_MISMATCH'));
+  assert.ok(issues.some(item => item.code === 'MONEY_CONSERVATION_MISMATCH'));
+});
+
 const artifact = (id: string, storageKey: string, bytes: Buffer): DispatchArtifactMetadata => ({
   id, waybillId: 'waybill-1', storageKey, byteLength: bytes.length,
   sha256: createHash('sha256').update(bytes).digest('hex'), sourceIntegrityHash: 'a'.repeat(64),
@@ -136,6 +152,8 @@ test('reconciliation distinguishes healthy, missing, corrupt, and unreferenced s
   assert.deepEqual(report.orphans, [{ storageKey: 'staging/unreferenced.pdf', status: 'ORPHAN_CANDIDATE' }]);
   assert.equal(report.status, 'UNRESOLVED_INCIDENT');
   assert.deepEqual(audits.map(item => item.action), ['RECONCILIATION_COMPLETED', 'INCIDENT_RECORDED', 'INCIDENT_RECORDED', 'INCIDENT_RECORDED']);
+  assert.equal(audits[0].detail.reportHash, report.reportHash);
+  assert.deepEqual(audits[0].detail.orphans, report.orphans);
 });
 
 test('restore accepts only original verified bytes and records failures without changing metadata', async () => {
@@ -146,7 +164,7 @@ test('restore accepts only original verified bytes and records failures without 
   const restored = await restoreDispatchDocumentArtifact({
     actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-1', idempotencyKey: 'restore-command-1', metadata, authority,
     encryptedBackup: { readOriginal: async () => ({ bytes: original, recoveryPackageId: 'backup-1', encrypted: true }) },
-    storage: { writeOriginal: async (_key, bytes) => { writes.push(bytes); }, read: async () => original, restorePrevious: async () => {} },
+    storage: { recoverInterruptedWrite: async () => {}, stageOriginal: async (_key, bytes) => { writes.push(bytes); }, commitStagedOriginal: async () => {}, finalizeStagedOriginal: async () => {}, read: async () => original, restorePrevious: async () => {} },
     audit: { append: async event => { audits.push(event); } },
   });
   assert.equal(restored.status, 'RESTORED');
@@ -157,7 +175,7 @@ test('restore accepts only original verified bytes and records failures without 
   const rejected = await restoreDispatchDocumentArtifact({
     actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-2', idempotencyKey: 'restore-command-2', metadata, authority,
     encryptedBackup: { readOriginal: async () => ({ bytes: Buffer.from('regenerated-or-corrupt'), recoveryPackageId: 'backup-2', encrypted: true }) },
-    storage: { writeOriginal: async (_key, bytes) => { rejectedWrites.push(bytes); }, read: async () => null, restorePrevious: async () => {} },
+    storage: { recoverInterruptedWrite: async () => {}, stageOriginal: async (_key, bytes) => { rejectedWrites.push(bytes); }, commitStagedOriginal: async () => {}, finalizeStagedOriginal: async () => {}, read: async () => null, restorePrevious: async () => {} },
     audit: { append: async event => { audits.push(event); } },
   });
   assert.equal(rejected.status, 'UNRESOLVED_INCIDENT');
@@ -168,7 +186,7 @@ test('restore accepts only original verified bytes and records failures without 
   const failedAudit = await restoreDispatchDocumentArtifact({
     actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-3', idempotencyKey: 'restore-command-3', metadata, authority,
     encryptedBackup: { readOriginal: async () => ({ bytes: original, recoveryPackageId: 'backup-3', encrypted: true }) },
-    storage: { writeOriginal: async () => {}, read: async () => ++readCount === 1 ? Buffer.from('previous-corrupt') : original, restorePrevious: async (_key, bytes) => { compensated.push(bytes); } },
+    storage: { recoverInterruptedWrite: async () => {}, stageOriginal: async () => {}, commitStagedOriginal: async () => {}, finalizeStagedOriginal: async () => {}, read: async () => ++readCount === 1 ? Buffer.from('previous-corrupt') : original, restorePrevious: async (_key, bytes) => { compensated.push(bytes); } },
     audit: { append: async () => { auditCount += 1; if (auditCount === 2) throw new Error('completion audit unavailable'); } },
   });
   assert.equal(failedAudit.status, 'UNRESOLVED_INCIDENT');
@@ -180,16 +198,20 @@ test('orphan quarantine rechecks references and cleanup waits for the safety win
   const audit: DispatchArtifactAuditEvent[] = [];
   await assert.rejects(quarantineDispatchDocumentOrphan({
     storageKey: 'staging/file.pdf', actorId: 'support-1', reason: 'candidate', correlationId: 'q-1', idempotencyKey: 'q-command-1', authority,
-    reconciliationReportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z',
-    repository: { isReferenced: async () => true }, storage: { quarantine: async () => { actions.push('quarantine'); }, restoreQuarantined: async () => {} },
+    repository: { isReferenced: async () => true, readPersistedOrphanEvidence: async () => ({ reportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z' }) }, storage: { quarantine: async () => { actions.push('quarantine'); }, restoreQuarantined: async () => {} },
     audit: { append: async event => { audit.push(event); } },
   }), /referenced/);
   assert.equal(actions.length, 0);
 
+  await assert.rejects(quarantineDispatchDocumentOrphan({
+    storageKey: 'staging/not-in-report.pdf', actorId: 'support-1', reason: 'candidate', correlationId: 'q-unknown', idempotencyKey: 'q-command-unknown', authority,
+    repository: { isReferenced: async () => false, readPersistedOrphanEvidence: async () => null },
+    storage: { quarantine: async () => { actions.push('quarantine'); }, restoreQuarantined: async () => {} }, audit: { append: async event => { audit.push(event); } },
+  }), /does not prove/);
+
   const quarantined = await quarantineDispatchDocumentOrphan({
     storageKey: 'staging/file.pdf', actorId: 'support-1', reason: 'confirmed orphan', correlationId: 'q-2', idempotencyKey: 'q-command-2', authority,
-    reconciliationReportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z',
-    repository: { isReferenced: async () => false }, storage: { quarantine: async () => { actions.push('quarantine'); }, restoreQuarantined: async () => {} },
+    repository: { isReferenced: async () => false, readPersistedOrphanEvidence: async () => ({ reportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z' }) }, storage: { quarantine: async () => { actions.push('quarantine'); }, restoreQuarantined: async () => {} },
     audit: { append: async event => { audit.push(event); } },
   });
   assert.equal(quarantined.status, 'QUARANTINED');
@@ -211,7 +233,7 @@ test('quarantine and cleanup compensate filesystem mutations when durable comple
   let appendCount = 0;
   await assert.rejects(quarantineDispatchDocumentOrphan({
     storageKey: 'staging/fail.pdf', actorId: 'support-1', reason: 'confirmed orphan', correlationId: 'q-fail', idempotencyKey: 'q-fail', authority,
-    reconciliationReportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z', repository: { isReferenced: async () => false },
+    repository: { isReferenced: async () => false, readPersistedOrphanEvidence: async () => ({ reportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z' }) },
     storage: { quarantine: async () => { movements.push('quarantine'); }, restoreQuarantined: async () => { movements.push('restore'); } },
     audit: { append: async () => { appendCount += 1; if (appendCount === 2) throw new Error('audit unavailable'); } },
   }), /audit unavailable/);
@@ -225,6 +247,18 @@ test('quarantine and cleanup compensate filesystem mutations when durable comple
     audit: { append: async () => { appendCount += 1; if (appendCount === 2) throw new Error('audit unavailable'); } },
   }), /audit unavailable/);
   assert.deepEqual(movements, ['stage', 'restore']);
+});
+
+test('compensation failure still records a terminal unresolved incident', async () => {
+  const events: DispatchArtifactAuditEvent[] = []; let calls = 0;
+  await assert.rejects(quarantineDispatchDocumentOrphan({
+    storageKey: 'staging/compensation-fails.pdf', actorId: 'support-1', reason: 'confirmed orphan', correlationId: 'q-compensation', idempotencyKey: 'q-compensation', authority,
+    repository: { isReferenced: async () => false, readPersistedOrphanEvidence: async () => ({ reportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z' }) },
+    storage: { quarantine: async () => {}, restoreQuarantined: async () => { throw new Error('restore failed'); } },
+    audit: { append: async event => { calls += 1; if (calls === 2) throw new Error('completion audit failed'); events.push(event); } },
+  }), /completion audit failed/);
+  assert.equal(events.at(-1)?.action, 'INCIDENT_RECORDED');
+  assert.equal(events.at(-1)?.detail.code, 'QUARANTINE_AUDIT_AND_COMPENSATION_FAILED');
 });
 
 test('Accounting recovery audit query is scoped, filtered, and paginated', async () => {
@@ -266,6 +300,20 @@ test('production filesystem adapter performs reversible quarantine and staged cl
     await storage.quarantine('staging/orphan.pdf'); await storage.stageCleanup('staging/orphan.pdf'); await storage.finalizeCleanup('staging/orphan.pdf');
     assert.equal(fs.existsSync(path.join(cleanupStagingRoot, 'staging', 'orphan.pdf')), false);
     await assert.rejects(storage.read('../outside.pdf'), /unsafe/);
+  } finally { await fs.promises.rm(root, { recursive: true, force: true }); }
+});
+
+test('production restore stages and fsyncs bytes, atomically swaps, and recovers interrupted completion', async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dispatch-atomic-restore-'));
+  const artifactRoot = path.join(root, 'artifacts'); const storage = createDispatchDocumentFilesystem({ artifactRoot });
+  try {
+    const destination = path.join(artifactRoot, 'issued', 'document.pdf'); await fs.promises.mkdir(path.dirname(destination), { recursive: true }); await fs.promises.writeFile(destination, 'corrupt');
+    await storage.stageOriginal('issued/document.pdf', Buffer.from('original')); await storage.commitStagedOriginal('issued/document.pdf');
+    assert.equal((await storage.read('issued/document.pdf'))?.toString(), 'original');
+    await storage.recoverInterruptedWrite('issued/document.pdf');
+    assert.equal((await storage.read('issued/document.pdf'))?.toString(), 'corrupt');
+    await storage.stageOriginal('issued/document.pdf', Buffer.from('original')); await storage.commitStagedOriginal('issued/document.pdf'); await storage.finalizeStagedOriginal('issued/document.pdf');
+    assert.equal((await storage.read('issued/document.pdf'))?.toString(), 'original');
   } finally { await fs.promises.rm(root, { recursive: true, force: true }); }
 });
 

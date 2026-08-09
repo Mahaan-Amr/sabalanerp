@@ -25,7 +25,7 @@ try {
   const operations = createDispatchDocumentRecoveryOperations(prisma);
   const result = command === 'replay' ? await operations.replay({ ...common, waybillId: required('waybill-id') })
     : command === 'reconcile' ? await operations.reconcile(common)
-      : command === 'quarantine' ? await operations.quarantine({ ...common, storageKey: required('storage-key'), reason: required('reason'), reconciliationReportHash: required('report-hash'), observedAt: required('observed-at') })
+      : command === 'quarantine' ? await operations.quarantine({ ...common, storageKey: required('storage-key'), reason: required('reason') })
         : command === 'cleanup' ? await operations.cleanup({ ...common, storageKey: required('storage-key'), reason: required('reason'), now: new Date() })
           : command === 'restore' ? await operations.restoreFromRecoveryPackage({ ...common, artifactId: required('artifact-id'), reason: required('reason'), recoveryPackagePath: required('package-path'), passphrase: process.env.DISPATCH_RECOVERY_PASSPHRASE || '' })
             : (() => { throw new Error('Unknown --command. Use replay, reconcile, restore, quarantine, or cleanup.'); })();

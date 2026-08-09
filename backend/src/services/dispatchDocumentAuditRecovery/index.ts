@@ -55,6 +55,7 @@ export type DispatchEvidenceAudit = {
   sourceHash: string;
   previousHash: string | null;
   eventHash: string;
+  authority: DispatchRecoveryAuthority;
 };
 
 export type DispatchReplayIssueCode =
@@ -82,6 +83,43 @@ const fixed = (atoms: bigint, scale: number) => {
   return `${sign}${absolute / base}.${String(absolute % base).padStart(scale, '0')}`;
 };
 const validTime = (value: string) => Boolean(value && !Number.isNaN(Date.parse(value)));
+
+export const validateDispatchLifecycleConservation = (input: {
+  candidate: { status: string; dispositionAt: string | null; dispositionBy: string | null };
+  lifecycle: { requiresPrintHandoff: boolean; hasPrintHandoff: boolean; requiresGuardExit: boolean; hasGuardExit: boolean; requiredAdjustmentIds: readonly string[]; actualAdjustmentIds: readonly string[] };
+  quantityWitnesses: readonly { stage: 'ALLOCATION' | 'PRICED' | 'DOCUMENTED' | 'EXIT'; rowId: string; unit: string; value: string }[];
+  moneyWitnesses: readonly { stage: 'PRICED' | 'DOCUMENTED'; currency: string; gross: string; discount: string; net: string }[];
+  adjustmentWitnesses: readonly { id: string; currency: string; before: string; delta: string; after: string }[];
+}) => {
+  const issues: Array<{ code: DispatchReplayIssueCode; subjectId: string; detail: string }> = [];
+  if (input.candidate.status !== 'ACCEPTED' || !input.candidate.dispositionAt || !input.candidate.dispositionBy) issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: 'CANDIDATE_DISPOSITION', detail: 'Issuance requires an accepted candidate disposition with actor/time.' });
+  if (input.lifecycle.requiresPrintHandoff && !input.lifecycle.hasPrintHandoff) issues.push({ code: 'MISSING_EVIDENCE', subjectId: 'PRINT_HANDOFF', detail: 'Required print handoff is missing.' });
+  if (input.lifecycle.requiresGuardExit && !input.lifecycle.hasGuardExit) issues.push({ code: 'MISSING_EVIDENCE', subjectId: 'GUARD_EXIT', detail: 'Required Guard exit is missing.' });
+  for (const id of input.lifecycle.requiredAdjustmentIds) if (!input.lifecycle.actualAdjustmentIds.includes(id)) issues.push({ code: 'MISSING_EVIDENCE', subjectId: id, detail: 'Posted correction adjustment is missing.' });
+  const quantities = new Map<string, Map<string, bigint>>();
+  for (const witness of input.quantityWitnesses) {
+    const atoms = parseFixed(witness.value, 3); const identity = `${witness.rowId}:${witness.unit}`; const stages = quantities.get(identity) ?? new Map<string, bigint>();
+    if (atoms === null || !witness.rowId || !witness.unit || stages.has(witness.stage)) issues.push({ code: atoms === null ? 'INVALID_FIXED_POINT' : 'DUPLICATE_EVIDENCE', subjectId: identity, detail: 'Quantity witness is invalid or duplicated.' });
+    else stages.set(witness.stage, atoms);
+    quantities.set(identity, stages);
+  }
+  if (!quantities.size) issues.push({ code: 'MISSING_EVIDENCE', subjectId: 'QUANTITY_CONSERVATION', detail: 'Quantity witnesses are required.' });
+  for (const [identity, stages] of quantities) {
+    const required = input.lifecycle.requiresGuardExit ? ['ALLOCATION', 'PRICED', 'DOCUMENTED', 'EXIT'] : ['ALLOCATION', 'PRICED', 'DOCUMENTED']; const values = required.map(stage => stages.get(stage));
+    if (values.some(value => value === undefined) || values.some(value => value !== values[0])) issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: identity, detail: 'Allocation, pricing, document, and exit quantities do not conserve.' });
+  }
+  const money = new Map<string, Map<string, [bigint, bigint, bigint]>>();
+  for (const witness of input.moneyWitnesses) {
+    const gross = parseFixed(witness.gross, 12); const discount = parseFixed(witness.discount, 12); const net = parseFixed(witness.net, 12);
+    if (gross === null || discount === null || net === null || gross - discount !== net) { issues.push({ code: 'MONEY_CONSERVATION_MISMATCH', subjectId: witness.currency, detail: 'Gross-discount-net equation is invalid.' }); continue; }
+    const stages = money.get(witness.currency) ?? new Map(); stages.set(witness.stage, [gross, discount, net]); money.set(witness.currency, stages);
+  }
+  if (!money.size) issues.push({ code: 'MISSING_EVIDENCE', subjectId: 'MONEY_CONSERVATION', detail: 'Money witnesses are required.' });
+  for (const [currency, stages] of money) { const priced = stages.get('PRICED'); const documented = stages.get('DOCUMENTED'); if (!priced || !documented || priced.some((value, index) => value !== documented[index])) issues.push({ code: 'MONEY_CONSERVATION_MISMATCH', subjectId: currency, detail: 'Priced and documented money do not conserve.' }); }
+  for (const witness of input.adjustmentWitnesses) { const before = parseFixed(witness.before, 12); const delta = parseFixed(witness.delta, 12); const after = parseFixed(witness.after, 12); if (before === null || delta === null || after === null || before + delta !== after) issues.push({ code: 'MONEY_CONSERVATION_MISMATCH', subjectId: witness.id, detail: 'Adjustment before+delta=after equation is invalid.' }); }
+  for (const id of input.lifecycle.requiredAdjustmentIds) if (!input.adjustmentWitnesses.some(witness => witness.id === id)) issues.push({ code: 'MISSING_EVIDENCE', subjectId: id, detail: 'Adjustment money witness is missing.' });
+  return issues;
+};
 
 const REQUIRED_KINDS: readonly DispatchEvidenceKind[] = [
   'APPROVED_PRICING_VERSION', 'FINALIZED_ALLOCATION_REVISION', 'PRICED_ALLOCATION_EVENT',
@@ -219,7 +257,9 @@ export const replayDispatchDocumentEvidence = (source: {
     if (!evidence || evidence.integrityHash !== audit.sourceHash) {
       issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: audit.aggregateId, detail: 'Audit source hash does not identify replay evidence.' });
     }
-    if (!audit.actorId || !audit.eventType || !validTime(audit.recordedAt) || !audit.correlationId || !audit.idempotencyKey) {
+    if (!audit.actorId || !audit.eventType || !validTime(audit.recordedAt) || !audit.correlationId || !audit.idempotencyKey
+      || !audit.authority.effectiveAuthority || !audit.authority.workspace || !audit.authority.subjectType || !audit.authority.subjectId
+      || !audit.authority.sessionId || !audit.authority.deviceId) {
       issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: audit.aggregateId, detail: 'Audit metadata is incomplete.' });
     }
     previousByAggregate.set(audit.aggregateId, audit.eventHash);
@@ -305,11 +345,12 @@ export const reconcileDispatchDocumentArtifacts = async (input: {
     .map(storageKey => ({ storageKey, status: 'ORPHAN_CANDIDATE' as const }));
   const occurredAt = (input.now ?? new Date()).toISOString();
   const unresolved = artifacts.filter(item => item.status !== 'HEALTHY');
+  const reportHash = dispatchRecoveryIntegrityHash({ artifacts, orphans, observedAt: occurredAt });
   await input.audit.append({
     action: 'RECONCILIATION_COMPLETED', actorId: input.actorId, correlationId: input.correlationId,
     authority: input.authority,
     idempotencyKey: input.idempotencyKey, occurredAt,
-    detail: { artifactCount: artifacts.length, healthyCount: artifacts.length - unresolved.length, missingCount: artifacts.filter(item => item.status === 'MISSING').length, corruptCount: artifacts.filter(item => item.status === 'CORRUPT').length, orphanCandidateCount: orphans.length },
+    detail: { reportHash, observedAt: occurredAt, artifacts, orphans, artifactCount: artifacts.length, healthyCount: artifacts.length - unresolved.length, missingCount: artifacts.filter(item => item.status === 'MISSING').length, corruptCount: artifacts.filter(item => item.status === 'CORRUPT').length, orphanCandidateCount: orphans.length },
   });
   for (const item of unresolved) await input.audit.append({
     action: 'INCIDENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
@@ -326,7 +367,7 @@ export const reconcileDispatchDocumentArtifacts = async (input: {
   return {
     status: unresolved.length || orphans.length ? 'UNRESOLVED_INCIDENT' as const : 'VERIFIED' as const,
     artifacts, orphans,
-    reportHash: dispatchRecoveryIntegrityHash({ artifacts, orphans }),
+    reportHash,
   };
 };
 
@@ -337,7 +378,7 @@ export const restoreDispatchDocumentArtifact = async (input: {
   idempotencyKey: string;
   metadata: DispatchArtifactMetadata;
   encryptedBackup: { readOriginal(storageKey: string): Promise<{ bytes: Buffer; recoveryPackageId: string; encrypted: boolean } | null> };
-  storage: { writeOriginal(storageKey: string, bytes: Buffer): Promise<void>; read(storageKey: string): Promise<Buffer | null>; restorePrevious(storageKey: string, bytes: Buffer | null): Promise<void> };
+  storage: { recoverInterruptedWrite(storageKey: string): Promise<void>; stageOriginal(storageKey: string, bytes: Buffer): Promise<void>; commitStagedOriginal(storageKey: string): Promise<void>; finalizeStagedOriginal(storageKey: string): Promise<void>; read(storageKey: string): Promise<Buffer | null>; restorePrevious(storageKey: string, bytes: Buffer | null): Promise<void> };
   audit: AuditPort;
   authority: DispatchRecoveryAuthority;
   now?: Date;
@@ -350,12 +391,14 @@ export const restoreDispatchDocumentArtifact = async (input: {
     if (!backup?.encrypted || backup.bytes.length !== input.metadata.byteLength || sha256(backup.bytes) !== input.metadata.sha256) {
       throw new Error('Encrypted recovery does not contain the original verified artifact bytes.');
     }
+    await input.storage.recoverInterruptedWrite(input.metadata.storageKey);
     previous = await input.storage.read(input.metadata.storageKey);
     await input.audit.append({ action: 'RESTORATION_INTENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, artifactId: input.metadata.id,
       storageKey: input.metadata.storageKey, reason: input.reason, detail: { expectedByteLength: input.metadata.byteLength, expectedSha256: input.metadata.sha256, recoveryPackageId: backup.recoveryPackageId } });
-    await input.storage.writeOriginal(input.metadata.storageKey, backup.bytes);
     mutated = true;
+    await input.storage.stageOriginal(input.metadata.storageKey, backup.bytes);
+    await input.storage.commitStagedOriginal(input.metadata.storageKey);
     const restored = await input.storage.read(input.metadata.storageKey);
     if (!restored || restored.length !== input.metadata.byteLength || sha256(restored) !== input.metadata.sha256) {
       throw new Error('Restored artifact failed post-write integrity verification.');
@@ -364,15 +407,17 @@ export const restoreDispatchDocumentArtifact = async (input: {
       authority: input.authority,
       idempotencyKey: input.idempotencyKey, occurredAt, artifactId: input.metadata.id, storageKey: input.metadata.storageKey,
       reason: input.reason, detail: { byteLength: restored.length, sha256: input.metadata.sha256, recoveryPackageId: backup.recoveryPackageId } });
+    await input.storage.finalizeStagedOriginal(input.metadata.storageKey);
     return { status: 'RESTORED' as const, artifactId: input.metadata.id, byteLength: restored.length, sha256: input.metadata.sha256 };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Artifact restoration failed.';
-    if (mutated) await input.storage.restorePrevious(input.metadata.storageKey, previous);
+    let compensationError: string | null = null;
+    if (mutated) try { await input.storage.restorePrevious(input.metadata.storageKey, previous); } catch (compensation) { compensationError = compensation instanceof Error ? compensation.message : 'Restore compensation failed.'; }
     await input.audit.append({ action: 'RESTORATION_FAILED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority,
       idempotencyKey: input.idempotencyKey, occurredAt, artifactId: input.metadata.id, storageKey: input.metadata.storageKey,
-      reason: input.reason, detail: { error: message } });
-    return { status: 'UNRESOLVED_INCIDENT' as const, artifactId: input.metadata.id, reason: message };
+      reason: input.reason, detail: { error: message, compensationError } });
+    return { status: 'UNRESOLVED_INCIDENT' as const, artifactId: input.metadata.id, reason: message, compensationError };
   }
 };
 
@@ -382,35 +427,35 @@ export const quarantineDispatchDocumentOrphan = async (input: {
   reason: string;
   correlationId: string;
   idempotencyKey: string;
-  reconciliationReportHash: string;
-  observedAt: string;
   authority: DispatchRecoveryAuthority;
-  repository: { isReferenced(storageKey: string): Promise<boolean> };
+  repository: { isReferenced(storageKey: string): Promise<boolean>; readPersistedOrphanEvidence(storageKey: string): Promise<{ reportHash: string; observedAt: string } | null> };
   storage: { quarantine(storageKey: string): Promise<void>; restoreQuarantined(storageKey: string): Promise<void> };
   audit: AuditPort;
   now?: Date;
 }) => {
   const occurredAt = (input.now ?? new Date()).toISOString();
-  if (await input.repository.isReferenced(input.storageKey)) {
+  const orphanEvidence = await input.repository.readPersistedOrphanEvidence(input.storageKey);
+  if (await input.repository.isReferenced(input.storageKey) || !orphanEvidence) {
     await input.audit.append({ action: 'QUARANTINE_REJECTED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority,
       idempotencyKey: input.idempotencyKey, occurredAt, storageKey: input.storageKey, reason: input.reason,
-      detail: { code: 'FILE_IS_REFERENCED' } });
-    throw new Error('A referenced dispatch artifact can never be quarantined.');
+      detail: { code: orphanEvidence ? 'FILE_IS_REFERENCED' : 'PERSISTED_ORPHAN_EVIDENCE_MISSING' } });
+    throw new Error(orphanEvidence ? 'A referenced dispatch artifact can never be quarantined.' : 'Persisted reconciliation does not prove this storage key is an orphan.');
   }
   await input.audit.append({ action: 'QUARANTINE_INTENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
     authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, storageKey: input.storageKey, reason: input.reason,
-    detail: { reconciliationReportHash: input.reconciliationReportHash, observedAt: input.observedAt } });
+    detail: { reconciliationReportHash: orphanEvidence.reportHash, observedAt: orphanEvidence.observedAt } });
   await input.storage.quarantine(input.storageKey);
   try {
     await input.audit.append({ action: 'QUARANTINE_COMPLETED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, storageKey: input.storageKey, reason: input.reason,
-      detail: { quarantinedAt: occurredAt, reconciliationReportHash: input.reconciliationReportHash, observedAt: input.observedAt } });
+      detail: { quarantinedAt: occurredAt, reconciliationReportHash: orphanEvidence.reportHash, observedAt: orphanEvidence.observedAt } });
   } catch (error) {
-    await input.storage.restoreQuarantined(input.storageKey);
+    let compensationError: string | null = null;
+    try { await input.storage.restoreQuarantined(input.storageKey); } catch (compensation) { compensationError = compensation instanceof Error ? compensation.message : 'Quarantine compensation failed.'; }
     await input.audit.append({ action: 'INCIDENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority, idempotencyKey: `${input.idempotencyKey}:compensated`, occurredAt, storageKey: input.storageKey,
-      reason: input.reason, detail: { code: 'QUARANTINE_AUDIT_FAILED_AND_STORAGE_RESTORED' } }).catch(() => undefined);
+      reason: input.reason, detail: { code: compensationError ? 'QUARANTINE_AUDIT_AND_COMPENSATION_FAILED' : 'QUARANTINE_AUDIT_FAILED_AND_STORAGE_RESTORED', compensationError } });
     throw error;
   }
   return { status: 'QUARANTINED' as const, storageKey: input.storageKey, quarantinedAt: occurredAt };
@@ -450,10 +495,11 @@ export const cleanupQuarantinedDispatchDocumentOrphan = async (input: {
       authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, storageKey: input.storageKey, reason: input.reason,
       detail: { quarantinedAt: quarantineEvidence.quarantinedAt, reconciliationReportHash: quarantineEvidence.reconciliationReportHash, safetyWindowMs: DISPATCH_ORPHAN_MIN_SAFETY_WINDOW_MS } });
   } catch (error) {
-    await input.storage.restoreStagedCleanup(input.storageKey);
+    let compensationError: string | null = null;
+    try { await input.storage.restoreStagedCleanup(input.storageKey); } catch (compensation) { compensationError = compensation instanceof Error ? compensation.message : 'Cleanup compensation failed.'; }
     await input.audit.append({ action: 'INCIDENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority, idempotencyKey: `${input.idempotencyKey}:compensated`, occurredAt, storageKey: input.storageKey,
-      reason: input.reason, detail: { code: 'CLEANUP_AUDIT_FAILED_AND_STORAGE_RESTORED' } }).catch(() => undefined);
+      reason: input.reason, detail: { code: compensationError ? 'CLEANUP_AUDIT_AND_COMPENSATION_FAILED' : 'CLEANUP_AUDIT_FAILED_AND_STORAGE_RESTORED', compensationError } });
     throw error;
   }
   try {

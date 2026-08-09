@@ -4,7 +4,7 @@ import { PricingReadinessStatus, Prisma, PrismaClient } from '@prisma/client';
 import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from '../approvedPricing';
 import { PrismaApprovedPricingRepository } from '../approvedPricing/prismaRepository';
 import type { ApprovedPricingVersionInsert } from '../approvedPricing/types';
-import { createDispatchCorrection, postDispatchCorrection } from '../dispatchCorrectionOutage';
+import { createDispatchCorrection, dispatchLifecycleAuditEventHash, postDispatchCorrection } from '../dispatchCorrectionOutage';
 import { createStatementAdjustmentArtifactPreparer, type DispatchArtifactStorage } from '../dispatchDocuments';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 import { readShipmentQuantityProjection, shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
@@ -12,6 +12,8 @@ import { readShipmentQuantityProjection, shipmentQuantityEvidenceIntegrityHash }
 const prisma = new PrismaClient();
 const rollback = Symbol('statement-adjustment-db-rollback');
 const hash = (character: string) => character.repeat(64);
+const record = (value: unknown): Readonly<Record<string, unknown>> => value && typeof value === 'object' && !Array.isArray(value)
+  ? value as Readonly<Record<string, unknown>> : {};
 const bytes = (value: string) => new TextEncoder().encode(value);
 const configuredArtifactPreparer = (options: { corruptRead?: boolean; onPublish?: () => void } = {}) => {
   const files = new Map<string, Uint8Array>();
@@ -137,6 +139,24 @@ const run = async () => {
       const firstArtifact = await tx.dispatchDocumentArtifact.findUniqueOrThrow({ where: { statementAdjustmentId: first.id } });
       assert.equal(first.sequence, 1);
       assert.equal(firstArtifact.sourceIntegrityHash, first.integrityHash);
+      const firstAudit = await tx.dispatchLifecycleAudit.findFirstOrThrow({ where: {
+        aggregateType: 'DISPATCH_CORRECTION', aggregateId: correction.id, eventType: 'CORRECTION_POSTED',
+      } });
+      const firstAuditPayload = record(firstAudit.payload);
+      assert.equal(firstAuditPayload.statementAdjustmentId, first.id);
+      assert.equal(firstAuditPayload.statementAdjustmentIntegrityHash, first.integrityHash);
+      assert.equal(firstAuditPayload.statementAdjustmentArtifactId, firstArtifact.id);
+      assert.equal(firstAuditPayload.statementAdjustmentArtifactSourceIntegrityHash, firstArtifact.sourceIntegrityHash);
+      assert.equal(firstAudit.eventHash, dispatchLifecycleAuditEventHash({
+        aggregateType: firstAudit.aggregateType,
+        aggregateId: firstAudit.aggregateId,
+        eventType: firstAudit.eventType,
+        payload: firstAuditPayload,
+        actorId: firstAudit.actorId,
+        authority: record(firstAuditPayload.effectiveAuthority) as typeof authority,
+        at: firstAudit.recordedAt,
+        previousHash: firstAudit.previousHash,
+      }), 'the actual post writer must persist the canonical audit event hash');
       assert.equal((first.snapshot as any).originalStatementDocumentId, originalStatement.id);
       assert.match((first.snapshot as any).lines[0].grossAmountDelta, /^-?\d+\.\d{12}$/);
       assert.deepEqual(await postDispatchCorrection(boundPrisma, { correctionId: correction.id,

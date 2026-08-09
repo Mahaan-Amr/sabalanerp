@@ -25,6 +25,16 @@ const stable = (value: unknown): unknown => {
 };
 const json = (value: unknown) => stable(value) as Prisma.InputJsonValue;
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
+export const dispatchLifecycleAuditEventHash = (input: {
+  aggregateType: string;
+  aggregateId: string;
+  eventType: string;
+  payload: unknown;
+  actorId: string;
+  authority: Authority;
+  at: Date;
+  previousHash: string | null;
+}) => digest(input);
 const required = (value: unknown, name: string) => {
   const result = String(value || '').trim();
   if (!result) throw new DispatchRecoveryValidationError(`${name} is required.`);
@@ -32,6 +42,16 @@ const required = (value: unknown, name: string) => {
 };
 const record = (value: unknown): Readonly<Record<string, unknown>> => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Readonly<Record<string, unknown>> : {};
+const auditAuthority = (value: unknown): Authority | null => {
+  const evidence = record(value);
+  const actorRole = String(evidence.actorRole || '').trim();
+  const workspace = String(evidence.workspace || '').trim();
+  const workspacePermission = String(evidence.workspacePermission || '').trim();
+  if (!actorRole || !workspace || !workspacePermission) return null;
+  const feature = String(evidence.feature || '').trim() || undefined;
+  const featurePermission = String(evidence.featurePermission || '').trim() || undefined;
+  return { actorRole, workspace, workspacePermission, feature, featurePermission };
+};
 const validDate = (value: Date, name: string) => {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) throw new DispatchRecoveryValidationError(`${name} must be a valid timestamp.`);
   return value;
@@ -55,9 +75,10 @@ const appendAudit = async (tx: Tx, input: { aggregateType: string; aggregateId: 
   const previous = await tx.dispatchLifecycleAudit.findFirst({ where: { aggregateType: input.aggregateType, aggregateId: input.aggregateId },
     orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }] });
   const payload = stable({ workspace: input.authority.workspace, effectiveAuthority: input.authority, ...((input.payload || {}) as object) });
+  const previousHash = previous?.eventHash || null;
   await tx.dispatchLifecycleAudit.create({ data: { aggregateType: input.aggregateType, aggregateId: input.aggregateId,
     eventType: input.eventType, payload: json(payload), actorId: input.actorId, recordedAt: input.at,
-    previousHash: previous?.eventHash || null, eventHash: digest({ ...input, payload, previousHash: previous?.eventHash || null }) } });
+    previousHash, eventHash: dispatchLifecycleAuditEventHash({ ...input, payload, previousHash }) } });
 };
 const serializable = <T>(prisma: PrismaClient, work: (tx: Tx) => Promise<T>) =>
   prisma.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -80,8 +101,9 @@ const correctionPostingPolicy = async (tx: Tx, correction: { id: string; reversa
     aggregateId: correction.id, eventType: 'CORRECTION_DRAFT_CREATED' }, orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
   const payload = record(creation?.payload);
   if (creation) {
-    const authority = record(payload.effectiveAuthority);
-    const expected = digest({ aggregateType: creation.aggregateType, aggregateId: creation.aggregateId,
+    const authority = auditAuthority(payload.effectiveAuthority);
+    if (!authority) throw new DispatchRecoveryConflictError('Dispatch correction draft audit authority is incomplete.');
+    const expected = dispatchLifecycleAuditEventHash({ aggregateType: creation.aggregateType, aggregateId: creation.aggregateId,
       eventType: creation.eventType, payload, actorId: creation.actorId, authority, at: creation.recordedAt,
       previousHash: creation.previousHash });
     if (creation.eventHash !== expected) throw new DispatchRecoveryConflictError('Dispatch correction draft audit integrity failed.');
@@ -104,7 +126,9 @@ const waybillContext = async (tx: Tx, waybillId: string) => {
   return waybill;
 };
 
-const withDispatchLoadingAttribution = async (tx: Tx, dispatchEvidence: any) => {
+type DispatchQuantityEvidence = Prisma.ShipmentQuantityEvidenceGetPayload<object>;
+
+const withDispatchLoadingAttribution = async <T extends DispatchQuantityEvidence | null>(tx: Tx, dispatchEvidence: T): Promise<T> => {
   if (!dispatchEvidence) return dispatchEvidence;
   if ((dispatchEvidence.metadata as Record<string, unknown> | null)?.loadingId || dispatchEvidence.kind !== 'PHYSICAL_EXIT') {
     return dispatchEvidence;
@@ -113,9 +137,9 @@ const withDispatchLoadingAttribution = async (tx: Tx, dispatchEvidence: any) => 
   const physicalExit = physicalExitId
     ? await tx.guardPhysicalExit.findUnique({ where: { id: physicalExitId }, include: { allocationRevision: true } })
     : null;
-  return physicalExit ? { ...dispatchEvidence,
+  return (physicalExit ? { ...dispatchEvidence,
     metadata: { ...((dispatchEvidence.metadata as Record<string, unknown>) || {}), loadingId: physicalExit.allocationRevision.loadingId } }
-    : dispatchEvidence;
+    : dispatchEvidence) as T;
 };
 
 export const createDispatchCorrection = (prisma: PrismaClient, input: { waybillId: string; reason: string; effectiveAt: Date;
@@ -309,7 +333,9 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
         statementAdjustmentId: adjustment?.adjustment.id || null,
         statementAdjustmentSequence: adjustment?.adjustment.sequence || null,
         statementAdjustmentIntegrityHash: adjustment?.adjustment.integrityHash || null,
-        statementAdjustmentArtifactId: adjustment?.artifact.id || null }, actorId: input.actorId, authority: input.authority, at });
+        statementAdjustmentArtifactId: adjustment?.artifact.id || null,
+        statementAdjustmentArtifactSourceIntegrityHash: adjustment?.artifact.sourceIntegrityHash || null,
+      }, actorId: input.actorId, authority: input.authority, at });
     const response = stable({ ...posted, statementAdjustment: adjustment ? {
       id: adjustment.adjustment.id, sequence: adjustment.adjustment.sequence, integrityHash: adjustment.adjustment.integrityHash,
       artifactId: adjustment.artifact.id,

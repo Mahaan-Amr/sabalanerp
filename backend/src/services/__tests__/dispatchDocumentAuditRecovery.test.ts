@@ -27,6 +27,8 @@ import {
   validatesReplacementEvidenceGeneration,
   validatesStaleSuccessorTransfer,
   isTerminalVoidWaybill,
+  validatesPrintHandoffTransition,
+  validatesStatementAdjustmentEvidence,
 } from '../dispatchDocumentAuditRecovery';
 import { recoveryEngineInternals, sanitizedDispatchArtifactMetadata } from '../systemRecoveryEngine';
 import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
@@ -191,12 +193,14 @@ test('production replay uses writer-owned Guard and correction hash formats', ()
 
 test('replacement replay follows the predecessor audit and does not require successor primary issuance', () => {
   const at = new Date('2026-08-09T11:00:00.000Z');
+  const dispatchAuthority = { actorRole: 'ACCOUNTANT', workspace: 'accounting', workspacePermission: 'edit',
+    feature: 'accounting_dispatch_candidates_manage', featurePermission: 'edit' };
   const command = { id: 'replace-command', scope: 'WAYBILL', scopeId: 'waybill-old', command: 'REPLACE', status: 'SUCCEEDED',
     waybillId: 'waybill-new', actorId: 'accounting-1', correlationId: 'replace-correlation', idempotencyKey: 'replace-1', completedAt: at };
   const predecessor = { id: 'waybill-old', status: 'VOIDED', integrityHash: 'b'.repeat(64), voidedAt: at,
     voidedBy: 'accounting-1', voidReason: 'Damaged print', replacementWaybillId: 'waybill-new' };
   const audit = { eventType: 'DOCUMENT_BUNDLE_REPLACED', actorId: 'accounting-1', recordedAt: at,
-    payload: { replacementWaybillId: 'waybill-new', reason: 'Damaged print', authority: { workspace: 'accounting' },
+    payload: { replacementWaybillId: 'waybill-new', reason: 'Damaged print', authority: dispatchAuthority,
       predecessorWaybillIntegrityHash: predecessor.integrityHash, replacementWaybillIntegrityHash: 'c'.repeat(64),
       primaryArtifactIds: ['new-waybill', 'new-statement'], primarySourceHash: 'a'.repeat(64),
       before: { predecessorStatus: 'ISSUED', successorId: null }, after: { predecessorStatus: 'VOIDED', successorId: 'waybill-new' },
@@ -204,6 +208,10 @@ test('replacement replay follows the predecessor audit and does not require succ
   const waybill = { id: 'waybill-new', candidateId: 'candidate-1', integrityHash: 'c'.repeat(64), replacesWaybillId: 'waybill-old', issuedAt: at, issuedBy: 'accounting-1' };
   assert.equal(validatePersistedDocumentTransition({ waybill, predecessor, primarySourceHash: 'a'.repeat(64),
     primaryArtifactIds: ['new-waybill', 'new-statement'], command, audit }), null);
+  assert.equal(validatePersistedDocumentTransition({ waybill, predecessor, primarySourceHash: 'a'.repeat(64),
+    primaryArtifactIds: ['new-waybill', 'new-statement'], command, audit: { ...audit, payload: { ...audit.payload, authority: {} } } }), 'INCOMPLETE_AUDIT_METADATA');
+  assert.equal(validatePersistedDocumentTransition({ waybill, predecessor: { ...predecessor, physicalExit: { id: 'exit-before-replace' } },
+    primarySourceHash: 'a'.repeat(64), primaryArtifactIds: ['new-waybill', 'new-statement'], command, audit }), 'INCOMPLETE_AUDIT_METADATA');
   assert.equal(validatePersistedDocumentTransition({ waybill, predecessor, primarySourceHash: 'a'.repeat(64), primaryArtifactIds: [], command: undefined, audit }), 'LEGACY_UNRECONCILED');
   const retained = [{ kind: 'WAYBILL', sourceIntegrityHash: 'a'.repeat(64), sha256: '1'.repeat(64) },
     { kind: 'STATEMENT', sourceIntegrityHash: 'a'.repeat(64), sha256: '2'.repeat(64) }];
@@ -214,15 +222,20 @@ test('replacement replay follows the predecessor audit and does not require succ
 
 test('terminal void replay requires exact writer command and audit metadata', () => {
   const at = new Date('2026-08-20T10:00:00.000Z');
+  const dispatchAuthority = { actorRole: 'ACCOUNTANT', workspace: 'accounting', workspacePermission: 'admin',
+    feature: 'accounting_dispatch_candidates_manage', featurePermission: 'edit' };
   const waybill = { id: 'waybill-void', integrityHash: 'a'.repeat(64), voidedAt: at, voidedBy: 'accountant-1', voidReason: 'customer correction' };
   const command = { scope: 'WAYBILL', scopeId: waybill.id, command: 'VOID', status: 'SUCCEEDED', waybillId: waybill.id,
     actorId: 'accountant-1', correlationId: 'void-correlation', idempotencyKey: 'void-1', completedAt: at };
   const audit = { eventType: 'DOCUMENT_BUNDLE_VOIDED', actorId: 'accountant-1', recordedAt: at,
-    payload: { reason: 'customer correction', authority: { workspace: 'accounting' }, correlationId: 'void-correlation',
+    payload: { reason: 'customer correction', authority: dispatchAuthority, correlationId: 'void-correlation',
       idempotencyKey: 'void-1', waybillIntegrityHash: 'a'.repeat(64), before: { status: 'ISSUED' }, after: { status: 'VOIDED' } } };
   assert.equal(validatesTerminalVoidTransition({ waybill, command, audit }), true);
   assert.equal(validatesTerminalVoidTransition({ waybill, command,
     audit: { ...audit, payload: { ...audit.payload, idempotencyKey: 'tampered' } } }), false);
+  assert.equal(validatesTerminalVoidTransition({ waybill, command,
+    audit: { ...audit, payload: { ...audit.payload, authority: { ...dispatchAuthority, workspace: 'logistics' } } } }), false);
+  assert.equal(validatesTerminalVoidTransition({ waybill: { ...waybill, manualOutageExit: { id: 'outage-exit' } }, command, audit }), false);
   assert.equal(isTerminalVoidWaybill({ status: 'VOIDED', replacementWaybill: null, replacesWaybillId: 'older-waybill' }), true);
 });
 
@@ -239,6 +252,24 @@ test('every generation in a recursive replacement chain retains the exact source
     .every(validatesReplacementEvidenceGeneration), false);
 });
 
+test('three-generation replacement replay requires each predecessor complete ordered audit chain', () => {
+  const chain = ['waybill-1', 'waybill-2'].flatMap((aggregateId, index) => {
+    const issuedAt = new Date(`2026-08-2${index}T08:00:00.000Z`); const replacedAt = new Date(`2026-08-2${index}T09:00:00.000Z`);
+    const issued = { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId, eventType: 'PRIMARY_BUNDLE_ISSUED',
+      payload: { sourceIntegrityHash: 'a'.repeat(64), artifactIds: [`${aggregateId}-waybill`, `${aggregateId}-statement`] },
+      actorId: 'accountant-1', at: issuedAt, previousHash: null };
+    const issuedHash = dispatchDocumentLifecycleAuditEventHash(issued);
+    const replaced = { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId, eventType: 'DOCUMENT_BUNDLE_REPLACED',
+      payload: { replacementWaybillId: `waybill-${index + 2}`, correlationId: `replace-${index}`, idempotencyKey: `replace-${index}` },
+      actorId: 'accountant-1', at: replacedAt, previousHash: issuedHash };
+    return [{ ...issued, recordedAt: issuedAt, eventHash: issuedHash },
+      { ...replaced, recordedAt: replacedAt, eventHash: dispatchDocumentLifecycleAuditEventHash(replaced) }];
+  });
+  assert.deepEqual(verifyProductionDispatchAuditChains(chain), []);
+  const tampered = chain.map((row, index) => index === 3 ? { ...row, previousHash: null } : row);
+  assert.ok(verifyProductionDispatchAuditChains(tampered).some(issue => issue.code === 'AUDIT_CHAIN_BROKEN'));
+});
+
 test('predecessor stale state—not an audit flag—requires exact successor transfer evidence', () => {
   const lines = [['contract-1', 'item-1', 'row-1', 'squareMeter', '2.000']];
   assert.equal(validatesStaleSuccessorTransfer({ predecessorStatus: 'STALE_REQUIRES_SUCCESSOR', auditMarksStaleTransfer: false,
@@ -247,6 +278,57 @@ test('predecessor stale state—not an audit flag—requires exact successor tra
     predecessorLines: lines, successorLines: lines }), true);
   assert.equal(validatesStaleSuccessorTransfer({ predecessorStatus: 'RETURNED', auditMarksStaleTransfer: true,
     predecessorLines: lines, successorLines: lines }), false);
+});
+
+test('print handoff replay accepts exact success and legitimate failed attempts by status', () => {
+  const at = new Date('2026-08-20T12:00:00.000Z'); const artifactKinds = new Map([['waybill-pdf', 'WAYBILL'], ['statement-pdf', 'STATEMENT']]);
+  const base = { id: 'handoff-1', idempotencyKey: 'attempt-1', correlationId: 'attempt-1', requestedBy: 'accountant-1',
+    completedAt: at, requestedKinds: ['WAYBILL', 'STATEMENT'] };
+  const success = { ...base, status: 'SUCCEEDED', failureCode: null,
+    items: [{ artifactId: 'statement-pdf', ordinal: 2 }, { artifactId: 'waybill-pdf', ordinal: 1 }] };
+  const successAudit = { eventType: 'PRINT_BYTES_HANDED_OFF', actorId: 'accountant-1', recordedAt: at,
+    payload: { handoffId: 'handoff-1', attemptId: 'attempt-1', operationIdempotencyKey: 'print-1', correlationId: 'attempt-1',
+      artifactIds: ['waybill-pdf', 'statement-pdf'], failureCode: null } };
+  assert.equal(validatesPrintHandoffTransition({ handoff: success, audit: successAudit, artifactKinds }), true);
+  const failed = { ...base, status: 'FAILED', failureCode: 'BYTE_HANDOFF_FAILED', items: [] };
+  const failedAudit = { ...successAudit, eventType: 'PRINT_BYTES_HANDOFF_FAILED',
+    payload: { ...successAudit.payload, failureCode: 'BYTE_HANDOFF_FAILED' } };
+  assert.equal(validatesPrintHandoffTransition({ handoff: failed, audit: failedAudit, artifactKinds }), true);
+  assert.equal(validatesPrintHandoffTransition({ handoff: failed,
+    audit: { ...failedAudit, payload: { ...failedAudit.payload, failureCode: 'tampered' } }, artifactKinds }), false);
+});
+
+test('statement adjustment replay cross-binds immutable sources and rejects a self-consistent row tamper', () => {
+  const at = new Date('2026-08-20T13:00:00.000Z'); const originalStatement = { id: 'statement-1', sourceIntegrityHash: 'a'.repeat(64), sha256: 'b'.repeat(64) };
+  const line = { id: 'correction-line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'M3', quantity: { toFixed: () => '-1.000' } };
+  const correction = { id: 'correction-1', reason: 'returned quantity', integrityHash: 'c'.repeat(64), postedAt: at, postedBy: 'accountant-1', lines: [line] };
+  const snapshot = { schemaVersion: 1, adjustmentId: 'adjustment-1', waybillId: 'waybill-1', correctionId: correction.id, sequence: 1,
+    reason: correction.reason, correctionIntegrityHash: correction.integrityHash, originalStatementDocumentId: originalStatement.id,
+    originalStatementSourceIntegrityHash: originalStatement.sourceIntegrityHash, originalStatementSha256: originalStatement.sha256,
+    currency: 'TOMAN', issuedAt: at.toISOString(), issuedBy: 'accountant-1', pricingVersions: [{ contractId: 'contract-1',
+      pricingVersionId: 'pricing-1', integrityHash: 'd'.repeat(64), readinessEvidenceHash: 'e'.repeat(64) }],
+    lines: [{ correctionLineId: line.id, contractId: line.contractId, contractItemId: line.contractItemId, productRowId: line.productRowId,
+      pricingVersionId: 'pricing-1', pricingRowId: 'pricing-row-1', label: 'row', unit: line.unit, quantityDelta: '-1.000',
+      grossAmountDelta: '-10.000000000000', discountDelta: '-1.000000000000', netAmountDelta: '-9.000000000000',
+      afterQuantity: '1.000', ledgerSequence: 2, consumesFinalRemainder: false, evidence: {} }], quantityDeltasByUnit: { M3: '-1.000' },
+    totals: { grossAmountDelta: '-10.000000000000', discountDelta: '-1.000000000000', netAmountDelta: '-9.000000000000' } };
+  const integrityHash = pricedAllocationIntegrityHash(snapshot); const artifact = { id: 'adjustment-pdf', waybillId: 'waybill-1',
+    statementAdjustmentId: 'adjustment-1', sourceIntegrityHash: integrityHash, publishedAt: at, publishedBy: 'accountant-1' };
+  const adjustment = { id: 'adjustment-1', waybillId: 'waybill-1', correctionId: correction.id, sequence: 1, integrityHash,
+    issuedAt: at, issuedBy: 'accountant-1', snapshot, artifact };
+  const command = { command: 'ISSUE_ADJUSTMENT', status: 'SUCCEEDED', waybillId: 'waybill-1', actorId: 'accountant-1', completedAt: at,
+    correlationId: 'correction-correlation', idempotencyKey: 'correction-1' };
+  const audit = { actorId: 'accountant-1', recordedAt: at, payload: { correlationId: command.correlationId, idempotencyKey: command.idempotencyKey,
+    statementAdjustmentId: adjustment.id, statementAdjustmentSequence: 1, statementAdjustmentIntegrityHash: integrityHash,
+    statementAdjustmentArtifactId: artifact.id, statementAdjustmentArtifactSourceIntegrityHash: integrityHash } };
+  const input = { waybillId: 'waybill-1', correction, adjustment, originalStatement,
+    pricingReferences: [{ contractId: 'contract-1', pricingVersionId: 'pricing-1', expectedPricingHash: 'd'.repeat(64), readinessEvidenceHash: 'e'.repeat(64) }], command, audit };
+  assert.equal(validatesStatementAdjustmentEvidence(input), true);
+  const tamperedSnapshot = { ...snapshot, lines: [{ ...snapshot.lines[0], contractId: 'contract-tampered' }] };
+  const tamperedHash = pricedAllocationIntegrityHash(tamperedSnapshot);
+  assert.equal(validatesStatementAdjustmentEvidence({ ...input, adjustment: { ...adjustment, snapshot: tamperedSnapshot, integrityHash: tamperedHash,
+    artifact: { ...artifact, sourceIntegrityHash: tamperedHash } }, audit: { ...audit, payload: { ...audit.payload,
+      statementAdjustmentIntegrityHash: tamperedHash, statementAdjustmentArtifactSourceIntegrityHash: tamperedHash } } }), false);
 });
 
 test('mandatory Prisma truth verifier accepts only immutable writer-owned pricing/event/provenance sources', async () => {

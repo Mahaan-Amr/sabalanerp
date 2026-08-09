@@ -98,7 +98,7 @@ const clearRetryKey = (config?: RetryAwareConfig) => {
 api.interceptors.request.use(async (config) => {
   const method = String(config.method || 'get').toUpperCase();
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
-  if (isMutation) {
+  if (isMutation && !config.headers.has('x-correlation-id')) {
     config.headers['x-correlation-id'] = crypto.randomUUID();
   }
   if (isMutation && !config.headers['x-idempotency-key']) {

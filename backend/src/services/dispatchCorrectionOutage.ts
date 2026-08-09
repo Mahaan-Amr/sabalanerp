@@ -339,7 +339,7 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
     await refreshProjectionContracts(tx, correction.lines.map((line) => line.contractId));
     await appendAudit(tx, { aggregateType: 'DISPATCH_CORRECTION', aggregateId: correction.id, eventType: 'CORRECTION_POSTED',
       payload: { waybillId: correction.waybillId, beforeStatus: 'DRAFT', afterStatus: 'POSTED', integrityHash,
-        effectiveAt: correction.effectiveAt, recordedAt: at, reason: correction.reason,
+        effectiveAt: correction.effectiveAt, recordedAt: at, reason: correction.reason, correlationId, idempotencyKey,
         statementAdjustmentId: adjustment?.adjustment.id || null,
         statementAdjustmentSequence: adjustment?.adjustment.sequence || null,
         statementAdjustmentIntegrityHash: adjustment?.adjustment.integrityHash || null,

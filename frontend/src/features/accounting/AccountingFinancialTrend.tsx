@@ -59,11 +59,13 @@ export function AccountingFinancialTrend({
   state,
   onRangeChange,
   onRetry,
+  compact = false,
 }: {
   range: FinancialTrendRange;
   state: FinancialTrendState;
   onRangeChange: (range: FinancialTrendRange) => void;
   onRetry: () => void;
+  compact?: boolean;
 }) {
   const source = state.data;
   const chartData = (source?.points || []).map((point) => ({
@@ -110,8 +112,8 @@ export function AccountingFinancialTrend({
 
       {source && !empty && (
         <div className="px-2 pb-4 sm:px-4" aria-busy={state.status === 'loading'}>
-          <div className="h-72" dir="ltr">
-            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 320, height: 288 }}>
+          <div className={compact ? 'h-52' : 'h-72'} dir="ltr">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 320, height: compact ? 208 : 288 }}>
               <AreaChart data={chartData} margin={{ top: 10, right: 8, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="financial-trend-invoiced-fill" x1="0" y1="0" x2="0" y2="1">

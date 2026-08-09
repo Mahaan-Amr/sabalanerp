@@ -170,6 +170,7 @@ export default function AccountingDashboardPage() {
       state={financialTrend}
       onRangeChange={setTrendRange}
       onRetry={() => void loadFinancialTrend(trendRange)}
+      compact
     />
   );
 
@@ -228,15 +229,15 @@ export default function AccountingDashboardPage() {
         <p role="status" className="sds-text-muted text-sm">در حال به‌روزرسانی داده‌های حسابداری…</p>
       )}
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,.9fr)]">
-        <div className="min-w-0">{financialTrendPanel}</div>
-        <div className="min-w-0">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(20rem,.9fr)_minmax(0,1.5fr)]">
+        <div className="order-2 min-w-0 xl:order-1">
           <AccountingDeadlinesPanel
             deadlines={workspace.deadlines}
             dashboardHref={dashboardHref}
             onTypeChange={(deadlineType) => router.replace(dashboardHref({ deadlineType }), { scroll: false })}
           />
         </div>
+        <div className="order-1 min-w-0 xl:order-2">{financialTrendPanel}</div>
       </div>
 
       <ErpActionGrid
@@ -276,6 +277,7 @@ export default function AccountingDashboardPage() {
             href: `/dashboard/hr/hiring?view=${HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts}`,
             icon: FaUserPlus,
             tone: 'info',
+            description: hrMetrics.status === 'pending' ? 'در حال بررسی دسترسی' : undefined,
             badge: hrMetricsAvailable
               ? <StatusBadge label={hrMetrics.actionableCollateralOrContractCases.toLocaleString('fa-IR')} tone="info" />
               : undefined,
@@ -285,6 +287,7 @@ export default function AccountingDashboardPage() {
             href: `/dashboard/hr/hiring/collateral-templates?view=${HR_HIRING_METRIC_VIEWS.activeCollateralTemplates}`,
             icon: FaClipboardCheck,
             tone: 'neutral',
+            description: hrMetrics.status === 'pending' ? 'در حال بررسی دسترسی' : undefined,
             badge: hrMetricsAvailable
               ? <StatusBadge label={hrMetrics.activeCollateralTemplates.toLocaleString('fa-IR')} tone="neutral" />
               : undefined,

@@ -1763,6 +1763,9 @@ model SalesContract {
   productGraphAudits                SalesContractProductGraphAudit[]
   shipmentQuantityEvidence          ShipmentQuantityEvidence[]
   shipmentQuantityProjections       ShipmentQuantityProjection[]
+  approvedPricingVersions           ContractApprovedPricingVersion[]
+  approvedPricingHead               ContractApprovedPricingHead?
+  pricingReadinessResults           ContractPricingReadinessResult[]
 
   @@index([createdBy, creatorSequenceNumber])
   @@index([responsibleSellerId])
@@ -2233,6 +2236,7 @@ model ContractItem {
   logisticsLoadingCorrections       LogisticsLoadingCorrection[]
   shipmentQuantityEvidence          ShipmentQuantityEvidence[]
   shipmentQuantityProjection        ShipmentQuantityProjection?
+  approvedPricingRows               ContractApprovedPricingRow[]
 
   @@unique([contractId, productRowId])
   @@map("contract_items")
@@ -2804,26 +2808,28 @@ model LogisticsAllocationDraftLine {
 }
 
 model LogisticsAllocationRevision {
-  id                    String                            @id @default(cuid())
-  batchId               String
-  loadingId             String
-  queueTurnId           String
-  revisionNumber        Int
-  snapshot              Json
-  integrityHash         String                            @unique
-  finalizedAt           DateTime                          @default(now())
-  finalizedBy           String
-  sealedAt              DateTime?
-  predecessorRevisionId String?                           @unique
-  batch                 LogisticsAllocationBatch          @relation(fields: [batchId], references: [id], onDelete: Restrict)
-  loading               LogisticsLoading                  @relation(fields: [loadingId], references: [id], onDelete: Restrict)
-  queueTurn             GuardDriverQueueTurn              @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
-  lines                 LogisticsAllocationRevisionLine[]
-  candidate             AccountingDispatchCandidate?
-  predecessorRevision   LogisticsAllocationRevision?      @relation("AllocationRevisionSuccessor", fields: [predecessorRevisionId], references: [id], onDelete: Restrict)
-  successorRevision     LogisticsAllocationRevision?      @relation("AllocationRevisionSuccessor")
-  physicalExit          GuardPhysicalExit?
-  manualOutageExit      ManualOutageExit?
+  id                     String                               @id @default(cuid())
+  batchId                String
+  loadingId              String
+  queueTurnId            String
+  revisionNumber         Int
+  snapshot               Json
+  integrityHash          String                               @unique
+  finalizedAt            DateTime                             @default(now())
+  finalizedBy            String
+  sealedAt               DateTime?
+  predecessorRevisionId  String?                              @unique
+  batch                  LogisticsAllocationBatch             @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  loading                LogisticsLoading                     @relation(fields: [loadingId], references: [id], onDelete: Restrict)
+  queueTurn              GuardDriverQueueTurn                 @relation(fields: [queueTurnId], references: [id], onDelete: Restrict)
+  lines                  LogisticsAllocationRevisionLine[]
+  candidate              AccountingDispatchCandidate?
+  predecessorRevision    LogisticsAllocationRevision?         @relation("AllocationRevisionSuccessor", fields: [predecessorRevisionId], references: [id], onDelete: Restrict)
+  successorRevision      LogisticsAllocationRevision?         @relation("AllocationRevisionSuccessor")
+  physicalExit           GuardPhysicalExit?
+  manualOutageExit       ManualOutageExit?
+  pricingReferences      LogisticsAllocationRevisionPricing[]
+  pricedAllocationEvents DispatchPricedAllocationEvent[]
 
   @@unique([loadingId, queueTurnId, revisionNumber])
   @@index([loadingId, finalizedAt])
@@ -2832,17 +2838,18 @@ model LogisticsAllocationRevision {
 }
 
 model LogisticsAllocationRevisionLine {
-  id                   String                      @id @default(cuid())
-  revisionId           String
-  sourceContractId     String
-  sourceContractItemId String
-  productRowId         String
-  productId            String
-  quantity             Decimal                     @db.Decimal(18, 3)
-  unit                 String
-  snapshot             Json
-  integrityHash        String                      @unique
-  revision             LogisticsAllocationRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  id                    String                         @id @default(cuid())
+  revisionId            String
+  sourceContractId      String
+  sourceContractItemId  String
+  productRowId          String
+  productId             String
+  quantity              Decimal                        @db.Decimal(18, 3)
+  unit                  String
+  snapshot              Json
+  integrityHash         String                         @unique
+  revision              LogisticsAllocationRevision    @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  pricedAllocationEvent DispatchPricedAllocationEvent?
 
   @@index([revisionId])
   @@index([sourceContractItemId])
@@ -2899,6 +2906,10 @@ model AccountingDispatchWaybill {
   physicalExit         GuardPhysicalExit?
   dispatchCorrections  DispatchCorrection[]
   manualOutageExit     ManualOutageExit?
+  documentArtifacts    DispatchDocumentArtifact[]
+  printHandoffs        DispatchDocumentPrintHandoff[]
+  statementAdjustments DispatchStatementAdjustment[]
+  commandResults       DispatchDocumentCommandResult[]
 
   @@index([candidateId, issuedAt])
   @@map("accounting_dispatch_waybills")
@@ -2931,6 +2942,311 @@ model DispatchLifecycleAudit {
 
   @@index([aggregateType, aggregateId, recordedAt])
   @@map("dispatch_lifecycle_audits")
+}
+
+model ContractApprovedPricingVersion {
+  id                      String                               @id @default(cuid())
+  contractId              String
+  versionNumber           Int
+  sourceFinancialRecordId String
+  origin                  ApprovedPricingVersionOrigin
+  approvedAt              DateTime
+  approvedBy              String
+  schemaVersion           Int
+  currency                String
+  grossAmount             Decimal                              @db.Decimal(38, 12)
+  discountAmount          Decimal                              @db.Decimal(38, 12)
+  netAmount               Decimal                              @db.Decimal(38, 12)
+  sourceEvidence          Json
+  legacySourceReference   Json?
+  integrityHash           String                               @unique
+  createdAt               DateTime                             @default(now())
+  contract                SalesContract                        @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  sourceFinancialRecord   AccountingFinancialRecord            @relation(fields: [sourceFinancialRecordId], references: [id], onDelete: Restrict)
+  rows                    ContractApprovedPricingRow[]
+  currentForHead          ContractApprovedPricingHead?         @relation("CurrentApprovedPricingVersion")
+  allocationReferences    LogisticsAllocationRevisionPricing[]
+  pricedAllocationEvents  DispatchPricedAllocationEvent[]
+  readinessResults        ContractPricingReadinessResult[]
+
+  @@unique([contractId, versionNumber])
+  @@unique([sourceFinancialRecordId, contractId])
+  @@index([contractId, approvedAt])
+  @@map("contract_approved_pricing_versions")
+}
+
+model ContractApprovedPricingRow {
+  id                     String                          @id @default(cuid())
+  pricingVersionId       String
+  contractItemId         String
+  productRowId           String
+  ordinal                Int
+  contractedQuantity     Decimal                         @db.Decimal(18, 3)
+  unit                   String
+  canonicalAllInTotal    Decimal                         @db.Decimal(38, 12)
+  discountEligible       Boolean
+  componentEvidence      Json
+  integrityHash          String                          @unique
+  pricingVersion         ContractApprovedPricingVersion  @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
+  contractItem           ContractItem                    @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
+  pricedAllocationEvents DispatchPricedAllocationEvent[]
+
+  @@unique([pricingVersionId, ordinal])
+  @@unique([pricingVersionId, contractItemId])
+  @@unique([pricingVersionId, productRowId])
+  @@index([contractItemId])
+  @@map("contract_approved_pricing_rows")
+}
+
+model ContractApprovedPricingHead {
+  contractId       String                         @id
+  currentVersionId String                         @unique
+  advancedAt       DateTime
+  advancedBy       String
+  contract         SalesContract                  @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  currentVersion   ContractApprovedPricingVersion @relation("CurrentApprovedPricingVersion", fields: [currentVersionId], references: [id], onDelete: Restrict)
+
+  @@map("contract_approved_pricing_heads")
+}
+
+model ContractPricingReadinessResult {
+  id                      String                           @id @default(cuid())
+  contractId              String
+  pricingVersionId        String?
+  sourceFinancialRecordId String?
+  status                  PricingReadinessStatus
+  sourceCount             Int
+  sourceIdentityHash      String
+  quantityTotal           Decimal?                         @db.Decimal(38, 3)
+  amountTotal             Decimal?                         @db.Decimal(38, 12)
+  evidenceHash            String                           @unique
+  evaluatedAt             DateTime                         @default(now())
+  evaluatedBy             String
+  contract                SalesContract                    @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  pricingVersion          ContractApprovedPricingVersion?  @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
+  sourceFinancialRecord   AccountingFinancialRecord?       @relation(fields: [sourceFinancialRecordId], references: [id], onDelete: Restrict)
+  reasons                 ContractPricingReadinessReason[]
+
+  @@index([contractId, evaluatedAt])
+  @@index([status, evaluatedAt])
+  @@map("contract_pricing_readiness_results")
+}
+
+model ContractPricingReadinessReason {
+  id                String                         @id @default(cuid())
+  readinessResultId String
+  ordinal           Int
+  code              PricingReadinessReasonCode
+  detail            Json
+  readinessResult   ContractPricingReadinessResult @relation(fields: [readinessResultId], references: [id], onDelete: Restrict)
+
+  @@unique([readinessResultId, ordinal])
+  @@index([code])
+  @@map("contract_pricing_readiness_reasons")
+}
+
+model LogisticsAllocationRevisionPricing {
+  id                    String                         @id @default(cuid())
+  allocationRevisionId  String
+  contractId            String
+  pricingVersionId      String
+  expectedPricingHash   String
+  readinessEvidenceHash String
+  createdAt             DateTime                       @default(now())
+  allocationRevision    LogisticsAllocationRevision    @relation(fields: [allocationRevisionId], references: [id], onDelete: Restrict)
+  pricingVersion        ContractApprovedPricingVersion @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([allocationRevisionId, contractId], map: "allocation_revision_pricing_contract_key")
+  @@unique([allocationRevisionId, pricingVersionId], map: "allocation_revision_pricing_version_key")
+  @@index([pricingVersionId])
+  @@map("logistics_allocation_revision_pricing")
+}
+
+model DispatchPricedAllocationEvent {
+  id                       String                          @id @default(cuid())
+  allocationRevisionId     String
+  allocationRevisionLineId String                          @unique
+  pricingVersionId         String
+  pricingRowId             String
+  quantity                 Decimal                         @db.Decimal(18, 3)
+  grossAmount              Decimal                         @db.Decimal(38, 12)
+  discountAmount           Decimal                         @db.Decimal(38, 12)
+  netAmount                Decimal                         @db.Decimal(38, 12)
+  consumesFinalRemainder   Boolean
+  evidence                 Json
+  integrityHash            String                          @unique
+  recordedAt               DateTime                        @default(now())
+  recordedBy               String
+  allocationRevision       LogisticsAllocationRevision     @relation(fields: [allocationRevisionId], references: [id], onDelete: Restrict)
+  allocationRevisionLine   LogisticsAllocationRevisionLine @relation(fields: [allocationRevisionLineId], references: [id], onDelete: Restrict)
+  pricingVersion           ContractApprovedPricingVersion  @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
+  pricingRow               ContractApprovedPricingRow      @relation(fields: [pricingRowId], references: [id], onDelete: Restrict)
+
+  @@index([pricingRowId, recordedAt])
+  @@index([allocationRevisionId])
+  @@map("dispatch_priced_allocation_events")
+}
+
+model DispatchStatementAdjustment {
+  id            String                    @id @default(cuid())
+  waybillId     String
+  correctionId  String                    @unique
+  sequence      Int
+  snapshot      Json
+  integrityHash String                    @unique
+  issuedAt      DateTime                  @default(now())
+  issuedBy      String
+  waybill       AccountingDispatchWaybill @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+  correction    DispatchCorrection        @relation(fields: [correctionId], references: [id], onDelete: Restrict)
+  artifact      DispatchDocumentArtifact?
+
+  @@unique([waybillId, sequence])
+  @@index([waybillId, issuedAt])
+  @@map("dispatch_statement_adjustments")
+}
+
+model DispatchDocumentArtifact {
+  id                    String                             @id @default(cuid())
+  waybillId             String
+  kind                  DispatchDocumentKind
+  statementAdjustmentId String?                            @unique
+  templateVersion       String
+  storageKey            String                             @unique
+  mediaType             String
+  byteLength            BigInt
+  sha256                String                             @unique
+  sourceIntegrityHash   String
+  publishedAt           DateTime                           @default(now())
+  publishedBy           String
+  waybill               AccountingDispatchWaybill          @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+  statementAdjustment   DispatchStatementAdjustment?       @relation(fields: [statementAdjustmentId], references: [id], onDelete: Restrict)
+  handoffItems          DispatchDocumentPrintHandoffItem[]
+
+  @@index([waybillId, kind, publishedAt])
+  @@map("dispatch_document_artifacts")
+}
+
+model DispatchDocumentPrintHandoff {
+  id             String                             @id @default(cuid())
+  waybillId      String
+  idempotencyKey String                             @unique
+  status         DispatchPrintHandoffStatus
+  requestedKinds DispatchDocumentKind[]
+  requestedAt    DateTime                           @default(now())
+  requestedBy    String
+  completedAt    DateTime?
+  failureCode    String?
+  failureDetail  Json?
+  correlationId  String
+  waybill        AccountingDispatchWaybill          @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+  items          DispatchDocumentPrintHandoffItem[]
+
+  @@index([waybillId, requestedAt])
+  @@index([status, requestedAt])
+  @@map("dispatch_document_print_handoffs")
+}
+
+model DispatchDocumentPrintHandoffItem {
+  id         String                       @id @default(cuid())
+  handoffId  String
+  artifactId String
+  ordinal    Int
+  byteLength BigInt
+  sha256     String
+  handoff    DispatchDocumentPrintHandoff @relation(fields: [handoffId], references: [id], onDelete: Restrict)
+  artifact   DispatchDocumentArtifact     @relation(fields: [artifactId], references: [id], onDelete: Restrict)
+
+  @@unique([handoffId, ordinal])
+  @@unique([handoffId, artifactId])
+  @@map("dispatch_document_print_handoff_items")
+}
+
+model DispatchDocumentCommandResult {
+  id             String                        @id @default(cuid())
+  waybillId      String?
+  scope          String
+  scopeId        String
+  idempotencyKey String
+  command        DispatchDocumentCommandType
+  status         DispatchDocumentCommandStatus
+  result         Json?
+  failureCode    String?
+  actorId        String
+  correlationId  String
+  startedAt      DateTime                      @default(now())
+  completedAt    DateTime?
+  waybill        AccountingDispatchWaybill?    @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+
+  @@unique([scope, scopeId, idempotencyKey])
+  @@index([waybillId, startedAt])
+  @@map("dispatch_document_command_results")
+}
+
+model ShipmentStatementCutover {
+  id            String                              @id
+  enabled       Boolean                             @default(false)
+  cutoverAt     DateTime?
+  activatedAt   DateTime?
+  activatedBy   String?
+  manifestId    String?
+  integrityHash String?
+  createdAt     DateTime                            @default(now())
+  manifest      ShipmentStatementMigrationManifest? @relation(fields: [manifestId], references: [id], onDelete: Restrict)
+
+  @@map("shipment_statement_cutovers")
+}
+
+model ShipmentStatementMigrationManifest {
+  id               String                          @id @default(cuid())
+  migrationName    String                          @unique
+  schemaVersion    Int
+  sourceSchemaHash String
+  createdAt        DateTime                        @default(now())
+  createdBy        String
+  runs             ShipmentStatementMigrationRun[]
+  cutovers         ShipmentStatementCutover[]
+
+  @@map("shipment_statement_migration_manifests")
+}
+
+model ShipmentStatementMigrationRun {
+  id          String                               @id @default(cuid())
+  manifestId  String
+  runNumber   Int
+  status      MigrationRunStatus
+  startedAt   DateTime                             @default(now())
+  completedAt DateTime?
+  reason      String?
+  manifest    ShipmentStatementMigrationManifest   @relation(fields: [manifestId], references: [id], onDelete: Restrict)
+  evidence    ShipmentStatementMigrationEvidence[]
+
+  @@unique([manifestId, runNumber])
+  @@index([status, startedAt])
+  @@map("shipment_statement_migration_runs")
+}
+
+model ShipmentStatementMigrationEvidence {
+  id                  String                        @id @default(cuid())
+  runId               String
+  scope               String
+  beforeRecordCount   BigInt
+  afterRecordCount    BigInt
+  beforeIdentityHash  String
+  afterIdentityHash   String
+  beforeQuantityTotal Decimal?                      @db.Decimal(38, 3)
+  afterQuantityTotal  Decimal?                      @db.Decimal(38, 3)
+  beforeAmountTotal   Decimal?                      @db.Decimal(38, 12)
+  afterAmountTotal    Decimal?                      @db.Decimal(38, 12)
+  beforeEvidenceHash  String
+  afterEvidenceHash   String
+  outcome             MigrationEvidenceOutcome
+  reason              String?
+  detail              Json
+  run                 ShipmentStatementMigrationRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@unique([runId, scope])
+  @@index([outcome])
+  @@map("shipment_statement_migration_evidence")
 }
 
 model BiometricGovernancePolicy {
@@ -3144,21 +3460,22 @@ model DispatchBuyerSmsIntent {
 }
 
 model DispatchCorrection {
-  id            String                    @id @default(cuid())
-  waybillId     String
-  status        DispatchCorrectionStatus  @default(DRAFT)
-  reason        String
-  effectiveAt   DateTime
-  createdAt     DateTime                  @default(now())
-  createdBy     String
-  postedAt      DateTime?
-  postedBy      String?
-  reversalOfId  String?                   @unique
-  integrityHash String?
-  waybill       AccountingDispatchWaybill @relation(fields: [waybillId], references: [id], onDelete: Restrict)
-  reversalOf    DispatchCorrection?       @relation("DispatchCorrectionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
-  reversals     DispatchCorrection[]      @relation("DispatchCorrectionReversal")
-  lines         DispatchCorrectionLine[]
+  id                  String                       @id @default(cuid())
+  waybillId           String
+  status              DispatchCorrectionStatus     @default(DRAFT)
+  reason              String
+  effectiveAt         DateTime
+  createdAt           DateTime                     @default(now())
+  createdBy           String
+  postedAt            DateTime?
+  postedBy            String?
+  reversalOfId        String?                      @unique
+  integrityHash       String?
+  waybill             AccountingDispatchWaybill    @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+  reversalOf          DispatchCorrection?          @relation("DispatchCorrectionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversals           DispatchCorrection[]         @relation("DispatchCorrectionReversal")
+  lines               DispatchCorrectionLine[]
+  statementAdjustment DispatchStatementAdjustment?
 
   @@index([waybillId, createdAt])
   @@index([status])
@@ -3752,34 +4069,36 @@ model ChartOfAccount {
 }
 
 model AccountingFinancialRecord {
-  id                    String                           @id @default(cuid())
-  kind                  FinancialRecordKind
-  status                AccountingRecordStatus           @default(DRAFT)
-  sourceKind            AccountingSourceKind
-  sourceId              String?
-  contractId            String?
-  customerId            String?
-  periodId              String?
-  amount                Decimal                          @default(0) @db.Decimal(18, 2)
-  currency              String                           @default("ریال")
-  sourceSnapshot        Json?
-  metadata              Json?
-  idempotencyKey        String?                          @unique
-  systemInvoiceNumber   String?
-  systemInvoiceDate     DateTime?
-  sepidarAmount         Decimal?                         @db.Decimal(18, 2)
-  financiallyApprovedAt DateTime?
-  financiallyApprovedBy String?
-  createdBy             String
-  postedAt              DateTime?
-  voidedAt              DateTime?
-  createdAt             DateTime                         @default(now())
-  updatedAt             DateTime                         @updatedAt
-  period                AccountingPeriod?                @relation(fields: [periodId], references: [id])
-  invoiceItems          AccountingInvoiceCandidateItem[]
-  receivables           AccountingReceivable[]
-  taxRecords            AccountingTaxRecord[]
-  journalVouchers       JournalVoucher[]
+  id                      String                           @id @default(cuid())
+  kind                    FinancialRecordKind
+  status                  AccountingRecordStatus           @default(DRAFT)
+  sourceKind              AccountingSourceKind
+  sourceId                String?
+  contractId              String?
+  customerId              String?
+  periodId                String?
+  amount                  Decimal                          @default(0) @db.Decimal(18, 2)
+  currency                String                           @default("ریال")
+  sourceSnapshot          Json?
+  metadata                Json?
+  idempotencyKey          String?                          @unique
+  systemInvoiceNumber     String?
+  systemInvoiceDate       DateTime?
+  sepidarAmount           Decimal?                         @db.Decimal(18, 2)
+  financiallyApprovedAt   DateTime?
+  financiallyApprovedBy   String?
+  createdBy               String
+  postedAt                DateTime?
+  voidedAt                DateTime?
+  createdAt               DateTime                         @default(now())
+  updatedAt               DateTime                         @updatedAt
+  period                  AccountingPeriod?                @relation(fields: [periodId], references: [id])
+  invoiceItems            AccountingInvoiceCandidateItem[]
+  receivables             AccountingReceivable[]
+  taxRecords              AccountingTaxRecord[]
+  journalVouchers         JournalVoucher[]
+  approvedPricingVersions ContractApprovedPricingVersion[]
+  pricingReadinessResults ContractPricingReadinessResult[]
 
   @@index([kind, status])
   @@index([sourceKind, sourceId])
@@ -4099,6 +4418,70 @@ enum AccountingDispatchWaybillStatus {
   ISSUED
   VOIDED
   EXIT_RECORDED
+}
+
+enum ApprovedPricingVersionOrigin {
+  FINANCIAL_APPROVAL
+  LEGACY_SEAL
+}
+
+enum PricingReadinessStatus {
+  READY
+  BLOCKED
+  QUARANTINED
+}
+
+enum PricingReadinessReasonCode {
+  MISSING_FINANCIAL_APPROVAL
+  MISSING_STABLE_ROW_IDENTITY
+  MISSING_CURRENCY
+  MISSING_CONTRACTED_QUANTITY
+  MISSING_CANONICAL_ROW_TOTAL
+  MISSING_DISCOUNT_EVIDENCE
+  ROW_IDENTITY_CONFLICT
+  CURRENCY_CONFLICT
+  SOURCE_HASH_MISMATCH
+  SOURCE_EVIDENCE_INCOMPLETE
+}
+
+enum DispatchDocumentKind {
+  WAYBILL
+  STATEMENT
+  STATEMENT_ADJUSTMENT
+}
+
+enum DispatchPrintHandoffStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum DispatchDocumentCommandType {
+  ACCEPT_AND_ISSUE
+  REJECT
+  VOID
+  REPLACE
+  RETRIEVE
+  PRINT_HANDOFF
+  ISSUE_ADJUSTMENT
+}
+
+enum DispatchDocumentCommandStatus {
+  STARTED
+  SUCCEEDED
+  FAILED
+}
+
+enum MigrationRunStatus {
+  STARTED
+  COMPLETED
+  FAILED
+}
+
+enum MigrationEvidenceOutcome {
+  MATCHED
+  QUARANTINED
+  FAILED
 }
 
 enum DispatchBuyerSmsStatus {

@@ -272,3 +272,65 @@ test.describe('browser-visible cross-role workflow controls', () => {
     await manager.close();
   });
 });
+
+test.describe('task-scoped HR duty surfaces', () => {
+  test.skip(
+      !env('HR_E2E_DUTY_ID') ||
+      !env('HR_E2E_DUTY_ASSIGNEE_STORAGE') ||
+      !env('HR_E2E_DUTY_UNAUTHORIZED_STORAGE') ||
+      !env('HR_E2E_DUTY_PROTECTED_MARKERS'),
+    'Set a live duty, assigned/unauthorized storage states, and comma-separated protected fixture markers.',
+  );
+
+  test('assigned actor can use the destination deep link without entering HR', async ({ browser }) => {
+    const workspace = env('HR_E2E_DUTY_WORKSPACE') || 'accounting';
+    const context = await browser.newContext({ storageState: env('HR_E2E_DUTY_ASSIGNEE_STORAGE') });
+    const page = await context.newPage();
+    await page.goto(`/dashboard/${workspace}/duties/${env('HR_E2E_DUTY_ID')}`);
+    await expect(page.getByText('دسترسی محدود به همین وظیفه')).toBeVisible();
+    await expect(page.getByRole('button', { name: /تأیید|رد|بازگرداندن|درخواست توضیح/ }).first()).toBeVisible();
+    await expect(page.locator('main a[href^="/dashboard/hr/"]')).toHaveCount(0);
+    const visibleText = await page.locator('main').innerText();
+    for (const marker of env('HR_E2E_DUTY_PROTECTED_MARKERS').split(',').map((item) => item.trim()).filter(Boolean)) {
+      expect(visibleText).not.toContain(marker);
+    }
+    await context.close();
+  });
+
+  test('unrelated actor receives a useful fail-closed deep-link state', async ({ browser }) => {
+    const workspace = env('HR_E2E_DUTY_WORKSPACE') || 'accounting';
+    const context = await browser.newContext({ storageState: env('HR_E2E_DUTY_UNAUTHORIZED_STORAGE') });
+    const page = await context.newPage();
+    await page.goto(`/dashboard/${workspace}/duties/${env('HR_E2E_DUTY_ID')}`);
+    await expect(page.getByText(/دسترسی.*معتبر نیست|در دسترس نیست|دیگر.*محول نیست/)).toBeVisible();
+    await expect(page.getByRole('button', { name: /تأیید|رد|بازگرداندن|درخواست توضیح/ })).toHaveCount(0);
+    const visibleText = await page.locator('main').innerText();
+    for (const marker of env('HR_E2E_DUTY_PROTECTED_MARKERS').split(',').map((item) => item.trim()).filter(Boolean)) {
+      expect(visibleText).not.toContain(marker);
+    }
+    await context.close();
+  });
+
+  test('destination manager sees only the bounded triage queue', async ({ browser }) => {
+    test.skip(
+      !env('HR_E2E_DUTY_MANAGER_STORAGE') || !env('HR_E2E_DUTY_TRIAGE_ID'),
+      'Set a destination manager storage state and an unassigned triage duty id.',
+    );
+    const workspace = env('HR_E2E_DUTY_WORKSPACE') || 'accounting';
+    const context = await browser.newContext({ storageState: env('HR_E2E_DUTY_MANAGER_STORAGE') });
+    const page = await context.newPage();
+    await page.goto(`/dashboard/${workspace}/duties`);
+    await page.getByText('نیازمند تعیین مسئول').click();
+    const triageLink = page.locator(`main a[href="/dashboard/${workspace}/duties/${env('HR_E2E_DUTY_TRIAGE_ID')}"]`);
+    await expect(triageLink).toBeVisible();
+    await triageLink.click();
+    await expect(page.getByText('دسترسی محدود به همین وظیفه')).toBeVisible();
+    await expect(page.getByRole('button', { name: /تأیید|رد|بازگرداندن|درخواست توضیح/ })).toHaveCount(0);
+    await expect(page.locator('main a[href^="/dashboard/hr/"]')).toHaveCount(0);
+    const visibleText = await page.locator('main').innerText();
+    for (const marker of env('HR_E2E_DUTY_PROTECTED_MARKERS').split(',').map((item) => item.trim()).filter(Boolean)) {
+      expect(visibleText).not.toContain(marker);
+    }
+    await context.close();
+  });
+});

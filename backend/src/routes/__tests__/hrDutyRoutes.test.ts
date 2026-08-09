@@ -15,6 +15,9 @@ const routes = stack.flatMap((layer) => layer.route
   : []);
 
 for (const expected of [
+  'GET /workspaces/:workspaceCode/summary',
+  'GET /workspaces/:workspaceCode/duties',
+  'GET /workspaces/:workspaceCode/duties/:id',
   'POST /legacy-work-items/:id/duties',
   'POST /:id/respond',
   'POST /:id/reconcile',

@@ -8,6 +8,11 @@ import {
   respondToHrDuty,
   syncHrDutyEnvelopeDefinitions,
 } from '../hrDutyEngine';
+import {
+  getDestinationDutyDetail,
+  getDestinationDutySummary,
+  listDestinationDuties,
+} from '../hrDutySurface';
 
 process.env.DATABASE_URL ??= 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public';
 const prisma = new PrismaClient();
@@ -53,6 +58,10 @@ const run = async () => {
       } }),
     ]);
     await syncHrDutyEnvelopeDefinitions(tx, sourceActor.id);
+    await tx.workspacePermission.create({ data: {
+      userId: sourceActor.id, workspace: 'accounting', permissionLevel: 'admin',
+      grantedBy: sourceActor.id,
+    } });
     const staticEnvelopeCodes = Object.values(HR_DUTY_DEFINITIONS)
       .filter(({ destinationWorkspaceCode }) => Boolean(destinationWorkspaceCode))
       .map(({ envelopeCode }) => envelopeCode);
@@ -110,6 +119,26 @@ const run = async () => {
     assert.equal((await tx.hrDutyAssignmentHistory.count({ where: { dutyId: created.id } })), 1);
     assert.equal((await tx.hrDutyAuditVersion.count({ where: { dutyId: created.id, eventCode: 'ASSIGNED' } })), 1);
 
+    const assignedDetail = await getDestinationDutyDetail(tx, {
+      dutyId: created.id, actorUserId: assignee.id, workspaceCode: 'accounting',
+      now: new Date('2026-08-09T08:05:00.000Z'),
+    });
+    assert.equal(assignedDetail.access, 'ASSIGNEE');
+    assert.equal(assignedDetail.fields.title, source.title);
+    assert.equal(JSON.stringify(assignedDetail).includes(source.id), false, 'surface cannot expose the HR source id');
+    assert.equal(JSON.stringify(assignedDetail).includes(sourceActor.id), false, 'surface cannot expose source actor identity');
+    assert.equal((await getDestinationDutySummary(tx, {
+      actorUserId: assignee.id, workspaceCode: 'ACCOUNTING', now: new Date('2026-08-09T08:05:00.000Z'),
+    })).open, 1);
+    await assert.rejects(getDestinationDutyDetail(tx, {
+      dutyId: created.id, actorUserId: sourceActor.id, workspaceCode: 'ACCOUNTING',
+      now: new Date('2026-08-09T08:05:00.000Z'),
+    }), /DUTY_ASSIGNEE_CHANGED/);
+    await assert.rejects(getDestinationDutyDetail(tx, {
+      dutyId: created.id, actorUserId: assignee.id, workspaceCode: 'SALES',
+      now: new Date('2026-08-09T08:05:00.000Z'),
+    }), /DUTY_DESTINATION_CHANGED/);
+
     const replay = await createHrDutyFromLegacyWorkItem(tx, {
       sourceWorkItemId: source.id,
       sourceActionCode: 'FINANCE_APPROVAL', actorUserId: sourceActor.id, policyVersion: 1,
@@ -149,6 +178,21 @@ const run = async () => {
     assert.equal(successorDuty.currentAssigneeUserId, successorOwner.id);
     assert.equal(successorDuty.responsibilityId, successorResponsibility.id);
     assert.equal(successorDuty.dueAt.toISOString(), created.dueAt.toISOString());
+    const formerAssigneeHistory = await listDestinationDuties(tx, {
+      actorUserId: assignee.id, workspaceCode: 'ACCOUNTING', view: 'history',
+      now: new Date('2026-08-09T08:32:00.000Z'),
+    });
+    const predecessorHistory = formerAssigneeHistory.find((item) => item.id === created.id);
+    assert.ok(predecessorHistory, 'former assignee retains a bounded terminal history record');
+    assert.equal(predecessorHistory.detailAvailable, false, 'stale terminal records are not actionable deep links');
+    assert.deepEqual(predecessorHistory.fields, {}, 'terminal fallback cannot re-read changed source fields');
+    assert.deepEqual(predecessorHistory.evidence, [], 'terminal fallback cannot reuse stale evidence declarations');
+    assert.equal(predecessorHistory.result, null, 'terminal fallback cannot expose a stale structured result');
+    assert.ok(predecessorHistory.history.every((event) => event.reason === null), 'terminal fallback exposes event metadata without reasons');
+    await assert.rejects(getDestinationDutyDetail(tx, {
+      dutyId: successorDuty.id, actorUserId: assignee.id, workspaceCode: 'ACCOUNTING',
+      now: new Date('2026-08-09T08:32:00.000Z'),
+    }), /DUTY_ASSIGNEE_CHANGED/);
 
     const completed = await respondToHrDuty(tx, {
       dutyId: successorDuty.id, actorUserId: successorOwner.id, actionCode: 'APPROVE',
@@ -162,6 +206,16 @@ const run = async () => {
     assert.deepEqual(completed.duty.structuredResultJson, { actionCode: 'APPROVE', reason: null });
     assert.equal((await tx.hrWorkItem.findUniqueOrThrow({ where: { id: source.id } })).status, 'COMPLETE');
     assert.equal((await tx.hrDutyAuditVersion.count({ where: { dutyId: successorDuty.id, eventCode: 'COMPLETED' } })), 1);
+    const history = await listDestinationDuties(tx, {
+      actorUserId: successorOwner.id, workspaceCode: 'ACCOUNTING', view: 'history',
+      now: new Date('2026-08-09T09:00:30.000Z'),
+    });
+    assert.ok(history.some((item) => item.id === successorDuty.id));
+    const managerHistory = await listDestinationDuties(tx, {
+      actorUserId: sourceActor.id, workspaceCode: 'ACCOUNTING', view: 'history',
+      now: new Date('2026-08-09T09:00:30.000Z'),
+    });
+    assert.ok(managerHistory.some((item) => item.id === successorDuty.id));
 
     const responseReplay = await respondToHrDuty(tx, {
       dutyId: successorDuty.id, actorUserId: successorOwner.id, actionCode: 'APPROVE',

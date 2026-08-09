@@ -847,6 +847,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   };
 
   const navigationItems = getNavigationItems();
+  if (currentWorkspace) navigationItems.splice(1, 0, {
+    name: 'Task-scoped HR duties',
+    namePersian: 'وظایف بین‌واحدی من',
+    href: `${WORKSPACE_CONFIG[currentWorkspace].path}/duties`,
+    icon: FaClipboardList,
+    show: true,
+  });
 
   return (
     <div className={`flex min-h-0 flex-col lg:h-full ${className}`}>

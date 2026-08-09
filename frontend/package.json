@@ -14,6 +14,7 @@
     "test:hr-date-boundary": "npx tsx src/features/hr/hrDateBoundary.test.ts && npx tsx src/features/hr/hrCalendarScope.test.ts && npx tsx src/features/hr/hrChecklistCalendar.test.ts",
     "test:hr-display": "npx tsx src/features/hr/hrDisplay.test.ts",
     "test:hr-dashboard": "npx tsx src/features/hr/hrDashboardViewModel.test.ts",
+    "test:hr-duty-surfaces": "npx tsx src/features/hr-duties/destinationDutyState.test.ts",
     "test:hr-e2e": "playwright test e2e/hr-role-workflows.spec.ts"
   },
   "dependencies": {

@@ -3,6 +3,7 @@ import {
   PERSONNEL_COLLECTION_PAGE_SIZE,
   buildPersonnelCollection,
   normalizePersonnelSearch,
+  personnelOriginFeature,
 } from '../hrPersonnelCollection';
 
 const people = [
@@ -19,6 +20,10 @@ const people = [
 ];
 
 assert.equal(PERSONNEL_COLLECTION_PAGE_SIZE, 10);
+assert.equal(personnelOriginFeature('/dashboard/hr/structure/positions?p=1'), 'ORGANIZATIONAL_STRUCTURE');
+assert.equal(personnelOriginFeature('/dashboard/hr/hiring/case-1'), 'RECRUITMENT_CASES');
+assert.equal(personnelOriginFeature('/dashboard/accounting'), null);
+assert.equal(personnelOriginFeature('https://evil.example/dashboard/hr'), null);
 assert.equal(normalizePersonnelSearch('  كيوان\u200c  ياسمي  '), 'کیوان یاسمی');
 
 const normalizedMatch = buildPersonnelCollection(people, { search: 'کیوان یاسمی', page: 1 });

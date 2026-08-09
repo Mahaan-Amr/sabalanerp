@@ -1,5 +1,20 @@
 export const PERSONNEL_COLLECTION_PAGE_SIZE = 10;
 
+export type PersonnelOriginFeature = 'DASHBOARD' | 'ORGANIZATIONAL_STRUCTURE' | 'RECRUITMENT_CASES' | 'DATA_MIGRATION_RECONCILIATION' | 'HR_WORK_MANAGEMENT';
+
+export const personnelOriginFeature = (value: unknown): PersonnelOriginFeature | null => {
+  const candidate = String(value ?? '').trim();
+  if (!candidate.startsWith('/dashboard/hr') || candidate.startsWith('//') || /[\r\n]/.test(candidate)) return null;
+  let pathname = '';
+  try { pathname = new URL(candidate, 'https://sabalan.local').pathname.replace(/\/$/, ''); } catch { return null; }
+  if (pathname === '/dashboard/hr') return 'DASHBOARD';
+  if (/^\/dashboard\/hr\/structure(?:\/|$)/.test(pathname)) return 'ORGANIZATIONAL_STRUCTURE';
+  if (/^\/dashboard\/hr\/hiring(?:\/|$)/.test(pathname)) return 'RECRUITMENT_CASES';
+  if (/^\/dashboard\/hr\/migration(?:\/|$)/.test(pathname)) return 'DATA_MIGRATION_RECONCILIATION';
+  if (/^\/dashboard\/hr\/(?:tasks|duties)(?:\/|$)/.test(pathname)) return 'HR_WORK_MANAGEMENT';
+  return null;
+};
+
 export type PersonnelCollectionRecord = {
   id: string;
   firstName: string;

@@ -13,12 +13,22 @@ export type PersonnelListState = {
   origin: string;
 };
 
+export const exceptionalPersonnelDraftKey = (userId: string) => `hr-personnel-draft:${userId}:exceptional`;
+export const personnelScheduleDraftPrefix = (userId: string) => `hr-personnel-draft:${userId}:schedule:`;
+export const personnelScheduleDraftKey = (userId: string, personnelId: string) => `${personnelScheduleDraftPrefix(userId)}${personnelId}`;
+
 const clean = (value: string | null) => String(value ?? '').trim();
 
 export const safePersonnelOrigin = (value: unknown) => {
   const candidate = clean(String(value ?? ''));
   if (!candidate.startsWith('/dashboard/') || candidate.startsWith('//') || /[\r\n]/.test(candidate)) return '';
-  return candidate;
+  let parsed: URL;
+  try { parsed = new URL(candidate, 'https://sabalan.local'); } catch { return ''; }
+  const allowed = [
+    /^\/dashboard\/hr\/?$/,
+    /^\/dashboard\/hr\/(?:structure|hiring|migration|tasks|duties)(?:\/[^/?#]+)*\/?$/,
+  ].some((pattern) => pattern.test(parsed.pathname));
+  return allowed ? `${parsed.pathname}${parsed.search}${parsed.hash}` : '';
 };
 
 export const parsePersonnelListState = (params: URLSearchParams): PersonnelListState => {

@@ -6,6 +6,8 @@ import "dotenv/config";
 import path from "path";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import { registerRealtimePublisher } from "./services/realtimePublisher";
+import { authorizeHrUser } from "./services/hrAuthorizationService";
 import { PrismaClient } from "@prisma/client";
 import {
   parseCookies,
@@ -346,6 +348,17 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     if (!isProduction) console.log("User disconnected:", socket.id);
   });
+});
+
+registerRealtimePublisher((event) => {
+  for (const socket of io.sockets.sockets.values()) {
+    void authorizeHrUser(prisma, socket.data.userId, {
+      workspaceLevel: "VIEW",
+      feature: { code: "PERSONNEL", level: "VIEW" },
+    }).then((authorization) => {
+      if (authorization.allowed) socket.emit(event, {});
+    }).catch(() => undefined);
+  }
 });
 
 // Error handling middleware

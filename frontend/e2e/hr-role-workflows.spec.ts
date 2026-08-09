@@ -274,6 +274,81 @@ test.describe('browser-visible cross-role workflow controls', () => {
     await expect(managerPage.getByRole('button', { name: /تأیید و ایجاد نسخه اجرایی|بازگرداندن/ })).toBeVisible();
     await manager.close();
   });
+
+  test('Personnel URL context survives Back and refresh while dirty drafts remain recoverable', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: env('HR_E2E_HR_MANAGER_STORAGE') });
+    const page = await context.newPage();
+    await page.goto('/dashboard/hr/personnel?origin=%2Fdashboard%2Faccounting%2Fdeadlines');
+    await expect(page.getByRole('link', { name: 'بازگشت' })).toHaveAttribute('href', '/dashboard/hr');
+    await page.getByRole('button', { name: 'ثبت استثنایی پرسنل' }).click();
+    await page.getByLabel('نام', { exact: true }).fill('پیش‌نویس آزمون');
+    await expect.poll(() => page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.endsWith(':exceptional'))?.[1] || '')).toContain('پیش‌نویس آزمون');
+    await page.goBack();
+    await expect(page.getByRole('dialog', { name: 'ثبت استثنایی پرسنل' })).toHaveCount(0);
+    await page.goForward();
+    await expect(page.getByLabel('نام', { exact: true })).toHaveValue('پیش‌نویس آزمون');
+    await page.reload();
+    await expect(page.getByLabel('نام', { exact: true })).toHaveValue('پیش‌نویس آزمون');
+    await context.close();
+  });
+
+  test('schedule draft survives browser navigation and direct panel recovery', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: env('HR_E2E_SUPERVISOR_STORAGE') });
+    const page = await context.newPage();
+    const personnelId = env('HR_E2E_PERSONNEL_ID');
+    await page.goto('/dashboard/hr/personnel');
+    await page.goto(`/dashboard/hr/personnel?focus=${personnelId}`);
+    await page.getByRole('button', { name: 'مشاهده برنامه کاری' }).click();
+    const note = page.getByPlaceholder('دلیل پیشنهاد سرپرست مسئول');
+    await note.fill('پیش‌نویس برنامه کاری آزمون');
+    await expect.poll(() => page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.includes(':schedule:'))?.[1] || '')).toContain('پیش‌نویس برنامه کاری آزمون');
+    await page.goBack();
+    await page.goto(`/dashboard/hr/personnel?focus=${personnelId}&panel=schedule`);
+    await expect(page.getByPlaceholder('دلیل پیشنهاد سرپرست مسئول')).toHaveValue('پیش‌نویس برنامه کاری آزمون');
+    await context.close();
+  });
+
+  test('realtime, refresh failure, scroll, focus, and logical return preserve collection context', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: env('HR_E2E_HR_MANAGER_STORAGE') });
+    const page = await context.newPage();
+    const personnelId = env('HR_E2E_PERSONNEL_ID');
+    await page.goto(`/dashboard/hr/personnel?page=99&focus=${personnelId}&origin=%2Fdashboard%2Fhr%2Fstructure`);
+    await expect(page.locator(`[data-personnel-id="${personnelId}"]`)).toBeVisible();
+    await expect(page).not.toHaveURL(/page=99/);
+    await expect(page.getByRole('link', { name: 'بازگشت' })).toHaveAttribute('href', '/dashboard/hr/structure');
+
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const beforeRealtime = await page.evaluate(() => window.scrollY);
+    const realtimeResponse = page.waitForResponse((response) => response.url().includes('/api/hr/personnel?'));
+    await page.evaluate(() => window.dispatchEvent(new Event('hr.personnel.changed')));
+    await realtimeResponse;
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(beforeRealtime);
+
+    const preservedUrl = page.url();
+    await page.route('**/api/hr/personnel?**', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'temporary refresh failure' }) }));
+    await page.getByRole('button', { name: 'به‌روزرسانی' }).click();
+    await expect(page.locator(`[data-personnel-id="${personnelId}"]`)).toBeVisible();
+    await expect(page).toHaveURL(preservedUrl);
+
+    await page.unroute('**/api/hr/personnel?**');
+    await page.goto('/dashboard/hr/personnel');
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.getByRole('button', { name: 'صفحه بعد' }).click();
+    await expect(page).toHaveURL(/page=2/);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await context.close();
+  });
+
+  test('Personnel permission loss clears the last successful disclosure', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: env('HR_E2E_HR_MANAGER_STORAGE') });
+    const page = await context.newPage();
+    await page.goto(`/dashboard/hr/personnel?focus=${env('HR_E2E_PERSONNEL_ID')}`);
+    await expect(page.locator(`[data-personnel-id="${env('HR_E2E_PERSONNEL_ID')}"]`)).toBeVisible();
+    await page.route('**/api/hr/personnel?**', (route) => route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'permission revoked' }) }));
+    await page.getByRole('button', { name: 'به‌روزرسانی' }).click();
+    await expect(page.locator(`[data-personnel-id="${env('HR_E2E_PERSONNEL_ID')}"]`)).toHaveCount(0);
+    await context.close();
+  });
 });
 
 test.describe('task-scoped HR duty surfaces', () => {

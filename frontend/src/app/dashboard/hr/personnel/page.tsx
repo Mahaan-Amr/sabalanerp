@@ -49,10 +49,15 @@ import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
 import RetentionAction from "@/features/hr/RetentionActionSheet";
 import {
+  exceptionalPersonnelDraftKey,
   parsePersonnelListState,
+  personnelScheduleDraftPrefix,
+  personnelScheduleDraftKey,
   personnelListSearch,
   type PersonnelListState,
 } from "@/features/hr/personnelListState";
+import { useSocket } from "@/hooks/useSocket";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   apiError,
   assignmentTypeLabel,
@@ -88,11 +93,21 @@ const blankAssignment = () => ({
   responsibleSupervisorAssignmentId: "",
   scheduleContributing: false,
 });
+const clearPersonnelScheduleDrafts = (userId: string) => {
+  const prefix = personnelScheduleDraftPrefix(userId);
+  for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.sessionStorage.key(index);
+    if (key?.startsWith(prefix)) window.sessionStorage.removeItem(key);
+  }
+};
 
 export default function HrPersonnelPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { socket } = useSocket();
+  const { user } = useAuth();
+  const currentUserId = user?.id || "";
   const listState = useMemo(
     () => parsePersonnelListState(new URLSearchParams(searchParams.toString())),
     [searchParams],
@@ -107,8 +122,18 @@ export default function HrPersonnelPage() {
   } = listState;
   const replaceListState = useCallback(
     (patch: Partial<PersonnelListState>) => {
-      const query = personnelListSearch({ ...listState, ...patch });
+      const nextState = { ...listState, ...patch };
+      const resetsCollectionScroll = ([
+        "view", "search", "page", "relationshipStatus", "attention",
+        "organizationalUnitId", "workplaceId", "costCenterId", "dependencyAt",
+      ] as const).some((key) => patch[key] !== undefined && nextState[key] !== listState[key]);
+      const query = personnelListSearch(nextState);
+      if (resetsCollectionScroll) {
+        const scrollKey = `hr-personnel-scroll:${pathname}?${personnelListSearch({ ...nextState, focus: "", panel: "" })}`;
+        window.sessionStorage.removeItem(scrollKey);
+      }
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      if (resetsCollectionScroll) window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
     },
     [listState, pathname, router],
   );
@@ -140,7 +165,9 @@ export default function HrPersonnelPage() {
   const [confirmDiscardSchedule, setConfirmDiscardSchedule] = useState(false);
   const [exceptionalOpenedHere, setExceptionalOpenedHere] = useState(false);
   const [confirmDiscardExceptional, setConfirmDiscardExceptional] = useState(false);
+  const [originHref, setOriginHref] = useState("/dashboard/hr");
   const lastSuccessfulView = useRef(false);
+  const restoredFocus = useRef<string | null>(null);
   const expanded = listState.focus || null;
   const archiveView = listState.view === "archived";
   const page = listState.page;
@@ -187,15 +214,40 @@ export default function HrPersonnelPage() {
         });
       }
     } catch (err) {
+      if ([401, 403].includes(Number((err as any)?.response?.status))) {
+        setRows([]);
+        setFoundation({ positions: [], availableUsers: [] });
+        setAuthorities([]);
+        setScheduleData(null);
+        setScheduleDirty(false);
+        setForm(blankPerson());
+        if (currentUserId) {
+          window.sessionStorage.removeItem(exceptionalPersonnelDraftKey(currentUserId));
+          clearPersonnelScheduleDrafts(currentUserId);
+        }
+        lastSuccessfulView.current = false;
+        replaceListState({ focus: "", panel: "" });
+      }
       setError(apiError(err));
     } finally {
       setLoading(false);
     }
-  }, [search, archiveView, page, relationshipStatus, attention, organizationalUnitId, workplaceId, costCenterId, dependencyAt, expanded, replaceListState]);
+  }, [search, archiveView, page, relationshipStatus, attention, organizationalUnitId, workplaceId, costCenterId, dependencyAt, expanded, replaceListState, currentUserId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    let active = true;
+    if (!listState.origin) {
+      setOriginHref("/dashboard/hr");
+      return () => { active = false; };
+    }
+    void hrAPI.resolvePersonnelOrigin(listState.origin)
+      .then((response) => { if (active) setOriginHref(response.data.data.origin || "/dashboard/hr"); })
+      .catch(() => { if (active) setOriginHref("/dashboard/hr"); });
+    return () => { active = false; };
+  }, [listState.origin]);
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       const nextSearch = searchDraft.trim();
@@ -209,10 +261,16 @@ export default function HrPersonnelPage() {
     setSearchDraft(listState.search);
   }, [listState.search]);
   useEffect(() => {
-    if (!expanded || loading) return;
+    if (!expanded) {
+      restoredFocus.current = null;
+      return;
+    }
+    if (loading || restoredFocus.current === expanded) return;
     const control = document.querySelector<HTMLElement>(`[data-personnel-id="${CSS.escape(expanded)}"] button`);
-    control?.focus({ preventScroll: true });
-    control?.scrollIntoView({ block: "center" });
+    if (!control) return;
+    control.focus({ preventScroll: true });
+    control.scrollIntoView({ block: "center" });
+    restoredFocus.current = expanded;
   }, [expanded, loading, rows]);
   useEffect(() => {
     const key = `hr-personnel-scroll:${pathname}?${personnelListSearch({ ...listState, focus: "", panel: "" })}`;
@@ -273,21 +331,44 @@ export default function HrPersonnelPage() {
       setScheduleData(null);
       setError(apiError(err));
       if ([401, 403, 404].includes(Number((err as any)?.response?.status))) {
+        if (currentUserId) window.sessionStorage.removeItem(personnelScheduleDraftKey(currentUserId, expanded));
+        setScheduleDirty(false);
         replaceListState({ panel: "", focus: "" });
       }
     } finally {
       setScheduleLoading(false);
     }
-  }, [expanded, listState.panel, replaceListState]);
+  }, [currentUserId, expanded, listState.panel, replaceListState]);
 
   useEffect(() => {
     void loadSchedule();
   }, [authoritySignature, loadSchedule]);
   useEffect(() => {
+    const refresh = () => {
+      void load();
+      if (listState.panel === "schedule") void loadSchedule();
+    };
+    socket?.on("hr.personnel.changed", refresh);
+    window.addEventListener("hr.personnel.changed", refresh);
+    return () => {
+      socket?.off("hr.personnel.changed", refresh);
+      window.removeEventListener("hr.personnel.changed", refresh);
+    };
+  }, [listState.panel, load, loadSchedule, socket]);
+  useEffect(() => {
     if (!lastSuccessfulView.current || !showExceptionalForm || canCreateExceptionalPersonnel) return;
     setForm(blankPerson());
+    if (currentUserId) window.sessionStorage.removeItem(exceptionalPersonnelDraftKey(currentUserId));
     replaceListState({ panel: "" });
-  }, [canCreateExceptionalPersonnel, replaceListState, showExceptionalForm]);
+  }, [canCreateExceptionalPersonnel, currentUserId, replaceListState, showExceptionalForm]);
+  useEffect(() => {
+    if (!showExceptionalForm || !canCreateExceptionalPersonnel) return;
+    if (!currentUserId) return;
+    const saved = window.sessionStorage.getItem(exceptionalPersonnelDraftKey(currentUserId));
+    if (!saved) return;
+    try { setForm({ ...blankPerson(), ...JSON.parse(saved) }); }
+    catch { window.sessionStorage.removeItem(exceptionalPersonnelDraftKey(currentUserId)); }
+  }, [canCreateExceptionalPersonnel, currentUserId, showExceptionalForm]);
 
   const run = async (
     action: () => Promise<any>,
@@ -368,6 +449,19 @@ export default function HrPersonnelPage() {
     router.push(`${pathname}?${query}`, { scroll: false });
   };
   const exceptionalDirty = JSON.stringify(form) !== JSON.stringify(blankPerson());
+  useEffect(() => {
+    if (!exceptionalDirty) return;
+    if (currentUserId) window.sessionStorage.setItem(exceptionalPersonnelDraftKey(currentUserId), JSON.stringify(form));
+  }, [currentUserId, exceptionalDirty, form]);
+  useEffect(() => {
+    if (!saving && !exceptionalDirty && !scheduleDirty) return;
+    const protectPendingWork = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectPendingWork);
+    return () => window.removeEventListener("beforeunload", protectPendingWork);
+  }, [exceptionalDirty, saving, scheduleDirty]);
   const closeExceptionalRegistration = () => {
     if (saving) return;
     if (exceptionalDirty) {
@@ -379,6 +473,7 @@ export default function HrPersonnelPage() {
   };
   const discardExceptionalRegistration = () => {
     setForm(blankPerson());
+    if (currentUserId) window.sessionStorage.removeItem(exceptionalPersonnelDraftKey(currentUserId));
     setConfirmDiscardExceptional(false);
     if (exceptionalOpenedHere) router.back();
     else replaceListState({ panel: "" });
@@ -397,6 +492,7 @@ export default function HrPersonnelPage() {
     replaceListState({ panel: "" });
   };
   const discardSchedule = () => {
+    if (currentUserId && expanded) window.sessionStorage.removeItem(personnelScheduleDraftKey(currentUserId, expanded));
     setScheduleDirty(false);
     setConfirmDiscardSchedule(false);
     setScheduleData(null);
@@ -426,7 +522,7 @@ export default function HrPersonnelPage() {
       <ErpPage
         eyebrow="منابع انسانی · پرسنل"
         title="فهرست پرسنل"
-        actions={[{ label: "بازگشت", href: listState.origin || "/dashboard/hr", icon: FaArrowRight, tone: "neutral" }]}
+        actions={[{ label: "بازگشت", href: originHref, icon: FaArrowRight, tone: "neutral" }]}
       >
         <ErpEmptyState
           icon={FaUsers}
@@ -450,7 +546,7 @@ export default function HrPersonnelPage() {
       actions={[
         {
           label: "بازگشت",
-          href: listState.origin || "/dashboard/hr",
+          href: originHref,
           icon: FaArrowRight,
           tone: "neutral",
         },
@@ -679,6 +775,7 @@ export default function HrPersonnelPage() {
                     "پرسنل استثنایی، رابطه استخدامی، تخصیص اصلی و رویداد ممیزی ثبت شد.",
                     (response) => {
                       setForm(blankPerson());
+                      if (currentUserId) window.sessionStorage.removeItem(exceptionalPersonnelDraftKey(currentUserId));
                       setExceptionalOpenedHere(false);
                       replaceListState({
                         view: "active",
@@ -824,6 +921,7 @@ export default function HrPersonnelPage() {
             saving={saving}
             run={run}
             onDirtyChange={setScheduleDirty}
+            userId={currentUserId}
           />
         ) : null}
       </ErpSheet>
@@ -1140,7 +1238,7 @@ function PersonnelCard(props: any) {
   );
 }
 
-function PersonnelScheduleEditor({ person, saving, run, onDirtyChange }: any) {
+function PersonnelScheduleEditor({ person, saving, run, onDirtyChange, userId }: any) {
   const schedule = person.workSchedules?.[0];
   const change = person.workScheduleChanges?.[0];
   const initialValue = useMemo(
@@ -1156,15 +1254,44 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange }: any) {
   );
   const [proposalNote, setProposalNote] = useState("");
   const [returnReason, setReturnReason] = useState("");
+  const [draftReady, setDraftReady] = useState(false);
   const capabilities = person.workScheduleCapabilities || {};
 
   useEffect(() => {
-    onDirtyChange?.(
-      JSON.stringify(value) !== JSON.stringify(initialValue) ||
-      Boolean(proposalNote.trim()) ||
-      Boolean(returnReason.trim()),
+    if (!userId) return;
+    const saved = window.sessionStorage.getItem(personnelScheduleDraftKey(userId, person.id));
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved);
+        if (draft.value) setValue(draft.value);
+        setProposalNote(String(draft.proposalNote || ""));
+        setReturnReason(String(draft.returnReason || ""));
+      } catch { window.sessionStorage.removeItem(personnelScheduleDraftKey(userId, person.id)); }
+    }
+    setDraftReady(true);
+  }, [person.id, userId]);
+
+  const dirty = JSON.stringify(value) !== JSON.stringify(initialValue) || Boolean(proposalNote.trim()) || Boolean(returnReason.trim());
+
+  useEffect(() => {
+    if (!draftReady || !dirty || !userId) return;
+    window.sessionStorage.setItem(
+      personnelScheduleDraftKey(userId, person.id),
+      JSON.stringify({ value, proposalNote, returnReason }),
     );
-  }, [initialValue, onDirtyChange, proposalNote, returnReason, value]);
+  }, [dirty, draftReady, person.id, proposalNote, returnReason, userId, value]);
+
+  const runSchedule = (action: () => Promise<any>, message: string) => run(action, message, () => {
+    setDraftReady(false);
+    if (userId) window.sessionStorage.removeItem(personnelScheduleDraftKey(userId, person.id));
+    setProposalNote("");
+    setReturnReason("");
+    onDirtyChange?.(false);
+  });
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   return (
     <div className="mt-4">
@@ -1198,7 +1325,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange }: any) {
               label="ثبت پیشنهاد توسط سرپرست مسئول"
               disabled={saving || !proposalNote.trim() || !value.effectiveDate}
               onClick={() =>
-                run(
+                runSchedule(
                   () =>
                     hrAPI.proposePersonnelWorkSchedule(person.id, {
                       ...workSchedulePayload(value),
@@ -1220,7 +1347,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange }: any) {
               icon={FaSync}
               disabled={saving || !value.effectiveDate}
               onClick={() =>
-                run(
+                runSchedule(
                   () =>
                     hrAPI.preparePersonnelWorkSchedule(
                       person.id,
@@ -1236,7 +1363,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange }: any) {
                 label="ارسال برای تأیید مدیر منابع انسانی"
                 disabled={saving}
                 onClick={() =>
-                  run(
+                  runSchedule(
                     () =>
                       hrAPI.submitPersonnelWorkSchedule(person.id, change.id),
                     "برنامه کاری برای تأیید ارسال شد.",
@@ -1262,7 +1389,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange }: any) {
                 label="بازگرداندن"
                 disabled={saving || !returnReason.trim()}
                 onClick={() =>
-                  run(
+                  runSchedule(
                     () =>
                       hrAPI.returnPersonnelWorkSchedule(
                         person.id,
@@ -1280,7 +1407,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange }: any) {
                 label="تأیید و ایجاد نسخه اجرایی"
                 disabled={saving}
                 onClick={() =>
-                  run(
+                  runSchedule(
                     () =>
                       hrAPI.approvePersonnelWorkSchedule(person.id, change.id),
                     "نسخه اجرایی برنامه کاری تأیید شد.",

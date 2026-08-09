@@ -38,7 +38,8 @@ import {
 } from '../services/hrOrganizationCapacity';
 import { assertAutomatedHrMigrationOperationAllowed } from '../services/hrMigrationReconciliation';
 import { getHrReconciliationWorkspace, recordHrReconciliationReview } from '../services/hrMigrationReconciliationStore';
-import { buildPersonnelCollection } from '../services/hrPersonnelCollection';
+import { buildPersonnelCollection, personnelOriginFeature } from '../services/hrPersonnelCollection';
+import { publishRealtime } from '../services/realtimePublisher';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -59,6 +60,16 @@ export const featureForPath = (path: string) => {
 router.use((req: WorkspaceRequest, res, next) => {
   const level = req.method === 'GET' ? 'VIEW' : req.path.startsWith('/migration') ? 'ADMIN' : 'EDIT';
   return requireHrFeature(featureForPath(req.path), level)(req, res, next);
+});
+router.use((req: WorkspaceRequest, res, next) => {
+  if (req.method !== 'GET' && /^\/(?:personnel|relationships|assignments)(?:\/|$)/.test(req.path)) {
+    res.once('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        publishRealtime('hr.personnel.changed', {});
+      }
+    });
+  }
+  next();
 });
 
 // Route-specific business authority and system-role middleware below remains
@@ -1103,6 +1114,16 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
     }));
     res.json({ success: true, data, meta: collection.meta });
   } catch (error) { handleError(res, error, 'List HR personnel'); }
+});
+
+router.get('/personnel-origin', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const origin = textValue(req.query.origin);
+    const feature = personnelOriginFeature(origin);
+    if (!feature) return res.json({ success: true, data: { origin: '/dashboard/hr' } });
+    const authorization = await authorizeHrUser(prisma, actorId(req), { feature: { code: feature, level: 'VIEW' } });
+    res.json({ success: true, data: { origin: authorization.allowed ? origin : '/dashboard/hr' } });
+  } catch (error) { handleError(res, error, 'Resolve Personnel logical origin'); }
 });
 
 router.post('/personnel/:id/archive', viewAccess, requireHrManagerAuthority, async (req: WorkspaceRequest, res) => {

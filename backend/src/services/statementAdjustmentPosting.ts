@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from './approvedPricing';
+import { mapVerifiedApprovedPricingVersion, persistedApprovedPricingInclude } from './approvedPricing';
 import type { StatementAdjustmentRenderInput } from './dispatchDocuments/contracts';
 import {
   pricedAllocationIntegrityHash,
-  type LockedApprovedPricingVersion,
   type PriorPricedAllocationEvent,
 } from './pricedAllocationLedger';
 import {
@@ -15,6 +14,20 @@ import {
 } from './statementAdjustment';
 
 type Tx = Prisma.TransactionClient;
+const adjustmentPostingInclude = Prisma.validator<Prisma.DispatchCorrectionInclude>()({
+  lines: true,
+  waybill: { include: {
+    documentArtifacts: { where: { kind: 'STATEMENT' }, orderBy: { publishedAt: 'asc' } },
+    statementAdjustments: { select: { sequence: true }, orderBy: { sequence: 'desc' }, take: 1 },
+    candidate: { include: { allocationRevision: { include: {
+      queueTurn: true,
+      lines: true,
+      pricingReferences: { include: { pricingVersion: { include: persistedApprovedPricingInclude } }, orderBy: { contractId: 'asc' } },
+    } } } },
+  } },
+});
+type AdjustmentPostingCorrection = Prisma.DispatchCorrectionGetPayload<{ include: typeof adjustmentPostingInclude }>;
+type AdjustmentPostingRevisionLine = AdjustmentPostingCorrection['waybill']['candidate']['allocationRevision']['lines'][number];
 
 export interface StatementAdjustmentArtifactPreparer {
   templateVersion: string;
@@ -41,72 +54,6 @@ const record = (value: unknown): Readonly<Record<string, unknown>> => {
 };
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 const text = (value: unknown) => String(value || '').trim();
-
-const rowIntegrityMatches = (version: any, row: any) => row.integrityHash === approvedPricingRowIntegrityHash({
-  versionId: version.id,
-  contractId: version.contractId,
-  sourceFinancialRecordId: version.sourceFinancialRecordId,
-  versionNumber: version.versionNumber,
-  contractItemId: row.contractItemId,
-  productRowId: row.productRowId,
-  ordinal: row.ordinal,
-  contractedQuantity: row.contractedQuantity.toFixed(3),
-  unit: row.unit,
-  canonicalAllInTotal: row.canonicalAllInTotal.toFixed(12),
-  discountEligible: row.discountEligible,
-  componentEvidence: record(row.componentEvidence) as Readonly<Record<string, string>>,
-});
-
-const lockedVersion = (reference: any): LockedApprovedPricingVersion => {
-  const version = reference.pricingVersion;
-  const rows = [...version.rows].sort((left: any, right: any) => left.ordinal - right.ordinal || left.id.localeCompare(right.id));
-  if (version.integrityHash !== reference.expectedPricingHash
-    || rows.some((row: any) => !rowIntegrityMatches(version, row))
-    || version.integrityHash !== approvedPricingVersionIntegrityHash({
-      id: version.id,
-      contractId: version.contractId,
-      versionNumber: version.versionNumber,
-      sourceFinancialRecordId: version.sourceFinancialRecordId,
-      approvedAt: version.approvedAt,
-      approvedBy: version.approvedBy,
-      schemaVersion: version.schemaVersion,
-      currency: version.currency,
-      grossAmount: version.grossAmount.toFixed(12),
-      discountAmount: version.discountAmount.toFixed(12),
-      netAmount: version.netAmount.toFixed(12),
-      sourceEvidence: record(version.sourceEvidence),
-      rowHashes: rows.map((row: any) => row.integrityHash),
-    })) {
-    throw new Error(`Approved pricing ${version.id} failed immutable integrity verification.`);
-  }
-  return {
-    id: version.id,
-    contractId: version.contractId,
-    versionNumber: version.versionNumber,
-    sourceFinancialRecordId: version.sourceFinancialRecordId,
-    approvedAt: version.approvedAt.toISOString(),
-    approvedBy: version.approvedBy,
-    schemaVersion: version.schemaVersion,
-    currency: version.currency,
-    grossAmount: version.grossAmount.toFixed(12),
-    discountAmount: version.discountAmount.toFixed(12),
-    netAmount: version.netAmount.toFixed(12),
-    integrityHash: version.integrityHash,
-    readinessEvidenceHash: reference.readinessEvidenceHash,
-    rows: rows.map((row: any) => ({
-      id: row.id,
-      contractItemId: row.contractItemId,
-      productRowId: row.productRowId,
-      ordinal: row.ordinal,
-      contractedQuantity: row.contractedQuantity.toFixed(3),
-      unit: row.unit,
-      canonicalAllInTotal: row.canonicalAllInTotal.toFixed(12),
-      discountEligible: row.discountEligible,
-      componentEvidence: record(row.componentEvidence) as Readonly<Record<string, string>>,
-      integrityHash: row.integrityHash,
-    })),
-  };
-};
 
 const originalPricedEvents = async (tx: Tx, pricingRowIds: string[]): Promise<PriorPricedAllocationEvent[]> => {
   const events = await tx.dispatchPricedAllocationEvent.findMany({
@@ -153,7 +100,24 @@ const priorAdjustmentEvents = async (tx: Tx, pricingRowIds: Set<string>): Promis
   });
 };
 
-const renderContext = (waybill: any, templateVersion: string) => {
+type ImmutableAdjustmentRenderContext = {
+  waybillNumber: string;
+  customerName: string;
+  projectOrDestination: string;
+  vehiclePlate: string;
+  templateVersion: string;
+};
+
+const immutableText = (value: unknown, name: string) => {
+  const result = text(value);
+  if (!result) throw new Error(`Immutable adjustment render context is missing ${name}.`);
+  return result;
+};
+
+const readImmutableAdjustmentRenderContext = (
+  waybill: AdjustmentPostingCorrection['waybill'],
+  templateVersion: string,
+): ImmutableAdjustmentRenderContext => {
   const waybillSnapshot = record(waybill.snapshot);
   const allocationSnapshot = record(waybillSnapshot.allocationSnapshot || waybill.candidate.allocationRevision.snapshot);
   const loading = record(allocationSnapshot.loading);
@@ -165,14 +129,14 @@ const renderContext = (waybill: any, templateVersion: string) => {
   const vehicle = record(admission.vehicle);
   return {
     waybillNumber: waybill.number.toString(),
-    customerName: text(customer.name || customer.companyName),
-    projectOrDestination: text(project.name || project.address),
-    vehiclePlate: text(plate.plate || vehicle.plate),
-    templateVersion,
+    customerName: immutableText(customer.name || customer.companyName, 'customer name'),
+    projectOrDestination: immutableText(project.name || project.address, 'project or destination'),
+    vehiclePlate: immutableText(plate.plate || vehicle.plate, 'vehicle plate'),
+    templateVersion: immutableText(templateVersion, 'template version'),
   };
 };
 
-const lineLabel = (revisionLine: any) => {
+const lineLabel = (revisionLine: AdjustmentPostingRevisionLine) => {
   const snapshot = record(revisionLine.snapshot);
   return text(snapshot.productName || revisionLine.productRowId);
 };
@@ -191,32 +155,24 @@ export const planStatementAdjustment = async (tx: Tx, input: {
   artifactPreparer?: StatementAdjustmentArtifactPreparer;
   id?: () => string;
 }): Promise<PlannedStatementAdjustment | null> => {
-  const correction = await tx.dispatchCorrection.findUnique({ where: { id: input.correctionId }, include: {
-    lines: true,
-    waybill: { include: {
-      documentArtifacts: { where: { kind: 'STATEMENT' }, orderBy: { publishedAt: 'asc' } },
-      statementAdjustments: { select: { sequence: true }, orderBy: { sequence: 'desc' }, take: 1 },
-      candidate: { include: { allocationRevision: { include: {
-        queueTurn: true,
-        lines: true,
-        pricingReferences: { include: { pricingVersion: { include: {
-          rows: { orderBy: [{ ordinal: 'asc' }, { id: 'asc' }] },
-        } } }, orderBy: { contractId: 'asc' } },
-      } } } },
-    } },
-  } });
+  const correction = await tx.dispatchCorrection.findUnique({ where: { id: input.correctionId }, include: adjustmentPostingInclude });
   if (!correction) throw new Error('Dispatch correction was not found.');
   const originalStatement = correction.waybill.documentArtifacts[0];
   if (!originalStatement) return null;
   if (!input.artifactPreparer) throw new Error('Statement adjustment artifact publication is unavailable.');
   const references = correction.waybill.candidate.allocationRevision.pricingReferences;
   if (references.length === 0) throw new Error('Statement waybill has no immutable approved-pricing binding.');
-  const versions = references.map(lockedVersion);
-  const pricingRows = references.flatMap((reference: any) => reference.pricingVersion.rows);
-  const pricingByItem = new Map(pricingRows.map((row: any) => [row.contractItemId, row]));
+  const versions = references.map((reference) => {
+    if (reference.expectedPricingHash !== reference.pricingVersion.integrityHash) {
+      throw new Error(`Approved pricing ${reference.pricingVersionId} differs from the frozen allocation binding.`);
+    }
+    return mapVerifiedApprovedPricingVersion(reference.pricingVersion, reference.readinessEvidenceHash);
+  });
+  const pricingRows = references.flatMap((reference) => reference.pricingVersion.rows);
+  const pricingByItem = new Map(pricingRows.map((row) => [row.contractItemId, row]));
   const revisionByItem = new Map(correction.waybill.candidate.allocationRevision.lines
-    .map((line: any) => [line.sourceContractItemId, line]));
-  const pricingRowIds = new Set(pricingRows.map((row: any) => row.id as string));
+    .map((line) => [line.sourceContractItemId, line]));
+  const pricingRowIds = new Set(pricingRows.map((row) => row.id));
   const priorEvents = [
     ...await originalPricedEvents(tx, [...pricingRowIds]),
     ...await priorAdjustmentEvents(tx, pricingRowIds),
@@ -239,8 +195,8 @@ export const planStatementAdjustment = async (tx: Tx, input: {
     versions,
     priorEvents,
     lines: correction.lines.map((line) => {
-      const pricingRow = pricingByItem.get(line.contractItemId) as any;
-      const revisionLine = revisionByItem.get(line.contractItemId) as any;
+      const pricingRow = pricingByItem.get(line.contractItemId);
+      const revisionLine = revisionByItem.get(line.contractItemId);
       if (!pricingRow || !revisionLine || pricingRow.productRowId !== line.productRowId || pricingRow.unit !== line.unit
         || revisionLine.productRowId !== line.productRowId || revisionLine.unit !== line.unit) {
         throw new Error(`Correction line ${line.id} no longer matches the original frozen pricing row.`);
@@ -248,7 +204,7 @@ export const planStatementAdjustment = async (tx: Tx, input: {
       return { correctionLineId: line.id, contractId: line.contractId, contractItemId: line.contractItemId,
         productRowId: line.productRowId, label: lineLabel(revisionLine), unit: line.unit, quantity: line.quantity.toFixed(3) };
     }),
-    renderContext: renderContext(correction.waybill, input.artifactPreparer.templateVersion),
+    renderContext: readImmutableAdjustmentRenderContext(correction.waybill, input.artifactPreparer.templateVersion),
   });
   const artifact = await input.artifactPreparer.prepare(calculated.renderInput);
   if (!validArtifact(artifact)) throw new Error('Statement adjustment artifact failed durable publication verification.');

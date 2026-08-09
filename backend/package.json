@@ -63,7 +63,7 @@
     "test:priced-allocation-ledger:db": "tsx src/services/__tests__/allocationPricingPrisma.test.ts",
     "test:dispatch-documents": "tsx src/services/__tests__/dispatchArtifactStorageLock.test.ts && tsx src/services/__tests__/dispatchDocuments.test.ts && tsx src/services/__tests__/dispatchDocumentsDelegation.test.ts && tsx src/services/__tests__/dispatchDocumentsPrismaBehavior.test.ts && tsx src/services/__tests__/dispatchDocumentsTemporaryDatabase.test.ts",
     "test:dispatch-documents:db": "tsx src/services/__tests__/dispatchDocumentsPrismaIntegration.test.ts && tsx src/services/__tests__/dispatchDocumentsIssuanceConcurrency.test.ts",
-    "test:statement-adjustments": "tsx src/services/__tests__/statementAdjustment.test.ts",
+    "test:statement-adjustments": "tsx src/services/__tests__/dispatchCorrectionAdjustmentPolicy.test.ts && tsx src/services/__tests__/statementAdjustment.test.ts",
     "test:statement-adjustments:db": "tsx src/services/__tests__/statementAdjustmentPrisma.test.ts",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"

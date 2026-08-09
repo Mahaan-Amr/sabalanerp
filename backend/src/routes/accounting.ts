@@ -131,13 +131,16 @@ router.get('/dispatch-corrections', accountingDispatchView, async (_req: AuthReq
 router.post('/dispatch-corrections', accountingCorrectionsEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
   try { return res.status(201).json({ success: true, data: await createDispatchCorrection(prisma, { waybillId: req.body.waybillId,
     reason: req.body.reason, effectiveAt: new Date(req.body.effectiveAt), lines: req.body.lines, reversalOfId: req.body.reversalOfId,
+    reattributions: req.body.reattributions,
     actorId: req.user!.id, authority: dispatchAuthority(req) }) }); }
   catch (error) { return dispatchError(res, error); }
 });
 
 router.post('/dispatch-corrections/:id/post', accountingCorrectionsEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
   try { return res.json({ success: true, data: await postDispatchCorrection(prisma, { correctionId: req.params.id,
-    actorId: req.user!.id, authority: dispatchAuthority(req) }) }); }
+    actorId: req.user!.id, authority: dispatchAuthority(req),
+    idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''),
+    correlationId: String(req.get('X-Correlation-Id') || req.body.correlationId || '') }) }); }
   catch (error) { return dispatchError(res, error); }
 });
 

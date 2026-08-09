@@ -1,61 +1,18 @@
 import { Prisma } from '@prisma/client';
 import type { AllocationPricingBindingPort, LockedPricingEvidence, PricedEventWrite, PricingReferenceWrite } from './allocationPricingBinding';
-import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from './approvedPricing';
+import {
+  persistedApprovedPricingInclude,
+  persistedApprovedPricingRowIntegrityMatches,
+  persistedApprovedPricingVersionIntegrityMatches,
+} from './approvedPricing';
 import { pricedAllocationIntegrityHash } from './pricedAllocationLedger';
 
 type Tx = Prisma.TransactionClient;
-const persistedPricingInclude = { rows: { orderBy: [{ ordinal: 'asc' as const }, { id: 'asc' as const }] } };
-type PersistedVersion = Prisma.ContractApprovedPricingVersionGetPayload<{ include: typeof persistedPricingInclude }>;
-type PersistedRow = PersistedVersion['rows'][number];
-
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 
 const record = (value: unknown): Readonly<Record<string, unknown>> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return value as Readonly<Record<string, unknown>>;
-};
-
-const rowIntegrityMatches = (version: PersistedVersion, row: PersistedRow) => {
-  try {
-    return row.integrityHash === approvedPricingRowIntegrityHash({
-      versionId: version.id,
-      contractId: version.contractId,
-      sourceFinancialRecordId: version.sourceFinancialRecordId,
-      versionNumber: version.versionNumber,
-      contractItemId: row.contractItemId,
-      productRowId: row.productRowId,
-      ordinal: row.ordinal,
-      contractedQuantity: row.contractedQuantity.toFixed(3),
-      unit: row.unit,
-      canonicalAllInTotal: row.canonicalAllInTotal.toFixed(12),
-      discountEligible: row.discountEligible,
-      componentEvidence: record(row.componentEvidence) as Readonly<Record<string, string>>,
-    });
-  } catch {
-    return false;
-  }
-};
-
-const versionIntegrityMatches = (version: PersistedVersion) => {
-  try {
-    return version.integrityHash === approvedPricingVersionIntegrityHash({
-      id: version.id,
-      contractId: version.contractId,
-      versionNumber: version.versionNumber,
-      sourceFinancialRecordId: version.sourceFinancialRecordId,
-      approvedAt: version.approvedAt,
-      approvedBy: version.approvedBy,
-      schemaVersion: version.schemaVersion,
-      currency: version.currency,
-      grossAmount: version.grossAmount.toFixed(12),
-      discountAmount: version.discountAmount.toFixed(12),
-      netAmount: version.netAmount.toFixed(12),
-      sourceEvidence: record(version.sourceEvidence),
-      rowHashes: version.rows.map((row) => row.integrityHash),
-    });
-  } catch {
-    return false;
-  }
 };
 
 const lockRows = async (tx: Tx, table: string, column: string, ids: string[]) => {
@@ -94,7 +51,7 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
   loadLockedPricingEvidence: async (contractIds) => {
     const heads = await tx.contractApprovedPricingHead.findMany({
       where: { contractId: { in: contractIds } },
-      include: { currentVersion: { include: persistedPricingInclude } },
+      include: { currentVersion: { include: persistedApprovedPricingInclude } },
       orderBy: { contractId: 'asc' },
     });
     const result: LockedPricingEvidence[] = [];
@@ -151,8 +108,8 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
           quantityTotal: readiness.quantityTotal?.toFixed(3) ?? null,
           amountTotal: readiness.amountTotal?.toFixed(12) ?? null,
         },
-        versionIntegrityVerified: versionIntegrityMatches(storedVersion),
-        rowIntegrityVerified: storedVersion.rows.every((row) => rowIntegrityMatches(storedVersion, row)),
+        versionIntegrityVerified: persistedApprovedPricingVersionIntegrityMatches(storedVersion),
+        rowIntegrityVerified: storedVersion.rows.every((row) => persistedApprovedPricingRowIntegrityMatches(storedVersion, row)),
       });
     }
     return result;

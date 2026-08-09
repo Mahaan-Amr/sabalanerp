@@ -146,7 +146,7 @@ export function AccountingFinancialTrend({
                   <a
                     key={`${point.periodKey}-${series}`}
                     href={point.destinations[series]}
-                    className="sds-text-primary rounded-[var(--sds-radius-control)] px-2 py-1 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sds-focus-ring)]"
+                    className="sds-text-primary inline-flex min-h-11 items-center rounded-[var(--sds-radius-control)] px-2 py-1 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sds-focus-ring)]"
                   >
                     {seriesLabels[series]}: {formatToman(point[series])}
                   </a>

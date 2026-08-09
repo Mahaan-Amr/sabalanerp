@@ -1,8 +1,8 @@
 "use client";
-import { ErpInput, ErpPressable, ErpSelect } from "@/components/erp";
+import { ErpInlineState, ErpInput, ErpPressable, ErpSelect } from "@/components/erp";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   FaCog,
   FaArchive,
@@ -70,6 +70,7 @@ export default function HiringCasesPage() {
     : "";
   const [rows, setRows] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
+  const [foundationState, setFoundationState] = useState<'pending' | 'available' | 'unavailable' | 'failed'>('pending');
   const [form, setForm] = useState(blank);
   const [filters, setFilters] = useState<HiringQueueFilters>(blankFilters);
   const [loading, setLoading] = useState(true);
@@ -111,19 +112,21 @@ export default function HiringCasesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [archiveView, representedView]);
 
-  useEffect(() => {
-    let active = true;
-    hrAPI.getFoundation()
-      .then((foundation) => {
-        if (active) setPositions(foundation.data.data.positions || []);
-      })
-      .catch(() => {
-        if (active) setPositions([]);
-      });
-    return () => {
-      active = false;
-    };
+  const loadFoundation = useCallback(async () => {
+    setFoundationState('pending');
+    try {
+      const foundation = await hrAPI.getFoundation();
+      setPositions(foundation.data.data.positions || []);
+      setFoundationState('available');
+    } catch (cause: any) {
+      setPositions([]);
+      setFoundationState(cause?.response?.status === 403 ? 'unavailable' : 'failed');
+    }
   }, []);
+
+  useEffect(() => {
+    void loadFoundation();
+  }, [loadFoundation]);
 
   const create = async () => {
     try {
@@ -169,7 +172,13 @@ export default function HiringCasesPage() {
       backHref="/dashboard/hr"
       metrics={[
         { label: archiveView ? "پرونده بایگانی" : "پرونده در صف", value: meta.total.toLocaleString("fa-IR"), tone: archiveView ? "warning" : "primary" },
-        { label: "جایگاه فعال", value: positions.filter((item: any) => item.isActive).length.toLocaleString("fa-IR"), tone: "neutral" },
+        {
+          label: "جایگاه فعال",
+          value: foundationState === 'available'
+            ? positions.filter((item: any) => item.isActive).length.toLocaleString("fa-IR")
+            : '—',
+          tone: "neutral",
+        },
       ]}
       actions={[
         {
@@ -177,6 +186,7 @@ export default function HiringCasesPage() {
           icon: FaPlus,
           onClick: () => setCreateOpen(true),
           tone: "success",
+          disabled: foundationState !== 'available',
         },
         {
           label: archiveView ? "فهرست فعال" : "بایگانی متقاضیان",
@@ -188,13 +198,27 @@ export default function HiringCasesPage() {
           icon: FaCog,
           href: "/dashboard/hr/hiring/authorities",
         },
-        { label: "به‌روزرسانی", icon: FaSync, onClick: () => load() },
+        {
+          label: "به‌روزرسانی",
+          icon: FaSync,
+          onClick: () => {
+            void load();
+            void loadFoundation();
+          },
+        },
       ]}
     >
       {error && (
         <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {error}
         </p>
+      )}
+      {foundationState === 'failed' && (
+        <ErpInlineState
+          kind="error"
+          title="جایگاه‌های استخدام دریافت نشدند. صف پرونده‌ها همچنان قابل استفاده است."
+          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadFoundation }}
+        />
       )}
       {message && (
         <p className="rounded-xl bg-[var(--sds-success-surface)] p-3 text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">

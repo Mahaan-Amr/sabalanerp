@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { mapVerifiedApprovedPricingVersion, persistedApprovedPricingInclude } from './approvedPricing';
-import type { StatementAdjustmentRenderInput } from './dispatchDocuments/contracts';
+import type { PreparedStatementAdjustmentArtifact } from './dispatchDocuments';
 import {
   pricedAllocationIntegrityHash,
   type PriorPricedAllocationEvent,
@@ -12,6 +12,7 @@ import {
   type CalculatedStatementAdjustment,
   type StatementAdjustmentSnapshot,
 } from './statementAdjustment';
+import type { ConfiguredStatementAdjustmentArtifactPreparer } from './statementAdjustmentRuntime';
 
 type Tx = Prisma.TransactionClient;
 const adjustmentPostingInclude = Prisma.validator<Prisma.DispatchCorrectionInclude>()({
@@ -29,21 +30,11 @@ const adjustmentPostingInclude = Prisma.validator<Prisma.DispatchCorrectionInclu
 type AdjustmentPostingCorrection = Prisma.DispatchCorrectionGetPayload<{ include: typeof adjustmentPostingInclude }>;
 type AdjustmentPostingRevisionLine = AdjustmentPostingCorrection['waybill']['candidate']['allocationRevision']['lines'][number];
 
-export interface StatementAdjustmentArtifactPreparer {
-  templateVersion: string;
-  prepare(input: StatementAdjustmentRenderInput): Promise<{
-    storageKey: string;
-    mediaType: 'application/pdf';
-    byteLength: number;
-    sha256: string;
-  }>;
-}
-
 export type PlannedStatementAdjustment = {
   adjustmentId: string;
   artifactId: string;
   calculated: CalculatedStatementAdjustment;
-  artifact: Awaited<ReturnType<StatementAdjustmentArtifactPreparer['prepare']>>;
+  artifact: PreparedStatementAdjustmentArtifact;
   issuedAt: Date;
   issuedBy: string;
 };
@@ -141,10 +132,16 @@ const lineLabel = (revisionLine: AdjustmentPostingRevisionLine) => {
   return text(snapshot.productName || revisionLine.productRowId);
 };
 
-const validArtifact = (artifact: Awaited<ReturnType<StatementAdjustmentArtifactPreparer['prepare']>>) =>
-  artifact.mediaType === 'application/pdf'
+const validArtifact = (artifact: PreparedStatementAdjustmentArtifact, expectedTemplateVersion: string) =>
+  Boolean(artifact.id.trim())
+  && artifact.templateVersion === expectedTemplateVersion
+  && Boolean(artifact.generatorVersion.trim())
+  && Object.values(artifact.sourceVersionIdentities).length > 0
+  && Object.values(artifact.sourceVersionIdentities).every((value) => Boolean(value.trim()))
+  && artifact.mediaType === 'application/pdf'
   && Number.isSafeInteger(artifact.byteLength) && artifact.byteLength > 0
   && /^[0-9a-f]{64}$/.test(artifact.sha256)
+  && Number.isFinite(new Date(artifact.publishedAt).getTime())
   && /^dispatch-documents\/[A-Za-z0-9_-]+\.pdf$/.test(artifact.storageKey);
 
 export const planStatementAdjustment = async (tx: Tx, input: {
@@ -152,7 +149,7 @@ export const planStatementAdjustment = async (tx: Tx, input: {
   actorId: string;
   correctionIntegrityHash: string;
   issuedAt: Date;
-  artifactPreparer?: StatementAdjustmentArtifactPreparer;
+  artifactPreparer?: ConfiguredStatementAdjustmentArtifactPreparer;
   id?: () => string;
 }): Promise<PlannedStatementAdjustment | null> => {
   const correction = await tx.dispatchCorrection.findUnique({ where: { id: input.correctionId }, include: adjustmentPostingInclude });
@@ -206,9 +203,11 @@ export const planStatementAdjustment = async (tx: Tx, input: {
     }),
     renderContext: readImmutableAdjustmentRenderContext(correction.waybill, input.artifactPreparer.templateVersion),
   });
-  const artifact = await input.artifactPreparer.prepare(calculated.renderInput);
-  if (!validArtifact(artifact)) throw new Error('Statement adjustment artifact failed durable publication verification.');
-  return { adjustmentId: calculated.renderInput.documentId, artifactId: id(), calculated, artifact,
+  const artifact = await input.artifactPreparer.preparer.prepare(calculated.renderInput);
+  if (!validArtifact(artifact, calculated.renderInput.templateVersion)) {
+    throw new Error('Statement adjustment artifact failed durable publication verification.');
+  }
+  return { adjustmentId: calculated.renderInput.documentId, artifactId: artifact.id, calculated, artifact,
     issuedAt: input.issuedAt, issuedBy: input.actorId };
 };
 
@@ -234,7 +233,7 @@ export const persistStatementAdjustment = async (tx: Tx, plan: PlannedStatementA
     byteLength: BigInt(plan.artifact.byteLength),
     sha256: plan.artifact.sha256,
     sourceIntegrityHash: plan.calculated.integrityHash,
-    publishedAt: plan.issuedAt,
+    publishedAt: new Date(plan.artifact.publishedAt),
     publishedBy: plan.issuedBy,
   } });
   return { adjustment, artifact };

@@ -2,6 +2,8 @@ import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
 import { installDispatchDocumentsCommands } from '../dispatchAllocation';
 import { resolveNarrowFeatureAccess } from '../narrowFeatureAccess';
+import { installStatementAdjustmentArtifactPreparer } from '../statementAdjustmentRuntime';
+import { createStatementAdjustmentArtifactPreparer } from './adjustmentArtifactPreparer';
 import type { DispatchArtifactPublisher } from './contracts';
 import { createFilesystemDispatchArtifactStorage } from './filesystemStorage';
 import { createDispatchIntegrityIncidentReporter } from './integrityIncidentReporter';
@@ -33,5 +35,17 @@ export const configureDispatchDocumentsRuntime = (input: {
       canReadCandidate: ({ actorId }) => canReadAccountingDispatch(actorId) },
   });
   installDispatchDocumentsCommands(service);
+  installStatementAdjustmentArtifactPreparer({
+    templateVersion: input.templateVersion,
+    preparer: createStatementAdjustmentArtifactPreparer({
+      publisher: input.publisher,
+      storage,
+      generatorVersion: input.generatorVersion,
+      sourceVersionIdentities: {
+        generatorVersion: input.generatorVersion,
+        templateVersion: input.templateVersion,
+      },
+    }),
+  });
   return service;
 };

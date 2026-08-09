@@ -55,6 +55,7 @@ import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { configureDispatchDocumentsRuntime, createAccountingDispatchDocumentRouter,
   dispatchDocumentHttpStatus } from '../services/dispatchDocuments';
 import { renderDispatchDocumentPdf } from '../documents/dispatch/dispatchDocumentPdf';
+import { getStatementAdjustmentArtifactPreparer } from '../services/statementAdjustmentRuntime';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -140,7 +141,9 @@ router.post('/dispatch-corrections/:id/post', accountingCorrectionsEdit, async (
   try { return res.json({ success: true, data: await postDispatchCorrection(prisma, { correctionId: req.params.id,
     actorId: req.user!.id, authority: dispatchAuthority(req),
     idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''),
-    correlationId: String(req.get('X-Correlation-Id') || req.body.correlationId || '') }) }); }
+    correlationId: String(req.get('X-Correlation-Id') || req.body.correlationId || '') }, {
+      artifactPreparer: getStatementAdjustmentArtifactPreparer() || undefined,
+    }) }); }
   catch (error) { return dispatchError(res, error); }
 });
 

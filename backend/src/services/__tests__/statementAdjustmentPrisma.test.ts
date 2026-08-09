@@ -5,11 +5,32 @@ import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } 
 import { PrismaApprovedPricingRepository } from '../approvedPricing/prismaRepository';
 import type { ApprovedPricingVersionInsert } from '../approvedPricing/types';
 import { createDispatchCorrection, postDispatchCorrection } from '../dispatchCorrectionOutage';
+import { createStatementAdjustmentArtifactPreparer, type DispatchArtifactStorage } from '../dispatchDocuments';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 
 const prisma = new PrismaClient();
 const rollback = Symbol('statement-adjustment-db-rollback');
 const hash = (character: string) => character.repeat(64);
+const bytes = (value: string) => new TextEncoder().encode(value);
+const configuredArtifactPreparer = (options: { corruptRead?: boolean; onPublish?: () => void } = {}) => {
+  const files = new Map<string, Uint8Array>();
+  const storage: DispatchArtifactStorage = {
+    stage: async ({ storageKey, bytes: content }) => { files.set(storageKey, content); },
+    read: async (storageKey) => options.corruptRead ? bytes('different-durable-bytes') : files.get(storageKey) ?? null,
+  };
+  return {
+    templateVersion: 'adjustment-v1',
+    preparer: createStatementAdjustmentArtifactPreparer({
+      publisher: { publish: async () => {
+        options.onPublish?.();
+        return { bytes: bytes('statement-adjustment-pdf'), mediaType: 'application/pdf' };
+      } },
+      storage,
+      generatorVersion: 'issue262-test-generator-v1',
+      sourceVersionIdentities: { fixture: 'issue262' },
+    }),
+  };
+};
 
 const run = async () => {
   assert.ok(process.env.DATABASE_URL?.includes('127.0.0.1:55432'), 'Integration must target sabalanerp-local PostgreSQL.');
@@ -95,18 +116,14 @@ const run = async () => {
         lines: [{ contractItemId: candidate.itemId, quantity: '0.500' }] });
 
       await assert.rejects(postDispatchCorrection(boundPrisma, { correctionId: correction.id, actorId: candidate.createdBy,
-        authority, idempotencyKey: 'issue262-invalid-artifact' }, { artifactPreparer: { templateVersion: 'adjustment-v1',
-          prepare: async () => ({ storageKey: `dispatch-documents/${randomUUID()}.pdf`, mediaType: 'application/pdf',
-            byteLength: 100, sha256: 'invalid' }) } }), /artifact failed durable publication verification/i);
+        authority, idempotencyKey: 'issue262-invalid-artifact' }, {
+          artifactPreparer: configuredArtifactPreparer({ corruptRead: true }),
+        }), /staged dispatch artifact failed verification/i);
       assert.equal((await tx.dispatchCorrection.findUniqueOrThrow({ where: { id: correction.id } })).status, 'DRAFT');
       assert.equal(await tx.dispatchStatementAdjustment.count({ where: { waybillId: candidate.waybillId } }), 0);
 
       let prepareCount = 0;
-      const artifactPreparer = { templateVersion: 'adjustment-v1', prepare: async () => {
-        prepareCount += 1;
-        return { storageKey: `dispatch-documents/${randomUUID()}.pdf`, mediaType: 'application/pdf' as const,
-          byteLength: 100, sha256: hash('b') };
-      } };
+      const artifactPreparer = configuredArtifactPreparer({ onPublish: () => { prepareCount += 1; } });
       const firstResponse = await postDispatchCorrection(boundPrisma, { correctionId: correction.id,
         actorId: candidate.createdBy, authority, idempotencyKey: 'issue262-positive' }, { artifactPreparer });
       const first = await tx.dispatchStatementAdjustment.findUniqueOrThrow({ where: { correctionId: correction.id } });
@@ -126,9 +143,7 @@ const run = async () => {
         reason: 'DB immutable opposite', effectiveAt: new Date(), actorId: candidate.createdBy, authority,
         reversalOfId: correction.id, lines: [{ contractItemId: candidate.itemId, quantity: '-0.500' }] });
       await postDispatchCorrection(boundPrisma, { correctionId: reversal.id, actorId: candidate.createdBy,
-        authority, idempotencyKey: 'issue262-reversal' }, { artifactPreparer: { templateVersion: 'adjustment-v1',
-          prepare: async () => ({ storageKey: `dispatch-documents/${randomUUID()}.pdf`, mediaType: 'application/pdf',
-            byteLength: 100, sha256: hash('9') }) } });
+        authority, idempotencyKey: 'issue262-reversal' }, { artifactPreparer: configuredArtifactPreparer() });
       const second = await tx.dispatchStatementAdjustment.findUniqueOrThrow({ where: { correctionId: reversal.id } });
       assert.equal(second.sequence, 2);
       assert.equal((second.snapshot as any).lines[0].grossAmountDelta,

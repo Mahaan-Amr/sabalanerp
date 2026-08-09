@@ -7,8 +7,8 @@ import { normalizeDispatchCorrectionDraft, StatementCorrectionPolicyError, type 
 import {
   persistStatementAdjustment,
   planStatementAdjustment,
-  type StatementAdjustmentArtifactPreparer,
 } from './statementAdjustmentPosting';
+import type { ConfiguredStatementAdjustmentArtifactPreparer } from './statementAdjustmentRuntime';
 
 type Tx = Prisma.TransactionClient;
 type Authority = { actorRole: string; workspace: string; workspacePermission: string; feature?: string; featurePermission?: string };
@@ -175,25 +175,25 @@ export const createDispatchCorrection = (prisma: PrismaClient, input: { waybillI
 
 export const postDispatchCorrection = (prisma: PrismaClient, input: { correctionId: string; actorId: string; authority: Authority;
   idempotencyKey: string; correlationId?: string },
-  dependencies: { artifactPreparer?: StatementAdjustmentArtifactPreparer; now?: () => Date; id?: () => string } = {}) =>
+  dependencies: { artifactPreparer?: ConfiguredStatementAdjustmentArtifactPreparer; now?: () => Date; id?: () => string } = {}) =>
   (() => {
     const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
     const createId = dependencies.id || randomUUID;
     const issuedAt = dependencies.now?.() || new Date();
     const correlationId = input.correlationId?.trim() || createId();
-    const reservedIds = [createId(), createId()];
+    const adjustmentId = createId();
     const requestHash = digest({ correctionId: input.correctionId, actorId: input.actorId, authority: input.authority });
-    const prepared = new Map<string, ReturnType<StatementAdjustmentArtifactPreparer['prepare']>>();
+    const prepared = new Map<string, ReturnType<ConfiguredStatementAdjustmentArtifactPreparer['preparer']['prepare']>>();
     const artifactPreparer = dependencies.artifactPreparer ? {
       templateVersion: dependencies.artifactPreparer.templateVersion,
-      prepare: (renderInput: Parameters<StatementAdjustmentArtifactPreparer['prepare']>[0]) => {
+      preparer: { prepare: (renderInput: Parameters<ConfiguredStatementAdjustmentArtifactPreparer['preparer']['prepare']>[0]) => {
         const key = digest(renderInput);
         const existing = prepared.get(key);
         if (existing) return existing;
-        const result = dependencies.artifactPreparer!.prepare(renderInput);
+        const result = dependencies.artifactPreparer!.preparer.prepare(renderInput);
         prepared.set(key, result);
         return result;
-      },
+      } },
     } : undefined;
     return serializableCorrectionPosting(prisma, async (tx) => {
     await lock(tx, [`DISPATCH_CORRECTION:${input.correctionId}`]);
@@ -288,7 +288,7 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
       effectiveAt: correction.effectiveAt, lines: correction.lines, postedAt: at });
     const adjustmentPlan = await planStatementAdjustment(tx, { correctionId: correction.id, actorId: input.actorId,
       correctionIntegrityHash: integrityHash, issuedAt: at, artifactPreparer,
-      id: (() => { let index = 0; return () => reservedIds[index++]; })() });
+      id: () => adjustmentId });
     for (const line of correction.lines) {
       const evidence = { id: randomUUID(), contractId: line.contractId, contractItemId: line.contractItemId, productRowId: line.productRowId,
         unit: line.unit, kind: 'DISPATCH_CORRECTION_POSTED' as const, quantity: line.quantity.toFixed(3),

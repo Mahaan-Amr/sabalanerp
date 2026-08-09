@@ -32,6 +32,14 @@ import {
   taxStatusLabels,
 } from '@/features/accounting/accountingUi';
 import { AccountingDashboardPrototype } from '@/features/accounting/prototype/AccountingDashboardPrototype';
+import { AccountingFinancialTrend } from '@/features/accounting/AccountingFinancialTrend';
+import {
+  failFinancialTrend,
+  pendingFinancialTrend,
+  resolveFinancialTrend,
+  type FinancialTrendRange,
+  type FinancialTrendState,
+} from '@/features/accounting/accountingFinancialTrendState';
 import { HR_HIRING_METRIC_VIEWS } from '@/features/hr-hiring/hrHiringMetricViews';
 import {
   clearHrHiringMetrics,
@@ -62,8 +70,9 @@ export default function AccountingDashboardPage() {
   });
   const [showPrototype, setShowPrototype] = useState(false);
   const [hrMetrics, setHrMetrics] = useState<HrHiringMetricsState>(pendingHrHiringMetrics);
+  const [trendRange, setTrendRange] = useState<FinancialTrendRange>('6m');
+  const [financialTrend, setFinancialTrend] = useState<FinancialTrendState>(pendingFinancialTrend);
   const hrRequestGeneration = useRef(0);
-
   const workspaceRequestGeneration = useRef(0);
   const rawSearchParams = searchParams.toString();
   const dashboardQuery = useMemo(
@@ -112,6 +121,24 @@ export default function AccountingDashboardPage() {
     }
   }, []);
 
+  const loadFinancialTrend = useCallback(async (range: FinancialTrendRange) => {
+    setFinancialTrend((previous) => pendingFinancialTrend(previous));
+    try {
+      const response = await accountingAPI.getFinancialTrend(range);
+      if (!response.data.success) {
+        setFinancialTrend((previous) => failFinancialTrend(previous));
+        return;
+      }
+      setFinancialTrend((previous) => resolveFinancialTrend(previous, response.data.data));
+    } catch {
+      setFinancialTrend((previous) => failFinancialTrend(previous));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadFinancialTrend(trendRange);
+  }, [loadFinancialTrend, trendRange]);
+
   useEffect(() => {
     const canonicalSearch = dashboardQuery.params.toString();
     if (canonicalSearch !== rawSearchParams) {
@@ -158,6 +185,12 @@ export default function AccountingDashboardPage() {
   if (!workspace && loading) {
     return (
       <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری">
+        <AccountingFinancialTrend
+          range={trendRange}
+          state={financialTrend}
+          onRangeChange={setTrendRange}
+          onRetry={() => void loadFinancialTrend(trendRange)}
+        />
         <ErpSkeleton lines={4} label="در حال بارگذاری سررسیدهای حسابداری" />
       </ErpPage>
     );
@@ -166,6 +199,12 @@ export default function AccountingDashboardPage() {
   if (!workspace) {
     return (
       <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری">
+        <AccountingFinancialTrend
+          range={trendRange}
+          state={financialTrend}
+          onRangeChange={setTrendRange}
+          onRetry={() => void loadFinancialTrend(trendRange)}
+        />
         <ErpInlineState
           kind="error"
           title={workspaceState.error || 'داده‌های حسابداری در دسترس نیست.'}
@@ -179,6 +218,7 @@ export default function AccountingDashboardPage() {
   const commandCenter = workspace?.commandCenter || {};
   const refreshDashboard = () => {
     void loadWorkspace();
+    void loadFinancialTrend(trendRange);
     if (currentUserId) void loadHrMetrics();
   };
   const hrMetricsAvailable = hrMetrics.status === 'available';
@@ -211,6 +251,13 @@ export default function AccountingDashboardPage() {
         deadlines={workspace.deadlines}
         dashboardHref={dashboardHref}
         onTypeChange={(deadlineType) => router.replace(dashboardHref({ deadlineType }), { scroll: false })}
+      />
+
+      <AccountingFinancialTrend
+        range={trendRange}
+        state={financialTrend}
+        onRangeChange={setTrendRange}
+        onRetry={() => void loadFinancialTrend(trendRange)}
       />
 
       <ErpActionGrid

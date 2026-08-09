@@ -862,6 +862,7 @@ export const inventoryAPI = {
 // Accounting Workspace API
 export const accountingAPI = {
   getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
+  getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
   decideDispatchCandidate: (id: string, data: { action: 'ACCEPT' | 'REJECT'; reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-candidates/${id}/decision`, data),

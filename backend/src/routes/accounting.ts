@@ -22,6 +22,7 @@ import {
   getAccountantPerformanceReport,
   getAccountingSettings,
   getAccountingContractDetail,
+  getAccountingFinancialTrend,
   getAccountingWorkspace,
   listAccountingContracts,
   listAuditLogs,
@@ -316,6 +317,16 @@ export const getAccountingWorkspaceResponse = async (req: AuthRequest, res: Resp
 };
 
 router.get('/workspace', accountingView, getAccountingWorkspaceResponse);
+
+router.get('/financial-trend', accountingView, async (req: AuthRequest, res: Response) => {
+  try {
+    const trend = await getAccountingFinancialTrend(req.query.range);
+    res.json({ success: true, data: trend });
+  } catch (error) {
+    console.error('Accounting financial trend error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
 
 router.get('/contracts', accountingView, async (req: AuthRequest, res: Response) => {
   try {

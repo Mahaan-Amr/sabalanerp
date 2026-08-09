@@ -120,6 +120,16 @@ test('invoiced period is canonical only for the invoiced semantic view', () => {
   assert.equal(canonicalizeInvoiceCandidatesQuery(new URLSearchParams('view=invoiced&period=2026-08')).params.toString(), 'view=invoiced');
 });
 
+test('daily trend drilldowns retain an exact Jalali day only inside their represented period', () => {
+  const invoice = canonicalizeInvoiceCandidatesQuery(new URLSearchParams('view=invoiced&period=1405-05&date=1405-05-10'));
+  const received = canonicalizePaymentsQuery(new URLSearchParams('view=received&period=1405-05&date=1405-05-10'));
+  const outstanding = canonicalizeReceivablesQuery(new URLSearchParams('view=outstanding&period=1405-05&date=1405-05-10'));
+  assert.equal(invoice.params.toString(), 'view=invoiced&period=1405-05&date=1405-05-10');
+  assert.equal(received.params.toString(), 'view=received&period=1405-05&date=1405-05-10');
+  assert.equal(outstanding.params.toString(), 'view=outstanding&period=1405-05&date=1405-05-10');
+  assert.equal(canonicalizePaymentsQuery(new URLSearchParams('view=received&period=1405-05&date=1405-04-10')).state.date, '');
+});
+
 test('collection register queries canonicalize semantic views, due buckets, focus, and unknown parameters', () => {
   const receivables = canonicalizeReceivablesQuery(new URLSearchParams(
     'view=open&due=next7&period=1405-05&recordId= legacy-receivable &page=1&campaign=summer',

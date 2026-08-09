@@ -56,6 +56,7 @@ test('serializable legacy sealing rejects a financial mutation after preflight a
             tooling: '0.000000000000', finishing: '0.000000000000', discountBasis: '0.000000000000',
           },
           componentEvidenceConflict: false,
+          identityEvidenceConflict: false,
           snapshotHash: 'a'.repeat(64),
         }],
         grossAmount: '100.000000000000', discountAmount: '0.000000000000', netAmount: '100.000000000000',

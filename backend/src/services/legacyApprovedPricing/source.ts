@@ -34,6 +34,7 @@ export type LegacyPricingSourceInput = {
     sourceSnapshot: unknown;
     metadata: unknown;
     invoiceItems: readonly {
+      id: string;
       contractItemId: string | null;
       productId: string | null;
       quantity: string | null;
@@ -70,43 +71,52 @@ const moneyCurrency = (currency: unknown): MoneyCurrency | null => {
   if (normalized === 'ریال' || normalized === 'rial' || normalized === 'irr') return 'RIAL';
   return null;
 };
-const rialCurrency = (currency: unknown): string | null => moneyCurrency(currency) ? 'ریال' : null;
-const toRial = (value: unknown, currency: unknown): string | null => {
-  const amount = decimal(value, 12);
+const canonicalCurrency = (currency: unknown): string | null => {
   const unit = moneyCurrency(currency);
-  if (!amount || !unit) return null;
-  return new Prisma.Decimal(amount).mul(unit === 'TOMAN' ? 10 : 1).toFixed(12);
+  return unit === 'TOMAN' ? 'تومان' : unit === 'RIAL' ? 'ریال' : null;
+};
+const toContractMoney = (value: unknown, valueCurrency: unknown, contractCurrency: unknown): string | null => {
+  const amount = decimal(value, 12);
+  const from = moneyCurrency(valueCurrency);
+  const to = moneyCurrency(contractCurrency);
+  if (!amount || !from || !to) return null;
+  if (from === to) return amount;
+  if (from === 'RIAL' && to === 'TOMAN') return new Prisma.Decimal(amount).div(10).toFixed(12);
+  return null;
 };
 const owns = (record: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(record, key);
 
-const legacyComponentEvidence = (product: Record<string, unknown>, currency: unknown) => {
-  const material = owns(product, 'originalTotalPrice') ? toRial(product.originalTotalPrice, currency) : null;
-  const cutting = owns(product, 'cuttingCost') ? toRial(product.cuttingCost, currency) : null;
-  const toolingSnapshot = owns(product, 'totalSubServiceCost') ? toRial(product.totalSubServiceCost, currency) : null;
+const legacyComponentEvidence = (product: Record<string, unknown>, currency: unknown, contractCurrency: unknown) => {
+  const material = owns(product, 'originalTotalPrice') ? toContractMoney(product.originalTotalPrice, currency, contractCurrency) : null;
+  const cutting = owns(product, 'cuttingCost') ? toContractMoney(product.cuttingCost, currency, contractCurrency) : null;
+  const toolingSnapshot = owns(product, 'totalSubServiceCost') ? toContractMoney(product.totalSubServiceCost, currency, contractCurrency) : null;
   const tools = Array.isArray(product.appliedSubServices) ? product.appliedSubServices.map(object) : [];
-  const toolAmounts = tools.map(tool => toRial(tool.cost, currency));
+  const toolAmounts = tools.map(tool => toContractMoney(tool.cost, currency, contractCurrency));
   const toolingFromRows = toolAmounts.every((value): value is string => value != null)
     ? toolAmounts.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)).toFixed(12)
     : null;
   let conflict = Boolean(toolingSnapshot && toolingFromRows && toolingSnapshot !== toolingFromRows);
 
   const finishings = Array.isArray(product.finishings) ? product.finishings.map(object) : [];
-  const finishingAmounts = finishings.map(finishing => toRial(finishing.cost, currency));
+  const finishingAmounts = finishings.map(finishing => toContractMoney(finishing.cost, currency, contractCurrency));
   const finishingFromRows = finishingAmounts.length && finishingAmounts.every((value): value is string => value != null)
     ? finishingAmounts.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)).toFixed(12)
     : null;
   const hasFinishing = Boolean(text(product.finishingId) || finishings.length || object(product.meta).finishing);
   const finishingSnapshot = owns(product, 'finishingCost')
-    ? toRial(product.finishingCost ?? (hasFinishing ? null : 0), currency)
+    ? toContractMoney(product.finishingCost ?? (hasFinishing ? null : 0), currency, contractCurrency)
     : hasFinishing ? null : new Prisma.Decimal(0).toFixed(12);
   if (finishingSnapshot && finishingFromRows && finishingSnapshot !== finishingFromRows) conflict = true;
 
-  const mandatoryEnabled = product.isMandatory === true;
+  const mandatoryEnabled = typeof product.isMandatory === 'boolean' ? product.isMandatory : null;
   const percentage = decimal(product.mandatoryPercentage, 12);
-  const mandatory = mandatoryEnabled
+  const mandatory = mandatoryEnabled === true
     ? material && percentage ? new Prisma.Decimal(material).mul(percentage).div(100).toFixed(12) : null
-    : new Prisma.Decimal(0).toFixed(12);
-  const discountEligible = material == null ? null : new Prisma.Decimal(material).gt(0) && object(product.meta).isLayer !== true;
+    : mandatoryEnabled === false ? new Prisma.Decimal(0).toFixed(12) : null;
+  const isLayer = object(product.meta).isLayer;
+  const discountEligible = material == null || typeof isLayer !== 'boolean'
+    ? null
+    : isLayer === false && new Prisma.Decimal(material).gt(0);
   return {
     discountEligible,
     conflict,
@@ -153,6 +163,15 @@ const productUnit = (product: Record<string, unknown>): string | null => {
   return text(product.unit);
 };
 
+const contractedQuantityWitness = (product: Record<string, unknown>, rawWitness: unknown): string | null => {
+  const raw = decimal(rawWitness, 3);
+  const type = text(product.productType)?.toLowerCase();
+  const expectedRaw = decimal(type === 'prepared' ? product.preparedQuantity ?? product.quantity : product.quantity, 3);
+  const contracted = productQuantity(product);
+  if (!raw || !expectedRaw || !contracted) return null;
+  return new Prisma.Decimal(raw).eq(expectedRaw) ? contracted : raw;
+};
+
 export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): LegacyPricingCandidate => {
   const records = [...source.financialRecords].sort((left, right) =>
     `${right.approvedAt ?? ''}:${right.id}`.localeCompare(`${left.approvedAt ?? ''}:${left.id}`));
@@ -166,15 +185,24 @@ export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): L
   const project = object(contractData.project);
   const discount = object(contractData.discount);
   const snapshotCurrency = text(snapshot.currency);
+  const relationalRowCounts = new Map<string, number>();
+  for (const item of source.contract.items) if (item.productRowId) relationalRowCounts.set(item.productRowId, (relationalRowCounts.get(item.productRowId) ?? 0) + 1);
+  const snapshotRowCounts = new Map<string, number>();
+  for (const product of products) {
+    const rowId = text(product.rowId ?? product.productRowId);
+    if (rowId) snapshotRowCounts.set(rowId, (snapshotRowCounts.get(rowId) ?? 0) + 1);
+  }
 
   const rows = source.contract.items.map(item => {
     const approvalItem = snapshotItems.find(candidate => text(candidate.id) === item.id) ?? null;
     const invoiceItem = invoiceItems.find(candidate => candidate.contractItemId === item.id) ?? null;
-    const product = item.productRowId
+    const duplicatedIdentity = Boolean(item.productRowId
+      && ((relationalRowCounts.get(item.productRowId) ?? 0) > 1 || (snapshotRowCounts.get(item.productRowId) ?? 0) > 1));
+    const product = item.productRowId && !duplicatedIdentity
       ? products.find(candidate => text(candidate.rowId ?? candidate.productRowId) === item.productRowId) ?? null
       : null;
     const productCurrency = product ? text(product.currency) : null;
-    const components = product ? legacyComponentEvidence(product, productCurrency) : null;
+    const components = product ? legacyComponentEvidence(product, productCurrency, source.contract.currency) : null;
     return {
       contractItemId: item.id,
       relationalProductRowId: item.productRowId,
@@ -182,27 +210,28 @@ export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): L
       relationalProductId: item.productId,
       snapshotProductId: product ? text(product.productId) : null,
       currencyEvidence: {
-        contract: rialCurrency(source.contract.currency),
-        approvalSnapshot: rialCurrency(snapshotCurrency),
-        productSnapshot: rialCurrency(productCurrency),
-        financialRecord: rialCurrency(selected?.currency),
+        contract: canonicalCurrency(source.contract.currency),
+        approvalSnapshot: canonicalCurrency(snapshotCurrency) === canonicalCurrency(source.contract.currency) ? canonicalCurrency(source.contract.currency) : null,
+        productSnapshot: canonicalCurrency(productCurrency) === canonicalCurrency(source.contract.currency) ? canonicalCurrency(source.contract.currency) : null,
+        financialRecord: toContractMoney(0, selected?.currency, source.contract.currency) == null ? null : canonicalCurrency(source.contract.currency),
       },
       quantity: product ? productQuantity(product) : null,
       quantityEvidence: {
-        contractItem: decimal(item.quantity, 3),
-        approvalItem: decimal(approvalItem?.quantity, 3),
-        invoiceItem: decimal(invoiceItem?.quantity, 3),
+        contractItem: product ? contractedQuantityWitness(product, item.quantity) : decimal(item.quantity, 3),
+        approvalItem: product ? contractedQuantityWitness(product, approvalItem?.quantity) : decimal(approvalItem?.quantity, 3),
+        invoiceItem: product ? contractedQuantityWitness(product, invoiceItem?.quantity) : decimal(invoiceItem?.quantity, 3),
       },
       unit: product ? productUnit(product) : null,
-      canonicalAllInTotal: product ? toRial(product.totalPrice, productCurrency) : null,
+      canonicalAllInTotal: product ? toContractMoney(product.totalPrice, productCurrency, source.contract.currency) : null,
       amountEvidence: {
-        contractItem: toRial(item.totalPrice, source.contract.currency),
-        approvalItem: toRial(approvalItem?.totalPrice, snapshotCurrency),
-        invoiceItem: toRial(invoiceItem?.totalPrice, selected?.currency),
+        contractItem: toContractMoney(item.totalPrice, source.contract.currency, source.contract.currency),
+        approvalItem: toContractMoney(approvalItem?.totalPrice, snapshotCurrency, source.contract.currency),
+        invoiceItem: toContractMoney(invoiceItem?.totalPrice, selected?.currency, source.contract.currency),
       },
       discountEligible: components?.discountEligible ?? null,
       componentEvidence: components?.evidence ?? null,
       componentEvidenceConflict: components?.conflict ?? false,
+      identityEvidenceConflict: duplicatedIdentity,
       snapshotHash: product && approvalItem && invoiceItem ? canonicalApprovedPricingHash({ product, approvalItem, invoiceItem }) : null,
     };
   });
@@ -210,7 +239,7 @@ export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): L
   const grossAmount = rowTotals.length && rowTotals.every((value): value is string => value != null)
     ? rowTotals.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)).toFixed(12)
     : null;
-  const discountAmount = toRial(discount.amount, snapshotCurrency);
+  const discountAmount = toContractMoney(discount.amount, snapshotCurrency, source.contract.currency);
   const evidence = {
     contract: source.contract,
     financialRecord: selected,
@@ -221,26 +250,26 @@ export const buildLegacyPricingCandidate = (source: LegacyPricingSourceInput): L
     contractId: source.contract.id,
     sourceFinancialRecordId: selected?.id ?? '',
     approvalLeaves: records.map(approvedLeaf),
-    currency: rialCurrency(source.contract.currency),
+    currency: canonicalCurrency(source.contract.currency),
     customerId: source.contract.customerId,
     projectId: text(contractData.projectId),
     destination: text(project.address),
     envelopeEvidence: {
-      financialCurrency: rialCurrency(selected?.currency),
+      financialCurrency: toContractMoney(0, selected?.currency, source.contract.currency) == null ? null : canonicalCurrency(source.contract.currency),
       financialCustomerId: selected?.customerId ?? null,
-      snapshotCurrency: rialCurrency(snapshotCurrency),
+      snapshotCurrency: canonicalCurrency(snapshotCurrency) === canonicalCurrency(source.contract.currency) ? canonicalCurrency(source.contract.currency) : null,
       snapshotCustomerId: text(snapshot.customerId ?? contractData.customerId),
       snapshotProjectId: text(contractData.projectId),
     },
     discount: Object.keys(discount).length ? {
       enabled: typeof discount.enabled === 'boolean' ? discount.enabled : false,
-      baseAmount: toRial(discount.baseSubtotal, snapshotCurrency),
+      baseAmount: toContractMoney(discount.baseSubtotal, snapshotCurrency, source.contract.currency),
       amount: discountAmount,
     } : null,
     rows,
     grossAmount,
     discountAmount,
-    netAmount: toRial(selected?.amount ?? null, selected?.currency),
+    netAmount: toContractMoney(selected?.amount ?? null, selected?.currency, source.contract.currency),
     sourceIdentityHash: canonicalApprovedPricingHash({ contractId: source.contract.id, financialRecordId: selected?.id ?? null, itemIds: source.contract.items.map(item => item.id) }),
     sourceEvidenceHash: canonicalApprovedPricingHash(evidence),
     existingSeal: source.existingSeal,

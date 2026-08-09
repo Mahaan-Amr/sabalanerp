@@ -11,7 +11,8 @@ updates contract items, snapshots, invoices, PDFs, allocation evidence, or prior
 - `classifyLegacyPricingCandidate` emits the five migration states and precise legacy reason codes. Missing or
   invalid decimals remain missing; they are never converted to zero.
 - `buildLegacyPricingManifest` produces deterministic schema-versioned contract, approval-record, and row counts, source identity/evidence hashes,
-  scale-three quantity totals, scale-twelve amount totals, known subtotals, and quarantine entries. It contains no
+  plus per-row stable identities, scale-three quantity, scale-twelve amount, and evidence hash for independent replay. It also retains aggregate
+  totals, known subtotals, and quarantine entries. It contains no
   customer names, addresses, prices by customer, or full source snapshots.
 - `runLegacyPricingSeal` consumes a `LegacyPricingSealWriter`. Its idempotency key is derived from contract,
   approval, and exact source-evidence hash; interrupted runs replay completed seals and resume remaining candidates.
@@ -55,6 +56,9 @@ npm run seal:legacy-approved-pricing
 
 The apply manifest retains both pre/post manifests, their comparison, every `SEALED`/`REPLAYED` result, aggregate
 outcomes, and an explicit failure reason. A source mismatch makes the run `FAILED` without deleting derived rows.
+Sealing reloads and hashes the complete financial envelope under the contract lock, then persists only that refreshed
+candidate. Contract/version and row amounts stay in the contract pricing unit (Toman for the production path); Rial
+invoice totals are reconciled only at the invoice boundary with the explicit ten-to-one factor.
 
 ## Repair boundary
 

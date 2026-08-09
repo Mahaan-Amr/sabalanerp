@@ -55,6 +55,7 @@ export class PrismaLegacyApprovedPricingRepository extends PrismaApprovedPricing
       sourceSnapshot: leaf.sourceSnapshot,
       metadata: leaf.metadata,
       invoiceItems: leaf.invoiceItems.map(item => ({
+        id: item.id,
         contractItemId: item.contractItemId,
         productId: item.productId,
         quantity: item.quantity.toFixed(3),
@@ -119,32 +120,33 @@ export const sealLegacyPricingWithApprovedPricingRepository = async (
       || refreshedClassification.status !== 'READY') {
       throw new Error('Legacy pricing source evidence changed after preflight.');
     }
-    const leaf = await repository.readApprovalLeaf(command.candidate.sourceFinancialRecordId);
+    const candidate = refreshedCandidate;
+    const leaf = await repository.readApprovalLeaf(candidate.sourceFinancialRecordId);
     const preflightLeaf = leaf ? refreshedCandidate.approvalLeaves.find(item => item.id === leaf.id) : null;
     if (!leaf || !preflightLeaf || !isCompleteValidApprovalLeaf({
       kind: leaf.kind,
       status: leaf.status,
       approvedAt: leaf.financiallyApprovedAt?.toISOString() ?? null,
       approvedBy: leaf.financiallyApprovedBy,
-    }) || leaf.contractId !== command.candidate.contractId
+    }) || leaf.contractId !== candidate.contractId
       || leaf.kind !== preflightLeaf.kind || leaf.status !== preflightLeaf.status
       || leaf.financiallyApprovedAt?.toISOString() !== preflightLeaf.approvedAt
       || leaf.financiallyApprovedBy !== preflightLeaf.approvedBy) {
       throw new Error('Legacy pricing approval evidence changed after preflight.');
     }
-    const existing = await repository.findByApproval(command.candidate.contractId, command.candidate.sourceFinancialRecordId);
+    const existing = await repository.findByApproval(candidate.contractId, candidate.sourceFinancialRecordId);
     if (existing) {
-      const context = await repository.readPersistenceContext(command.candidate.contractId, command.candidate.sourceFinancialRecordId);
+      const context = await repository.readPersistenceContext(candidate.contractId, candidate.sourceFinancialRecordId);
       const reference = record(context?.legacySourceReference);
       if (context?.origin !== ApprovedPricingVersionOrigin.LEGACY_SEAL || reference.sourceEvidenceHash !== command.sourceReference.sourceEvidenceHash) {
         throw new Error('Existing approved pricing version conflicts with the legacy seal command.');
       }
       return { outcome: 'REPLAYED' as const, pricingVersionId: existing.id };
     }
-    const versionNumber = await repository.nextVersionNumber(command.candidate.contractId);
+    const versionNumber = await repository.nextVersionNumber(candidate.contractId);
     const versionId = ids.version();
-    const approvedAt = new Date(command.candidate.approvalLeaves.find(item => item.id === leaf.id)!.approvedAt!);
-    const rows = command.candidate.rows.map((row, ordinal) => {
+    const approvedAt = new Date(candidate.approvalLeaves.find(item => item.id === leaf.id)!.approvedAt!);
+    const rows = candidate.rows.map((row, ordinal) => {
       if (!row.relationalProductRowId || !row.quantity || !row.unit || !row.canonicalAllInTotal
         || row.discountEligible == null || !row.componentEvidence
         || Object.values(row.componentEvidence).some(value => value == null)) {
@@ -152,8 +154,8 @@ export const sealLegacyPricingWithApprovedPricingRepository = async (
       }
       const rowPayload = {
         versionId,
-        contractId: command.candidate.contractId,
-        sourceFinancialRecordId: command.candidate.sourceFinancialRecordId,
+        contractId: candidate.contractId,
+        sourceFinancialRecordId: candidate.sourceFinancialRecordId,
         versionNumber,
         contractItemId: row.contractItemId,
         productRowId: row.relationalProductRowId,
@@ -170,24 +172,24 @@ export const sealLegacyPricingWithApprovedPricingRepository = async (
       origin: 'LEGACY_SEAL',
       sourceReference: command.sourceReference,
       review: command.review,
-      customerId: command.candidate.customerId,
-      projectId: command.candidate.projectId,
-      destination: command.candidate.destination,
-      discount: command.candidate.discount,
-      rowSnapshotHashes: command.candidate.rows.map(row => ({ contractItemId: row.contractItemId, snapshotHash: row.snapshotHash })),
+      customerId: candidate.customerId,
+      projectId: candidate.projectId,
+      destination: candidate.destination,
+      discount: candidate.discount,
+      rowSnapshotHashes: candidate.rows.map(row => ({ contractItemId: row.contractItemId, snapshotHash: row.snapshotHash })),
     };
     const rootPayload = {
       id: versionId,
-      contractId: command.candidate.contractId,
+      contractId: candidate.contractId,
       versionNumber,
-      sourceFinancialRecordId: command.candidate.sourceFinancialRecordId,
+      sourceFinancialRecordId: candidate.sourceFinancialRecordId,
       approvedAt,
       approvedBy: leaf.financiallyApprovedBy!,
       schemaVersion: APPROVED_PRICING_SCHEMA_VERSION,
-      currency: command.candidate.currency!,
-      grossAmount: command.candidate.grossAmount!,
-      discountAmount: command.candidate.discountAmount!,
-      netAmount: command.candidate.netAmount!,
+      currency: candidate.currency!,
+      grossAmount: candidate.grossAmount!,
+      discountAmount: candidate.discountAmount!,
+      netAmount: candidate.netAmount!,
       sourceEvidence,
       rowHashes: rows.map(row => row.integrityHash),
     };

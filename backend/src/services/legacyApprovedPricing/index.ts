@@ -55,6 +55,7 @@ export type LegacyPricingRow = {
   discountEligible: boolean | null;
   componentEvidence: Readonly<Record<string, string | null>> | null;
   componentEvidenceConflict: boolean;
+  identityEvidenceConflict: boolean;
   snapshotHash: string | null;
 };
 
@@ -108,6 +109,16 @@ export type LegacyPricingClassification = {
   sourceEvidenceHash: string;
   quantityTotal: string | null;
   amountTotal: string | null;
+  rows: readonly {
+    contractItemId: string;
+    relationalProductRowId: string | null;
+    snapshotProductRowId: string | null;
+    relationalProductId: string | null;
+    snapshotProductId: string | null;
+    quantity: string | null;
+    amount: string | null;
+    evidenceHash: string;
+  }[];
 };
 
 const PERSISTED_REASON_BY_LEGACY_REASON: Record<LegacyPricingReasonCode, PricingReadinessReasonCode> = {
@@ -207,6 +218,7 @@ export const classifyLegacyPricingCandidate = (candidate: LegacyPricingCandidate
     if (row.relationalProductRowId && row.snapshotProductRowId && row.relationalProductRowId !== row.snapshotProductRowId) {
       addReason(conflicts, reason('IDENTITY_CONFLICT', detail));
     }
+    if (row.identityEvidenceConflict) addReason(conflicts, reason('IDENTITY_CONFLICT', { ...detail, source: 'duplicate-product-row-id' }));
     if (!row.relationalProductId?.trim() || !row.snapshotProductId?.trim()) addReason(repair, reason('ROW_SNAPSHOT_NOT_FOUND', detail));
     if (row.relationalProductId && row.snapshotProductId && row.relationalProductId !== row.snapshotProductId) {
       addReason(conflicts, reason('IDENTITY_CONFLICT', { ...detail, source: 'catalog-product' }));
@@ -221,7 +233,12 @@ export const classifyLegacyPricingCandidate = (candidate: LegacyPricingCandidate
     if (quantity == null || !quantity.gt(0)) {
       quantityComplete = false;
       addReason(repair, reason('MISSING_QUANTITY', detail));
-    } else quantityTotal = quantityTotal.plus(quantity);
+    } else {
+      if (quantityEvidence.every(value => value != null) && quantityEvidence.some(value => !value!.eq(quantity))) {
+        addReason(conflicts, reason('FINANCIAL_MISMATCH', { ...detail, source: 'product-derived-quantity' }));
+      }
+      quantityTotal = quantityTotal.plus(quantity);
+    }
     if (!row.unit?.trim()) addReason(repair, reason('MISSING_UNIT', detail));
     const total = exact(row.canonicalAllInTotal, 12);
     const amountEvidence = Object.values(row.amountEvidence).map(value => exact(value, 12));
@@ -230,7 +247,12 @@ export const classifyLegacyPricingCandidate = (candidate: LegacyPricingCandidate
     if (total == null) {
       amountComplete = false;
       addReason(repair, reason('MISSING_TOTAL', detail));
-    } else rowAmountTotal = rowAmountTotal.plus(total);
+    } else {
+      if (amountEvidence.every(value => value != null) && amountEvidence.some(value => !value!.eq(total))) {
+        addReason(conflicts, reason('FINANCIAL_MISMATCH', { ...detail, source: 'canonical-row-total' }));
+      }
+      rowAmountTotal = rowAmountTotal.plus(total);
+    }
     const components = row.componentEvidence && Object.entries(row.componentEvidence);
     if (row.componentEvidenceConflict) addReason(conflicts, reason('FINANCIAL_MISMATCH', { ...detail, source: 'attached-component-snapshots' }));
     if (!components?.length || components.some(([, value]) => exact(value, 12) == null)) {
@@ -289,6 +311,25 @@ export const classifyLegacyPricingCandidate = (candidate: LegacyPricingCandidate
     sourceEvidenceHash: candidate.sourceEvidenceHash,
     quantityTotal: quantityComplete ? quantityTotal.toFixed(3) : null,
     amountTotal: amountComplete && net ? net.toFixed(12) : null,
+    rows: candidate.rows.map(row => ({
+      contractItemId: row.contractItemId,
+      relationalProductRowId: row.relationalProductRowId,
+      snapshotProductRowId: row.snapshotProductRowId,
+      relationalProductId: row.relationalProductId,
+      snapshotProductId: row.snapshotProductId,
+      quantity: exact(row.quantity, 3)?.toFixed(3) ?? null,
+      amount: exact(row.canonicalAllInTotal, 12)?.toFixed(12) ?? null,
+      evidenceHash: canonicalApprovedPricingHash({
+        contractItemId: row.contractItemId,
+        relationalProductRowId: row.relationalProductRowId,
+        snapshotProductRowId: row.snapshotProductRowId,
+        relationalProductId: row.relationalProductId,
+        snapshotProductId: row.snapshotProductId,
+        quantity: exact(row.quantity, 3)?.toFixed(3) ?? null,
+        amount: exact(row.canonicalAllInTotal, 12)?.toFixed(12) ?? null,
+        snapshotHash: row.snapshotHash,
+      }),
+    })),
   };
 };
 

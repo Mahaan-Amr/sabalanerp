@@ -59,6 +59,7 @@ export const loadLegacyPricingCandidates = async (
       sourceSnapshot: record.sourceSnapshot,
       metadata: record.metadata,
       invoiceItems: record.invoiceItems.map(item => ({
+        id: item.id,
         contractItemId: item.contractItemId,
         productId: item.productId,
         quantity: item.quantity.toFixed(3),

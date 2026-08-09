@@ -34,12 +34,12 @@ const completeLegacySource = (): LegacyPricingSourceInput => ({
         discount: { enabled: true, baseSubtotal: '70', amount: '10' },
         products: [{
           rowId: 'row-1', productId: 'product-1', productType: 'prepared', preparedQuantity: '2', preparedUnit: 'squareMeter',
-          currency: 'تومان', totalPrice: '100', originalTotalPrice: '70', isMandatory: false, mandatoryPercentage: '0', cuttingCost: '10',
+          currency: 'تومان', totalPrice: '100', originalTotalPrice: '70', isMandatory: false, mandatoryPercentage: '0', meta: { isLayer: false }, cuttingCost: '10',
           totalSubServiceCost: '10', appliedSubServices: [{ id: 'tool-1', cost: '10' }], finishingId: 'finish-1', finishingCost: '10',
         }],
       },
     },
-    invoiceItems: [{ contractItemId: 'item-1', productId: 'product-1', quantity: '2.000', totalPrice: '1000.000000000000' }],
+    invoiceItems: [{ id: 'invoice-item-1', contractItemId: 'item-1', productId: 'product-1', quantity: '2.000', totalPrice: '1000.000000000000' }],
   }],
   existingSeal: null,
   review: null,
@@ -72,6 +72,7 @@ const completeCandidate = (overrides: Partial<LegacyPricingCandidate> = {}): Leg
     amountEvidence: { contractItem: '100.000000000000', approvalItem: '100.000000000000', invoiceItem: '100.000000000000' },
     componentEvidence: { material: '80.000000000000', cutting: '20.000000000000', discountBasis: '100.000000000000' },
     componentEvidenceConflict: false,
+    identityEvidenceConflict: false,
     snapshotHash: 'a'.repeat(64),
   }],
   grossAmount: '100.000000000000',
@@ -175,6 +176,12 @@ test('manifest is deterministic regardless of source order and contains exact to
   assert.equal(first.knownQuantitySubtotal, '2.000');
   assert.equal(first.amountTotal, '180.000000000000');
   assert.equal(first.entries[1].quarantined, true);
+  assert.deepEqual(first.entries[0].rows[0], {
+    contractItemId: 'item-1', relationalProductRowId: 'row-1', snapshotProductRowId: 'row-1',
+    relationalProductId: 'product-1', snapshotProductId: 'product-1', quantity: '2.000', amount: '100.000000000000',
+    evidenceHash: first.entries[0].rows[0].evidenceHash,
+  });
+  assert.match(first.entries[0].rows[0].evidenceHash, /^[a-f0-9]{64}$/);
 });
 
 test('apply is idempotent and resumes after interruption without changing its manifest', async () => {
@@ -225,22 +232,26 @@ test('source adapter binds rows only by exact stable identity and hashes the unt
           discount: { enabled: true, baseSubtotal: '70', amount: '10' },
           products: [{
             rowId: 'row-1', productId: 'product-1', productType: 'prepared', preparedQuantity: '2', preparedUnit: 'squareMeter',
-            currency: 'تومان', totalPrice: '100', originalTotalPrice: '70', isMandatory: false, mandatoryPercentage: '0', cuttingCost: '10',
+            currency: 'تومان', totalPrice: '100', originalTotalPrice: '70', isMandatory: false, mandatoryPercentage: '0', meta: { isLayer: false }, cuttingCost: '10',
             totalSubServiceCost: '10', appliedSubServices: [{ id: 'tool-1', cost: '10' }], finishingId: 'finish-1', finishingCost: '10',
           }],
         },
       },
-      invoiceItems: [{ contractItemId: 'item-1', productId: 'product-1', quantity: '2.000', totalPrice: '1000.000000000000' }],
+      invoiceItems: [{ id: 'invoice-item-1', contractItemId: 'item-1', productId: 'product-1', quantity: '2.000', totalPrice: '1000.000000000000' }],
     }],
     existingSeal: null,
     review: null,
   });
   assert.equal(candidate.rows[0].snapshotProductRowId, 'row-1');
-  assert.equal(candidate.currency, 'ریال');
-  assert.equal(candidate.rows[0].canonicalAllInTotal, '1000.000000000000');
+  assert.equal(candidate.currency, 'تومان');
+  assert.equal(candidate.rows[0].canonicalAllInTotal, '100.000000000000');
+  assert.deepEqual(candidate.rows[0].amountEvidence, {
+    contractItem: '100.000000000000', approvalItem: '100.000000000000', invoiceItem: '100.000000000000',
+  });
+  assert.equal(candidate.netAmount, '90.000000000000');
   assert.deepEqual(candidate.rows[0].componentEvidence, {
-    material: '700.000000000000', mandatory: '0.000000000000', cutting: '100.000000000000',
-    tooling: '100.000000000000', finishing: '100.000000000000', discountBasis: '700.000000000000',
+    material: '70.000000000000', mandatory: '0.000000000000', cutting: '10.000000000000',
+    tooling: '10.000000000000', finishing: '10.000000000000', discountBasis: '70.000000000000',
   });
   assert.equal(candidate.sourceEvidenceHash.length, 64);
   assert.equal(classifyLegacyPricingCandidate(candidate).status, 'LEGACY_REVIEW_REQUIRED');
@@ -254,6 +265,59 @@ test('source adapter binds rows only by exact stable identity and hashes the unt
   const result = classifyLegacyPricingCandidate(legacyWithoutPersistedIdentity);
   assert.equal(result.status, 'REPAIR_REQUIRED');
   assert.ok(result.reasons.some(item => item.code === 'MISSING_STABLE_ROW_ID'));
+});
+
+test('product quantity and canonical Toman total reconcile with every row witness', () => {
+  const quantitySource = completeLegacySource();
+  const quantityProduct = ((quantitySource.financialRecords[0].sourceSnapshot as any).contractData.products as any[])[0];
+  quantityProduct.preparedQuantity = '3';
+  const quantityResult = classifyLegacyPricingCandidate(buildLegacyPricingCandidate(quantitySource));
+  assert.equal(quantityResult.status, 'EVIDENCE_CONFLICT');
+  assert.ok(quantityResult.reasons.some(item => item.code === 'FINANCIAL_MISMATCH' && item.detail.source === 'product-derived-quantity'));
+
+  const amountSource = completeLegacySource();
+  const amountProduct = ((amountSource.financialRecords[0].sourceSnapshot as any).contractData.products as any[])[0];
+  amountProduct.totalPrice = '110';
+  const amountResult = classifyLegacyPricingCandidate(buildLegacyPricingCandidate(amountSource));
+  assert.equal(amountResult.status, 'EVIDENCE_CONFLICT');
+  assert.ok(amountResult.reasons.some(item => item.code === 'FINANCIAL_MISMATCH' && item.detail.source === 'canonical-row-total'));
+});
+
+test('mandatory and discount eligibility evidence never default missing booleans', () => {
+  const mandatorySource = completeLegacySource();
+  const mandatoryProduct = ((mandatorySource.financialRecords[0].sourceSnapshot as any).contractData.products as any[])[0];
+  delete mandatoryProduct.isMandatory;
+  const mandatory = classifyLegacyPricingCandidate(buildLegacyPricingCandidate(mandatorySource));
+  assert.equal(mandatory.status, 'REPAIR_REQUIRED');
+  assert.ok(mandatory.reasons.some(item => item.code === 'MISSING_ATTACHED_COST_EVIDENCE'));
+
+  const eligibilitySource = completeLegacySource();
+  const eligibilityProduct = ((eligibilitySource.financialRecords[0].sourceSnapshot as any).contractData.products as any[])[0];
+  delete eligibilityProduct.meta.isLayer;
+  const eligibility = classifyLegacyPricingCandidate(buildLegacyPricingCandidate(eligibilitySource));
+  assert.equal(eligibility.status, 'REPAIR_REQUIRED');
+  assert.ok(eligibility.reasons.some(item => item.code === 'MISSING_DISCOUNT_EVIDENCE'));
+});
+
+test('duplicate relational or snapshot productRowId is quarantined without first-match binding', () => {
+  const baseRelationalSource = completeLegacySource();
+  const relationalSource: LegacyPricingSourceInput = {
+    ...baseRelationalSource,
+    contract: {
+      ...baseRelationalSource.contract,
+      items: [...baseRelationalSource.contract.items, { ...baseRelationalSource.contract.items[0], id: 'item-2' }],
+    },
+  };
+  const relational = classifyLegacyPricingCandidate(buildLegacyPricingCandidate(relationalSource));
+  assert.equal(relational.status, 'EVIDENCE_CONFLICT');
+  assert.ok(relational.reasons.some(item => item.code === 'IDENTITY_CONFLICT' && item.detail.source === 'duplicate-product-row-id'));
+
+  const snapshotSource = completeLegacySource();
+  const products = (snapshotSource.financialRecords[0].sourceSnapshot as any).contractData.products as any[];
+  products.push({ ...products[0] });
+  const snapshot = classifyLegacyPricingCandidate(buildLegacyPricingCandidate(snapshotSource));
+  assert.equal(snapshot.status, 'EVIDENCE_CONFLICT');
+  assert.ok(snapshot.reasons.some(item => item.code === 'IDENTITY_CONFLICT' && item.detail.source === 'duplicate-product-row-id'));
 });
 
 test('Prisma source cohort includes graphless contracts with no invoice candidate', async () => {
@@ -329,7 +393,21 @@ test('real legacy writer port persists through approvedPricing with LEGACY_SEAL 
     },
   };
   const command = {
-    idempotencyKey: 'command-1', origin: 'LEGACY_SEAL' as const, candidate: ready, review: ready.review!,
+    idempotencyKey: 'command-1', origin: 'LEGACY_SEAL' as const,
+    candidate: {
+      ...ready,
+      rows: [{
+        ...ready.rows[0], canonicalAllInTotal: '200.000000000000',
+        amountEvidence: { contractItem: '200.000000000000', approvalItem: '200.000000000000', invoiceItem: '200.000000000000' },
+        componentEvidence: {
+          material: '140.000000000000', mandatory: '0.000000000000', cutting: '20.000000000000',
+          tooling: '20.000000000000', finishing: '20.000000000000', discountBasis: '140.000000000000',
+        },
+      }],
+      grossAmount: '200.000000000000', discountAmount: '20.000000000000', netAmount: '180.000000000000',
+      discount: { enabled: true, baseAmount: '140.000000000000', amount: '20.000000000000' },
+    },
+    review: ready.review!,
     sourceReference: { contractId: ready.contractId, sourceFinancialRecordId: ready.sourceFinancialRecordId, sourceIdentityHash: ready.sourceIdentityHash, sourceEvidenceHash: ready.sourceEvidenceHash },
   };
   const first = await sealLegacyPricingWithApprovedPricingRepository(repository, command, { version: () => 'version-1', row: () => 'pricing-row-1' });
@@ -337,7 +415,10 @@ test('real legacy writer port persists through approvedPricing with LEGACY_SEAL 
   assert.deepEqual(first, { outcome: 'SEALED', pricingVersionId: 'version-1' });
   assert.deepEqual(replay, { outcome: 'REPLAYED', pricingVersionId: 'version-1' });
   assert.equal((persistenceContext as ApprovedPricingPersistenceContext | null)?.origin, ApprovedPricingVersionOrigin.LEGACY_SEAL);
-  assert.equal((persisted as ApprovedPricingVersionInsert | null)?.rows[0]?.componentEvidence.discountBasis, '700.000000000000');
+  assert.equal((persisted as ApprovedPricingVersionInsert | null)?.currency, 'تومان');
+  assert.equal((persisted as ApprovedPricingVersionInsert | null)?.grossAmount, '100.000000000000');
+  assert.equal((persisted as ApprovedPricingVersionInsert | null)?.netAmount, '90.000000000000');
+  assert.equal((persisted as ApprovedPricingVersionInsert | null)?.rows[0]?.componentEvidence.discountBasis, '70.000000000000');
 });
 
 test('writer revalidates the complete source envelope under the contract lock before any immutable write', async () => {

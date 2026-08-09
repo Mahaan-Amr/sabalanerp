@@ -24,7 +24,7 @@ export const approvedPricingLifecycleAuditHash = (input: { aggregateType: 'APPRO
   eventType: 'APPROVED_PRICING_VERSION_CREATED'; payload: unknown; actorId: string; recordedAt: Date; previousHash: string | null }) =>
   createHash('sha256').update(JSON.stringify(stableAudit(input))).digest('hex');
 export type ApprovedPricingAuditContext = { reason: string; correlationId: string; idempotencyKey: string;
-  effectiveAuthority: { actorRole: string; workspace: string; workspacePermission: string } };
+  effectiveAuthority: { actorRole: string; workspace: string; workspacePermission: string; feature?: string; featurePermission?: string } };
 
 type PersistedVersion = Prisma.ContractApprovedPricingVersionGetPayload<{ include: typeof pricingVersionInclude }>;
 

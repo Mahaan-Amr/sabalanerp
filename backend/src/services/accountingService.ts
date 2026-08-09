@@ -43,6 +43,7 @@ const activeCorrectionStatuses = () => [
 type Actor = {
   userId: string;
   role: string;
+  effectiveAuthority?: { actorRole: string; workspace?: string; workspacePermission?: string; feature: string; featurePermission?: string };
 };
 
 export type AccountingActionNotificationHook = (
@@ -1266,6 +1267,13 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
   const approvalIdempotencyKey = String(command.idempotencyKey || '').trim();
   const approvalCorrelationId = String(command.correlationId || '').trim();
   if (!approvalIdempotencyKey || !approvalCorrelationId) throw new Error('Financial approval idempotency and correlation identities are required');
+  const approvalAuthority = actor.effectiveAuthority;
+  if (!approvalAuthority?.workspace || !approvalAuthority.workspacePermission || !approvalAuthority.featurePermission) {
+    throw new Error('Financial approval effective authority is required');
+  }
+  const approvalAuthorityEvidence = { actorRole: approvalAuthority.actorRole, workspace: approvalAuthority.workspace,
+    workspacePermission: approvalAuthority.workspacePermission, feature: approvalAuthority.feature,
+    featurePermission: approvalAuthority.featurePermission } as const;
 
   const systemInvoiceNumber = normalizeDigits(command.systemInvoiceNumber || '').trim();
   if (!systemInvoiceNumber) throw new Error('System invoice number is required');
@@ -1347,7 +1355,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     await sealApprovedPricingAtFinancialApproval(tx, updated.id, {
       reason: String(command.note || 'Financial invoice approval').trim(), correlationId: approvalCorrelationId,
       idempotencyKey: approvalIdempotencyKey,
-      effectiveAuthority: { actorRole: actor.role, workspace: 'accounting', workspacePermission: 'MANAGE' },
+      effectiveAuthority: approvalAuthorityEvidence,
     });
 
     if (updated.contractId) {

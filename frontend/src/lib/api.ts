@@ -97,7 +97,11 @@ const clearRetryKey = (config?: RetryAwareConfig) => {
 
 api.interceptors.request.use(async (config) => {
   const method = String(config.method || 'get').toUpperCase();
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !config.headers['x-idempotency-key']) {
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  if (isMutation) {
+    config.headers['x-correlation-id'] = crypto.randomUUID();
+  }
+  if (isMutation && !config.headers['x-idempotency-key']) {
     loadRetryKeys();
     const fingerprint = await mutationFingerprint(config);
     const cached = retryKeys.get(fingerprint);

@@ -51,7 +51,8 @@ router.post('/exit-desk/authorizations/:authorizationId/exit', protect, guardEdi
   try { return res.status(201).json({ success: true, data: await physicalExitService.recordExit({ authorizationId: req.params.authorizationId,
     actorId: req.user!.id, effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace,
       workspacePermission: req.workspacePermission }, idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''),
-    reason: String(req.body.reason || ''), effectiveAt: req.body.effectiveAt ? new Date(req.body.effectiveAt) : undefined }) }); }
+    correlationId: String(req.get('X-Correlation-ID') || ''), reasonDetail: String(req.body.reasonDetail || ''),
+    effectiveAt: req.body.effectiveAt ? new Date(req.body.effectiveAt) : undefined }) }); }
   catch (error) { return fail(res, error, 'Record Guard physical exit'); }
 });
 

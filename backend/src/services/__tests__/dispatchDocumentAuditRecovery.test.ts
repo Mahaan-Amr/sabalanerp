@@ -24,10 +24,13 @@ import {
   validatePersistedDocumentTransition,
   validatesRetainedPrimaryPair,
   validatesTerminalVoidTransition,
+  validatesReplacementEvidenceGeneration,
+  validatesStaleSuccessorTransfer,
+  isTerminalVoidWaybill,
 } from '../dispatchDocumentAuditRecovery';
 import { recoveryEngineInternals, sanitizedDispatchArtifactMetadata } from '../systemRecoveryEngine';
 import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
-import { guardPhysicalExitAuditIntegrityHash, guardPhysicalExitIntegrityHash } from '../physicalGateExit';
+import { guardPhysicalExitAuditIntegrityHash, guardPhysicalExitIntegrityHash, guardPhysicalExitReasonEvidence } from '../physicalGateExit';
 import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from '../approvedPricing/domain';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 import { dispatchDocumentLifecycleAuditEventHash } from '../dispatchDocuments/prismaRepository';
@@ -129,10 +132,11 @@ test('replay distinguishes lifecycle-optional evidence and fails closed on quant
 });
 
 test('state-aware production validator covers disposition, required lifecycle, document, and before-delta-after witnesses', () => {
+  const identity = { contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'squareMeter' };
   const issues = validateDispatchLifecycleConservation({
     candidate: { status: 'PENDING', dispositionAt: null, dispositionBy: null },
     lifecycle: { requiresPrintHandoff: true, hasPrintHandoff: false, requiresGuardExit: true, hasGuardExit: false, requiredAdjustmentIds: ['adjustment-1'], actualAdjustmentIds: [] },
-    quantityWitnesses: [{ stage: 'ALLOCATION', rowId: 'row-1', unit: 'squareMeter', value: '2.000' }, { stage: 'PRICED', rowId: 'row-1', unit: 'squareMeter', value: '2.000' }],
+    quantityWitnesses: [{ stage: 'ALLOCATION', ...identity, value: '2.000' }, { stage: 'PRICED', ...identity, value: '2.000' }],
     moneyWitnesses: [{ stage: 'PRICED', currency: 'TOMAN', gross: '100.000000000000', discount: '10.000000000000', net: '90.000000000000' }],
     adjustmentWitnesses: [{ id: 'adjustment-1', currency: 'TOMAN', before: '90.000000000000', delta: '5.000000000000', after: '94.000000000000' }],
   });
@@ -143,7 +147,20 @@ test('state-aware production validator covers disposition, required lifecycle, d
   assert.ok(issues.some(item => item.code === 'MONEY_CONSERVATION_MISMATCH'));
 });
 
+test('production conservation keeps contract, item, product row, and unit in the quantity identity', () => {
+  const stages = ['ALLOCATION', 'PRICED', 'DOCUMENTED'] as const;
+  const quantityWitnesses = ['contract-1', 'contract-2'].flatMap(contractId => stages.map(stage => ({ stage, contractId,
+    contractItemId: 'item-1', productRowId: 'row-1', unit: 'squareMeter', value: '2.000' })));
+  const issues = validateDispatchLifecycleConservation({ candidate: { status: 'ACCEPTED', dispositionAt: '2026-08-20T00:00:00.000Z', dispositionBy: 'accountant-1' },
+    lifecycle: { requiresPrintHandoff: false, hasPrintHandoff: false, requiresGuardExit: false, hasGuardExit: false,
+      requiredAdjustmentIds: [], actualAdjustmentIds: [] }, quantityWitnesses,
+    moneyWitnesses: [{ stage: 'PRICED', currency: 'TOMAN', gross: '2.000000000000', discount: '0.000000000000', net: '2.000000000000' },
+      { stage: 'DOCUMENTED', currency: 'TOMAN', gross: '2.000000000000', discount: '0.000000000000', net: '2.000000000000' }], adjustmentWitnesses: [] });
+  assert.equal(issues.some(issue => issue.code === 'DUPLICATE_EVIDENCE'), false);
+});
+
 test('production replay uses writer-owned Guard and correction hash formats', () => {
+  assert.deepEqual(guardPhysicalExitReasonEvidence(), { reasonCode: 'GUARD_PHYSICAL_EXIT_CONFIRMED', reasonDetail: null });
   const correction = { correctionId: 'correction-1', waybillId: 'waybill-1', reason: 'verified return', effectiveAt: new Date('2026-08-09T08:00:00.000Z'), lines: [{ id: 'line-1', quantity: { toFixed: () => '1.000' } }], postedAt: new Date('2026-08-09T09:00:00.000Z') };
   assert.match(dispatchCorrectionIntegrityHash(correction), /^[a-f0-9]{64}$/);
   const correctionPayload = { workspace: 'accounting', effectiveAuthority: { actorRole: 'ADMIN' }, waybillId: 'waybill-1', reason: 'verified return', integrityHash: dispatchCorrectionIntegrityHash(correction) };
@@ -206,6 +223,30 @@ test('terminal void replay requires exact writer command and audit metadata', ()
   assert.equal(validatesTerminalVoidTransition({ waybill, command, audit }), true);
   assert.equal(validatesTerminalVoidTransition({ waybill, command,
     audit: { ...audit, payload: { ...audit.payload, idempotencyKey: 'tampered' } } }), false);
+  assert.equal(isTerminalVoidWaybill({ status: 'VOIDED', replacementWaybill: null, replacesWaybillId: 'older-waybill' }), true);
+});
+
+test('every generation in a recursive replacement chain retains the exact source pair', () => {
+  const provenance = { sourceIntegrityHash: 'a'.repeat(64), allocationIntegrityHash: 'b'.repeat(64), sourceVersionIdentities: ['pricing-1'] };
+  const artifacts = [{ kind: 'WAYBILL', sourceIntegrityHash: 'a'.repeat(64), sha256: '1'.repeat(64) },
+    { kind: 'STATEMENT', sourceIntegrityHash: 'a'.repeat(64), sha256: '2'.repeat(64) }];
+  const generations = [
+    { successorId: 'waybill-3', linkedSuccessorId: 'waybill-3', successorProvenance: provenance, predecessorProvenance: provenance, predecessorArtifacts: artifacts },
+    { successorId: 'waybill-2', linkedSuccessorId: 'waybill-2', successorProvenance: provenance, predecessorProvenance: provenance, predecessorArtifacts: artifacts },
+  ];
+  assert.equal(generations.every(validatesReplacementEvidenceGeneration), true);
+  assert.equal(generations.map((item, index) => index === 1 ? { ...item, predecessorArtifacts: artifacts.slice(0, 1) } : item)
+    .every(validatesReplacementEvidenceGeneration), false);
+});
+
+test('predecessor stale state—not an audit flag—requires exact successor transfer evidence', () => {
+  const lines = [['contract-1', 'item-1', 'row-1', 'squareMeter', '2.000']];
+  assert.equal(validatesStaleSuccessorTransfer({ predecessorStatus: 'STALE_REQUIRES_SUCCESSOR', auditMarksStaleTransfer: false,
+    predecessorLines: lines, successorLines: lines }), false);
+  assert.equal(validatesStaleSuccessorTransfer({ predecessorStatus: 'STALE_REQUIRES_SUCCESSOR', auditMarksStaleTransfer: true,
+    predecessorLines: lines, successorLines: lines }), true);
+  assert.equal(validatesStaleSuccessorTransfer({ predecessorStatus: 'RETURNED', auditMarksStaleTransfer: true,
+    predecessorLines: lines, successorLines: lines }), false);
 });
 
 test('mandatory Prisma truth verifier accepts only immutable writer-owned pricing/event/provenance sources', async () => {
@@ -414,6 +455,16 @@ test('cleanup retry resumes finalization after durable completion without stagin
     storage: { stageCleanup: async () => { staged += 1; }, restoreStagedCleanup: async () => {}, finalizeCleanup: async () => { finalized += 1; } },
     audit: { append: async () => {}, hasCompletedCleanup: async () => true } });
   assert.equal(result.status, 'REMOVED'); assert.equal(staged, 0); assert.equal(finalized, 1);
+});
+
+test('cleanup retry rechecks current references before finalizing staged bytes', async () => {
+  let finalized = 0; const events: DispatchArtifactAuditEvent[] = [];
+  await assert.rejects(cleanupQuarantinedDispatchDocumentOrphan({ storageKey: 'staging/referenced.pdf', actorId: 'support-1', reason: 'resume cleanup',
+    correlationId: 'cleanup-resume', idempotencyKey: 'cleanup-resume-2', authority, now: new Date('2026-08-20T00:00:00.000Z'),
+    repository: { isReferenced: async () => true, readQuarantineEvidence: async () => null },
+    storage: { stageCleanup: async () => {}, restoreStagedCleanup: async () => {}, finalizeCleanup: async () => { finalized += 1; } },
+    audit: { append: async event => { events.push(event); }, hasCompletedCleanup: async () => true } }));
+  assert.equal(finalized, 0); assert.equal(events.at(-1)?.detail.code, 'FILE_BECAME_REFERENCED_AFTER_CLEANUP');
 });
 
 test('compensation failure still records a terminal unresolved incident', async () => {

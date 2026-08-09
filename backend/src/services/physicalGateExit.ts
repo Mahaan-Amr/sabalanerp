@@ -7,6 +7,9 @@ import { shipmentQuantityEvidenceIntegrityHash } from './shipmentQuantityProject
 type Tx = Prisma.TransactionClient;
 export class PhysicalGateExitValidationError extends Error {}
 export class PhysicalGateExitConflictError extends Error {}
+export const GUARD_PHYSICAL_EXIT_REASON_CODE = 'GUARD_PHYSICAL_EXIT_CONFIRMED' as const;
+export const guardPhysicalExitReasonEvidence = (detail?: string) => ({ reasonCode: GUARD_PHYSICAL_EXIT_REASON_CODE,
+  reasonDetail: String(detail || '').trim() || null });
 
 const stableValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -72,8 +75,9 @@ export class PhysicalGateExitService {
       admissionSnapshot: authorization.waybill.candidate.allocationRevision.queueTurn.admissionSnapshot }));
   }
 
-  async recordExit(input: { authorizationId: string; actorId: string; effectiveAuthority: unknown; idempotencyKey?: string; reason?: string; effectiveAt?: Date }) {
-    const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey'); const reason = required(input.reason, 'reason');
+  async recordExit(input: { authorizationId: string; actorId: string; effectiveAuthority: unknown; idempotencyKey?: string;
+    correlationId?: string; reasonDetail?: string; effectiveAt?: Date }) {
+    const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey'); const correlationId = required(input.correlationId, 'correlationId');
     const authorizationId = required(input.authorizationId, 'authorizationId');
     const actorId = required(input.actorId, 'actorId');
     const initial = await this.prisma.dispatchExitAuthorization.findUnique({ where: { id: authorizationId }, include: { physicalExit: { include: { smsIntent: true } }, waybill: { include: { candidate: { include: { allocationRevision: true } } } } } });
@@ -161,12 +165,13 @@ export class PhysicalGateExitService {
           dispatchNumber: waybill.number.toString(), status: 'NEEDS_ATTENTION', detail: 'No confirmed buyer notification phone was snapshotted.' }) } });
       await appendAudit(tx, { aggregateType: 'GUARD_PHYSICAL_EXIT', aggregateId: exitId, eventType: 'PHYSICAL_EXIT_RECORDED',
         payload: { workspace: 'security', effectiveAuthority: input.effectiveAuthority,
-          reason, idempotencyKey, effectiveAt: (input.effectiveAt ?? at).toISOString(),
+          ...guardPhysicalExitReasonEvidence(input.reasonDetail),
+          idempotencyKey, effectiveAt: (input.effectiveAt ?? at).toISOString(),
           authorizationId: authorization.id, authorizationIntegrityHash: authorization.integrityHash,
           waybillId: waybill.id, waybillIntegrityHash: waybill.integrityHash, queueTurnId: turn.id, queueTurnIntegrityHash: turn.integrityHash,
           allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash, sessionId: authorization.sessionId,
           before: { authorization: 'ACTIVE', waybill: 'ISSUED', queueTurn: 'LOADING_FINALIZED' },
-          after: { authorization: 'CONSUMED', waybill: 'EXIT_RECORDED', queueTurn: 'EXIT_RECORDED' }, correlationId: exitId }, actorId, at });
+          after: { authorization: 'CONSUMED', waybill: 'EXIT_RECORDED', queueTurn: 'EXIT_RECORDED' }, correlationId }, actorId, at });
       await appendAudit(tx, { aggregateType: 'DISPATCH_EXIT_AUTHORIZATION', aggregateId: authorization.id, eventType: 'CONSUMED_AT_PHYSICAL_EXIT',
         payload: { workspace: 'security', effectiveAuthority: input.effectiveAuthority,
           beforeStatus: 'ACTIVE', afterStatus: 'CONSUMED', physicalExitId: exitId,

@@ -146,7 +146,7 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     const waybill: IssuedWaybill = { id: root.waybillId, number: root.number, status: 'ISSUED', issuedAt: root.issuedAt, replacesWaybillId: null };
     return dependencies.repository.acceptAndIssue({ candidateId, allocationRevisionId: source.allocationRevisionId,
       expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
-      waybill, artifacts, idempotencyKey, actorId, correlationId, authority: input.authority ?? {}, intentFingerprint: fingerprint });
+      waybill, artifacts, idempotencyKey, actorId, correlationId, authority: input.authority, intentFingerprint: fingerprint });
   };
 
   const voidWaybill = async (input: { waybillId: string; reason: string; idempotencyKey: string; actorId: string; correlationId?: string; authority?: unknown }) => {

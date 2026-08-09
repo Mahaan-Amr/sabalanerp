@@ -248,6 +248,21 @@ export const validatePersistedDocumentTransition = (input: {
 export const validatesRetainedPrimaryPair = (artifacts: readonly { kind: string; sourceIntegrityHash: string; sha256: string }[], sourceHash: string | null) =>
   Boolean(sourceHash && artifacts.length === 2 && ['WAYBILL', 'STATEMENT'].every(kind => artifacts.filter(item => item.kind === kind).length === 1)
     && artifacts.every(item => item.sourceIntegrityHash === sourceHash && /^[a-f0-9]{64}$/.test(item.sha256)));
+const orderedPrimaryArtifacts = <T extends { kind: string; statementAdjustmentId?: string | null }>(artifacts: readonly T[]) =>
+  artifacts.filter(item => !item.statementAdjustmentId && (item.kind === 'WAYBILL' || item.kind === 'STATEMENT'))
+    .sort((left, right) => (left.kind === 'WAYBILL' ? 0 : 1) - (right.kind === 'WAYBILL' ? 0 : 1));
+export const validatesReplacementEvidenceGeneration = (input: { successorId: string; linkedSuccessorId: string | null;
+  successorProvenance: Record<string, any>; predecessorProvenance: Record<string, any>;
+  predecessorArtifacts: readonly { kind: string; sourceIntegrityHash: string; sha256: string }[] }) =>
+  input.linkedSuccessorId === input.successorId
+  && input.predecessorProvenance.sourceIntegrityHash === input.successorProvenance.sourceIntegrityHash
+  && input.predecessorProvenance.allocationIntegrityHash === input.successorProvenance.allocationIntegrityHash
+  && JSON.stringify(input.predecessorProvenance.sourceVersionIdentities) === JSON.stringify(input.successorProvenance.sourceVersionIdentities)
+  && validatesRetainedPrimaryPair(input.predecessorArtifacts, input.successorProvenance.sourceIntegrityHash);
+export const validatesStaleSuccessorTransfer = (input: { predecessorStatus: string | null; auditMarksStaleTransfer: boolean;
+  predecessorLines: readonly unknown[]; successorLines: readonly unknown[] }) => input.predecessorStatus === 'STALE_REQUIRES_SUCCESSOR'
+  ? input.auditMarksStaleTransfer && JSON.stringify(input.predecessorLines) === JSON.stringify(input.successorLines)
+  : !input.auditMarksStaleTransfer;
 export const validatesTerminalVoidTransition = (input: {
   waybill: { id: string; integrityHash: string; voidedAt: Date | null; voidedBy: string | null; voidReason: string | null };
   command?: { scope: string; scopeId: string; command: string; status: string; waybillId: string | null; actorId: string;
@@ -263,6 +278,8 @@ export const validatesTerminalVoidTransition = (input: {
     && payload?.idempotencyKey === command.idempotencyKey && payload?.waybillIntegrityHash === waybill.integrityHash
     && payload?.before?.status === 'ISSUED' && payload?.after?.status === 'VOIDED');
 };
+export const isTerminalVoidWaybill = (waybill: { status: string; replacementWaybill?: { id: string } | null; replacesWaybillId?: string | null }) =>
+  waybill.status === 'VOIDED' && !waybill.replacementWaybill;
 
 export const createPrismaDispatchReplayTruthVerifier = (prisma: PrismaClient): DispatchReplayTruthVerifier => ({
   verifyPrimarySource: input => prisma.$transaction(async tx => {
@@ -384,7 +401,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
   }
   const waybillSnapshot = waybill.snapshot as Record<string, any>;
   const provenance = waybillSnapshot?.documentProvenance as Record<string, any> | undefined;
-  const primaryArtifacts = waybill.documentArtifacts.filter(item => !item.statementAdjustmentId && (item.kind === 'WAYBILL' || item.kind === 'STATEMENT'));
+  const primaryArtifacts = orderedPrimaryArtifacts(waybill.documentArtifacts);
   const primarySourceHash = typeof provenance?.sourceIntegrityHash === 'string' ? provenance.sourceIntegrityHash : null;
   if (waybill.replacesWaybill) {
     const predecessorProvenance = ((waybill.replacesWaybill.snapshot as Record<string, any>)?.documentProvenance ?? {}) as Record<string, any>;
@@ -396,6 +413,47 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       || !validatesRetainedPrimaryPair(predecessorPrimary, primarySourceHash)
       || waybill.replacesWaybill.replacementWaybill?.id !== waybill.id) issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: waybill.id,
         detail: 'Replacement and predecessor do not share one immutable source/snapshot identity or exactly-one successor.' });
+  }
+  const seenReplacementIds = new Set<string>([waybill.id]);
+  const replacementChainAudits: any[] = [];
+  let replacementSuccessor: any = waybill;
+  let replacementPredecessor: any = waybill.replacesWaybill;
+  while (replacementPredecessor) {
+    if (seenReplacementIds.has(replacementPredecessor.id)) {
+      issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: replacementPredecessor.id, detail: 'Replacement chain contains a cycle.' });
+      break;
+    }
+    seenReplacementIds.add(replacementPredecessor.id);
+    const successorProvenance = ((replacementSuccessor.snapshot as Record<string, any>)?.documentProvenance ?? {}) as Record<string, any>;
+    const predecessorProvenance = ((replacementPredecessor.snapshot as Record<string, any>)?.documentProvenance ?? {}) as Record<string, any>;
+    const predecessorPrimary = replacementPredecessor.documentArtifacts.filter((item: any) => !item.statementAdjustmentId
+      && (item.kind === 'WAYBILL' || item.kind === 'STATEMENT'));
+    const [replacementCommand, replacementAudit] = await Promise.all([
+      prisma.dispatchDocumentCommandResult.findFirst({ where: { scope: 'WAYBILL', scopeId: replacementPredecessor.id,
+        command: 'REPLACE', status: 'SUCCEEDED', waybillId: replacementSuccessor.id }, orderBy: [{ completedAt: 'desc' }, { id: 'desc' }] }),
+      prisma.dispatchLifecycleAudit.findFirst({ where: { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: replacementPredecessor.id,
+        eventType: 'DOCUMENT_BUNDLE_REPLACED' }, orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }] }),
+    ]);
+    const transitionIssue = validatePersistedDocumentTransition({ waybill: { id: replacementSuccessor.id,
+      candidateId: replacementSuccessor.candidateId, integrityHash: replacementSuccessor.integrityHash,
+      replacesWaybillId: replacementSuccessor.replacesWaybillId, issuedAt: replacementSuccessor.issuedAt, issuedBy: replacementSuccessor.issuedBy },
+      predecessor: { id: replacementPredecessor.id, status: replacementPredecessor.status, integrityHash: replacementPredecessor.integrityHash,
+        voidedAt: replacementPredecessor.voidedAt, voidedBy: replacementPredecessor.voidedBy, voidReason: replacementPredecessor.voidReason,
+        replacementWaybillId: replacementPredecessor.replacementWaybill?.id ?? null },
+      primarySourceHash: successorProvenance.sourceIntegrityHash,
+      primaryArtifactIds: orderedPrimaryArtifacts(replacementSuccessor.documentArtifacts).map((item: any) => item.id),
+      command: replacementCommand ?? undefined, audit: replacementAudit ?? undefined });
+    if (replacementAudit) replacementChainAudits.push(replacementAudit);
+    if (!validatesReplacementEvidenceGeneration({ successorId: replacementSuccessor.id,
+      linkedSuccessorId: replacementPredecessor.replacementWaybill?.id ?? null, successorProvenance, predecessorProvenance,
+      predecessorArtifacts: predecessorPrimary }) || transitionIssue) {
+      issues.push({ code: transitionIssue ?? 'BROKEN_EVIDENCE_LINK', subjectId: replacementPredecessor.id,
+        detail: 'A replacement generation lacks retained artifacts, immutable provenance, or its exact predecessor transition.' });
+    }
+    replacementSuccessor = replacementPredecessor;
+    replacementPredecessor = replacementPredecessor.replacesWaybillId
+      ? await prisma.accountingDispatchWaybill.findUnique({ where: { id: replacementPredecessor.replacesWaybillId },
+        include: { documentArtifacts: true, replacementWaybill: { select: { id: true } } } }) : null;
   }
   if (!primarySourceHash || primaryArtifacts.length !== 2 || primaryArtifacts.some(artifact => artifact.sourceIntegrityHash !== primarySourceHash)) {
     issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: waybill.id, detail: 'Retained primary artifacts do not bind the immutable waybill document-provenance snapshot.' });
@@ -425,10 +483,14 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     candidate: { status: waybill.candidate.status, dispositionAt: waybill.candidate.dispositionAt?.toISOString() ?? null, dispositionBy: waybill.candidate.dispositionBy },
     lifecycle: { requiresPrintHandoff: waybill.printHandoffs.some(item => item.status === 'SUCCEEDED'), hasPrintHandoff: waybill.printHandoffs.some(item => item.status === 'SUCCEEDED'), requiresGuardExit: waybill.status === 'EXIT_RECORDED', hasGuardExit: Boolean(waybill.physicalExit), requiredAdjustmentIds: posted.map(item => item.statementAdjustment?.id ?? `missing:${item.id}`), actualAdjustmentIds: posted.flatMap(item => item.statementAdjustment ? [item.statementAdjustment.id] : []) },
     quantityWitnesses: [
-      ...revision.lines.map(line => ({ stage: 'ALLOCATION' as const, rowId: line.productRowId, unit: line.unit, value: line.quantity.toFixed(3) })),
-      ...revision.pricedAllocationEvents.map(event => { const line = lineById.get(event.allocationRevisionLineId); return { stage: 'PRICED' as const, rowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: event.quantity.toFixed(3) }; }),
-      ...(primarySourceHash ? revision.pricedAllocationEvents.map(event => { const line = lineById.get(event.allocationRevisionLineId); return { stage: 'DOCUMENTED' as const, rowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: event.quantity.toFixed(3) }; }) : []),
-      ...(waybill.physicalExit ? revision.lines.map(line => ({ stage: 'EXIT' as const, rowId: line.productRowId, unit: line.unit, value: line.quantity.toFixed(3) })) : []),
+      ...revision.lines.map(line => ({ stage: 'ALLOCATION' as const, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
+        productRowId: line.productRowId, unit: line.unit, value: line.quantity.toFixed(3) })),
+      ...revision.pricedAllocationEvents.map(event => { const line = lineById.get(event.allocationRevisionLineId); return { stage: 'PRICED' as const,
+        contractId: line?.sourceContractId ?? '', contractItemId: line?.sourceContractItemId ?? '', productRowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: event.quantity.toFixed(3) }; }),
+      ...(primarySourceHash ? revision.pricedAllocationEvents.map(event => { const line = lineById.get(event.allocationRevisionLineId); return { stage: 'DOCUMENTED' as const,
+        contractId: line?.sourceContractId ?? '', contractItemId: line?.sourceContractItemId ?? '', productRowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: event.quantity.toFixed(3) }; }) : []),
+      ...(waybill.physicalExit ? revision.lines.map(line => ({ stage: 'EXIT' as const, contractId: line.sourceContractId,
+        contractItemId: line.sourceContractItemId, productRowId: line.productRowId, unit: line.unit, value: line.quantity.toFixed(3) })) : []),
     ],
     moneyWitnesses: [
       ...[...pricedMoney].map(([currency, value]) => ({ stage: 'PRICED' as const, currency, gross: value.gross.toFixed(12), discount: value.discount.toFixed(12), net: value.net.toFixed(12) })),
@@ -479,7 +541,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
         primarySourceHash, primaryArtifactIds: primaryArtifacts.map(artifact => artifact.id), command: issuanceCommand, audit: issued });
       if (transitionIssue) issues.push({ code: transitionIssue, subjectId: waybill.id,
         detail: 'Document transition lacks exact source/replacement/actor/time/reason/correlation/idempotency binding.' });
-      if (waybill.status === 'VOIDED' && !waybill.replacementWaybill && !waybill.replacesWaybillId) {
+      if (isTerminalVoidWaybill(waybill)) {
         const voidCommand = commands.find(command => command.scope === 'WAYBILL' && command.scopeId === waybill.id
           && command.command === 'VOID' && command.status === 'SUCCEEDED' && command.waybillId === waybill.id);
         const voidAudit = rows.find(row => row.eventType === 'DOCUMENT_BUNDLE_VOIDED');
@@ -503,8 +565,9 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
         if (!predecessor || snapshot?.predecessorRevisionId !== predecessor.id || !successorAudit
           || successorPayload?.predecessorRevisionId !== predecessor.id || successorAudit.actorId !== revision.finalizedBy
           || successorAudit.recordedAt.toISOString() !== revision.finalizedAt.toISOString()
-          || (successorPayload?.stalePricingTransfer === true && (predecessor.candidate?.status !== 'STALE_REQUIRES_SUCCESSOR'
-            || JSON.stringify(stableLines(revision.lines)) !== JSON.stringify(stableLines(predecessor.lines))))) {
+          || !validatesStaleSuccessorTransfer({ predecessorStatus: predecessor.candidate?.status ?? null,
+            auditMarksStaleTransfer: successorPayload?.stalePricingTransfer === true,
+            predecessorLines: stableLines(predecessor.lines), successorLines: stableLines(revision.lines) })) {
           issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: revision.id,
             detail: 'Successor snapshot/audit does not prove predecessor identity and exact stale reservation transfer.' });
         }
@@ -519,8 +582,10 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       const acceptanceAuthority = acceptance?.authority as Record<string, unknown> | undefined;
       if (!accepted || !issuanceCommand || accepted.actorId !== waybill.candidate.dispositionBy
         || accepted.recordedAt.toISOString() !== waybill.candidate.dispositionAt?.toISOString()
-        || !acceptance?.reason || acceptanceAuthority?.workspace !== 'accounting' || acceptanceAuthority?.workspacePermission !== 'EDIT'
-        || acceptanceAuthority?.featurePermission !== 'MANAGE' || !acceptanceAuthority?.actorRole || !acceptanceAuthority?.feature
+        || !acceptance?.reason || acceptanceAuthority?.workspace !== 'accounting'
+        || !['edit', 'admin'].includes(String(acceptanceAuthority?.workspacePermission || '').toLowerCase())
+        || !['edit', 'admin'].includes(String(acceptanceAuthority?.featurePermission || '').toLowerCase())
+        || !acceptanceAuthority?.actorRole || acceptanceAuthority?.feature !== 'accounting_dispatch_candidates_manage'
         || acceptance?.correlationId !== issuanceCommand.correlationId
         || acceptance?.idempotencyKey !== issuanceCommand.idempotencyKey || acceptance?.before?.status !== 'PENDING'
         || acceptance?.after?.status !== 'ACCEPTED' || acceptance?.after?.waybillId !== waybill.id
@@ -534,8 +599,12 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     if (expected.aggregateType === 'APPROVED_PRICING_VERSION') {
       const version = revision.pricingReferences.find(reference => reference.pricingVersionId === expected.aggregateId)?.pricingVersion;
       const created = rows.find(row => row.eventType === 'APPROVED_PRICING_VERSION_CREATED'); const payload = created?.payload as Record<string, any> | undefined;
+      const pricingAuthority = payload?.effectiveAuthority as Record<string, unknown> | undefined;
       if (!version || !created || created.actorId !== version.approvedBy || created.recordedAt.toISOString() !== version.approvedAt.toISOString()
-        || !payload?.reason || !payload?.correlationId || !payload?.idempotencyKey || !payload?.effectiveAuthority
+        || !payload?.reason || !payload?.correlationId || !payload?.idempotencyKey || pricingAuthority?.workspace !== 'accounting'
+        || pricingAuthority?.feature !== 'accounting_actions_manage'
+        || !['edit', 'admin'].includes(String(pricingAuthority?.workspacePermission || '').toLowerCase())
+        || !['edit', 'admin'].includes(String(pricingAuthority?.featurePermission || '').toLowerCase())
         || payload?.sourceFinancialRecordId !== version.sourceFinancialRecordId || payload?.contractId !== version.contractId
         || payload?.versionIntegrityHash !== version.integrityHash
         || JSON.stringify(payload?.rowIntegrityHashes) !== JSON.stringify(version.rows.map(row => row.integrityHash))
@@ -575,7 +644,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       if (!exitAudit || payload?.waybillId !== waybill.id || payload?.allocationRevisionId !== revision.id
         || exitAuthority?.workspace !== 'security' || exitAuthority?.workspacePermission !== 'EDIT' || !exitAuthority?.actorRole
         || payload?.workspace !== 'security' || !payload?.sessionId || !payload?.correlationId
-        || !payload?.reason || !payload?.idempotencyKey || !payload?.effectiveAt || !payload?.before || !payload?.after
+        || payload?.reasonCode !== 'GUARD_PHYSICAL_EXIT_CONFIRMED' || !payload?.idempotencyKey || !payload?.effectiveAt || !payload?.before || !payload?.after
         || payload?.waybillIntegrityHash !== waybill.integrityHash || payload?.allocationIntegrityHash !== revision.integrityHash
         || payload?.before?.authorization !== 'ACTIVE' || payload?.before?.waybill !== 'ISSUED'
         || payload?.after?.authorization !== 'CONSUMED' || payload?.after?.waybill !== 'EXIT_RECORDED'
@@ -586,9 +655,10 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       }
     }
   }
-  issues.push(...verifyProductionDispatchAuditChains(audits));
-  return { status: issues.length ? 'UNRESOLVED_INCIDENT' as const : 'VERIFIED' as const, waybillId, issues, evidenceCount: expectedAggregates.length, auditCount: audits.length,
-    reportHash: dispatchRecoveryIntegrityHash({ waybillId, expectedAggregates, auditHashes: audits.map(item => item.eventHash), issues }) };
+  const replayAudits = [...audits, ...replacementChainAudits.filter(candidate => !audits.some(item => item.id === candidate.id))];
+  issues.push(...verifyProductionDispatchAuditChains(replayAudits));
+  return { status: issues.length ? 'UNRESOLVED_INCIDENT' as const : 'VERIFIED' as const, waybillId, issues, evidenceCount: expectedAggregates.length, auditCount: replayAudits.length,
+    reportHash: dispatchRecoveryIntegrityHash({ waybillId, expectedAggregates, auditHashes: replayAudits.map(item => item.eventHash), issues }) };
 };
 
 export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, filesystem: ReturnType<typeof createDispatchDocumentFilesystem>, truthVerifier: DispatchReplayTruthVerifier) => {

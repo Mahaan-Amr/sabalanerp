@@ -197,13 +197,13 @@ router.get('/dispatch-candidates', accountingDispatchView, async (_req: AuthRequ
   } catch (error) { return dispatchError(res, error); }
 });
 
-router.post('/dispatch-candidates/:id/decision', accountingDispatchEdit, async (req: AuthRequest, res: Response) => {
+router.post('/dispatch-candidates/:id/decision', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
   try {
     const data = await decideAccountingDispatchCandidate(prisma, {
       candidateId: req.params.id, action: req.body.action, reason: req.body.reason,
       idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user!.id,
-      effectiveAuthority: { actorRole: req.user!.role, workspace: 'accounting', workspacePermission: 'EDIT',
-        feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE, featurePermission: 'MANAGE' },
+      effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace, workspacePermission: req.workspacePermission,
+        feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE, featurePermission: req.featurePermission },
     });
     return res.json({ success: true, data });
   } catch (error) { return dispatchError(res, error); }
@@ -687,7 +687,7 @@ router.post(
     body('systemInvoiceDate').optional().isString(),
     body('sepidarAmount').optional().isNumeric()
   ],
-  async (req: AuthRequest, res: Response) => {
+  async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
     if (handleValidation(req, res)) return;
 
     try {
@@ -704,10 +704,12 @@ router.post(
 
       const result = await executeAccountingAction({ ...req.body,
         idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''),
-        correlationId: String(req.get('X-Correlation-ID') || req.body.correlationId || ''),
+        correlationId: String(req.get('X-Correlation-ID') || ''),
       }, {
         userId: req.user!.id,
-        role: req.user!.role
+        role: req.user!.role,
+        effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace, workspacePermission: req.workspacePermission,
+          feature: FEATURES.ACCOUNTING_ACTIONS_MANAGE, featurePermission: req.featurePermission },
       }, async (tx, notification) => {
         const correctionRequired = notification.kind === 'APPROVE_CORRECTION_FOR_SALES_EDIT';
         await publishNotificationEvent(tx, {

@@ -31,13 +31,20 @@ const resultJson = (value: unknown) => json(stable(value));
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Record<string, any> : {};
 
-const serializable = async <T>(prisma: PrismaClient, work: (tx: Tx) => Promise<T>) => {
+const serializable = async <T>(prisma: PrismaClient, work: (tx: Tx) => Promise<T>,
+  replayAfterUniqueConflict?: () => Promise<T | null>) => {
   let error: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try { return await prisma.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }
     catch (caught) {
       error = caught;
-      if (!(caught instanceof Prisma.PrismaClientKnownRequestError) || caught.code !== 'P2034') throw caught;
+      if (!(caught instanceof Prisma.PrismaClientKnownRequestError)) throw caught;
+      if (caught.code === 'P2002' && replayAfterUniqueConflict) {
+        const replay = await replayAfterUniqueConflict();
+        if (replay !== null) return replay;
+        throw caught;
+      }
+      if (caught.code !== 'P2034') throw caught;
     }
   }
   throw error;
@@ -176,14 +183,15 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       await tx.accountingDispatchWorkItem.update({ where: { candidateId: candidate.id }, data: { status: 'COMPLETED', completedAt: issuedAt } });
       const result = { candidateId: candidate.id, status: 'ACCEPTED' as const,
         waybill: { id: waybill.id, number: waybill.number.toString(), status: 'ISSUED' as const, issuedAt: waybill.issuedAt.toISOString(), replacesWaybillId: null } };
-      await tx.dispatchDocumentCommandResult.create({ data: { waybillId: waybill.id, scope: 'CANDIDATE', scopeId: candidate.id,
+      await tx.dispatchDocumentCommandResult.create({ data: { scope: 'CANDIDATE', scopeId: candidate.id,
         idempotencyKey: input.idempotencyKey, command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED', result: storedCommandResult(result, input.intentFingerprint),
         actorId: input.actorId, correlationId: input.correlationId, completedAt: issuedAt } });
       await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id, eventType: 'PRIMARY_BUNDLE_ISSUED',
         payload: { candidateId: candidate.id, allocationRevisionId: input.allocationRevisionId, artifactIds: input.artifacts.map(item => item.id),
           sourceIntegrityHash: input.expectedSourceIntegrityHash, idempotencyKey: input.idempotencyKey, correlationId: input.correlationId }, actorId: input.actorId, at: issuedAt });
       return result;
-    });
+    }, async () => (await this.findCommandResult({ scope: 'CANDIDATE', scopeId: input.candidateId,
+      idempotencyKey: input.idempotencyKey, command: 'ACCEPT_AND_ISSUE', intentFingerprint: input.intentFingerprint })) as any);
   }
   async recordEvidenceConflict(input: Parameters<DispatchDocumentRepository['recordEvidenceConflict']>[0]) {
     return serializable(this.prisma, async (tx) => {

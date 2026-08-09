@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaDispatchDocumentRepository } from '../dispatchDocuments/prismaRepository';
-import { DispatchDocumentEvidenceConflictError } from '../dispatchDocuments/service';
+import { DispatchDocumentConflictError, DispatchDocumentEvidenceConflictError } from '../dispatchDocuments/service';
 import { dispatchArtifactStorageLockKey } from '../dispatchDocuments/artifactStorageLock';
 
 const writes: string[] = [];
@@ -79,6 +80,36 @@ const run = async () => {
     /changed before metadata publication/);
     assert.equal(writes.includes('WAYBILL_CREATED'), false, 'primary metadata is not inserted after durable-byte mismatch');
     assert.ok(advisoryLocks.includes(dispatchArtifactStorageLockKey(publicationArtifact.storageKey)));
+
+    const duplicateCommand = new Prisma.PrismaClientKnownRequestError('duplicate command result', {
+      code: 'P2002', clientVersion: '5.16.1', meta: { target: ['scope', 'scopeId', 'idempotencyKey'] },
+    });
+    const replayValue = { candidateId: 'candidate-race', status: 'ACCEPTED' as const,
+      waybill: { id: 'waybill-race', number: '91', status: 'ISSUED' as const,
+        issuedAt: '2026-08-10T01:00:00.000Z', replacesWaybillId: null } };
+    const racingPrisma = {
+      $transaction: async () => { throw duplicateCommand; },
+      dispatchDocumentCommandResult: { findUnique: async () => ({ command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED',
+        result: { intentFingerprint: 'race-intent', value: replayValue } }) },
+    } as any;
+    const racingRepository = new PrismaDispatchDocumentRepository(racingPrisma,
+      { assess: async () => ({ status: 'CURRENT', staleContracts: [] }) }, storage);
+    assert.deepEqual(await racingRepository.acceptAndIssue({ candidateId: 'candidate-race', allocationRevisionId: 'revision-race',
+      expectedSourceIntegrityHash: 'race-source', waybillSnapshot: {}, waybill: replayValue.waybill, artifacts: [],
+      idempotencyKey: 'race-key', actorId: 'accountant', correlationId: 'race-correlation', intentFingerprint: 'race-intent' }),
+    replayValue, 'a same-scope, same-key, exact-intent P2002 replays the durable issuance result');
+    await assert.rejects(() => racingRepository.acceptAndIssue({ candidateId: 'candidate-race', allocationRevisionId: 'revision-race',
+      expectedSourceIntegrityHash: 'race-source', waybillSnapshot: {}, waybill: replayValue.waybill, artifacts: [],
+      idempotencyKey: 'race-key', actorId: 'accountant', correlationId: 'race-correlation', intentFingerprint: 'other-intent' }),
+    DispatchDocumentConflictError, 'same key with a different intent remains a conflict');
+    const unrelatedRepository = new PrismaDispatchDocumentRepository({
+      $transaction: async () => { throw duplicateCommand; },
+      dispatchDocumentCommandResult: { findUnique: async () => null },
+    } as any, { assess: async () => ({ status: 'CURRENT', staleContracts: [] }) }, storage);
+    await assert.rejects(() => unrelatedRepository.acceptAndIssue({ candidateId: 'candidate-race', allocationRevisionId: 'revision-race',
+      expectedSourceIntegrityHash: 'race-source', waybillSnapshot: {}, waybill: replayValue.waybill, artifacts: [],
+      idempotencyKey: 'unrelated-key', actorId: 'accountant', correlationId: 'race-correlation', intentFingerprint: 'race-intent' }),
+    error => error === duplicateCommand, 'a P2002 without the exact durable command result is rethrown fail-closed');
 
     replacementMode = true;
     advisoryLocks.length = 0;

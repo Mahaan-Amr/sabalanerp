@@ -5,6 +5,17 @@ export const DISPATCH_DOCUMENT_KINDS = [
 ] as const;
 export type DispatchDocumentKind = (typeof DISPATCH_DOCUMENT_KINDS)[number];
 
+export const ACCOUNTING_DISPATCH_CANDIDATE_STATUSES = [
+  'PENDING',
+  'ACCEPTED',
+  'REJECTED',
+  'RETURNED',
+  'WITHDRAWN',
+  'STALE_REQUIRES_SUCCESSOR',
+] as const;
+export type AccountingDispatchCandidateStatusContract =
+  (typeof ACCOUNTING_DISPATCH_CANDIDATE_STATUSES)[number];
+
 export const PRICING_READINESS_STATUSES = ['READY', 'BLOCKED', 'QUARANTINED'] as const;
 export type PricingReadinessStatus = (typeof PRICING_READINESS_STATUSES)[number];
 

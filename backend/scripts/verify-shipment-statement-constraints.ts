@@ -10,6 +10,15 @@ const expectConstraintFailure = async (operation: () => Promise<unknown>, messag
 };
 
 const run = async () => {
+  const staleStatuses = await prisma.$queryRaw<Array<{ count: bigint }>>`
+    SELECT COUNT(*)::bigint AS "count"
+    FROM pg_enum enum_value
+    JOIN pg_type enum_type ON enum_type.oid = enum_value.enumtypid
+    WHERE enum_type.typname = 'AccountingDispatchCandidateStatus'
+      AND enum_value.enumlabel = 'STALE_REQUIRES_SUCCESSOR'
+  `;
+  assert.equal(staleStatuses[0]?.count, 1n, 'The terminal stale candidate status must exist exactly once.');
+
   const [source] = await prisma.$queryRaw<Array<{
     contractId: string;
     contractItemId: string;

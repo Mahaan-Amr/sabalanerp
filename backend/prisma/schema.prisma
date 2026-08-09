@@ -4407,6 +4407,7 @@ enum AccountingDispatchCandidateStatus {
   REJECTED
   RETURNED
   WITHDRAWN
+  STALE_REQUIRES_SUCCESSOR
 }
 
 enum AccountingDispatchWorkItemStatus {

@@ -19,6 +19,7 @@ export interface GeneratePdfOptions {
   displayHeaderFooter?: boolean;
   headerTemplate?: string;
   footerTemplate?: string;
+  assertNoOverflowSelector?: string;
 }
 
 // Ensure a directory exists
@@ -29,12 +30,7 @@ function ensureDirectoryExists(directoryPath: string): void {
 }
 
 // Generate a PDF from HTML content with RTL support
-export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<string> {
-  const outputDir = options.outputDir || path.join(process.cwd(), 'storage', 'contracts');
-  ensureDirectoryExists(outputDir);
-
-  const outputPath = path.join(outputDir, `${options.fileName.replace(/[^\w\-\.]/g, '_')}.pdf`);
-
+export async function generatePdfBufferFromHtml(options: Omit<GeneratePdfOptions, 'fileName' | 'outputDir'> & { htmlContent: string }): Promise<Buffer> {
   const browser = await puppeteer.launch({
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
@@ -42,9 +38,16 @@ export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<
   });
   try {
     const page = await browser.newPage();
+    if (options.assertNoOverflowSelector) {
+      await page.setViewport({
+        width: Math.round((options.widthMm ?? (options.landscape ? 297 : 210)) * 3.78),
+        height: Math.round((options.heightMm ?? (options.landscape ? 210 : 297)) * 3.78),
+        deviceScaleFactor: 1,
+      });
+    }
 
     // Inject basic RTL and font setup; assumes Persian fonts installed on host or bundled via @font-face in HTML
-    const htmlWithRtl = `<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8" />
+    const htmlWithRtl = /^\s*(?:<!doctype|<html)/i.test(options.htmlContent) ? options.htmlContent : `<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8" />
       <style>
         html, body { font-family: Vazirmatn, Vazir, Samim, Tahoma, Arial, sans-serif; direction: rtl; }
       </style>
@@ -60,12 +63,23 @@ export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<
     }))`);
     await page.evaluate('document.fonts.ready');
     await page.emulateMediaType('print');
+    if (options.assertNoOverflowSelector) {
+      const selector = JSON.stringify(options.assertNoOverflowSelector);
+      const overflow = await page.evaluate(`Array.from(document.querySelectorAll(${selector})).map((element, index) => ({
+        index,
+        text: (element.textContent || '').trim().slice(0, 120),
+        horizontal: element.scrollWidth > element.clientWidth + 1,
+        vertical: element.scrollHeight > element.clientHeight + 1
+      })).filter((entry) => entry.horizontal || entry.vertical)`);
+      if (Array.isArray(overflow) && overflow.length > 0) {
+        throw new Error(`PDF element overflow detected for ${options.assertNoOverflowSelector}: ${JSON.stringify(overflow)}`);
+      }
+    }
 
     const width = `${options.widthMm ?? (options.landscape ? 297 : 210)}mm`;
     const height = `${options.heightMm ?? (options.landscape ? 210 : 297)}mm`;
 
-    await page.pdf({
-      path: outputPath,
+    const pdf = await page.pdf({
       width,
       height,
       printBackground: true,
@@ -76,11 +90,20 @@ export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<
       footerTemplate: options.footerTemplate,
       preferCSSPageSize: false
     });
+    return Buffer.from(pdf);
   } finally {
     await browser.close();
   }
+}
+
+// Generate a PDF from HTML content with RTL support
+export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<string> {
+  const outputDir = options.outputDir || path.join(process.cwd(), 'storage', 'contracts');
+  ensureDirectoryExists(outputDir);
+
+  const outputPath = path.join(outputDir, `${options.fileName.replace(/[^\w\-\.]/g, '_')}.pdf`);
+  const bytes = await generatePdfBufferFromHtml(options);
+  fs.writeFileSync(outputPath, bytes);
 
   return outputPath;
 }
-
-

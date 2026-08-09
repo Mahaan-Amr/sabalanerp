@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import puppeteer from 'puppeteer';
+import { generatePdfBufferFromHtml } from '../../utils/pdf';
+import { getPrintTemplateLogoDataUri, renderYekanFontFaces } from '../../utils/printTemplate';
 
 export type DispatchDocumentKind = 'WAYBILL' | 'STATEMENT' | 'STATEMENT_ADJUSTMENT';
 
@@ -144,29 +143,25 @@ const formatIssuedAt = (value: string): string => {
   return date.toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' });
 };
 
-const assetCandidates = (...segments: string[]) => [
-  path.resolve(process.cwd(), 'public', ...segments),
-  path.resolve(process.cwd(), 'backend', 'public', ...segments),
-  path.resolve(process.cwd(), '..', 'backend', 'public', ...segments),
-];
+export const loadDispatchDocumentAssets = (): DispatchDocumentAssets => ({
+  logoDataUri: getPrintTemplateLogoDataUri(),
+  fontFacesCss: renderYekanFontFaces(),
+});
 
-const readAsset = (segments: string[], mimeType: string): string => {
-  const assetPath = assetCandidates(...segments).find((candidate) => fs.existsSync(candidate));
-  if (!assetPath) throw new Error(`Required dispatch document asset is missing: ${segments.join('/')}`);
-  return `data:${mimeType};base64,${fs.readFileSync(assetPath).toString('base64')}`;
-};
+const documentTitle = (input: DispatchDocumentRenderData): string => input.kind === 'WAYBILL'
+  ? 'بارنامه خروج محموله'
+  : input.kind === 'STATEMENT'
+    ? 'صورت‌حساب محموله مشتری'
+    : 'اصلاحیه صورت‌حساب محموله';
 
-export const loadDispatchDocumentAssets = (): DispatchDocumentAssets => {
-  const regular = readAsset(['yekan-bakh', 'YekanBakh-Regular.woff2'], 'font/woff2');
-  const semiBold = readAsset(['yekan-bakh', 'YekanBakh-SemiBold.woff2'], 'font/woff2');
-  const bold = readAsset(['yekan-bakh', 'YekanBakh-Bold.woff2'], 'font/woff2');
-  return {
-    logoDataUri: readAsset(['brand', 'sabalan-logo.jpg'], 'image/jpeg'),
-    fontFacesCss: [
-      [400, regular], [600, semiBold], [700, bold],
-    ].map(([weight, uri]) => `@font-face{font-family:'Yekan Bakh';src:url('${uri}') format('woff2');font-style:normal;font-weight:${weight};font-display:block}`).join(''),
-  };
-};
+const printedNumber = (input: DispatchDocumentRenderData): string => input.kind === 'STATEMENT_ADJUSTMENT'
+  ? `${input.waybillNumber} / اصلاحیه ${localizeDigits(String(input.payload.sequence))}`
+  : input.waybillNumber;
+
+export const renderDispatchDocumentHeaderTemplate = (
+  input: DispatchDocumentRenderData,
+  assets: DispatchDocumentAssets = loadDispatchDocumentAssets(),
+): string => `<style>${assets.fontFacesCss}*{box-sizing:border-box}.page-header{width:100%;height:20mm;margin:0 9mm;padding:2mm 0 1.5mm;display:grid;grid-template-columns:13mm 1fr auto;align-items:center;gap:3mm;border-bottom:1px solid #176653;color:#17212b;font-family:'Yekan Bakh',Tahoma,Arial,sans-serif;direction:rtl}.page-header img{width:11mm;height:11mm;object-fit:contain}.page-header strong{display:block;font-size:9px}.page-header small{display:block;color:#64716d;font-size:7px}.page-identity{text-align:left;direction:rtl;font-size:7.5px}.page-identity b{direction:ltr;unicode-bidi:isolate}.page-count{margin-top:1mm;color:#64716d}.page-count .pageNumber,.page-count .totalPages{font-weight:700}</style><div class="page-header"><img src="${escapeHtml(assets.logoDataUri)}" alt=""><div><strong>صنایع سنگ سبلان · ${documentTitle(input)}</strong><small>${escapeHtml(input.customerName)} · ${escapeHtml(input.vehiclePlate)}</small></div><div class="page-identity"><b>${escapeHtml(printedNumber(input))}</b><div class="page-count">صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div></div></div>`;
 
 const renderHeader = (input: DispatchDocumentRenderData, assets: DispatchDocumentAssets, title: string, number: string) => `
   <header class="document-header">
@@ -188,7 +183,7 @@ const renderWaybill = (input: Extract<DispatchDocumentRenderData, { kind: 'WAYBI
   let row = 0;
   const groups = input.payload.contracts.map((contract) => `<tbody>
     <tr class="contract-heading"><td colspan="5">قرارداد ${escapeHtml(contract.contractNumber)}</td></tr>
-    ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value">${escapeHtml(line.productRowId)}</td><td class="numeric">${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td></tr>`).join('')}
+    ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value" data-pdf-cell>${escapeHtml(line.productRowId)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td></tr>`).join('')}
   </tbody>`).join('');
   return `${renderHeader(input, assets, 'بارنامه خروج محموله', input.waybillNumber)}<table>${renderTableHead(quantityColumns, 5, 'بارنامه خروج محموله', input.waybillNumber)}${groups}</table>`;
 };
@@ -197,7 +192,7 @@ const renderStatement = (input: Extract<DispatchDocumentRenderData, { kind: 'STA
   let row = 0;
   const groups = input.payload.contracts.map((contract) => `<tbody>
     <tr class="contract-heading"><td colspan="8">قرارداد ${escapeHtml(contract.contractNumber)}</td></tr>
-    ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value">${escapeHtml(line.productRowId)}</td><td class="numeric">${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td><td class="numeric">${formatMoney(line.grossAmount)}</td><td class="numeric">${formatMoney(line.allocatedDiscount)}</td><td class="numeric strong">${formatMoney(line.netAmount)}</td></tr>`).join('')}
+    ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value" data-pdf-cell>${escapeHtml(line.productRowId)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.grossAmount)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.allocatedDiscount)}</td><td class="numeric money strong" data-pdf-cell>${formatMoney(line.netAmount)}</td></tr>`).join('')}
     <tr class="contract-subtotal"><td colspan="5">جمع قرارداد</td><td class="numeric">${formatMoney(contract.grossAmount)}</td><td class="numeric">${formatMoney(contract.allocatedDiscount)}</td><td class="numeric strong">${formatMoney(contract.netAmount)}</td></tr>
   </tbody>`).join('');
   return `${renderHeader(input, assets, 'صورت‌حساب محموله مشتری', input.waybillNumber)}<table>${renderTableHead(moneyColumns, 8, 'صورت‌حساب محموله مشتری', input.waybillNumber)}${groups}</table>
@@ -206,7 +201,7 @@ const renderStatement = (input: Extract<DispatchDocumentRenderData, { kind: 'STA
 
 const renderAdjustment = (input: Extract<DispatchDocumentRenderData, { kind: 'STATEMENT_ADJUSTMENT' }>, assets: DispatchDocumentAssets) => {
   const number = `${input.waybillNumber} / اصلاحیه ${localizeDigits(String(input.payload.sequence))}`;
-  const rows = input.payload.lines.map((line, index) => `<tr><td>${localizeDigits(String(index + 1))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value">${escapeHtml(line.productRowId)}</td><td class="numeric">${escapeHtml(formatExactQuantity(line.quantityDelta))}</td><td>${escapeHtml(line.unit)}</td><td class="numeric">${formatSignedMoney(line.grossAmountDelta)}</td><td class="numeric">${formatSignedMoney(line.discountDelta)}</td><td class="numeric strong">${formatSignedMoney(line.netAmountDelta)}</td></tr>`).join('');
+  const rows = input.payload.lines.map((line, index) => `<tr><td>${localizeDigits(String(index + 1))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value attribution" data-pdf-cell><span>قرارداد: ${escapeHtml(line.contractId)}</span><span>قلم: ${escapeHtml(line.contractItemId)}</span><span>ردیف: ${escapeHtml(line.productRowId)}</span></td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantityDelta))}</td><td>${escapeHtml(line.unit)}</td><td class="numeric money" data-pdf-cell>${formatSignedMoney(line.grossAmountDelta)}</td><td class="numeric money" data-pdf-cell>${formatSignedMoney(line.discountDelta)}</td><td class="numeric money strong" data-pdf-cell>${formatSignedMoney(line.netAmountDelta)}</td></tr>`).join('');
   return `${renderHeader(input, assets, 'اصلاحیه صورت‌حساب محموله', number)}<div class="adjustment-reason"><span>علت اصلاح</span><strong>${escapeHtml(input.payload.reason)}</strong></div><table>${renderTableHead(moneyColumns.replace('مقدار', 'تغییر مقدار').replace('مبلغ ناخالص', 'تغییر ناخالص').replace('تخفیف تخصیص‌یافته', 'تغییر تخفیف').replace('مبلغ خالص', 'تغییر خالص'), 8, 'اصلاحیه صورت‌حساب محموله', number)}<tbody>${rows}</tbody></table>
     <section class="grand-total adjustment-total"><span>جمع خالص اصلاحیه</span><div><small>تغییر ناخالص</small><strong>${formatSignedMoney(input.payload.grossAmountDelta)}</strong></div><div><small>تغییر تخفیف</small><strong>${formatSignedMoney(input.payload.discountDelta)}</strong></div><div class="net"><small>تغییر خالص (${escapeHtml(input.payload.currency)})</small><strong>${formatSignedMoney(input.payload.netAmountDelta)}</strong></div></section>`;
 };
@@ -222,35 +217,25 @@ export const renderDispatchDocumentHtml = (
       ? renderStatement(input, assets)
       : renderAdjustment(input, assets);
   return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><style>${assets.fontFacesCss}
-    @page{size:A4 portrait;margin:9mm 9mm 11mm}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}html,body{margin:0;padding:0;background:#fff;color:#17212b;font-family:'Yekan Bakh',Tahoma,Arial,sans-serif;font-size:9.4px;line-height:1.5}body{width:100%}.document-header{display:grid;grid-template-columns:22mm 1fr 54mm;align-items:center;gap:4mm;border-bottom:2px solid #176653;padding:0 0 4mm;margin-bottom:3mm}.brand-logo{display:block;width:19mm;height:19mm;object-fit:contain}.brand-name{color:#176653;font-weight:700;font-size:10px}.title-block h1{margin:1mm 0 0;font-size:19px;line-height:1.25}.document-identity{display:grid;gap:1.5mm;margin:0}.document-identity div{display:flex;justify-content:space-between;gap:3mm;border-bottom:1px solid #d8e0df;padding-bottom:1mm}.document-identity dt{color:#66736f}.document-identity dd{margin:0;font-weight:700;direction:ltr;unicode-bidi:isolate}.shipment-identity{display:grid;grid-template-columns:1fr 1.5fr .72fr;gap:2mm;margin-bottom:3mm}.shipment-identity div,.adjustment-reason{min-width:0;border:1px solid #d8e0df;background:#f5f8f7;padding:2mm 2.5mm}.shipment-identity span,.adjustment-reason span{display:block;color:#66736f;font-size:8px}.shipment-identity strong,.adjustment-reason strong{display:block;margin-top:.5mm;overflow-wrap:anywhere}.adjustment-reason{margin-bottom:3mm;border-right:3px solid #176653}table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}th,td{border:1px solid #aebbb7;padding:1.45mm 1.2mm;vertical-align:middle;overflow-wrap:anywhere}th{background:#e9f2ef;color:#174d40;font-size:8px;font-weight:700}.continuation-header th{padding:.8mm 1.2mm;background:#fff;border-color:#aebbb7;color:#66736f;text-align:right}.continuation-header span{font-weight:600}.continuation-header b{float:left;direction:ltr;unicode-bidi:isolate;color:#174d40}.row-number{width:7mm}.identity-column{width:23mm}.number-column{width:16mm}.unit-column{width:16mm}.money-column{width:24mm}.contract-heading td{padding:1.2mm 1.5mm;background:#f0f4f3;color:#174d40;font-weight:700}.contract-subtotal td{background:#f8faf9;font-weight:600}.identity-value{direction:ltr;text-align:left;font-size:7.6px;color:#57635f}.numeric{direction:ltr;unicode-bidi:isolate;text-align:left;font-variant-numeric:tabular-nums;white-space:nowrap}.strong{font-weight:700}.grand-total{display:grid;grid-template-columns:1fr repeat(3,31mm);gap:2mm;align-items:stretch;margin-top:3mm;border:1px solid #8ba299;border-right:3px solid #176653;background:#f5f8f7;padding:2mm;break-inside:avoid;page-break-inside:avoid}.grand-total>span{align-self:center;color:#174d40;font-size:11px;font-weight:700}.grand-total div{display:flex;flex-direction:column}.grand-total small{color:#66736f}.grand-total strong{direction:ltr;text-align:left;font-size:11px;font-variant-numeric:tabular-nums}.grand-total .net{border-right:1px solid #b8c6c1;padding-right:2mm}.adjustment-total{border-right-color:#9b5c13;background:#fff8ed}@media print{tr{break-inside:avoid;page-break-inside:avoid}.document-header{break-inside:avoid}.shipment-identity{break-inside:avoid}}
+    @page{size:A4 portrait}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}html,body{margin:0;padding:0;background:#fff;color:#17212b;font-family:'Yekan Bakh',Tahoma,Arial,sans-serif;font-size:9.4px;line-height:1.5}body{width:100%}.document-header{display:grid;grid-template-columns:22mm 1fr 54mm;align-items:center;gap:4mm;border-bottom:2px solid #176653;padding:0 0 4mm;margin-bottom:3mm}.brand-logo{display:block;width:19mm;height:19mm;object-fit:contain}.brand-name{color:#176653;font-weight:700;font-size:10px}.title-block h1{margin:1mm 0 0;font-size:19px;line-height:1.25}.document-identity{display:grid;gap:1.5mm;margin:0}.document-identity div{display:flex;justify-content:space-between;gap:3mm;border-bottom:1px solid #d8e0df;padding-bottom:1mm}.document-identity dt{color:#66736f}.document-identity dd{margin:0;font-weight:700;direction:ltr;unicode-bidi:isolate}.shipment-identity{display:grid;grid-template-columns:1fr 1.5fr .72fr;gap:2mm;margin-bottom:3mm}.shipment-identity div,.adjustment-reason{min-width:0;border:1px solid #d8e0df;background:#f5f8f7;padding:2mm 2.5mm}.shipment-identity span,.adjustment-reason span{display:block;color:#66736f;font-size:8px}.shipment-identity strong,.adjustment-reason strong{display:block;margin-top:.5mm;overflow-wrap:anywhere}.adjustment-reason{margin-bottom:3mm;border-right:3px solid #176653}table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}th,td{border:1px solid #aebbb7;padding:1.45mm 1.2mm;vertical-align:middle;overflow-wrap:anywhere}th{background:#e9f2ef;color:#174d40;font-size:8px;font-weight:700}.continuation-header th{padding:.8mm 1.2mm;background:#fff;border-color:#aebbb7;color:#66736f;text-align:right}.continuation-header span{font-weight:600}.continuation-header b{float:left;direction:ltr;unicode-bidi:isolate;color:#174d40}.row-number{width:6mm}.identity-column{width:25mm}.number-column{width:14mm}.unit-column{width:13mm}.money-column{width:26mm}.contract-heading td{padding:1.2mm 1.5mm;background:#f0f4f3;color:#174d40;font-weight:700}.contract-subtotal td{background:#f8faf9;font-weight:600}.identity-value{direction:ltr;text-align:left;font-size:7px;color:#57635f;overflow-wrap:anywhere}.attribution span{display:block}.numeric{direction:ltr;unicode-bidi:isolate;text-align:left;font-variant-numeric:tabular-nums}.numeric.money{font-size:7.1px;line-height:1.25;white-space:normal;overflow-wrap:anywhere}.strong{font-weight:700}.grand-total{display:grid;grid-template-columns:1fr repeat(3,minmax(0,34mm));gap:2mm;align-items:stretch;margin-top:3mm;border:1px solid #8ba299;border-right:3px solid #176653;background:#f5f8f7;padding:2mm;break-inside:avoid;page-break-inside:avoid}.grand-total>span{align-self:center;color:#174d40;font-size:11px;font-weight:700}.grand-total div{min-width:0;display:flex;flex-direction:column}.grand-total small{color:#66736f}.grand-total strong{direction:ltr;text-align:left;font-size:8px;line-height:1.25;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.grand-total .net{border-right:1px solid #b8c6c1;padding-right:2mm}.adjustment-total{border-right-color:#9b5c13;background:#fff8ed}@media print{tr{break-inside:avoid;page-break-inside:avoid}.document-header{break-inside:avoid}.shipment-identity{break-inside:avoid}}
   </style></head><body>${body}</body></html>`;
 };
 
 export const renderDispatchDocumentPdf = async (
   input: DispatchDocumentRenderData,
 ): Promise<RenderedDispatchDocument> => {
-  const browser = await puppeteer.launch({
-    headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  const assets = loadDispatchDocumentAssets();
+  const bytes = await generatePdfBufferFromHtml({
+    htmlContent: renderDispatchDocumentHtml(input, assets),
+    widthMm: 210,
+    heightMm: 297,
+    margin: { top: '24mm', right: '9mm', bottom: '11mm', left: '9mm' },
+    displayHeaderFooter: true,
+    headerTemplate: renderDispatchDocumentHeaderTemplate(input, assets),
+    footerTemplate: '<span></span>',
+    assertNoOverflowSelector: '[data-pdf-cell], .grand-total strong',
   });
-  try {
-    const page = await browser.newPage();
-    await page.setContent(renderDispatchDocumentHtml(input), { waitUntil: 'load', timeout: 120_000 });
-    await page.evaluate(`(async () => {
-      await document.fonts.ready;
-      await Promise.all(Array.from(document.images).map(async (image) => {
-        if (!image.complete) await new Promise((resolve, reject) => {
-          image.addEventListener('load', resolve, { once: true });
-          image.addEventListener('error', () => reject(new Error('Dispatch PDF image failed to load')), { once: true });
-        });
-        if (typeof image.decode === 'function') await image.decode();
-      }));
-    })()`);
-    await page.emulateMediaType('print');
-    const pdf = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true });
-    const bytes = Buffer.from(pdf);
-    return {
+  return {
       bytes,
       metadata: {
         documentId: input.documentId,
@@ -262,7 +247,4 @@ export const renderDispatchDocumentPdf = async (
         generatorVersion: 'chromium-pdf-v1',
       },
     };
-  } finally {
-    await browser.close();
-  }
 };

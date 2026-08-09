@@ -1,47 +1,32 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { dispatchDocumentVisualFixtures, dispatchPrintBothFixture } from '../src/documents/dispatch/dispatchDocumentFixtures';
-import { renderDispatchDocumentPdf } from '../src/documents/dispatch/dispatchDocumentPdf';
+import { dispatchDocumentVisualFixtures, dispatchPrintBothFixture } from '../documents/dispatch/dispatchDocumentFixtures';
+import { renderDispatchDocumentPdf } from '../documents/dispatch/dispatchDocumentPdf';
 
 const updateBaselines = process.argv.includes('--update-baselines');
-const backendRoot = path.resolve(__dirname, '..');
-const repositoryRoot = path.resolve(backendRoot, '..');
-const outputDir = path.join(repositoryRoot, 'tmp', 'dispatch-document-pdf-qa');
-const baselineDir = path.join(backendRoot, 'src', 'documents', 'dispatch', '__fixtures__', 'baselines');
-
-const locatePython = () => {
-  const candidates = [
-    process.env.CODEX_PYTHON_PATH,
-    process.env.PYTHON,
-    process.env.USERPROFILE && path.join(process.env.USERPROFILE, '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies', 'python', 'python.exe'),
-    'python3',
-    'python',
-  ].filter(Boolean) as string[];
-  for (const candidate of candidates) {
-    const probe = spawnSync(candidate, ['-c', 'import pypdf, PIL'], { encoding: 'utf8' });
-    if (probe.status === 0) return candidate;
-  }
-  throw new Error('Python with pypdf and Pillow is required for dispatch document visual QA.');
-};
+const backendRoot = process.cwd();
+const outputDir = path.join(backendRoot, 'tmp', 'dispatch-document-pdf-qa');
+const baselineDir = process.env.DISPATCH_PDF_BASELINE_DIR
+  || path.join(backendRoot, 'dispatch-document-baselines');
 
 const main = async () => {
   fs.rmSync(outputDir, { recursive: true, force: true });
   fs.mkdirSync(outputDir, { recursive: true });
   fs.mkdirSync(baselineDir, { recursive: true });
 
-  const manifest = [];
+  const manifest: Array<{
+    name: string;
+    kind: 'WAYBILL' | 'STATEMENT' | 'STATEMENT_ADJUSTMENT';
+    expectedPages: number;
+    pdfPath: string;
+    sha256: string;
+  }> = [];
   for (const fixture of dispatchDocumentVisualFixtures) {
     const rendered = await renderDispatchDocumentPdf(fixture.input);
     const pdfPath = path.join(outputDir, `${fixture.name}.pdf`);
     fs.writeFileSync(pdfPath, rendered.bytes);
-    manifest.push({
-      name: fixture.name,
-      kind: fixture.input.kind,
-      expectedPages: fixture.expectedPages,
-      pdfPath,
-      sha256: rendered.metadata.sha256,
-    });
+    manifest.push({ name: fixture.name, kind: fixture.input.kind, expectedPages: fixture.expectedPages, pdfPath, sha256: rendered.metadata.sha256 });
   }
 
   const printBothDir = path.join(outputDir, dispatchPrintBothFixture.name);
@@ -57,7 +42,7 @@ const main = async () => {
   const verifier = path.join(backendRoot, 'scripts', 'verify-dispatch-document-pdfs.py');
   const args = [verifier, '--manifest', manifestPath, '--baseline-dir', baselineDir];
   if (updateBaselines) args.push('--update-baselines');
-  const verification = spawnSync(locatePython(), args, { cwd: repositoryRoot, encoding: 'utf8', stdio: 'inherit' });
+  const verification = spawnSync('python3', args, { cwd: backendRoot, encoding: 'utf8', stdio: 'inherit' });
   if (verification.status !== 0) process.exitCode = verification.status || 1;
   else console.log(`Dispatch PDF QA artifacts: ${outputDir}`);
 };

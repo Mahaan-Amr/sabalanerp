@@ -298,6 +298,8 @@ export const renderYekanFontFaces = (): string => `
   }
 `;
 
+export const getPrintTemplateLogoDataUri = (): string => logoUrl;
+
 const toFaDigits = (value: string): string =>
   value.replace(/\d/g, (char) => '۰۱۲۳۴۵۶۷۸۹'[Number(char)]);
 

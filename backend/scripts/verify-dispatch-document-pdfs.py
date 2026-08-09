@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import unicodedata
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw
-from pypdf import PdfReader
+try:
+    from pypdf import PdfReader
+except ImportError:
+    from PyPDF2 import PdfReader
 
 A4_POINTS = (595.28, 841.89)
 FORBIDDEN = (
@@ -58,9 +60,14 @@ def has_image(reader: PdfReader) -> bool:
     return False
 
 
+def page_has_image(page) -> bool:
+    resources = resolve_pdf_object(page.get("/Resources", {}))
+    xobjects = resolve_pdf_object(resources.get("/XObject", {}))
+    return any(resolve_pdf_object(item).get("/Subtype") == "/Image" for item in xobjects.values())
+
+
 def render_pages(pdf_path: Path, target_prefix: Path) -> list[Path]:
-    bundled = Path(os.environ.get("USERPROFILE", "")) / ".cache/codex-runtimes/codex-primary-runtime/dependencies/native/poppler/Library/bin/pdftoppm.exe"
-    command = str(bundled) if bundled.exists() else (shutil.which("pdftoppm") or shutil.which("pdftoppm.cmd"))
+    command = shutil.which("pdftoppm")
     if not command:
         raise AssertionError("Poppler pdftoppm is required for dispatch PDF visual QA")
     result = subprocess.run([command, "-png", "-r", "144", str(pdf_path), str(target_prefix)], capture_output=True, text=True)
@@ -120,6 +127,8 @@ def main() -> None:
         page_text = [unicodedata.normalize("NFKC", (page.extract_text() or "").replace("\x00", "")) for page in reader.pages]
         combined_text = "\n".join(page_text)
         assert "سبلان" in combined_text, f"{document['name']}: Persian RTL text is not extractable"
+        assert all("سبلان" in text and "صفحه" in text for text in page_text), f"{document['name']}: compact brand/page identity does not repeat"
+        assert all(page_has_image(page) for page in reader.pages), f"{document['name']}: branded logo does not repeat on every page"
         assert not any(term in combined_text for term in FORBIDDEN), f"{document['name']}: forbidden content found"
         if document["kind"] in ("WAYBILL", "STATEMENT"):
             assert all("شرح محصول" in text for text in page_text), f"{document['name']}: table heading does not repeat"

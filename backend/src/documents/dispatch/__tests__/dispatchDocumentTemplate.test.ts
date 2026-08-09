@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   renderDispatchDocumentHtml,
+  renderDispatchDocumentHeaderTemplate,
   type DispatchDocumentRenderData,
 } from '../dispatchDocumentPdf';
 
@@ -104,7 +105,19 @@ const adjustmentHtml = renderDispatchDocumentHtml({
 assert.match(adjustmentHtml, /WB-1405-0042 \/ اصلاحیه ۲/);
 assert.match(adjustmentHtml, /−۱٫۲۵۰/);
 assert.match(adjustmentHtml, /جمع خالص اصلاحیه/);
+assert.match(adjustmentHtml, /contract-1/);
+assert.match(adjustmentHtml, /contract-item-1/);
 assert.doesNotMatch(adjustmentHtml, /row-stable-2|جمع کل محموله/);
+
+const pageHeader = renderDispatchDocumentHeaderTemplate(statement, {
+  logoDataUri: 'data:image/jpeg;base64,official-logo',
+  fontFacesCss: "@font-face{font-family:'Yekan Bakh';src:url(data:font/woff2;base64,regular)}",
+});
+assert.match(pageHeader, /official-logo/);
+assert.match(pageHeader, /صنایع سنگ سبلان/);
+assert.match(pageHeader, /WB-1405-0042/);
+assert.match(pageHeader, /class="pageNumber"/);
+assert.match(pageHeader, /class="totalPages"/);
 
 const positiveAdjustmentHtml = renderDispatchDocumentHtml({
   ...common,

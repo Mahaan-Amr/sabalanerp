@@ -99,6 +99,22 @@ const reattribution: DispatchDocumentRenderData = {
 };
 
 const ordinaryStatement = statement('statement-ordinary', [4]);
+const largeDecimalStatement = statement('statement-large-decimal', [2]);
+if (largeDecimalStatement.kind === 'STATEMENT') {
+  for (const contract of largeDecimalStatement.payload.contracts) {
+    for (const line of contract.lines) {
+      line.grossAmount = '999999999999999999999999.500000000000';
+      line.allocatedDiscount = '999999999999999999999.500000000000';
+      line.netAmount = '999000000000000000000000.000000000000';
+    }
+    contract.grossAmount = '999999999999999999999999.500000000000';
+    contract.allocatedDiscount = '999999999999999999999.500000000000';
+    contract.netAmount = '999000000000000000000000.000000000000';
+  }
+  largeDecimalStatement.payload.grossAmount = '999999999999999999999999.500000000000';
+  largeDecimalStatement.payload.allocatedDiscount = '999999999999999999999.500000000000';
+  largeDecimalStatement.payload.netAmount = '999000000000000000000000.000000000000';
+}
 const ordinaryWaybill: DispatchDocumentRenderData = {
   ...base,
   documentId: 'waybill-ordinary',
@@ -124,10 +140,10 @@ export const dispatchDocumentVisualFixtures: ReadonlyArray<{
   { name: 'waybill-ordinary', expectedPages: 1, input: ordinaryWaybill },
   { name: 'statement-ordinary', expectedPages: 1, input: ordinaryStatement },
   { name: 'statement-boundary-one-page', expectedPages: 1, input: statement('statement-boundary-one-page', [12]) },
-  { name: 'statement-continuation', expectedPages: 2, input: statement('statement-continuation', [30]) },
+  { name: 'statement-continuation', expectedPages: 2, input: statement('statement-continuation', [24]) },
   { name: 'statement-multi-contract', expectedPages: 1, input: statement('statement-multi-contract', [3, 3]) },
   { name: 'statement-long-persian', expectedPages: 1, input: statement('statement-long-persian', [5], { customerName: 'شرکت توسعه و فرآوری سنگ‌های ساختمانی و تزئینی آذربایجان شرقی', projectOrDestination: 'پروژه بازآفرینی مجموعه فرهنگی تاریخی در خیابان استاد شهریار، ورودی ضلع جنوب‌غربی' }) },
-  { name: 'statement-large-decimal', expectedPages: 1, input: statement('statement-large-decimal', [2]) },
+  { name: 'statement-large-decimal', expectedPages: 1, input: largeDecimalStatement },
   { name: 'adjustment-positive', expectedPages: 1, input: adjustment('adjustment-positive', 1, '+') },
   { name: 'adjustment-negative', expectedPages: 1, input: adjustment('adjustment-negative', 2, '-') },
   { name: 'adjustment-reattribution', expectedPages: 1, input: reattribution },

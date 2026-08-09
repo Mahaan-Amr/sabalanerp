@@ -71,6 +71,10 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   chromium \
+  poppler-utils \
+  python3 \
+  python3-pil \
+  python3-pypdf2 \
   ca-certificates \
   fonts-dejavu-core \
   fonts-liberation \
@@ -87,6 +91,7 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/dist ./dist
 COPY backend/public ./public
 COPY backend/scripts ./scripts
+COPY backend/src/documents/dispatch/__fixtures__/baselines ./dispatch-document-baselines
 COPY backend/excel ./excel
 
 RUN printf 'TCPSocket 3310\nTCPAddr clamav\n' > /etc/clamav/clamd-remote.conf \

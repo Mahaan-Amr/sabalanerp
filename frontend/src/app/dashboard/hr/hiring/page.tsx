@@ -86,7 +86,9 @@ export default function HiringCasesPage() {
   const [decisionDetail, setDecisionDetail] = useState<any>(null);
   const [archiveView, setArchiveView] = useState(initialContext.archived);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createDiscardOpen, setCreateDiscardOpen] = useState(false);
   const [inviteTarget, setInviteTarget] = useState<any>(null);
+  const createDirty = Object.values(form).some(Boolean);
 
   const load = async (nextFilters: HiringQueueFilters = filters, nextArchiveView = archiveView) => {
     try {
@@ -223,8 +225,12 @@ export default function HiringCasesPage() {
 
       <ErpSheet
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={() => {
+          if (createDirty) setCreateDiscardOpen(true);
+          else setCreateOpen(false);
+        }}
         title="ایجاد متقاضی و ارسال دعوت"
+        dismissible={!busy}
       >
         <ErpCard className="grid gap-3 p-4 md:grid-cols-5">
           <ErpInput
@@ -291,6 +297,30 @@ export default function HiringCasesPage() {
             />
           </div>
         </ErpCard>
+      </ErpSheet>
+      <ErpSheet
+        open={createDiscardOpen}
+        onClose={() => setCreateDiscardOpen(false)}
+        title="صرف‌نظر از اطلاعات واردشده؟"
+        presentation="modal"
+        dismissible={!busy}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <ErpButton label="ادامه ویرایش" variant="ghost" disabled={busy} onClick={() => setCreateDiscardOpen(false)} />
+            <ErpButton
+              label="حذف اطلاعات"
+              tone="danger"
+              disabled={busy}
+              onClick={() => {
+                setForm(blank);
+                setCreateDiscardOpen(false);
+                setCreateOpen(false);
+              }}
+            />
+          </div>
+        }
+      >
+        <ErpInlineState kind="stale" title="اطلاعات این فرم هنوز ذخیره نشده است." />
       </ErpSheet>
 
       <ErpSection

@@ -116,7 +116,7 @@ export const projectApplicantFullInformation = (
           workHistory: revision.dataJson?.workHistory ?? [],
           skills: revision.dataJson?.skills ?? [],
           languages: revision.dataJson?.languages ?? [],
-          hasSocialSecurityHistory: source.candidate.hasSocialSecurityHistory,
+          hasSocialSecurityHistory: revision.dataJson?.hasSocialSecurityHistory ?? null,
         })),
       });
     }

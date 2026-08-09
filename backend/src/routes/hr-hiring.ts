@@ -130,11 +130,12 @@ const createApplicantInvitation = async (
   applicationId: string,
   mobile: string,
   createdBy: string,
+  db: Prisma.TransactionClient | PrismaClient = prisma,
 ) => {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const otp = generateApplicantOtp();
     try {
-      const invitation = await prisma.hrCandidateInvitation.create({ data: {
+      const invitation = await db.hrCandidateInvitation.create({ data: {
         applicationId,
         mobileSnapshot: mobile,
         otpHash: applicantOtpHash(mobile, otp),
@@ -2408,16 +2409,17 @@ router.post('/applications/:id/reopen/execute', requireAuthority('HR_MANAGER'), 
   }});
   if (occupiedCapacity >= application.position.capacity) throw new Error('ظرفیت جایگاه تکمیل است؛ بازگشایی تا ایجاد ظرفیت مجاز نیست.');
   if (application.outcome === 'WITHDRAWN' && (!req.body.candidateConsentMethod || !req.body.candidateConsentedAt || !String(req.body.candidateConsentNote || '').trim())) throw new Error('رضایت جدید متقاضی برای بازگشایی پرونده انصرافی الزامی است.');
+  const mobile = normalizeApplicantMobile(application.candidate.mobile);
+  if (!mobile) throw new Error('شماره همراه متقاضی برای صدور دعوت‌نامه جدید معتبر نیست.');
   const now = new Date();
-  const row = await prisma.$transaction(async (tx) => {
+  const { row, invitation, otp } = await prisma.$transaction(async (tx) => {
     await tx.hrApplicationReopening.update({ where: { id: reopening.id }, data: { status: 'REOPENED', hrExecutedBy: actorId(req), hrExecutedAt: now, hrReason: reason, candidateConsentMethod: req.body.candidateConsentMethod || null, candidateConsentedAt: req.body.candidateConsentedAt ? parseDate(req.body.candidateConsentedAt, 'زمان رضایت') : null, candidateConsentNote: String(req.body.candidateConsentNote || '').trim() || null } });
     const latestOffer = await tx.hrCompensationSnapshot.findFirst({ where: { applicationId: application.id, obsoleteAt: null }, orderBy: { version: 'desc' } });
     if (latestOffer) await tx.hrCompensationSnapshot.update({ where: { id: latestOffer.id }, data: { obsoleteAt: now, obsoleteBy: actorId(req), obsoleteReason: 'بازگشایی پرونده بسته؛ صدور نسخه جدید پیشنهاد الزامی است.' } });
-    return tx.hrJobApplication.update({ where: { id: application.id }, data: { stage: application.preClosureStage || 'RECEIVED', outcome: null, outcomeReason: null, acceptedOfferAt: null, compensationClearance: latestOffer ? 'NOT_STARTED' : application.compensationClearance, disposition: null, dispositionReason: null, dispositionBy: null, dispositionAt: null } });
+    const row = await tx.hrJobApplication.update({ where: { id: application.id }, data: { stage: application.preClosureStage || 'RECEIVED', outcome: null, outcomeReason: null, acceptedOfferAt: null, compensationClearance: latestOffer ? 'NOT_STARTED' : application.compensationClearance, disposition: null, dispositionReason: null, dispositionBy: null, dispositionAt: null } });
+    const issued = await createApplicantInvitation(application.id, mobile, actorId(req), tx);
+    return { row, ...issued };
   });
-  const mobile = normalizeApplicantMobile(application.candidate.mobile);
-  if (!mobile) throw new Error('شماره همراه متقاضی برای صدور دعوت‌نامه جدید معتبر نیست.');
-  const { invitation, otp } = await createApplicantInvitation(application.id, mobile, actorId(req));
   const sms = await hrHiringSmsGateway.sendInvitation({ phoneNumber: mobile, code: otp });
   await prisma.hrCandidateInvitation.update({
     where: { id: invitation.id },

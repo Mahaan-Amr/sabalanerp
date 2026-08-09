@@ -4,8 +4,8 @@ import { PricingReadinessStatus, Prisma, PrismaClient } from '@prisma/client';
 import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from '../approvedPricing';
 import { PrismaApprovedPricingRepository } from '../approvedPricing/prismaRepository';
 import type { ApprovedPricingVersionInsert } from '../approvedPricing/types';
+import { createDispatchCorrection, postDispatchCorrection } from '../dispatchCorrectionOutage';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
-import { persistStatementAdjustment, planStatementAdjustment } from '../statementAdjustmentPosting';
 
 const prisma = new PrismaClient();
 const rollback = Symbol('statement-adjustment-db-rollback');
@@ -88,50 +88,51 @@ const run = async () => {
         mediaType: 'application/pdf', byteLength: 100n, sha256: hash('a'), sourceIntegrityHash: version.integrityHash,
         publishedBy: candidate.createdBy } });
 
-      const correction = await tx.dispatchCorrection.create({ data: { waybillId: candidate.waybillId,
-        reason: 'DB positive correction', effectiveAt: new Date(), createdBy: candidate.createdBy,
-        lines: { create: { contractId: candidate.contractId, contractItemId: candidate.itemId,
-          productRowId: candidate.productRowId, unit: candidate.lineUnit, quantity: '0.500' } } }, include: { lines: true } });
+      const boundPrisma = { $transaction: async (work: (transaction: Prisma.TransactionClient) => Promise<unknown>) => work(tx) } as unknown as PrismaClient;
+      const authority = { actorRole: 'ADMIN', workspace: 'accounting', workspacePermission: 'admin' };
+      const correction = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
+        reason: 'DB positive correction', effectiveAt: new Date(), actorId: candidate.createdBy, authority,
+        lines: [{ contractItemId: candidate.itemId, quantity: '0.500' }] });
 
-      await assert.rejects(planStatementAdjustment(tx, { correctionId: correction.id, actorId: candidate.createdBy,
-        correctionIntegrityHash: hash('c'), issuedAt: new Date(), artifactPreparer: { templateVersion: 'adjustment-v1',
+      await assert.rejects(postDispatchCorrection(boundPrisma, { correctionId: correction.id, actorId: candidate.createdBy,
+        authority, idempotencyKey: 'issue262-invalid-artifact' }, { artifactPreparer: { templateVersion: 'adjustment-v1',
           prepare: async () => ({ storageKey: `dispatch-documents/${randomUUID()}.pdf`, mediaType: 'application/pdf',
             byteLength: 100, sha256: 'invalid' }) } }), /artifact failed durable publication verification/i);
       assert.equal((await tx.dispatchCorrection.findUniqueOrThrow({ where: { id: correction.id } })).status, 'DRAFT');
       assert.equal(await tx.dispatchStatementAdjustment.count({ where: { waybillId: candidate.waybillId } }), 0);
 
-      const issuedAt = new Date();
-      const plan = await planStatementAdjustment(tx, { correctionId: correction.id, actorId: candidate.createdBy,
-        correctionIntegrityHash: hash('c'), issuedAt, artifactPreparer: { templateVersion: 'adjustment-v1',
-          prepare: async () => ({ storageKey: `dispatch-documents/${randomUUID()}.pdf`, mediaType: 'application/pdf',
-            byteLength: 100, sha256: hash('b') }) } });
-      assert(plan);
-      assert.equal(await tx.dispatchStatementAdjustment.count({ where: { waybillId: candidate.waybillId } }), 0,
-        'a draft correction and prepared artifact reserve no customer-facing sequence');
-      await tx.dispatchCorrection.update({ where: { id: correction.id }, data: { status: 'POSTED', postedAt: issuedAt,
-        postedBy: candidate.createdBy, integrityHash: hash('c') } });
-      const first = await persistStatementAdjustment(tx, plan);
-      assert.equal(first.adjustment.sequence, 1);
-      assert.equal(first.artifact.sourceIntegrityHash, first.adjustment.integrityHash);
-      assert.equal((first.adjustment.snapshot as any).originalStatementDocumentId, originalStatement.id);
-      assert.match((first.adjustment.snapshot as any).lines[0].grossAmountDelta, /^-?\d+\.\d{12}$/);
+      let prepareCount = 0;
+      const artifactPreparer = { templateVersion: 'adjustment-v1', prepare: async () => {
+        prepareCount += 1;
+        return { storageKey: `dispatch-documents/${randomUUID()}.pdf`, mediaType: 'application/pdf' as const,
+          byteLength: 100, sha256: hash('b') };
+      } };
+      const firstResponse = await postDispatchCorrection(boundPrisma, { correctionId: correction.id,
+        actorId: candidate.createdBy, authority, idempotencyKey: 'issue262-positive' }, { artifactPreparer });
+      const first = await tx.dispatchStatementAdjustment.findUniqueOrThrow({ where: { correctionId: correction.id } });
+      const firstArtifact = await tx.dispatchDocumentArtifact.findUniqueOrThrow({ where: { statementAdjustmentId: first.id } });
+      assert.equal(first.sequence, 1);
+      assert.equal(firstArtifact.sourceIntegrityHash, first.integrityHash);
+      assert.equal((first.snapshot as any).originalStatementDocumentId, originalStatement.id);
+      assert.match((first.snapshot as any).lines[0].grossAmountDelta, /^-?\d+\.\d{12}$/);
+      assert.deepEqual(await postDispatchCorrection(boundPrisma, { correctionId: correction.id,
+        actorId: candidate.createdBy, authority, idempotencyKey: 'issue262-positive' }, { artifactPreparer }), firstResponse);
+      assert.equal(prepareCount, 1, 'an identical retry must replay the persisted result without publishing another artifact');
+      await assert.rejects(postDispatchCorrection(boundPrisma, { correctionId: correction.id,
+        actorId: `${candidate.createdBy}-different`, authority, idempotencyKey: 'issue262-positive' }, { artifactPreparer }),
+      /different command evidence/i);
 
-      const reversal = await tx.dispatchCorrection.create({ data: { waybillId: candidate.waybillId,
-        reason: 'DB immutable opposite', effectiveAt: new Date(), createdBy: candidate.createdBy, reversalOfId: correction.id,
-        lines: { create: { contractId: candidate.contractId, contractItemId: candidate.itemId,
-          productRowId: candidate.productRowId, unit: candidate.lineUnit, quantity: '-0.500' } } }, include: { lines: true } });
-      const reversalAt = new Date();
-      const reversalPlan = await planStatementAdjustment(tx, { correctionId: reversal.id, actorId: candidate.createdBy,
-        correctionIntegrityHash: hash('f'), issuedAt: reversalAt, artifactPreparer: { templateVersion: 'adjustment-v1',
+      const reversal = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
+        reason: 'DB immutable opposite', effectiveAt: new Date(), actorId: candidate.createdBy, authority,
+        reversalOfId: correction.id, lines: [{ contractItemId: candidate.itemId, quantity: '-0.500' }] });
+      await postDispatchCorrection(boundPrisma, { correctionId: reversal.id, actorId: candidate.createdBy,
+        authority, idempotencyKey: 'issue262-reversal' }, { artifactPreparer: { templateVersion: 'adjustment-v1',
           prepare: async () => ({ storageKey: `dispatch-documents/${randomUUID()}.pdf`, mediaType: 'application/pdf',
             byteLength: 100, sha256: hash('9') }) } });
-      assert(reversalPlan);
-      await tx.dispatchCorrection.update({ where: { id: reversal.id }, data: { status: 'POSTED', postedAt: reversalAt,
-        postedBy: candidate.createdBy, integrityHash: hash('f') } });
-      const second = await persistStatementAdjustment(tx, reversalPlan);
-      assert.equal(second.adjustment.sequence, 2);
-      assert.equal((second.adjustment.snapshot as any).lines[0].grossAmountDelta,
-        new Prisma.Decimal((first.adjustment.snapshot as any).lines[0].grossAmountDelta).negated().toFixed(12));
+      const second = await tx.dispatchStatementAdjustment.findUniqueOrThrow({ where: { correctionId: reversal.id } });
+      assert.equal(second.sequence, 2);
+      assert.equal((second.snapshot as any).lines[0].grossAmountDelta,
+        new Prisma.Decimal((first.snapshot as any).lines[0].grossAmountDelta).negated().toFixed(12));
       assert.equal(await tx.dispatchStatementAdjustment.count({ where: { waybillId: candidate.waybillId } }), 2);
       assert.equal(await tx.dispatchDocumentArtifact.count({ where: { waybillId: candidate.waybillId,
         kind: 'STATEMENT_ADJUSTMENT' } }), 2);

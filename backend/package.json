@@ -71,6 +71,9 @@
     "test:dispatch-document-recovery": "tsx --test src/services/__tests__/dispatchDocumentAuditRecovery.test.ts",
     "test:shipment-statement-concurrency:harness": "tsx src/services/__tests__/shipmentStatementConcurrency/harness.unit.test.ts",
     "test:shipment-statement-concurrency:db": "tsx src/services/__tests__/shipmentStatementConcurrency/database.integration.test.ts && tsx src/services/__tests__/shipmentStatementConcurrency/scenarios.integration.test.ts && tsx src/services/__tests__/shipmentStatementConcurrency/scenarios.integration.test.ts && tsx src/services/__tests__/shipmentStatementConcurrency/scenarios.integration.test.ts",
+    "test:legacy-approved-pricing": "tsx src/services/__tests__/legacyApprovedPricing.test.ts",
+    "preflight:legacy-approved-pricing": "tsx scripts/preflight-seal-legacy-pricing.ts",
+    "seal:legacy-approved-pricing": "tsx scripts/preflight-seal-legacy-pricing.ts --apply",
     "sync:opc-products:dry": "node scripts/sync-products-from-opc.js",
     "sync:opc-products:apply": "node scripts/sync-products-from-opc.js --apply"
   },

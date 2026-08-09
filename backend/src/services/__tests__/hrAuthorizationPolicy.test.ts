@@ -4,6 +4,7 @@ import {
   resolveNamedResponsibility,
   type HrAuthorizationSnapshot,
 } from '../hrAuthorizationPolicy';
+import { activeHrAuthoritiesForUser, resolveHrNamedResponsibility } from '../hrAuthorizationService';
 
 const now = new Date('2026-08-08T10:00:00.000Z');
 const activeWindow = { effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null };
@@ -139,4 +140,47 @@ for (const [name, expectedReason, overrides] of unresolvedCases) {
   if (result.status === 'UNRESOLVED') assert.equal(result.reason, expectedReason, name);
 }
 
-console.log('HR authorization and named responsibility policy tests passed.');
+const serviceRegressionTests = async () => {
+  const grant = {
+    authorityCode: 'HR_MANAGER', status: 'ACTIVE', effectiveFrom: activeWindow.effectiveFrom,
+    effectiveTo: null, reason: 'HR redesign baseline', userId: 'demoted-admin',
+  };
+  const fakeClient = {
+    user: {
+      findUnique: async () => ({ id: 'demoted-admin', role: 'MANAGER', isActive: true }),
+      findMany: async () => [{ id: 'demoted-admin', role: 'MANAGER', isActive: true }],
+    },
+    hrWorkspaceAccessGrant: { findMany: async () => [] },
+    hrFeatureAccessGrant: { findMany: async () => [] },
+    hrBusinessAuthorityGrant: { findMany: async () => [grant] },
+    hrDuty: { findMany: async () => [] },
+    hrAuthorityCatalog: {
+      findMany: async () => [{ code: 'HR_MANAGER' }],
+      findUnique: async () => ({ code: 'HR_MANAGER' }),
+    },
+    hrNamedResponsibility: { findMany: async () => [{ ...primary, responsibilityTypeCode: 'HR_MANAGER', assignedUserId: 'demoted-admin' }] },
+    hrResponsibilityDestination: { findMany: async () => [{ ...destination, responsibilityTypeCode: 'HR_MANAGER', workspaceCode: 'HUMAN_RESOURCES' }] },
+    hrSeparationOfDutyConstraint: { findMany: async () => [] },
+  } as any;
+
+  assert.deepEqual(
+    await activeHrAuthoritiesForUser(fakeClient, 'demoted-admin', now),
+    [],
+    'active-authority projections must exclude persisted bootstrap grants after demotion',
+  );
+  const resolution = await resolveHrNamedResponsibility(fakeClient, {
+    sourceActionCode: 'HR_MANAGER_ACTION', responsibilityTypeCode: 'HR_MANAGER', scopeType: 'GLOBAL', scopeId: null, now,
+  });
+  assert.deepEqual(
+    resolution,
+    { status: 'UNRESOLVED', reason: 'INELIGIBLE_ASSIGNEE' },
+    'responsibility resolution must exclude persisted bootstrap grants after demotion',
+  );
+};
+
+serviceRegressionTests()
+  .then(() => console.log('HR authorization and named responsibility policy tests passed.'))
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

@@ -31,9 +31,10 @@ const prisma = new PrismaClient();
 router.use(protect);
 router.use('/authorization', hrAuthorizationRoutes);
 
-const featureForPath = (path: string) => {
+export const featureForPath = (path: string) => {
   if (path === '/dashboard') return 'DASHBOARD';
   if (path.startsWith('/personnel')) return 'PERSONNEL';
+  if (path.startsWith('/relationships') || path.startsWith('/assignments') || path.startsWith('/supervisor-candidates')) return 'PERSONNEL';
   if (path.startsWith('/migration')) return 'DATA_MIGRATION_RECONCILIATION';
   if (path.startsWith('/redesign/compatibility/work-items')) return 'HR_WORK_MANAGEMENT';
   if (path.includes('/assessments')) return 'RECRUITMENT_CASES';

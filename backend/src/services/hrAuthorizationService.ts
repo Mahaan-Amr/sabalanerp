@@ -66,7 +66,7 @@ export const activeHrAuthoritiesForUser = async (
     return catalog.map(({ code }) => code);
   }
   return snapshot.authorityGrants
-    .filter((grant) => grant.status === 'ACTIVE' && grant.effectiveFrom <= at && (!grant.effectiveTo || grant.effectiveTo > at))
+    .filter((grant) => !grant.bootstrapOnly && grant.status === 'ACTIVE' && grant.effectiveFrom <= at && (!grant.effectiveTo || grant.effectiveTo > at))
     .map((grant) => grant.authorityCode);
 };
 
@@ -122,7 +122,7 @@ export const resolveHrNamedResponsibility = async (
     client.user.findMany({ where: { id: { in: assignedUserIds } }, select: { id: true, role: true, isActive: true } }),
     client.hrBusinessAuthorityGrant.findMany({
       where: { userId: { in: assignedUserIds }, authorityCode: input.responsibilityTypeCode, ...activeHrGrantWhere(now) },
-      select: { userId: true },
+      select: { userId: true, reason: true },
     }),
     client.hrAuthorityCatalog.findUnique({ where: { code: input.responsibilityTypeCode }, select: { code: true } }),
   ]);
@@ -130,7 +130,10 @@ export const resolveHrNamedResponsibility = async (
     user.role === 'ADMIN' || Boolean(process.env.HR_SHAKILA_USER_ID && user.id === process.env.HR_SHAKILA_USER_ID)
   )).map(({ id }) => id);
   const authorityEligibleUserIds = authorityCatalog
-    ? [...new Set([...authorityGrants.map(({ userId }) => userId), ...baselineIds])]
+    ? [...new Set([
+      ...authorityGrants.filter(({ reason }) => reason !== 'HR redesign baseline').map(({ userId }) => userId),
+      ...baselineIds,
+    ])]
     : undefined;
   const conflictedUserIds = new Set(input.disallowedUserIds ?? []);
   for (const constraint of constraints) {

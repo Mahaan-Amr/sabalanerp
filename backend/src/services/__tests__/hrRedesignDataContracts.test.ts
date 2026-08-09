@@ -70,6 +70,8 @@ assert.deepEqual(Object.keys(HR_QA_ACCESS_MATRIX), [
 assert.deepEqual(HR_QA_ACCESS_MATRIX.qa_no_hr_access, { workspaceLevel: null, features: {}, authority: null, responsibility: null, destinationWorkspace: null });
 assert.equal(HR_QA_ACCESS_MATRIX.qa_finance_manager.workspaceLevel, null);
 assert.equal(HR_QA_ACCESS_MATRIX.qa_hiring_manager.workspaceLevel, null);
+assert.equal(HR_QA_ACCESS_MATRIX.qa_hiring_manager.destinationWorkspace, null);
+assert.equal(HR_QA_ACCESS_MATRIX.qa_hiring_manager.responsibilityScope, 'RECORDED_POSITION');
 assert.equal(HR_QA_ACCESS_MATRIX.qa_hr_viewer.authority, null);
 assert.equal(HR_QA_ACCESS_MATRIX.qa_hr_manager.features.AUTHORITY_RESPONSIBILITY_ADMINISTRATION, 'ADMIN');
 

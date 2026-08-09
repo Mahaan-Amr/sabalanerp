@@ -18,29 +18,33 @@ const asyncHandler = (handler: (req: AuthRequest, res: Response, next: NextFunct
 ) => void handler(req, res, next).catch(next);
 const actorId = (req: AuthRequest) => req.user!.id;
 const text = (value: unknown) => String(value ?? '').trim();
+const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode, isOperational: true });
+const badRequest = (message: string) => httpError(400, message);
+const forbidden = (message: string) => httpError(403, message);
+const conflict = (message: string) => httpError(409, message);
 const optionalDate = (value: unknown) => {
   if (!value) return null;
   const result = new Date(String(value));
-  if (Number.isNaN(result.getTime())) throw new Error('تاریخ واردشده معتبر نیست.');
+  if (Number.isNaN(result.getTime())) throw badRequest('تاریخ واردشده معتبر نیست.');
   return result;
 };
 const requiredReason = (value: unknown) => {
   const reason = text(value);
-  if (reason.length < 3) throw new Error('دلیل مستند با حداقل سه نویسه الزامی است.');
+  if (reason.length < 3) throw badRequest('دلیل مستند با حداقل سه نویسه الزامی است.');
   return reason;
 };
 const jsonValue = (value: unknown) => value == null ? Prisma.JsonNull : JSON.parse(JSON.stringify(value));
 
 const assertOperationalAdministrator = async (req: AuthRequest, authorityCode?: string) => {
   if (req.user!.role === 'ADMIN') return;
-  if (authorityCode === 'COMPANY_MANAGER') throw new Error('فقط مدیر سامانه می‌تواند اختیار مدیر شرکت را مدیریت کند.');
+  if (authorityCode === 'COMPANY_MANAGER') throw forbidden('فقط مدیر سامانه می‌تواند اختیار مدیر شرکت را مدیریت کند.');
   const authorities = await activeHrAuthoritiesForUser(prisma, actorId(req));
-  if (!authorities.includes('COMPANY_MANAGER')) throw new Error('اختیار فعال مدیر شرکت برای این عملیات الزامی است.');
+  if (!authorities.includes('COMPANY_MANAGER')) throw forbidden('اختیار فعال مدیر شرکت برای این عملیات الزامی است.');
 };
 
 const assertActiveUser = async (client: Prisma.TransactionClient, userId: string) => {
   const user = await client.user.findFirst({ where: { id: userId, isActive: true }, select: { id: true } });
-  if (!user) throw new Error('کاربر فعال پیدا نشد.');
+  if (!user) throw badRequest('کاربر فعال پیدا نشد.');
 };
 
 const writeAudit = async (client: Prisma.TransactionClient, input: {
@@ -65,12 +69,20 @@ const writeAudit = async (client: Prisma.TransactionClient, input: {
 
 router.get('/me', asyncHandler(async (req, res) => {
   const now = new Date();
-  const [workspaceGrants, featureGrants, authorityCodes] = await Promise.all([
+  const [workspaceGrants, featureGrants, authorityCodes, administration] = await Promise.all([
     prisma.hrWorkspaceAccessGrant.findMany({ where: { userId: actorId(req) }, orderBy: { createdAt: 'desc' } }),
     prisma.hrFeatureAccessGrant.findMany({ where: { userId: actorId(req) }, orderBy: { createdAt: 'desc' } }),
     activeHrAuthoritiesForUser(prisma, actorId(req), now),
+    authorizeHrUser(prisma, actorId(req), {
+      workspaceLevel: 'ADMIN',
+      feature: { code: 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION', level: 'ADMIN' },
+    }, now),
   ]);
-  res.json({ success: true, data: { workspaceGrants, featureGrants, authorityCodes, generatedAt: now } });
+  res.json({ success: true, data: {
+    workspaceGrants, featureGrants, authorityCodes,
+    canAdministerAuthorityResponsibility: administration.allowed,
+    generatedAt: now,
+  } });
 }));
 
 router.get('/context', administer, asyncHandler(async (_req, res) => {
@@ -96,11 +108,11 @@ router.get('/context', administer, asyncHandler(async (_req, res) => {
 }));
 
 router.post('/workspace-grants', administer, asyncHandler(async (req, res) => {
-  if (req.user!.role !== 'ADMIN') throw new Error('فقط مدیر سامانه می‌تواند دسترسی فضای کاری را تغییر دهد.');
+  if (req.user!.role !== 'ADMIN') throw forbidden('فقط مدیر سامانه می‌تواند دسترسی فضای کاری را تغییر دهد.');
   const userId = text(req.body.userId);
   const level = text(req.body.level).toUpperCase();
   const reason = requiredReason(req.body.reason);
-  if (!userId || !levelValues.has(level as never)) throw new Error('کاربر یا سطح دسترسی معتبر نیست.');
+  if (!userId || !levelValues.has(level as never)) throw badRequest('کاربر یا سطح دسترسی معتبر نیست.');
   const effectiveAt = optionalDate(req.body.effectiveFrom) ?? new Date();
   const row = await prisma.$transaction(async (tx) => {
     await assertActiveUser(tx, userId);
@@ -116,13 +128,13 @@ router.post('/workspace-grants', administer, asyncHandler(async (req, res) => {
 }));
 
 router.post('/feature-grants', administer, asyncHandler(async (req, res) => {
-  if (req.user!.role !== 'ADMIN') throw new Error('فقط مدیر سامانه می‌تواند دسترسی قابلیت را تغییر دهد.');
+  if (req.user!.role !== 'ADMIN') throw forbidden('فقط مدیر سامانه می‌تواند دسترسی قابلیت را تغییر دهد.');
   const userId = text(req.body.userId);
   const featureCode = text(req.body.featureCode).toUpperCase();
   const level = text(req.body.level).toUpperCase();
   const reason = requiredReason(req.body.reason);
   if (!userId || !HR_REDESIGN_CATALOG.workspaceFeatures.some(({ code }) => code === featureCode) || !levelValues.has(level as never)) {
-    throw new Error('کاربر، قابلیت یا سطح دسترسی معتبر نیست.');
+    throw badRequest('کاربر، قابلیت یا سطح دسترسی معتبر نیست.');
   }
   const effectiveAt = optionalDate(req.body.effectiveFrom) ?? new Date();
   const row = await prisma.$transaction(async (tx) => {
@@ -142,14 +154,14 @@ router.post('/business-authorities', administer, asyncHandler(async (req, res) =
   const userId = text(req.body.userId);
   const authorityCode = text(req.body.authorityCode).toUpperCase();
   const reason = requiredReason(req.body.reason);
-  if (!userId || !authorityValues.has(authorityCode)) throw new Error('کاربر یا اختیار کسب‌وکار معتبر نیست.');
+  if (!userId || !authorityValues.has(authorityCode)) throw badRequest('کاربر یا اختیار کسب‌وکار معتبر نیست.');
   await assertOperationalAdministrator(req, authorityCode);
-  if (userId === actorId(req)) throw new Error('اعطای اختیار به خود مجاز نیست.');
+  if (userId === actorId(req)) throw forbidden('اعطای اختیار به خود مجاز نیست.');
   const effectiveAt = optionalDate(req.body.effectiveFrom) ?? new Date();
   const row = await prisma.$transaction(async (tx) => {
     await assertActiveUser(tx, userId);
     const active = await tx.hrBusinessAuthorityGrant.findFirst({ where: { userId, authorityCode, status: 'ACTIVE', OR: [{ effectiveTo: null }, { effectiveTo: { gt: effectiveAt } }] } });
-    if (active) throw new Error('این اختیار هم‌اکنون فعال است.');
+    if (active) throw conflict('این اختیار هم‌اکنون فعال است.');
     const created = await tx.hrBusinessAuthorityGrant.create({ data: {
       stableKey: `hr-authority:${userId}:${authorityCode}:${effectiveAt.toISOString()}:${crypto.randomUUID()}`,
       userId, authorityCode, effectiveFrom: effectiveAt, effectiveTo: optionalDate(req.body.effectiveTo),
@@ -166,14 +178,18 @@ router.post('/business-authorities/:id/revoke', administer, asyncHandler(async (
   const row = await prisma.$transaction(async (tx) => {
     const current = await tx.hrBusinessAuthorityGrant.findUniqueOrThrow({ where: { id: req.params.id } });
     await assertOperationalAdministrator(req, current.authorityCode);
-    if (current.userId === actorId(req)) throw new Error('سلب اختیار از خود مجاز نیست.');
-    if (current.status !== 'ACTIVE' || (current.effectiveTo && current.effectiveTo <= new Date())) throw new Error('این اختیار فعال نیست.');
+    if (current.userId === actorId(req)) throw forbidden('سلب اختیار از خود مجاز نیست.');
+    if (current.status !== 'ACTIVE' || (current.effectiveTo && current.effectiveTo <= new Date())) throw conflict('این اختیار فعال نیست.');
     if (current.authorityCode === 'COMPANY_MANAGER') {
-      const otherCount = await tx.hrBusinessAuthorityGrant.count({ where: {
+      const otherGrants = await tx.hrBusinessAuthorityGrant.findMany({ where: {
         authorityCode: 'COMPANY_MANAGER', status: 'ACTIVE', id: { not: current.id },
         effectiveFrom: { lte: new Date() }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: new Date() } }],
+      }, select: { userId: true } });
+      const otherActiveManagerCount = await tx.user.count({ where: {
+        id: { in: [...new Set(otherGrants.map(({ userId }) => userId))] },
+        isActive: true,
       } });
-      if (otherCount === 0) throw new Error('سلب اختیار آخرین مدیر شرکت مجاز نیست.');
+      if (otherActiveManagerCount === 0) throw conflict('سلب اختیار آخرین مدیر شرکت مجاز نیست.');
     }
     const effectiveAt = new Date();
     const updated = await tx.hrBusinessAuthorityGrant.update({ where: { id: current.id }, data: {
@@ -188,29 +204,29 @@ router.post('/business-authorities/:id/revoke', administer, asyncHandler(async (
 router.post('/responsibilities', administer, asyncHandler(async (req, res) => {
   const responsibilityTypeCode = text(req.body.responsibilityTypeCode).toUpperCase();
   await assertOperationalAdministrator(req, responsibilityTypeCode);
-  if (!responsibilityValues.has(responsibilityTypeCode)) throw new Error('نوع مسئولیت معتبر نیست.');
+  if (!responsibilityValues.has(responsibilityTypeCode)) throw badRequest('نوع مسئولیت معتبر نیست.');
   const assignedUserId = text(req.body.assignedUserId);
   const scopeType = text(req.body.scopeType).toUpperCase();
   const scopeId = text(req.body.scopeId) || null;
   const assignmentKind = text(req.body.assignmentKind || 'PRIMARY').toUpperCase();
   const reason = requiredReason(req.body.reason);
-  if (!assignedUserId || !scopeType || !['PRIMARY', 'ACTING', 'SUBSTITUTE'].includes(assignmentKind)) throw new Error('مالک، دامنه یا نوع انتساب معتبر نیست.');
-  if (assignedUserId === actorId(req)) throw new Error('انتساب مسئولیت به خود در این عملیات مجاز نیست.');
+  if (!assignedUserId || !scopeType || !['PRIMARY', 'ACTING', 'SUBSTITUTE'].includes(assignmentKind)) throw badRequest('مالک، دامنه یا نوع انتساب معتبر نیست.');
+  if (assignedUserId === actorId(req)) throw forbidden('انتساب مسئولیت به خود در این عملیات مجاز نیست.');
   const effectiveAt = optionalDate(req.body.effectiveFrom) ?? new Date();
   const row = await prisma.$transaction(async (tx) => {
     await assertActiveUser(tx, assignedUserId);
     const requiresAuthority = await tx.hrAuthorityCatalog.findUnique({ where: { code: responsibilityTypeCode }, select: { code: true } });
     if (requiresAuthority && !(await authorizeHrUser(tx, assignedUserId, { authorityCodes: [responsibilityTypeCode] }, effectiveAt)).allowed) {
-      throw new Error('مالک انتخاب‌شده اختیار کسب‌وکار فعال این مسئولیت را ندارد.');
+      throw conflict('مالک انتخاب‌شده اختیار کسب‌وکار فعال این مسئولیت را ندارد.');
     }
     const principalResponsibilityId = text(req.body.principalResponsibilityId) || null;
     if (assignmentKind !== 'PRIMARY') {
-      if (!principalResponsibilityId) throw new Error('انتساب موقت یا جانشین باید به مسئولیت اصلی متصل باشد.');
+      if (!principalResponsibilityId) throw badRequest('انتساب موقت یا جانشین باید به مسئولیت اصلی متصل باشد.');
       const principal = await tx.hrNamedResponsibility.findFirst({ where: {
         id: principalResponsibilityId, responsibilityTypeCode, scopeType, scopeId, assignmentKind: 'PRIMARY',
         effectiveFrom: { lte: effectiveAt }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: effectiveAt } }],
       } });
-      if (!principal) throw new Error('مسئولیت اصلی مؤثر برای این جانشینی پیدا نشد.');
+      if (!principal) throw conflict('مسئولیت اصلی مؤثر برای این جانشینی پیدا نشد.');
     }
     const created = await tx.hrNamedResponsibility.create({ data: {
       stableKey: `hr-responsibility:${responsibilityTypeCode}:${scopeType}:${scopeId ?? 'GLOBAL'}:${effectiveAt.toISOString()}:${crypto.randomUUID()}`,
@@ -229,9 +245,9 @@ router.post('/responsibilities/:id/end', administer, asyncHandler(async (req, re
   const row = await prisma.$transaction(async (tx) => {
     const current = await tx.hrNamedResponsibility.findUniqueOrThrow({ where: { id: req.params.id } });
     await assertOperationalAdministrator(req, current.responsibilityTypeCode);
-    if (current.assignedUserId === actorId(req)) throw new Error('پایان‌دادن مسئولیت خود در این عملیات مجاز نیست.');
+    if (current.assignedUserId === actorId(req)) throw forbidden('پایان‌دادن مسئولیت خود در این عملیات مجاز نیست.');
     const effectiveAt = optionalDate(req.body.effectiveTo) ?? new Date();
-    if (effectiveAt <= current.effectiveFrom || (current.effectiveTo && current.effectiveTo <= effectiveAt)) throw new Error('زمان پایان مسئولیت معتبر نیست.');
+    if (effectiveAt <= current.effectiveFrom || (current.effectiveTo && current.effectiveTo <= effectiveAt)) throw badRequest('زمان پایان مسئولیت معتبر نیست.');
     const updated = await tx.hrNamedResponsibility.update({ where: { id: current.id }, data: { effectiveTo: effectiveAt, reason } });
     await writeAudit(tx, { entityType: 'NAMED_RESPONSIBILITY', entityId: current.id, action: 'ENDED', actorUserId: actorId(req), reason, effectiveAt, before: current, after: updated });
     return updated;
@@ -240,14 +256,14 @@ router.post('/responsibilities/:id/end', administer, asyncHandler(async (req, re
 }));
 
 router.post('/destinations', administer, asyncHandler(async (req, res) => {
-  if (req.user!.role !== 'ADMIN') throw new Error('فقط مدیر سامانه می‌تواند مقصد مسئولیت را پیکربندی کند.');
+  if (req.user!.role !== 'ADMIN') throw forbidden('فقط مدیر سامانه می‌تواند مقصد مسئولیت را پیکربندی کند.');
   const responsibilityTypeCode = text(req.body.responsibilityTypeCode).toUpperCase();
   const scopeType = text(req.body.scopeType).toUpperCase();
   const scopeId = text(req.body.scopeId) || null;
   const workspaceCode = text(req.body.workspaceCode).toUpperCase();
   const queueCode = text(req.body.queueCode).toUpperCase();
   const reason = requiredReason(req.body.reason);
-  if (!responsibilityValues.has(responsibilityTypeCode) || !scopeType || !workspaceCode || !queueCode) throw new Error('نوع مسئولیت، دامنه، فضای کاری و صف مقصد الزامی است.');
+  if (!responsibilityValues.has(responsibilityTypeCode) || !scopeType || !workspaceCode || !queueCode) throw badRequest('نوع مسئولیت، دامنه، فضای کاری و صف مقصد الزامی است.');
   const effectiveAt = new Date();
   const row = await prisma.$transaction(async (tx) => {
     const created = await tx.hrResponsibilityDestination.create({ data: {

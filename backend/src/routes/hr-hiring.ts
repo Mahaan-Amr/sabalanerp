@@ -76,8 +76,7 @@ import {
   staleAutomaticHiringWorkItemStatus
 } from '../services/hrWorkItems';
 import { requireHrFeature } from '../middleware/hrAuthorization';
-import { activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
-import { normalizeCoveredHiringAmounts } from '../services/hrApplicantExperience';
+import { activeHrAuthoritiesForUser, authorizeHrUser, resolveHrNamedResponsibility } from '../services/hrAuthorizationService';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -308,9 +307,44 @@ const applicationInclude = {
 const asyncHandler = (fn: (req: any, res: Response, next: NextFunction) => Promise<any>) =>
   (req: any, res: Response, next: NextFunction) => fn(req, res, next).catch(next);
 
+const requireEffectiveResponsibilityOwner = async (
+  req: AuthRequest,
+  res: Response,
+  responsibilityTypeCode: string,
+) => {
+  let scopeType = 'GLOBAL';
+  let scopeId: string | null = null;
+  if (responsibilityTypeCode === 'HIRING_MANAGER') {
+    const applicationId = String(req.params.id || '');
+    const application = applicationId
+      ? await prisma.hrJobApplication.findUnique({ where: { id: applicationId }, select: { positionId: true } })
+      : null;
+    scopeType = 'POSITION';
+    scopeId = application?.positionId ?? null;
+  }
+  const resolution = await resolveHrNamedResponsibility(prisma, {
+    sourceActionCode: `${req.method}:${req.baseUrl}${req.route?.path ?? req.path}`,
+    responsibilityTypeCode,
+    scopeType,
+    scopeId,
+    sourceActorUserId: actorId(req),
+  });
+  if (resolution.status === 'UNRESOLVED') {
+    res.status(409).json({ success: false, error: 'HR_RESPONSIBILITY_UNRESOLVED', reason: resolution.reason });
+    return false;
+  }
+  if (resolution.assignedUserId !== actorId(req)) {
+    res.status(403).json({ success: false, error: 'HR_RESPONSIBILITY_NOT_ASSIGNED' });
+    return false;
+  }
+  (req as any).hiringResponsibility = resolution;
+  return true;
+};
+
 const requireAuthority = (...authorities: string[]) => asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
   const assigned = await authorizeHrUser(prisma, req.user!.id, { authorityCodes: authorities });
   if (!assigned.allowed) return res.status(403).json({ success: false, error: `اختیار سازمانی لازم است: ${authorities.join(', ')}` });
+  if (!['GET', 'HEAD'].includes(req.method) && !(await requireEffectiveResponsibilityOwner(req, res, authorities[0]))) return;
   (req as any).hiringAuthority = authorities[0];
   next();
 });
@@ -319,6 +353,7 @@ const activeHiringAuthoritiesForUser = (userId: string, at = new Date()) => acti
 
 const requireArchiveManager = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!(await authorizeHrUser(prisma, actorId(req), { authorityCodes: ['HR_MANAGER'] })).allowed) return res.status(403).json({ success: false, error: 'فقط مدیر منابع انسانی یا مدیر سامانه می‌تواند بایگانی را مدیریت کند.' });
+  if (!['GET', 'HEAD'].includes(req.method) && !(await requireEffectiveResponsibilityOwner(req, res, 'HR_MANAGER'))) return;
   next();
 });
 
@@ -381,6 +416,7 @@ const applicationDeletionImpact = async (applicationId: string, client: PrismaCl
 
 const requireAuthorityAdministrator = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!(await authorizeHrUser(prisma, actorId(req), { authorityCodes: ['COMPANY_MANAGER'] })).allowed) return res.status(403).json({ success: false, error: 'اختیار مدیریت شرکت یا نقش مدیر سامانه الزامی است.' });
+  if (!['GET', 'HEAD'].includes(req.method) && !(await requireEffectiveResponsibilityOwner(req, res, 'COMPANY_MANAGER'))) return;
   next();
 });
 
@@ -390,6 +426,7 @@ const canManageHrWork = async (req: AuthRequest) => {
 
 const requireHrWorkManager = asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!(await canManageHrWork(req))) return res.status(403).json({ success: false, error: 'فقط مدیر منابع انسانی می‌تواند وظایف را تخصیص دهد.' });
+  if (!['GET', 'HEAD'].includes(req.method) && !(await requireEffectiveResponsibilityOwner(req, res, 'HR_MANAGER'))) return;
   next();
 });
 
@@ -640,29 +677,28 @@ router.get('/public/application', applicantSession, asyncHandler(async (req: App
 
 router.put('/public/application/draft', applicantSession, asyncHandler(async (req: ApplicantRequest, res: Response) => {
   const applicationId = req.applicant!.applicationId;
-  const normalizedBody = normalizeCoveredHiringAmounts(req.body || {});
   const latest = await prisma.hrApplicationFormRevision.findFirst({ where: { applicationId }, orderBy: { revisionNumber: 'desc' } });
   const allowedCorrectionFields = Array.isArray(latest?.correctionFieldsJson) ? latest.correctionFieldsJson.map(String) : [];
   if (latest && allowedCorrectionFields.length) {
     const previous = latest.dataJson as Record<string, unknown>;
-    const attempted = Object.keys(normalizedBody).filter((key) => !allowedCorrectionFields.includes(key) && JSON.stringify(normalizedBody[key]) !== JSON.stringify(previous[key]));
+    const attempted = Object.keys(req.body || {}).filter((key) => !allowedCorrectionFields.includes(key) && JSON.stringify(req.body[key]) !== JSON.stringify(previous[key]));
     if (attempted.length) return res.status(422).json({ success: false, error: `فقط فیلدهای مشخص‌شده قابل اصلاح‌اند: ${allowedCorrectionFields.join(', ')}` });
   }
   let revision;
   if (!latest) {
-    revision = await prisma.hrApplicationFormRevision.create({ data: { applicationId, revisionNumber: 1, dataJson: normalizedBody as Prisma.InputJsonValue } });
+    revision = await prisma.hrApplicationFormRevision.create({ data: { applicationId, revisionNumber: 1, dataJson: req.body as Prisma.InputJsonValue } });
   } else if (latest.status === 'RETURNED') {
     revision = await prisma.hrApplicationFormRevision.create({ data: {
       applicationId, revisionNumber: latest.revisionNumber + 1,
-      dataJson: { ...(latest.dataJson as any), ...normalizedBody } as Prisma.InputJsonValue,
+      dataJson: { ...(latest.dataJson as any), ...req.body } as Prisma.InputJsonValue,
       correctionFieldsJson: latest.correctionFieldsJson as Prisma.InputJsonValue,
       correctionDetailsJson: latest.correctionDetailsJson as Prisma.InputJsonValue,
       correctionReason: latest.correctionReason
     }});
   } else if (latest.status === 'DRAFT') {
     const dataJson = allowedCorrectionFields.length
-      ? { ...(latest.dataJson as any), ...normalizedBody }
-      : normalizedBody;
+      ? { ...(latest.dataJson as any), ...req.body }
+      : req.body;
     revision = await prisma.hrApplicationFormRevision.update({
       where: { id: latest.id },
       data: { dataJson: dataJson as Prisma.InputJsonValue }
@@ -1232,12 +1268,6 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
     archiveEligible: row.stage === 'CLOSED' && Boolean(row.outcome),
   });
   data.readOnlyArchived = Boolean(row.archivedAt);
-  data.informationGroups = [
-    { key: 'PROFILE_IDENTITY', status: canSeeHrSensitive ? 'AVAILABLE' : 'RESTRICTED' },
-    { key: 'EXPERIENCE_QUALIFICATIONS', status: canSeeDecisionDetails ? 'AVAILABLE' : 'RESTRICTED' },
-    { key: 'APPLICATION_ANSWERS', status: canSeeDecisionDetails ? 'AVAILABLE' : 'RESTRICTED' },
-    { key: 'DOCUMENT_EVIDENCE', status: canSeeHrSensitive ? 'AVAILABLE' : 'RESTRICTED' }
-  ];
   data.lifecycle = projectHiringLifecycle(row, authorities, actorId(req));
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities, actorId(req));
   data.documentIndex = buildHiringDocumentIndex(row, authorities);
@@ -1253,7 +1283,6 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   data.documents = canSeeHrSensitive ? data.documents.map(({ storageName: _storageName, sha256: _sha256, ...document }: any) => document) : [];
   data.assessments = canSeeDecisionDetails ? data.assessments.map(({ storageName: _storageName, sha256: _sha256, ...assessment }: any) => assessment) : [];
   if (!canSeeHrSensitive) {
-    data.candidate.mobile = `${data.candidate.mobile.slice(0, 4)}***${data.candidate.mobile.slice(-2)}`;
     data.candidate.profileJson = null;
     data.candidate.nationalCode = null;
     data.candidate.foreignIdentityType = null;
@@ -2115,6 +2144,7 @@ router.post('/applications/:id/decisions/:kind', asyncHandler(async (req: AuthRe
   if (!requiredAuthority) throw new Error('نوع تصمیم استخدام نامعتبر است.');
   const assigned = await authorizeHrUser(prisma, actorId(req), { authorityCodes: [requiredAuthority] });
   if (!assigned.allowed) return res.status(403).json({ success: false, error: `اختیار سازمانی لازم است: ${requiredAuthority}` });
+  if (!(await requireEffectiveResponsibilityOwner(req, res, requiredAuthority))) return;
   const outcome = String(req.body.outcome || '');
   if (!['POSITIVE', 'NEGATIVE'].includes(outcome)) throw new Error('نتیجه تصمیم باید مثبت یا منفی باشد.');
   const explanation = String(req.body.explanation || '').trim();
@@ -2316,6 +2346,7 @@ router.post('/applications/:id/disposition/reactivate', asyncHandler(async (req:
   if (!required) throw new Error('پرونده برچسب توقف قابل فعال‌سازی ندارد.');
   const assigned = await authorizeHrUser(prisma, actorId(req), { authorityCodes: [required] });
   if (!assigned.allowed) return res.status(403).json({ success: false, error: `اختیار سازمانی لازم است: ${required}` });
+  if (!(await requireEffectiveResponsibilityOwner(req, res, required))) return;
   const reason = String(req.body.reason || '').trim();
   if (!reason) throw new Error('دلیل فعال‌سازی مجدد الزامی است.');
   const previousDisposition = application.disposition;
@@ -2721,6 +2752,7 @@ router.put('/applications/:id/onboarding-tasks/:taskId', asyncHandler(async (req
   if (task.applicationId !== req.params.id) return res.status(404).json({ success: false, error: 'وظیفه در این پرونده پیدا نشد.' });
   const assigned = await authorizeHrUser(prisma, actorId(req), { authorityCodes: [task.ownerAuthority] });
   if (!assigned.allowed) return res.status(403).json({ success: false, error: 'فقط مالک سازمانی وظیفه مجاز به تکمیل است.' });
+  if (!(await requireEffectiveResponsibilityOwner(req, res, task.ownerAuthority))) return;
   const row = await prisma.hrOnboardingTask.update({ where: { id: task.id }, data: {
     status: req.body.status, evidenceNote: req.body.evidenceNote || null,
     completedBy: req.body.status === 'COMPLETE' ? actorId(req) : null, completedAt: req.body.status === 'COMPLETE' ? new Date() : null

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import type { RequestHandler } from 'express';
 import { HR_REDESIGN_CATALOG } from '../../services/hrRedesignDataContracts';
-import router from '../hr';
+import router, { featureForPath } from '../hr';
+
+for (const personnelPath of ['/personnel', '/relationships/relationship-1', '/assignments/assignment-1', '/supervisor-candidates']) {
+  assert.equal(featureForPath(personnelPath), 'PERSONNEL', `${personnelPath} must use the Personnel feature boundary`);
+}
 
 const registeredRoutes = (router as unknown as {
   stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;

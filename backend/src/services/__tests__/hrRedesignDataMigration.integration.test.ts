@@ -33,6 +33,15 @@ const run = async () => {
     } });
     const planCountBefore = await tx.hrFormalAssessmentPlan.count();
     await runHrRedesignBackfill(tx, { apply: true });
+    const viewerBeforeRepeat = await tx.user.findUniqueOrThrow({ where: { username: 'qa_hr_viewer' } });
+    const excessViewerGrant = await tx.hrFeatureAccessGrant.create({ data: {
+      stableKey: `test:excess-viewer-grant:${suffix}`,
+      userId: viewerBeforeRepeat.id,
+      featureCode: 'PERSONNEL',
+      level: 'ADMIN',
+      effectiveFrom: new Date(),
+      reason: 'Regression fixture',
+    } });
     const repeatReport = await runHrRedesignBackfill(tx, { apply: true });
 
     assert.equal(repeatReport.totals.safeBackfills, 0);
@@ -40,6 +49,10 @@ const run = async () => {
     assert.equal(await tx.hrFeatureCatalog.count(), HR_REDESIGN_CATALOG.workspaceFeatures.length);
     assert.equal(await tx.hrAuthorityCatalog.count(), HR_REDESIGN_CATALOG.businessAuthorities.length);
     assert.equal(await tx.hrResponsibilityTypeCatalog.count(), HR_REDESIGN_CATALOG.responsibilityTypes.length);
+    assert.equal((await tx.hrFeatureAccessGrant.findUniqueOrThrow({ where: { id: excessViewerGrant.id } })).status, 'REVOKED');
+    assert.equal(await tx.hrAuthorizationAuditEvent.count({ where: {
+      entityType: 'FEATURE_GRANT', entityId: excessViewerGrant.id, action: 'QA_MATRIX_REVOKED',
+    } }), 1, 'QA matrix revocations preserve before/after audit history');
     const financeManagerQa = await tx.user.findUniqueOrThrow({ where: { username: 'qa_finance_manager' } });
     assert.equal(await tx.hrWorkspaceAccessGrant.count({ where: { userId: financeManagerQa.id, status: 'ACTIVE' } }), 0, 'Finance QA receives no ordinary HR workspace access');
     assert.equal(await tx.hrFeatureAccessGrant.count({ where: { userId: financeManagerQa.id, status: 'ACTIVE' } }), 0, 'Finance QA receives no ordinary HR feature access');
@@ -56,6 +69,15 @@ const run = async () => {
     const hrViewerQa = await tx.user.findUniqueOrThrow({ where: { username: 'qa_hr_viewer' } });
     assert.equal(await tx.hrWorkspaceAccessGrant.count({ where: { userId: hrViewerQa.id, status: 'ACTIVE', level: 'VIEW' } }), 1);
     assert.equal(await tx.hrBusinessAuthorityGrant.count({ where: { userId: hrViewerQa.id, status: 'ACTIVE' } }), 0);
+    const hiringManagerQa = await tx.user.findUniqueOrThrow({ where: { username: 'qa_hiring_manager' } });
+    const hiringResponsibilities = await tx.hrNamedResponsibility.findMany({
+      where: { assignedUserId: hiringManagerQa.id, responsibilityTypeCode: 'HIRING_MANAGER', effectiveTo: null },
+    });
+    assert.equal(hiringResponsibilities.every(({ scopeType, scopeId }) => scopeType === 'POSITION' && Boolean(scopeId)), true);
+    assert.equal(await tx.hrResponsibilityDestination.count({ where: {
+      responsibilityTypeCode: 'HIRING_MANAGER', isActive: true, workspaceCode: 'PERSONAL',
+      stableKey: { startsWith: 'hr-redesign-v1:qa-destination:' },
+    } }), 0, 'Hiring Manager routing never falls back to a personal/global destination');
     assert.equal(await tx.hrFormalAssessmentPlan.count(), planCountBefore, 'legacy evidence must not create an assessment plan');
     assert.equal(
       await tx.hrAssessmentMigrationEvent.count(),

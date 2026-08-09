@@ -68,7 +68,7 @@ test('type-specific deadline panel renders the selected actionable population', 
   assert.match(html, /recordId=check-1/);
 });
 
-test('empty deadline filter keeps bucket register actions without rendering stale rows', () => {
+test('empty deadline filter stays compact without redundant register recovery actions', () => {
   const html = renderPanel(deadlines({
     selection: { due: 'days8to30', deadlineType: 'receivable' },
     typeCounts: counts(0, 0, 0),
@@ -78,8 +78,9 @@ test('empty deadline filter keeps bucket register actions without rendering stal
   assert.match(html, /\/dashboard\/accounting\/receivables\?view=open&amp;due=days8to30/);
   assert.match(html, /فقط دریافتنی‌های باز و چک‌های تسویه‌نشده‌ای نمایش داده می‌شوند که تاریخ سررسید دارند/);
   assert.match(html, /\/dashboard\/accounting\/payments\?view=unsettled-checks&amp;due=days8to30/);
-  assert.match(html, /بررسی دریافتنی‌ها/);
-  assert.match(html, /بررسی چک‌ها/);
+  assert.match(html, /xl:grid-cols-4/);
+  assert.doesNotMatch(html, /بررسی دریافتنی‌ها/);
+  assert.doesNotMatch(html, /بررسی چک‌ها/);
   assert.doesNotMatch(html, /<li/);
   assert.doesNotMatch(html, /recordId=/);
 });

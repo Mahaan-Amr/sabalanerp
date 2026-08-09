@@ -90,7 +90,7 @@ export default function AccountingDeadlinesPanel({
           }))}
         />
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {(Object.keys(bucketLabels) as DeadlineBucket[]).map((bucket) => {
             const counts = deadlines.bucketCounts[bucket];
             const active = selectedDue === bucket;
@@ -135,18 +135,6 @@ export default function AccountingDeadlinesPanel({
             kind="empty"
             className="rounded-lg border"
             title={`${typeLabels[selectedType]} در ${selectedDue ? bucketLabels[selectedDue] : 'همه سررسیدها'} نتیجه‌ای ندارد. فقط دریافتنی‌های باز و چک‌های تسویه‌نشده‌ای نمایش داده می‌شوند که تاریخ سررسید دارند.`}
-            actions={[
-              {
-                href: deadlineRegisterHref('receivable', selectedDue || undefined),
-                label: 'بررسی دریافتنی‌ها',
-                tone: 'success',
-              },
-              {
-                href: deadlineRegisterHref('check', selectedDue || undefined),
-                label: 'بررسی چک‌ها',
-                tone: 'warning',
-              },
-            ]}
           />
         ) : (
           <ul className="divide-y divide-[var(--sds-border-subtle)] rounded-lg border border-[var(--sds-border-default)]">

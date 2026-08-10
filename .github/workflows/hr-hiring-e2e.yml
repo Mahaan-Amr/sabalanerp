@@ -50,9 +50,11 @@ jobs:
           cache: npm
           cache-dependency-path: |
             package-lock.json
+            packages/contract-product-graph/package-lock.json
             backend/package-lock.json
             frontend/package-lock.json
       - run: npm ci
+      - run: npm ci --prefix packages/contract-product-graph
       - run: npm run build:contract-product-graph
       - run: npm ci --prefix backend
       - run: npm ci --prefix frontend

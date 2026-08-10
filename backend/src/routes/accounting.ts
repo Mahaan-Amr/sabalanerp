@@ -57,6 +57,7 @@ import { configureDispatchDocumentsRuntime, createAccountingDispatchDocumentRout
   dispatchDocumentHttpStatus } from '../services/dispatchDocuments';
 import { renderDispatchDocumentPdf } from '../documents/dispatch/dispatchDocumentPdf';
 import { getStatementAdjustmentArtifactPreparer } from '../services/statementAdjustmentRuntime';
+import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -186,12 +187,16 @@ router.get('/dispatch-evidence-exceptions', accountingDispatchView, async (_req:
   catch (error) { return dispatchError(res, error); }
 });
 
-router.get('/dispatch-candidates', accountingDispatchView, async (_req: AuthRequest, res: Response) => {
+router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthRequest, res: Response) => {
   try {
+    const manage = await resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role,
+      workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
+      requiredPermission: FEATURE_PERMISSIONS.EDIT });
     const candidates = await prisma.accountingDispatchCandidate.findMany({
       include: { workItem: true, allocationRevision: { include: { lines: true, queueTurn: true } }, waybills: { orderBy: { issuedAt: 'asc' } } },
       orderBy: { createdAt: 'asc' },
     });
+    res.setHeader('X-Dispatch-Documents-Permission', manage.allowed ? 'MANAGE' : 'VIEW');
     return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,
       waybills: candidate.waybills.map((waybill) => ({ ...waybill, number: waybill.number.toString() })) })) });
   } catch (error) { return dispatchError(res, error); }

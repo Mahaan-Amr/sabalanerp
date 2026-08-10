@@ -65,6 +65,7 @@
     "test:priced-allocation-ledger": "tsx src/services/__tests__/pricedAllocationLedger.test.ts && tsx src/services/__tests__/allocationPricingBinding.test.ts && tsx src/services/__tests__/allocationPricingReadModel.test.ts && tsx src/services/__tests__/dispatchAllocationRetry.test.ts",
     "test:priced-allocation-ledger:db": "tsx src/services/__tests__/allocationPricingPrisma.test.ts",
     "test:dispatch-documents": "tsx src/services/__tests__/dispatchArtifactStorageLock.test.ts && tsx src/services/__tests__/dispatchDocuments.test.ts && tsx src/services/__tests__/dispatchDocumentsDelegation.test.ts && tsx src/services/__tests__/dispatchDocumentsPrismaBehavior.test.ts && tsx src/services/__tests__/dispatchDocumentsTemporaryDatabase.test.ts",
+    "test:accounting-dispatch-documents:api-contract": "tsx --test ../scripts/__tests__/accountingDispatchDocumentsApiContract.test.ts",
     "test:dispatch-documents:db": "tsx src/services/__tests__/dispatchDocumentsPrismaIntegration.test.ts && tsx src/services/__tests__/dispatchDocumentsIssuanceConcurrency.test.ts",
     "test:statement-adjustments": "tsx src/services/__tests__/dispatchCorrectionAdjustmentPolicy.test.ts && tsx src/services/__tests__/statementAdjustment.test.ts && tsx src/services/__tests__/statementAdjustmentRuntime.test.ts",
     "test:statement-adjustments:db": "tsx src/services/__tests__/statementAdjustmentPrisma.test.ts",

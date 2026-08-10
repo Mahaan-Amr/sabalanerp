@@ -85,6 +85,7 @@ import { startSupportTicketMaintenance } from "./services/supportTicketMaintenan
 import { startDispatchBuyerSmsDelivery } from "./services/dispatchBuyerSmsWorker";
 import { startHrDutyDeadlineMaintenance } from "./services/hrDutyEngine";
 import { verifyHrRedesignCutover } from "./services/hrRedesignCutover";
+import { resolveHrRedesignCutoverStartup } from "./services/hrRedesignCutoverStartup";
 
 const prisma = new PrismaClient();
 initializeRecoveryRuntime();
@@ -114,8 +115,6 @@ const validateProductionEnvironment = () => {
     "SMS_IR_DISPATCH_CONFIRM_OTP_TEMPLATE_ID",
     "SMS_IR_DISPATCH_EXIT_TEMPLATE_ID",
     "SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID",
-    "HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH",
-    "HR_REDESIGN_CUTOVER_REVISION",
   ];
   const missingVars = requiredVars.filter((key) => !process.env[key]);
   const hiringTemplateId =
@@ -185,6 +184,9 @@ const validateProductionEnvironment = () => {
 };
 
 validateProductionEnvironment();
+const hrRedesignCutoverStartup = isProduction
+  ? resolveHrRedesignCutoverStartup(process.env)
+  : { enabled: false, acceptancePath: null, sourceRevision: null };
 
 const allowedOrigins = (configuredFrontendUrl || "")
   .split(",")
@@ -399,11 +401,11 @@ app.use(errorHandler);
 
 // Start only after interrupted recovery has been finalized or safely rolled back.
 initializeSystemRecovery(prisma).then(async () => {
-  if (isProduction) {
-    const acceptanceAttestation = JSON.parse(await readFile(process.env.HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH!, "utf8")) as unknown;
+  if (hrRedesignCutoverStartup.enabled) {
+    const acceptanceAttestation = JSON.parse(await readFile(hrRedesignCutoverStartup.acceptancePath!, "utf8")) as unknown;
     await verifyHrRedesignCutover(prisma, {
       acceptanceAttestation,
-      sourceRevision: process.env.HR_REDESIGN_CUTOVER_REVISION!,
+      sourceRevision: hrRedesignCutoverStartup.sourceRevision!,
     });
   }
   if (getRecoveryRuntimeState().mode === "NORMAL") {

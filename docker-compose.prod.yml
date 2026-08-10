@@ -104,6 +104,9 @@ services:
       ALLOW_SANITIZED_RECOVERY: "false"
       APP_VERSION: ${APP_VERSION:-1.0.0}
       APP_COMMIT: ${APP_COMMIT:-unknown}
+      HR_REDESIGN_CUTOVER_ENABLED: ${HR_REDESIGN_CUTOVER_ENABLED:-false}
+      HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH: ${HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH:-}
+      HR_REDESIGN_CUTOVER_REVISION: ${HR_REDESIGN_CUTOVER_REVISION:-}
     volumes:
       - backend_storage_contracts:/app/storage/contracts
       - backend_storage_hr_hiring:/app/storage/hr-hiring

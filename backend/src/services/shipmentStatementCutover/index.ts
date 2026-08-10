@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
+import { link, mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { SHIPMENT_STATEMENT_PRESERVATION_SCOPES } from '../dispatchDocuments/migrationManifest';
 
@@ -131,6 +131,54 @@ export type LegacyPricingCohortSnapshot = {
   sourceApprovalRecordCount: string | number;
   sourceRowCount: string | number;
   counts: Record<string, number>;
+};
+
+type CommandExecution = { exitCode: number; stdout: string; stderr: string };
+
+export const captureAuthoritativeCutoverGates = async (evidence: CutoverEvidence, input: {
+  artifactDirectory: string;
+  sourceCommit: string;
+  incidentContacts: string[];
+  monitoringChecks: string[];
+  run(command: string): Promise<CommandExecution>;
+}): Promise<CutoverEvidence> => {
+  const verified = structuredClone(evidence);
+  await mkdir(input.artifactDirectory, { recursive: true });
+  const composeCommand = 'docker compose -f docker-compose.local.yml ps --format json';
+  const compose = await input.run(composeCommand);
+  let servicesHealthy = false;
+  if (compose.exitCode === 0) {
+    try {
+      const services = compose.stdout.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+      servicesHealthy = services.length > 0 && services.every(service => service.State === 'running' && service.Health === 'healthy');
+    } catch {
+      servicesHealthy = false;
+    }
+  }
+  verified.environment = { composeProject: 'sabalanerp-local', servicesHealthy };
+
+  const acceptance: CutoverEvidence['acceptance'] = [];
+  for (const [index, command] of CUTOVER_ACCEPTANCE_COMMANDS.entries()) {
+    const startedAt = new Date().toISOString();
+    const result = await input.run(command);
+    const completedAt = new Date().toISOString();
+    const outputPath = join(input.artifactDirectory, `acceptance-${String(index + 1).padStart(2, '0')}.log`);
+    const output = `${result.stdout}${result.stderr}`;
+    await writeFile(outputPath, output, { encoding: 'utf8', flag: 'wx' });
+    const artifactPath = join(input.artifactDirectory, `acceptance-${String(index + 1).padStart(2, '0')}.json`);
+    const receipt = { schemaVersion: 1, command, exitCode: result.exitCode, startedAt, completedAt,
+      sourceCommit: input.sourceCommit, outputPath };
+    const receiptBytes = Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`);
+    await writeFile(artifactPath, receiptBytes, { flag: 'wx' });
+    acceptance.push({ command, artifactPath, artifactSha256: hashBytes(receiptBytes), exitCode: result.exitCode,
+      outputSha256: hashBytes(Buffer.from(output)) });
+  }
+  verified.acceptance = acceptance;
+  const exitCode = (command: string) => acceptance.find(item => item.command === command)?.exitCode;
+  verified.deployment.additiveMigrationsOnly = exitCode('npm --prefix backend run verify:shipment-statement-migration') === 0;
+  verified.deployment.constraintsVerified = exitCode('npm --prefix backend run verify:shipment-statement-constraints') === 0;
+  verified.operations = { incidentContacts: [...input.incidentContacts], monitoringChecks: [...input.monitoringChecks] };
+  return verified;
 };
 
 /** Replaces caller claims with values read from immutable run artifacts and an independently recaptured legacy cohort. */

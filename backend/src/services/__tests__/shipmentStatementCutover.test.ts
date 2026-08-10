@@ -8,6 +8,7 @@ import {
   CUTOVER_ACCEPTANCE_COMMANDS,
   activateShipmentStatementCutover,
   buildCutoverManifest,
+  captureAuthoritativeCutoverGates,
   evaluateCutoverEvidence,
   readAndVerifyCutoverManifest,
   verifyFileBackedCutoverEvidence,
@@ -78,6 +79,31 @@ test('file-backed verification rejects hash-shaped caller claims without their a
     })),
     /artifact path/i,
   );
+});
+
+test('authoritative gate capture replaces caller success claims with executed results', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'shipment-gates-'));
+  const caller = passingEvidence();
+  const executed: string[] = [];
+  const captured = await captureAuthoritativeCutoverGates(caller, {
+    artifactDirectory: directory,
+    sourceCommit: 'verified-commit',
+    incidentContacts: ['release-on-call'],
+    monitoringChecks: ['audit-gap-monitor'],
+    run: async command => {
+      executed.push(command);
+      if (command.includes('docker compose')) return { exitCode: 0, stdout: '{"Service":"postgres","State":"running","Health":"healthy"}\n', stderr: '' };
+      const exitCode = command === 'npm run build' ? 1 : 0;
+      return { exitCode, stdout: exitCode === 0 ? 'passed' : '', stderr: exitCode === 0 ? '' : 'build failed' };
+    },
+  });
+  assert.equal(executed.length, CUTOVER_ACCEPTANCE_COMMANDS.length + 1);
+  assert.equal(captured.environment.servicesHealthy, true);
+  assert.equal(captured.deployment.additiveMigrationsOnly, true);
+  assert.equal(captured.deployment.constraintsVerified, true);
+  assert.equal(captured.acceptance.find(item => item.command === 'npm run build')?.exitCode, 1);
+  assert.deepEqual(captured.operations, { incidentContacts: ['release-on-call'], monitoringChecks: ['audit-gap-monitor'] });
+  assert.equal(evaluateCutoverEvidence(captured).decision, 'NO_GO');
 });
 
 test('file-backed verification recomputes hashes and binds legacy evidence to the current cohort', async () => {

@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { exec, execFileSync } from 'node:child_process';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import {
   activateShipmentStatementCutover,
   buildCutoverManifest,
+  captureAuthoritativeCutoverGates,
   readAndVerifyCutoverManifest,
   verifyFileBackedCutoverEvidence,
   writeImmutableCutoverManifest,
@@ -14,7 +15,7 @@ import {
 import { PrismaShipmentStatementCutoverRepository } from '../src/services/shipmentStatementCutover/prismaRepository';
 import { buildLegacyPricingManifest, loadLegacyPricingCandidates } from '../src/services/legacyApprovedPricing';
 
-const usage = 'Usage: shipment-statement-cutover.ts manifest --evidence <json> --out <json> | activate --manifest <json> --receipt <json>';
+const usage = 'Usage: shipment-statement-cutover.ts manifest --evidence <json> --artifacts <dir> --out <json> | activate --manifest <json> --receipt <json>';
 const args = process.argv.slice(2);
 const command = args.shift();
 const option = (name: string) => {
@@ -31,6 +32,7 @@ const requiredEnvironment = (name: string) => {
   if (!value) throw new Error(`${name} is required.`);
   return value;
 };
+const requiredEnvironmentList = (name: string) => requiredEnvironment(name).split(',').map(value => value.trim()).filter(Boolean);
 
 const signingKey = requiredEnvironment('SHIPMENT_STATEMENT_CUTOVER_SIGNING_KEY');
 const prisma = new PrismaClient();
@@ -46,6 +48,13 @@ const recaptureLegacyCohort = async () => {
     sourceApprovalRecordCount: manifest.sourceApprovalRecordCount, sourceRowCount: manifest.sourceRowCount,
     counts: manifest.counts };
 };
+
+const repositoryRoot = basename(process.cwd()).toLowerCase() === 'backend' ? resolve(process.cwd(), '..') : process.cwd();
+const runCommand = (command: string) => new Promise<{ exitCode: number; stdout: string; stderr: string }>(resolveRun => {
+  exec(command, { cwd: repositoryRoot, env: process.env, maxBuffer: 20 * 1024 * 1024 }, (error, stdout, stderr) => {
+    resolveRun({ exitCode: typeof error?.code === 'number' ? error.code : error ? 1 : 0, stdout, stderr });
+  });
+});
 
 const writeReceipt = async (destination: string, receipt: Record<string, unknown>) => {
   const directory = dirname(destination);
@@ -72,7 +81,29 @@ const writeReceipt = async (destination: string, receipt: Record<string, unknown
 const run = async () => {
   if (command === 'manifest') {
     const callerEvidence = JSON.parse(await readFile(requiredOption('--evidence'), 'utf8')) as CutoverEvidence;
-    const evidence = await verifyFileBackedCutoverEvidence(callerEvidence, recaptureLegacyCohort);
+    const currentLegacy = await recaptureLegacyCohort();
+    const unresolvedLegacy = Number(currentLegacy.counts.REPAIR_REQUIRED ?? 0)
+      + Number(currentLegacy.counts.EVIDENCE_CONFLICT ?? 0) + Number(currentLegacy.counts.STALE ?? 0);
+    const unreviewedLegacy = Number(currentLegacy.counts.LEGACY_REVIEW_REQUIRED ?? 0);
+    let evidence: CutoverEvidence;
+    if (unresolvedLegacy !== 0 || unreviewedLegacy !== 0) {
+      evidence = structuredClone(callerEvidence);
+      evidence.environment = { composeProject: 'sabalanerp-local', servicesHealthy: false };
+      evidence.deployment.additiveMigrationsOnly = false;
+      evidence.deployment.constraintsVerified = false;
+      evidence.acceptance = [];
+      evidence.operations = { incidentContacts: [], monitoringChecks: [] };
+      evidence.legacy = { ...evidence.legacy, manifestHash: currentLegacy.manifestHash,
+        dryRunCompleted: false, applyCompleted: false, repeatCompleted: false, repeatCreatedCount: 0,
+        unresolvedCount: unresolvedLegacy, quarantinedCount: unresolvedLegacy, unreviewedCohortCount: unreviewedLegacy };
+    } else {
+      const captured = await captureAuthoritativeCutoverGates(callerEvidence, {
+        artifactDirectory: requiredOption('--artifacts'), sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+        incidentContacts: requiredEnvironmentList('SHIPMENT_STATEMENT_INCIDENT_CONTACTS'),
+        monitoringChecks: requiredEnvironmentList('SHIPMENT_STATEMENT_MONITORING_CHECKS'), run: runCommand,
+      });
+      evidence = await verifyFileBackedCutoverEvidence(captured, async () => currentLegacy);
+    }
     const state = await repository.loadState();
     evidence.deployment.databaseGateEnabled = state.enabled;
     evidence.deployment.environmentGateEnabled = process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED === 'true';

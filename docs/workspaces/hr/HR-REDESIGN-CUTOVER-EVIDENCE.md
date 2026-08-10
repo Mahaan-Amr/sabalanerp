@@ -5,7 +5,9 @@ Ticket: [#245](https://github.com/Mahaan-Amr/sabalanerp/issues/245)
 
 ## Current decision
 
-**BLOCKED — do not activate the HR redesign in production.**
+**TICKET CLOSURE APPROVED WITH WAIVER — production activation remains fail-closed.**
+
+On 2026-08-10 the product owner explicitly removed the 108 legacy reconciliation reviews, the unrelated System Recovery Design System adoption debt, and the incomplete browser E2E matrix from #245's closure requirements. This waiver closes the implementation ticket without recording those checks as passes and without weakening the revision-bound production activation gate.
 
 The supported production backend now runs the database-backed HR redesign dry-run before opening its listening port. Startup fails closed while safe backfills, actionable reconciliation conflicts, or blocking configuration/ownership failures remain. Full-access baseline authorization is limited to active `ADMIN` users; there is no named-user exception.
 
@@ -57,7 +59,7 @@ The release attestation is bound to `HR_REDESIGN_CUTOVER_REVISION` and must mark
 
 - #226 is closed as the approved governing resolution.
 - #236–#244 are closed with focused implementation evidence.
-- #245 remains open with `needs-info` and is blocked by this evidence; its progress/disposition comment records the live counts and the approved Company Manager workflow change.
+- #245 is closed by explicit product-owner waiver after delivery of the Company Manager workflow, permanent QA-account purge, fail-closed activation gate, and current evidence. The waived reconciliation, unrelated adoption debt, and incomplete browser E2E remain documented as non-passing evidence rather than silently rewritten as successful.
 - #246 is the umbrella specification and is not independently runnable; its contradictory `ready-for-agent` label was removed and a disposition comment points remaining work to #245.
 - #130 and #136 remain open and independent. This Cutover does not absorb, weaken, or close their Applicant/Personnel archival and irreversible-erasure acceptance scope.
 

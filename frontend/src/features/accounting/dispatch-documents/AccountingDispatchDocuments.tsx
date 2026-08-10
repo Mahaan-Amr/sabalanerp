@@ -23,6 +23,7 @@ import type { DispatchDocumentHandoff, DispatchDocumentsClient } from './dispatc
 import {
   canRunDispatchDocumentCommand,
   formatDisplayedMoney,
+  hasCompletePrimaryBundle,
   type DispatchDocumentArtifact,
   type DispatchDocumentCase,
   type DispatchDocumentFilter,
@@ -39,6 +40,7 @@ const printActionLabels = { WAYBILL: 'چاپ بارنامه', STATEMENT: 'چاپ
 const faDate = (value: string) => new Date(value).toLocaleString('fa-IR');
 
 function ArtifactList({ artifacts }: { artifacts: DispatchDocumentArtifact[] }) {
+  if (!artifacts.length) return <ErpEmptyState title="فایل نگهداری‌شده‌ای برای این سابقه قابل اثبات نیست" description="تحویل سند از این نما غیرفعال است؛ شواهد اصلی باید از مسیر بازیابی بررسی شود." />;
   return <div className="space-y-3">
     {artifacts.map((item) => <ErpCard key={item.id} className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -135,11 +137,14 @@ export function CaseReview({ item, workspace, stale, pending, rejectionReason, o
   const canAccept = canRunDispatchDocumentCommand('ACCEPT', workspace, item, unsafe);
   const canPrint = canRunDispatchDocumentCommand('PRINT', workspace, item, unsafe);
   const canReplace = canRunDispatchDocumentCommand('REPLACE', workspace, item, unsafe);
+  const completePrimaryBundle = hasCompletePrimaryBundle(item);
   return <div className="space-y-4" dir="rtl">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-bold text-[var(--sds-text-primary)]">{item.loadingNumber} · {item.customerName}</h2><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{item.destination} · پلاک {item.vehiclePlate} · راننده: {item.driverName}</p></div><ErpBadge tone={stateTone[item.state]}>{filterLabels[item.state]}</ErpBadge></div>
     {item.state === 'BLOCKED' && <ErpInlineState kind="error" title={item.readiness.label} />}
     {item.state === 'READY' && <ErpInlineState kind="success" title="شواهد مقدار، هویت ردیف، قیمت، تخفیف و ارز کامل و آماده تصمیم است." />}
-    {item.state === 'ISSUED' && item.bundle && <ErpInlineState kind="success" title={`بسته شماره ${item.bundle.number} از یک تصویر ثابت صادر شده و فایل‌های اصلی نگهداری شده‌اند.`} />}
+    {item.state === 'ISSUED' && item.bundle && (completePrimaryBundle
+      ? <ErpInlineState kind="success" title={`بسته شماره ${item.bundle.number} از یک تصویر ثابت صادر شده و فایل‌های اصلی نگهداری شده‌اند.`} />
+      : <ErpInlineState kind="stale" title="بسته کامل بارنامه و صورت‌حساب در این نما قابل اثبات نیست؛ تحویل و جایگزینی غیرفعال است." />)}
     {item.readiness.reasons.map((reason) => <ErpCard key={reason.id} className="p-4"><p className="text-sm text-[var(--sds-text-primary)]">{reason.label}</p><div className="mt-3"><ErpButton label={reason.ownerLabel} href={reason.ownerHref} variant="outline" className="min-h-11" /></div></ErpCard>)}
     <ErpSummaryGrid columns={3} items={[{ label: 'مقدار قطعی', value: `${item.contracts.reduce((count, contract) => count + contract.rows.length, 0).toLocaleString('fa-IR')} ردیف پایدار`, hint: 'ویرایش‌ناپذیر در حسابداری' }, { label: 'وضعیت قیمت', value: item.readiness.label, hint: 'منطبق با نهایی‌سازی لجستیک', tone: item.state === 'BLOCKED' ? 'danger' : 'success' }, { label: 'جمع ارسال', value: formatDisplayedMoney(item.total), hint: 'جمع معتبر ذخیره‌شده', tone: 'primary' }]} />
     <ErpCard className="p-4"><h3 className="font-semibold text-[var(--sds-text-primary)]">ردیف‌های منبع</h3><div className="mt-3 space-y-4">{item.contracts.map((contract) => <section key={contract.id} aria-label={`قرارداد ${contract.number}`}><h4 className="text-sm font-semibold text-[var(--sds-text-primary)]">قرارداد {contract.number}</h4><div className="mt-2 space-y-2">{contract.rows.map((row) => <div key={row.id} className="rounded-lg border border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] p-3 text-sm"><strong>{row.label}</strong><p className="mt-1 text-[var(--sds-text-secondary)]">{row.quantity} {row.unit} · خالص {formatDisplayedMoney(row.net)}</p><p className="mt-1 break-all text-xs text-[var(--sds-text-muted)]" dir="ltr">{row.id}</p></div>)}</div></section>)}</div></ErpCard>

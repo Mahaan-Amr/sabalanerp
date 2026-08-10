@@ -100,8 +100,14 @@ export function canRunDispatchDocumentCommand(
   staleOrPending: boolean,
 ): boolean {
   if (workspace.permission === 'UNAUTHORIZED' || staleOrPending) return false;
-  if (command === 'DOWNLOAD' || command === 'PRINT') return item.state === 'ISSUED' && Boolean(item.bundle);
+  if (command === 'DOWNLOAD' || command === 'PRINT') return item.state === 'ISSUED' && hasCompletePrimaryBundle(item);
   if (workspace.permission !== 'MANAGE') return false;
   if (command === 'ACCEPT' || command === 'REJECT') return item.state === 'READY' && item.readiness.code === 'READY';
-  return command === 'REPLACE' && item.state === 'ISSUED' && item.bundle?.status === 'ISSUED';
+  return command === 'REPLACE' && item.state === 'ISSUED' && item.bundle?.status === 'ISSUED' && hasCompletePrimaryBundle(item);
+}
+
+export function hasCompletePrimaryBundle(item: DispatchDocumentCase): boolean {
+  if (!item.bundle) return false;
+  return item.bundle.artifacts.filter((artifact) => artifact.kind === 'WAYBILL').length === 1
+    && item.bundle.artifacts.filter((artifact) => artifact.kind === 'STATEMENT').length === 1;
 }

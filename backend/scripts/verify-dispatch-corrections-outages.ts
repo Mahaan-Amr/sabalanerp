@@ -23,6 +23,12 @@ const main = async () => {
   const request = (token: string, path: string, init: RequestInit = {}) => fetch(`http://127.0.0.1:5000${path}`, { ...init,
     headers: { 'content-type': 'application/json', cookie: `${SESSION_COOKIE}=${encodeURIComponent(token)}`, ...(init.headers || {}) } });
   const jsonRequest = (token: string, path: string, body: unknown) => request(token, path, { method: 'POST', body: JSON.stringify(body) });
+  const postCorrection = (token: string, correctionId: string) => {
+    const idempotencyKey = `post-correction-${randomUUID()}`;
+    return request(token, `/api/accounting/dispatch-corrections/${correctionId}/post`, { method: 'POST', body: '{}', headers: {
+      'Idempotency-Key': idempotencyKey, 'X-Correlation-ID': `correction-outage-verifier:${idempotencyKey}`,
+    } });
+  };
   const expectStatus = async (response: Response, expected: number) => {
     if (response.status !== expected) assert.fail(`Expected HTTP ${expected}, received ${response.status}: ${await response.text()}`);
   };
@@ -41,7 +47,7 @@ const main = async () => {
   const correction = (await createResponse.json() as any).data;
   assert.equal((await prisma.shipmentQuantityProjection.findUniqueOrThrow({ where: { contractItemId: line.sourceContractItemId } })).physicallyDispatched.toFixed(3),
     projectionBefore.physicallyDispatched!.toFixed(3), 'draft correction cannot affect the projection');
-  const postedResponse = await jsonRequest(actorSession.token, `/api/accounting/dispatch-corrections/${correction.id}/post`, {});
+  const postedResponse = await postCorrection(actorSession.token, correction.id);
   await expectStatus(postedResponse, 200);
   const afterPositive = await prisma.shipmentQuantityProjection.findUniqueOrThrow({ where: { contractItemId: line.sourceContractItemId } });
   assert.equal(afterPositive.physicallyDispatched!.toFixed(3), projectionBefore.physicallyDispatched!.add('0.500').toFixed(3));
@@ -52,7 +58,7 @@ const main = async () => {
     lines: [{ contractItemId: line.sourceContractItemId, quantity: '-0.500' }] });
   await expectStatus(reversalResponse, 201);
   const reversal = (await reversalResponse.json() as any).data;
-  assert.equal((await jsonRequest(actorSession.token, `/api/accounting/dispatch-corrections/${reversal.id}/post`, {})).status, 200);
+  assert.equal((await postCorrection(actorSession.token, reversal.id)).status, 200);
   assert.equal((await prisma.shipmentQuantityProjection.findUniqueOrThrow({ where: { contractItemId: line.sourceContractItemId } })).physicallyDispatched!.toFixed(3),
     projectionBefore.physicallyDispatched!.toFixed(3));
   assert.equal((await jsonRequest(actorSession.token, '/api/accounting/dispatch-corrections', { waybillId: exited.waybillId,
@@ -86,13 +92,13 @@ const main = async () => {
     lines: [{ contractItemId: line.sourceContractItemId, quantity: '-0.250', returnEvidenceId: returnEvidence.id }] });
   await expectStatus(prematureNegativeResponse, 201);
   const prematureNegative = (await prematureNegativeResponse.json() as any).data;
-  assert.equal((await jsonRequest(actorSession.token, `/api/accounting/dispatch-corrections/${prematureNegative.id}/post`, {})).status, 409);
+  assert.equal((await postCorrection(actorSession.token, prematureNegative.id)).status, 409);
   const negativeResponse = await jsonRequest(actorSession.token, '/api/accounting/dispatch-corrections', { waybillId: exited.waybillId,
     reason: 'Accepted Guard-proven physical return', effectiveAt: new Date().toISOString(),
     lines: [{ contractItemId: line.sourceContractItemId, quantity: '-0.250', returnEvidenceId: returnEvidence.id }] });
   await expectStatus(negativeResponse, 201);
   const negative = (await negativeResponse.json() as any).data;
-  await expectStatus(await jsonRequest(actorSession.token, `/api/accounting/dispatch-corrections/${negative.id}/post`, {}), 200);
+  await expectStatus(await postCorrection(actorSession.token, negative.id), 200);
   assert.equal((await prisma.shipmentQuantityProjection.findUniqueOrThrow({ where: { contractItemId: line.sourceContractItemId } })).physicallyDispatched!.toFixed(3),
     projectionBefore.physicallyDispatched!.sub('0.250').toFixed(3));
 

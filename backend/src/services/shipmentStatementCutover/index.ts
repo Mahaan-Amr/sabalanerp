@@ -27,6 +27,7 @@ export const CUTOVER_ACCEPTANCE_COMMANDS = [
   'npm run test:dispatch-document-pdfs:docker',
   'npm --prefix frontend run test:accounting-dispatch-documents',
   'npx playwright test --config=playwright.design-system.config.ts tests/design-system-e2e/accounting-dispatch-documents.spec.ts',
+  'npm run test:accounting-dispatch-documents:e2e:real',
   'npm run design-system:check',
   'npm run test:design-system-foundation',
   'npm run test:design-system-adoption',

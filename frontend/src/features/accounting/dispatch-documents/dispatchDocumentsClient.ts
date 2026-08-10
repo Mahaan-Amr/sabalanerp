@@ -76,7 +76,7 @@ export function mapDispatchDocumentReadModel(value: unknown): DispatchDocumentCa
   const status = text(candidate.status);
   const blockedCode = status === 'EVIDENCE_CONFLICT' ? 'EVIDENCE_CONFLICT' : status === 'STALE_REQUIRES_SUCCESSOR' ? 'STALE_PRICING' : 'INCOMPLETE_EVIDENCE';
   const state: DispatchDocumentCase['state'] = active ? 'ISSUED' : status === 'PENDING' ? 'READY' : 'BLOCKED';
-  const total = addDecimals(events.map((event) => text(event.netAmount, '0')));
+  const total = events.length ? addDecimals(events.map((event) => text(event.netAmount, '0'))) : 'UNKNOWN';
   const contracts = Array.from(contractGroups.values());
 
   const bundle = active ? {
@@ -104,11 +104,13 @@ export function mapDispatchDocumentReadModel(value: unknown): DispatchDocumentCa
 
   return {
     id: text(candidate.id), state,
-    customerName: text(customer.companyName, text(customer.name, text(customer.id))),
-    destination: text(project.address, text(project.name, text(project.id))),
-    loadingNumber: text(loading.number, text(loading.id)), finalizedAt: iso(revision.finalizedAt || snapshot.finalizedAt),
-    total: money(total, currency), vehiclePlate: text(admission.vehiclePlate, text(record(admission.vehicle).plate, text(admission.externalVehicleId))),
-    driverName: text(admission.driverName, text(record(admission.driver).name, text(admission.externalDriverId || admission.internalDriverId))),
+    customerName: text(customer.companyName, text(customer.name, text(customer.id, 'مشتری در تصویر ثابت ثبت نشده'))),
+    destination: text(project.address, text(project.name, text(project.id, 'مقصد در تصویر ثابت ثبت نشده'))),
+    loadingNumber: text(loading.number, text(loading.id, `پرونده ${text(candidate.id)}`)), finalizedAt: iso(revision.finalizedAt || snapshot.finalizedAt),
+    total: money(total, currency), vehiclePlate: text(admission.vehiclePlate, text(record(admission.vehicle).plate,
+      text(admission.externalVehicleId, 'ثبت نشده در تصویر ثابت'))),
+    driverName: text(admission.driverName, text(record(admission.driver).name,
+      text(admission.externalDriverId || admission.internalDriverId, 'ثبت نشده در تصویر ثابت'))),
     readiness: state === 'BLOCKED'
       ? { code: blockedCode, label: status === 'EVIDENCE_CONFLICT' ? 'تعارض شواهد' : 'نیازمند اصلاح در منبع', reasons: [{ id: `${candidate.id}:${blockedCode}`,
         label: text(candidate.dispositionReason, 'شواهد این پرونده برای صدور آماده نیست.'), ownerLabel: 'بازگشت به لجستیک', ownerHref: '/dashboard/logistics' }] }

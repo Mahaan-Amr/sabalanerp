@@ -22,6 +22,10 @@ import { SHIPMENT_STATEMENT_PRESERVATION_SCOPES } from '../dispatchDocuments/mig
 
 const sha = 'a'.repeat(64);
 
+test('cutover requires the authenticated mounted-backend Accounting journey', () => {
+  assert.ok(CUTOVER_ACCEPTANCE_COMMANDS.includes('npm run test:accounting-dispatch-documents:e2e:real' as never));
+});
+
 const passingEvidence = (): CutoverEvidence => ({
   environment: { composeProject: 'sabalanerp-local', servicesHealthy: true },
   deployment: {

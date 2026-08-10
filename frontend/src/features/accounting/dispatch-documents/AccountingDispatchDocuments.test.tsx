@@ -36,3 +36,12 @@ test('blocked case names evidence and owning recovery path without an Accounting
   assert.match(html, /بازگشت به لجستیک/);
   assert.doesNotMatch(html, /پذیرش و صدور/);
 });
+
+test('issued history without a complete retained pair names the evidence gap and disables handoff', async () => {
+  const workspace = await createFixtureDispatchDocumentsClient('MANAGE').load();
+  const item = structuredClone(workspace.cases.find((candidate) => candidate.id === 'dispatch-issued')!);
+  item.bundle!.artifacts = item.bundle!.artifacts.filter((artifact) => artifact.kind === 'WAYBILL');
+  const html = renderToStaticMarkup(<CaseReview item={item} workspace={workspace} stale={false} pending={false} rejectionReason="" onRejectionReason={noop} onAccept={noop} onReject={noop} onHandoff={noop} onMore={noop} />);
+  assert.match(html, /بسته کامل بارنامه و صورت‌حساب در این نما قابل اثبات نیست/);
+  assert.equal((html.match(/disabled=""/g) || []).length, 5); // two downloads plus three print actions
+});

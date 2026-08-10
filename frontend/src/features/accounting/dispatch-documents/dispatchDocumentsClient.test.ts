@@ -67,3 +67,19 @@ test('production adapter maps the frozen combined backend read model without cha
   });
   assert.equal(item.bundle?.artifacts[0].id, 'artifact-waybill');
 });
+
+test('incomplete historical snapshots stay explicit and never become blank identity or zero money', () => {
+  const item = mapDispatchDocumentReadModel({
+    id: 'legacy-candidate', status: 'ACCEPTED',
+    allocationRevision: { snapshot: {}, lines: [], pricingReferences: [], pricedAllocationEvents: [] },
+    waybills: [{ id: 'legacy-waybill', number: '1258', status: 'ISSUED',
+      issuedAt: '2026-08-09T12:00:00Z', documentArtifacts: [], printHandoffs: [], statementAdjustments: [] }],
+  });
+
+  assert.equal(item.loadingNumber, 'پرونده legacy-candidate');
+  assert.equal(item.customerName, 'مشتری در تصویر ثابت ثبت نشده');
+  assert.equal(item.destination, 'مقصد در تصویر ثابت ثبت نشده');
+  assert.equal(item.vehiclePlate, 'ثبت نشده در تصویر ثابت');
+  assert.equal(item.driverName, 'ثبت نشده در تصویر ثابت');
+  assert.equal(item.total.amount, 'UNKNOWN');
+});

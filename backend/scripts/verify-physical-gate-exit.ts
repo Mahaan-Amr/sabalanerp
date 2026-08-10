@@ -29,6 +29,10 @@ const main = async () => {
   const request = (token: string, path: string, init: RequestInit = {}) => fetch(`http://127.0.0.1:5000${path}`, {
     ...init, headers: { 'content-type': 'application/json', cookie: `${SESSION_COOKIE}=${encodeURIComponent(token)}`, ...(init.headers || {}) },
   });
+  const exitRequest = (token: string, authorizationId: string, idempotencyKey: string) => request(token,
+    `/api/security/exit-desk/authorizations/${authorizationId}/exit`, { method: 'POST', body: '{}', headers: {
+      'Idempotency-Key': idempotencyKey, 'X-Correlation-ID': `physical-exit-verifier:${idempotencyKey}`,
+    } });
   assert.equal((await fetch('http://127.0.0.1:5000/api/security/exit-desk/authorizations')).status, 401);
   assert.equal((await request(deniedSession.token, '/api/security/exit-desk/authorizations')).status, 403);
   assert.equal((await request(actorSession.token, '/api/security/vehicle-movements/ready-exit')).status, 410);
@@ -43,10 +47,11 @@ const main = async () => {
   const revision = active[0].waybill.candidate.allocationRevision;
   const projectionBefore = await prisma.shipmentQuantityProjection.findUniqueOrThrow({ where: { contractItemId: revision.lines[0].sourceContractItemId } });
   const quantity = revision.lines.reduce((total, line) => total + Number(line.quantity), 0);
-  const exitResponse = await request(actorSession.token, `/api/security/exit-desk/authorizations/${active[0].id}/exit`, { method: 'POST', body: '{}' });
+  const normalExitKey = `physical-exit-${randomUUID()}`;
+  const exitResponse = await exitRequest(actorSession.token, active[0].id, normalExitKey);
   if (exitResponse.status !== 201) assert.fail(`Physical exit API returned ${exitResponse.status}: ${await exitResponse.text()}`);
   const exitBody = await exitResponse.json() as { data: { id: string; smsIntent: { id: string; phoneNumber: string; dispatchNumber: string; vehiclePlate: string } } };
-  const duplicateResponse = await request(actorSession.token, `/api/security/exit-desk/authorizations/${active[0].id}/exit`, { method: 'POST', body: '{}' });
+  const duplicateResponse = await exitRequest(actorSession.token, active[0].id, normalExitKey);
   assert.equal(duplicateResponse.status, 201);
   const duplicate = (await duplicateResponse.json() as { data: { id: string } }).data;
   assert.equal(duplicate.id, exitBody.data.id, 'an HTTP retry returns the immutable prior exit');
@@ -89,14 +94,14 @@ const main = async () => {
     alertType: 'BUYER_EXIT_SMS_NEEDS_ATTENTION' } }), 'permanent SMS failures raise a visible alert');
 
   const revoked = await prisma.dispatchExitAuthorization.findFirstOrThrow({ where: { status: 'REVOKED' } });
-  assert.equal((await request(actorSession.token, `/api/security/exit-desk/authorizations/${revoked.id}/exit`, { method: 'POST', body: '{}' })).status, 409);
+  assert.equal((await exitRequest(actorSession.token, revoked.id, `revoked-exit-${randomUUID()}`)).status, 409);
   const expiredSession = await prisma.dispatchConfirmationSession.create({ data: { waybillId: active[0].waybillId, method: active[0].method,
     status: 'CONFIRMED', driverSource: active[0].driverSource, driverId: active[0].driverId, accountingActorId: actor.id,
     waybillIntegrityHash: active[0].waybillIntegrityHash, workstationId: 'EXPIRED-VERIFY', expiresAt: new Date(0), confirmedAt: new Date(0) } });
   const expired = await prisma.dispatchExitAuthorization.create({ data: { waybillId: active[0].waybillId, sessionId: expiredSession.id,
     status: 'ACTIVE', method: active[0].method, driverSource: active[0].driverSource, driverId: active[0].driverId,
     waybillIntegrityHash: active[0].waybillIntegrityHash, evidenceSnapshot: {}, integrityHash: randomUUID(), issuedAt: new Date(0), validUntil: new Date(1) } });
-  assert.equal((await request(actorSession.token, `/api/security/exit-desk/authorizations/${expired.id}/exit`, { method: 'POST', body: '{}' })).status, 409);
+  assert.equal((await exitRequest(actorSession.token, expired.id, `expired-exit-${randomUUID()}`)).status, 409);
   assert.equal((await prisma.dispatchExitAuthorization.findUniqueOrThrow({ where: { id: expired.id } })).status, 'EXPIRED',
     'expiration is committed even though the exit command is rejected');
 
@@ -107,7 +112,7 @@ const main = async () => {
     if (changed.count !== 1) throw new Error('Authorization already finalized');
   });
   const competing = await Promise.allSettled([
-    (async () => { const response = await request(actorSession.token, `/api/security/exit-desk/authorizations/${active[1].id}/exit`, { method: 'POST', body: '{}' });
+    (async () => { const response = await exitRequest(actorSession.token, active[1].id, `competing-exit-${randomUUID()}`);
       if (response.status !== 201) throw new Error(`Competing HTTP exit lost with ${response.status}`); return response.json(); })(),
     revoke(),
     voidAccountingDispatchWaybill(prisma, { waybillId: active[1].waybillId, reason: 'Competing verification command',

@@ -197,7 +197,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       await tx.accountingDispatchWorkItem.update({ where: { candidateId: candidate.id }, data: { status: 'COMPLETED', completedAt: issuedAt } });
       const result = { candidateId: candidate.id, status: 'ACCEPTED' as const,
         waybill: { id: waybill.id, number: waybill.number.toString(), status: 'ISSUED' as const, issuedAt: waybill.issuedAt.toISOString(), replacesWaybillId: null } };
-      await tx.dispatchDocumentCommandResult.create({ data: { waybillId: waybill.id, scope: 'CANDIDATE', scopeId: candidate.id,
+      await tx.dispatchDocumentCommandResult.create({ data: { scope: 'CANDIDATE', scopeId: candidate.id,
         idempotencyKey: input.idempotencyKey, command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED', result: storedCommandResult(result, input.intentFingerprint),
         actorId: input.actorId, correlationId: input.correlationId, completedAt: issuedAt } });
       await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id,
@@ -319,7 +319,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
         }) } } });
       const result = { voided: { id: predecessor.id, number: predecessor.number.toString(), status: 'VOIDED' as const },
         replacement: { id: replacement.id, number: replacement.number.toString(), status: 'ISSUED' as const, issuedAt: replacement.issuedAt.toISOString(), replacesWaybillId: predecessor.id } };
-      await tx.dispatchDocumentCommandResult.create({ data: { waybillId: replacement.id, scope: 'WAYBILL', scopeId: predecessor.id,
+      await tx.dispatchDocumentCommandResult.create({ data: { waybillId: predecessor.id, scope: 'WAYBILL', scopeId: predecessor.id,
         idempotencyKey: input.idempotencyKey, command: 'REPLACE', status: 'SUCCEEDED', result: storedCommandResult(result, input.intentFingerprint), actorId: input.actorId,
         correlationId: input.correlationId, completedAt: at } });
       await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: predecessor.id, eventType: 'DOCUMENT_BUNDLE_REPLACED',

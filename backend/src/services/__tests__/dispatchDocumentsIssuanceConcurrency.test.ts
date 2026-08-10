@@ -56,7 +56,9 @@ const run = async () => {
     const decisionCandidate = candidates.find(item => item.id !== candidate?.id);
     assert.ok(candidate && decisionCandidate,
       'production decision and issuance races require one external-driver and one other pending candidate');
-    const actor = await observer.user.findFirstOrThrow({ where: { isActive: true }, select: { id: true } });
+    const { actor, authority: accountingAuthority } = await createAuthorizedActorFixture(observer, {
+      runId: database.runId, workspace: 'accounting', feature: 'accounting_dispatch_candidates_manage',
+      workspacePermission: 'admin' });
     const manifest = await observer.shipmentStatementMigrationManifest.create({ data: {
       migrationName: `dispatch-documents-concurrency-${database.runId}`, schemaVersion: 1,
       sourceSchemaHash: createHash('sha256').update(`source-${database.runId}`).digest('hex'), createdBy: actor.id,
@@ -95,7 +97,8 @@ const run = async () => {
       expectedSourceIntegrityHash: '7'.repeat(64), waybillSnapshot: { candidateId: candidate.id },
       waybill: { id: waybillId, number, status: 'ISSUED' as const, issuedAt, replacesWaybillId: null }, artifacts,
       idempotencyKey: `same-key-${database.runId}`, actorId: actor.id,
-      correlationId: `same-key-${database.runId}`, intentFingerprint: createHash('sha256').update(`same-intent-${database.runId}`).digest('hex') };
+      correlationId: `same-key-${database.runId}`, authority: accountingAuthority,
+      intentFingerprint: createHash('sha256').update(`same-intent-${database.runId}`).digest('hex') };
 
     const decisionWaybillId = randomUUID();
     const decisionNumber = await first.allocateWaybillNumber();
@@ -106,7 +109,8 @@ const run = async () => {
       waybill: { ...input.waybill, id: decisionWaybillId, number: decisionNumber },
       artifacts: input.artifacts.map(item => ({ ...item, id: randomUUID(), waybillId: decisionWaybillId,
         storageKey: `${item.storageKey}-decision` })), idempotencyKey: `decision-accept-${database.runId}`,
-      correlationId: `decision-accept-${database.runId}`, intentFingerprint: decisionIntent };
+      correlationId: `decision-accept-${database.runId}`, authority: accountingAuthority,
+      intentFingerprint: decisionIntent };
     const decisionResults = await Promise.allSettled([
       first.acceptAndIssue(decisionInput),
       second.rejectCandidate({ candidateId: decisionCandidate.id, action: 'REJECT', reason: 'concurrent rejection',
@@ -114,6 +118,11 @@ const run = async () => {
         correlationId: `decision-reject-${database.runId}`,
         intentFingerprint: createHash('sha256').update(`decision-reject-${database.runId}`).digest('hex') }),
     ]);
+    if (decisionResults[0].status === 'rejected') {
+      const reason = decisionResults[0].reason as { name?: string; message?: string; code?: string; meta?: unknown };
+      throw new Error(`Lock-owning production issuance rejected: ${JSON.stringify({ name: reason?.name,
+        message: reason?.message || String(decisionResults[0].reason), code: reason?.code, meta: reason?.meta })}`);
+    }
     assert.equal(decisionResults[0].status, 'fulfilled', 'the lock-owning production issuance command commits first');
     assert.equal(decisionResults[1].status, 'rejected', 'the competing production rejection observes the terminal decision');
     assert.equal((await observer.accountingDispatchCandidate.findUniqueOrThrow({ where: { id: decisionCandidate.id } })).status,
@@ -121,6 +130,9 @@ const run = async () => {
     assert.equal(await observer.accountingDispatchWaybill.count({ where: { candidateId: decisionCandidate.id } }), 1);
     assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE',
       scopeId: decisionCandidate.id } }), 1);
+    assert.equal((await observer.dispatchDocumentCommandResult.findFirstOrThrow({ where: { scope: 'CANDIDATE',
+      scopeId: decisionCandidate.id } })).waybillId, null,
+    'candidate-scoped command evidence must retain waybill identity in its result/audits without violating scope identity');
     assert.equal(await observer.shipmentQuantityEvidence.count({ where: { sourceType: 'ACCOUNTING_CANDIDATE_DISPOSITION',
       sourceId: { startsWith: `${decisionCandidate.id}:` } } }), 0, 'the losing rejection releases no reservation evidence');
 
@@ -217,14 +229,23 @@ const run = async () => {
       replacement: { id: replacementId, number: replacementNumber, status: 'ISSUED' as const,
         issuedAt: new Date().toISOString(), replacesWaybillId: predecessor.id }, artifacts: replacementArtifacts,
       reason: 'concurrent replacement', idempotencyKey: `replace-${database.runId}`, actorId: actor.id,
-      correlationId: `replace-${database.runId}`, authority: { actorRole: 'ADMIN', workspace: 'accounting' },
+      correlationId: `replace-${database.runId}`, authority: accountingAuthority,
       intentFingerprint: createHash('sha256').update(`replace-${database.runId}`).digest('hex') };
     const exitService = new PhysicalGateExitService(firstRaw, { now: () => new Date() });
     const lifecycleResults = await Promise.allSettled([
       exitService.recordExit({ authorizationId: authorization.id, actorId: guard.id,
-        effectiveAuthority: guardAuthority }),
+        effectiveAuthority: guardAuthority, idempotencyKey: `guard-exit-${database.runId}`,
+        correlationId: `guard-exit-${database.runId}`, reasonDetail: 'Issue 260 concurrent lifecycle proof' }),
       second.replaceWaybill(replacementInput),
     ]);
+    if (lifecycleResults.every(result => result.status === 'rejected')) {
+      const diagnostics = lifecycleResults.map((result, index) => {
+        const reason = (result as PromiseRejectedResult).reason as { name?: string; message?: string; code?: string; meta?: unknown };
+        return { actor: index === 0 ? 'guard-exit' : 'accounting-replacement', name: reason?.name,
+          message: reason?.message || String((result as PromiseRejectedResult).reason), code: reason?.code, meta: reason?.meta };
+      });
+      throw new Error(`Both lifecycle commands rejected: ${JSON.stringify(diagnostics)}`);
+    }
     assert.equal(lifecycleResults.filter(result => result.status === 'fulfilled').length, 1,
       'only one production Guard exit or document replacement may commit');
     const [exit, replacement] = await Promise.all([
@@ -232,6 +253,9 @@ const run = async () => {
       observer.accountingDispatchWaybill.findUnique({ where: { id: replacementId } }),
     ]);
     assert.notEqual(Boolean(exit), Boolean(replacement), 'production lifecycle race persists exactly one winner');
+    if (replacement) assert.equal((await observer.dispatchDocumentCommandResult.findFirstOrThrow({ where: {
+      scope: 'WAYBILL', scopeId: predecessor.id, command: 'REPLACE' } })).waybillId, predecessor.id,
+    'replacement command scope identity remains the predecessor aggregate while the result names its successor');
     assert.equal(await observer.dispatchLifecycleAudit.count({ where: exit
       ? { aggregateType: 'GUARD_PHYSICAL_EXIT', aggregateId: exit.id, eventType: 'PHYSICAL_EXIT_RECORDED' }
       : { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: predecessor.id, eventType: 'DOCUMENT_BUNDLE_REPLACED' } }), 1);

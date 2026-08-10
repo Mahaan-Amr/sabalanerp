@@ -1,9 +1,15 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaHistory, FaSync } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { emptyAccountingPagination, readAccountingListResponse, dateFa } from '@/features/accounting/accountingUi';
+import {
+  canonicalizeAuditQuery,
+  patchAuditQuery,
+  type AuditQueryState,
+} from '@/features/accounting/accountingQueryState';
 
 const actionOptions = [
   { label: 'همه عملیات', value: 'ALL' },
@@ -19,16 +25,49 @@ const actionOptions = [
 ];
 
 export default function AccountingAuditPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const canonicalQuery = useMemo(
+    () => canonicalizeAuditQuery(new URLSearchParams(searchParams.toString())),
+    [searchParams],
+  );
+  const query = canonicalQuery.state;
   const [rows, setRows] = useState<any[]>([]);
   const [pagination, setPagination] = useState(emptyAccountingPagination);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [action, setAction] = useState('ALL');
+  const [searchInput, setSearchInput] = useState(query.search);
 
-  const loadRows = useCallback(async (page = 1) => {
+  const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeAuditQuery>) => {
+    const serialized = next.params.toString();
+    router.replace(serialized ? `${pathname}?${serialized}` : pathname, { scroll: false });
+  }, [pathname, router]);
+
+  const updateQuery = useCallback((patch: Partial<AuditQueryState>) => {
+    replaceQuery(patchAuditQuery(new URLSearchParams(searchParams.toString()), patch));
+  }, [replaceQuery, searchParams]);
+
+  useEffect(() => {
+    if (canonicalQuery.params.toString() !== searchParams.toString()) replaceQuery(canonicalQuery);
+  }, [canonicalQuery, replaceQuery, searchParams]);
+
+  useEffect(() => setSearchInput(query.search), [query.search]);
+
+  useEffect(() => {
+    if (searchInput.trim() === query.search) return;
+    const timeout = window.setTimeout(() => updateQuery({ search: searchInput }), 350);
+    return () => window.clearTimeout(timeout);
+  }, [query.search, searchInput, updateQuery]);
+
+  const loadRows = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await accountingAPI.getAuditLogs({ search, action, page, pageSize: pagination.pageSize });
+      const response = await accountingAPI.getAuditLogs({
+        search: query.search || undefined,
+        action: query.action,
+        page: query.page,
+        pageSize: pagination.pageSize,
+      });
       if (response.data.success) {
         const data = readAccountingListResponse<any>(response.data.data);
         setRows(data.items);
@@ -39,10 +78,10 @@ export default function AccountingAuditPage() {
     } finally {
       setLoading(false);
     }
-  }, [action, pagination.pageSize, search]);
+  }, [pagination.pageSize, query.action, query.page, query.search]);
 
   useEffect(() => {
-    loadRows(1);
+    loadRows();
   }, [loadRows]);
 
   const columns: ErpColumn<any>[] = [
@@ -58,16 +97,16 @@ export default function AccountingAuditPage() {
       eyebrow="حسابداری"
       title="سوابق عملیات"
       description="ردیابی اقدام‌های حسابداری برای حسابرسی داخلی و حفظ شفافیت."
-      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: () => loadRows(pagination.page), tone: 'neutral' }]}
+      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadRows, tone: 'neutral' }]}
       filters={[
-        { id: 'search', label: 'جستجو', type: 'search', value: search, onChange: setSearch, placeholder: 'شماره قرارداد یا مشتری...' },
-        { id: 'action', label: 'نوع عملیات', type: 'select', value: action, onChange: setAction, options: actionOptions },
+        { id: 'search', label: 'جستجو', type: 'search', value: searchInput, onChange: setSearchInput, placeholder: 'شماره قرارداد یا مشتری...' },
+        { id: 'action', label: 'نوع عملیات', type: 'select', value: query.action, onChange: (value) => updateQuery({ action: value }), options: actionOptions },
       ]}
       rows={rows}
       rowKey={(row) => row.id}
       columns={columns}
       isLoading={loading}
-      footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={loadRows} itemLabel="سابقه" />}
+      footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={(page) => updateQuery({ page })} itemLabel="سابقه" />}
       emptyState={<ErpEmptyState icon={FaHistory} title="هنوز سابقه‌ای ثبت نشده است" description="هر اقدام حسابداری در این بخش ثبت خواهد شد." />}
     />
   );

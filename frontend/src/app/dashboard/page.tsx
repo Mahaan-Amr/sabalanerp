@@ -294,9 +294,9 @@ export default function DashboardPage() {
         <ErpNeumorphicActionGrid
           title="مدیریت سیستم"
           items={[
-            { id: 'users', title: 'کاربران', href: '/dashboard/users', icon: FaUserCog },
+            { id: 'users', title: 'مدیریت کاربران', href: '/dashboard/hr/users', icon: FaUserCog },
             { id: 'personnel', title: 'پرسنل', href: '/dashboard/hr/personnel', icon: FaUsers },
-            { id: 'permissions', title: 'دسترسی‌ها', href: '/dashboard/admin/permissions', icon: FaShieldAlt },
+            { id: 'permissions', title: 'اختیار و مسئولیت', href: '/dashboard/hr/permissions', icon: FaShieldAlt },
             { id: 'departments', title: 'بخش‌ها', href: '/dashboard/departments', icon: FaBuilding },
             { id: 'settings', title: 'تنظیمات', href: '/dashboard/admin/settings', icon: FaCog },
             { id: 'discount-settings', title: 'تخفیف قرارداد', href: '/dashboard/admin/discount-settings', icon: FaPercent },

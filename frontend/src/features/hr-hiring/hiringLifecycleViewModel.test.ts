@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  hiringLifecyclePhaseOptions,
   hiringTaskCapability,
   hiringTaskDetailVisible,
   hiringLifecycleStatusLabel,
@@ -7,6 +8,18 @@ import {
   selectedHiringPhase,
   type HiringLifecycleProjection,
 } from "./hiringLifecycleViewModel";
+
+assert.deepEqual(hiringLifecyclePhaseOptions.map(([id]) => id), [
+  "APPLICATION",
+  "INITIAL_HR_REVIEW",
+  "FORMAL_ASSESSMENTS",
+  "COMPANY_EVALUATION_PLAN",
+  "IDENTITY",
+  "OFFER",
+  "CONVERSION",
+  "ONBOARDING",
+  "ACTIVATION",
+]);
 
 const projection: HiringLifecycleProjection = {
   currentPhaseId: "IDENTITY",

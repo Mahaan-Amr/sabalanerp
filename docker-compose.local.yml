@@ -130,17 +130,21 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      target: local-dev
       args:
         NEXT_PUBLIC_API_URL: /api
         NEXT_PUBLIC_SOCKET_URL: http://localhost:5000
         BACKEND_API_ORIGIN: http://backend:5000
+        NEXT_PUBLIC_ENABLE_PROTOTYPES: "1"
         NPM_CONFIG_REGISTRY: https://mirror.abrha.net/repository/npm/
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
+      NEXT_DIST_DIR: .next-local
       PORT: 3000
       NEXT_PUBLIC_API_URL: /api
       NEXT_PUBLIC_SOCKET_URL: http://localhost:5000
       BACKEND_API_ORIGIN: http://backend:5000
+      NEXT_PUBLIC_ENABLE_PROTOTYPES: "1"
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

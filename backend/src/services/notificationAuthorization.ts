@@ -11,12 +11,38 @@ export type NotificationAuthorizationUser = {
 
 export type NotificationWithAuthorizationEvent = {
   id: string;
+  type?: string;
   event: {
     workspace: string | null;
     feature: string | null;
     resourceType: string | null;
     resourceId: string | null;
   } | null;
+};
+type AuthorizedHrDuty = {
+  status: string;
+  currentAssigneeUserId: string | null;
+  createdByUserId: string;
+  destinationWorkspaceCode: string;
+  assignmentHistoryUserIds: string[];
+};
+
+export const canAccessHrDutyNotification = (input: {
+  userId: string;
+  type?: string;
+  managedWorkspaces: string[];
+  duty: AuthorizedHrDuty;
+}) => {
+  const terminalResult = input.type === 'HR_DUTY_RESULT';
+  if (terminalResult) {
+    return input.duty.createdByUserId === input.userId
+      || input.duty.assignmentHistoryUserIds.includes(input.userId)
+      || input.managedWorkspaces.includes(input.duty.destinationWorkspaceCode.toLowerCase());
+  }
+  if (input.type === 'HR_DUTY_UNASSIGNED_TRIAGE' || input.type === 'HR_DUTY_MANAGER_ESCALATION') {
+    return input.managedWorkspaces.includes(input.duty.destinationWorkspaceCode.toLowerCase());
+  }
+  return input.duty.status === 'OPEN' && input.duty.currentAssigneeUserId === input.userId;
 };
 type AuthorizedSupportTicket = {
   id: string;
@@ -51,7 +77,10 @@ export const filterCurrentlyAuthorizedNotifications = async <
   const supportTicketIds = [...new Set(rows
     .filter((row) => row.event?.resourceType === 'support-ticket' && row.event.resourceId)
     .map((row) => row.event!.resourceId!))];
-  const [tickets, designatedIncidentHandler] = await Promise.all([
+  const hrDutyIds = [...new Set(rows
+    .filter((row) => row.event?.resourceType === 'HR_DUTY' && row.event.resourceId)
+    .map((row) => row.event!.resourceId!))];
+  const [tickets, designatedIncidentHandler, hrDuties] = await Promise.all([
     supportTicketIds.length
       ? database.supportTicket.findMany({
           where: { id: { in: supportTicketIds } },
@@ -76,10 +105,32 @@ export const filterCurrentlyAuthorizedNotifications = async <
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
     }).then((count) => count > 0),
+    hrDutyIds.length
+      ? database.hrDuty.findMany({
+          where: { id: { in: hrDutyIds } },
+          select: {
+            id: true,
+            status: true,
+            currentAssigneeUserId: true,
+            createdByUserId: true,
+            destinationWorkspaceCode: true,
+            assignmentHistory: { select: { assignedUserId: true } },
+          },
+        })
+      : [],
   ]);
   const ticketById = new Map<string, AuthorizedSupportTicket>(
     (tickets as AuthorizedSupportTicket[]).map((ticket) => [ticket.id, ticket]),
   );
+  const hrDutyById = new Map<string, AuthorizedHrDuty>(hrDuties.map((duty) => [duty.id, {
+    status: duty.status,
+    currentAssigneeUserId: duty.currentAssigneeUserId,
+    createdByUserId: duty.createdByUserId,
+    destinationWorkspaceCode: duty.destinationWorkspaceCode,
+    assignmentHistoryUserIds: duty.assignmentHistory
+      .map(({ assignedUserId }) => assignedUserId)
+      .filter((assignedUserId): assignedUserId is string => Boolean(assignedUserId)),
+  }] as const));
   return rows.filter((row) => {
     const event = row.event;
     if (!event) return true;
@@ -101,6 +152,15 @@ export const filterCurrentlyAuthorizedNotifications = async <
         restrictedIncident: ticket.restrictedIncident,
         participants: ticket.participants as any,
       });
+    }
+    if (event.resourceType === 'HR_DUTY' && event.resourceId) {
+      const duty = hrDutyById.get(event.resourceId);
+      return duty ? canAccessHrDutyNotification({
+        userId: user.id,
+        type: row.type,
+        managedWorkspaces,
+        duty,
+      }) : false;
     }
     if (!event.workspace) return true;
     if (!accessibleWorkspaces.includes(event.workspace)) return false;

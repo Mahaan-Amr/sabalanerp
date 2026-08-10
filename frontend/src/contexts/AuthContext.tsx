@@ -68,6 +68,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     await authAPI.logout().catch(() => undefined);
+    if (user?.id) {
+      const draftPrefix = `hr-personnel-draft:${user.id}:`;
+      for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+        const key = window.sessionStorage.key(index);
+        if (key?.startsWith(draftPrefix)) window.sessionStorage.removeItem(key);
+      }
+    }
     setUser(null);
   };
 

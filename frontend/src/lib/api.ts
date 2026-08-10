@@ -311,7 +311,14 @@ export const personnelAPI = {
 
 export const hrAPI = {
   getDashboard: () => api.get('/hr/dashboard'),
-  getFoundation: () => api.get('/hr/foundation'),
+  getFoundation: (params?: { dependencyAt?: string }) => api.get('/hr/foundation', { params }),
+  getPositions: (params?: { filter?: string; dependencyAt?: string }) => api.get('/hr/positions', { params }),
+  getPositionCapacitySummary: (params?: { dependencyAt?: string }) => api.get('/hr/positions/capacity-summary', { params }),
+  getPositionHistory: (id: string) => api.get(`/hr/positions/${id}/history`),
+  changePositionCapacity: (id: string, data: any) => api.post(`/hr/positions/${id}/capacity-changes`, data),
+  getFoundationDependencies: (entityType: string, id: string) => api.get(`/hr/foundation/${entityType}/${id}/dependencies`),
+  changeFoundationLifecycle: (entityType: string, id: string, data: any) => api.post(`/hr/foundation/${entityType}/${id}/lifecycle`, data),
+  permanentlyDeleteFoundation: (entityType: string, id: string, data: any) => api.delete(`/hr/foundation/${entityType}/${id}/permanent`, { data }),
   createOrganizationalUnit: (data: any) => api.post('/hr/organizational-units', data),
   updateOrganizationalUnit: (id: string, data: any) => api.put(`/hr/organizational-units/${id}`, data),
   createWorkplace: (data: any) => api.post('/hr/workplaces', data),
@@ -323,6 +330,8 @@ export const hrAPI = {
   createPosition: (data: any) => api.post('/hr/positions', data),
   updatePosition: (id: string, data: any) => api.put(`/hr/positions/${id}`, data),
   getPersonnel: (params?: any) => api.get('/hr/personnel', { params }),
+  resolvePersonnelOrigin: (origin: string) => api.get('/hr/personnel-origin', { params: { origin } }),
+  getPersonnelWorkSchedule: (id: string) => api.get(`/hr/personnel/${id}/work-schedule`),
   archivePersonnel: (id: string, data: { reason: string; effectiveDate: string }) => api.post(`/hr/personnel/${id}/archive`, data),
   restorePersonnel: (id: string, reason: string) => api.post(`/hr/personnel/${id}/restore`, { reason }),
   getPersonnelDeletionPreview: (id: string) => api.get(`/hr/personnel/${id}/deletion-preview`),
@@ -344,6 +353,10 @@ export const hrAPI = {
   getMigrationPreview: () => api.get('/hr/migration/preview'),
   getMigrationRecords: (category: string) => api.get(`/hr/migration/records/${encodeURIComponent(category)}`),
   applyMigration: (data: any) => api.post('/hr/migration/apply', data),
+  getMigrationReconciliation: (params?: Record<string, string | boolean | undefined>) => api.get('/hr/migration/reconciliation', { params }),
+  reviewMigrationReconciliation: (id: string, data: { outcome: string; reason: string }) => api.post(`/hr/migration/reconciliation/${encodeURIComponent(id)}/reviews`, data),
+  previewHrRedesignBackfill: () => api.get('/hr/migration/redesign-preview'),
+  applyHrRedesignBackfill: () => api.post('/hr/migration/redesign-backfill'),
 };
 
 export const dispatchMasterDataAPI = {
@@ -865,7 +878,8 @@ export const inventoryAPI = {
 
 // Accounting Workspace API
 export const accountingAPI = {
-  getWorkspace: () => api.get('/accounting/workspace'),
+  getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
+  getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
   decideDispatchCandidate: (id: string, data: { action: 'ACCEPT' | 'REJECT'; reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-candidates/${id}/decision`, data),
@@ -913,6 +927,10 @@ export const dispatchConfirmationAPI = {
   approveByGuard: (sessionId: string, data: { password: string; reason?: string }) => api.post(`/dispatch-confirmation/sessions/${sessionId}/guard-approval`, data),
   revokeAuthorization: (authorizationId: string, reason: string) => api.post(`/dispatch-confirmation/authorizations/${authorizationId}/revoke`, { reason }),
   revokeAuthorizationAsGuard: (authorizationId: string, reason: string) => api.post(`/dispatch-confirmation/guard/authorizations/${authorizationId}/revoke`, { reason }),
+};
+
+export const hrHiringMetricsAPI = {
+  getDashboardMetrics: () => api.get('/hr-hiring/dashboard-metrics'),
 };
 
 export const biAPI = {
@@ -1258,6 +1276,30 @@ export const sabalanCalendarAPI = {
   getEntries: (params?: any) => api.get('/sabalan-calendar', { params }),
   createEntry: (data: any) => api.post('/sabalan-calendar', data),
   updateEntry: (id: string, data: any) => api.put(`/sabalan-calendar/${id}`, data),
+};
+
+export const hrAuthorizationAPI = {
+  getMe: () => api.get('/hr/authorization/me'),
+  getContext: () => api.get('/hr/authorization/context'),
+  grantWorkspace: (data: { userId: string; level: 'VIEW' | 'EDIT' | 'ADMIN'; reason: string }) =>
+    api.post('/hr/authorization/workspace-grants', data),
+  grantFeature: (data: { userId: string; featureCode: string; level: 'VIEW' | 'EDIT' | 'ADMIN'; reason: string }) =>
+    api.post('/hr/authorization/feature-grants', data),
+  grantAuthority: (data: { userId: string; authorityCode: string; reason: string }) =>
+    api.post('/hr/authorization/business-authorities', data),
+  revokeAuthority: (id: string, reason: string) =>
+    api.post(`/hr/authorization/business-authorities/${id}/revoke`, { reason }),
+  assignResponsibility: (data: {
+    assignedUserId: string;
+    responsibilityTypeCode: string;
+    scopeType: string;
+    scopeId?: string;
+    assignmentKind: 'PRIMARY' | 'ACTING' | 'SUBSTITUTE';
+    principalResponsibilityId?: string;
+    reason: string;
+  }) => api.post('/hr/authorization/responsibilities', data),
+  endResponsibility: (id: string, reason: string) =>
+    api.post(`/hr/authorization/responsibilities/${id}/end`, { reason }),
 };
 
 // Permissions API

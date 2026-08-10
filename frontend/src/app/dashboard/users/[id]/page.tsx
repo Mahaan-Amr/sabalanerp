@@ -49,11 +49,11 @@ export default function UserDetailsPage({ params }: { params: { id: string } }) 
   const confirmErasure = async () => {
     if (!erasureReason.trim() || !erasurePassword) return setMessage('دلیل حذف و رمز عبور مدیر الزامی است.');
     await usersAPI.eraseUser(params.id, { reason: erasureReason.trim(), adminPassword: erasurePassword });
-    window.location.href = '/dashboard/users';
+    window.location.href = '/dashboard/hr/users';
   };
 
   if (loading) return <ErpLoading />;
-  if (error || !user) return <ErpEmptyState icon={FaUser} title="کاربر پیدا نشد" description={error} action={{ label: 'بازگشت', href: '/dashboard/users' }} />;
+  if (error || !user) return <ErpEmptyState icon={FaUser} title="کاربر پیدا نشد" description={error} action={{ label: 'بازگشت', href: '/dashboard/hr/users' }} />;
   const fullName = `${user.firstName} ${user.lastName}`.trim();
   const creator = user.creatorDisplayNameSnapshot
     ? user.createdByUser?.erasedAt
@@ -61,9 +61,9 @@ export default function UserDetailsPage({ params }: { params: { id: string } }) 
       : `${user.creatorDisplayNameSnapshot}${user.creatorUsernameSnapshot ? ` (@${user.creatorUsernameSnapshot})` : ''}`
     : 'نامشخص — داده تاریخی';
 
-  return <ErpPage eyebrow="مدیریت سیستم" title={fullName || user.username} description="جزئیات حساب، منشأ ایجاد و شواهد امنیتی کاربر." backHref="/dashboard/users" actions={[
-    { label: 'ویرایش', href: `/dashboard/users/${user.id}/edit`, icon: FaEdit, tone: 'primary', variant: 'solid' },
-    { label: 'مدیریت دسترسی‌ها', href: `/dashboard/admin/permissions?userId=${user.id}`, icon: FaShieldAlt, tone: 'neutral', variant: 'outline' },
+  return <ErpPage eyebrow="مدیریت سیستم" title={fullName || user.username} description="جزئیات حساب، منشأ ایجاد و شواهد امنیتی کاربر." backHref="/dashboard/hr/users" actions={[
+    { label: 'ویرایش', href: `/dashboard/hr/users/${user.id}/edit`, icon: FaEdit, tone: 'primary', variant: 'solid' },
+    { label: 'مدیریت دسترسی‌ها', href: `/dashboard/hr/permissions?userId=${user.id}`, icon: FaShieldAlt, tone: 'neutral', variant: 'outline' },
   ]} metrics={[
     { label: 'وضعیت', value: user.isActive ? 'فعال' : 'غیرفعال', icon: FaUser, tone: user.isActive ? 'success' : 'danger' },
     { label: 'نقش', value: user.role, icon: FaShieldAlt, tone: user.role === 'ADMIN' ? 'danger' : 'info' },

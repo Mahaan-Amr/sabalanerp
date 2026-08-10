@@ -132,7 +132,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       });
 
       if (response.data.success) {
-        router.push(`/dashboard/users/${params.id}`);
+        router.push(`/dashboard/hr/users/${params.id}`);
       }
     } catch (error: any) {
       const details = error.response?.data?.details;
@@ -151,7 +151,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
         icon={FaUserEdit}
         title="امکان ویرایش کاربر وجود ندارد"
         description={error}
-        action={{ label: 'بازگشت به کاربران', href: '/dashboard/users', tone: 'primary', variant: 'solid' }}
+        action={{ label: 'بازگشت به کاربران', href: '/dashboard/hr/users', tone: 'primary', variant: 'solid' }}
       />
     );
   }
@@ -163,14 +163,14 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
       eyebrow="مدیریت سیستم"
       title="ویرایش کاربر"
       description="اطلاعات حساب، نقش، بخش و شماره تماس ورود را بروزرسانی کنید؛ پرونده و برنامه کاری پرسنل فقط در HR تغییر می‌کند."
-      backHref={`/dashboard/users/${params.id}`}
+      backHref={`/dashboard/hr/users/${params.id}`}
     >
       {managerEditingAdmin ? (
         <ErpEmptyState
           icon={FaUserEdit}
           title="دسترسی محدود است"
           description="مدیر نمی‌تواند کاربر مدیر سیستم را ویرایش کند."
-          action={{ label: 'بازگشت به کاربران', href: '/dashboard/users', tone: 'primary', variant: 'solid' }}
+          action={{ label: 'بازگشت به کاربران', href: '/dashboard/hr/users', tone: 'primary', variant: 'solid' }}
         />
       ) : (
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -240,7 +240,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
           </ErpSection>
 
           <div className="flex flex-wrap justify-end gap-2">
-            <ErpButton label="انصراف" href={`/dashboard/users/${params.id}`} tone="neutral" variant="outline" icon={FaTimes} />
+            <ErpButton label="انصراف" href={`/dashboard/hr/users/${params.id}`} tone="neutral" variant="outline" icon={FaTimes} />
             <ErpPressable
               type="submit"
               disabled={saving}

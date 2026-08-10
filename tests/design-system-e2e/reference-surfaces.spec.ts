@@ -1138,6 +1138,7 @@ test('Accounting routes share focused responsive canonical surfaces', async ({ p
 
   const routes = [
     '/dashboard/accounting',
+    '/dashboard/accounting/dispatch',
     '/dashboard/accounting/contracts',
     '/dashboard/accounting/invoice-candidates',
     '/dashboard/accounting/receivables',

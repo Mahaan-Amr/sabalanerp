@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { FaUsers, FaCog, FaPlus, FaEdit, FaTrash, FaEye, FaCheck, FaTimes, FaLock } from 'react-icons/fa';
 import { usersAPI, permissionsAPI, authAPI, workspacePermissionsAPI } from '@/lib/api';
 import EnhancedDropdown, { DropdownOption } from '@/components/EnhancedDropdown';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 interface FeaturePermission {
   id: string;
@@ -245,9 +245,15 @@ const normalizePermissionLevelForFeature = (featureKey: string, permissionLevel:
 
 export default function PermissionsManagementPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedUserId = searchParams.get('userId');
   const requestedSection = searchParams.get('section');
+  useEffect(() => {
+    if (pathname !== '/dashboard/admin/permissions') return;
+    const query = searchParams.toString();
+    router.replace(`/dashboard/hr/permissions${query ? `?${query}` : ''}`);
+  }, [pathname, router, searchParams]);
   const [users, setUsers] = useState<User[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -1597,7 +1603,7 @@ export default function PermissionsManagementPage() {
 
         {/* Create/Edit Modal */}
         {showAddPermissionModal && (
-          <div className="fixed inset-0 bg-[var(--sds-surface-overlay)] flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-overlay)] p-4 backdrop-blur-sm">
             <div className="sds-workspace-surface p-4 w-full max-w-6xl mx-auto max-h-[90vh] overflow-y-auto">
               <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-3">
                 {editingPermission ? 'ویرایش مجوز' : 'ایجاد مجوز جدید'}
@@ -1920,7 +1926,7 @@ export default function PermissionsManagementPage() {
 
         {/* Workspace Permission Modal */}
         {showWorkspacePermissionModal && (
-          <div className="fixed inset-0 bg-[var(--sds-surface-overlay)] flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-overlay)] p-4 backdrop-blur-sm">
             <div className="sds-workspace-surface p-6 w-full max-w-md mx-auto">
               <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">
                 ایجاد مجوز فضای کاری

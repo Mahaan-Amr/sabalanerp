@@ -402,12 +402,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     if (user?.role === "ADMIN" || user?.role === "MANAGER") {
       baseItems.push(
         {
-          name: "مدیریت کاربران",
-          href: "/dashboard/users",
-          icon: FaUsers,
-          show: true,
-        },
-        {
           name: "مدیریت پرسنل",
           href: "/dashboard/hr/personnel",
           icon: FaUsers,
@@ -417,7 +411,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         },
         {
           name: "سطوح دسترسی",
-          href: "/dashboard/admin/permissions",
+          href: "/dashboard/hr/permissions",
           icon: FaShieldAlt,
           show: true,
         },

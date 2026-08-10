@@ -16,6 +16,12 @@ process.env.SMS_IR_ENVIRONMENT ??= "sandbox";
 process.env.HR_HIRING_E2E ??= "true";
 process.env.HR_HIRING_SMS_ADAPTER ??= "memory";
 
+// The backend intentionally owns several bounded Prisma clients across route modules.
+// Keep the single-worker E2E process below the small CI PostgreSQL connection budget.
+const e2eDatabaseUrl = new URL(process.env.DATABASE_URL);
+e2eDatabaseUrl.searchParams.set("connection_limit", "1");
+process.env.DATABASE_URL = e2eDatabaseUrl.toString();
+
 export default defineConfig({
   testDir: "./tests/hr-hiring",
   timeout: 60_000,

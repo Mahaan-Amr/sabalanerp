@@ -4,8 +4,11 @@ import helmet from "helmet";
 import morgan from "morgan";
 import "dotenv/config";
 import path from "path";
+import { readFile } from "fs/promises";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import { registerRealtimePublisher } from "./services/realtimePublisher";
+import { authorizeHrUser } from "./services/hrAuthorizationService";
 import { PrismaClient } from "@prisma/client";
 import {
   parseCookies,
@@ -37,6 +40,8 @@ import biRoutes from "./routes/bi";
 import logisticsRoutes from "./routes/logistics";
 import hrRoutes from "./routes/hr";
 import hrHiringRoutes from "./routes/hr-hiring";
+import hrApplicantExperienceRoutes from "./routes/hr-applicant-experience";
+import hrDutyRoutes from "./routes/hr-duties";
 import workspacePermissionsRoutes from "./routes/workspace-permissions";
 import permissionsRoutes from "./routes/permissions";
 import productsRoutes from "./routes/products";
@@ -78,6 +83,8 @@ import {
 import { startNotificationOutboxDelivery } from "./services/notificationService";
 import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
 import { startDispatchBuyerSmsDelivery } from "./services/dispatchBuyerSmsWorker";
+import { startHrDutyDeadlineMaintenance } from "./services/hrDutyEngine";
+import { verifyHrRedesignCutover } from "./services/hrRedesignCutover";
 
 const prisma = new PrismaClient();
 initializeRecoveryRuntime();
@@ -107,6 +114,8 @@ const validateProductionEnvironment = () => {
     "SMS_IR_DISPATCH_CONFIRM_OTP_TEMPLATE_ID",
     "SMS_IR_DISPATCH_EXIT_TEMPLATE_ID",
     "SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID",
+    "HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH",
+    "HR_REDESIGN_CUTOVER_REVISION",
   ];
   const missingVars = requiredVars.filter((key) => !process.env[key]);
   const hiringTemplateId =
@@ -247,6 +256,8 @@ app.use("/api/accounting", accountingRoutes);
 app.use("/api/bi", biRoutes);
 app.use("/api/logistics", logisticsRoutes);
 app.use("/api/hr", hrRoutes);
+app.use("/api/hr-duties", hrDutyRoutes);
+app.use("/api/hr-hiring", hrApplicantExperienceRoutes);
 app.use("/api/hr-hiring", hrHiringRoutes);
 app.use("/api/workspace-permissions", workspacePermissionsRoutes);
 app.use("/api/permissions", permissionsRoutes);
@@ -371,12 +382,30 @@ io.on("connection", (socket) => {
   });
 });
 
+registerRealtimePublisher((event) => {
+  for (const socket of io.sockets.sockets.values()) {
+    void authorizeHrUser(prisma, socket.data.userId, {
+      workspaceLevel: "VIEW",
+      feature: { code: "PERSONNEL", level: "VIEW" },
+    }).then((authorization) => {
+      if (authorization.allowed) socket.emit(event, {});
+    }).catch(() => undefined);
+  }
+});
+
 // Error handling middleware
 app.use(notFound);
 app.use(errorHandler);
 
 // Start only after interrupted recovery has been finalized or safely rolled back.
-initializeSystemRecovery(prisma).finally(() => {
+initializeSystemRecovery(prisma).then(async () => {
+  if (isProduction) {
+    const acceptanceAttestation = JSON.parse(await readFile(process.env.HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH!, "utf8")) as unknown;
+    await verifyHrRedesignCutover(prisma, {
+      acceptanceAttestation,
+      sourceRevision: process.env.HR_REDESIGN_CUTOVER_REVISION!,
+    });
+  }
   if (getRecoveryRuntimeState().mode === "NORMAL") {
     startAuthenticationRetentionCleanup(prisma);
     startHiringInvitationDeliveryPolling(prisma);
@@ -387,11 +416,15 @@ initializeSystemRecovery(prisma).finally(() => {
     });
     startSupportTicketMaintenance(prisma);
     startDispatchBuyerSmsDelivery(prisma);
+    startHrDutyDeadlineMaintenance(prisma);
   }
   server.listen(PORT, () => {
     console.log(`? Server running on port ${PORT}`);
     console.log(`? Health check: http://localhost:${PORT}/api/health`);
   });
+}).catch((error) => {
+  console.error("Backend startup blocked:", error);
+  process.exitCode = 1;
 });
 
 export { io };

@@ -10,9 +10,23 @@ import {
   FaFileUpload,
   FaKey,
   FaRedo,
-  FaShieldAlt,
-  FaSpinner,
 } from 'react-icons/fa';
+import {
+  ErpBadge,
+  ErpButton,
+  ErpCard,
+  ErpEmptyState,
+  ErpInlineState,
+  ErpInput,
+  ErpLoading,
+  ErpPage,
+  ErpSection,
+  ErpSelect,
+  ErpSheet,
+  ErpTextarea,
+  ErpTone,
+  erpFieldLabelClassName,
+} from '@/components/erp';
 import { authAPI, systemRecoveryAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 
@@ -63,13 +77,13 @@ const statusLabel: Record<string, string> = {
   EXPIRED: 'منقضی‌شده',
 };
 
-const statusTone: Record<string, string> = {
-  READY: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',
-  VALIDATED: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200',
-  APPROVED: 'bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-200',
-  FAILED: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200',
-  INCOMPATIBLE: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200',
-  EXPIRED: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+const statusTone: Record<string, ErpTone> = {
+  READY: 'success',
+  VALIDATED: 'info',
+  APPROVED: 'purple',
+  FAILED: 'danger',
+  INCOMPATIBLE: 'danger',
+  EXPIRED: 'neutral',
 };
 
 const formatBytes = (value?: number | null) => {
@@ -149,7 +163,7 @@ export default function SystemRecoveryPage() {
       await systemRecoveryAPI.createBackup({ packageType, adminPassword: createPassword, passphrase: createPassphrase });
       setCreatePassword('');
       setCreatePassphrase('');
-      setMessage('ساخت بسته در پس‌زمینه آغاز شد. در زمان ثبت تصویر سازگار، سامانه برای مدت کوتاهی فقط‌خواندنی است.');
+      setMessage('ساخت بسته در پس‌زمینه آغاز شد. هنگام ثبت تصویر سازگار، سامانه برای مدت کوتاهی فقط‌خواندنی است.');
       await load(true);
     } catch (caught) {
       setError(errorText(caught));
@@ -172,7 +186,7 @@ export default function SystemRecoveryPage() {
       setUploadFile(null);
       setUploadPassword('');
       setUploadPassphrase('');
-      setMessage('بارگذاری کامل شد و اعتبارسنجی در پس‌زمینه آغاز شد. نتیجه سازگاری در فهرست نمایش داده می‌شود.');
+      setMessage('بارگذاری کامل شد و اعتبارسنجی در پس‌زمینه آغاز شد. نتیجه سازگاری در تاریخچه نمایش داده می‌شود.');
       await load(true);
     } catch (caught) {
       setError(errorText(caught));
@@ -222,188 +236,168 @@ export default function SystemRecoveryPage() {
     }
   };
 
-  if (loading) {
-    return <div className="flex min-h-[50vh] items-center justify-center text-teal-700"><FaSpinner className="h-8 w-8 animate-spin" /></div>;
-  }
+  if (loading) return <ErpLoading />;
 
   return (
-    <main dir="rtl" className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-      <header className="rounded-2xl bg-gradient-to-l from-[#063f3f] to-[#0b6864] p-6 text-white shadow-lg">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-teal-100"><FaShieldAlt /> فقط مدیر سامانه</div>
-            <h1 className="text-2xl font-bold">پشتیبان‌گیری و بازیابی کامل سامانه</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-teal-50">
-              پایگاه داده اصلی، فایل‌های کسب‌وکار و داده سرویس استعلام در یک بسته رمزگذاری‌شده ثبت می‌شوند. رمز بسته در سامانه ذخیره نمی‌شود.
-            </p>
-          </div>
-          <button onClick={() => load()} className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/30 px-4 py-2 hover:bg-white/10">
-            <FaRedo /> به‌روزرسانی
-          </button>
-        </div>
-      </header>
+    <ErpPage
+      eyebrow="مدیریت سیستم"
+      title="پشتیبان‌گیری و بازیابی کامل سامانه"
+      description="پایگاه داده، فایل‌های کسب‌وکار و داده سرویس استعلام در یک بسته رمزگذاری‌شده ثبت می‌شوند. رمز بسته در سامانه ذخیره نمی‌شود."
+      actions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: () => load(), disabled: busy, tone: 'neutral', variant: 'outline' }]}
+    >
+      <div className="space-y-3">
+        {state?.sanitizedEnvironment && (
+          <ErpInlineState kind="stale" title="محیط آزمایشی با داده‌های پاک‌سازی‌شده است؛ استفاده عملیاتی ممنوع است." />
+        )}
+        {state?.stale && (
+          <ErpInlineState kind="stale" title="نسخه پشتیبان کامل دانلودشده به‌روز نیست؛ فایل باقی‌مانده روی همین سرور در برابر خرابی سرور محافظت ایجاد نمی‌کند." />
+        )}
+        {state?.runtime.mode !== 'NORMAL' && (
+          <ErpInlineState kind="permission" title={`وضعیت سامانه: ${state?.runtime.mode}${state?.runtime.message ? ` — ${state.runtime.message}` : ''}`} />
+        )}
+        {error && <ErpInlineState kind="error" title={error} />}
+        {message && <ErpInlineState kind="success" title={message} />}
+      </div>
 
-      {state?.sanitizedEnvironment && (
-        <div className="rounded-xl border-2 border-amber-500 bg-amber-50 p-4 font-bold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-          محیط آزمایشی با داده‌های پاک‌سازی‌شده — استفاده عملیاتی ممنوع
-        </div>
-      )}
-
-      {state?.stale && (
-        <div className="flex gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-          <FaExclamationTriangle className="mt-1 shrink-0" />
-          <div>
-            <div className="font-bold">نسخه پشتیبان کامل دانلودشده به‌روز نیست</div>
-            <p className="mt-1 text-sm">فایلی که فقط روی همین سرور باقی بماند، در برابر خرابی سرور محافظت ایجاد نمی‌کند.</p>
-          </div>
-        </div>
-      )}
-
-      {state?.runtime.mode !== 'NORMAL' && (
-        <div className="rounded-xl border border-sky-300 bg-sky-50 p-4 text-sky-900 dark:bg-sky-950 dark:text-sky-100">
-          وضعیت سامانه: <strong>{state?.runtime.mode}</strong> — {state?.runtime.message}
-        </div>
-      )}
-
-      {error && <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-red-800 dark:bg-red-950 dark:text-red-100">{error}</div>}
-      {message && <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-100">{message}</div>}
       {bootstrap && (
-        <div className="rounded-xl border-2 border-violet-500 bg-violet-50 p-5 text-violet-950 dark:bg-violet-950 dark:text-violet-100">
-          <div className="font-bold">اعتبار مدیر محلی — فقط همین یک بار نمایش داده می‌شود</div>
-          <div className="mt-3 font-mono text-left" dir="ltr">username: {bootstrap.username}<br />password: {bootstrap.temporaryPassword}</div>
-          <p className="mt-2 text-sm">پس از نخستین ورود، تغییر رمز اجباری است.</p>
-        </div>
+        <ErpCard tone="purple" className="p-4 sm:p-5">
+          <h2 className="sds-text-primary font-semibold">اعتبار مدیر محلی — فقط همین یک بار نمایش داده می‌شود</h2>
+          <div className="sds-text-primary mt-3 font-mono text-left" dir="ltr">
+            username: {bootstrap.username}<br />password: {bootstrap.temporaryPassword}
+          </div>
+          <p className="sds-text-muted mt-2 text-sm">پس از نخستین ورود، تغییر رمز اجباری است.</p>
+        </ErpCard>
       )}
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <form onSubmit={createBackup} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-white"><FaDatabase className="text-teal-700" /> ساخت بسته جدید</h2>
-          <label className="block text-sm font-medium">
-            نوع بسته
-            <select value={packageType} onChange={(event) => setPackageType(event.target.value as any)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-3 dark:border-slate-700 dark:bg-slate-950">
-              <option value="COMPLETE">بازیابی کامل — داده دقیق عملیاتی</option>
-              <option value="SANITIZED_TEST">آزمایشی پاک‌سازی‌شده — فقط Docker غیرتولیدی</option>
-            </select>
-          </label>
-          <SecretField label="رمز فعلی مدیر" value={createPassword} onChange={setCreatePassword} />
-          <SecretField label="عبارت عبور بسته (حداقل ۱۲ نویسه، شامل حرف و عدد)" value={createPassphrase} onChange={setCreatePassphrase} />
-          <button disabled={busy || active} className="w-full rounded-lg bg-teal-700 px-4 py-3 font-bold text-white disabled:opacity-50">ساخت در پس‌زمینه</button>
+      <section className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <form onSubmit={createBackup}>
+          <ErpSection title={<span className="inline-flex items-center gap-2"><FaDatabase aria-hidden="true" /> ساخت بسته جدید</span>} className="h-full">
+            <div className="space-y-4">
+              <label className="block">
+                <span className={erpFieldLabelClassName}>نوع بسته</span>
+                <ErpSelect value={packageType} onChange={(event) => setPackageType(event.target.value as 'COMPLETE' | 'SANITIZED_TEST')}>
+                  <option value="COMPLETE">بازیابی کامل — داده دقیق عملیاتی</option>
+                  <option value="SANITIZED_TEST">آزمایشی پاک‌سازی‌شده — فقط Docker غیرتولیدی</option>
+                </ErpSelect>
+              </label>
+              <label className="block">
+                <span className={`${erpFieldLabelClassName} inline-flex items-center gap-2`}><FaKey aria-hidden="true" />رمز فعلی مدیر</span>
+                <ErpInput type="password" autoComplete="off" value={createPassword} onChange={(event) => setCreatePassword(event.target.value)} required />
+              </label>
+              <label className="block">
+                <span className={`${erpFieldLabelClassName} inline-flex items-center gap-2`}><FaKey aria-hidden="true" />عبارت عبور بسته (حداقل ۱۲ نویسه، شامل حرف و عدد)</span>
+                <ErpInput type="password" autoComplete="off" value={createPassphrase} onChange={(event) => setCreatePassphrase(event.target.value)} required />
+              </label>
+              <ErpButton type="submit" label="ساخت در پس‌زمینه" disabled={busy || active} className="min-h-11 w-full" />
+            </div>
+          </ErpSection>
         </form>
 
-        <form onSubmit={uploadBackup} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-white"><FaFileUpload className="text-sky-700" /> بارگذاری و اعتبارسنجی</h2>
-          <label className="block text-sm font-medium">
-            فایل ‎.sabrec
-            <input type="file" accept=".sabrec,application/octet-stream" onChange={(event) => setUploadFile(event.target.files?.[0] || null)} className="mt-1 block w-full rounded-lg border border-slate-300 p-3 dark:border-slate-700" required />
-          </label>
-          <SecretField label="رمز فعلی مدیر" value={uploadPassword} onChange={setUploadPassword} />
-          <SecretField label="عبارت عبور بسته" value={uploadPassphrase} onChange={setUploadPassphrase} />
-          <button disabled={busy || active || !uploadFile} className="w-full rounded-lg bg-sky-700 px-4 py-3 font-bold text-white disabled:opacity-50">بارگذاری امن</button>
+        <form onSubmit={uploadBackup}>
+          <ErpSection title={<span className="inline-flex items-center gap-2"><FaFileUpload aria-hidden="true" /> بارگذاری و اعتبارسنجی</span>} className="h-full">
+            <div className="space-y-4">
+              <label className="block">
+                <span className={erpFieldLabelClassName}>فایل ‎.sabrec</span>
+                <ErpInput type="file" accept=".sabrec,application/octet-stream" onChange={(event) => setUploadFile(event.target.files?.[0] || null)} required />
+              </label>
+              <label className="block">
+                <span className={`${erpFieldLabelClassName} inline-flex items-center gap-2`}><FaKey aria-hidden="true" />رمز فعلی مدیر</span>
+                <ErpInput type="password" autoComplete="off" value={uploadPassword} onChange={(event) => setUploadPassword(event.target.value)} required />
+              </label>
+              <label className="block">
+                <span className={`${erpFieldLabelClassName} inline-flex items-center gap-2`}><FaKey aria-hidden="true" />عبارت عبور بسته</span>
+                <ErpInput type="password" autoComplete="off" value={uploadPassphrase} onChange={(event) => setUploadPassphrase(event.target.value)} required />
+              </label>
+              <ErpButton type="submit" label="بارگذاری امن" tone="info" disabled={busy || active || !uploadFile} className="min-h-11 w-full" />
+            </div>
+          </ErpSection>
         </form>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg font-bold">تاریخچه عملیات</h2>
-          <span className="text-sm text-slate-500">
-            آخرین دانلود کامل: {state?.latestCompleteDownloadAt ? PersianCalendar.formatForDisplay(state.latestCompleteDownloadAt) : 'هرگز'}
-          </span>
-        </div>
-        <div className="space-y-4">
-          {!state?.operations.length && <div className="rounded-xl bg-slate-50 p-8 text-center text-slate-500 dark:bg-slate-950">هنوز عملیاتی ثبت نشده است.</div>}
+      <ErpSection
+        title="تاریخچه عملیات"
+        description={`آخرین دانلود کامل: ${state?.latestCompleteDownloadAt ? PersianCalendar.formatForDisplay(state.latestCompleteDownloadAt) : 'هرگز'}`}
+      >
+        <div className="space-y-3">
+          {!state?.operations.length && <ErpEmptyState title="هنوز عملیاتی ثبت نشده است" />}
           {state?.operations.map((operation) => (
-            <article key={operation.id} className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="min-w-0">
+            <ErpCard key={operation.id} className="p-4">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-bold">{operation.packageType === 'COMPLETE' ? 'بازیابی کامل' : 'آزمایشی پاک‌سازی‌شده'}</span>
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusTone[operation.status] || 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}>
-                      {statusLabel[operation.status] || operation.status}
-                    </span>
+                    <span className="sds-text-primary font-semibold">{operation.packageType === 'COMPLETE' ? 'بازیابی کامل' : 'آزمایشی پاک‌سازی‌شده'}</span>
+                    <ErpBadge tone={statusTone[operation.status] || 'neutral'}>{statusLabel[operation.status] || operation.status}</ErpBadge>
                   </div>
-                  <div className="mt-2 grid gap-x-6 gap-y-1 text-xs text-slate-500 sm:grid-cols-2">
+                  <div className="sds-text-muted mt-3 grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
                     <span>ایجاد: {PersianCalendar.formatForDisplay(operation.createdAt)}</span>
                     <span>اندازه: {formatBytes(operation.size)}</span>
                     <span>عامل: {operation.createdBy ? `${operation.createdBy.firstName} ${operation.createdBy.lastName}` : 'سامانه/بازیابی‌شده'}</span>
                     <span dir="ltr" className="truncate text-left">SHA-256: {operation.encryptedSha256 || '—'}</span>
                   </div>
                   {['CREATING', 'VALIDATING', 'RESTORING'].includes(operation.status) && (
-                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-                      <div className="h-full bg-teal-600 transition-all" style={{ width: `${operation.progress}%` }} />
+                    <div className="sds-skeleton mt-3 h-2 overflow-hidden rounded-full" role="progressbar" aria-label="پیشرفت عملیات" aria-valuemin={0} aria-valuemax={100} aria-valuenow={operation.progress}>
+                      <div className="h-full bg-[var(--sds-accent)] transition-[width] motion-reduce:transition-none" style={{ width: `${operation.progress}%` }} />
                     </div>
                   )}
-                  {operation.errorMessage && <p className="mt-2 text-sm text-red-700 dark:text-red-300">{operation.errorCode}: {operation.errorMessage}</p>}
+                  {operation.errorMessage && <div className="mt-3"><ErpInlineState kind="error" title={`${operation.errorCode || 'خطا'}: ${operation.errorMessage}`} /></div>}
                   {operation.compatibility && !operation.compatibility.compatible && (
-                    <p className="mt-2 text-sm text-red-700">{operation.compatibility.reasons?.join('، ')}</p>
+                    <div className="mt-3"><ErpInlineState kind="error" title={operation.compatibility.reasons?.join('، ') || 'این بسته با سامانه سازگار نیست.'} /></div>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {operation.status === 'READY' && (
-                    <ActionButton icon={<FaCloudDownloadAlt />} label="دانلود" onClick={() => setAction({ kind: 'download', operation })} />
+                    <ErpButton icon={FaCloudDownloadAlt} label="دانلود" onClick={() => setAction({ kind: 'download', operation })} />
                   )}
                   {operation.status === 'VALIDATED' && operation.createdById !== currentUserId && (
-                    <ActionButton icon={<FaCheckCircle />} label="تأیید مدیر دوم" onClick={() => setAction({ kind: 'approve', operation })} />
+                    <ErpButton icon={FaCheckCircle} label="تأیید مدیر دوم" tone="success" onClick={() => setAction({ kind: 'approve', operation })} />
                   )}
                   {['VALIDATED', 'APPROVED'].includes(operation.status) && (
-                    <ActionButton danger icon={<FaExclamationTriangle />} label="بازیابی" onClick={() => setAction({ kind: 'restore', operation })} />
+                    <ErpButton icon={FaExclamationTriangle} label="بازیابی" tone="danger" onClick={() => setAction({ kind: 'restore', operation })} />
                   )}
                 </div>
               </div>
-            </article>
+            </ErpCard>
           ))}
         </div>
-      </section>
+      </ErpSection>
 
-      {action && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <form onSubmit={runAction} className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
-            <h2 className="flex items-center gap-2 text-xl font-bold">
-              {action.kind === 'download' ? <FaCloudDownloadAlt /> : action.kind === 'approve' ? <FaCheckCircle /> : <FaExclamationTriangle className="text-red-600" />}
-              {action.kind === 'download' ? 'دانلود بسته' : action.kind === 'approve' ? 'تأیید بازیابی' : 'بازیابی کل سامانه'}
-            </h2>
-            <SecretField label="رمز فعلی مدیر" value={actionPassword} onChange={setActionPassword} />
+      <ErpSheet
+        open={Boolean(action)}
+        onClose={() => { if (!busy) setAction(null); }}
+        title={action?.kind === 'download' ? 'دانلود بسته' : action?.kind === 'approve' ? 'تأیید بازیابی' : 'بازیابی کل سامانه'}
+        presentation="modal"
+        dismissible={!busy}
+      >
+        {action && (
+          <form onSubmit={runAction} className="space-y-4">
+            <label className="block">
+              <span className={`${erpFieldLabelClassName} inline-flex items-center gap-2`}><FaKey aria-hidden="true" />رمز فعلی مدیر</span>
+              <ErpInput type="password" autoComplete="off" value={actionPassword} onChange={(event) => setActionPassword(event.target.value)} required />
+            </label>
             {action.kind === 'restore' && (
               <>
-                <SecretField label="عبارت عبور بسته" value={actionPassphrase} onChange={setActionPassphrase} />
-                <label className="block text-sm font-medium">
-                  برای تأیید دقیقاً بنویسید: <span dir="ltr" className="font-mono">RESTORE SABALAN ERP</span>
-                  <input value={confirmationPhrase} onChange={(event) => setConfirmationPhrase(event.target.value)} dir="ltr" className="mt-1 w-full rounded-lg border border-red-300 bg-white p-3 font-mono dark:bg-slate-950" required />
+                <label className="block">
+                  <span className={`${erpFieldLabelClassName} inline-flex items-center gap-2`}><FaKey aria-hidden="true" />عبارت عبور بسته</span>
+                  <ErpInput type="password" autoComplete="off" value={actionPassphrase} onChange={(event) => setActionPassphrase(event.target.value)} required />
                 </label>
-                <label className="block text-sm font-medium">
-                  دلیل اضطراری (در حالت تک‌مدیر اجباری)
-                  <textarea value={breakGlassReason} onChange={(event) => setBreakGlassReason(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-3 dark:bg-slate-950" />
+                <label className="block">
+                  <span className={erpFieldLabelClassName}>برای تأیید دقیقاً بنویسید: <span dir="ltr" className="font-mono">RESTORE SABALAN ERP</span></span>
+                  <ErpInput value={confirmationPhrase} onChange={(event) => setConfirmationPhrase(event.target.value)} dir="ltr" className="font-mono" required />
                 </label>
-                <p className="rounded-lg bg-red-50 p-3 text-sm leading-6 text-red-800 dark:bg-red-950 dark:text-red-100">
-                  سامانه وارد حالت نگهداری می‌شود، داده فعال جایگزین خواهد شد و نشست همه کاربران لغو می‌شود.
-                </p>
+                <label className="block">
+                  <span className={erpFieldLabelClassName}>دلیل اضطراری (در حالت تک‌مدیر اجباری)</span>
+                  <ErpTextarea value={breakGlassReason} onChange={(event) => setBreakGlassReason(event.target.value)} />
+                </label>
+                <ErpInlineState kind="error" title="سامانه وارد حالت نگهداری می‌شود، داده فعال جایگزین خواهد شد و نشست همه کاربران لغو می‌شود." />
               </>
             )}
-            <div className="flex gap-3">
-              <button disabled={busy} className={`flex-1 rounded-lg px-4 py-3 font-bold text-white ${action.kind === 'restore' ? 'bg-red-700' : 'bg-teal-700'}`}>
-                {busy ? 'در حال انجام…' : 'تأیید'}
-              </button>
-              <button type="button" onClick={() => setAction(null)} className="rounded-lg border border-slate-300 px-4 py-3">انصراف</button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <ErpButton type="submit" label={busy ? 'در حال انجام…' : 'تأیید'} tone={action.kind === 'restore' ? 'danger' : 'primary'} disabled={busy} />
+              <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={() => setAction(null)} disabled={busy} />
             </div>
           </form>
-        </div>
-      )}
-    </main>
-  );
-}
-
-function SecretField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return (
-    <label className="block text-sm font-medium">
-      <span className="flex items-center gap-2"><FaKey className="text-slate-400" />{label}</span>
-      <input type="password" autoComplete="off" value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-3 dark:border-slate-700 dark:bg-slate-950" required />
-    </label>
-  );
-}
-
-function ActionButton({ icon, label, onClick, danger = false }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
-  return (
-    <button onClick={onClick} className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-white ${danger ? 'bg-red-700' : 'bg-teal-700'}`}>
-      {icon}{label}
-    </button>
+        )}
+      </ErpSheet>
+    </ErpPage>
   );
 }

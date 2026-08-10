@@ -53,6 +53,7 @@ jobs:
             backend/package-lock.json
             frontend/package-lock.json
       - run: npm ci
+      - run: npm run build:contract-product-graph
       - run: npm ci --prefix backend
       - run: npm ci --prefix frontend
       - run: npx playwright install --with-deps chrome

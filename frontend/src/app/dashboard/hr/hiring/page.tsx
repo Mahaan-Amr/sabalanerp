@@ -1,8 +1,8 @@
 "use client";
-import { ErpInlineState, ErpInput, ErpPressable, ErpSelect } from "@/components/erp";
+import { ErpCheckbox, ErpInput, ErpPressable, ErpSegmentedControl, ErpSelect } from "@/components/erp";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   FaCog,
   FaArchive,
@@ -15,6 +15,7 @@ import {
   ErpBadge,
   ErpButton,
   ErpCard,
+  ErpInlineState,
   ErpLoading,
   ErpPage,
   ErpSection,
@@ -31,16 +32,41 @@ import {
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
 import {
   buildHiringQueueParams,
+  buildHiringCaseHref,
+  buildHiringQueueHref,
+  parseHiringQueueContext,
   type HiringQueueFilters,
 } from "@/features/hr-hiring/hiringQueueViewModel";
 import { HR_HIRING_METRIC_VIEWS } from "@/features/hr-hiring/hrHiringMetricViews";
 
-const blank = {
+type AssessmentKind = "DISC" | "EQ" | "BIG_FIVE";
+type HiringCreateForm = {
+  firstName: string;
+  lastName: string;
+  mobile: string;
+  nationalCode: string;
+  positionId: string;
+  formalAssessmentPlan: {
+    explicitlyNoAssessment: boolean;
+    executionMethod: "" | "APPLICANT" | "COMPANY";
+    selections: AssessmentKind[];
+    repeatKinds: AssessmentKind[];
+    reason: string;
+  };
+};
+const blank: HiringCreateForm = {
   firstName: "",
   lastName: "",
   mobile: "",
   nationalCode: "",
   positionId: "",
+  formalAssessmentPlan: {
+    explicitlyNoAssessment: false,
+    executionMethod: "",
+    selections: [],
+    repeatKinds: [],
+    reason: "",
+  },
 };
 const blankFilters: HiringQueueFilters = {
   attention: "",
@@ -65,32 +91,46 @@ const badgeTone = (status: HiringLifecycleStatus) => {
 
 export default function HiringCasesPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const initialContext = parseHiringQueueContext(searchParams);
   const representedView = searchParams.get("view") === HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts
     ? HR_HIRING_METRIC_VIEWS.actionableCollateralOrContracts
     : "";
   const [rows, setRows] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
-  const [foundationState, setFoundationState] = useState<'pending' | 'available' | 'unavailable' | 'failed'>('pending');
-  const [form, setForm] = useState(blank);
-  const [filters, setFilters] = useState<HiringQueueFilters>(blankFilters);
+  const [form, setForm] = useState<HiringCreateForm>(blank);
+  const [filters, setFilters] = useState<HiringQueueFilters>(initialContext.filters);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [meta, setMeta] = useState({ page: 1, totalPages: 1, total: 0 });
   const [decisionDetail, setDecisionDetail] = useState<any>(null);
-  const [archiveView, setArchiveView] = useState(false);
+  const [archiveView, setArchiveView] = useState(initialContext.archived);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createDiscardOpen, setCreateDiscardOpen] = useState(false);
+  const [inviteTarget, setInviteTarget] = useState<any>(null);
+  const createDirty = Boolean(
+    form.firstName || form.lastName || form.mobile || form.nationalCode || form.positionId
+    || form.formalAssessmentPlan.explicitlyNoAssessment
+    || form.formalAssessmentPlan.executionMethod
+    || form.formalAssessmentPlan.selections.length,
+  );
+  const assessmentDecisionComplete = form.formalAssessmentPlan.explicitlyNoAssessment
+    || Boolean(form.formalAssessmentPlan.executionMethod && form.formalAssessmentPlan.selections.length);
 
-  const load = async (nextFilters: HiringQueueFilters = filters) => {
+  const load = async (nextFilters: HiringQueueFilters = filters, nextArchiveView = archiveView) => {
     try {
       setLoading(true);
       setError("");
-      const cases = await hiringAPI.list({
-        ...buildHiringQueueParams(nextFilters),
-        archived: String(archiveView),
-        ...(representedView ? { view: representedView } : {}),
-      });
+      const [cases, foundation] = await Promise.all([
+        hiringAPI.list({
+          ...buildHiringQueueParams(nextFilters),
+          archived: String(nextArchiveView),
+          ...(representedView ? { view: representedView } : {}),
+        }),
+        hrAPI.getFoundation(),
+      ]);
       setRows(cases.data.data);
       setMeta(
         cases.data.meta || {
@@ -99,6 +139,7 @@ export default function HiringCasesPage() {
           total: cases.data.data.length,
         },
       );
+      setPositions(foundation.data.data.positions || []);
     } catch (cause) {
       setError(hiringError(cause));
     } finally {
@@ -107,32 +148,45 @@ export default function HiringCasesPage() {
   };
 
   useEffect(() => {
-    void load(blankFilters);
-    // Initial queue load intentionally uses the stable empty filter set.
+    const restored = parseHiringQueueContext(searchParams);
+    setFilters(restored.filters);
+    setArchiveView(restored.archived);
+    void load(restored.filters, restored.archived).then(() => {
+      const focus = searchParams.get("focus");
+      const storedScroll = sessionStorage.getItem("hrHiringQueueScroll");
+      window.setTimeout(() => {
+        if (focus) document.getElementById(`hiring-case-${focus}`)?.focus();
+        else if (storedScroll) window.scrollTo({ top: Number(storedScroll), behavior: "auto" });
+      }, 50);
+    });
+    // URL-owned state is intentionally reloaded after browser Back or in-app return.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [archiveView, representedView]);
+  }, [searchParams, representedView]);
 
-  const loadFoundation = useCallback(async () => {
-    setFoundationState('pending');
-    try {
-      const foundation = await hrAPI.getFoundation();
-      setPositions(foundation.data.data.positions || []);
-      setFoundationState('available');
-    } catch (cause: any) {
-      setPositions([]);
-      setFoundationState(cause?.response?.status === 403 ? 'unavailable' : 'failed');
-    }
-  }, []);
+  const commitContext = (nextFilters: HiringQueueFilters, nextArchiveView = archiveView) => {
+    setFilters(nextFilters);
+    setArchiveView(nextArchiveView);
+    router.replace(buildHiringQueueHref(nextFilters, nextArchiveView, representedView));
+    void load(nextFilters, nextArchiveView);
+  };
 
-  useEffect(() => {
-    void loadFoundation();
-  }, [loadFoundation]);
+  const queueHref = buildHiringQueueHref(filters, archiveView, representedView);
+  const rememberQueuePosition = () => sessionStorage.setItem("hrHiringQueueScroll", String(window.scrollY));
 
   const create = async () => {
     try {
       setBusy(true);
       setError("");
-      const result = await hiringAPI.create(form);
+      const result = await hiringAPI.create({
+        ...form,
+        formalAssessmentPlan: {
+          ...form.formalAssessmentPlan,
+          selections: form.formalAssessmentPlan.selections.map((assessmentKind) => ({
+            assessmentKind,
+            executionMethod: form.formalAssessmentPlan.executionMethod,
+          })),
+        },
+      });
       const invitation = await hiringAPI.invite(result.data.data.id);
       setMessage(
         `پرونده و دعوت‌نامه ساخته شد.${invitation.data.data.debugOtp ? ` کد محیط آزمایشی: ${invitation.data.data.debugOtp}` : ""}`,
@@ -154,8 +208,10 @@ export default function HiringCasesPage() {
       setMessage(
         `دعوت‌نامه ارسال شد.${result.data.data.debugOtp ? ` کد محیط آزمایشی: ${result.data.data.debugOtp}` : ""}`,
       );
+      return true;
     } catch (cause) {
       setError(hiringError(cause));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -172,13 +228,7 @@ export default function HiringCasesPage() {
       backHref="/dashboard/hr"
       metrics={[
         { label: archiveView ? "پرونده بایگانی" : "پرونده در صف", value: meta.total.toLocaleString("fa-IR"), tone: archiveView ? "warning" : "primary" },
-        {
-          label: "جایگاه فعال",
-          value: foundationState === 'available'
-            ? positions.filter((item: any) => item.isActive).length.toLocaleString("fa-IR")
-            : '—',
-          tone: "neutral",
-        },
+        { label: "جایگاه فعال", value: positions.filter((item: any) => item.isActive).length.toLocaleString("fa-IR"), tone: "neutral" },
       ]}
       actions={[
         {
@@ -186,39 +236,24 @@ export default function HiringCasesPage() {
           icon: FaPlus,
           onClick: () => setCreateOpen(true),
           tone: "success",
-          disabled: foundationState !== 'available',
         },
         {
           label: archiveView ? "فهرست فعال" : "بایگانی متقاضیان",
           icon: archiveView ? FaUndo : FaArchive,
-          onClick: () => setArchiveView((value) => !value),
+          onClick: () => commitContext({ ...filters, page: 1 }, !archiveView),
         },
         {
-          label: "اختیارها",
+          label: "اختیار و مسئولیت",
           icon: FaCog,
-          href: "/dashboard/hr/hiring/authorities",
+          href: "/dashboard/hr/permissions",
         },
-        {
-          label: "به‌روزرسانی",
-          icon: FaSync,
-          onClick: () => {
-            void load();
-            void loadFoundation();
-          },
-        },
+        { label: "به‌روزرسانی", icon: FaSync, onClick: () => load() },
       ]}
     >
       {error && (
         <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {error}
         </p>
-      )}
-      {foundationState === 'failed' && (
-        <ErpInlineState
-          kind="error"
-          title="جایگاه‌های استخدام دریافت نشدند. صف پرونده‌ها همچنان قابل استفاده است."
-          action={{ label: 'تلاش دوباره', icon: FaSync, onClick: loadFoundation }}
-        />
       )}
       {message && (
         <p className="rounded-xl bg-[var(--sds-success-surface)] p-3 text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
@@ -228,10 +263,15 @@ export default function HiringCasesPage() {
 
       <ErpSheet
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={() => {
+          if (createDirty) setCreateDiscardOpen(true);
+          else setCreateOpen(false);
+        }}
         title="ایجاد متقاضی و ارسال دعوت"
+        presentation="modal"
+        dismissible={!busy}
       >
-        <ErpCard className="grid gap-3 p-4 md:grid-cols-5">
+        <ErpCard className="grid gap-3 p-4 sm:grid-cols-2">
           <ErpInput
             className={field}
             placeholder="نام"
@@ -280,7 +320,60 @@ export default function HiringCasesPage() {
                 </option>
               ))}
           </ErpSelect>
-          <div className="md:col-span-5">
+          <div className="space-y-3 border-t border-[var(--sds-border-default)] pt-4 sm:col-span-2">
+            <b className="block">برنامه ارزیابی‌های رسمی</b>
+            <ErpCheckbox
+              label="برای این پرونده ارزیابی رسمی لازم نیست"
+              checked={form.formalAssessmentPlan.explicitlyNoAssessment}
+              onChange={(event) => setForm({
+                ...form,
+                formalAssessmentPlan: event.target.checked
+                  ? { ...form.formalAssessmentPlan, explicitlyNoAssessment: true, executionMethod: "", selections: [] }
+                  : { ...form.formalAssessmentPlan, explicitlyNoAssessment: false },
+              })}
+            />
+            {!form.formalAssessmentPlan.explicitlyNoAssessment && (
+              <>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {([
+                    ["DISC", "DISC"],
+                    ["EQ", "EQ"],
+                    ["BIG_FIVE", "BIG FIVE"],
+                  ] as Array<[AssessmentKind, string]>).map(([kind, label]) => (
+                    <ErpCheckbox
+                      key={kind}
+                      label={label}
+                      checked={form.formalAssessmentPlan.selections.includes(kind)}
+                      onChange={(event) => setForm({
+                        ...form,
+                        formalAssessmentPlan: {
+                          ...form.formalAssessmentPlan,
+                          selections: event.target.checked
+                            ? [...form.formalAssessmentPlan.selections, kind]
+                            : form.formalAssessmentPlan.selections.filter((item) => item !== kind),
+                        },
+                      })}
+                    />
+                  ))}
+                </div>
+                <ErpSegmentedControl<"APPLICANT" | "COMPANY" | "">
+                  value={form.formalAssessmentPlan.executionMethod}
+                  onChange={(value) => setForm({
+                    ...form,
+                    formalAssessmentPlan: {
+                      ...form.formalAssessmentPlan,
+                      executionMethod: value,
+                    },
+                  })}
+                  options={[
+                    { value: "APPLICANT", label: "تکمیل توسط متقاضی" },
+                    { value: "COMPANY", label: "اجرا در شرکت" },
+                  ]}
+                />
+              </>
+            )}
+          </div>
+          <div className="sm:col-span-2">
             <ErpButton
               label="ساخت پرونده و ارسال دعوت"
               icon={FaPlus}
@@ -289,13 +382,38 @@ export default function HiringCasesPage() {
                 !form.firstName ||
                 !form.lastName ||
                 !form.mobile ||
-                !form.positionId
+                !form.positionId ||
+                !assessmentDecisionComplete
               }
               onClick={create}
               tone="success"
             />
           </div>
         </ErpCard>
+      </ErpSheet>
+      <ErpSheet
+        open={createDiscardOpen}
+        onClose={() => setCreateDiscardOpen(false)}
+        title="صرف‌نظر از اطلاعات واردشده؟"
+        presentation="modal"
+        dismissible={!busy}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <ErpButton label="ادامه ویرایش" variant="ghost" disabled={busy} onClick={() => setCreateDiscardOpen(false)} />
+            <ErpButton
+              label="حذف اطلاعات"
+              tone="danger"
+              disabled={busy}
+              onClick={() => {
+                setForm(blank);
+                setCreateDiscardOpen(false);
+                setCreateOpen(false);
+              }}
+            />
+          </div>
+        }
+      >
+        <ErpInlineState kind="stale" title="اطلاعات این فرم هنوز ذخیره نشده است." />
       </ErpSheet>
 
       <ErpSection
@@ -428,15 +546,14 @@ export default function HiringCasesPage() {
             <ErpButton
               label="اعمال فیلتر"
               icon={FaFilter}
-              onClick={() => load(filters)}
+              onClick={() => commitContext({ ...filters, page: 1 })}
               disabled={loading}
             />
             <ErpPressable
               type="button"
               className="rounded-xl border border-[var(--sds-border-default)] px-3 py-2 text-xs font-bold dark:border-[var(--sds-border-strong)]"
               onClick={() => {
-                setFilters(blankFilters);
-                void load(blankFilters);
+                commitContext(blankFilters);
               }}
             >
               پاک‌کردن
@@ -477,12 +594,15 @@ export default function HiringCasesPage() {
                 return (
                   <tr
                     key={row.id}
+                    id={`hiring-case-${row.id}`}
+                    tabIndex={-1}
                     className="border-t align-top dark:border-[var(--sds-border-strong)]"
                   >
                     <td className="p-3">
                       <Link
                         className="font-black hover:text-[var(--sds-success)]"
-                        href={`/dashboard/hr/hiring/${row.id}`}
+                        href={buildHiringCaseHref(row.id, queueHref)}
+                        onClick={rememberQueuePosition}
                       >
                         {row.candidate.firstName} {row.candidate.lastName}
                       </Link>
@@ -578,7 +698,8 @@ export default function HiringCasesPage() {
                       <div className="flex flex-col gap-2">
                         <Link
                           className="rounded-lg bg-[var(--sds-surface-raised)] px-3 py-2 text-center font-bold text-[var(--sds-text-primary)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-primary)]"
-                          href={`/dashboard/hr/hiring/${row.id}`}
+                          href={buildHiringCaseHref(row.id, queueHref)}
+                          onClick={rememberQueuePosition}
                         >
                           بازکردن پرونده
                         </Link>
@@ -586,7 +707,7 @@ export default function HiringCasesPage() {
                           <ErpPressable
                             type="button"
                             disabled={busy || row.stage === "CLOSED"}
-                            onClick={() => invite(row.id)}
+                            onClick={() => setInviteTarget(row)}
                             className="rounded-lg border px-3 py-2 disabled:opacity-50"
                           >
                             ارسال مجدد دعوت
@@ -614,12 +735,14 @@ export default function HiringCasesPage() {
               "COMPANY_APPROVAL",
             ];
             return (
-              <ErpCard key={row.id} className="p-4">
+              <div key={row.id} id={`hiring-case-${row.id}`} tabIndex={-1}>
+              <ErpCard className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <Link
                       className="font-black text-[var(--sds-text-primary)]"
-                      href={`/dashboard/hr/hiring/${row.id}`}
+                      href={buildHiringCaseHref(row.id, queueHref)}
+                      onClick={rememberQueuePosition}
                     >
                       {row.candidate.firstName} {row.candidate.lastName}
                     </Link>
@@ -681,20 +804,22 @@ export default function HiringCasesPage() {
                   <div className="flex gap-2">
                     <ErpButton
                       label="بازکردن پرونده"
-                      href={`/dashboard/hr/hiring/${row.id}`}
+                      href={buildHiringCaseHref(row.id, queueHref)}
+                      onClick={rememberQueuePosition}
                       variant="soft"
                     />
                     {!row.archivedAt && (
                       <ErpButton
                         label="ارسال دعوت"
                         disabled={busy || row.stage === "CLOSED"}
-                        onClick={() => invite(row.id)}
+                        onClick={() => setInviteTarget(row)}
                         variant="ghost"
                       />
                     )}
                   </div>
                 </div>
               </ErpCard>
+              </div>
             );
           })}
           {!rows.length && (
@@ -716,8 +841,7 @@ export default function HiringCasesPage() {
               disabled={loading || meta.page <= 1}
               onClick={() => {
                 const next = { ...filters, page: meta.page - 1 };
-                setFilters(next);
-                void load(next);
+                commitContext(next);
               }}
             >
               صفحه قبل
@@ -728,8 +852,7 @@ export default function HiringCasesPage() {
               disabled={loading || meta.page >= meta.totalPages}
               onClick={() => {
                 const next = { ...filters, page: meta.page + 1 };
-                setFilters(next);
-                void load(next);
+                commitContext(next);
               }}
             >
               صفحه بعد
@@ -737,13 +860,14 @@ export default function HiringCasesPage() {
           </div>
         </div>
       </ErpSection>
-      {decisionDetail && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-raised)] p-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <ErpCard className="w-full max-w-lg p-5">
+      <ErpSheet
+        open={Boolean(decisionDetail)}
+        onClose={() => setDecisionDetail(null)}
+        title="شرح تصمیم پرونده"
+        presentation="modal"
+      >
+        {decisionDetail && (
+          <>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="font-black">شرح تصمیم پرونده</h3>
@@ -816,9 +940,34 @@ export default function HiringCasesPage() {
                 </div>
               </div>
             )}
-          </ErpCard>
-        </div>
-      )}
+          </>
+        )}
+      </ErpSheet>
+      <ErpSheet
+        open={Boolean(inviteTarget)}
+        onClose={() => setInviteTarget(null)}
+        title="ارسال دوباره دعوت‌نامه"
+        presentation="modal"
+        dismissible={!busy}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => setInviteTarget(null)} />
+            <ErpButton
+              label="ارسال دعوت‌نامه جدید"
+              tone="primary"
+              disabled={busy}
+              onClick={async () => {
+                if (await invite(inviteTarget.id)) setInviteTarget(null);
+              }}
+            />
+          </div>
+        }
+      >
+        <ErpInlineState
+          kind="stale"
+          title={`کد ورود جدید برای ${inviteTarget?.candidate?.firstName || "متقاضی"} صادر می‌شود و کدهای قبلی دیگر مبنای ورود نخواهند بود.`}
+        />
+      </ErpSheet>
     </ErpPage>
   );
 }

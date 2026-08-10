@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpCard, ErpInlineState, ErpInput, ErpPressable, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from "react";
 import { applicantHiringAPI, hiringError } from "@/lib/hiringApi";
 import { normalizeIranianMobile } from "@/lib/phoneFormat";
@@ -9,6 +9,7 @@ import PersianCalendar from "@/lib/persian-calendar";
 import { toIsoDate } from "@/features/hr/hrUi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import { formatPrice } from '@/lib/numberFormat';
+import { ApplicantFormalAssessments } from "@/features/hr-hiring/ApplicantFormalAssessments";
 
 const questions = [
   "به چه فعالیت‌های هنری یا ورزشی علاقه دارید؟",
@@ -106,6 +107,8 @@ export default function ApplicantFormPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
 
   const submitted = application?.revision?.status === "SUBMITTED";
   const correctionFields: string[] = Array.isArray(
@@ -133,8 +136,18 @@ export default function ApplicantFormPage() {
   }, [data]);
 
   const load = async () => {
-    const result = await applicantHiringAPI.get();
-    const next = result.data.data;
+    let next: any;
+    try {
+      const result = await applicantHiringAPI.get();
+      next = result.data.data;
+    } catch (cause) {
+      try {
+        const closed = await applicantHiringAPI.getClosedState();
+        next = closed.data.data;
+      } catch {
+        throw cause;
+      }
+    }
     setApplication(next);
     const revisionData = next.revision?.dataJson;
     if (revisionData)
@@ -160,11 +173,22 @@ export default function ApplicantFormPage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!dirty) return;
+    const protectDraft = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectDraft);
+    return () => window.removeEventListener("beforeunload", protectDraft);
+  }, [dirty]);
+
   const run = async (action: () => Promise<any>, success: string) => {
     try {
       setBusy(true);
       setError("");
       await action();
+      setDirty(false);
       setMessage(success);
       await load();
     } catch (err) {
@@ -190,8 +214,10 @@ export default function ApplicantFormPage() {
     }
   };
 
-  const set = (key: string, value: any) =>
+  const set = (key: string, value: any) => {
+    setDirty(true);
     setData((old: any) => ({ ...old, [key]: value }));
+  };
   const saveApplicationDraft = () => {
     const normalizedData = {
       ...data,
@@ -219,13 +245,25 @@ export default function ApplicantFormPage() {
     index: number,
     field: string,
     value: string,
-  ) =>
+  ) => {
+    setDirty(true);
     setData((old: any) => ({
       ...old,
       [key]: old[key].map((item: any, i: number) =>
         i === index ? { ...item, [field]: value } : item,
       ),
     }));
+  };
+
+  const endSession = () => {
+    sessionStorage.removeItem("hrApplicantSession");
+    setVerified(false);
+    setApplication(undefined);
+    setMessage("");
+    setError("");
+    setDirty(false);
+    setDiscardOpen(false);
+  };
 
   if (!verified)
     return (
@@ -279,6 +317,44 @@ export default function ApplicantFormPage() {
       </main>
     );
 
+  if (application?.closed) {
+    const closedMessage = application.candidateMessageCode === "APPLICATION_HIRED"
+      ? "فرایند استخدام شما با موفقیت تکمیل شده است."
+      : application.candidateMessageCode === "APPLICATION_WITHDRAWN"
+        ? "انصراف شما ثبت شده و این درخواست دیگر قابل تغییر نیست."
+        : application.candidateMessageCode === "APPLICATION_CANCELLED"
+          ? "این درخواست بسته شده و دیگر قابل تغییر نیست."
+          : "بررسی این درخواست پایان یافته و پرونده در حالت فقط‌خواندنی قرار دارد.";
+    return (
+      <main dir="rtl" lang="fa" className="sds-workspace sds-neumorphic-applicant-shell hr-applicant-shell min-h-screen px-4 py-16 text-[var(--sds-text-primary)]">
+        <ErpCard className="mx-auto max-w-xl space-y-5 p-6 sm:p-8">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold text-[var(--sds-text-secondary)]">وضعیت درخواست همکاری</p>
+              <h1 className="mt-1 text-2xl font-black">{application.positionTitle || "فرم استخدام سبلان"}</h1>
+            </div>
+            <ThemeToggle />
+          </div>
+          <ErpInlineState kind="empty" title={closedMessage} />
+          <p className="text-sm leading-7 text-[var(--sds-text-secondary)]">
+            برای پرسش درباره ادامه فرایند با واحد منابع انسانی تماس بگیرید. دلایل و یادداشت‌های داخلی در این صفحه نمایش داده نمی‌شوند.
+          </p>
+          <ErpPressable
+            type="button"
+            onClick={() => {
+              sessionStorage.removeItem("hrApplicantSession");
+              setVerified(false);
+              setApplication(undefined);
+            }}
+            className="min-h-11 w-full rounded-xl border border-[var(--sds-border-default)] px-4 py-2 font-bold"
+          >
+            خروج امن
+          </ErpPressable>
+        </ErpCard>
+      </main>
+    );
+  }
+
   return (
     <main dir="rtl" lang="fa" className="sds-workspace sds-neumorphic-applicant-shell hr-applicant-shell min-h-screen px-3 py-6 text-[var(--sds-text-primary)] sm:px-6">
       <div className="mx-auto max-w-6xl">
@@ -292,13 +368,7 @@ export default function ApplicantFormPage() {
             </div>
             <ErpPressable
               type="button"
-              onClick={() => {
-                sessionStorage.removeItem("hrApplicantSession");
-                setVerified(false);
-                setApplication(undefined);
-                setMessage("");
-                setError("");
-              }}
+              onClick={() => dirty ? setDiscardOpen(true) : endSession()}
               className="rounded-xl border border-[var(--sds-border-strong)] px-4 py-2 text-sm font-bold hover:bg-[var(--sds-surface-raised)]"
             >
               خروج امن
@@ -312,6 +382,20 @@ export default function ApplicantFormPage() {
             />
           </div>
         </header>
+        <ErpSheet
+          open={discardOpen}
+          onClose={() => setDiscardOpen(false)}
+          title="خروج بدون ذخیره تغییرات"
+          presentation="modal"
+          footer={
+            <div className="flex flex-wrap justify-end gap-2">
+              <ErpButton label="ادامه ویرایش" variant="ghost" onClick={() => setDiscardOpen(false)} />
+              <ErpButton label="خروج و کنارگذاشتن" tone="danger" variant="solid" onClick={endSession} />
+            </div>
+          }
+        >
+          <ErpInlineState kind="stale" title="تغییرات ذخیره‌نشده با خروج از این صفحه از بین می‌روند." />
+        </ErpSheet>
         {error && (
           <p className="mt-4 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)]">
             {error}
@@ -662,7 +746,7 @@ export default function ApplicantFormPage() {
                   }
                 />
                 <ErpInput
-                  placeholder="آخرین حقوق و مزایا"
+                  placeholder="آخرین حقوق و مزایا (ریال)"
                   className={inputClass}
                   value={row.lastSalaryBenefits}
                   onChange={(e) =>
@@ -670,7 +754,7 @@ export default function ApplicantFormPage() {
                       "workHistory",
                       i,
                       "lastSalaryBenefits",
-                      e.target.value,
+                      e.target.value.replace(/[^0-9۰-۹٠-٩٬,،\s]/g, ""),
                     )
                   }
                 />
@@ -786,13 +870,13 @@ export default function ApplicantFormPage() {
                   onChange={(e) => set("requestedPosition", e.target.value)}
                 />
               </Field>
-              <Field label="حقوق پیشنهادی">
+              <Field label="حقوق پیشنهادی (ریال)">
                 <ErpInput
                   inputMode="numeric"
                   className={inputClass}
                   value={data.desiredSalary}
                   onChange={(e) =>
-                    set("desiredSalary", e.target.value.replace(/\D/g, ""))
+                    set("desiredSalary", e.target.value.replace(/[^0-9۰-۹٠-٩٬,،\s]/g, ""))
                   }
                 />
               </Field>
@@ -871,6 +955,11 @@ export default function ApplicantFormPage() {
             فرم نهایی ثبت شده و تا زمان درخواست اصلاح منابع انسانی قفل است.
           </p>
         )}
+        <ApplicantFormalAssessments
+          assessments={application?.formalAssessments}
+          busy={busy}
+          run={run}
+        />
         {application?.compensation && (
           <section className="mt-5 rounded-3xl bg-[var(--sds-surface-raised)] p-5 shadow-sm">
             <h2 className="text-lg font-black">حقوق و مزایا</h2>

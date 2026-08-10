@@ -3,36 +3,114 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { protect } from '../middleware/auth';
-import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
+import type { WorkspaceRequest } from '../middleware/workspace';
+import { requireHrFeature } from '../middleware/hrAuthorization';
 import { normalizeWorkSchedule } from '../utils/personnelWorkSchedule';
-import { archiveRosterMembershipEnd, assertSubsequentEmploymentRelationship, personnelSearchWhere } from '../services/hrPersonnelBoundary';
+import { archiveRosterMembershipEnd, assertSubsequentEmploymentRelationship } from '../services/hrPersonnelBoundary';
 import { assertWorkScheduleAction } from '../services/hrWorkScheduleGovernance';
 import { dateOnlyRangeIncludes, plannedStartHasArrived } from '../services/hrEmploymentActivation';
 import { assertArchiveReason, assertArchivedRecordMutable, assertPermanentDeletionConfirmation, assertPersonnelErasureTarget, projectRecordRetentionCapabilities } from '../services/hrRecordRetentionPolicy';
 import { buildPersonnelErasurePlan, executePersonnelErasureGraph } from '../services/hrPersonnelErasureGraph';
 import { commitStagedHiringFiles, planHiringFilesForDeletion, restoreStagedHiringFiles, stagePlannedHiringFiles, type StagedHiringFile } from '../services/hrDeletionFileTransaction';
 import { PERSONNEL_ERASURE_LEASE_MS } from '../services/hrPersonnelErasureRecovery';
+import {
+  HR_REDESIGN_CATALOG,
+  canReadLegacyAssessmentCompatibility,
+  projectLegacyAssessmentCompatibility,
+  projectLegacyHrAccess,
+  projectLegacyHrWorkItem,
+  projectLegacyPosition,
+  runHrRedesignBackfill,
+} from '../services/hrRedesignDataContracts';
+import hrAuthorizationRoutes from './hr-authorization';
+import { authorizeHrUser, resolveHrNamedResponsibility } from '../services/hrAuthorizationService';
+import {
+  assertCapacityChangeAllowed,
+  assertFreshVersion,
+  capacityAt,
+  FoundationVersionConflictError,
+  maximumCapacityCommitmentFrom,
+  projectEffectiveFoundation,
+  reconcilePositionCapacity,
+  resolveFoundationStatus,
+  summarizePositionCoverage,
+  type CapacityAssignment,
+} from '../services/hrOrganizationCapacity';
+import { assertAutomatedHrMigrationOperationAllowed } from '../services/hrMigrationReconciliation';
+import { getHrReconciliationWorkspace, recordHrReconciliationReview } from '../services/hrMigrationReconciliationStore';
+import { buildPersonnelCollection, personnelOriginFeature } from '../services/hrPersonnelCollection';
+import { publishRealtime } from '../services/realtimePublisher';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 router.use(protect);
+router.use('/authorization', hrAuthorizationRoutes);
 
-const viewAccess = requireWorkspaceAccess(WORKSPACES.HR, WORKSPACE_PERMISSIONS.VIEW);
-const editAccess = requireWorkspaceAccess(WORKSPACES.HR, WORKSPACE_PERMISSIONS.EDIT);
-const adminAccess = requireWorkspaceAccess(WORKSPACES.HR, WORKSPACE_PERMISSIONS.ADMIN);
+export const featureForPath = (path: string) => {
+  if (path === '/dashboard') return 'DASHBOARD';
+  if (path.startsWith('/personnel')) return 'PERSONNEL';
+  if (path.startsWith('/relationships') || path.startsWith('/assignments') || path.startsWith('/supervisor-candidates')) return 'PERSONNEL';
+  if (path.startsWith('/migration')) return 'DATA_MIGRATION_RECONCILIATION';
+  if (path.startsWith('/redesign/compatibility/work-items')) return 'HR_WORK_MANAGEMENT';
+  if (path.includes('/assessments')) return 'RECRUITMENT_CASES';
+  if (path.startsWith('/redesign/compatibility/access')) return 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION';
+  return 'ORGANIZATIONAL_STRUCTURE';
+};
+router.use((req: WorkspaceRequest, res, next) => {
+  const level = req.method === 'GET' ? 'VIEW' : req.path.startsWith('/migration') ? 'ADMIN' : 'EDIT';
+  return requireHrFeature(featureForPath(req.path), level)(req, res, next);
+});
+router.use((req: WorkspaceRequest, res, next) => {
+  if (req.method !== 'GET' && /^\/(?:personnel|relationships|assignments)(?:\/|$)/.test(req.path)) {
+    res.once('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        publishRealtime('hr.personnel.changed', {});
+      }
+    });
+  }
+  next();
+});
+
+// Route-specific business authority and system-role middleware below remains
+// independent from the workspace/feature decision performed above.
+const viewAccess: express.RequestHandler = (_req, _res, next) => next();
+const editAccess: express.RequestHandler = (_req, _res, next) => next();
+const adminAccess: express.RequestHandler = (_req, _res, next) => next();
 const EXCEPTIONAL_PERSONNEL_SOURCES = new Set(['DATA_MIGRATION', 'HISTORICAL_CORRECTION', 'ORGANIZATIONAL_TRANSFER']);
+
+const requireHrResponsibility = (responsibilityTypeCode: 'HR_PROCESSOR' | 'HR_MANAGER') => async (
+  req: WorkspaceRequest,
+  res: Response,
+  next: express.NextFunction,
+) => {
+  try {
+    const resolution = await resolveHrNamedResponsibility(prisma, {
+      sourceActionCode: `${req.method}:${req.baseUrl}${req.route?.path ?? req.path}`,
+      responsibilityTypeCode,
+      scopeType: 'GLOBAL',
+      scopeId: null,
+      sourceActorUserId: actorId(req),
+    });
+    if (resolution.status === 'UNRESOLVED') {
+      return res.status(409).json({ success: false, error: 'HR_RESPONSIBILITY_UNRESOLVED', reason: resolution.reason });
+    }
+    if (resolution.assignedUserId !== actorId(req)) {
+      return res.status(403).json({ success: false, error: 'HR_RESPONSIBILITY_NOT_ASSIGNED' });
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
 
 const requireHrManagerAuthority = async (req: WorkspaceRequest, res: Response, next: express.NextFunction) => {
   try {
-    if (req.user!.role === 'ADMIN') return next();
-    const authority = await prisma.hrHiringAuthority.findFirst({
-      where: { userId: req.user!.id, authority: 'HR_MANAGER', isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }
-    });
-    if (!authority) {
+    const authority = await authorizeHrUser(prisma, req.user!.id, { authorityCodes: ['HR_MANAGER'] });
+    if (!authority.allowed) {
       return res.status(403).json({ success: false, error: 'اختیار سازمانی HR_MANAGER برای ثبت استثنایی پرسنل الزامی است.' });
     }
-    next();
+    return requireHrResponsibility('HR_MANAGER')(req, res, next);
   } catch (error) {
     next(error);
   }
@@ -45,6 +123,18 @@ const requireSystemAdmin = (req: WorkspaceRequest, res: Response, next: express.
 
 const textValue = (value: unknown) => String(value ?? '').trim();
 const nullableText = (value: unknown) => textValue(value) || null;
+const jsonValue = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+const jsonContainsExactValue = (value: unknown, expected: string): boolean => {
+  if (value === expected) return true;
+  if (Array.isArray(value)) return value.some((item) => jsonContainsExactValue(item, expected));
+  if (value && typeof value === 'object') return Object.values(value).some((item) => jsonContainsExactValue(item, expected));
+  return false;
+};
+const foundationHistoryDelta = (value: unknown) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const allowed = ['isActive', 'type', 'parentId', 'jobId', 'organizationalUnitId', 'workplaceId', 'costCenterId', 'supervisorPositionId'];
+  return Object.fromEntries(Object.entries(value).filter(([key]) => allowed.includes(key)));
+};
 const parseDate = (value: unknown, label: string) => {
   const parsed = new Date(String(value || ''));
   if (Number.isNaN(parsed.getTime())) throw new Error(`${label} معتبر نیست.`);
@@ -59,14 +149,14 @@ const isValidIranianNationalCode = (value: string) => {
 };
 const actorId = (req: WorkspaceRequest) => req.user!.id;
 const hasHiringAuthority = async (userId: string, authority: 'HR_PROCESSOR' | 'HR_MANAGER') => Boolean(
-  await prisma.hrHiringAuthority.findFirst({
-    where: { userId, authority, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-    select: { id: true }
-  })
+  (await authorizeHrUser(prisma, userId, { authorityCodes: [authority] })).allowed
 );
 const badRequest = (res: Response, error: unknown) => res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'اطلاعات واردشده معتبر نیست.' });
 const handleError = (res: Response, error: unknown, context: string) => {
   console.error(context, error);
+  if (error instanceof FoundationVersionConflictError) {
+    return res.status(409).json({ success: false, error: error.code, message: error.message });
+  }
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
     return res.status(409).json({ success: false, error: 'کد یا شناسه واردشده قبلاً ثبت شده است.' });
   }
@@ -87,6 +177,8 @@ const positionInclude = {
   workplace: true,
   costCenter: true,
   supervisorPosition: { select: { id: true, code: true, title: true } },
+  capacityChanges: { orderBy: { effectiveAt: 'asc' as const } },
+  recruitmentRequests: { orderBy: { effectiveFrom: 'asc' as const } },
   _count: { select: { subordinatePositions: true } }
 } as const;
 
@@ -121,31 +213,47 @@ const personnelInclude = {
   hrPersonnelAudits: { orderBy: { createdAt: 'desc' as const }, take: 10 }
 } as const;
 
-const assertActiveReference = async (client: any, model: 'hrOrganizationalUnit' | 'hrWorkplace' | 'hrCostCenter' | 'hrJob', id: string | null, label: string) => {
+const personnelListInclude = {
+  user: { select: { id: true, username: true, email: true, isActive: true } },
+  hrEmploymentRelationships: {
+    orderBy: { effectiveFrom: 'desc' as const },
+    include: {
+      assignments: { orderBy: { effectiveFrom: 'desc' as const }, include: assignmentInclude },
+      hiringApplication: { select: { id: true, stage: true, outcome: true, convertedAt: true, activatedAt: true } }
+    }
+  },
+  hrPersonnelAudits: { orderBy: { createdAt: 'desc' as const }, take: 1 }
+} as const;
+
+const assertActiveReference = async (client: any, model: 'hrOrganizationalUnit' | 'hrWorkplace' | 'hrCostCenter' | 'hrJob', id: string | null, label: string, at = new Date()) => {
   if (!id) return;
   const record = await client[model].findUnique({ where: { id }, select: { isActive: true } });
-  if (!record?.isActive) throw new Error(`${label} پیدا نشد یا غیرفعال است.`);
+  const entityType = model === 'hrOrganizationalUnit' ? 'ORGANIZATIONAL_UNIT' : model === 'hrWorkplace' ? 'WORKPLACE' : model === 'hrCostCenter' ? 'COST_CENTER' : 'JOB';
+  const versions = record ? await client.hrFoundationLifecycleVersion.findMany({ where: { entityType, entityId: id }, select: { status: true, effectiveFrom: true, version: true, afterJson: true } }) : [];
+  if (!record || !resolveFoundationStatus({ baseActive: record.isActive, at, versions })) throw new Error(`${label} پیدا نشد یا غیرفعال است.`);
 };
 
-const assertNoUnitCycle = async (unitId: string, parentId: string | null) => {
+const assertNoUnitCycle = async (client: any, unitId: string, parentId: string | null, at = new Date()) => {
   if (!parentId) return;
   if (unitId === parentId) throw new Error('واحد سازمانی نمی‌تواند والد خودش باشد.');
   let cursor: string | null = parentId;
   while (cursor) {
     if (cursor === unitId) throw new Error('چرخه در سلسله‌مراتب سازمانی مجاز نیست.');
-    const parent: { parentId: string | null } | null = await prisma.hrOrganizationalUnit.findUnique({ where: { id: cursor }, select: { parentId: true } });
-    cursor = parent?.parentId || null;
+    const parent: { id: string; parentId: string | null; isActive: boolean } | null = await client.hrOrganizationalUnit.findUnique({ where: { id: cursor }, select: { id: true, parentId: true, isActive: true } });
+    const versions = parent ? await client.hrFoundationLifecycleVersion.findMany({ where: { entityType: 'ORGANIZATIONAL_UNIT', entityId: parent.id }, select: { effectiveFrom: true, afterJson: true, version: true } }) : [];
+    cursor = parent ? projectEffectiveFoundation(parent, versions, at).parentId || null : null;
   }
 };
 
-const assertNoPositionCycle = async (positionId: string, supervisorPositionId: string | null) => {
+const assertNoPositionCycle = async (client: any, positionId: string, supervisorPositionId: string | null, at = new Date()) => {
   if (!supervisorPositionId) return;
   if (positionId === supervisorPositionId) throw new Error('جایگاه نمی‌تواند سرپرست خودش باشد.');
   let cursor: string | null = supervisorPositionId;
   while (cursor) {
     if (cursor === positionId) throw new Error('چرخه در خط گزارش‌دهی جایگاه‌ها مجاز نیست.');
-    const parent: { supervisorPositionId: string | null } | null = await prisma.hrPosition.findUnique({ where: { id: cursor }, select: { supervisorPositionId: true } });
-    cursor = parent?.supervisorPositionId || null;
+    const parent: { id: string; supervisorPositionId: string | null; isActive: boolean } | null = await client.hrPosition.findUnique({ where: { id: cursor }, select: { id: true, supervisorPositionId: true, isActive: true } });
+    const versions = parent ? await client.hrFoundationLifecycleVersion.findMany({ where: { entityType: 'POSITION', entityId: parent.id }, select: { effectiveFrom: true, afterJson: true, version: true } }) : [];
+    cursor = parent ? projectEffectiveFoundation(parent, versions, at).supervisorPositionId || null : null;
   }
 };
 
@@ -159,13 +267,23 @@ const validateAssignment = async (client: any, input: {
   excludeAssignmentId?: string;
 }) => {
   if (input.effectiveTo && input.effectiveTo < input.effectiveFrom) throw new Error('پایان تخصیص نمی‌تواند پیش از شروع آن باشد.');
-  const relationship = await client.hrEmploymentRelationship.findUnique({ where: { id: input.relationshipId } });
+  const relationship = await client.hrEmploymentRelationship.findUnique({ where: { id: input.relationshipId }, include: { hiringApplication: { select: { convertedAt: true } } } });
   if (!relationship) throw new Error('رابطه استخدامی پیدا نشد.');
   if (input.effectiveFrom < relationship.effectiveFrom || (relationship.effectiveTo && (!input.effectiveTo || input.effectiveTo > relationship.effectiveTo))) {
     throw new Error('بازه تخصیص باید کاملاً داخل بازه رابطه استخدامی باشد.');
   }
   const position = await client.hrPosition.findUnique({ where: { id: input.positionId }, include: positionInclude });
-  if (!position?.isActive) throw new Error('جایگاه پیدا نشد یا غیرفعال است.');
+  const positionLifecycle = position ? await client.hrFoundationLifecycleVersion.findMany({
+    where: { entityType: 'POSITION', entityId: input.positionId },
+    select: { status: true, effectiveFrom: true, version: true, afterJson: true },
+  }) : [];
+  if (!position || !resolveFoundationStatus({ baseActive: position.isActive, at: input.effectiveFrom, versions: positionLifecycle })) throw new Error('جایگاه پیدا نشد یا غیرفعال است.');
+  const lifecycleCheckpoints = [input.effectiveFrom, ...positionLifecycle
+    .map((version: { effectiveFrom: Date }) => version.effectiveFrom)
+    .filter((effectiveFrom: Date) => effectiveFrom >= input.effectiveFrom && (!input.effectiveTo || effectiveFrom <= input.effectiveTo))];
+  if (lifecycleCheckpoints.some((checkpoint) => !resolveFoundationStatus({ baseActive: position.isActive, at: checkpoint, versions: positionLifecycle }))) {
+    throw new Error('بازه تخصیص با دوره غیرفعال جایگاه هم‌پوشانی دارد.');
+  }
 
   if (input.type === 'PRIMARY') {
     const primaryOverlap = await client.hrEmploymentAssignment.findFirst({
@@ -180,16 +298,48 @@ const validateAssignment = async (client: any, input: {
   }
 
   if (input.type !== 'ACTING') {
-    const occupied = await client.hrEmploymentAssignment.count({
+    const occupiedAssignments = await client.hrEmploymentAssignment.findMany({
       where: {
         positionId: input.positionId,
         type: { in: ['PRIMARY', 'SECONDARY'] },
         ...(input.excludeAssignmentId ? { id: { not: input.excludeAssignmentId } } : {}),
         employmentRelationship: { status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } },
         ...overlaps(input.effectiveFrom, input.effectiveTo)
-      }
+      },
+      select: {
+        id: true, type: true, effectiveFrom: true, effectiveTo: true,
+        employmentRelationship: { select: { status: true, hiringApplication: { select: { convertedAt: true } } } },
+      },
     });
-    if (occupied >= position.capacity) throw new Error('ظرفیت این جایگاه در بازه انتخاب‌شده تکمیل است.');
+    const commitments: CapacityAssignment[] = occupiedAssignments
+      .filter((assignment: any) => !input.effectiveTo || assignment.effectiveFrom <= input.effectiveTo)
+      .map((assignment: any) => ({
+        id: assignment.id,
+        type: assignment.type,
+        relationshipStatus: assignment.employmentRelationship.status,
+        effectiveFrom: assignment.effectiveFrom,
+        effectiveTo: assignment.effectiveTo,
+        hireConvertedAt: assignment.employmentRelationship.hiringApplication?.convertedAt ?? null,
+      }));
+    const candidate: CapacityAssignment = {
+      id: input.excludeAssignmentId || 'candidate',
+      type: input.type,
+      relationshipStatus: relationship.status,
+      effectiveFrom: input.effectiveFrom,
+      effectiveTo: input.effectiveTo,
+      hireConvertedAt: relationship.hiringApplication?.convertedAt ?? null,
+    };
+    const withinRequestedRange = (value: Date) => value >= input.effectiveFrom && (!input.effectiveTo || value <= input.effectiveTo);
+    const checkpoints = [
+      input.effectiveFrom,
+      ...commitments.map((assignment) => assignment.effectiveFrom).filter(withinRequestedRange),
+      ...position.capacityChanges.map((change: { effectiveAt: Date }) => change.effectiveAt).filter(withinRequestedRange),
+    ];
+    const violatesCapacity = checkpoints.some((checkpoint) => {
+      const breakdown = reconcilePositionCapacity({ capacity: capacityAt(position.capacity, position.capacityChanges, checkpoint), active: true, at: checkpoint, assignments: [...commitments, candidate] });
+      return breakdown.inUse + breakdown.reservedForStart > breakdown.capacity;
+    });
+    if (violatesCapacity) throw new Error('ظرفیت این جایگاه در بازه انتخاب‌شده تکمیل است.');
   }
 
   let supervisorAssignmentId = input.responsibleSupervisorAssignmentId || null;
@@ -216,40 +366,87 @@ const validateAssignment = async (client: any, input: {
   return { position, supervisorAssignmentId };
 };
 
-const foundationData = async () => {
-  const now = new Date();
-  const [organizationalUnits, workplaces, costCenters, jobs, positions, currentAssignments, availableUsers] = await Promise.all([
+const foundationData = async (now = new Date()) => {
+  const [organizationalUnits, workplaces, costCenters, jobs, positions, assignments, lifecycleVersions, availableUsers] = await Promise.all([
     prisma.hrOrganizationalUnit.findMany({ orderBy: [{ isActive: 'desc' }, { code: 'asc' }] }),
     prisma.hrWorkplace.findMany({ orderBy: [{ isActive: 'desc' }, { code: 'asc' }] }),
     prisma.hrCostCenter.findMany({ orderBy: [{ isActive: 'desc' }, { code: 'asc' }] }),
     prisma.hrJob.findMany({ orderBy: [{ isActive: 'desc' }, { code: 'asc' }] }),
     prisma.hrPosition.findMany({ include: positionInclude, orderBy: [{ isActive: 'desc' }, { code: 'asc' }] }),
     prisma.hrEmploymentAssignment.findMany({
-      where: {
-        type: { in: ['PRIMARY', 'SECONDARY'] },
-        OR: [
-          { employmentRelationship: { status: 'PLANNED' }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] },
-          { employmentRelationship: { status: { in: ['ACTIVE', 'SUSPENDED'] } }, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] }
-        ]
-      },
-      select: { positionId: true, employmentRelationship: { select: { status: true } } }
+      select: {
+        id: true, positionId: true, type: true, effectiveFrom: true, effectiveTo: true,
+        employmentRelationship: {
+          select: { status: true, hiringApplication: { select: { convertedAt: true } } }
+        }
+      }
     }),
+    prisma.hrFoundationLifecycleVersion.findMany({ orderBy: { effectiveFrom: 'asc' } }),
     prisma.user.findMany({ where: { personnelId: null, isActive: true }, select: { id: true, firstName: true, lastName: true, username: true }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] })
   ]);
-  const occupancy = currentAssignments.reduce<Record<string, { active: number; committed: number }>>((result, assignment) => {
-    const current = result[assignment.positionId] || { active: 0, committed: 0 };
-    if (assignment.employmentRelationship.status === 'PLANNED') current.committed += 1;
-    else current.active += 1;
-    result[assignment.positionId] = current;
-    return result;
-  }, {});
-  return {
-    organizationalUnits, workplaces, costCenters, jobs, availableUsers,
-    positions: positions.map((position) => ({
+  const versionsFor = (entityType: string, entityId: string) => lifecycleVersions
+    .filter((version) => version.entityType === entityType && version.entityId === entityId);
+  const projectLifecycle = <T extends { id: string; isActive: boolean }>(entityType: string, rows: T[]) => rows.map((row) => {
+    const versions = versionsFor(entityType, row.id);
+    const effective = projectEffectiveFoundation(row, versions, now);
+    return {
+      ...effective,
+      isActive: resolveFoundationStatus({ baseActive: effective.isActive, at: now, versions }),
+      lifecycle: versions,
+    };
+  });
+  const projectedUnits = projectLifecycle('ORGANIZATIONAL_UNIT', organizationalUnits);
+  const projectedWorkplaces = projectLifecycle('WORKPLACE', workplaces);
+  const projectedCostCenters = projectLifecycle('COST_CENTER', costCenters);
+  const projectedJobs = projectLifecycle('JOB', jobs);
+  const projectedPositions = projectLifecycle('POSITION', positions);
+  const unitRows = projectedUnits.map((unit) => {
+    const checkpoints = [now, ...unit.lifecycle.filter((version) => version.effectiveFrom >= now).map((version) => version.effectiveFrom)];
+    const dependencyParentIdsFrom = [...new Set(checkpoints.flatMap((checkpoint) => {
+      const projected = projectEffectiveFoundation(unit, unit.lifecycle, checkpoint);
+      return resolveFoundationStatus({ baseActive: projected.isActive, at: checkpoint, versions: unit.lifecycle }) && projected.parentId ? [projected.parentId] : [];
+    }))];
+    return { ...unit, dependencyParentIdsFrom };
+  });
+  const positionRows = projectedPositions.map((position) => {
+    const positionAssignments: CapacityAssignment[] = assignments
+      .filter((assignment) => assignment.positionId === position.id)
+      .map((assignment) => ({
+        id: assignment.id,
+        type: assignment.type,
+        relationshipStatus: assignment.employmentRelationship.status,
+        effectiveFrom: assignment.effectiveFrom,
+        effectiveTo: assignment.effectiveTo,
+        hireConvertedAt: assignment.employmentRelationship.hiringApplication?.convertedAt ?? null,
+      }));
+    const effectiveCapacity = capacityAt(position.capacity, position.capacityChanges, now);
+    const breakdown = reconcilePositionCapacity({ capacity: effectiveCapacity, active: position.isActive, at: now, assignments: positionAssignments });
+    const projectedSupervisor = projectedPositions.find((candidate) => candidate.id === position.supervisorPositionId);
+    const subordinatePositions = projectedPositions.filter((candidate) => candidate.isActive && candidate.supervisorPositionId === position.id).length;
+    return {
       ...position,
-      occupancy: occupancy[position.id] || { active: 0, committed: 0 },
-      vacancy: Math.max(0, position.capacity - (occupancy[position.id]?.active || 0) - (occupancy[position.id]?.committed || 0))
-    }))
+      job: projectedJobs.find((job) => job.id === position.jobId) ?? position.job,
+      organizationalUnit: projectedUnits.find((unit) => unit.id === position.organizationalUnitId) ?? position.organizationalUnit,
+      workplace: projectedWorkplaces.find((workplace) => workplace.id === position.workplaceId) ?? position.workplace,
+      costCenter: projectedCostCenters.find((costCenter) => costCenter.id === position.costCenterId) ?? position.costCenter,
+      supervisorPosition: projectedSupervisor
+        ? { id: projectedSupervisor.id, code: projectedSupervisor.code, title: projectedSupervisor.title }
+        : position.supervisorPosition,
+      capacity: effectiveCapacity,
+      capacityBreakdown: breakdown,
+      _count: { ...position._count, subordinatePositions },
+      occupancy: { active: breakdown.inUse, committed: breakdown.reservedForStart },
+      vacancy: breakdown.vacancy,
+    };
+  });
+  return {
+    organizationalUnits: unitRows,
+    workplaces: projectedWorkplaces,
+    costCenters: projectedCostCenters,
+    jobs: projectedJobs,
+    availableUsers,
+    positions: positionRows,
+    capacitySummary: summarizePositionCoverage(positionRows.filter((position) => position.isActive).map((position) => position.capacityBreakdown)),
   };
 };
 
@@ -270,27 +467,483 @@ router.get('/dashboard', viewAccess, async (_req, res) => {
   } catch (error) { handleError(res, error, 'HR dashboard'); }
 });
 
-router.get('/foundation', viewAccess, async (_req, res) => {
-  try { res.json({ success: true, data: await foundationData() }); }
+router.get('/foundation', viewAccess, async (req, res) => {
+  try { res.json({ success: true, data: await foundationData(req.query.dependencyAt ? parseDate(req.query.dependencyAt, 'تاریخ وابستگی') : new Date()) }); }
   catch (error) { handleError(res, error, 'HR foundation'); }
 });
+
+export const filterFoundationPositions = (positions: Awaited<ReturnType<typeof foundationData>>['positions'], filter: string, dependencyAt?: Date) => positions.filter((position) => {
+  const matchesStructuralFrom = (field: 'supervisorPositionId' | 'organizationalUnitId' | 'jobId' | 'workplaceId' | 'costCenterId', expected: string) => {
+    if (!dependencyAt) return position[field] === expected;
+    const checkpoints = [dependencyAt, ...position.lifecycle.filter((version) => version.effectiveFrom >= dependencyAt).map((version) => version.effectiveFrom)];
+    return checkpoints.some((checkpoint) => {
+      const projected = projectEffectiveFoundation(position, position.lifecycle, checkpoint);
+      return resolveFoundationStatus({ baseActive: projected.isActive, at: checkpoint, versions: position.lifecycle }) && projected[field] === expected;
+    });
+  };
+  if (filter === 'vacant') return position.capacityBreakdown.vacancy > 0;
+  if (filter === 'in-use') return position.capacityBreakdown.inUse > 0;
+  if (filter === 'reserved' || filter === 'committed') return position.capacityBreakdown.reservedForStart > 0;
+  if (filter === 'allocated') return position.capacityBreakdown.inUse + position.capacityBreakdown.reservedForStart > 0;
+  if (filter === 'acting') return position.capacityBreakdown.acting > 0;
+  if (filter === 'ended') return position.capacityBreakdown.ended > 0;
+  if (filter === 'future') return position.capacityBreakdown.future > 0;
+  if (filter === 'inactive') return !position.isActive;
+  if (filter === 'vacant-supervisor') return position._count.subordinatePositions > 0 && position.capacityBreakdown.inUse === 0;
+  if (filter.startsWith('supervisor:')) return matchesStructuralFrom('supervisorPositionId', filter.slice('supervisor:'.length));
+  if (filter.startsWith('organizational-unit:')) return matchesStructuralFrom('organizationalUnitId', filter.slice('organizational-unit:'.length));
+  if (filter.startsWith('job:')) return matchesStructuralFrom('jobId', filter.slice('job:'.length));
+  if (filter.startsWith('workplace:')) return matchesStructuralFrom('workplaceId', filter.slice('workplace:'.length));
+  if (filter.startsWith('cost_center:')) return matchesStructuralFrom('costCenterId', filter.slice('cost_center:'.length));
+  return true;
+});
+
+router.get('/positions', viewAccess, async (req, res) => {
+  try {
+    const foundation = await foundationData(req.query.dependencyAt ? parseDate(req.query.dependencyAt, 'تاریخ وابستگی') : new Date());
+    const filter = textValue(req.query.filter) || 'all';
+    const dependencyAt = req.query.dependencyAt ? parseDate(req.query.dependencyAt, 'تاریخ وابستگی') : undefined;
+    res.json({ success: true, data: { filter, positions: filterFoundationPositions(foundation.positions, filter, dependencyAt) } });
+  } catch (error) { handleError(res, error, 'List HR positions'); }
+});
+
+router.get('/positions/capacity-summary', viewAccess, async (_req, res) => {
+  try {
+    const foundation = await foundationData(_req.query.dependencyAt ? parseDate(_req.query.dependencyAt, 'تاریخ وابستگی') : new Date());
+    res.json({ success: true, data: foundation.capacitySummary });
+  } catch (error) { handleError(res, error, 'HR position capacity summary'); }
+});
+
+router.get('/positions/:id/history', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const editDecision = await authorizeHrUser(prisma, actorId(req), {
+      workspaceLevel: 'EDIT',
+      feature: { code: 'ORGANIZATIONAL_STRUCTURE', level: 'EDIT' },
+    });
+    const position = await prisma.hrPosition.findUnique({
+      where: { id: req.params.id },
+      include: {
+        ...positionInclude,
+        assignments: {
+          orderBy: { effectiveFrom: 'desc' },
+          include: {
+            employmentRelationship: {
+              select: {
+                status: true,
+                hiringApplication: { select: { convertedAt: true } },
+                personnel: { select: { id: true, firstName: true, lastName: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!position) return res.status(404).json({ success: false, error: 'جایگاه پیدا نشد.' });
+    const lifecycle = await prisma.hrFoundationLifecycleVersion.findMany({
+      where: { entityType: 'POSITION', entityId: position.id },
+      orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+    });
+    const effectivePosition = (await foundationData()).positions.find((candidate) => candidate.id === position.id) ?? position;
+    const historyView = textValue(req.query.view);
+    const historyNow = req.query.dependencyAt ? parseDate(req.query.dependencyAt, 'تاریخ وابستگی') : new Date();
+    const assignmentRows = position.assignments.filter((assignment) => historyView !== 'assignments-live' || (
+      ['PLANNED', 'ACTIVE', 'SUSPENDED'].includes(assignment.employmentRelationship.status)
+      && (!assignment.effectiveTo || assignment.effectiveTo >= historyNow)
+    ));
+    res.json({
+      success: true,
+      data: {
+        position: {
+          id: effectivePosition.id, code: effectivePosition.code, title: effectivePosition.title, capacity: effectivePosition.capacity, isActive: effectivePosition.isActive, updatedAt: position.updatedAt,
+          job: effectivePosition.job, organizationalUnit: effectivePosition.organizationalUnit,
+          workplace: effectivePosition.workplace, costCenter: effectivePosition.costCenter,
+          supervisorPosition: effectivePosition.supervisorPosition,
+        },
+        assignments: assignmentRows.map((assignment) => ({
+          id: assignment.id,
+          type: assignment.type,
+          relationshipStatus: assignment.employmentRelationship.status,
+          effectiveFrom: assignment.effectiveFrom,
+          effectiveTo: assignment.effectiveTo,
+          hireConvertedAt: assignment.employmentRelationship.hiringApplication?.convertedAt ?? null,
+          personnel: editDecision.allowed ? {
+            id: assignment.employmentRelationship.personnel.id,
+            name: `${assignment.employmentRelationship.personnel.firstName} ${assignment.employmentRelationship.personnel.lastName}`,
+          } : null,
+        })),
+        capacityChanges: position.capacityChanges.map((change) => ({
+          id: change.id, version: change.version, previousCapacity: change.previousCapacity,
+          newCapacity: change.newCapacity, effectiveAt: change.effectiveAt, reason: change.reason, createdAt: change.createdAt,
+        })),
+        recruitmentRequests: position.recruitmentRequests.filter((request) => historyView !== 'recruitment-open' || (
+          ['DRAFT', 'APPROVED'].includes(request.status) && (!request.effectiveTo || request.effectiveTo >= historyNow)
+        )).map((request) => ({
+          id: request.id, status: request.status, approvedHeadcount: request.approvedHeadcount,
+          convertedHires: request.convertedHires, effectiveFrom: request.effectiveFrom, effectiveTo: request.effectiveTo,
+        })),
+        structuralChanges: lifecycle.map((change) => ({
+          id: change.id,
+          version: change.version,
+          status: change.status,
+          effectiveFrom: change.effectiveFrom,
+          reason: change.reason,
+          changes: foundationHistoryDelta(change.afterJson),
+          createdAt: change.createdAt,
+        })),
+        capabilities: { canEditCapacity: editDecision.allowed, canViewAssigneeIdentity: editDecision.allowed },
+      },
+    });
+  } catch (error) { handleError(res, error, 'HR position history'); }
+});
+
+router.post('/positions/:id/capacity-changes', editAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const stableKey = textValue(req.body.idempotencyKey) || crypto.randomUUID();
+      const replay = await tx.hrPositionCapacityChange.findUnique({ where: { stableKey } });
+      if (replay) {
+        if (replay.positionId !== req.params.id) throw new Error('کلید تکرار به تغییر دیگری تعلق دارد.');
+        return replay;
+      }
+      const position = await tx.hrPosition.findUnique({
+        where: { id: req.params.id },
+        include: { capacityChanges: { orderBy: { effectiveAt: 'asc' } } },
+      });
+      if (!position) throw new Error('جایگاه پیدا نشد.');
+      assertFreshVersion(position.updatedAt, req.body.expectedUpdatedAt);
+      const effectiveAt = parseDate(req.body.effectiveAt, 'تاریخ اثر');
+      const newCapacity = Number(req.body.newCapacity);
+      const assignmentRows = await tx.hrEmploymentAssignment.findMany({
+        where: {
+          positionId: position.id,
+          type: { in: ['PRIMARY', 'SECONDARY'] },
+          employmentRelationship: { status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveAt } }],
+        },
+        select: {
+          id: true, type: true, effectiveFrom: true, effectiveTo: true,
+          employmentRelationship: { select: { status: true, hiringApplication: { select: { convertedAt: true } } } },
+        },
+      });
+      const capacityAssignments: CapacityAssignment[] = assignmentRows.map((assignment) => ({
+        id: assignment.id, type: assignment.type,
+        relationshipStatus: assignment.employmentRelationship.status,
+        effectiveFrom: assignment.effectiveFrom, effectiveTo: assignment.effectiveTo,
+        hireConvertedAt: assignment.employmentRelationship.hiringApplication?.convertedAt ?? null,
+      }));
+      const recruitment = await tx.hrRecruitmentRequest.findMany({
+        where: {
+          positionId: position.id, status: 'APPROVED',
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveAt } }],
+        },
+        select: { approvedHeadcount: true, convertedHires: true, effectiveFrom: true, effectiveTo: true },
+      });
+      const previousCapacity = capacityAt(position.capacity, position.capacityChanges, effectiveAt);
+      assertCapacityChangeAllowed({
+        currentCapacity: previousCapacity,
+        newCapacity,
+        committedFromEffectiveDate: maximumCapacityCommitmentFrom(capacityAssignments, effectiveAt, recruitment.map((request) => ({
+          effectiveFrom: request.effectiveFrom,
+          effectiveTo: request.effectiveTo,
+          remaining: request.approvedHeadcount - request.convertedHires,
+        }))),
+        approvedRecruitmentRemaining: 0,
+        reason: textValue(req.body.reason),
+        effectiveAt,
+        today: new Date(),
+      });
+      const latestVersion = await tx.hrPositionCapacityChange.findFirst({ where: { positionId: position.id }, orderBy: { version: 'desc' }, select: { version: true } });
+      const version = (latestVersion?.version ?? 0) + 1;
+      const change = await tx.hrPositionCapacityChange.create({
+        data: {
+          stableKey, positionId: position.id, version, previousCapacity, newCapacity, effectiveAt,
+          reason: textValue(req.body.reason) || 'افزایش ظرفیت', changedByUserId: actorId(req),
+        },
+      });
+      await tx.hrPosition.update({ where: { id: position.id }, data: effectiveAt <= new Date() ? { capacity: newCapacity } : { updatedAt: new Date() } });
+      return change;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    res.status(201).json({ success: true, data: result });
+  } catch (error) { handleError(res, error, 'Change HR position capacity'); }
+});
+
+const foundationEntityModels = {
+  'organizational-unit': { entityType: 'ORGANIZATIONAL_UNIT', model: 'hrOrganizationalUnit' },
+  workplace: { entityType: 'WORKPLACE', model: 'hrWorkplace' },
+  'cost-center': { entityType: 'COST_CENTER', model: 'hrCostCenter' },
+  job: { entityType: 'JOB', model: 'hrJob' },
+  position: { entityType: 'POSITION', model: 'hrPosition' },
+} as const;
+type FoundationEntitySlug = keyof typeof foundationEntityModels;
+
+const foundationEntityConfig = (value: string) => {
+  const config = foundationEntityModels[value as FoundationEntitySlug];
+  if (!config) throw new Error('نوع رکورد سازمانی معتبر نیست.');
+  return config;
+};
+
+const foundationDependencyPreview = async (entityType: string, id: string, client: any = prisma, at = new Date()) => {
+  const now = at;
+  const dependency = (kind: string, count: number, href: string) => ({ kind, count, href });
+  const lifecycleHistory = await client.hrFoundationLifecycleVersion.findMany({
+    select: { entityType: true, entityId: true, version: true, status: true, effectiveFrom: true, beforeJson: true, afterJson: true },
+  });
+  const projectDefinitionAt = (entityTypeForRow: string, row: any, projectAt: Date) => {
+    const versions = lifecycleHistory.filter((version: any) => version.entityType === entityTypeForRow && version.entityId === row.id);
+    const projected = projectEffectiveFoundation(row, versions, projectAt);
+    return { ...projected, isActive: resolveFoundationStatus({ baseActive: projected.isActive, at: projectAt, versions }) };
+  };
+  const isDefinitionDependentFrom = (entityTypeForRow: string, row: any, predicate: (projected: any) => boolean) => {
+    const checkpoints = [at, ...lifecycleHistory
+      .filter((version: any) => version.entityType === entityTypeForRow && version.entityId === row.id && version.effectiveFrom >= at)
+      .map((version: any) => version.effectiveFrom)];
+    return checkpoints.some((checkpoint) => {
+      const projected = projectDefinitionAt(entityTypeForRow, row, checkpoint);
+      return projected.isActive && predicate(projected);
+    });
+  };
+  const historicalStructureReferences = lifecycleHistory.filter((version: any) => (
+    (version.entityType === entityType && version.entityId === id && version.version > 1)
+    || ((version.entityType !== entityType || version.entityId !== id)
+      && (jsonContainsExactValue(version.beforeJson, id) || jsonContainsExactValue(version.afterJson, id)))
+  )).length;
+  if (entityType === 'POSITION') {
+    const [liveAssignments, allAssignments, liveApplications, allApplications, recruitmentRequests, allRecruitmentRequests, subordinateRows, capacityChanges] = await Promise.all([
+      client.hrEmploymentAssignment.count({ where: { positionId: id, employmentRelationship: { status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] } }),
+      client.hrEmploymentAssignment.count({ where: { positionId: id } }),
+      client.hrJobApplication.count({ where: { positionId: id, outcome: null } }),
+      client.hrJobApplication.count({ where: { positionId: id } }),
+      client.hrRecruitmentRequest.count({ where: { positionId: id, status: { in: ['DRAFT', 'APPROVED'] }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] } }),
+      client.hrRecruitmentRequest.count({ where: { positionId: id } }),
+      client.hrPosition.findMany({ select: { id: true, supervisorPositionId: true, isActive: true } }),
+      client.hrPositionCapacityChange.count({ where: { positionId: id } }),
+    ]);
+    const subordinates = subordinateRows.filter((row: any) => isDefinitionDependentFrom('POSITION', row, (projected) => projected.supervisorPositionId === id)).length;
+    return {
+      live: [
+        dependency('assignments', liveAssignments, `/dashboard/hr/structure/positions/${id}?view=assignments-live&dependencyAt=${encodeURIComponent(at.toISOString())}`),
+        dependency('applications', liveApplications, `/dashboard/hr/hiring?positionId=${id}`),
+        dependency('recruitmentRequests', recruitmentRequests, `/dashboard/hr/structure/positions/${id}?view=recruitment-open&dependencyAt=${encodeURIComponent(at.toISOString())}`),
+        dependency('subordinatePositions', subordinates, `/dashboard/hr/structure/positions?filter=supervisor:${id}&dependencyAt=${encodeURIComponent(at.toISOString())}`),
+      ].filter((row) => row.count > 0),
+      historicalReferenceCount: allAssignments + allApplications + allRecruitmentRequests + capacityChanges + historicalStructureReferences,
+    };
+  }
+  if (entityType === 'ORGANIZATIONAL_UNIT') {
+    const [unitRows, positionRows, liveAssignments, allAssignments] = await Promise.all([
+      client.hrOrganizationalUnit.findMany({ select: { id: true, parentId: true, isActive: true } }),
+      client.hrPosition.findMany({ select: { id: true, organizationalUnitId: true, isActive: true } }),
+      client.hrEmploymentAssignment.findMany({ where: { organizationalUnitId: id, employmentRelationship: { status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] }, select: { employmentRelationship: { select: { personnelId: true } } } }),
+      client.hrEmploymentAssignment.count({ where: { organizationalUnitId: id } }),
+    ]);
+    const livePersonnel = new Set(liveAssignments.map((assignment: any) => assignment.employmentRelationship.personnelId)).size;
+    const children = unitRows.filter((row: any) => isDefinitionDependentFrom('ORGANIZATIONAL_UNIT', row, (projected) => projected.parentId === id)).length;
+    const positions = positionRows.filter((row: any) => isDefinitionDependentFrom('POSITION', row, (projected) => projected.organizationalUnitId === id)).length;
+    return { live: [dependency('childUnits', children, `/dashboard/hr/structure?tab=units&parentId=${id}&dependencyAt=${encodeURIComponent(at.toISOString())}`), dependency('positions', positions, `/dashboard/hr/structure/positions?filter=organizational-unit:${id}&dependencyAt=${encodeURIComponent(at.toISOString())}`), dependency('assignments', livePersonnel, `/dashboard/hr/personnel?organizationalUnitId=${id}&dependencyAt=${encodeURIComponent(at.toISOString())}`)].filter((row) => row.count > 0), historicalReferenceCount: allAssignments + positions + children + historicalStructureReferences };
+  }
+  const field = entityType === 'JOB' ? 'jobId' : entityType === 'WORKPLACE' ? 'workplaceId' : 'costCenterId';
+  const positionRows = await client.hrPosition.findMany({ select: { id: true, jobId: true, workplaceId: true, costCenterId: true, isActive: true } });
+  const positions = positionRows.filter((row: any) => isDefinitionDependentFrom('POSITION', row, (projected) => projected[field] === id)).length;
+  const assignments = entityType === 'JOB' ? 0 : await client.hrEmploymentAssignment.count({ where: { [field]: id } });
+  const liveAssignmentRows = entityType === 'JOB' ? [] : await client.hrEmploymentAssignment.findMany({ where: {
+    [field]: id,
+    employmentRelationship: { status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } },
+    OR: [{ effectiveTo: null }, { effectiveTo: { gte: at } }],
+  }, select: { employmentRelationship: { select: { personnelId: true } } } });
+  const liveAssignments = new Set(liveAssignmentRows.map((assignment: any) => assignment.employmentRelationship.personnelId)).size;
+  const assignmentFilter = entityType === 'WORKPLACE' ? 'workplaceId' : 'costCenterId';
+  return {
+    live: [
+      dependency('positions', positions, `/dashboard/hr/structure/positions?filter=${entityType.toLowerCase()}:${id}&dependencyAt=${encodeURIComponent(at.toISOString())}`),
+      dependency('assignments', liveAssignments, `/dashboard/hr/personnel?${assignmentFilter}=${id}&dependencyAt=${encodeURIComponent(at.toISOString())}`),
+    ].filter((row) => row.count > 0),
+    historicalReferenceCount: positions + assignments + historicalStructureReferences,
+  };
+};
+
+router.get('/foundation/:entityType/:id/dependencies', viewAccess, async (req, res) => {
+  try {
+    const config = foundationEntityConfig(req.params.entityType);
+    res.json({ success: true, data: await foundationDependencyPreview(config.entityType, req.params.id) });
+  } catch (error) { handleError(res, error, 'Preview HR foundation dependencies'); }
+});
+
+router.post('/foundation/:entityType/:id/lifecycle', editAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const config = foundationEntityConfig(req.params.entityType);
+    const status = textValue(req.body.status);
+    if (!['ACTIVE', 'INACTIVE'].includes(status)) throw new Error('وضعیت چرخه عمر معتبر نیست.');
+    const effectiveFrom = parseDate(req.body.effectiveFrom, 'تاریخ اثر');
+    if (Date.UTC(effectiveFrom.getUTCFullYear(), effectiveFrom.getUTCMonth(), effectiveFrom.getUTCDate()) < Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) throw new Error('تغییر چرخه عمر در گذشته مجاز نیست.');
+    const reason = textValue(req.body.reason);
+    if (!reason) throw new Error('دلیل تغییر وضعیت الزامی است.');
+    const result = await prisma.$transaction(async (tx) => {
+      const stableKey = textValue(req.body.idempotencyKey) || crypto.randomUUID();
+      const replay = await tx.hrFoundationLifecycleVersion.findUnique({ where: { stableKey } });
+      if (replay) {
+        if (replay.entityType !== config.entityType || replay.entityId !== req.params.id) throw new Error('کلید تکرار به تغییر دیگری تعلق دارد.');
+        return replay;
+      }
+      const model = (tx as any)[config.model];
+      const entity = await model.findUnique({ where: { id: req.params.id } });
+      if (!entity) throw new Error('رکورد سازمانی پیدا نشد.');
+      assertFreshVersion(entity.updatedAt, req.body.expectedUpdatedAt);
+      const entityVersions = await tx.hrFoundationLifecycleVersion.findMany({
+        where: { entityType: config.entityType, entityId: entity.id },
+        select: { effectiveFrom: true, afterJson: true, version: true },
+      });
+      const projectedEntity = projectEffectiveFoundation(entity, entityVersions, effectiveFrom);
+      if (status === 'INACTIVE') {
+        const dependencies = await foundationDependencyPreview(config.entityType, entity.id, tx, effectiveFrom);
+        if (dependencies.live.length) {
+          const error = new Error('غیرفعال‌سازی به دلیل وابستگی‌های زنده مسدود است.') as Error & { dependencies?: unknown };
+          error.dependencies = dependencies.live;
+          throw error;
+        }
+      }
+      if (status === 'ACTIVE' && config.entityType === 'POSITION') {
+        await Promise.all([
+          assertActiveReference(tx, 'hrJob', projectedEntity.jobId, 'شغل', effectiveFrom),
+          assertActiveReference(tx, 'hrOrganizationalUnit', projectedEntity.organizationalUnitId, 'واحد سازمانی', effectiveFrom),
+          assertActiveReference(tx, 'hrWorkplace', projectedEntity.workplaceId, 'محل کار', effectiveFrom),
+          assertActiveReference(tx, 'hrCostCenter', projectedEntity.costCenterId, 'مرکز هزینه', effectiveFrom),
+        ]);
+        await assertNoPositionCycle(tx, entity.id, projectedEntity.supervisorPositionId, effectiveFrom);
+      }
+      if (status === 'ACTIVE' && config.entityType === 'ORGANIZATIONAL_UNIT' && projectedEntity.parentId) {
+        await assertActiveReference(tx, 'hrOrganizationalUnit', projectedEntity.parentId, 'واحد والد', effectiveFrom);
+        await assertNoUnitCycle(tx, entity.id, projectedEntity.parentId, effectiveFrom);
+      }
+      const previous = await tx.hrFoundationLifecycleVersion.findFirst({
+        where: { entityType: config.entityType, entityId: entity.id }, orderBy: { version: 'desc' },
+      });
+      const version = (previous?.version ?? 0) + 1;
+      const lifecycle = await tx.hrFoundationLifecycleVersion.create({
+        data: {
+          stableKey, entityType: config.entityType, entityId: entity.id, version,
+          status: status as 'ACTIVE' | 'INACTIVE', effectiveFrom, reason,
+          beforeJson: jsonValue({ isActive: entity.isActive }), afterJson: jsonValue({ isActive: status === 'ACTIVE' }), changedByUserId: actorId(req),
+        },
+      });
+      await model.update({ where: { id: entity.id }, data: effectiveFrom <= new Date() ? { isActive: status === 'ACTIVE' } : { updatedAt: new Date() } });
+      return lifecycle;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    res.status(201).json({ success: true, data: result });
+  } catch (error) {
+    if (error instanceof Error && 'dependencies' in error) return res.status(409).json({ success: false, error: error.message, dependencies: (error as any).dependencies });
+    handleError(res, error, 'Change HR foundation lifecycle');
+  }
+});
+
+router.delete('/foundation/:entityType/:id/permanent', requireSystemAdmin, async (req: WorkspaceRequest, res) => {
+  try {
+    const config = foundationEntityConfig(req.params.entityType);
+    const reason = textValue(req.body.reason);
+    const model = (prisma as any)[config.model];
+    const [target, actor] = await Promise.all([
+      model.findUnique({ where: { id: req.params.id } }),
+      prisma.user.findUnique({ where: { id: actorId(req) }, select: { password: true } }),
+    ]);
+    if (!target) return res.status(404).json({ success: false, error: 'رکورد سازمانی پیدا نشد.' });
+    if (!actor || !(await bcrypt.compare(String(req.body.adminPassword || ''), actor.password))) return res.status(403).json({ success: false, error: 'رمز عبور مدیر سامانه صحیح نیست.' });
+    if (!reason || textValue(req.body.entityId) !== target.id || textValue(req.body.confirmationCode) !== target.code) {
+      throw new Error('دلیل، شناسه پایدار و کد دقیق رکورد برای حذف دائمی الزامی است.');
+    }
+    const dependencies = await foundationDependencyPreview(config.entityType, req.params.id);
+    if (dependencies.live.length || dependencies.historicalReferenceCount > 0) {
+      return res.status(409).json({ success: false, error: 'حذف دائمی با وجود ارجاع جاری یا تاریخی ممنوع است.', dependencies });
+    }
+    const deleted = await prisma.$transaction(async (tx) => {
+      const model = (tx as any)[config.model];
+      const entity = await model.findUnique({ where: { id: req.params.id } });
+      if (!entity) throw new Error('رکورد سازمانی پیدا نشد.');
+      assertFreshVersion(entity.updatedAt, req.body.expectedUpdatedAt);
+      if (entity.id !== target.id || entity.code !== target.code) throw new FoundationVersionConflictError();
+      const transactionDependencies = await foundationDependencyPreview(config.entityType, entity.id, tx);
+      if (transactionDependencies.live.length || transactionDependencies.historicalReferenceCount > 0) throw new FoundationVersionConflictError();
+      await tx.hrFoundationReservedCode.create({ data: { entityType: config.entityType, code: entity.code, deletedEntityId: entity.id, deletedByUserId: actorId(req), reason } });
+      await model.delete({ where: { id: entity.id } });
+      return { id: entity.id, code: entity.code, permanentlyDeleted: true };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    res.json({ success: true, data: deleted });
+  } catch (error) { handleError(res, error, 'Permanently delete HR foundation record'); }
+});
+
+const createFoundationRecord = async (
+  req: WorkspaceRequest,
+  config: { entityType: string; model: string },
+  data: Record<string, unknown>,
+  include?: Record<string, unknown>,
+) => prisma.$transaction(async (tx) => {
+  const code = String(data.code);
+  const stableKey = textValue(req.body.idempotencyKey) || `FOUNDATION_CREATE:${config.entityType}:${code}`;
+  const replay = await tx.hrFoundationLifecycleVersion.findUnique({ where: { stableKey } });
+  if (replay) {
+    if (replay.entityType !== config.entityType) throw new Error('کلید تکرار به ایجاد دیگری تعلق دارد.');
+    return (tx as any)[config.model].findUnique({ where: { id: replay.entityId }, ...(include ? { include } : {}) });
+  }
+  const reserved = await tx.hrFoundationReservedCode.findUnique({ where: { entityType_code: { entityType: config.entityType, code } } });
+  if (reserved) throw new Error('این کد به‌صورت دائمی رزرو شده و قابل استفاده دوباره نیست.');
+  const status = textValue(req.body.status) || 'ACTIVE';
+  if (!['ACTIVE', 'INACTIVE'].includes(status)) throw new Error('وضعیت ایجاد معتبر نیست.');
+  const effectiveFrom = req.body.effectiveFrom ? parseDate(req.body.effectiveFrom, 'تاریخ فعال‌سازی') : new Date();
+  if (Date.UTC(effectiveFrom.getUTCFullYear(), effectiveFrom.getUTCMonth(), effectiveFrom.getUTCDate()) < Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) throw new Error('فعال‌سازی در گذشته مجاز نیست.');
+  const record = await (tx as any)[config.model].create({
+    data: { ...data, isActive: status === 'ACTIVE' && effectiveFrom <= new Date() },
+    ...(include ? { include } : {}),
+  });
+  await tx.hrFoundationLifecycleVersion.create({
+    data: {
+      stableKey, entityType: config.entityType, entityId: record.id, version: 1,
+      status: status as 'ACTIVE' | 'INACTIVE', effectiveFrom,
+      reason: textValue(req.body.lifecycleReason) || 'ایجاد رکورد سازمانی',
+      beforeJson: Prisma.JsonNull, afterJson: jsonValue(record), changedByUserId: actorId(req),
+    },
+  });
+  return record;
+}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
 router.post('/organizational-units', editAccess, async (req: WorkspaceRequest, res) => {
   try {
     const code = textValue(req.body.code).toUpperCase(); const name = textValue(req.body.name); const parentId = nullableText(req.body.parentId);
     if (!code || !name) throw new Error('کد و نام واحد سازمانی الزامی است.');
     if (!['COMPANY', 'DIVISION', 'DEPARTMENT', 'SECTION', 'TEAM'].includes(req.body.type)) throw new Error('نوع واحد سازمانی معتبر نیست.');
-    if (parentId) await assertActiveReference(prisma, 'hrOrganizationalUnit', parentId, 'واحد والد');
-    const record = await prisma.hrOrganizationalUnit.create({ data: { code, name, type: req.body.type, parentId, createdBy: actorId(req) } });
+    const effectiveFrom = req.body.effectiveFrom ? parseDate(req.body.effectiveFrom, 'تاریخ فعال‌سازی') : new Date();
+    if (parentId) await assertActiveReference(prisma, 'hrOrganizationalUnit', parentId, 'واحد والد', effectiveFrom);
+    const record = await createFoundationRecord(req, foundationEntityModels['organizational-unit'], { code, name, type: req.body.type, parentId, createdBy: actorId(req) });
     res.status(201).json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Create HR unit'); }
 });
 
 router.put('/organizational-units/:id', editAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const parentId = nullableText(req.body.parentId); await assertNoUnitCycle(req.params.id, parentId);
-    if (parentId) await assertActiveReference(prisma, 'hrOrganizationalUnit', parentId, 'واحد والد');
-    const record = await prisma.hrOrganizationalUnit.update({ where: { id: req.params.id }, data: { name: textValue(req.body.name), type: req.body.type, parentId, isActive: Boolean(req.body.isActive) } });
+    const parentId = nullableText(req.body.parentId);
+    const record = await prisma.$transaction(async (tx) => {
+      const current = await tx.hrOrganizationalUnit.findUnique({ where: { id: req.params.id } });
+      if (!current) throw new Error('واحد سازمانی پیدا نشد.');
+      assertFreshVersion(current.updatedAt, req.body.expectedUpdatedAt);
+      const structuralChange = current.type !== req.body.type || current.parentId !== parentId;
+      const references = structuralChange ? await Promise.all([
+        tx.hrOrganizationalUnit.count({ where: { parentId: current.id } }),
+        tx.hrPosition.count({ where: { organizationalUnitId: current.id } }),
+        tx.hrEmploymentAssignment.count({ where: { organizationalUnitId: current.id } }),
+      ]) : [0, 0, 0];
+      const validationAt = structuralChange && references.some(Boolean)
+        ? parseDate(req.body.effectiveFrom, 'تاریخ اثر تغییر ساختاری')
+        : new Date();
+      if (parentId) await assertActiveReference(tx, 'hrOrganizationalUnit', parentId, 'واحد والد', validationAt);
+      await assertNoUnitCycle(tx, current.id, parentId, validationAt);
+      if (structuralChange && references.some(Boolean)) {
+        const effectiveFrom = validationAt;
+        const reason = textValue(req.body.reason);
+        if (!reason) throw new Error('دلیل تغییر ساختاری الزامی است.');
+        if (effectiveFrom < new Date(new Date().toISOString().slice(0, 10))) throw new Error('تغییر ساختاری در گذشته مجاز نیست.');
+        const previous = await tx.hrFoundationLifecycleVersion.findFirst({ where: { entityType: 'ORGANIZATIONAL_UNIT', entityId: current.id }, orderBy: { version: 'desc' } });
+        await tx.hrFoundationLifecycleVersion.create({ data: { stableKey: textValue(req.body.idempotencyKey) || crypto.randomUUID(), entityType: 'ORGANIZATIONAL_UNIT', entityId: current.id, version: (previous?.version ?? 0) + 1, status: current.isActive ? 'ACTIVE' : 'INACTIVE', effectiveFrom, reason, beforeJson: jsonValue({ type: current.type, parentId: current.parentId }), afterJson: jsonValue({ type: req.body.type, parentId }), changedByUserId: actorId(req) } });
+        if (effectiveFrom > new Date()) return tx.hrOrganizationalUnit.update({ where: { id: current.id }, data: { name: textValue(req.body.name) } });
+      }
+      return tx.hrOrganizationalUnit.update({ where: { id: current.id }, data: { name: textValue(req.body.name), type: req.body.type, parentId } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Update HR unit'); }
 });
@@ -299,13 +952,17 @@ const simpleCatalogCreate = (model: 'hrWorkplace' | 'hrCostCenter') => async (re
   try {
     const code = textValue(req.body.code).toUpperCase(); const name = textValue(req.body.name);
     if (!code || !name) throw new Error('کد و نام الزامی است.');
-    const record = await (prisma[model] as any).create({ data: { code, name, description: nullableText(req.body.description), createdBy: actorId(req) } });
+    const config = model === 'hrWorkplace' ? foundationEntityModels.workplace : foundationEntityModels['cost-center'];
+    const record = await createFoundationRecord(req, config, { code, name, description: nullableText(req.body.description), createdBy: actorId(req) });
     res.status(201).json({ success: true, data: record });
   } catch (error) { handleError(res, error, `Create ${model}`); }
 };
 const simpleCatalogUpdate = (model: 'hrWorkplace' | 'hrCostCenter') => async (req: WorkspaceRequest, res: Response) => {
   try {
-    const record = await (prisma[model] as any).update({ where: { id: req.params.id }, data: { name: textValue(req.body.name), description: nullableText(req.body.description), isActive: Boolean(req.body.isActive) } });
+    const current = await (prisma[model] as any).findUnique({ where: { id: req.params.id } });
+    if (!current) throw new Error('رکورد پیدا نشد.');
+    assertFreshVersion(current.updatedAt, req.body.expectedUpdatedAt);
+    const record = await (prisma[model] as any).update({ where: { id: req.params.id }, data: { name: textValue(req.body.name), description: nullableText(req.body.description) } });
     res.json({ success: true, data: record });
   } catch (error) { handleError(res, error, `Update ${model}`); }
 };
@@ -318,13 +975,16 @@ router.post('/jobs', editAccess, async (req: WorkspaceRequest, res) => {
   try {
     const code = textValue(req.body.code).toUpperCase(); const title = textValue(req.body.title);
     if (!code || !title) throw new Error('کد و عنوان شغل الزامی است.');
-    const record = await prisma.hrJob.create({ data: { code, title, description: nullableText(req.body.description), responsibilities: nullableText(req.body.responsibilities), createdBy: actorId(req) } });
+    const record = await createFoundationRecord(req, foundationEntityModels.job, { code, title, description: nullableText(req.body.description), responsibilities: nullableText(req.body.responsibilities), createdBy: actorId(req) });
     res.status(201).json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Create HR job'); }
 });
 router.put('/jobs/:id', editAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const record = await prisma.hrJob.update({ where: { id: req.params.id }, data: { title: textValue(req.body.title), description: nullableText(req.body.description), responsibilities: nullableText(req.body.responsibilities), isActive: Boolean(req.body.isActive) } });
+    const current = await prisma.hrJob.findUnique({ where: { id: req.params.id } });
+    if (!current) throw new Error('شغل پیدا نشد.');
+    assertFreshVersion(current.updatedAt, req.body.expectedUpdatedAt);
+    const record = await prisma.hrJob.update({ where: { id: req.params.id }, data: { title: textValue(req.body.title), description: nullableText(req.body.description), responsibilities: nullableText(req.body.responsibilities) } });
     res.json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Update HR job'); }
 });
@@ -334,20 +994,58 @@ router.post('/positions', editAccess, async (req: WorkspaceRequest, res) => {
     const code = textValue(req.body.code).toUpperCase(); const title = textValue(req.body.title); const capacity = Number(req.body.capacity);
     if (!code || !title || !Number.isInteger(capacity) || capacity < 1) throw new Error('کد، عنوان و ظرفیت مثبت جایگاه الزامی است.');
     const jobId = textValue(req.body.jobId); const organizationalUnitId = textValue(req.body.organizationalUnitId);
-    await Promise.all([assertActiveReference(prisma, 'hrJob', jobId, 'شغل'), assertActiveReference(prisma, 'hrOrganizationalUnit', organizationalUnitId, 'واحد سازمانی'), assertActiveReference(prisma, 'hrWorkplace', nullableText(req.body.workplaceId), 'محل کار'), assertActiveReference(prisma, 'hrCostCenter', nullableText(req.body.costCenterId), 'مرکز هزینه')]);
+    const effectiveFrom = req.body.effectiveFrom ? parseDate(req.body.effectiveFrom, 'تاریخ فعال‌سازی') : new Date();
+    await Promise.all([assertActiveReference(prisma, 'hrJob', jobId, 'شغل', effectiveFrom), assertActiveReference(prisma, 'hrOrganizationalUnit', organizationalUnitId, 'واحد سازمانی', effectiveFrom), assertActiveReference(prisma, 'hrWorkplace', nullableText(req.body.workplaceId), 'محل کار', effectiveFrom), assertActiveReference(prisma, 'hrCostCenter', nullableText(req.body.costCenterId), 'مرکز هزینه', effectiveFrom)]);
     const supervisorPositionId = nullableText(req.body.supervisorPositionId);
-    if (supervisorPositionId && !(await prisma.hrPosition.findUnique({ where: { id: supervisorPositionId, isActive: true } }))) throw new Error('جایگاه سرپرست معتبر نیست.');
-    const record = await prisma.hrPosition.create({ data: { code, title, capacity, jobId, organizationalUnitId, workplaceId: nullableText(req.body.workplaceId), costCenterId: nullableText(req.body.costCenterId), supervisorPositionId, createdBy: actorId(req) }, include: positionInclude });
+    if (supervisorPositionId) {
+      const supervisor = await prisma.hrPosition.findUnique({ where: { id: supervisorPositionId }, select: { isActive: true } });
+      const supervisorLifecycle = supervisor ? await prisma.hrFoundationLifecycleVersion.findMany({ where: { entityType: 'POSITION', entityId: supervisorPositionId }, select: { status: true, effectiveFrom: true, version: true, afterJson: true } }) : [];
+      if (!supervisor || !resolveFoundationStatus({ baseActive: supervisor.isActive, at: effectiveFrom, versions: supervisorLifecycle })) throw new Error('جایگاه سرپرست معتبر نیست.');
+    }
+    const record = await createFoundationRecord(req, foundationEntityModels.position, { code, title, capacity, jobId, organizationalUnitId, workplaceId: nullableText(req.body.workplaceId), costCenterId: nullableText(req.body.costCenterId), supervisorPositionId, createdBy: actorId(req) }, positionInclude);
     res.status(201).json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Create HR position'); }
 });
 router.put('/positions/:id', editAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const capacity = Number(req.body.capacity); if (!Number.isInteger(capacity) || capacity < 1) throw new Error('ظرفیت باید حداقل یک باشد.');
-    const occupied = await prisma.hrEmploymentAssignment.count({ where: { positionId: req.params.id, type: { in: ['PRIMARY', 'SECONDARY'] }, effectiveTo: null, employmentRelationship: { status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } } } });
-    if (capacity < occupied) throw new Error('ظرفیت نمی‌تواند از تعداد تخصیص‌های متعهد کمتر شود.');
-    const supervisorPositionId = nullableText(req.body.supervisorPositionId); await assertNoPositionCycle(req.params.id, supervisorPositionId);
-    const record = await prisma.hrPosition.update({ where: { id: req.params.id }, data: { title: textValue(req.body.title), capacity, workplaceId: nullableText(req.body.workplaceId), costCenterId: nullableText(req.body.costCenterId), supervisorPositionId, isActive: Boolean(req.body.isActive) }, include: positionInclude });
+    const record = await prisma.$transaction(async (tx) => {
+      const current = await tx.hrPosition.findUnique({ where: { id: req.params.id }, include: { capacityChanges: true } });
+      if (!current) throw new Error('جایگاه پیدا نشد.');
+      assertFreshVersion(current.updatedAt, req.body.expectedUpdatedAt);
+      if (req.body.capacity != null && Number(req.body.capacity) !== capacityAt(current.capacity, current.capacityChanges, new Date())) throw new Error('تغییر ظرفیت فقط از مسیر تغییر ظرفیت مؤثر-تاریخ‌دار مجاز است.');
+      const jobId = textValue(req.body.jobId) || current.jobId;
+      const organizationalUnitId = textValue(req.body.organizationalUnitId) || current.organizationalUnitId;
+      const workplaceId = req.body.workplaceId === undefined ? current.workplaceId : nullableText(req.body.workplaceId);
+      const costCenterId = req.body.costCenterId === undefined ? current.costCenterId : nullableText(req.body.costCenterId);
+      const supervisorPositionId = req.body.supervisorPositionId === undefined ? current.supervisorPositionId : nullableText(req.body.supervisorPositionId);
+      const structuralChange = current.jobId !== jobId || current.organizationalUnitId !== organizationalUnitId || current.workplaceId !== workplaceId || current.costCenterId !== costCenterId || current.supervisorPositionId !== supervisorPositionId;
+      const referenceCount = structuralChange ? await Promise.all([
+        tx.hrEmploymentAssignment.count({ where: { positionId: current.id } }),
+        tx.hrJobApplication.count({ where: { positionId: current.id } }),
+        tx.hrRecruitmentRequest.count({ where: { positionId: current.id } }),
+      ]).then((counts) => counts.reduce((sum, count) => sum + count, 0)) : 0;
+      const validationAt = structuralChange && referenceCount > 0
+        ? parseDate(req.body.effectiveFrom, 'تاریخ اثر تغییر ساختاری')
+        : new Date();
+      await Promise.all([
+        assertActiveReference(tx, 'hrJob', jobId, 'شغل', validationAt),
+        assertActiveReference(tx, 'hrOrganizationalUnit', organizationalUnitId, 'واحد سازمانی', validationAt),
+        assertActiveReference(tx, 'hrWorkplace', workplaceId, 'محل کار', validationAt),
+        assertActiveReference(tx, 'hrCostCenter', costCenterId, 'مرکز هزینه', validationAt),
+      ]);
+      await assertNoPositionCycle(tx, current.id, supervisorPositionId, validationAt);
+      const structuralData = { jobId, organizationalUnitId, workplaceId, costCenterId, supervisorPositionId };
+      if (structuralChange && referenceCount > 0) {
+        const effectiveFrom = validationAt;
+        const reason = textValue(req.body.reason);
+        if (!reason) throw new Error('دلیل تغییر ساختاری الزامی است.');
+        if (effectiveFrom < new Date(new Date().toISOString().slice(0, 10))) throw new Error('تغییر ساختاری در گذشته مجاز نیست.');
+        const previous = await tx.hrFoundationLifecycleVersion.findFirst({ where: { entityType: 'POSITION', entityId: current.id }, orderBy: { version: 'desc' } });
+        await tx.hrFoundationLifecycleVersion.create({ data: { stableKey: textValue(req.body.idempotencyKey) || crypto.randomUUID(), entityType: 'POSITION', entityId: current.id, version: (previous?.version ?? 0) + 1, status: current.isActive ? 'ACTIVE' : 'INACTIVE', effectiveFrom, reason, beforeJson: jsonValue({ jobId: current.jobId, organizationalUnitId: current.organizationalUnitId, workplaceId: current.workplaceId, costCenterId: current.costCenterId, supervisorPositionId: current.supervisorPositionId }), afterJson: jsonValue(structuralData), changedByUserId: actorId(req) } });
+        if (effectiveFrom > new Date()) return tx.hrPosition.update({ where: { id: current.id }, data: { title: textValue(req.body.title) || current.title }, include: positionInclude });
+      }
+      return tx.hrPosition.update({ where: { id: current.id }, data: { title: textValue(req.body.title) || current.title, ...structuralData }, include: positionInclude });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Update HR position'); }
 });
@@ -355,12 +1053,15 @@ router.put('/positions/:id', editAccess, async (req: WorkspaceRequest, res) => {
 router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
     const search = textValue(req.query.search);
+    const focusId = nullableText(req.query.focus);
     const archived = textValue(req.query.archived) === 'true';
     const relationshipStatus = textValue(req.query.relationshipStatus);
+    const organizationalUnitId = textValue(req.query.organizationalUnitId);
+    const workplaceId = textValue(req.query.workplaceId);
+    const costCenterId = textValue(req.query.costCenterId);
+    const dependencyAt = req.query.dependencyAt ? parseDate(req.query.dependencyAt, 'تاریخ وابستگی') : new Date();
     const attention = textValue(req.query.attention);
     const page = Math.max(1, Number(req.query.page || 1));
-    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 50)));
-    const sortDirection = textValue(req.query.sortDirection) === 'desc' ? 'desc' : 'asc';
     const filterNow = new Date();
     const relationshipFilter: Prisma.HrEmploymentRelationshipWhereInput = {
       status: relationshipStatus && ['PLANNED', 'ACTIVE', 'SUSPENDED', 'ENDED', 'CANCELLED'].includes(relationshipStatus)
@@ -373,61 +1074,56 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
       ...(attention === 'missing-primary'
         ? { assignments: { none: { type: 'PRIMARY', effectiveTo: null } } }
         : {}),
+      ...((organizationalUnitId || workplaceId || costCenterId) ? { assignments: { some: {
+        ...(organizationalUnitId ? { organizationalUnitId } : {}),
+        ...(workplaceId ? { workplaceId } : {}),
+        ...(costCenterId ? { costCenterId } : {}),
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: dependencyAt } }],
+      } } } : {}),
     };
     const where: Prisma.PersonnelWhereInput = {
       archivedAt: archived ? { not: null } : null,
-      ...((relationshipStatus || attention === 'missing-primary') ? { hrEmploymentRelationships: { some: relationshipFilter } } : {}),
-      ...(personnelSearchWhere(search) || {})
+      ...((relationshipStatus || attention === 'missing-primary' || organizationalUnitId || workplaceId || costCenterId) ? { hrEmploymentRelationships: { some: relationshipFilter } } : {})
     };
-    const [rows, total, authorityRows] = await Promise.all([
-      prisma.personnel.findMany({ where, include: personnelInclude, orderBy: [{ lastName: sortDirection }, { firstName: sortDirection }], skip: (page - 1) * pageSize, take: pageSize }),
-      prisma.personnel.count({ where }),
+    // Authorization and structural filters are applied by middleware/where first. Search,
+    // Persian collation, focus canonicalization, and pagination then operate on that complete set.
+    const [authorizedRows, authorityRows] = await Promise.all([
+      prisma.personnel.findMany({
+        where,
+        select: { id: true, firstName: true, lastName: true, nationalCode: true, employeeNumber: true }
+      }),
       prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } })
     ]);
+    const collection = buildPersonnelCollection(authorizedRows, { search, page, focusId });
+    const pageIds = collection.rows.map((person) => person.id);
+    const unorderedRows = pageIds.length
+      ? await prisma.personnel.findMany({ where: { id: { in: pageIds } }, include: personnelListInclude })
+      : [];
+    const pageOrder = new Map(pageIds.map((id, index) => [id, index]));
+    const rows = unorderedRows.sort((left, right) => pageOrder.get(left.id)! - pageOrder.get(right.id)!);
     const archivedActorIds = [...new Set(rows.map((person) => person.archivedBy).filter(Boolean) as string[])];
     const archivedActors = archivedActorIds.length
       ? await prisma.user.findMany({ where: { id: { in: archivedActorIds } }, select: { id: true, firstName: true, lastName: true, username: true } })
       : [];
     const archivedActorNames = new Map(archivedActors.map((actor) => [actor.id, `${actor.firstName} ${actor.lastName}`.trim() || actor.username]));
     const authorities = new Set(authorityRows.map((row) => row.authority));
-    const now = new Date();
-    const isEffective = (from: Date, to: Date | null) => dateOnlyRangeIncludes(from, to, now);
-    const data = rows.map((person) => {
-      const relationship = person.hrEmploymentRelationships.find((candidate) =>
-        ['PLANNED', 'ACTIVE', 'SUSPENDED'].includes(candidate.status) &&
-        isEffective(candidate.effectiveFrom, candidate.effectiveTo)
-      );
-      const primary = relationship?.assignments.find((assignment) =>
-        assignment.type === 'PRIMARY' && isEffective(assignment.effectiveFrom, assignment.effectiveTo)
-      );
-      const change = person.workScheduleChanges[0];
-      const supervisorAssignment = primary?.responsibleSupervisorAssignment;
-      const supervisorRelationship = supervisorAssignment?.employmentRelationship;
-      const isResponsibleSupervisor = Boolean(
-        supervisorAssignment && supervisorRelationship &&
-        isEffective(supervisorAssignment.effectiveFrom, supervisorAssignment.effectiveTo) &&
-        ['ACTIVE', 'SUSPENDED'].includes(supervisorRelationship.status) &&
-        isEffective(supervisorRelationship.effectiveFrom, supervisorRelationship.effectiveTo) &&
-        supervisorRelationship.personnel.user?.id === actorId(req)
-      );
-      const separateReviewer = change?.preparedBy !== actorId(req);
-      const canSeeChangeDetails = Boolean(isResponsibleSupervisor) || authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
-      return {
-        ...person,
-        archivedByDisplayName: person.archivedBy ? archivedActorNames.get(person.archivedBy) || person.archivedBy : null,
-        retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities: [...authorities], archived: Boolean(person.archivedAt) }),
-        workScheduleChanges: canSeeChangeDetails ? person.workScheduleChanges : [],
-        workScheduleCapabilities: {
-          canPropose: Boolean(isResponsibleSupervisor) && (!change || change.status === 'APPROVED'),
-          canPrepare: authorities.has('HR_PROCESSOR') && Boolean(change && ['PROPOSED', 'RETURNED', 'DRAFT'].includes(change.status)),
-          canSubmit: authorities.has('HR_PROCESSOR') && change?.status === 'DRAFT',
-          canApprove: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer,
-          canReturn: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer
-        }
-      };
-    });
-    res.json({ success: true, data, meta: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } });
+    const data = rows.map((person) => ({
+      ...person,
+      archivedByDisplayName: person.archivedBy ? archivedActorNames.get(person.archivedBy) || person.archivedBy : null,
+      retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities: [...authorities], archived: Boolean(person.archivedAt) }),
+    }));
+    res.json({ success: true, data, meta: collection.meta });
   } catch (error) { handleError(res, error, 'List HR personnel'); }
+});
+
+router.get('/personnel-origin', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const origin = textValue(req.query.origin);
+    const feature = personnelOriginFeature(origin);
+    if (!feature) return res.json({ success: true, data: { origin: '/dashboard/hr' } });
+    const authorization = await authorizeHrUser(prisma, actorId(req), { feature: { code: feature, level: 'VIEW' } });
+    res.json({ success: true, data: { origin: authorization.allowed ? origin : '/dashboard/hr' } });
+  } catch (error) { handleError(res, error, 'Resolve Personnel logical origin'); }
 });
 
 router.post('/personnel/:id/archive', viewAccess, requireHrManagerAuthority, async (req: WorkspaceRequest, res) => {
@@ -710,6 +1406,85 @@ router.use('/assignments/:id', async (req: WorkspaceRequest, res, next) => {
   } catch (error) { handleError(res, error, 'Reject archived Personnel assignment mutation'); }
 });
 
+router.get('/personnel/:id/work-schedule', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const [person, authorityRows] = await Promise.all([
+      prisma.personnel.findUnique({
+        where: { id: req.params.id },
+        select: {
+          id: true,
+          archivedAt: true,
+          workSchedules: {
+            include: { days: { orderBy: { weekday: 'asc' } } },
+            orderBy: { effectiveFrom: 'desc' },
+            take: 1,
+          },
+          workScheduleChanges: { orderBy: { createdAt: 'desc' }, take: 5 },
+          hrEmploymentRelationships: {
+            orderBy: { effectiveFrom: 'desc' },
+            include: {
+              assignments: {
+                orderBy: { effectiveFrom: 'desc' },
+                include: {
+                  responsibleSupervisorAssignment: {
+                    include: {
+                      employmentRelationship: {
+                        include: { personnel: { select: { user: { select: { id: true } } } } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      prisma.hrHiringAuthority.findMany({
+        where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+        select: { authority: true },
+      }),
+    ]);
+    if (!person) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
+    const authorities = new Set(authorityRows.map((row) => row.authority));
+    const now = new Date();
+    const isEffective = (from: Date, to: Date | null) => dateOnlyRangeIncludes(from, to, now);
+    const relationship = person.hrEmploymentRelationships.find((candidate) =>
+      ['PLANNED', 'ACTIVE', 'SUSPENDED'].includes(candidate.status) && isEffective(candidate.effectiveFrom, candidate.effectiveTo)
+    );
+    const primary = relationship?.assignments.find((assignment) =>
+      assignment.type === 'PRIMARY' && isEffective(assignment.effectiveFrom, assignment.effectiveTo)
+    );
+    const supervisorAssignment = primary?.responsibleSupervisorAssignment;
+    const supervisorRelationship = supervisorAssignment?.employmentRelationship;
+    const isResponsibleSupervisor = Boolean(
+      supervisorAssignment && supervisorRelationship &&
+      isEffective(supervisorAssignment.effectiveFrom, supervisorAssignment.effectiveTo) &&
+      ['ACTIVE', 'SUSPENDED'].includes(supervisorRelationship.status) &&
+      isEffective(supervisorRelationship.effectiveFrom, supervisorRelationship.effectiveTo) &&
+      supervisorRelationship.personnel.user?.id === actorId(req)
+    );
+    const change = person.workScheduleChanges[0];
+    const canSeeChangeDetails = isResponsibleSupervisor || authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
+    const separateReviewer = change?.preparedBy !== actorId(req);
+    res.json({
+      success: true,
+      data: {
+        personnelId: person.id,
+        archived: Boolean(person.archivedAt),
+        workSchedules: person.workSchedules,
+        workScheduleChanges: canSeeChangeDetails ? person.workScheduleChanges : [],
+        workScheduleCapabilities: {
+          canPropose: isResponsibleSupervisor && (!change || change.status === 'APPROVED'),
+          canPrepare: authorities.has('HR_PROCESSOR') && Boolean(change && ['PROPOSED', 'RETURNED', 'DRAFT'].includes(change.status)),
+          canSubmit: authorities.has('HR_PROCESSOR') && change?.status === 'DRAFT',
+          canApprove: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer,
+          canReturn: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer,
+        },
+      },
+    });
+  } catch (error) { handleError(res, error, 'Get personnel work schedule on request'); }
+});
+
 router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, async (req: WorkspaceRequest, res) => {
   try {
     const firstName = textValue(req.body.firstName); const lastName = textValue(req.body.lastName);
@@ -824,7 +1599,7 @@ router.post('/personnel/:id/work-schedule/proposals', viewAccess, async (req: Wo
   } catch (error) { handleError(res, error, 'Propose personnel work schedule'); }
 });
 
-router.put('/personnel/:id/work-schedule/changes/:changeId/prepare', editAccess, async (req: WorkspaceRequest, res) => {
+router.put('/personnel/:id/work-schedule/changes/:changeId/prepare', editAccess, requireHrResponsibility('HR_PROCESSOR'), async (req: WorkspaceRequest, res) => {
   try {
     const [change, hasHrProcessor] = await Promise.all([
       prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
@@ -845,7 +1620,7 @@ router.put('/personnel/:id/work-schedule/changes/:changeId/prepare', editAccess,
   } catch (error) { handleError(res, error, 'Prepare personnel work schedule'); }
 });
 
-router.post('/personnel/:id/work-schedule/changes/:changeId/submit', editAccess, async (req: WorkspaceRequest, res) => {
+router.post('/personnel/:id/work-schedule/changes/:changeId/submit', editAccess, requireHrResponsibility('HR_PROCESSOR'), async (req: WorkspaceRequest, res) => {
   try {
     const [change, hasHrProcessor] = await Promise.all([
       prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
@@ -858,7 +1633,7 @@ router.post('/personnel/:id/work-schedule/changes/:changeId/submit', editAccess,
   } catch (error) { handleError(res, error, 'Submit personnel work schedule'); }
 });
 
-router.post('/personnel/:id/work-schedule/changes/:changeId/return', adminAccess, async (req: WorkspaceRequest, res) => {
+router.post('/personnel/:id/work-schedule/changes/:changeId/return', adminAccess, requireHrResponsibility('HR_MANAGER'), async (req: WorkspaceRequest, res) => {
   try {
     const [change, hasHrManager] = await Promise.all([
       prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
@@ -872,7 +1647,7 @@ router.post('/personnel/:id/work-schedule/changes/:changeId/return', adminAccess
   } catch (error) { handleError(res, error, 'Return personnel work schedule'); }
 });
 
-router.post('/personnel/:id/work-schedule/changes/:changeId/approve', adminAccess, async (req: WorkspaceRequest, res) => {
+router.post('/personnel/:id/work-schedule/changes/:changeId/approve', adminAccess, requireHrResponsibility('HR_MANAGER'), async (req: WorkspaceRequest, res) => {
   try {
     const [change, hasHrManager] = await Promise.all([
       prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
@@ -988,6 +1763,136 @@ router.get('/migration/preview', adminAccess, async (_req, res) => {
   } catch (error) { handleError(res, error, 'HR migration preview'); }
 });
 
+router.get('/redesign/data-contracts', viewAccess, (_req, res) => {
+  res.json({ success: true, data: HR_REDESIGN_CATALOG });
+});
+
+router.get('/redesign/compatibility/access/:userId', adminAccess, async (req, res) => {
+  try {
+    const [workspacePermission, featurePermissions, authorities] = await Promise.all([
+      prisma.workspacePermission.findUnique({ where: { userId_workspace: { userId: req.params.userId, workspace: 'hr' } } }),
+      prisma.featurePermission.findMany({ where: { userId: req.params.userId, workspace: 'hr' } }),
+      prisma.hrHiringAuthority.findMany({ where: { userId: req.params.userId } }),
+    ]);
+    res.json({ success: true, data: projectLegacyHrAccess({ userId: req.params.userId, workspacePermission, featurePermissions, authorities }) });
+  } catch (error) { handleError(res, error, 'Project legacy HR access'); }
+});
+
+router.get('/redesign/compatibility/positions', viewAccess, async (_req, res) => {
+  try {
+    const positions = await prisma.hrPosition.findMany({
+      select: { id: true, code: true, title: true, capacity: true, isActive: true, createdAt: true },
+      orderBy: { code: 'asc' },
+    });
+    res.json({ success: true, data: positions.map(projectLegacyPosition) });
+  } catch (error) { handleError(res, error, 'Project legacy HR Positions'); }
+});
+
+router.get('/redesign/compatibility/work-items', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const workItems = await prisma.hrWorkItem.findMany({
+      where: { assignedToUserId: actorId(req) },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    res.json({ success: true, data: workItems.map(projectLegacyHrWorkItem) });
+  } catch (error) { handleError(res, error, 'Project legacy HR work items'); }
+});
+
+router.get('/redesign/compatibility/applications/:applicationId/assessments', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const [authority, assignedDuty] = await Promise.all([
+      prisma.hrHiringAuthority.findFirst({
+        where: {
+          userId: actorId(req),
+          authority: { in: ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER'] },
+          isActive: true,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        select: { id: true },
+      }),
+      prisma.hrWorkItem.findFirst({
+        where: {
+          sourceType: 'HIRING_ACTION',
+          assignedToUserId: actorId(req),
+          status: { in: ['PENDING', 'IN_PROGRESS'] },
+          OR: ['COMPLETE_ASSESSMENT', 'DECIDE_ASSESSMENT', 'RECORD_ASSESSMENT'].map((action) => ({
+            sourceKey: { startsWith: `HIRING:${req.params.applicationId}:${action}:` },
+          })),
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (!canReadLegacyAssessmentCompatibility({
+      hasAssignedAssessmentDuty: Boolean(assignedDuty),
+      hasActiveHiringAuthority: Boolean(authority),
+    })) {
+      return res.status(403).json({ success: false, error: 'Assigned hiring assessment duty and active authority are required.' });
+    }
+    const application = await prisma.hrJobApplication.findUniqueOrThrow({
+      where: { id: req.params.applicationId },
+      select: { id: true, assessments: { orderBy: { recordedAt: 'asc' } } },
+    });
+    const completedAssessmentKinds = [...new Set(application.assessments
+      .map((assessment) => assessment.assessmentType)
+      .filter((kind): kind is 'DISC' | 'EQ' | 'BIG_FIVE' => ['DISC', 'EQ', 'BIG_FIVE'].includes(kind)))] as Array<'DISC' | 'EQ' | 'BIG_FIVE'>;
+    res.json({
+      success: true,
+      data: projectLegacyAssessmentCompatibility({
+        applicationId: application.id,
+        completedAssessmentKinds,
+        evidence: application.assessments,
+      }),
+    });
+  } catch (error) { handleError(res, error, 'Project legacy HR assessment evidence'); }
+});
+
+router.get('/migration/redesign-preview', adminAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const report = await runHrRedesignBackfill(prisma, {
+      apply: false,
+      actorUserId: actorId(req),
+    });
+    res.json({ success: true, data: report });
+  } catch (error) { handleError(res, error, 'Preview HR redesign backfill'); }
+});
+
+router.post('/migration/redesign-backfill', adminAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const report = await runHrRedesignBackfill(prisma, {
+      apply: true,
+      actorUserId: actorId(req),
+    });
+    res.json({ success: true, data: report });
+  } catch (error) { handleError(res, error, 'Apply HR redesign backfill'); }
+});
+
+router.get('/migration/reconciliation', adminAccess, async (req, res) => {
+  try {
+    const blockerValue = textValue(req.query.cutoverBlocker);
+    if (blockerValue && !['true', 'false'].includes(blockerValue)) throw new Error('HR_RECONCILIATION_BLOCKER_FILTER_INVALID');
+    const data = await getHrReconciliationWorkspace(prisma, {
+      primaryState: nullableText(req.query.primaryState) ?? undefined,
+      attentionFlag: nullableText(req.query.attentionFlag) ?? undefined,
+      sourceType: nullableText(req.query.sourceType) ?? undefined,
+      cutoverBlocker: blockerValue ? blockerValue === 'true' : undefined,
+    });
+    res.json({ success: true, data });
+  } catch (error) { handleError(res, error, 'List HR migration reconciliation'); }
+});
+
+router.post('/migration/reconciliation/:id/reviews', adminAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const review = await recordHrReconciliationReview(prisma, {
+      reconciliationId: req.params.id,
+      outcome: textValue(req.body.outcome),
+      reason: textValue(req.body.reason),
+      actorUserId: actorId(req),
+    });
+    res.status(201).json({ success: true, data: review });
+  } catch (error) { handleError(res, error, 'Review HR migration reconciliation'); }
+});
+
 const migrationRecordTitles: Record<string, string> = {
   'active-personnel': 'پرسنل فعال',
   'inactive-personnel': 'پرسنل غیرفعال',
@@ -1093,7 +1998,23 @@ router.post('/migration/apply', adminAccess, async (req: WorkspaceRequest, res) 
       const personnel = await tx.personnel.findMany({ where: { isActive: true }, select: { id: true } });
       let relationshipsCreated = 0;
       let relationshipsSkipped = 0;
+      let relationshipsBlocked = 0;
       for (const person of personnel) {
+        const reconciliation = await tx.hrReconciliationRecord.findUnique({
+          where: { sourceType_sourceId: { sourceType: 'PERSONNEL', sourceId: person.id } },
+          select: { id: true, attentionFlags: { where: { flagCode: 'POSSIBLE_DUPLICATE_IDENTITY', isActive: true }, select: { flagCode: true } } },
+        });
+        if (reconciliation) {
+          try {
+            assertAutomatedHrMigrationOperationAllowed({
+              reconciliationId: reconciliation.id,
+              activeAttentionFlags: reconciliation.attentionFlags.map((flag) => flag.flagCode),
+            });
+          } catch {
+            relationshipsBlocked += 1;
+            continue;
+          }
+        }
         const existing = await tx.hrEmploymentRelationship.findUnique({ where: { sourceSystem_sourceId: { sourceSystem: 'LEGACY_PERSONNEL', sourceId: person.id } } });
         const currentRelationship = await tx.hrEmploymentRelationship.findFirst({ where: { personnelId: person.id, ...overlaps(baseline, null) } });
         if (!existing && !currentRelationship) {
@@ -1103,7 +2024,7 @@ router.post('/migration/apply', adminAccess, async (req: WorkspaceRequest, res) 
           relationshipsSkipped += 1;
         }
       }
-      return { unitsCreated, relationshipsCreated, relationshipsSkipped };
+      return { unitsCreated, relationshipsCreated, relationshipsSkipped, relationshipsBlocked };
     });
     res.json({ success: true, data: result, message: 'مهاجرت کنترل‌شده انجام شد؛ موارد فاقد تخصیص اصلی همچنان برای تکمیل HR علامت‌گذاری می‌شوند.' });
   } catch (error) { handleError(res, error, 'Apply HR migration'); }

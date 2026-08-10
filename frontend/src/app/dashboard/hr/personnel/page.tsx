@@ -1,16 +1,19 @@
 "use client";
 import {
   ErpInput,
+  ErpCheckbox,
   ErpPressable,
   ErpSelect,
+  ErpSheet,
   ErpTextarea,
 } from "@/components/erp";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import moment from "moment-jalaali";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   FaArchive,
+  FaArrowRight,
   FaBriefcase,
   FaChevronDown,
   FaChevronUp,
@@ -46,6 +49,16 @@ import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
 import RetentionAction from "@/features/hr/RetentionActionSheet";
 import {
+  exceptionalPersonnelDraftKey,
+  parsePersonnelListState,
+  personnelScheduleDraftPrefix,
+  personnelScheduleDraftKey,
+  personnelListSearch,
+  type PersonnelListState,
+} from "@/features/hr/personnelListState";
+import { useSocket } from "@/hooks/useSocket";
+import { useAuth } from "@/contexts/AuthContext";
+import {
   apiError,
   assignmentTypeLabel,
   dateFa,
@@ -80,11 +93,50 @@ const blankAssignment = () => ({
   responsibleSupervisorAssignmentId: "",
   scheduleContributing: false,
 });
+const clearPersonnelScheduleDrafts = (userId: string) => {
+  const prefix = personnelScheduleDraftPrefix(userId);
+  for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.sessionStorage.key(index);
+    if (key?.startsWith(prefix)) window.sessionStorage.removeItem(key);
+  }
+};
 
 export default function HrPersonnelPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const relationshipStatus = searchParams.get("relationshipStatus") || "";
-  const attention = searchParams.get("attention") || "";
+  const { socket } = useSocket();
+  const { user } = useAuth();
+  const currentUserId = user?.id || "";
+  const listState = useMemo(
+    () => parsePersonnelListState(new URLSearchParams(searchParams.toString())),
+    [searchParams],
+  );
+  const {
+    relationshipStatus,
+    attention,
+    organizationalUnitId,
+    workplaceId,
+    costCenterId,
+    dependencyAt,
+  } = listState;
+  const replaceListState = useCallback(
+    (patch: Partial<PersonnelListState>) => {
+      const nextState = { ...listState, ...patch };
+      const resetsCollectionScroll = ([
+        "view", "search", "page", "relationshipStatus", "attention",
+        "organizationalUnitId", "workplaceId", "costCenterId", "dependencyAt",
+      ] as const).some((key) => patch[key] !== undefined && nextState[key] !== listState[key]);
+      const query = personnelListSearch(nextState);
+      if (resetsCollectionScroll) {
+        const scrollKey = `hr-personnel-scroll:${pathname}?${personnelListSearch({ ...nextState, focus: "", panel: "" })}`;
+        window.sessionStorage.removeItem(scrollKey);
+      }
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      if (resetsCollectionScroll) window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
+    },
+    [listState, pathname, router],
+  );
   const [rows, setRows] = useState<any[]>([]);
   const [foundation, setFoundation] = useState<any>({
     positions: [],
@@ -94,11 +146,9 @@ export default function HrPersonnelPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [searchDraft, setSearchDraft] = useState("");
-  const [search, setSearch] = useState("");
+  const [searchDraft, setSearchDraft] = useState(listState.search);
   const [form, setForm] = useState(blankPerson);
   const [supervisors, setSupervisors] = useState<any[]>([]);
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [assignmentRelationship, setAssignmentRelationship] = useState<
     string | null
   >(null);
@@ -106,13 +156,26 @@ export default function HrPersonnelPage() {
   const [assignmentSupervisors, setAssignmentSupervisors] = useState<any[]>([]);
   const [endDates, setEndDates] = useState<Record<string, string>>({});
   const [authorities, setAuthorities] = useState<string[]>([]);
-  const [archiveView, setArchiveView] = useState(false);
-  const [page, setPage] = useState(1);
   const [meta, setMeta] = useState({ page: 1, total: 0, totalPages: 1 });
   const [deletionTarget, setDeletionTarget] = useState<any>(null);
   const [retentionTarget, setRetentionTarget] = useState<any>(null);
-  const [showExceptionalForm, setShowExceptionalForm] = useState(false);
+  const [scheduleData, setScheduleData] = useState<any>(null);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleDirty, setScheduleDirty] = useState(false);
+  const [confirmDiscardSchedule, setConfirmDiscardSchedule] = useState(false);
+  const [exceptionalOpenedHere, setExceptionalOpenedHere] = useState(false);
+  const [confirmDiscardExceptional, setConfirmDiscardExceptional] = useState(false);
+  const [originHref, setOriginHref] = useState("/dashboard/hr");
+  const lastSuccessfulView = useRef(false);
+  const restoredFocus = useRef<string | null>(null);
+  const expanded = listState.focus || null;
+  const archiveView = listState.view === "archived";
+  const page = listState.page;
+  const search = listState.search;
+  const showExceptionalForm = listState.panel === "exceptional";
   const canCreateExceptionalPersonnel = authorities.includes("HR_MANAGER");
+  const authoritySignature = authorities.join("|");
+  const scheduleTarget = rows.find((person) => person.id === expanded) || null;
 
   const load = useCallback(async () => {
     try {
@@ -124,43 +187,102 @@ export default function HrPersonnelPage() {
           archived: archiveView,
           ...(relationshipStatus ? { relationshipStatus } : {}),
           ...(attention ? { attention } : {}),
+          ...(organizationalUnitId ? { organizationalUnitId } : {}),
+          ...(workplaceId ? { workplaceId } : {}),
+          ...(costCenterId ? { costCenterId } : {}),
+          ...(dependencyAt ? { dependencyAt } : {}),
           page,
-          pageSize: 50,
+          ...(expanded ? { focus: expanded } : {}),
         }),
         hrAPI.getFoundation(),
         hiringAPI.myAuthorities(),
       ]);
-      setRows(people.data.data);
-      setMeta(
-        people.data.meta || {
+      const nextMeta = people.data.meta || {
           page: 1,
           total: people.data.data.length,
           totalPages: 1,
-        },
-      );
+        };
+      setRows(people.data.data);
+      setMeta(nextMeta);
       setFoundation(base.data.data);
       setAuthorities(authorityResponse.data.data || []);
+      lastSuccessfulView.current = true;
+      if (nextMeta.page !== page || nextMeta.focus === "removed") {
+        replaceListState({
+          page: nextMeta.page,
+          ...(nextMeta.focus === "removed" ? { focus: "", panel: "" } : {}),
+        });
+      }
     } catch (err) {
+      if ([401, 403].includes(Number((err as any)?.response?.status))) {
+        setRows([]);
+        setFoundation({ positions: [], availableUsers: [] });
+        setAuthorities([]);
+        setScheduleData(null);
+        setScheduleDirty(false);
+        setForm(blankPerson());
+        if (currentUserId) {
+          window.sessionStorage.removeItem(exceptionalPersonnelDraftKey(currentUserId));
+          clearPersonnelScheduleDrafts(currentUserId);
+        }
+        lastSuccessfulView.current = false;
+        replaceListState({ focus: "", panel: "" });
+      }
       setError(apiError(err));
     } finally {
       setLoading(false);
     }
-  }, [search, archiveView, page, relationshipStatus, attention]);
+  }, [search, archiveView, page, relationshipStatus, attention, organizationalUnitId, workplaceId, costCenterId, dependencyAt, expanded, replaceListState, currentUserId]);
 
   useEffect(() => {
     void load();
   }, [load]);
   useEffect(() => {
+    let active = true;
+    if (!listState.origin) {
+      setOriginHref("/dashboard/hr");
+      return () => { active = false; };
+    }
+    void hrAPI.resolvePersonnelOrigin(listState.origin)
+      .then((response) => { if (active) setOriginHref(response.data.data.origin || "/dashboard/hr"); })
+      .catch(() => { if (active) setOriginHref("/dashboard/hr"); });
+    return () => { active = false; };
+  }, [listState.origin]);
+  useEffect(() => {
     const timeout = window.setTimeout(() => {
-      setPage(1);
-      setSearch(searchDraft.trim());
+      const nextSearch = searchDraft.trim();
+      if (nextSearch !== listState.search) {
+        replaceListState({ search: nextSearch, page: 1, focus: "", panel: "" });
+      }
     }, 400);
     return () => window.clearTimeout(timeout);
-  }, [searchDraft]);
+  }, [listState.search, replaceListState, searchDraft]);
   useEffect(() => {
-    const focus = new URLSearchParams(window.location.search).get("focus");
-    if (focus) setExpanded(focus);
-  }, []);
+    setSearchDraft(listState.search);
+  }, [listState.search]);
+  useEffect(() => {
+    if (!expanded) {
+      restoredFocus.current = null;
+      return;
+    }
+    if (loading || restoredFocus.current === expanded) return;
+    const control = document.querySelector<HTMLElement>(`[data-personnel-id="${CSS.escape(expanded)}"] button`);
+    if (!control) return;
+    control.focus({ preventScroll: true });
+    control.scrollIntoView({ block: "center" });
+    restoredFocus.current = expanded;
+  }, [expanded, loading, rows]);
+  useEffect(() => {
+    const key = `hr-personnel-scroll:${pathname}?${personnelListSearch({ ...listState, focus: "", panel: "" })}`;
+    const restore = sessionStorage.getItem(key);
+    if (restore && !expanded) window.requestAnimationFrame(() => window.scrollTo({ top: Number(restore) || 0 }));
+    const remember = () => sessionStorage.setItem(key, String(window.scrollY));
+    window.addEventListener("scroll", remember, { passive: true });
+    return () => {
+      remember();
+      window.removeEventListener("scroll", remember);
+    };
+  }, [expanded, listState, pathname]);
   useEffect(() => {
     const fetchCandidates = async () => {
       if (!form.positionId || !form.effectiveFrom) return setSupervisors([]);
@@ -196,19 +318,72 @@ export default function HrPersonnelPage() {
     void fetchCandidates();
   }, [assignment.positionId, assignment.effectiveFrom, assignment.effectiveTo]);
 
+  const loadSchedule = useCallback(async () => {
+    if (!expanded || listState.panel !== "schedule") {
+      setScheduleData(null);
+      return;
+    }
+    try {
+      setScheduleLoading(true);
+      const response = await hrAPI.getPersonnelWorkSchedule(expanded);
+      setScheduleData(response.data.data);
+    } catch (err) {
+      setScheduleData(null);
+      setError(apiError(err));
+      if ([401, 403, 404].includes(Number((err as any)?.response?.status))) {
+        if (currentUserId) window.sessionStorage.removeItem(personnelScheduleDraftKey(currentUserId, expanded));
+        setScheduleDirty(false);
+        replaceListState({ panel: "", focus: "" });
+      }
+    } finally {
+      setScheduleLoading(false);
+    }
+  }, [currentUserId, expanded, listState.panel, replaceListState]);
+
+  useEffect(() => {
+    void loadSchedule();
+  }, [authoritySignature, loadSchedule]);
+  useEffect(() => {
+    const refresh = () => {
+      void load();
+      if (listState.panel === "schedule") void loadSchedule();
+    };
+    socket?.on("hr.personnel.changed", refresh);
+    window.addEventListener("hr.personnel.changed", refresh);
+    return () => {
+      socket?.off("hr.personnel.changed", refresh);
+      window.removeEventListener("hr.personnel.changed", refresh);
+    };
+  }, [listState.panel, load, loadSchedule, socket]);
+  useEffect(() => {
+    if (!lastSuccessfulView.current || !showExceptionalForm || canCreateExceptionalPersonnel) return;
+    setForm(blankPerson());
+    if (currentUserId) window.sessionStorage.removeItem(exceptionalPersonnelDraftKey(currentUserId));
+    replaceListState({ panel: "" });
+  }, [canCreateExceptionalPersonnel, currentUserId, replaceListState, showExceptionalForm]);
+  useEffect(() => {
+    if (!showExceptionalForm || !canCreateExceptionalPersonnel) return;
+    if (!currentUserId) return;
+    const saved = window.sessionStorage.getItem(exceptionalPersonnelDraftKey(currentUserId));
+    if (!saved) return;
+    try { setForm({ ...blankPerson(), ...JSON.parse(saved) }); }
+    catch { window.sessionStorage.removeItem(exceptionalPersonnelDraftKey(currentUserId)); }
+  }, [canCreateExceptionalPersonnel, currentUserId, showExceptionalForm]);
+
   const run = async (
     action: () => Promise<any>,
     message: string,
-    reset?: () => void,
+    reset?: (response?: any) => void,
   ) => {
     try {
       setSaving(true);
       setError("");
       setSuccess("");
-      await action();
-      reset?.();
+      const response = await action();
+      reset?.(response);
       setSuccess(message);
       await load();
+      if (listState.panel === "schedule") await loadSchedule();
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -264,9 +439,64 @@ export default function HrPersonnelPage() {
 
   const submitSearch = () => {
     const nextSearch = searchDraft.trim();
-    setPage(1);
     if (nextSearch === search) void load();
-    else setSearch(nextSearch);
+    else replaceListState({ search: nextSearch, page: 1, focus: "", panel: "" });
+  };
+
+  const openExceptionalRegistration = () => {
+    const query = personnelListSearch({ ...listState, panel: "exceptional" });
+    setExceptionalOpenedHere(true);
+    router.push(`${pathname}?${query}`, { scroll: false });
+  };
+  const exceptionalDirty = JSON.stringify(form) !== JSON.stringify(blankPerson());
+  useEffect(() => {
+    if (!exceptionalDirty) return;
+    if (currentUserId) window.sessionStorage.setItem(exceptionalPersonnelDraftKey(currentUserId), JSON.stringify(form));
+  }, [currentUserId, exceptionalDirty, form]);
+  useEffect(() => {
+    if (!saving && !exceptionalDirty && !scheduleDirty) return;
+    const protectPendingWork = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectPendingWork);
+    return () => window.removeEventListener("beforeunload", protectPendingWork);
+  }, [exceptionalDirty, saving, scheduleDirty]);
+  const closeExceptionalRegistration = () => {
+    if (saving) return;
+    if (exceptionalDirty) {
+      setConfirmDiscardExceptional(true);
+      return;
+    }
+    if (exceptionalOpenedHere) router.back();
+    else replaceListState({ panel: "" });
+  };
+  const discardExceptionalRegistration = () => {
+    setForm(blankPerson());
+    if (currentUserId) window.sessionStorage.removeItem(exceptionalPersonnelDraftKey(currentUserId));
+    setConfirmDiscardExceptional(false);
+    if (exceptionalOpenedHere) router.back();
+    else replaceListState({ panel: "" });
+  };
+  const openSchedule = (person: any) => {
+    setScheduleDirty(false);
+    replaceListState({ focus: person.id, panel: "schedule" });
+  };
+  const closeSchedule = () => {
+    if (saving) return;
+    if (scheduleDirty) {
+      setConfirmDiscardSchedule(true);
+      return;
+    }
+    setScheduleData(null);
+    replaceListState({ panel: "" });
+  };
+  const discardSchedule = () => {
+    if (currentUserId && expanded) window.sessionStorage.removeItem(personnelScheduleDraftKey(currentUserId, expanded));
+    setScheduleDirty(false);
+    setConfirmDiscardSchedule(false);
+    setScheduleData(null);
+    replaceListState({ panel: "" });
   };
 
   const confirmPermanentDeletion = async (payload: any) => {
@@ -287,6 +517,22 @@ export default function HrPersonnelPage() {
   };
 
   if (loading && !rows.length) return <ErpLoading />;
+  if (!loading && error && !lastSuccessfulView.current) {
+    return (
+      <ErpPage
+        eyebrow="منابع انسانی · پرسنل"
+        title="فهرست پرسنل"
+        actions={[{ label: "بازگشت", href: originHref, icon: FaArrowRight, tone: "neutral" }]}
+      >
+        <ErpEmptyState
+          icon={FaUsers}
+          title="فهرست پرسنل در دسترس نیست"
+          description={error}
+          action={{ label: "تلاش دوباره", onClick: load }}
+        />
+      </ErpPage>
+    );
+  }
 
   return (
     <ErpPage
@@ -298,35 +544,48 @@ export default function HrPersonnelPage() {
         { label: "جایگاه فعال", value: foundation.positions.filter((item: any) => item.isActive).length.toLocaleString("fa-IR"), tone: "neutral" },
       ]}
       actions={[
+        {
+          label: "بازگشت",
+          href: originHref,
+          icon: FaArrowRight,
+          tone: "neutral",
+        },
         ...(canCreateExceptionalPersonnel
           ? [{
               label: "ثبت استثنایی پرسنل",
               icon: FaUserPlus,
-              onClick: () => setShowExceptionalForm(true),
+              onClick: openExceptionalRegistration,
               tone: "success" as const,
             }]
           : []),
         {
           label: archiveView ? "فهرست فعال" : "بایگانی پرسنل",
           icon: archiveView ? FaUndo : FaArchive,
-          onClick: () => {
-            setPage(1);
-            setArchiveView((value) => !value);
-          },
+          onClick: () => replaceListState({
+            view: archiveView ? "active" : "archived",
+            page: 1,
+            focus: "",
+            panel: "",
+          }),
           tone: "neutral",
         },
         { label: "به‌روزرسانی", icon: FaSync, onClick: load, tone: "neutral" },
       ]}
-      backHref="/dashboard/hr"
     >
       {error && <HrMessage>{error}</HrMessage>}
       {success && <HrMessage tone="success">{success}</HrMessage>}
 
-      {canCreateExceptionalPersonnel ? (showExceptionalForm ? (
-        <ErpSection
+      {canCreateExceptionalPersonnel ? (
+        <ErpSheet
+          open={showExceptionalForm}
+          onClose={closeExceptionalRegistration}
+          dismissible={!saving}
           title="ثبت استثنایی پرسنل"
-          description="فقط برای مهاجرت داده، اصلاح سابقه یا انتقال سازمانی؛ جذب عادی باید از پرونده متقاضی انجام شود."
+          presentation="modal"
         >
+          <p className="mb-4 text-sm text-[var(--sds-text-secondary)]">
+            فقط برای مهاجرت داده، اصلاح سابقه یا انتقال سازمانی؛ جذب عادی باید از پرونده متقاضی انجام شود.
+          </p>
           <ErpCard className="p-4 sm:p-5">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
               <HrField label="نام" required>
@@ -451,16 +710,14 @@ export default function HrPersonnelPage() {
                   </HrField>
                 </div>
               )}
-              <label className="flex items-center gap-2 self-end rounded-xl border border-[var(--sds-border-default)] px-3 py-2.5 text-sm dark:border-[var(--sds-border-strong)]">
-                <ErpInput
-                  type="checkbox"
+              <ErpCheckbox
+                  className="self-end rounded-xl border border-[var(--sds-border-default)] px-3 py-2.5 dark:border-[var(--sds-border-strong)]"
+                  label="نام‌های مشابه را بررسی کرده‌ام"
                   checked={form.confirmDuplicate}
                   onChange={(e) =>
                     setForm({ ...form, confirmDuplicate: e.target.checked })
                   }
-                />
-                نام‌های مشابه را بررسی کرده‌ام
-              </label>
+              />
               <HrField label="منبع ثبت استثنایی" required>
                 <ErpSelect
                   className={fieldClass}
@@ -517,17 +774,24 @@ export default function HrPersonnelPage() {
                         effectiveFrom: toIsoDate(form.effectiveFrom),
                       }),
                     "پرسنل استثنایی، رابطه استخدامی، تخصیص اصلی و رویداد ممیزی ثبت شد.",
-                    () => {
+                    (response) => {
                       setForm(blankPerson());
-                      setShowExceptionalForm(false);
+                      if (currentUserId) window.sessionStorage.removeItem(exceptionalPersonnelDraftKey(currentUserId));
+                      setExceptionalOpenedHere(false);
+                      replaceListState({
+                        view: "active",
+                        page: 1,
+                        focus: response?.data?.data?.id || "",
+                        panel: "",
+                      });
                     },
                   )
                 }
               />
             </div>
           </ErpCard>
-        </ErpSection>
-      ) : null) : (
+        </ErpSheet>
+      ) : (
         <ErpSection
           title="ایجاد پرسنل جدید"
           description="مسیر عادی ایجاد پرسنل از پرونده جذب و پس از تکمیل کنترل‌های استخدام انجام می‌شود."
@@ -592,9 +856,11 @@ export default function HrPersonnelPage() {
               key={person.id}
               person={person}
               open={expanded === person.id}
-              onToggle={() =>
-                setExpanded(expanded === person.id ? null : person.id)
-              }
+              onToggle={() => replaceListState({
+                focus: expanded === person.id ? "" : person.id,
+                panel: "",
+              })}
+              onOpenSchedule={() => openSchedule(person)}
               saving={saving}
               foundation={foundation}
               assignment={assignment}
@@ -627,7 +893,7 @@ export default function HrPersonnelPage() {
               type="button"
               className="rounded-lg border px-3 py-2 disabled:opacity-50"
               disabled={loading || page <= 1}
-              onClick={() => setPage((value) => value - 1)}
+              onClick={() => replaceListState({ page: page - 1, focus: "", panel: "" })}
             >
               صفحه قبل
             </ErpPressable>
@@ -635,13 +901,60 @@ export default function HrPersonnelPage() {
               type="button"
               className="rounded-lg border px-3 py-2 disabled:opacity-50"
               disabled={loading || page >= meta.totalPages}
-              onClick={() => setPage((value) => value + 1)}
+              onClick={() => replaceListState({ page: page + 1, focus: "", panel: "" })}
             >
               صفحه بعد
             </ErpPressable>
           </div>
         </div>
       </ErpSection>
+      <ErpSheet
+        open={listState.panel === "schedule" && Boolean(expanded)}
+        onClose={closeSchedule}
+        dismissible={!saving}
+        title={scheduleTarget ? `برنامه کاری ${scheduleTarget.firstName} ${scheduleTarget.lastName}` : "برنامه کاری"}
+        presentation="modal"
+      >
+        {scheduleLoading && !scheduleData ? <ErpLoading /> : null}
+        {scheduleData && scheduleTarget ? (
+          <PersonnelScheduleEditor
+            key={`${scheduleData.workSchedules?.[0]?.id || "new-schedule"}-${scheduleData.workScheduleChanges?.[0]?.id || "no-change"}`}
+            person={{ ...scheduleTarget, ...scheduleData }}
+            saving={saving}
+            run={run}
+            onDirtyChange={setScheduleDirty}
+            userId={currentUserId}
+          />
+        ) : null}
+      </ErpSheet>
+      <ErpSheet
+        open={confirmDiscardExceptional}
+        onClose={() => setConfirmDiscardExceptional(false)}
+        title="کنار گذاشتن اطلاعات ثبت‌نشده؟"
+        presentation="modal"
+        footer={(
+          <div className="flex flex-wrap justify-end gap-2">
+            <ErpButton label="ادامه ویرایش" variant="ghost" onClick={() => setConfirmDiscardExceptional(false)} />
+            <ErpButton label="کنار گذاشتن" tone="danger" onClick={discardExceptionalRegistration} />
+          </div>
+        )}
+      >
+        <p className="text-sm text-[var(--sds-text-secondary)]">اطلاعات واردشده ذخیره نشده است.</p>
+      </ErpSheet>
+      <ErpSheet
+        open={confirmDiscardSchedule}
+        onClose={() => setConfirmDiscardSchedule(false)}
+        title="بستن برنامه کاری بدون ذخیره؟"
+        presentation="modal"
+        footer={(
+          <div className="flex flex-wrap justify-end gap-2">
+            <ErpButton label="ادامه ویرایش" variant="ghost" onClick={() => setConfirmDiscardSchedule(false)} />
+            <ErpButton label="کنار گذاشتن" tone="danger" onClick={discardSchedule} />
+          </div>
+        )}
+      >
+        <p className="text-sm text-[var(--sds-text-secondary)]">تغییرهای ثبت‌نشده برنامه کاری از بین می‌رود.</p>
+      </ErpSheet>
       {deletionTarget && (
         <PermanentDeletionDialog
           title="حذف دائمی شخص و همه سوابق مرتبط"
@@ -676,6 +989,7 @@ function PersonnelCard(props: any) {
     person,
     open,
     onToggle,
+    onOpenSchedule,
     saving,
     foundation,
     assignment,
@@ -695,6 +1009,7 @@ function PersonnelCard(props: any) {
     (item: any) => item.type === "PRIMARY" && !item.effectiveTo,
   );
   return (
+    <div data-personnel-id={person.id}>
     <ErpCard className="p-4">
       <ErpPressable
         type="button"
@@ -807,12 +1122,15 @@ function PersonnelCard(props: any) {
               )}
             />
           </div>
-          <PersonnelScheduleEditor
-            key={`${person.workSchedules?.[0]?.id || "new-schedule"}-${person.workScheduleChanges?.[0]?.id || "no-change"}`}
-            person={person}
-            saving={saving}
-            run={run}
-          />
+          <div className="mt-4">
+            <ErpButton
+              label="مشاهده برنامه کاری"
+              variant="soft"
+              tone="info"
+              disabled={saving}
+              onClick={onOpenSchedule}
+            />
+          </div>
           {relationship && (
             <>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -921,22 +1239,64 @@ function PersonnelCard(props: any) {
         </div>
       )}
     </ErpCard>
+    </div>
   );
 }
 
-function PersonnelScheduleEditor({ person, saving, run }: any) {
+function PersonnelScheduleEditor({ person, saving, run, onDirtyChange, userId }: any) {
   const schedule = person.workSchedules?.[0];
   const change = person.workScheduleChanges?.[0];
-  const draftSchedule =
-    change?.effectiveFrom && Array.isArray(change.daysJson)
-      ? { effectiveFrom: change.effectiveFrom, days: change.daysJson }
-      : schedule;
+  const initialValue = useMemo(
+    () => workScheduleFromApi(
+      change?.effectiveFrom && Array.isArray(change.daysJson)
+        ? { effectiveFrom: change.effectiveFrom, days: change.daysJson }
+        : schedule,
+    ),
+    [change?.daysJson, change?.effectiveFrom, schedule],
+  );
   const [value, setValue] = useState<WorkScheduleValue>(() =>
-    workScheduleFromApi(draftSchedule),
+    initialValue,
   );
   const [proposalNote, setProposalNote] = useState("");
   const [returnReason, setReturnReason] = useState("");
+  const [draftReady, setDraftReady] = useState(false);
   const capabilities = person.workScheduleCapabilities || {};
+
+  useEffect(() => {
+    if (!userId) return;
+    const saved = window.sessionStorage.getItem(personnelScheduleDraftKey(userId, person.id));
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved);
+        if (draft.value) setValue(draft.value);
+        setProposalNote(String(draft.proposalNote || ""));
+        setReturnReason(String(draft.returnReason || ""));
+      } catch { window.sessionStorage.removeItem(personnelScheduleDraftKey(userId, person.id)); }
+    }
+    setDraftReady(true);
+  }, [person.id, userId]);
+
+  const dirty = JSON.stringify(value) !== JSON.stringify(initialValue) || Boolean(proposalNote.trim()) || Boolean(returnReason.trim());
+
+  useEffect(() => {
+    if (!draftReady || !dirty || !userId) return;
+    window.sessionStorage.setItem(
+      personnelScheduleDraftKey(userId, person.id),
+      JSON.stringify({ value, proposalNote, returnReason }),
+    );
+  }, [dirty, draftReady, person.id, proposalNote, returnReason, userId, value]);
+
+  const runSchedule = (action: () => Promise<any>, message: string) => run(action, message, () => {
+    setDraftReady(false);
+    if (userId) window.sessionStorage.removeItem(personnelScheduleDraftKey(userId, person.id));
+    setProposalNote("");
+    setReturnReason("");
+    onDirtyChange?.(false);
+  });
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   return (
     <div className="mt-4">
@@ -970,7 +1330,7 @@ function PersonnelScheduleEditor({ person, saving, run }: any) {
               label="ثبت پیشنهاد توسط سرپرست مسئول"
               disabled={saving || !proposalNote.trim() || !value.effectiveDate}
               onClick={() =>
-                run(
+                runSchedule(
                   () =>
                     hrAPI.proposePersonnelWorkSchedule(person.id, {
                       ...workSchedulePayload(value),
@@ -992,7 +1352,7 @@ function PersonnelScheduleEditor({ person, saving, run }: any) {
               icon={FaSync}
               disabled={saving || !value.effectiveDate}
               onClick={() =>
-                run(
+                runSchedule(
                   () =>
                     hrAPI.preparePersonnelWorkSchedule(
                       person.id,
@@ -1008,7 +1368,7 @@ function PersonnelScheduleEditor({ person, saving, run }: any) {
                 label="ارسال برای تأیید مدیر منابع انسانی"
                 disabled={saving}
                 onClick={() =>
-                  run(
+                  runSchedule(
                     () =>
                       hrAPI.submitPersonnelWorkSchedule(person.id, change.id),
                     "برنامه کاری برای تأیید ارسال شد.",
@@ -1034,7 +1394,7 @@ function PersonnelScheduleEditor({ person, saving, run }: any) {
                 label="بازگرداندن"
                 disabled={saving || !returnReason.trim()}
                 onClick={() =>
-                  run(
+                  runSchedule(
                     () =>
                       hrAPI.returnPersonnelWorkSchedule(
                         person.id,
@@ -1052,7 +1412,7 @@ function PersonnelScheduleEditor({ person, saving, run }: any) {
                 label="تأیید و ایجاد نسخه اجرایی"
                 disabled={saving}
                 onClick={() =>
-                  run(
+                  runSchedule(
                     () =>
                       hrAPI.approvePersonnelWorkSchedule(person.id, change.id),
                     "نسخه اجرایی برنامه کاری تأیید شد.",

@@ -6,7 +6,7 @@ export default function UserPermissionsRedirectPage({ params }: { params: { id: 
   const router = useRouter();
 
   useEffect(() => {
-    router.replace(`/dashboard/admin/permissions?userId=${params.id}`);
+    router.replace(`/dashboard/hr/permissions?userId=${params.id}`);
   }, [params.id, router]);
 
   return (

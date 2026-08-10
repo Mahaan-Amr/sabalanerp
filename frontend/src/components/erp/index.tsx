@@ -557,7 +557,7 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             className={cx(
-              'inline-flex min-h-10 flex-shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
+              'inline-flex min-h-[var(--sds-control-height)] flex-shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
               active
                 ? 'bg-[var(--sds-surface-raised)] text-[var(--sds-accent)] shadow-sm dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent)]'
                 : 'text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-raised)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:bg-[var(--sds-surface-raised)] dark:hover:text-[var(--sds-text-primary)]'
@@ -1246,14 +1246,27 @@ export function ErpMotionSection({ children, className, delay = 0 }: WithChildre
   );
 }
 
-export function ErpSkeleton({ lines = 3, className, label = 'در حال بارگذاری' }: { lines?: number; className?: string; label?: string }) {
+export function ErpSkeletonBlock({ className }: { className?: string }) {
+  return <span aria-hidden="true" className={cx('sds-skeleton block rounded-xl', className)} />;
+}
+
+export function ErpSkeleton({ lines = 3, className, label = 'در حال بارگذاری', children }: {
+  lines?: number;
+  className?: string;
+  label?: string;
+  children?: React.ReactNode;
+}) {
   return (
     <div className={cx('sds-card animate-pulse space-y-3 p-4 motion-reduce:animate-none', className)} role="status" aria-label={label}>
       <span className="sr-only">{label}</span>
-      <div className="sds-skeleton h-4 w-28 rounded-full" />
-      {Array.from({ length: lines }).map((_, index) => (
-        <div key={index} className={cx('sds-skeleton h-11 rounded-xl', index === lines - 1 && 'w-4/5')} />
-      ))}
+      {children || (
+        <>
+          <ErpSkeletonBlock className="h-4 w-28 rounded-full" />
+          {Array.from({ length: lines }).map((_, index) => (
+            <ErpSkeletonBlock key={index} className={cx('h-11', index === lines - 1 && 'w-4/5')} />
+          ))}
+        </>
+      )}
     </div>
   );
 }

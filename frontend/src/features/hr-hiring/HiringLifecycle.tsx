@@ -120,7 +120,7 @@ export function HiringLifecycle({
       </div>
 
       <div
-        className="mt-4 hidden grid-cols-8 gap-2 md:grid"
+        className="mt-4 hidden grid-cols-3 gap-2 md:grid xl:grid-cols-9"
         role="list"
         aria-label="مراحل جذب"
       >

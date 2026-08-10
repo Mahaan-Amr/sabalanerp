@@ -80,7 +80,7 @@ export default function CollateralTemplatesPage() {
       {error && (
         <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)]">{error}</p>
       )}
-      <ErpSheet open={createOpen} onClose={() => setCreateOpen(false)} title="قالب جدید وثیقه">
+      <ErpSheet open={createOpen} onClose={() => setCreateOpen(false)} title="قالب جدید وثیقه" presentation="modal">
       <ErpCard className="space-y-3 p-4">
         <ErpInput
           className={field}

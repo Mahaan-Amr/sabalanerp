@@ -126,7 +126,7 @@ export function AccountingFinancialTrend({
                 </defs>
                 <CartesianGrid stroke="var(--sds-border-subtle)" strokeDasharray="3 5" vertical={false} />
                 <XAxis dataKey="label" interval={source.range === '1m' ? 0 : 'preserveStartEnd'} tickFormatter={(label, index) => source.range !== '1m' || chartData[index]?.marker ? label : ''} minTickGap={12} tick={{ fill: 'var(--sds-text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={(value) => compactToman.format(value)} tick={{ fill: 'var(--sds-text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
+                <YAxis tickFormatter={(value) => compactToman.format(value)} tick={{ fill: 'var(--sds-text-muted)', fontSize: 11 }} tickMargin={8} axisLine={false} tickLine={false} width="auto" />
                 <Tooltip formatter={(value) => formatToman(Number(value))} contentStyle={{ background: 'var(--sds-surface-overlay)', border: '1px solid var(--sds-border-default)', borderRadius: 'var(--sds-radius-card)', color: 'var(--sds-text-primary)' }} />
                 <Legend wrapperStyle={{ color: 'var(--sds-text-secondary)', fontSize: 11 }} />
                 <Area name={seriesLabels.invoiced} dataKey="invoiced" type="monotone" stroke="var(--sds-accent)" fill="url(#financial-trend-invoiced-fill)" strokeWidth={2.5} dot={(props) => <DrilldownDot {...props} series="invoiced" stroke="var(--sds-accent)" />} />

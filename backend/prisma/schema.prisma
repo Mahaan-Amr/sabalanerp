@@ -4620,27 +4620,29 @@ model HrJob {
 }
 
 model HrPosition {
-  id                   String                   @id @default(cuid())
-  code                 String                   @unique
+  id                   String                     @id @default(cuid())
+  code                 String                     @unique
   title                String
   jobId                String
   organizationalUnitId String
   workplaceId          String?
   costCenterId         String?
   supervisorPositionId String?
-  capacity             Int                      @default(1)
-  isActive             Boolean                  @default(true)
+  capacity             Int                        @default(1)
+  isActive             Boolean                    @default(true)
   createdBy            String
-  createdAt            DateTime                 @default(now())
-  updatedAt            DateTime                 @updatedAt
-  job                  HrJob                    @relation(fields: [jobId], references: [id], onDelete: Restrict)
-  organizationalUnit   HrOrganizationalUnit     @relation(fields: [organizationalUnitId], references: [id], onDelete: Restrict)
-  workplace            HrWorkplace?             @relation(fields: [workplaceId], references: [id], onDelete: Restrict)
-  costCenter           HrCostCenter?            @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
-  supervisorPosition   HrPosition?              @relation("HrPositionReporting", fields: [supervisorPositionId], references: [id], onDelete: Restrict)
-  subordinatePositions HrPosition[]             @relation("HrPositionReporting")
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  job                  HrJob                      @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  organizationalUnit   HrOrganizationalUnit       @relation(fields: [organizationalUnitId], references: [id], onDelete: Restrict)
+  workplace            HrWorkplace?               @relation(fields: [workplaceId], references: [id], onDelete: Restrict)
+  costCenter           HrCostCenter?              @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  supervisorPosition   HrPosition?                @relation("HrPositionReporting", fields: [supervisorPositionId], references: [id], onDelete: Restrict)
+  subordinatePositions HrPosition[]               @relation("HrPositionReporting")
   assignments          HrEmploymentAssignment[]
   hiringApplications   HrJobApplication[]
+  capacityChanges      HrPositionCapacityChange[]
+  recruitmentRequests  HrRecruitmentRequest[]
 
   @@index([organizationalUnitId, isActive])
   @@index([jobId, isActive])
@@ -4926,6 +4928,10 @@ model HrJobApplication {
   onboardingTasks                    HrOnboardingTask[]
   audits                             HrHiringAudit[]
   assessments                        HrCandidateAssessment[]
+  formalAssessmentPlans              HrFormalAssessmentPlan[]
+  formalAssessmentResults            HrFormalAssessmentResult[]
+  initialInterviewDraft              HrInitialInterviewDraft?
+  assessmentMigrationEvents          HrAssessmentMigrationEvent[]
   preIdentityChecklistItems          HrPreIdentityChecklistItem[]
   hiringDecisions                    HrApplicationDecision[]
   reopenings                         HrApplicationReopening[]
@@ -5048,20 +5054,36 @@ model HrPreIdentityChecklistEvent {
 }
 
 model HrApplicationDecision {
-  id            String                  @id @default(cuid())
-  applicationId String
-  kind          HrHiringDecisionKind
-  outcome       HrHiringDecisionOutcome
-  explanation   String?
-  changeReason  String?
-  version       Int
-  decidedBy     String
-  decidedAt     DateTime                @default(now())
-  application   HrJobApplication        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  id                      String                  @id @default(cuid())
+  applicationId           String
+  kind                    HrHiringDecisionKind
+  outcome                 HrHiringDecisionOutcome
+  explanation             String?
+  evidenceJson            Json?
+  criteriaTemplateVersion Int?
+  changeReason            String?
+  version                 Int
+  decidedBy               String
+  decidedAt               DateTime                @default(now())
+  application             HrJobApplication        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@unique([applicationId, kind, version])
   @@index([applicationId, kind, decidedAt])
   @@map("hr_application_decisions")
+}
+
+model HrInitialInterviewDraft {
+  id                      String           @id @default(cuid())
+  applicationId           String           @unique
+  version                 Int              @default(1)
+  criteriaTemplateVersion Int              @default(1)
+  dataJson                Json
+  updatedByUserId         String
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+  application             HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("hr_initial_interview_drafts")
 }
 
 model HrApplicationReopening {
@@ -5212,26 +5234,27 @@ model HrHiringAuthorityAudit {
 }
 
 model HrHiringDocument {
-  id                String             @id @default(cuid())
-  applicationId     String
-  category          String
-  side              String?
-  customTitle       String?
-  version           Int
-  status            HrEvidenceStatus   @default(RECEIVED)
-  inspectionSource  HrInspectionSource
-  storageName       String?
-  originalName      String?
-  mimeType          String?
-  size              Int?
-  sha256            String?
-  malwareScanStatus String?
-  note              String?
-  uploadedBy        String
-  verifiedBy        String?
-  verifiedAt        DateTime?
-  createdAt         DateTime           @default(now())
-  application       HrJobApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  id                            String                           @id @default(cuid())
+  applicationId                 String
+  category                      String
+  side                          String?
+  customTitle                   String?
+  version                       Int
+  status                        HrEvidenceStatus                 @default(RECEIVED)
+  inspectionSource              HrInspectionSource
+  storageName                   String?
+  originalName                  String?
+  mimeType                      String?
+  size                          Int?
+  sha256                        String?
+  malwareScanStatus             String?
+  note                          String?
+  uploadedBy                    String
+  verifiedBy                    String?
+  verifiedAt                    DateTime?
+  createdAt                     DateTime                         @default(now())
+  application                   HrJobApplication                 @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  formalAssessmentEvidenceLinks HrFormalAssessmentEvidenceLink[]
 
   @@unique([applicationId, category, side, customTitle, version])
   @@index([applicationId, category, status])
@@ -5530,31 +5553,34 @@ model HrOnboardingTask {
 }
 
 model HrWorkItem {
-  id                String               @id @default(cuid())
-  title             String
-  description       String?
-  status            HrWorkItemStatus     @default(PENDING)
-  sourceType        HrWorkItemSourceType
-  sourceKey         String?              @unique
-  destinationHref   String
-  dueDate           DateTime
-  assignedToUserId  String?
-  createdByUserId   String?
-  completedByUserId String?
-  completedAt       DateTime?
-  waivedByUserId    String?
-  waivedAt          DateTime?
-  waiverReason      String?
-  assignmentReason  String?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  assignedTo        User?                @relation("HrWorkItemAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
-  createdBy         User?                @relation("HrWorkItemCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  completedBy       User?                @relation("HrWorkItemCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
-  waivedBy          User?                @relation("HrWorkItemWaiver", fields: [waivedByUserId], references: [id], onDelete: SetNull)
-  audits            HrWorkItemAudit[]
+  id                     String               @id @default(cuid())
+  title                  String
+  description            String?
+  status                 HrWorkItemStatus     @default(PENDING)
+  sourceType             HrWorkItemSourceType
+  sourceKey              String?              @unique
+  destinationHref        String
+  dueDate                DateTime
+  assignedToUserId       String?
+  createdByUserId        String?
+  completedByUserId      String?
+  completedAt            DateTime?
+  waivedByUserId         String?
+  waivedAt               DateTime?
+  waiverReason           String?
+  assignmentReason       String?
+  dutyRoutingBlockedAt   DateTime?
+  dutyRoutingBlockReason String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  assignedTo             User?                @relation("HrWorkItemAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  createdBy              User?                @relation("HrWorkItemCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  completedBy            User?                @relation("HrWorkItemCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  waivedBy               User?                @relation("HrWorkItemWaiver", fields: [waivedByUserId], references: [id], onDelete: SetNull)
+  audits                 HrWorkItemAudit[]
 
   @@index([assignedToUserId, status, dueDate])
+  @@index([dutyRoutingBlockedAt])
   @@index([sourceType, status])
   @@index([status, dueDate])
   @@map("hr_work_items")
@@ -5590,4 +5616,700 @@ model HrHiringAudit {
   @@index([applicationId, createdAt])
   @@index([eventType, createdAt])
   @@map("hr_hiring_audits")
+}
+
+enum HrAccessLevel {
+  VIEW
+  EDIT
+  ADMIN
+}
+
+enum HrGrantStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+enum HrResponsibilityAssignmentKind {
+  PRIMARY
+  ACTING
+  SUBSTITUTE
+}
+
+enum HrDutyStatus {
+  OPEN
+  COMPLETED
+  WAIVED
+  CANCELLED
+}
+
+enum HrDutyAssignmentEndReason {
+  COMPLETED
+  REASSIGNED
+  WAIVED
+  CANCELLED
+  OWNER_INELIGIBLE
+  SOURCE_CHANGED
+}
+
+enum HrFormalAssessmentPlanStatus {
+  ACTIVE
+  SUPERSEDED
+}
+
+enum HrAssessmentExecutionMethod {
+  APPLICANT
+  COMPANY
+}
+
+enum HrFormalAssessmentKind {
+  DISC
+  EQ
+  BIG_FIVE
+}
+
+enum HrFormalAssessmentResultStatus {
+  PENDING
+  COMPLETED
+  INVALIDATED
+}
+
+enum HrFormalAssessmentAttemptStatus {
+  STARTED
+  COMPLETED
+  ABANDONED
+  INVALIDATED
+}
+
+enum HrFoundationLifecycleStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum HrRecruitmentRequestStatus {
+  DRAFT
+  APPROVED
+  CLOSED
+  CANCELLED
+}
+
+enum HrReconciliationPrimaryState {
+  READY
+  NEEDS_REVIEW
+  PERSONNEL_CURRENT
+  PERSONNEL_INACTIVE_ENDED
+  USER_PERSONNEL_LINKED
+  USER_ACCESS_ONLY
+  USER_LINKAGE_UNRESOLVED
+  EMPLOYMENT_CURRENT
+  EMPLOYMENT_ENDED
+  LEGACY_ONLY_HISTORY
+  NEUTRAL_HISTORY
+  CLASSIFICATION_ERROR
+}
+
+enum HrReconciliationReviewOutcome {
+  CONFIRMED
+  REMEDIATION_REQUIRED
+  ACCEPTED_ACCESS_ONLY
+  ACCEPTED_LEGACY_ONLY
+  BLOCKED
+  ACCESS_ONLY_USER
+  DIFFERENT_PEOPLE
+  SHARED_IDENTITY
+  STILL_AMBIGUOUS
+  ORGANIZATION_MAPPED
+  ORGANIZATION_CREATED
+  ORGANIZATION_HISTORICAL
+  START_DATE_UNRECOVERABLE
+  LEGACY_ONLY_CONFIRMED
+}
+
+model HrWorkspaceCatalog {
+  id          String                   @id @default(cuid())
+  code        String                   @unique
+  version     Int                      @default(1)
+  displayName String
+  isActive    Boolean                  @default(true)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  features    HrFeatureCatalog[]
+  grants      HrWorkspaceAccessGrant[]
+
+  @@map("hr_workspace_catalogs")
+}
+
+model HrFeatureCatalog {
+  id            String                 @id @default(cuid())
+  code          String                 @unique
+  workspaceCode String
+  version       Int                    @default(1)
+  displayName   String
+  isActive      Boolean                @default(true)
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  workspace     HrWorkspaceCatalog     @relation(fields: [workspaceCode], references: [code], onDelete: Restrict)
+  grants        HrFeatureAccessGrant[]
+
+  @@index([workspaceCode, isActive])
+  @@map("hr_feature_catalogs")
+}
+
+model HrAuthorityCatalog {
+  id          String                     @id @default(cuid())
+  code        String                     @unique
+  version     Int                        @default(1)
+  displayName String
+  isActive    Boolean                    @default(true)
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+  grants      HrBusinessAuthorityGrant[]
+
+  @@map("hr_authority_catalogs")
+}
+
+model HrResponsibilityTypeCatalog {
+  id                          String                         @id @default(cuid())
+  code                        String                         @unique
+  version                     Int                            @default(1)
+  displayName                 String
+  isActive                    Boolean                        @default(true)
+  createdAt                   DateTime                       @default(now())
+  updatedAt                   DateTime                       @updatedAt
+  responsibilities            HrNamedResponsibility[]
+  destinations                HrResponsibilityDestination[]
+  separationOfDutyConstraints HrSeparationOfDutyConstraint[]
+
+  @@map("hr_responsibility_type_catalogs")
+}
+
+model HrWorkspaceAccessGrant {
+  id                String             @id @default(cuid())
+  stableKey         String             @unique
+  userId            String
+  workspaceCode     String
+  level             HrAccessLevel
+  status            HrGrantStatus      @default(ACTIVE)
+  effectiveFrom     DateTime
+  effectiveTo       DateTime?
+  grantedByUserId   String?
+  revokedByUserId   String?
+  revokedAt         DateTime?
+  reason            String?
+  provenanceVersion Int                @default(1)
+  legacyGrantId     String?            @unique
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  workspace         HrWorkspaceCatalog @relation(fields: [workspaceCode], references: [code], onDelete: Restrict)
+
+  @@index([userId, workspaceCode, status, effectiveFrom, effectiveTo])
+  @@map("hr_workspace_access_grants")
+}
+
+model HrFeatureAccessGrant {
+  id                String           @id @default(cuid())
+  stableKey         String           @unique
+  userId            String
+  featureCode       String
+  level             HrAccessLevel
+  status            HrGrantStatus    @default(ACTIVE)
+  effectiveFrom     DateTime
+  effectiveTo       DateTime?
+  grantedByUserId   String?
+  revokedByUserId   String?
+  revokedAt         DateTime?
+  reason            String?
+  provenanceVersion Int              @default(1)
+  legacyGrantId     String?          @unique
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  feature           HrFeatureCatalog @relation(fields: [featureCode], references: [code], onDelete: Restrict)
+
+  @@index([userId, featureCode, status, effectiveFrom, effectiveTo])
+  @@map("hr_feature_access_grants")
+}
+
+model HrBusinessAuthorityGrant {
+  id                String             @id @default(cuid())
+  stableKey         String             @unique
+  userId            String
+  authorityCode     String
+  status            HrGrantStatus      @default(ACTIVE)
+  effectiveFrom     DateTime
+  effectiveTo       DateTime?
+  grantedByUserId   String?
+  revokedByUserId   String?
+  revokedAt         DateTime?
+  reason            String?
+  provenanceVersion Int                @default(1)
+  legacyAuthorityId String?            @unique
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  authority         HrAuthorityCatalog @relation(fields: [authorityCode], references: [code], onDelete: Restrict)
+
+  @@index([userId, authorityCode, status, effectiveFrom, effectiveTo])
+  @@map("hr_business_authority_grants")
+}
+
+model HrNamedResponsibility {
+  id                        String                         @id @default(cuid())
+  stableKey                 String                         @unique
+  responsibilityTypeCode    String
+  scopeType                 String
+  scopeId                   String?
+  assignedUserId            String?
+  assignmentKind            HrResponsibilityAssignmentKind @default(PRIMARY)
+  principalResponsibilityId String?
+  effectiveFrom             DateTime
+  effectiveTo               DateTime?
+  reason                    String?
+  createdByUserId           String
+  provenanceVersion         Int                            @default(1)
+  createdAt                 DateTime                       @default(now())
+  updatedAt                 DateTime                       @updatedAt
+  duties                    HrDuty[]
+  dutyAssignmentHistory     HrDutyAssignmentHistory[]
+  responsibilityType        HrResponsibilityTypeCatalog    @relation(fields: [responsibilityTypeCode], references: [code], onDelete: Restrict)
+  principal                 HrNamedResponsibility?         @relation("HrResponsibilityDelegates", fields: [principalResponsibilityId], references: [id], onDelete: Restrict)
+  delegates                 HrNamedResponsibility[]        @relation("HrResponsibilityDelegates")
+
+  @@index([responsibilityTypeCode, scopeType, scopeId, effectiveFrom, effectiveTo])
+  @@index([assignedUserId, effectiveFrom, effectiveTo])
+  @@map("hr_named_responsibilities")
+}
+
+model HrResponsibilityDestination {
+  id                     String                      @id @default(cuid())
+  stableKey              String                      @unique
+  responsibilityTypeCode String
+  scopeType              String
+  scopeId                String?
+  workspaceCode          String
+  featureCode            String?
+  queueCode              String
+  version                Int                         @default(1)
+  isActive               Boolean                     @default(true)
+  createdByUserId        String
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime                    @updatedAt
+  responsibilityType     HrResponsibilityTypeCatalog @relation(fields: [responsibilityTypeCode], references: [code], onDelete: Restrict)
+
+  @@index([responsibilityTypeCode, scopeType, scopeId, isActive])
+  @@map("hr_responsibility_destinations")
+}
+
+model HrSeparationOfDutyConstraint {
+  id                     String                      @id @default(cuid())
+  stableKey              String                      @unique
+  sourceActionCode       String
+  responsibilityTypeCode String
+  conflictRuleJson       Json
+  version                Int                         @default(1)
+  isActive               Boolean                     @default(true)
+  createdByUserId        String
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime                    @updatedAt
+  responsibilityType     HrResponsibilityTypeCatalog @relation(fields: [responsibilityTypeCode], references: [code], onDelete: Restrict)
+
+  @@unique([sourceActionCode, responsibilityTypeCode, version])
+  @@map("hr_separation_of_duty_constraints")
+}
+
+model HrAuthorizationAuditEvent {
+  id          String   @id @default(cuid())
+  entityType  String
+  entityId    String
+  action      String
+  actorUserId String
+  reason      String
+  effectiveAt DateTime
+  beforeJson  Json?
+  afterJson   Json?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("hr_authorization_audit_events")
+}
+
+model HrDutyEnvelope {
+  id                       String   @id @default(cuid())
+  code                     String
+  version                  Int
+  destinationWorkspaceCode String
+  destinationFeatureCode   String?
+  allowedFieldsJson        Json
+  allowedEvidenceJson      Json
+  allowedActionCodesJson   Json
+  responseSchemaJson       Json
+  isActive                 Boolean  @default(true)
+  createdByUserId          String
+  createdAt                DateTime @default(now())
+  duties                   HrDuty[]
+
+  @@unique([code, version])
+  @@map("hr_duty_envelopes")
+}
+
+model HrDuty {
+  id                            String                       @id @default(cuid())
+  stableKey                     String                       @unique
+  sourceType                    String
+  sourceId                      String
+  sourceActionCode              String
+  sourceVersion                 Int
+  envelopeCode                  String
+  envelopeVersion               Int
+  destinationWorkspaceCode      String
+  destinationQueueCode          String
+  status                        HrDutyStatus                 @default(OPEN)
+  currentAssigneeUserId         String?
+  responsibilityId              String?
+  routingResponsibilityTypeCode String?
+  routingScopeType              String?
+  routingScopeId                String?
+  sourceActorUserId             String?
+  dueAt                         DateTime
+  structuredResultJson          Json?
+  respondedAt                   DateTime?
+  respondedByUserId             String?
+  predecessorDutyId             String?
+  createdByUserId               String
+  createdAt                     DateTime                     @default(now())
+  updatedAt                     DateTime                     @updatedAt
+  envelope                      HrDutyEnvelope               @relation(fields: [envelopeCode, envelopeVersion], references: [code, version], onDelete: Restrict)
+  responsibility                HrNamedResponsibility?       @relation(fields: [responsibilityId], references: [id], onDelete: Restrict)
+  predecessor                   HrDuty?                      @relation("HrDutySuccessors", fields: [predecessorDutyId], references: [id], onDelete: Restrict)
+  successors                    HrDuty[]                     @relation("HrDutySuccessors")
+  assignmentHistory             HrDutyAssignmentHistory[]
+  auditVersions                 HrDutyAuditVersion[]
+  notificationIdentities        HrDutyNotificationIdentity[]
+
+  @@unique([sourceType, sourceId, sourceActionCode, sourceVersion])
+  @@index([currentAssigneeUserId, status, dueAt])
+  @@index([destinationWorkspaceCode, destinationQueueCode, status, dueAt])
+  @@index([routingResponsibilityTypeCode, routingScopeType, routingScopeId, status], map: "hr_duties_routingResponsibilityTypeCode_routingScopeType_idx")
+  @@map("hr_duties")
+}
+
+model HrDutyAssignmentHistory {
+  id                       String                     @id @default(cuid())
+  dutyId                   String
+  sequence                 Int
+  assignedUserId           String?
+  responsibilityId         String?
+  destinationWorkspaceCode String
+  destinationQueueCode     String
+  startedAt                DateTime                   @default(now())
+  endedAt                  DateTime?
+  endReason                HrDutyAssignmentEndReason?
+  changedByUserId          String?
+  policyVersion            Int
+  createdAt                DateTime                   @default(now())
+  duty                     HrDuty                     @relation(fields: [dutyId], references: [id], onDelete: Restrict)
+  responsibility           HrNamedResponsibility?     @relation(fields: [responsibilityId], references: [id], onDelete: Restrict)
+
+  @@unique([dutyId, sequence])
+  @@index([assignedUserId, endedAt])
+  @@map("hr_duty_assignment_history")
+}
+
+model HrDutyAuditVersion {
+  id                     String                       @id @default(cuid())
+  dutyId                 String
+  version                Int
+  eventCode              String
+  actorUserId            String?
+  sourceVersion          Int
+  envelopeVersion        Int
+  policyVersion          Int
+  beforeJson             Json?
+  afterJson              Json?
+  reason                 String?
+  createdAt              DateTime                     @default(now())
+  duty                   HrDuty                       @relation(fields: [dutyId], references: [id], onDelete: Restrict)
+  notificationIdentities HrDutyNotificationIdentity[] @relation("HrDutyAuditNotifications")
+
+  @@unique([dutyId, version])
+  @@index([dutyId, createdAt])
+  @@map("hr_duty_audit_versions")
+}
+
+model HrDutyNotificationIdentity {
+  id               String             @id @default(cuid())
+  stableKey        String             @unique
+  dutyId           String
+  dutyAuditVersion Int
+  recipientUserId  String?
+  channelCode      String
+  templateCode     String
+  safePayloadJson  Json
+  providerIdentity String?
+  createdAt        DateTime           @default(now())
+  duty             HrDuty             @relation(fields: [dutyId], references: [id], onDelete: Restrict)
+  dutyAudit        HrDutyAuditVersion @relation("HrDutyAuditNotifications", fields: [dutyId, dutyAuditVersion], references: [dutyId, version], onDelete: Restrict)
+
+  @@unique([dutyId, dutyAuditVersion, recipientUserId, channelCode])
+  @@map("hr_duty_notification_identities")
+}
+
+model HrFormalAssessmentPlan {
+  id                     String                            @id @default(cuid())
+  stableKey              String                            @unique
+  applicationId          String
+  version                Int
+  status                 HrFormalAssessmentPlanStatus      @default(ACTIVE)
+  explicitlyNoAssessment Boolean                           @default(false)
+  executionMethod        HrAssessmentExecutionMethod?
+  finalizedByUserId      String
+  finalizedAt            DateTime                          @default(now())
+  reason                 String?
+  predecessorPlanId      String?
+  createdAt              DateTime                          @default(now())
+  application            HrJobApplication                  @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  predecessor            HrFormalAssessmentPlan?           @relation("HrAssessmentPlanVersions", fields: [predecessorPlanId, applicationId], references: [id, applicationId], onDelete: Restrict)
+  successors             HrFormalAssessmentPlan[]          @relation("HrAssessmentPlanVersions")
+  selections             HrFormalAssessmentPlanSelection[]
+  results                HrFormalAssessmentResult[]
+
+  @@unique([applicationId, version])
+  @@unique([id, applicationId])
+  @@index([applicationId, status])
+  @@map("hr_formal_assessment_plans")
+}
+
+model HrFormalAssessmentPlanSelection {
+  id              String                       @id @default(cuid())
+  planId          String
+  assessmentKind  HrFormalAssessmentKind
+  selected        Boolean
+  executionMethod HrAssessmentExecutionMethod?
+  createdAt       DateTime                     @default(now())
+  plan            HrFormalAssessmentPlan       @relation(fields: [planId], references: [id], onDelete: Restrict)
+  results         HrFormalAssessmentResult[]
+
+  @@unique([planId, assessmentKind])
+  @@unique([id, planId, assessmentKind])
+  @@map("hr_formal_assessment_plan_selections")
+}
+
+model HrFormalAssessmentResult {
+  id                  String                          @id @default(cuid())
+  stableKey           String                          @unique
+  applicationId       String
+  planId              String
+  planSelectionId     String
+  assessmentKind      HrFormalAssessmentKind
+  resultVersion       Int
+  status              HrFormalAssessmentResultStatus  @default(PENDING)
+  resultJson          Json?
+  recordedByUserId    String?
+  recordedAt          DateTime?
+  supersedesResultId  String?
+  invalidatedAt       DateTime?
+  invalidatedByUserId String?
+  invalidationReason  String?
+  createdAt           DateTime                        @default(now())
+  application         HrJobApplication                @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  plan                HrFormalAssessmentPlan          @relation(fields: [planId, applicationId], references: [id, applicationId], onDelete: Restrict)
+  planSelection       HrFormalAssessmentPlanSelection @relation(fields: [planSelectionId, planId, assessmentKind], references: [id, planId, assessmentKind], onDelete: Restrict)
+  supersedes          HrFormalAssessmentResult?       @relation("HrAssessmentResultVersions", fields: [supersedesResultId, applicationId, assessmentKind], references: [id, applicationId, assessmentKind], onDelete: Restrict)
+  supersededBy        HrFormalAssessmentResult[]      @relation("HrAssessmentResultVersions")
+  attempts            HrFormalAssessmentAttempt[]
+
+  @@unique([applicationId, assessmentKind, resultVersion])
+  @@unique([id, applicationId, assessmentKind])
+  @@index([planSelectionId, status])
+  @@map("hr_formal_assessment_results")
+}
+
+model HrFormalAssessmentAttempt {
+  id              String                           @id @default(cuid())
+  stableKey       String                           @unique
+  resultId        String
+  attemptNumber   Int
+  executionMethod HrAssessmentExecutionMethod
+  status          HrFormalAssessmentAttemptStatus  @default(STARTED)
+  startedAt       DateTime                         @default(now())
+  completedAt     DateTime?
+  actorUserId     String?
+  responseJson    Json?
+  result          HrFormalAssessmentResult         @relation(fields: [resultId], references: [id], onDelete: Restrict)
+  evidenceLinks   HrFormalAssessmentEvidenceLink[]
+
+  @@unique([resultId, attemptNumber])
+  @@map("hr_formal_assessment_attempts")
+}
+
+model HrFormalAssessmentEvidenceLink {
+  id                String                    @id @default(cuid())
+  stableKey         String                    @unique
+  attemptId         String
+  evidenceType      String
+  hiringDocumentId  String?
+  externalReference String?
+  evidenceHash      String?
+  linkedByUserId    String?
+  linkedAt          DateTime                  @default(now())
+  attempt           HrFormalAssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  hiringDocument    HrHiringDocument?         @relation(fields: [hiringDocumentId], references: [id], onDelete: Restrict)
+
+  @@index([attemptId, evidenceType])
+  @@map("hr_formal_assessment_evidence_links")
+}
+
+model HrAssessmentMigrationEvent {
+  id            String           @id @default(cuid())
+  stableKey     String           @unique
+  applicationId String
+  eventCode     String
+  detailsJson   Json
+  sourceVersion Int              @default(1)
+  createdAt     DateTime         @default(now())
+  application   HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  @@unique([applicationId, eventCode, sourceVersion])
+  @@map("hr_assessment_migration_events")
+}
+
+model HrFoundationLifecycleVersion {
+  id              String                      @id @default(cuid())
+  stableKey       String                      @unique
+  entityType      String
+  entityId        String
+  version         Int
+  status          HrFoundationLifecycleStatus
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  reason          String
+  beforeJson      Json?
+  afterJson       Json
+  changedByUserId String
+  createdAt       DateTime                    @default(now())
+
+  @@unique([entityType, entityId, version])
+  @@index([entityType, entityId, effectiveFrom, effectiveTo])
+  @@map("hr_foundation_lifecycle_versions")
+}
+
+model HrPositionCapacityChange {
+  id               String     @id @default(cuid())
+  stableKey        String     @unique
+  positionId       String
+  version          Int
+  previousCapacity Int
+  newCapacity      Int
+  effectiveAt      DateTime
+  reason           String
+  changedByUserId  String
+  createdAt        DateTime   @default(now())
+  position         HrPosition @relation(fields: [positionId], references: [id], onDelete: Restrict)
+
+  @@unique([positionId, version])
+  @@index([positionId, effectiveAt])
+  @@map("hr_position_capacity_changes")
+}
+
+model HrRecruitmentRequest {
+  id                String                     @id @default(cuid())
+  stableKey         String                     @unique
+  positionId        String
+  status            HrRecruitmentRequestStatus @default(DRAFT)
+  approvedHeadcount Int
+  convertedHires    Int                        @default(0)
+  effectiveFrom     DateTime
+  effectiveTo       DateTime?
+  createdByUserId   String
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  position          HrPosition                 @relation(fields: [positionId], references: [id], onDelete: Restrict)
+
+  @@index([positionId, status, effectiveFrom, effectiveTo])
+  @@map("hr_recruitment_requests")
+}
+
+model HrFoundationReservedCode {
+  id              String   @id @default(cuid())
+  entityType      String
+  code            String
+  deletedEntityId String
+  deletedByUserId String
+  deletedAt       DateTime @default(now())
+  reason          String
+
+  @@unique([entityType, code])
+  @@unique([entityType, deletedEntityId])
+  @@map("hr_foundation_reserved_codes")
+}
+
+model HrReconciliationRecord {
+  id                 String                          @id @default(cuid())
+  stableKey          String                          @unique
+  sourceType         String
+  sourceId           String
+  primaryState       HrReconciliationPrimaryState
+  stateVersion       Int                             @default(1)
+  detailsJson        Json
+  cutoverBlocker     Boolean                         @default(false)
+  classifiedAt       DateTime                        @default(now())
+  classifiedByUserId String?
+  createdAt          DateTime                        @default(now())
+  updatedAt          DateTime                        @updatedAt
+  attentionFlags     HrReconciliationAttentionFlag[]
+  reviews            HrReconciliationReview[]
+  cutoverBlockers    HrCutoverBlockerProjection[]
+
+  @@unique([sourceType, sourceId])
+  @@index([primaryState, cutoverBlocker])
+  @@map("hr_reconciliation_records")
+}
+
+model HrReconciliationAttentionFlag {
+  id               String                 @id @default(cuid())
+  stableKey        String                 @unique
+  reconciliationId String
+  flagCode         String
+  version          Int                    @default(1)
+  isActive         Boolean                @default(true)
+  detailsJson      Json?
+  raisedAt         DateTime               @default(now())
+  resolvedAt       DateTime?
+  resolvedByUserId String?
+  resolutionReason String?
+  reconciliation   HrReconciliationRecord @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
+
+  @@unique([reconciliationId, flagCode, version])
+  @@index([flagCode, isActive])
+  @@map("hr_reconciliation_attention_flags")
+}
+
+model HrReconciliationReview {
+  id               String                        @id @default(cuid())
+  stableKey        String                        @unique
+  reconciliationId String
+  version          Int
+  outcome          HrReconciliationReviewOutcome
+  reason           String
+  reviewedByUserId String
+  reviewedAt       DateTime                      @default(now())
+  reconciliation   HrReconciliationRecord        @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
+
+  @@unique([reconciliationId, version])
+  @@map("hr_reconciliation_reviews")
+}
+
+model HrCutoverBlockerProjection {
+  id               String                 @id @default(cuid())
+  stableKey        String                 @unique
+  reconciliationId String
+  blockerCode      String
+  sourceVersion    Int
+  isActive         Boolean                @default(true)
+  projectedAt      DateTime               @default(now())
+  clearedAt        DateTime?
+  reconciliation   HrReconciliationRecord @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
+
+  @@unique([reconciliationId, blockerCode, sourceVersion])
+  @@index([isActive, blockerCode])
+  @@map("hr_cutover_blocker_projections")
 }

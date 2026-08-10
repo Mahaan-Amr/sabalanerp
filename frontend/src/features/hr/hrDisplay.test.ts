@@ -11,7 +11,7 @@ assert.equal(
   assessmentTypeLabel("BIG_FIVE"),
   "BIG FIVE (ارزیابی پنج عامل بزرگ شخصیت)",
 );
-assert.equal(hrDisplayLabel("UNKNOWN_INTERNAL_VALUE"), "نامشخص");
+assert.equal(hrDisplayLabel("UNKNOWN_INTERNAL_VALUE"), "خطای طبقه‌بندی");
 assert.equal(assessmentTypeLabel("OTHER"), "سایر");
 
 console.log("HR Persian display tests passed.");

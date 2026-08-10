@@ -1,4 +1,5 @@
 'use client';
+import React from 'react';
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer,
   Tooltip, XAxis, YAxis
@@ -28,7 +29,11 @@ function SeriesLegend({ items }: { items: Array<{ label: string; color: string; 
   </div>;
 }
 
-export function RtlTrendChart({ data, onSelect }: { data: any[]; onSelect?: (row: any) => void }) {
+export function RtlTrendChart({ data, onSelect, valueAxisSide = 'right' }: {
+  data: any[];
+  onSelect?: (row: any) => void;
+  valueAxisSide?: 'left' | 'right';
+}) {
   return (
     <div dir="rtl" className="min-w-0 w-full overflow-hidden" role="img" aria-label="روند زمانی؛ قدیمی‌ترین بازه در سمت راست و جدیدترین بازه در سمت چپ است">
       <SeriesLegend items={[
@@ -41,7 +46,7 @@ export function RtlTrendChart({ data, onSelect }: { data: any[]; onSelect?: (row
           <LineChart data={data} margin={{ top: 8, right: 12, left: 16, bottom: 28 }} onClick={(state: any) => state?.activePayload?.[0]?.payload && onSelect?.(state.activePayload[0].payload)}>
           <CartesianGrid stroke="var(--sds-border-subtle)" vertical={false} />
           <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--sds-text-secondary)' }} interval={chartTickInterval(data.length, 3)} minTickGap={36} tickMargin={10} height={50} />
-          <YAxis orientation="right" tickFormatter={faNumber} tick={{ fontSize: 10, fill: 'var(--sds-text-secondary)' }} tickMargin={8} width={92} />
+          <YAxis orientation={valueAxisSide} tickFormatter={faNumber} tick={{ fontSize: 10, fill: 'var(--sds-text-secondary)', textAnchor: valueAxisSide === 'left' ? 'start' : undefined }} tickMargin={8} width={92} />
           <Tooltip contentStyle={tooltipStyle} labelStyle={{ textAlign: 'right', fontWeight: 800 }} formatter={(value: any, name: any) => [faNumber(value), name]} />
           <Line type="monotone" dataKey="net" name="فروش قطعی خالص" stroke="var(--sds-accent)" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 6, cursor: 'pointer' }} />
           <Line type="monotone" dataKey="pipeline" name="پایپ‌لاین" stroke="var(--sds-warning)" strokeWidth={2} strokeDasharray="7 5" dot={{ r: 2 }} />

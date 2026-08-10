@@ -20,7 +20,7 @@
 مجوز عمومی Workspace یا نقش `ADMIN` به‌تنهایی اجازه تأیید کسب‌وکاری نمی‌دهد. پیش از استفاده، HR Admin باید افراد مسئول را در صفحه اختیارها تعیین کند:
 
 - `HR_PROCESSOR`, `HR_MANAGER`
-- `HIRING_MANAGER`
+- `COMPANY_MANAGER`
 - `HR_PAYROLL_PROCESSOR`, `HR_PAYROLL_MANAGER`
 - `FINANCE_RECORDER`, `FINANCE_MANAGER`
 
@@ -31,7 +31,7 @@
 1. HR پرونده را برای یک Position ایجاد و OTP مخصوص همان Application را همراه نشانی ثابت `sabalanerp.com/apply` پیامک می‌کند.
 2. متقاضی پیش‌نویس را ذخیره و با اظهارنامه دیجیتال ارسال می‌کند. ارسال قفل است؛ اصلاح فقط با بازگشت فیلدهای مشخص انجام می‌شود.
 3. HR Processor اسناد را پس از مشاهده اصل یا دریافت کپی اسکن و تطبیق فیلدی را ثبت می‌کند؛ HR Manager تأیید نهایی می‌دهد.
-4. Hiring Manager پیشنهاد ردیفی ریالی را ثبت، HR/Payroll Processor آن را طبقه‌بندی و آماده، HR/Payroll Manager و Finance Manager آن را به‌ترتیب تأیید و سپس متقاضی می‌پذیرد.
+4. Company Manager پیشنهاد ردیفی ریالی را ثبت، HR/Payroll Processor آن را طبقه‌بندی و آماده، HR/Payroll Manager و Finance Manager آن را به‌ترتیب تأیید و سپس متقاضی می‌پذیرد.
 5. Finance Recorder پس از پذیرش پیشنهاد، قالب نسخه‌دار چک‌لیست را اعمال و وثیقه‌ها را ثبت می‌کند؛ Finance Manager هر قلم و سپس Clearance را تأیید می‌کند.
 6. HR Manager تبدیل اتمیک را اجرا می‌کند: Personnel، رابطه `PLANNED`، Assignment اصلی و Onboarding ساخته می‌شوند؛ User ساخته نمی‌شود.
 7. Finance قرارداد کاغذی را بارگذاری و مدیر مالی تأیید می‌کند. HR/Payroll مشارکت حقوق را تنظیم می‌کند و HR وضعیت بیمه را پیگیری می‌کند.

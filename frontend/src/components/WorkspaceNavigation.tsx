@@ -220,7 +220,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
           {
             name: "User Management",
             namePersian: "مدیریت کاربران",
-            href: "/dashboard/users",
+            href: "/dashboard/hr/users",
             icon: FaUserCog,
             show: true,
           },
@@ -236,7 +236,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
           {
             name: "Permissions",
             namePersian: "سطوح دسترسی",
-            href: "/dashboard/admin/permissions",
+            href: "/dashboard/hr/permissions",
             icon: FaShieldAlt,
             show: true,
           },
@@ -875,6 +875,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   };
 
   const navigationItems = getNavigationItems();
+  if (currentWorkspace) navigationItems.splice(1, 0, {
+    name: 'Task-scoped HR duties',
+    namePersian: 'وظایف بین‌واحدی من',
+    href: `${WORKSPACE_CONFIG[currentWorkspace].path}/duties`,
+    icon: FaClipboardList,
+    show: true,
+  });
 
   return (
     <div className={`flex min-h-0 flex-col lg:h-full ${className}`}>

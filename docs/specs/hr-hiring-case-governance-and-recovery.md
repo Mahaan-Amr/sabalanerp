@@ -23,7 +23,7 @@ Detailed checklist work remains evidence inside the fixed Application stages; it
 
 ## Authorities
 
-Introduce `COMPANY_MANAGER` (`مدیریت شرکت`) as an explicit hiring authority. It is separate from `HIRING_MANAGER`, `HR_MANAGER`, and generic `ADMIN`. Multiple users may hold it, but every action records the exact actor. Generic administration never grants this authority implicitly.
+Use `COMPANY_MANAGER` (`مدیریت شرکت`) as the explicit company-management hiring authority. It is separate from `HR_MANAGER` and generic `ADMIN`; Sabalan has no active Hiring Manager authority or responsibility. Multiple users may hold Company Manager authority, but every action records the exact actor. Generic administration never grants this authority implicitly.
 
 Only explicit HR authority administrators may assign, remove, or expire `COMPANY_MANAGER`. Authority changes are audited and never rewrite earlier decisions.
 
@@ -33,8 +33,7 @@ Responsibilities:
 | --- | --- |
 | `HR_PROCESSOR` | Coordinate checklist work, record checklist evidence/results, release the completed pre-identity gate, record assessments, issue invitations, and record offline Candidate offer decisions |
 | `HR_MANAGER` | Independently record preliminary HR approval, correct HR checklist results through a new version, approve identity, execute authorized formal reopening |
-| `COMPANY_MANAGER` | Finalize checklist requirements, add case-specific work, decide how negative items are handled, approve continuation, decide formal assessments, propose collateral requirements, authorize reopening |
-| `HIRING_MANAGER` | Create salary-and-benefits offer versions after selection approval |
+| `COMPANY_MANAGER` | Finalize checklist requirements, add case-specific work, decide how negative items are handled, approve continuation, decide formal assessments, create salary-and-benefits offer versions after selection approval, propose collateral requirements, authorize reopening |
 | `FINANCE_RECORDER` | Record actual collateral receipt, protected instrument details, custody, and scans |
 | `FINANCE_MANAGER` | Independently verify collateral and approve clearance |
 
@@ -146,7 +145,7 @@ Successful login changes overall invitation status to `دسترسی تأیید �
 
 Only `HR_PROCESSOR` may record `ثبت پذیرش آفلاین متقاضی` or an offline decline after every internal approval is complete. This records the Candidate's consent; HR is not the accepting party. Required evidence is communication method, date/time, confirmed full name, offline reason, and conversation note. The exact HR actor and immutable offer version are audited.
 
-An offer decision is final for that offer version. A portal decline cannot be overwritten with offline acceptance; the Hiring Manager must issue a new offer version.
+An offer decision is final for that offer version. A portal decline cannot be overwritten with offline acceptance; the Company Manager must issue a new offer version.
 
 ## Collateral
 

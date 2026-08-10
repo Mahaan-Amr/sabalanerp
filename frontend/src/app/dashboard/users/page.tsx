@@ -1,7 +1,7 @@
 'use client';
 import { ErpInput, ErpSelect } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTimes, FaTrash, FaUserCheck, FaUserTimes, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpListPage, ErpLoading, ErpSection, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
 import { authAPI, departmentsAPI, usersAPI, workspacePermissionsAPI } from '@/lib/api';
@@ -79,7 +79,14 @@ interface Department {
 }
 
 export default function UsersManagementPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
+  useEffect(() => {
+    if (pathname !== '/dashboard/users') return;
+    const query = searchParams.toString();
+    router.replace(`/dashboard/hr/users${query ? `?${query}` : ''}`);
+  }, [pathname, router, searchParams]);
   const createdUserId = searchParams.get('createdUserId');
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -416,7 +423,7 @@ export default function UsersManagementPage() {
         title="مدیریت کاربران"
         metrics={metrics}
         actions={[
-          { label: 'کاربر جدید', href: '/dashboard/users/create', icon: FaPlus, tone: 'primary', variant: 'solid' },
+          { label: 'کاربر جدید', href: '/dashboard/hr/users/create', icon: FaPlus, tone: 'primary', variant: 'solid' },
           { label: 'مدیریت بخش‌ها', href: '/dashboard/departments', icon: FaBuilding, tone: 'neutral', variant: 'outline' },
           { label: 'صادرات', icon: FaDownload, tone: 'neutral', variant: 'ghost', title: 'صادرات' },
         ]}
@@ -475,9 +482,9 @@ export default function UsersManagementPage() {
           const disableAdminActions = currentUserRole === 'MANAGER' && user.role === 'ADMIN';
           const disableDelete = currentUserRole !== 'ADMIN' || user.id === currentUserId;
           return [
-            { label: 'مشاهده جزئیات', href: `/dashboard/users/${user.id}`, icon: FaEye, title: 'مشاهده جزئیات' },
-            { label: 'ویرایش', href: `/dashboard/users/${user.id}/edit`, icon: FaEdit, disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'ویرایش' },
-            { label: 'مدیریت دسترسی‌ها', href: `/dashboard/admin/permissions?userId=${user.id}`, icon: FaCog, disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'مدیریت دسترسی‌ها' },
+            { label: 'مشاهده جزئیات', href: `/dashboard/hr/users/${user.id}`, icon: FaEye, title: 'مشاهده جزئیات' },
+            { label: 'ویرایش', href: `/dashboard/hr/users/${user.id}/edit`, icon: FaEdit, disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'ویرایش' },
+            { label: 'مدیریت دسترسی‌ها', href: `/dashboard/hr/permissions?userId=${user.id}`, icon: FaCog, disabled: disableAdminActions, title: disableAdminActions ? 'دسترسی برای مدیر فروش محدود است' : 'مدیریت دسترسی‌ها' },
             { label: 'حذف حساب استفاده‌نشده', onClick: () => handleDeleteUser(user), icon: FaTrash, tone: 'danger', disabled: disableDelete, title: user.id === currentUserId ? 'حذف حساب فعلی مجاز نیست' : currentUserRole !== 'ADMIN' ? 'فقط مدیر سیستم می‌تواند حساب را حذف کند' : 'حذف قطعی فقط در صورت نداشتن سابقه عملیاتی' },
           ];
         }}
@@ -519,8 +526,8 @@ export default function UsersManagementPage() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <ErpButton label="مدیریت استثناها" href={`/dashboard/admin/permissions?userId=${createdUserId}&section=exceptions`} tone="primary" variant="solid" />
-                <ErpButton label="بستن" href="/dashboard/users" tone="neutral" variant="outline" />
+                <ErpButton label="مدیریت استثناها" href={`/dashboard/hr/permissions?userId=${createdUserId}&section=exceptions`} tone="primary" variant="solid" />
+                <ErpButton label="بستن" href="/dashboard/hr/users" tone="neutral" variant="outline" />
               </div>
             </div>
           </ErpCard>

@@ -51,11 +51,15 @@ test('all mandatory gates pass only with exact preservation, recovery, legacy, a
   const unsafe = passingEvidence();
   unsafe.preservation[0].afterAmountScale12 = '98.000000000000';
   unsafe.legacy.quarantinedCount = 1;
+  unsafe.recovery.restoredEvidenceHash = '';
+  unsafe.recovery.sourceEvidenceHash = '';
   unsafe.acceptance.pop();
   const blocked = evaluateCutoverEvidence(unsafe);
   assert.equal(blocked.decision, 'NO_GO');
   assert.ok(blocked.failures.includes('PRESERVATION_MISMATCH:sales_contracts:AMOUNT_SCALE_12'));
   assert.ok(blocked.failures.includes('LEGACY_QUARANTINED:1'));
+  assert.ok(blocked.failures.includes('RESTORED_EVIDENCE_HASH_INVALID'));
+  assert.ok(blocked.failures.includes('SOURCE_EVIDENCE_HASH_INVALID'));
   assert.ok(blocked.failures.some(failure => failure.startsWith('ACCEPTANCE_MISSING:')));
 });
 

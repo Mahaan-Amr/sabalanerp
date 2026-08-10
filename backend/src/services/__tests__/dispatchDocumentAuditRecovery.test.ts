@@ -203,7 +203,7 @@ test('replacement replay follows the predecessor audit and does not require succ
   const dispatchAuthority = { actorRole: 'ACCOUNTANT', workspace: 'accounting', workspacePermission: 'edit',
     feature: 'accounting_dispatch_candidates_manage', featurePermission: 'edit' };
   const command = { id: 'replace-command', scope: 'WAYBILL', scopeId: 'waybill-old', command: 'REPLACE', status: 'SUCCEEDED',
-    waybillId: 'waybill-new', actorId: 'accounting-1', correlationId: 'replace-correlation', idempotencyKey: 'replace-1', completedAt: at };
+    waybillId: 'waybill-old', actorId: 'accounting-1', correlationId: 'replace-correlation', idempotencyKey: 'replace-1', completedAt: at };
   const predecessor = { id: 'waybill-old', status: 'VOIDED', integrityHash: 'b'.repeat(64), voidedAt: at,
     voidedBy: 'accounting-1', voidReason: 'Damaged print', replacementWaybillId: 'waybill-new' };
   const audit = { eventType: 'DOCUMENT_BUNDLE_REPLACED', actorId: 'accounting-1', recordedAt: at,
@@ -215,6 +215,8 @@ test('replacement replay follows the predecessor audit and does not require succ
   const waybill = { id: 'waybill-new', candidateId: 'candidate-1', integrityHash: 'c'.repeat(64), replacesWaybillId: 'waybill-old', issuedAt: at, issuedBy: 'accounting-1' };
   assert.equal(validatePersistedDocumentTransition({ waybill, predecessor, primarySourceHash: 'a'.repeat(64),
     primaryArtifactIds: ['new-waybill', 'new-statement'], command, audit }), null);
+  assert.equal(validatePersistedDocumentTransition({ waybill, predecessor, primarySourceHash: 'a'.repeat(64),
+    primaryArtifactIds: ['new-waybill', 'new-statement'], command: { ...command, waybillId: waybill.id }, audit }), 'LEGACY_UNRECONCILED');
   assert.equal(validatePersistedDocumentTransition({ waybill, predecessor, primarySourceHash: 'a'.repeat(64),
     primaryArtifactIds: ['new-waybill', 'new-statement'], command, audit: { ...audit, payload: { ...audit.payload, authority: {} } } }), 'INCOMPLETE_AUDIT_METADATA');
   assert.equal(validatePersistedDocumentTransition({ waybill, predecessor: { ...predecessor, physicalExit: { id: 'exit-before-replace' } },

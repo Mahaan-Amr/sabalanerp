@@ -237,9 +237,10 @@ export const validatePersistedDocumentTransition = (input: {
   const replacement = Boolean(input.waybill.replacesWaybillId);
   const expectedCommand = replacement ? 'REPLACE' : 'ACCEPT_AND_ISSUE'; const expectedScope = replacement ? 'WAYBILL' : 'CANDIDATE';
   const expectedScopeId = input.waybill.replacesWaybillId ?? input.waybill.candidateId;
+  const expectedCommandWaybillId = replacement ? input.waybill.replacesWaybillId : null;
   const command = input.command; const audit = input.audit; const payload = audit?.payload as Record<string, any> | undefined;
   if (!command || command.scope !== expectedScope || command.scopeId !== expectedScopeId || command.command !== expectedCommand
-    || command.status !== 'SUCCEEDED' || command.waybillId !== input.waybill.id) return 'LEGACY_UNRECONCILED' as const;
+    || command.status !== 'SUCCEEDED' || command.waybillId !== expectedCommandWaybillId) return 'LEGACY_UNRECONCILED' as const;
   const invalidAudit = replacement
     ? audit?.eventType !== 'DOCUMENT_BUNDLE_REPLACED' || payload?.replacementWaybillId !== input.waybill.id || !payload?.reason
       || !validAccountingDispatchAuthority(payload?.authority)
@@ -775,12 +776,13 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
   const audits = await prisma.dispatchLifecycleAudit.findMany({ where: { OR: expectedAggregates.map(item => ({ aggregateType: item.aggregateType, aggregateId: item.aggregateId })) }, orderBy: [{ aggregateType: 'asc' }, { aggregateId: 'asc' }, { recordedAt: 'asc' }, { id: 'asc' }] });
   const commands = await prisma.dispatchDocumentCommandResult.findMany({ where: { OR: [
     { scope: 'CANDIDATE', scopeId: waybill.candidate.id }, { waybillId: waybill.id },
+    ...(waybill.replacesWaybillId ? [{ scope: 'WAYBILL' as const, scopeId: waybill.replacesWaybillId }] : []),
   ] }, orderBy: [{ startedAt: 'asc' }, { id: 'asc' }] });
   const issuanceCommand = waybill.replacesWaybillId
     ? commands.find(command => command.scope === 'WAYBILL' && command.scopeId === waybill.replacesWaybillId
-      && command.command === 'REPLACE' && command.status === 'SUCCEEDED' && command.waybillId === waybill.id)
+      && command.command === 'REPLACE' && command.status === 'SUCCEEDED' && command.waybillId === waybill.replacesWaybillId)
     : commands.find(command => command.scope === 'CANDIDATE' && command.scopeId === waybill.candidate.id
-      && command.command === 'ACCEPT_AND_ISSUE' && command.status === 'SUCCEEDED' && command.waybillId === waybill.id);
+      && command.command === 'ACCEPT_AND_ISSUE' && command.status === 'SUCCEEDED' && command.waybillId === null);
   const terminalWaybillAudits = isTerminalVoidWaybill(waybill) && waybill.replacesWaybillId
     ? await prisma.dispatchLifecycleAudit.findMany({ where: { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id },
       orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] }) : [];

@@ -132,6 +132,8 @@ export const evaluateCutoverEvidence = (evidence: CutoverEvidence): CutoverDecis
   if (!sha256Pattern.test(evidence.recovery.backupSha256)) failures.push('BACKUP_HASH_INVALID');
   if (!evidence.recovery.backupRestored) failures.push('RESTORE_DRILL_MISSING');
   if (evidence.recovery.restoreDrillProject !== 'sabalanerp-local') failures.push('RESTORE_DRILL_WRONG_PROJECT');
+  if (!sha256Pattern.test(evidence.recovery.restoredEvidenceHash)) failures.push('RESTORED_EVIDENCE_HASH_INVALID');
+  if (!sha256Pattern.test(evidence.recovery.sourceEvidenceHash)) failures.push('SOURCE_EVIDENCE_HASH_INVALID');
   if (evidence.recovery.restoredEvidenceHash !== evidence.recovery.sourceEvidenceHash) failures.push('RESTORE_EVIDENCE_MISMATCH');
   if (!evidence.legacy.dryRunCompleted || !evidence.legacy.applyCompleted || !evidence.legacy.repeatCompleted) failures.push('LEGACY_PREFLIGHT_INCOMPLETE');
   addCountFailure(failures, 'LEGACY_REPEAT_CREATED', evidence.legacy.repeatCreatedCount);

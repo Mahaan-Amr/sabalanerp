@@ -6,6 +6,9 @@ import {
   assertHrRedesignReleaseAcceptance,
   assertHrRedesignCutoverReady,
 } from '../hrRedesignCutover';
+import {
+  resolveHrRedesignCutoverStartup,
+} from '../hrRedesignCutoverStartup';
 
 const readyReport = {
   safeBackfills: [{ code: 'CATALOGS', count: 0 }],
@@ -36,6 +39,29 @@ assert.throws(
     checks: { ...readyAttestation.checks, 'frontend-build': 'FAILED' },
   }, 'revision-245'),
   /frontend-build/,
+);
+
+assert.deepEqual(
+  resolveHrRedesignCutoverStartup({}),
+  { enabled: false, acceptancePath: null, sourceRevision: null },
+  'production compatibility mode must start without a fabricated Cutover attestation',
+);
+assert.deepEqual(
+  resolveHrRedesignCutoverStartup({
+    HR_REDESIGN_CUTOVER_ENABLED: 'true',
+    HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH: '/run/secrets/hr-redesign-acceptance.json',
+    HR_REDESIGN_CUTOVER_REVISION: 'revision-245',
+  }),
+  {
+    enabled: true,
+    acceptancePath: '/run/secrets/hr-redesign-acceptance.json',
+    sourceRevision: 'revision-245',
+  },
+);
+assert.throws(
+  () => resolveHrRedesignCutoverStartup({ HR_REDESIGN_CUTOVER_ENABLED: 'true' }),
+  /HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH, HR_REDESIGN_CUTOVER_REVISION/,
+  'an explicitly enabled Cutover must remain fail-closed without its revision-bound attestation',
 );
 assert.throws(
   () => assertHrRedesignReleaseAcceptance(readyAttestation, 'different-revision'),

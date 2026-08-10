@@ -53,7 +53,7 @@ There are 127 current classified records: 108 remain Cutover blockers and 19 are
 - Added `hr-redesign:cutover:verify`, which validates a release attestation, repeats the dry-run, and rejects nondeterministic output or any remaining blocker.
 - Added a production startup gate that runs the same attestation and database verifier before `server.listen`.
 
-The release attestation is bound to `HR_REDESIGN_CUTOVER_REVISION` and must mark every registered build, Design System, E2E, migration, Docker, focused behavior, authorization/privacy, visual, backlog-disposition, and recovery gate as `PASSED`. Production also requires `HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH` and rejects a missing, malformed, incomplete, failed, or different-revision attestation. No passing attestation exists for this rehearsal.
+The release attestation is bound to `HR_REDESIGN_CUTOVER_REVISION` and must mark every registered build, Design System, E2E, migration, Docker, focused behavior, authorization/privacy, visual, backlog-disposition, and recovery gate as `PASSED`. Production keeps `HR_REDESIGN_CUTOVER_ENABLED=false` while compatibility mode is required. When Cutover is deliberately enabled, it requires `HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH` and `HR_REDESIGN_CUTOVER_REVISION` and rejects a missing, malformed, incomplete, failed, or different-revision attestation. No passing attestation exists for this rehearsal, so this release must remain in compatibility mode.
 
 ## Backlog disposition
 

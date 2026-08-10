@@ -57,6 +57,9 @@ export type CutoverEvidence = {
     afterEvidenceHash: string;
   }>;
   recovery: {
+    artifactPath: string;
+    backupPath: string;
+    evidenceArtifactSha256: string;
     backupSha256: string;
     backupRestored: boolean;
     restoreDrillProject: string;
@@ -64,6 +67,13 @@ export type CutoverEvidence = {
     sourceEvidenceHash: string;
   };
   legacy: {
+    dryRunArtifactPath: string;
+    applyArtifactPath: string;
+    repeatArtifactPath: string;
+    dryRunArtifactSha256: string;
+    applyArtifactSha256: string;
+    repeatArtifactSha256: string;
+    manifestHash: string;
     dryRunCompleted: boolean;
     applyCompleted: boolean;
     repeatCompleted: boolean;
@@ -73,6 +83,7 @@ export type CutoverEvidence = {
     unreviewedCohortCount: number;
   };
   integrity: {
+    artifactPath: string;
     orphanArtifactCount: number;
     incompleteBundleCount: number;
     auditGapCount: number;
@@ -80,14 +91,146 @@ export type CutoverEvidence = {
     recoveryFailures: number;
     evidenceArtifactSha256: string;
   };
-  concurrency: { completedRuns: number; anomalyCount: number; evidenceArtifactSha256: string };
-  acceptance: Array<{ command: string; exitCode: number; outputSha256: string }>;
+  concurrency: { artifactPath: string; completedRuns: number; anomalyCount: number; evidenceArtifactSha256: string };
+  acceptance: Array<{ command: string; artifactPath: string; artifactSha256: string; exitCode: number; outputSha256: string }>;
   operations: { incidentContacts: string[]; monitoringChecks: string[] };
 };
 
 export type CutoverDecision = { decision: 'GO' | 'NO_GO'; failures: string[] };
 
 const sha256Pattern = /^[0-9a-f]{64}$/;
+const requiredArtifactPath = (value: unknown, label: string): string => {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} artifact path is required.`);
+  return value;
+};
+const readArtifact = async (path: unknown, label: string): Promise<{ bytes: Buffer; value: Record<string, any> }> => {
+  const source = requiredArtifactPath(path, label);
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(source);
+  } catch {
+    throw new Error(`${label} artifact could not be read: ${source}`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes.toString('utf8'));
+  } catch {
+    throw new Error(`${label} artifact is not valid JSON: ${source}`);
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} artifact must be a JSON object.`);
+  return { bytes, value: value as Record<string, any> };
+};
+const hashBytes = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+const exact = (actual: unknown, expected: unknown, label: string) => {
+  if (actual !== expected) throw new Error(`${label} does not match the independently captured evidence.`);
+};
+
+export type LegacyPricingCohortSnapshot = {
+  manifestHash: string;
+  sourceContractCount: string | number;
+  sourceApprovalRecordCount: string | number;
+  sourceRowCount: string | number;
+  counts: Record<string, number>;
+};
+
+/** Replaces caller claims with values read from immutable run artifacts and an independently recaptured legacy cohort. */
+export const verifyFileBackedCutoverEvidence = async (
+  evidence: CutoverEvidence,
+  recaptureLegacyCohort: () => Promise<LegacyPricingCohortSnapshot>,
+): Promise<CutoverEvidence> => {
+  const verified = structuredClone(evidence);
+
+  const recovery = await readArtifact(verified.recovery.artifactPath, 'Recovery');
+  const recoveryValue = recovery.value;
+  const backupPath = requiredArtifactPath(recoveryValue.backupPath, 'Recovery backup');
+  const backupBytes = await readFile(backupPath).catch(() => {
+    throw new Error(`Recovery backup artifact could not be read: ${backupPath}`);
+  });
+  exact(verified.recovery.backupPath, backupPath, 'Recovery backup path');
+  verified.recovery = {
+    artifactPath: verified.recovery.artifactPath,
+    backupPath,
+    evidenceArtifactSha256: hashBytes(recovery.bytes),
+    backupSha256: hashBytes(backupBytes),
+    backupRestored: recoveryValue.backupRestored === true,
+    restoreDrillProject: String(recoveryValue.restoreDrillProject ?? ''),
+    restoredEvidenceHash: String(recoveryValue.restoredEvidenceHash ?? ''),
+    sourceEvidenceHash: String(recoveryValue.sourceEvidenceHash ?? ''),
+  };
+
+  const integrity = await readArtifact(verified.integrity.artifactPath, 'Audit/recovery');
+  verified.integrity = {
+    artifactPath: verified.integrity.artifactPath,
+    orphanArtifactCount: Number(integrity.value.orphanArtifactCount),
+    incompleteBundleCount: Number(integrity.value.incompleteBundleCount),
+    auditGapCount: Number(integrity.value.auditGapCount),
+    corruptArtifactCount: Number(integrity.value.corruptArtifactCount),
+    recoveryFailures: Number(integrity.value.recoveryFailures),
+    evidenceArtifactSha256: hashBytes(integrity.bytes),
+  };
+
+  const concurrency = await readArtifact(verified.concurrency.artifactPath, 'Concurrency');
+  if (!Array.isArray(concurrency.value.runs)) throw new Error('Concurrency artifact must contain a runs array.');
+  const anomalyCount = concurrency.value.runs.reduce((sum: number, run: any) => sum + Number(run?.anomalyCount), 0);
+  if (concurrency.value.runs.some((run: any) => !Number.isSafeInteger(run?.anomalyCount) || run.anomalyCount < 0)) {
+    throw new Error('Concurrency artifact contains an invalid anomaly count.');
+  }
+  verified.concurrency = { artifactPath: verified.concurrency.artifactPath, completedRuns: concurrency.value.runs.length,
+    anomalyCount, evidenceArtifactSha256: hashBytes(concurrency.bytes) };
+
+  verified.acceptance = await Promise.all(verified.acceptance.map(async claim => {
+    const artifact = await readArtifact(claim.artifactPath, `Acceptance ${claim.command}`);
+    exact(artifact.value.command, claim.command, `Acceptance command ${claim.command}`);
+    const outputPath = requiredArtifactPath(artifact.value.outputPath, `Acceptance output ${claim.command}`);
+    const output = await readFile(outputPath).catch(() => {
+      throw new Error(`Acceptance output artifact could not be read: ${outputPath}`);
+    });
+    return { command: claim.command, artifactPath: claim.artifactPath, artifactSha256: hashBytes(artifact.bytes),
+      exitCode: Number(artifact.value.exitCode), outputSha256: hashBytes(output) };
+  }));
+
+  const [dry, apply, repeat, current] = await Promise.all([
+    readArtifact(verified.legacy.dryRunArtifactPath, 'Legacy dry-run'),
+    readArtifact(verified.legacy.applyArtifactPath, 'Legacy apply'),
+    readArtifact(verified.legacy.repeatArtifactPath, 'Legacy repeat'),
+    recaptureLegacyCohort(),
+  ]);
+  exact(dry.value.mode, 'DRY_RUN', 'Legacy dry-run mode');
+  exact(apply.value.mode, 'APPLY', 'Legacy apply mode');
+  exact(repeat.value.mode, 'APPLY', 'Legacy repeat mode');
+  for (const [label, artifact] of [['dry-run', dry], ['apply', apply], ['repeat', repeat]] as const) {
+    exact(artifact.value.status, 'COMPLETED', `Legacy ${label} status`);
+    if (!artifact.value.afterManifest || typeof artifact.value.afterManifest !== 'object') throw new Error(`Legacy ${label} artifact has no afterManifest.`);
+  }
+  if (!apply.value.beforeManifest || !repeat.value.beforeManifest) throw new Error('Legacy apply/repeat artifacts must contain beforeManifest.');
+  exact(dry.value.afterManifest.manifestHash, apply.value.beforeManifest.manifestHash, 'Legacy dry-run/apply cohort');
+  exact(apply.value.afterManifest.manifestHash, repeat.value.beforeManifest.manifestHash, 'Legacy apply/repeat cohort');
+  exact(repeat.value.beforeManifest.manifestHash, repeat.value.afterManifest.manifestHash, 'Legacy repeat idempotency');
+  exact(apply.value.sourceComparison?.matched, true, 'Legacy apply source comparison');
+  exact(repeat.value.sourceComparison?.matched, true, 'Legacy repeat source comparison');
+  exact(repeat.value.afterManifest.manifestHash, current.manifestHash, 'Legacy cohort manifest hash');
+  for (const field of ['sourceContractCount', 'sourceApprovalRecordCount', 'sourceRowCount'] as const) {
+    exact(String(repeat.value.afterManifest[field]), String(current[field]), `Legacy cohort ${field}`);
+  }
+  exact(JSON.stringify(repeat.value.afterManifest.counts), JSON.stringify(current.counts), 'Legacy cohort counts');
+  const counts = current.counts;
+  const unresolvedCount = Number(counts.REPAIR_REQUIRED ?? 0) + Number(counts.EVIDENCE_CONFLICT ?? 0) + Number(counts.STALE ?? 0);
+  verified.legacy = {
+    ...verified.legacy,
+    dryRunArtifactSha256: hashBytes(dry.bytes),
+    applyArtifactSha256: hashBytes(apply.bytes),
+    repeatArtifactSha256: hashBytes(repeat.bytes),
+    manifestHash: current.manifestHash,
+    dryRunCompleted: true,
+    applyCompleted: true,
+    repeatCompleted: true,
+    repeatCreatedCount: Number(repeat.value.outcomeCounts?.SEALED ?? Number.NaN),
+    unresolvedCount,
+    quarantinedCount: unresolvedCount,
+    unreviewedCohortCount: Number(counts.LEGACY_REVIEW_REQUIRED ?? 0),
+  };
+  return verified;
+};
 const addCountFailure = (failures: string[], name: string, count: number) => {
   if (!Number.isSafeInteger(count) || count !== 0) failures.push(`${name}:${count}`);
 };
@@ -129,6 +272,7 @@ export const evaluateCutoverEvidence = (evidence: CutoverEvidence): CutoverDecis
     if (item.afterAmountScale12 !== null && !/^-?\d+\.\d{12}$/.test(item.afterAmountScale12)) failures.push(`PRESERVATION_INVALID:${item.scope}:AMOUNT_SCALE_12`);
     if (!sha256Pattern.test(item.beforeEvidenceHash) || !sha256Pattern.test(item.afterEvidenceHash)) failures.push(`PRESERVATION_INVALID:${item.scope}:EVIDENCE_HASH`);
   }
+  if (!sha256Pattern.test(evidence.recovery.evidenceArtifactSha256)) failures.push('RECOVERY_EVIDENCE_HASH_INVALID');
   if (!sha256Pattern.test(evidence.recovery.backupSha256)) failures.push('BACKUP_HASH_INVALID');
   if (!evidence.recovery.backupRestored) failures.push('RESTORE_DRILL_MISSING');
   if (evidence.recovery.restoreDrillProject !== 'sabalanerp-local') failures.push('RESTORE_DRILL_WRONG_PROJECT');
@@ -136,6 +280,10 @@ export const evaluateCutoverEvidence = (evidence: CutoverEvidence): CutoverDecis
   if (!sha256Pattern.test(evidence.recovery.sourceEvidenceHash)) failures.push('SOURCE_EVIDENCE_HASH_INVALID');
   if (evidence.recovery.restoredEvidenceHash !== evidence.recovery.sourceEvidenceHash) failures.push('RESTORE_EVIDENCE_MISMATCH');
   if (!evidence.legacy.dryRunCompleted || !evidence.legacy.applyCompleted || !evidence.legacy.repeatCompleted) failures.push('LEGACY_PREFLIGHT_INCOMPLETE');
+  if (!sha256Pattern.test(evidence.legacy.dryRunArtifactSha256)
+    || !sha256Pattern.test(evidence.legacy.applyArtifactSha256)
+    || !sha256Pattern.test(evidence.legacy.repeatArtifactSha256)) failures.push('LEGACY_ARTIFACT_HASH_INVALID');
+  if (!sha256Pattern.test(evidence.legacy.manifestHash)) failures.push('LEGACY_MANIFEST_HASH_INVALID');
   addCountFailure(failures, 'LEGACY_REPEAT_CREATED', evidence.legacy.repeatCreatedCount);
   addCountFailure(failures, 'LEGACY_UNRESOLVED', evidence.legacy.unresolvedCount);
   addCountFailure(failures, 'LEGACY_QUARANTINED', evidence.legacy.quarantinedCount);
@@ -153,7 +301,7 @@ export const evaluateCutoverEvidence = (evidence: CutoverEvidence): CutoverDecis
   for (const command of CUTOVER_ACCEPTANCE_COMMANDS) {
     const result = commandResults.get(command);
     if (!result) failures.push(`ACCEPTANCE_MISSING:${command}`);
-    else if (result.exitCode !== 0 || !sha256Pattern.test(result.outputSha256)) failures.push(`ACCEPTANCE_FAILED:${command}`);
+    else if (result.exitCode !== 0 || !sha256Pattern.test(result.artifactSha256) || !sha256Pattern.test(result.outputSha256)) failures.push(`ACCEPTANCE_FAILED:${command}`);
   }
   if (evidence.operations.incidentContacts.length === 0) failures.push('INCIDENT_CONTACTS_MISSING');
   if (evidence.operations.monitoringChecks.length === 0) failures.push('MONITORING_CHECKLIST_MISSING');

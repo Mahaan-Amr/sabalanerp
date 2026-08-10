@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import {
   buildCutoverManifest,
   evaluateCutoverEvidence,
   readAndVerifyCutoverManifest,
+  verifyFileBackedCutoverEvidence,
   writeImmutableCutoverManifest,
   type CutoverEvidence,
   type ShipmentStatementCutoverRepository,
@@ -33,14 +35,16 @@ const passingEvidence = (): CutoverEvidence => ({
     afterIdentityHash: sha, beforeQuantityScale3: '12.000', afterQuantityScale3: '12.000',
     beforeAmountScale12: '99.000000000000', afterAmountScale12: '99.000000000000',
     beforeEvidenceHash: sha, afterEvidenceHash: sha })),
-  recovery: { backupSha256: sha, backupRestored: true, restoreDrillProject: 'sabalanerp-local',
+  recovery: { artifactPath: '', backupPath: '', evidenceArtifactSha256: sha, backupSha256: sha, backupRestored: true, restoreDrillProject: 'sabalanerp-local',
     restoredEvidenceHash: sha, sourceEvidenceHash: sha },
-  legacy: { dryRunCompleted: true, applyCompleted: true, repeatCompleted: true, repeatCreatedCount: 0,
+  legacy: { dryRunArtifactPath: '', applyArtifactPath: '', repeatArtifactPath: '', dryRunArtifactSha256: sha,
+    applyArtifactSha256: sha, repeatArtifactSha256: sha, manifestHash: sha,
+    dryRunCompleted: true, applyCompleted: true, repeatCompleted: true, repeatCreatedCount: 0,
     unresolvedCount: 0, quarantinedCount: 0, unreviewedCohortCount: 0 },
-  integrity: { orphanArtifactCount: 0, incompleteBundleCount: 0, auditGapCount: 0,
+  integrity: { artifactPath: '', orphanArtifactCount: 0, incompleteBundleCount: 0, auditGapCount: 0,
     corruptArtifactCount: 0, recoveryFailures: 0, evidenceArtifactSha256: sha },
-  concurrency: { completedRuns: 3, anomalyCount: 0, evidenceArtifactSha256: sha },
-  acceptance: CUTOVER_ACCEPTANCE_COMMANDS.map(command => ({ command, exitCode: 0, outputSha256: sha })),
+  concurrency: { artifactPath: '', completedRuns: 3, anomalyCount: 0, evidenceArtifactSha256: sha },
+  acceptance: CUTOVER_ACCEPTANCE_COMMANDS.map(command => ({ command, artifactPath: '', artifactSha256: sha, exitCode: 0, outputSha256: sha })),
   operations: { incidentContacts: ['accounting-on-call'], monitoringChecks: ['bundle integrity', 'audit gaps'] },
 });
 
@@ -61,6 +65,65 @@ test('all mandatory gates pass only with exact preservation, recovery, legacy, a
   assert.ok(blocked.failures.includes('RESTORED_EVIDENCE_HASH_INVALID'));
   assert.ok(blocked.failures.includes('SOURCE_EVIDENCE_HASH_INVALID'));
   assert.ok(blocked.failures.some(failure => failure.startsWith('ACCEPTANCE_MISSING:')));
+});
+
+test('file-backed verification rejects hash-shaped caller claims without their artifacts', async () => {
+  await assert.rejects(
+    () => verifyFileBackedCutoverEvidence(passingEvidence(), async () => ({
+      manifestHash: sha,
+      sourceContractCount: 0,
+      sourceApprovalRecordCount: 0,
+      sourceRowCount: 0,
+      counts: { SEALED: 0, LEGACY_REVIEW_REQUIRED: 0, REPAIR_REQUIRED: 0, EVIDENCE_CONFLICT: 0 },
+    })),
+    /artifact path/i,
+  );
+});
+
+test('file-backed verification recomputes hashes and binds legacy evidence to the current cohort', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'shipment-evidence-'));
+  const writeJson = async (name: string, value: unknown) => {
+    const path = join(directory, name);
+    await writeFile(path, JSON.stringify(value));
+    return path;
+  };
+  const backupPath = join(directory, 'backup.dump');
+  await writeFile(backupPath, 'real backup bytes');
+  const evidence = passingEvidence();
+  evidence.recovery.artifactPath = await writeJson('recovery.json', { backupPath, backupRestored: true,
+    restoreDrillProject: 'sabalanerp-local', restoredEvidenceHash: sha, sourceEvidenceHash: sha });
+  evidence.recovery.backupPath = backupPath;
+  evidence.integrity.artifactPath = await writeJson('integrity.json', { orphanArtifactCount: 0, incompleteBundleCount: 0,
+    auditGapCount: 0, corruptArtifactCount: 0, recoveryFailures: 0 });
+  evidence.concurrency.artifactPath = await writeJson('concurrency.json', { runs: [
+    { runId: 'one', anomalyCount: 0 }, { runId: 'two', anomalyCount: 0 }, { runId: 'three', anomalyCount: 0 },
+  ] });
+  evidence.acceptance = await Promise.all(CUTOVER_ACCEPTANCE_COMMANDS.map(async (command, index) => {
+    const outputPath = join(directory, `acceptance-${index}.log`);
+    await writeFile(outputPath, `passed: ${command}`);
+    return { command, artifactPath: await writeJson(`acceptance-${index}.json`, { command, exitCode: 0, outputPath }),
+      artifactSha256: sha, exitCode: 99, outputSha256: sha };
+  }));
+  const current = { manifestHash: 'b'.repeat(64), sourceContractCount: '2', sourceApprovalRecordCount: '2', sourceRowCount: '4',
+    counts: { SEALED: 2, LEGACY_REVIEW_REQUIRED: 0, REPAIR_REQUIRED: 0, EVIDENCE_CONFLICT: 0, STALE: 0 } };
+  const legacyManifest = { ...current };
+  evidence.legacy.dryRunArtifactPath = await writeJson('legacy-dry.json', { mode: 'DRY_RUN', status: 'COMPLETED', afterManifest: legacyManifest });
+  evidence.legacy.applyArtifactPath = await writeJson('legacy-apply.json', { mode: 'APPLY', status: 'COMPLETED', beforeManifest: legacyManifest, afterManifest: legacyManifest,
+    sourceComparison: { matched: true }, outcomeCounts: { SEALED: 2, REPLAYED: 0 } });
+  evidence.legacy.repeatArtifactPath = await writeJson('legacy-repeat.json', { mode: 'APPLY', status: 'COMPLETED', beforeManifest: legacyManifest, afterManifest: legacyManifest,
+    sourceComparison: { matched: true }, outcomeCounts: { SEALED: 0, REPLAYED: 2 } });
+
+  const verified = await verifyFileBackedCutoverEvidence(evidence, async () => current);
+  assert.equal(verified.acceptance[0].exitCode, 0);
+  assert.notEqual(verified.acceptance[0].outputSha256, sha);
+  assert.equal(verified.recovery.backupSha256, createHash('sha256').update('real backup bytes').digest('hex'));
+  assert.equal(verified.legacy.manifestHash, current.manifestHash);
+  assert.deepEqual(evaluateCutoverEvidence(verified), { decision: 'GO', failures: [] });
+
+  await assert.rejects(
+    () => verifyFileBackedCutoverEvidence(evidence, async () => ({ ...current, manifestHash: 'c'.repeat(64) })),
+    /manifest hash does not match/i,
+  );
 });
 
 test('signed manifests are deterministic, tamper-evident, and created without overwrite', async () => {

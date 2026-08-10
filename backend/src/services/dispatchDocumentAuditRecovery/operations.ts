@@ -272,6 +272,9 @@ export const validAccountingDispatchAuthority = (value: unknown) => {
 const validGuardAdminAuthority = (value: unknown) => { const authority = value as Record<string, unknown> | undefined;
   return authority?.workspace === 'security' && String(authority?.workspacePermission || '').toLowerCase() === 'admin'
     && Boolean(authority?.actorRole); };
+const validAccountingAdminAuthority = (value: unknown) => { const authority = value as Record<string, unknown> | undefined;
+  return authority?.workspace === 'accounting' && String(authority?.workspacePermission || '').toLowerCase() === 'admin'
+    && Boolean(authority?.actorRole); };
 export const validatesManualOutageExitEvidence = (input: {
   waybill: { id: string; integrityHash: string };
   revision: { id: string; integrityHash: string; queueTurnId: string };
@@ -279,10 +282,19 @@ export const validatesManualOutageExitEvidence = (input: {
     status: string; actualOccurredAt: Date; recordedAt: Date | null; recordedBy: string | null; accountingApprovedBy: string | null;
     guardApprovedBy: string | null; paperEvidence: unknown; snapshot: unknown; integrityHash: string | null };
   audit?: { eventType: string; actorId: string; recordedAt: Date; payload: unknown };
+  approvalAudits?: readonly { eventType: string; actorId: string; payload: unknown }[];
 }) => {
   const { exit, waybill, revision, audit } = input; const snapshot = exit.snapshot as Record<string, any> | null;
   const payload = audit?.payload as Record<string, any> | undefined;
+  const accountingApproval = input.approvalAudits?.find(item => item.eventType === 'ACCOUNTING_PAPER_EXIT_APPROVED');
+  const guardApproval = input.approvalAudits?.find(item => item.eventType === 'GUARD_PAPER_EXIT_APPROVED');
+  const approvalEvidenceValid = !input.approvalAudits || Boolean(accountingApproval && guardApproval
+    && accountingApproval.actorId === exit.accountingApprovedBy && guardApproval.actorId === exit.guardApprovedBy
+    && validAccountingAdminAuthority((accountingApproval.payload as Record<string, unknown>)?.effectiveAuthority)
+    && validGuardAdminAuthority((guardApproval.payload as Record<string, unknown>)?.effectiveAuthority));
   return Boolean(snapshot && exit.status === 'REGISTERED' && exit.integrityHash && dispatchRecoveryIntegrityHash(snapshot) === exit.integrityHash
+    && Boolean(exit.accountingApprovedBy) && Boolean(exit.guardApprovedBy) && exit.accountingApprovedBy !== exit.guardApprovedBy
+    && approvalEvidenceValid
     && exit.waybillId === waybill.id && exit.allocationRevisionId === revision.id && exit.queueTurnId === revision.queueTurnId
     && snapshot.schemaVersion === 1 && snapshot.method === 'MANUAL_OUTAGE_EXIT' && snapshot.paperNumber === exit.paperNumber
     && snapshot.outageId === exit.outageId && snapshot.waybillId === waybill.id && snapshot.waybillIntegrityHash === waybill.integrityHash
@@ -340,6 +352,7 @@ export const validatesPrintHandoffTransition = (input: {
 }) => {
   const { handoff, audit } = input; const payload = audit?.payload as Record<string, any> | undefined;
   const artifactIds = Array.isArray(payload?.artifactIds) ? payload.artifactIds as string[] : [];
+  const resolvedArtifactIds = [...input.artifactKinds.entries()].filter(([, kind]) => handoff.requestedKinds.includes(kind)).map(([id]) => id).sort();
   const common = Boolean(handoff.completedAt) && audit?.actorId === handoff.requestedBy
     && audit.recordedAt.toISOString() === handoff.completedAt?.toISOString()
     && payload?.handoffId === handoff.id && payload?.attemptId === handoff.idempotencyKey
@@ -349,8 +362,10 @@ export const validatesPrintHandoffTransition = (input: {
   if (!common) return false;
   if (handoff.status === 'SUCCEEDED') return audit?.eventType === 'PRINT_BYTES_HANDED_OFF' && payload?.failureCode === null
     && JSON.stringify(artifactIds) === JSON.stringify([...handoff.items].sort((a, b) => a.ordinal - b.ordinal).map(item => item.artifactId));
+  const requiresCompleteResolvedSet = handoff.failureCode === 'BYTE_HANDOFF_FAILED' || handoff.failureCode === 'ARTIFACT_INTEGRITY_FAILURE';
   return handoff.status === 'FAILED' && audit?.eventType === 'PRINT_BYTES_HANDOFF_FAILED' && Boolean(handoff.failureCode)
-    && payload?.failureCode === handoff.failureCode && handoff.items.length === 0;
+    && payload?.failureCode === handoff.failureCode && handoff.items.length === 0
+    && (!requiresCompleteResolvedSet || JSON.stringify([...artifactIds].sort()) === JSON.stringify(resolvedArtifactIds));
 };
 export const validatesStatementAdjustmentEvidence = (input: {
   waybillId: string;
@@ -361,7 +376,7 @@ export const validatesStatementAdjustmentEvidence = (input: {
       publishedAt: Date; publishedBy: string } | null } | null;
   originalStatement?: { id: string; sourceIntegrityHash: string; sha256: string };
   pricingReferences: readonly { contractId: string; pricingVersionId: string; expectedPricingHash: string; readinessEvidenceHash: string;
-    pricingVersion?: { rows: readonly { id: string; contractItemId: string; productRowId: string; unit: string; integrityHash: string }[] } }[];
+    pricingVersion?: { currency: string; rows: readonly { id: string; contractItemId: string; productRowId: string; unit: string; integrityHash: string }[] } }[];
   command?: { command: string; status: string; waybillId: string | null; actorId: string; completedAt: Date | null;
     correlationId: string; idempotencyKey: string };
   audit?: { actorId: string; recordedAt: Date; payload: unknown };
@@ -372,6 +387,8 @@ export const validatesStatementAdjustmentEvidence = (input: {
   const expectedPricing = [...input.pricingReferences].sort((a, b) => a.contractId.localeCompare(b.contractId)).map(reference => ({
     contractId: reference.contractId, pricingVersionId: reference.pricingVersionId, integrityHash: reference.expectedPricingHash,
     readinessEvidenceHash: reference.readinessEvidenceHash }));
+  const pricingCurrencies = new Set(input.pricingReferences.map(reference => reference.pricingVersion?.currency).filter(Boolean));
+  if (pricingCurrencies.size !== 1 || !pricingCurrencies.has(snapshot.currency)) return false;
   const correctionLines = new Map(correction.lines.map(line => [line.id, line])); const snapshotLines = Array.isArray(snapshot.lines) ? snapshot.lines : [];
   if (snapshotLines.length !== correction.lines.length || new Set(snapshotLines.map((line: any) => line.correctionLineId)).size !== correction.lines.length
     || snapshotLines.some((line: any) => { const source = correctionLines.get(line.correctionLineId); return !source
@@ -418,7 +435,8 @@ export const validatesStatementAdjustmentEvidence = (input: {
 };
 export const validatesAdjustmentLedgerContinuity = (input: {
   baseEvents: readonly { pricingRowId: string; quantity: { toFixed(scale: number): string };
-    grossAmount: { toFixed(scale: number): string }; discountAmount: { toFixed(scale: number): string }; evidence: unknown }[];
+    grossAmount: { toFixed(scale: number): string }; discountAmount: { toFixed(scale: number): string };
+    netAmount: { toFixed(scale: number): string }; evidence: unknown }[];
   adjustments: readonly { sequence: number; snapshot: unknown }[];
 }) => {
   const state = new Map<string, { sequence: number; quantity: string; gross: string; discount: string }>();
@@ -428,7 +446,12 @@ export const validatesAdjustmentLedgerContinuity = (input: {
       const evidence = event.evidence as Record<string, unknown>; const prior = state.get(event.pricingRowId);
       const ledgerSequence = Number(evidence.ledgerSequence);
       if (!Number.isSafeInteger(ledgerSequence) || ledgerSequence !== (prior?.sequence ?? 0) + 1
-        || (prior && (evidence.beforeQuantity !== prior.quantity || evidence.beforeGross !== prior.gross || evidence.beforeDiscount !== prior.discount))) return false;
+        || (prior && (evidence.beforeQuantity !== prior.quantity || evidence.beforeGross !== prior.gross || evidence.beforeDiscount !== prior.discount))
+        || new Prisma.Decimal(String(evidence.afterQuantity)).minus(String(evidence.beforeQuantity)).toFixed(3) !== event.quantity.toFixed(3)
+        || new Prisma.Decimal(String(evidence.afterGross)).minus(String(evidence.beforeGross)).toFixed(12) !== event.grossAmount.toFixed(12)
+        || new Prisma.Decimal(String(evidence.afterDiscount)).minus(String(evidence.beforeDiscount)).toFixed(12) !== event.discountAmount.toFixed(12)
+        || new Prisma.Decimal(event.grossAmount.toFixed(12)).minus(event.discountAmount.toFixed(12)).toFixed(12)
+          !== event.netAmount.toFixed(12)) return false;
       state.set(event.pricingRowId, { sequence: ledgerSequence, quantity: String(evidence.afterQuantity),
         gross: String(evidence.afterGross), discount: String(evidence.afterDiscount) });
     }
@@ -577,6 +600,12 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     if (!version.approvedAt || !version.approvedBy) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: version.id, detail: 'Approved-pricing approval actor/time is missing.' });
     if (version.rows.some(row => !persistedApprovedPricingRowIntegrityMatches(version, row))
       || recomputed !== version.integrityHash || reference.expectedPricingHash !== version.integrityHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: version.id, detail: 'Approved-pricing row/root binding or immutable hash changed.' });
+  }
+  const pricingCurrencies = new Set(revision.pricingReferences.map(reference => reference.pricingVersion.currency));
+  if (pricingCurrencies.size !== 1 || revision.pricedAllocationEvents.some(event =>
+    !revision.pricingReferences.some(reference => reference.pricingVersionId === event.pricingVersionId))) {
+    issues.push({ code: 'MONEY_CONSERVATION_MISMATCH', subjectId: revision.id,
+      detail: 'Approved pricing versions, priced events, and adjustments must bind one exact currency.' });
   }
   const lineById = new Map(revision.lines.map(line => [line.id, line]));
   for (const event of revision.pricedAllocationEvents) {
@@ -908,7 +937,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     if (expected.aggregateType === 'MANUAL_OUTAGE_EXIT') {
       const registered = rows.find(row => row.eventType === 'MANUAL_OUTAGE_EXIT_REGISTERED');
       if (!waybill.manualOutageExit || !validatesManualOutageExitEvidence({ waybill, revision,
-        exit: waybill.manualOutageExit, audit: registered })) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: expected.aggregateId,
+        exit: waybill.manualOutageExit, audit: registered, approvalAudits: rows })) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: expected.aggregateId,
         detail: 'Manual outage exit lacks exact immutable snapshot/hash, dual approvals, actor/time, Guard authority, or before/after audit binding.' });
     }
   }

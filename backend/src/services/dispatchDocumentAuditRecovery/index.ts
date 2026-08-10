@@ -412,6 +412,9 @@ export const restoreDispatchDocumentArtifact = async (input: {
       || persisted.artifactId !== input.metadata.id
       || persisted.storageKey !== input.metadata.storageKey
       || persisted.idempotencyKey !== input.idempotencyKey
+      || persisted.actorId !== input.actorId
+      || persisted.reason !== input.reason
+      || dispatchRecoveryIntegrityHash(persisted.authority) !== dispatchRecoveryIntegrityHash(input.authority)
       || detail.restorationIntentHash !== restorationIntentHash
       || result?.status !== 'RESTORED'
       || result.artifactId !== input.metadata.id

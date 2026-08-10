@@ -2,6 +2,10 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**Personnel List Context**:
+The restorable logical state of the Human Resources Personnel collection: active or archived view, committed search and filters, server page, expanded Personnel, and return scroll position. Shareable state lives in the URL and replaces the current history entry as it changes; scroll remains session-scoped. In-app return uses the recorded logical origin rather than replaying intermediate list-state changes, while refresh and direct links reconstruct the URL-owned portion.
+_Avoid_: keeping committed list state only in component memory, adding each filter or page change as a browser-history destination, treating scroll as shareable URL state, or returning every user to the Human Resources root regardless of origin
+
 **Sabalan Design System**:
 The platform-wide visual, interaction, accessibility, and user-experience language for Sabalan ERP. The Guard workspace and the contract Product Selection flow are reference implementations that inform the shared system without contributing Guard- or contract-specific domain assumptions to generic components.
 _Avoid_: calling the platform system the Guard design system, copying reference-page styling without reusable behavior, or leaking workspace terminology and permissions into shared primitives
@@ -11,12 +15,108 @@ The role-authorized operational overview that prioritizes current business state
 _Avoid_: treating the main dashboard as a flat application menu, giving every destination equal visual weight, or hiding operational truth behind decorative presentation
 
 **Position Capacity Coverage**:
-The share of current organizational position capacity that is already committed, calculated as committed capacity divided by committed capacity plus vacancies; when no capacity exists, coverage is zero.
-_Avoid_: presenting a fictional workflow-completion percentage, using active headcount alone as the numerator, or treating an undefined zero-capacity ratio as complete
+The share of total capacity across active Positions that is allocated either to current capacity-consuming assignments or to planned hires with a Position Start Reservation. Acting assignments do not consume capacity, and when active Positions provide no capacity the coverage has no percentage rather than zero or complete coverage.
+_Avoid_: presenting a fictional workflow-completion percentage, counting only active headcount or only planned hires, counting Acting assignments, or presenting an undefined zero-capacity ratio as zero or complete
+
+**Position Capacity Coverage Summary**:
+The compact interactive presentation of Position Capacity Coverage with a 96px ring on two-column desktop or laptop layouts and an 80px ring in its non-sticky single-column mobile summary, accompanied by separate In Use, Start Reservation, and Vacancy counts. It remains sticky below the page header only within the Position section on two-column layouts, never fixed or overlapping, and shows `—` with an explicit no-active-capacity explanation when the ratio is undefined.
+_Avoid_: a large decorative chart, sticky behavior at mobile or 200% zoom, hiding the capacity breakdown, covering list content, or showing a misleading zero-percent ring
+
+**Human Resources Metric Drilldown**:
+The filtered record collection represented by an operational Human Resources count or percentage, opened from every corresponding metric card, verification item, or progress ring even when its value is zero. The destination owns its filter in the URL so browser return restores the prior dashboard or list context, while the empty filtered result remains explicit rather than disabling navigation.
+_Avoid_: decorative non-navigable operational counts, linking a metric to an unfiltered list, disabling zero-value drilldown, or losing filter and return context
+
+**Position Capacity In Use**:
+Capacity consumed by a currently effective Primary or Secondary Employment Assignment whose Employment Relationship is Active or Suspended. Suspension retains the person's place until the assignment or relationship ends.
+_Avoid_: treating suspension as a vacancy, counting Acting assignments, or counting ended assignments
+
+**Position Start Reservation**:
+Capacity reserved by a Planned Employment Relationship's Primary or Secondary Employment Assignment for a confirmed future start. A Recruitment Request or open hiring Application alone does not reserve capacity; reservation begins only when Hire Conversion creates the planned relationship and assignment.
+_Avoid_: calling every recruitment intention committed capacity, reserving capacity for an unconverted Applicant, or counting Acting assignments
+
+**Position Vacancy**:
+The remaining capacity of an active Position after subtracting Position Capacity In Use and Position Start Reservations for the relevant effective period.
+_Avoid_: subtracting only active headcount, treating an inactive Position as currently vacant, or ignoring confirmed future starts
+
+**Position Capacity Change**:
+An audited, non-retroactive change to a Position's positive-integer capacity with an effective date of today or later; increases record their before/after values, while decreases additionally require a reason and impact preview and cannot fall below capacity-consuming assignments from their effective date forward or invalidate an active Recruitment Request's approved remaining hires. Zero capacity is represented by deactivating the Position, and no assignment, planned hire, or Recruitment Request is created, cancelled, or moved automatically.
+_Avoid_: reducing capacity from a point-in-time count alone, using zero as an active capacity, silently invalidating future staffing, automatically creating recruitment demand after an increase, or rewriting historical capacity
+
+**Position Assignment History Detail**:
+The permission-scoped focused view opened by every active or inactive Position card, combining current capacity breakdown, current and planned Primary or Secondary assignees, separately identified non-capacity-consuming Acting assignees, ended assignment periods, and effective-dated capacity and structural changes. It shows only necessary organizational identity and effective dates, preserves the originating list's filter and scroll context, and keeps embedded card actions independent from opening the detail.
+_Avoid_: showing only the current occupant, mixing Acting into consumed capacity, exposing confidential Personnel evidence, navigating away without return context, or letting an embedded action trigger the detail accidentally
+
+**Applicant Case Overview**:
+The always-visible, permission-scoped summary of an Applicant's hiring case, combining the application context, current lifecycle state, next accountable action, and a concise decision-relevant profile without reproducing the full Candidate Profile or Application Form.
+_Avoid_: calling it the first hiring-case level, exposing protected evidence in the summary, or treating the summary as the complete Applicant record
+
+**Full Applicant Information**:
+The permission-scoped Applicant case view that groups the complete Candidate Profile, experience and qualifications, submitted Application Form answers, and document/evidence index while preserving each source revision and its access boundary.
+_Avoid_: presenting the complete record in an overlay, flattening protected evidence into the Applicant Case Overview, or granting every section merely because a user can open the case
+
+**Closure Summary**:
+The permission-scoped explanation opened from a completed Applicant case label, identifying the closure outcome, prior lifecycle phase, accountable closure event, and any authorized reason or reopening state without embedding protected evidence.
+_Avoid_: exposing the free-text closure reason to every case reader, attaching protected files to the summary, or making a closed label look non-interactive when authorized detail exists
+
+**Closed Applicant Portal State**:
+The read-only, Candidate-safe `/apply` state shown to an already authenticated Applicant after their Application closes, confirming only a safe terminal outcome and contact guidance while disabling every mutation and withholding internal reasons, evidence, and case history.
+_Avoid_: presenting closure as an authentication failure during an existing session, allowing a closed Application to change, or reusing an expired invitation without formal reopening
+
+**Hiring Rial Amount**:
+A non-negative whole-Rial monetary value used for requested salary, compensation, and collateral, entered with localized digits and grouping but persisted as a canonical separator-free integer while keeping an empty value distinct from zero.
+_Avoid_: implicit Toman conversion, storing formatted separators, accepting fractional Rials, or treating narrative benefits as part of the numeric amount
 
 **HR Work Item**:
-A concrete Human Resources duty assigned to one responsible system user, with a due date, lifecycle status, destination, and preserved completion history. It may be created manually or derived automatically from actionable hiring and HR conditions. A recruitment action produces one linked personal copy for every active user whose queue shows “Action required by you”; resolving the source action closes every linked copy. If nobody is eligible, one unassigned copy remains visible for manager triage. Losing eligibility waives that user's still-open copy rather than counting it as completed.
-_Avoid_: selecting one arbitrary authority holder, allowing linked automatic copies to be reassigned manually, or leaving linked copies open after their shared source action is resolved
+A concrete Human Resources duty assigned to one named, responsible system user, with a due date, lifecycle status, destination, and preserved completion history. It may be created manually or derived automatically from actionable hiring and HR conditions. A role-owned workflow action resolves its assignee from the current effective-dated Approver Assignment or other named organizational responsibility rather than broadcasting copies to every eligible user. If nobody currently occupies that responsibility, one unassigned copy remains visible in the destination workspace's manager triage queue and the source workflow remains blocked. Losing eligibility waives that user's still-open copy and reroutes the unresolved source action without counting the waived copy as completed. When the responsible person belongs to another workspace, the duty is projected into that person's own operational workspace and the Unified Notification Center without granting Human Resources workspace access. Its task-scoped view reveals only the case information and actions required for that duty; completion returns the structured result to the originating Human Resources case and advances that workflow when its governing conditions are satisfied.
+_Avoid_: broadcasting the same accountable decision to every authority holder, selecting an arbitrary authority holder, leaving an unowned action invisible, counting reassignment as completion, leaving linked copies open after their shared source action is resolved, making a cross-workspace participant enter Human Resources, granting Human Resources workspace access merely because a duty was assigned, exposing unrelated case evidence through the task view, or requiring Human Resources to copy the result back manually
+
+**Human Resources Authorization Layers**:
+The independent controls for Human Resources work: workspace permission admits a User to the workspace, feature permission exposes a named capability, business authority permits a governed action, organizational responsibility selects its one effective-dated accountable person, and an assigned cross-workspace duty exposes only that duty's minimum information and actions. Possessing any one layer never implies another except through the explicit Human Resources Broad-Manager Override, and task-scoped duty access never grants Human Resources workspace access.
+_Avoid_: treating ordinary workspace or feature access as business authority, treating authority as assignment to every eligible User, applying the broad-manager exception without full Human Resources workspace access, or expanding a duty into general case or workspace access
+
+**Human Resources Full-Access Baseline**:
+The explicit grant of every Human Resources workspace permission, feature permission, and business authority to each active User whose internal system role is ADMIN (shown as `مدیر`). An active ADMIN or MANAGER who independently has full Human Resources workspace access qualifies for the Human Resources Broad-Manager Override without becoming the named organizational responsibility holder.
+_Avoid_: treating every MANAGER (`مدیر فروش`) as full-access without the complete Human Resources workspace grant, automatically assigning every responsibility to a full-access User, or extending the override to a manager from another workspace
+
+**Human Resources Broad-Manager Override**:
+The exceptional ability of an active internal ADMIN or MANAGER with full Human Resources workspace access to perform any governed action owned by a named Human Resources responsibility even while another valid owner exists. The override permits the same User to prepare and approve the same work, retains the named assignment unchanged, and automatically audits the real actor, internal role, normal responsibility holder, override use, self-approval state, and time without requiring a manually entered override reason.
+_Avoid_: requiring reassignment, an unowned action, or a manual override explanation before acting; blocking self-approval; granting the override from system role alone without full Human Resources workspace access; silently attributing the action to the named owner; or exposing Human Resources information to managers of unrelated workspaces
+
+**Human Resources Feature Catalog**:
+The stable Human Resources capability groups for Dashboard, Organizational Structure, Personnel, Recruitment Cases, HR Work Management, Authority and Responsibility Administration, Data Migration and Reconciliation, and User Administration, each granted at view, edit, or administration level. These permissions govern navigation and ordinary maintenance only; governed decisions still require their business authority, and User Administration retains its separate system-role boundary.
+_Avoid_: one unrestricted Human Resources permission, a permission for every button, treating feature administration as approval authority, or weakening User Administration rules because its interface appears inside Human Resources
+
+**Human Resources Business Authority Catalog**:
+The eligibility grants for HR Processor, HR Manager, Company Manager, HR Payroll Processor, HR Payroll Manager, Finance Recorder, and Finance Manager, each permitting its governed family of hiring, employment, payroll, or financial actions without selecting the responsible actor for a case. Responsible Supervisor remains an organizational relationship, while User administration, permanent erasure, and other system powers retain their separate system-role rules.
+_Avoid_: treating an ordinary authority grant as case assignment, adding Supervisor as a global authority, granting system-administration powers through an HR authority, or allowing one actor to satisfy separated preparation and approval duties outside the Human Resources Broad-Manager Override
+
+**Company Compensation Proposal**:
+The initial itemized whole-Rial offer created by the single effective Company Manager responsibility owner in Human Resources, then independently prepared by HR Payroll Processor, approved by HR Payroll Manager, approved financially by Finance Manager, and finally accepted or rejected by the Applicant.
+_Avoid_: a position-bound Hiring Manager role, allowing HR Processor or HR Manager to originate the business offer, broadcasting proposal authority to every Company Manager, or collapsing preparation and approval into one actor
+
+**Named Responsibility Resolution**:
+The default fail-closed selection of exactly one active, eligible User from the effective-dated assignment for a source action's responsibility type and organizational scope, with an explicit acting or substitute assignment taking precedence when configured. Missing, ambiguous, ineligible, or separation-of-duty-conflicted ownership blocks ordinary actors, while a Human Resources Broad-Manager Override may perform the action without changing ownership; a pre-completion ownership change waives the old duty with history and links a successor to the newly valid assignee.
+_Avoid_: selecting an arbitrary ordinary authority holder, broadcasting duties, silently rerouting because of leave without an acting assignment, losing predecessor history, changing the named owner as a side effect of override, or treating override eligibility as a new assignment
+
+**Cross-Workspace Duty Envelope**:
+The code-registered, versioned, minimum-necessary contract that carries common duty metadata, a safe source reference and summary, explicitly permitted fields or evidence, allowed action codes, and a structured response between an HR source action and its assigned destination-workspace task view. Its assignment-time snapshot remains auditable while every action revalidates current source state; an incompatible source change cancels the old duty and creates a linked replacement without granting case search or Human Resources workspace access.
+_Avoid_: arbitrary payloads, a generic HR case link, unrestricted evidence access, client-defined actions, trusting a stale snapshot for completion, or mutating an assigned envelope without version history
+
+**Cross-Workspace Duty Lifecycle**:
+The append-only progression of an HR-originated duty through Open, Completed, Waived, or Cancelled, with assignment and derived overdue state kept separate and every approval, rejection, return, or clarification represented as a structured business result rather than a task failure. Completion atomically records the validated result, audit event, and source transition; renewed work creates a linked successor that normally inherits the original deadline instead of rewriting the prior response.
+_Avoid_: storing overdue as an independent lifecycle, treating a valid rejection as a technical failure, reopening or editing completed evidence, resetting a deadline silently during reassignment, or advancing the source when task completion was not committed
+
+**Cross-Workspace Duty Notification Policy**:
+The mandatory, privacy-safe Unified Notification Center record for assignment, near-due reminder, overdue state, unassigned triage, reassignment, and structured result, with one escalation to the destination manager after twenty-four overdue hours and optional safe Web Push delivery. Event identity combines duty, event kind, and envelope or response-attempt version so delivery retries never duplicate the durable notification.
+_Avoid_: sensitive lock-screen content, treating Web Push as the source of truth, allowing accountability notifications to be muted, daily default escalation spam, notifying every authority holder, or duplicating one lifecycle event during delivery retries
+
+**Destination Workspace Duty Surface**:
+The Persian-first, task-scoped list and detail experience that projects an HR-originated duty only into its assigned operational workspace, with a personal open/due summary, an authorized manager triage view, and preserved history separate from notifications and support work. A direct link always reauthorizes the current assignee, envelope version, and duty state, while managers see only bounded destination-scope triage information rather than the originating HR case.
+_Avoid_: duplicating one duty across every workspace, redirecting a cross-workspace actor into Human Resources, combining task and notification lifecycles, exposing all HR case data to a destination manager, or relying on a stale deep link for authorization
+
+**Organizational Responsibility Destination**:
+The explicit operational workspace carried by or deterministically configured for a named responsibility assignment, inherited by an acting assignment unless replaced explicitly and used as the sole destination for its task-scoped duties. HR responsibilities and the Company Compensation Proposal target Human Resources, Finance responsibilities target Accounting, and position-bound Responsible Supervisor duties use their recorded organizational assignment; a missing or unauthorized destination blocks routing rather than being inferred from names or broad roles.
+_Avoid_: guessing a workspace from a username or job title, granting ordinary destination-workspace access through a duty, or duplicating a duty into multiple workspaces
 
 **Personal HR Work Progress**:
 The signed-in user's completion rate for assigned HR Work Items, calculated as items completed during the current Persian month divided by those completed during that month plus every currently open assigned item, including older overdue work. Waived or cancelled items do not count as completed, and an empty workload has no percentage.
@@ -1057,6 +1157,38 @@ _Avoid_: treating draft creation as financial approval, counting voided records,
 The Sepidar/system invoice date entered by accounting during financial approval. It may be today, up to ten days in the past, or up to thirty days in the future.
 _Avoid_: treating future system invoice dates as invalid when they are within the accounting forward-entry window
 
+**تاریخچه رویدادمحور روند مالی قراردادها**:
+The historical financial-trend view in which a late entry is attributed to its authoritative business date, while a later void or correction changes the financial position only from that event's effective date onward. Past Persian-month results are recalculated from the event history rather than frozen when first displayed or rewritten from current record state alone.
+_Avoid_: assigning late entries to their data-entry month, erasing previously valid history after a later void, or treating the first displayed monthly total as an immutable snapshot
+
+**ماه مالی شمسی روند قراردادها**:
+A Tehran civil-time interval beginning at 00:00 on the first day of a Persian month and ending immediately before 00:00 on the first day of the next Persian month; the current interval ends at the present moment.
+_Avoid_: using the server's implicit timezone, Gregorian-month boundaries, an inclusive next-month midnight, or a future end for the current month
+
+**مبلغ خالص فاکتورشدۀ ماه**:
+The net invoice movement in a Persian financial month: a financially approved issued or posted invoice adds its amount on its System Invoice Date, a later void subtracts that amount on the void's effective date, and an approved replacement adds its own amount on its own System Invoice Date. Drafts and unapproved replacements have no financial effect.
+_Avoid_: counting draft candidates, grouping approval by data-entry time, silently removing a voided invoice from its original month, or treating a replacement as effective before its own approval and invoice date
+
+**مبلغ خالص دریافتی ماه**:
+The net realized collection movement in a Persian financial month. Cash, card, bank transfer, and receipt payments add their amount on their authoritative occurrence date; a check adds its amount only when cleared, and a later reversal, bounce, return, or correction subtracts the previously realized amount on that event's effective date. A replacement check has its own independent collection lifecycle.
+_Avoid_: counting check possession or deposit as realized collection, retaining a cleared amount after its later reversal, assigning a correction to the original collection month, or carrying realization automatically from an old check to its replacement
+
+**مانده مطالبات پایان ماه قراردادها**:
+The non-negative month-end stock calculated per contract as valid net invoiced amount minus realized net collections as of the Persian financial-month cutoff, then summed across contracts. An uninvoiced contract creates no outstanding receivable, an unallocated contract receipt still reduces that contract's balance, and excess advance collection does not become a negative receivable.
+_Avoid_: summing current mutable balances into past months, treating the full contract price as receivable before valid invoicing, ignoring an unallocated contract receipt, or presenting customer credit as negative outstanding receivables
+
+**تاریخ مؤثر رویداد مالی**:
+The immutable business date on which an invoice, collection, void, reversal, or correction changes financial-trend history; when no separate real-world date is supplied, the system-recorded event time is authoritative. Legacy fallback uses the record's dedicated event time, then its audit-event time, then creation time, and the resulting lower-confidence attribution remains visible to consumers.
+_Avoid_: overwriting an earlier event's date during a later status change, silently presenting a fallback date as exact, or assigning every correction to the date of its original transaction
+
+**مهلت حسابداری قرارداد**:
+An open receivable with a due date or an unsettled check with a check due date, classified by Tehran calendar date as overdue before today, due from today through seven days ahead, due from eight through thirty days ahead, or due after thirty days. Open receivables include open, partially paid, and overdue items; unsettled checks include pending handover, received, deposited, and bounced checks, while settled, voided, cleared, returned, and replaced items do not create a deadline.
+_Avoid_: using record-creation time as the deadline, treating due today as overdue, including terminal records, or calculating rolling device-local 24-hour buckets
+
+**Accounting Metric Drilldown**:
+The permission-scoped record collection represented by an Accounting dashboard count, deadline bucket, or financial-trend point. Opening it preserves the metric's exact business scope in a shareable destination, including when the result is empty, without broadening Accounting or Human Resources access.
+_Avoid_: linking an operational metric to an unfiltered register, disabling zero-value drilldown, exposing records outside the viewer's authority, or letting a saved destination silently change the represented population
+
 **حذف پیش‌نویس رکورد مالی**:
 An accounting financial record may be physically deleted only while it is still a draft and has not been financially approved, while keeping an audit trail of the deletion. Issued, posted, financially approved, or otherwise submitted records are not deleted; they are voided or corrected through accounting workflows.
 _Avoid_: deleting financially approved accounting records, or keeping undeletable draft clutter when a new draft should be regenerated
@@ -1786,6 +1918,46 @@ _Avoid_: merging promised delivery schedule data with actual loading transaction
 The declared cutover reference used to introduce existing Personnel into the new HR model without manufacturing unknown history. Existing active Personnel receive a migrated active Employment Relationship with source identifiers and migration provenance, but creation timestamps are never treated as hire dates and unknown dates remain explicitly unknown for HR verification. Existing User-to-Personnel links are preserved, while unlinked Users remain access identities until deliberately classified. Departments become typed Organizational Units only after hierarchy review, existing schedules retain their known effective dates as legacy records, and only genuine leave Exception Requests become Leave Requests; other exceptions retain their attendance or Security meaning. Migration provides a repeat-safe dry run, reconciliation totals, and duplicate or conflict reporting, and never destructively deletes source records.
 _Avoid_: invented employment or schedule history, automatically turning every User into Personnel, coercing every exception into leave, losing source provenance, destructive one-shot migration without reconciliation
 
+**HR Migration Reconciliation State**:
+The combination of one primary state describing a record's known lifecycle or migration outcome and zero or more independent attention flags for unresolved mapping, identity, ambiguity, or preserved historical uncertainty. A record may carry several attention flags at once without replacing its truthful primary state.
+_Avoid_: one mutually exclusive badge that hides overlapping conditions, using `Unknown` for a known state whose display label is missing, or treating preserved historical uncertainty as a generic migration failure
+
+**HR Migration Identity Reconciliation**:
+The evidence-based classification of a legacy person's identity using a confirmed Personnel link, a valid Iranian National Code when available, and human review of possible matches. Sabalan has no Personnel Number identity concept, so an absent `employeeNumber` never creates an identity warning, blocks migration, or participates in matching.
+_Avoid_: calling a person unknown merely because National Code is absent, using Personnel Number as identity evidence, merging records from name similarity, or auto-linking an ambiguous User and Personnel pair
+
+**HR User–Personnel Link Reconciliation**:
+The explicit classification of each legacy User without a Personnel link as either requiring a reviewed link to a confirmed or controlled-created Personnel identity, or intentionally remaining an access-only User. Until classified, the User carries an attention flag; an approved access-only classification clears it without manufacturing workforce identity.
+_Avoid_: automatically creating Personnel for every User, linking by name similarity, treating every unlinked User as invalid, or leaving an unclassified link gap without an owner and action
+
+**HR Organizational Mapping Reconciliation**:
+The reviewed mapping of each legacy Department to an existing or approved new Organizational Unit, followed by a valid Primary Employment Assignment for each operational Employment Relationship. Missing mapping does not prevent safe Personnel or Employment Relationship migration, but it carries an attention flag and prevents full reconciliation and final cutover until resolved; a genuinely historical Department may be explicitly classified as having no operational target.
+_Avoid_: guessing a unit from its name, blocking safe identity migration, presenting an unassigned relationship as fully reconciled, or allowing final cutover with unresolved operational placement
+
+**HR Possible-Duplicate Reconciliation**:
+The durable human review of legacy Personnel records with similar identity evidence, resulting in distinct people, one shared identity requiring controlled consolidation, or unresolved ambiguity. Only the affected automatic link or creation is blocked; the wider migration may continue, and no records are merged automatically.
+_Avoid_: treating a similar name as proof, blocking the entire migration for a local ambiguity, repeatedly warning after a distinct-people decision without changed evidence, or silently merging operational history
+
+**HR Legacy-Only Record**:
+A reviewed legacy Department, schedule, exception, or other source record retained as historical evidence with no current operational target or dependency. It is a neutral, filterable primary state with explanation and drilldown but no warning, remediation action, or cutover blocker; a record that still affects current operations must instead carry the relevant mapping attention flag.
+_Avoid_: treating all legacy data as defective, hiding retained history, forcing a target record without operational meaning, or using legacy-only classification to bypass a current dependency
+
+**Accepted Unknown HR History**:
+A field-specific historical fact that Human Resources has reviewed and confirmed cannot be recovered from trustworthy evidence. An unavailable original employment start date uses the canonical Persian classification `تاریخ شروع همکاری قابل بازیابی نیست`; it is neutral and does not block cutover, while a fact still expected to be recoverable remains an actionable completion flag instead.
+_Avoid_: using a generic `Unknown` badge, substituting the migration baseline as the real historical date, keeping an accepted unavailable fact as a permanent warning, or accepting uncertainty before review
+
+**HR Employment-State Consistency**:
+The agreement between a Personnel record's active or inactive lifecycle state and its current or ended Employment Relationships. Active and inactive are truthful neutral states; an inconsistency flag appears only when the combination is contradictory, and correction proceeds through governed employment history or Offboarding rather than migration rewriting either state.
+_Avoid_: flagging every inactive Personnel record, silently ending a relationship during migration, treating suspension as inactivity, or hiding an inactive Personnel record that still has a current relationship
+
+**Unsupported HR Migration State**:
+An unexpected non-empty state code returned outside the registered Human Resources migration taxonomy. The interface presents it as a classification error and records technical evidence for investigation; an empty value renders as `—`, and neither condition is translated into a generic business `Unknown` state.
+_Avoid_: silently converting a missing label into business uncertainty, persisting an unsupported code as accepted history, showing `Unknown` for an empty optional field, or hiding the technical contract failure
+
+**HR Migration Cutover Blocker**:
+An unresolved User–Personnel classification, identity ambiguity, current organizational mapping or Primary Assignment gap, employment-state inconsistency, pending HR review of a recoverable start date, or unsupported migration state that prevents final HR migration cutover. An approved access-only User, HR Legacy-Only Record, Accepted Unknown HR History, consistent inactive Personnel history, or absent National Code by itself is not a blocker.
+_Avoid_: blocking safe preliminary migration, allowing unresolved current workforce truth through final cutover, treating accepted historical uncertainty as a permanent defect, or making optional identity evidence mandatory
+
 **Leave Request**:
 An employee's request for approved time away from expected work, owned by Human Resources regardless of which workspace later consumes its result.
 _Avoid_: Security exception, attendance correction, shift exception
@@ -2019,8 +2191,8 @@ The reason a Job Application is Closed: Hired, Rejected, Withdrawn, or Recruitme
 _Avoid_: a generic closed state without reason, treating Hired as completed Employment activation, treating withdrawal as rejection, reopening Hired, moving a reopened Application to another Position, erasing closure history, or restoring expired access credentials
 
 **Company Manager Hiring Authority**:
-The explicitly assigned company-wide business authority that finalizes pre-identity requirements, reviews management-safe recruitment evidence, decides whether a Candidate continues after checklist and formal assessment work, proposes Candidate-visible collateral requirements, authorizes reopening of a non-Hired closed Application, and manages operational hiring authorities. Multiple users may hold the authority, but each decision retains the exact actor; a Company Manager cannot grant or revoke Company Manager authority, revoke their own authority, or remove the final Company Manager, while Super Admin alone manages Company Manager assignments without thereby gaining its business decisions.
-_Avoid_: equating company management with a line Hiring Manager, allowing Company Managers to control their own authority, removing the final Company Manager, treating Super Admin as a Company Manager decision-maker, hardcoding one user, hiding the decision actor, or letting company management view protected Finance instrument data or unrestricted medical evidence
+The explicitly assigned company-wide business authority that finalizes a Formal Assessment Plan, reviews management-safe recruitment evidence, finalizes the Company Evaluation Plan, independently records a reasoned final rejection or continuation decision, proposes Candidate-visible collateral requirements, authorizes reopening of a non-Hired closed Application, and manages operational hiring authorities. Multiple users may hold the authority, but each decision retains the exact actor; a Company Manager cannot grant or revoke Company Manager authority, revoke their own authority, or remove the final Company Manager, while Super Admin alone manages Company Manager assignments without thereby gaining its business decisions.
+_Avoid_: equating company management with a line manager, allowing Company Managers to control their own authority, removing the final Company Manager, treating Super Admin as a Company Manager decision-maker, hardcoding one user, hiding the decision actor, or letting company management view protected Finance instrument data or unrestricted medical evidence
 
 **Hiring Authority Revocation**:
 The immediate, reasoned deactivation of a named person's Hiring Authority without deleting its assignment or rewriting decisions they previously made. The authority history retains grantor, revoker, timestamps, reason, and audit evidence; subsequent protected actions fail authorization immediately while prior decisions keep their original actor.
@@ -2034,9 +2206,13 @@ _Avoid_: treating a pause as deleted history, losing the preserved phase, automa
 The Job- or Position-specific definition of required and optional screening, interview, test, reference, certificate, and approval activities inside the fixed Application Stages. A Job Application snapshots the applicable template version when entering the pipeline so later template changes do not rewrite its required work or history.
 _Avoid_: one universal assessment sequence for every Job, adding custom pipeline stages per Position, recalculating an active Application from a later template version
 
-**Pre-Identity Management Checklist**:
-The internal, Candidate-hidden guided lifecycle phase after Application Form submission and before Identity verification. A Company Manager snapshots or adds required trial attendance, interviews, referrals, reports, or case-specific assessments and explicitly finalizes the requirement set; Human Resources coordinates the work outside `/apply`, records versioned positive or negative results and evidence, and releases the gate only after Company Manager continuation approval. DISC, BIG FIVE, and EQ remain exclusively in the later formal Assessment phase.
-_Avoid_: exposing the checklist in `/apply`, letting external reviewers write the canonical result, treating a negative item as automatic rejection, silently deleting or editing a requirement, placing DISC/BIG FIVE/EQ in the checklist, or allowing presentation logic to bypass an unresolved item
+**Formal Assessment Plan**:
+The versioned, Application-specific snapshot in which a Company Manager independently selects or does not select DISC, BIG FIVE, and EQ and chooses Candidate completion through `/apply` or company administration for each selected assessment. A later change creates a reasoned new plan version and preserves every earlier selection and result; there is no separate waived state.
+_Avoid_: treating absence as a decision not to assess, selecting all assessments as one inseparable bundle, silently inheriting later template changes, erasing an earlier selection, or marking an incomplete selected assessment as waived
+
+**Company Evaluation Plan**:
+The internal, Candidate-hidden guided lifecycle phase after Formal Assessments and before Identity verification. A Company Manager snapshots or adds required trial attendance, interviews, referrals, reports, or case-specific activities; Human Resources coordinates the work outside `/apply`, records versioned positive or negative results and evidence, and releases the gate only after the Company Manager's decision.
+_Avoid_: exposing the plan in `/apply`, letting external reviewers write the canonical result, treating a negative item as automatic rejection, silently deleting or editing an activity, duplicating DISC/BIG FIVE/EQ inside the plan, or allowing presentation logic to bypass unresolved work
 
 **Candidate Profile**:
 The reusable Candidate-owned recruitment information shared across Applications, including identity and contact details, resume, education, skills, languages, and employment history.
@@ -2067,8 +2243,8 @@ Private, versioned recruitment evidence recorded only by an HR Processor after i
 _Avoid_: Candidate-uploaded identity evidence in the first version, requiring an upload for original-seen evidence, accepting copy-received evidence without its file, missing inspection-source metadata, public file URLs, replacing a rejected version, or exposing internal reviewer notes
 
 **Candidate Identity Verification**:
-The field-level Human Resources comparison of an Application Form Submission with received identity evidence: an HR Processor records documents and marks each check as matching, mismatched, or unverifiable with its note, while only the designated HR Manager grants final identity clearance. A mismatch or unverifiable required fact blocks clearance until Human Resources returns the identified Candidate fields for resubmission or requests replacement evidence; generic HR workspace or Admin access does not confer approval authority, and Human Resources never silently edits the Candidate's submission.
-_Avoid_: one unexplained overall checkbox, self-approval by the processor, generic permission as business authority, approving unresolved discrepancies, changing Candidate answers on their behalf, replacing evidence without version history
+The field-level Human Resources comparison of an Application Form Submission with received identity evidence: an HR Processor records documents and marks each check as matching, mismatched, or unverifiable with its note, while only the current named HR Manager responsibility holder grants final identity clearance. A mismatch or unverifiable required fact blocks clearance until Human Resources returns the identified Candidate fields for resubmission or requests replacement evidence; workspace or feature access alone never confers approval authority, and even a full-access User must hold the effective assignment and satisfy separation of duties.
+_Avoid_: one unexplained overall checkbox, self-approval by the processor, generic permission or unassigned authority as approval responsibility, approving unresolved discrepancies, changing Candidate answers on their behalf, replacing evidence without version history
 
 **Candidate Correction Request**:
 A single candidate-facing request issued after Human Resources finishes reviewing an Application Form Submission and identifies one or more fields that the Candidate must correct. The request preserves every prior draft and submitted revision, reopens only the identified fields, and sends one SMS directing the Candidate to the fixed `/apply` page. A still-valid Application-specific OTP remains usable without being repeated in the correction SMS; if access has expired or been revoked, Human Resources issues a replacement OTP for the same Job Application without deleting or resetting any Candidate information, form revision, correction history, or recruitment evidence.
@@ -2110,6 +2286,10 @@ _Avoid_: an implicit declaration, treating OTP access alone as acceptance, repla
 Restricted recruitment evidence created by authorized Sabalan reviewers, including interview notes, psychological or aptitude test results, management assessment, and hiring recommendations.
 _Avoid_: candidate-editable assessment, exposing confidential notes in candidate-facing views, treating assessment evidence as reusable Candidate identity data
 
+**Initial HR Interview**:
+The HR Processor's versioned Internal Candidate Assessment before Company Manager requirements are finalized. Every interview snapshots the current single company-wide set of default HR criteria, may add case-specific criteria, records the Candidate's answers separately from the interviewer's analysis, and ends with the interviewer's explicit positive or negative decision and reason; the HR Manager reads the completed report before preliminary approval, and the Company Manager reads that report plus the preliminary decision before the later management decision. Criterion scores and contextual judgments—including the recorded address and whether the Candidate attended with a companion—inform but never automatically calculate the interviewer's decision; a completed interview is corrected only through a reasoned new version that preserves the earlier record.
+_Avoid_: exposing the interview in `/apply`, hiding the completed report from its HR Manager or Company Manager decision-maker, asking the Company Manager to decide before requested evaluation results are complete, calling the default criteria a reusable template, silently changing an active interview when defaults change, mixing the Candidate's self-description with interviewer analysis, calculating the outcome automatically from scores, or editing a completed version in place
+
 **Candidate Assessment Score**:
 A required score from zero through one hundred inclusive, with at most two decimal places, entered using Persian, Arabic, or Latin digits and normalized before validation. The Human Resources interface reports an invalid score beside its field and blocks submission, while the server independently rejects the same invalid value; neither layer silently clamps an out-of-range score.
 _Avoid_: accepting a score below zero or above one hundred, relying only on browser number controls, accepting excessive decimal precision, silently changing an invalid score to a boundary value, or rejecting otherwise valid Persian or Arabic digits
@@ -2135,8 +2315,8 @@ The readable light and dark presentation of every authenticated Human Resources 
 _Avoid_: fixing only the reported recruitment page, relying on broad CSS overrides that destroy semantic status colors, leaving hidden text in an untested state, or expanding the requested audit into Sales, Accounting, Inventory, Logistics, CRM, Security, or Administration
 
 **Candidate Assessment Completion**:
-The HR Processor's explicit, timestamped confirmation that at least one valid DISC, BIG FIVE, EQ, or other formal Internal Candidate Assessment is active and recording is complete enough for the Company Manager's decision. Completion alone does not advance the phase: the Company Manager approves continuation, requests a versioned repeat, applies `رد/ذخیره`, or records formal Rejected. Management approval completes Assessment and unlocks Offer without another HR action. Adding, correcting through a new version, or voiding evidence afterward reopens the decision gate; an accepted offer is not silently cancelled, but later progression remains blocked until management decides the changed evidence.
-_Avoid_: treating presence as implicit completion, completing an empty set, placing formal DISC/BIG FIVE/EQ work in the pre-identity checklist, letting HR make the company-management selection decision, creating an offer as a side effect of HR completion, editing or deleting evidence in place, or silently revoking an accepted offer
+The evidence-derived completion of the pre-identity Formal Assessments phase: every assessment selected by the active Formal Assessment Plan has one valid completed result, or the plan explicitly selects no assessments. Candidate-completed results are system-recorded from `/apply`; company-administered results are recorded by an HR Processor and corrected only through a new version. Completion never calculates a hiring outcome, while an HR Manager or Company Manager may independently request a repeat or record a reasoned final rejection.
+_Avoid_: treating absence as implicit non-selection, requiring at least one assessment, automatically accepting or rejecting from a score or personality pattern, editing a completed result in place, hiding who recorded a company-administered result, or requiring a separate viewing acknowledgment to complete the evidence gate
 
 **Justified Recruitment Field**:
 A field from the source questionnaire that Human Resources explicitly classifies as required, optional, or omitted for a defined recruitment purpose. Sensitive family, social, or personal details are not mandatory merely because they appeared on the paper form.
@@ -2167,8 +2347,8 @@ The Candidate's recorded acceptance of the latest fully approved offer, performe
 _Avoid_: accepting an internally incomplete or obsolete offer version, reusing hidden or stale declaration state, prefilling away deliberate acceptance, rejecting equivalent Persian `ی/ي` or `ک/ك` spelling and spacing, tolerating a genuinely different or reordered name, obscuring whether the Candidate acted directly or HR recorded offline consent, treating verbal or recorded acceptance as completed hiring, closing the Application before employment records exist, partially creating employment after acceptance
 
 **Declined Offer**:
-The Candidate's direct portal decision, or an HR Processor's documented offline record, that the latest fully approved offer is not accepted. It requires a structured Persian reason category and may include an explanatory note, blocks Hire Conversion, and notifies the responsible Hiring Manager and HR Processor without automatically closing the Job Application. The Hiring Manager may respond with a new offer version or explicitly close the Application with the appropriate outcome; every earlier offer and decline remains preserved and audited.
-_Avoid_: treating silence as decline, declining an obsolete or internally incomplete offer, converting after decline, automatically closing the Application without a Hiring Manager decision, overwriting the declined offer, losing the Candidate's reason, or omitting offline declines from the audit history
+The Candidate's direct portal decision, or an HR Processor's documented offline record, that the latest fully approved offer is not accepted. It requires a structured Persian reason category and may include an explanatory note, blocks Hire Conversion, and notifies the responsible Company Manager and HR Processor without automatically closing the Job Application. The Company Manager may respond with a new offer version or explicitly close the Application with the appropriate outcome; every earlier offer and decline remains preserved and audited.
+_Avoid_: treating silence as decline, declining an obsolete or internally incomplete offer, converting after decline, automatically closing the Application without a Company Manager decision, overwriting the declined offer, losing the Candidate's reason, or omitting offline declines from the audit history
 
 **Offline Candidate Offer Acceptance**:
 An HR Processor's final, audited record that the Candidate accepted the latest fully approved Offer Compensation Summary through a documented phone call, in-person meeting, or other approved offline channel when SMS delivery fails or the Candidate cannot use `/apply`. It records the communication method and time, the Candidate's confirmed full name, the reason for using the offline path, and an explanatory note; it remains visibly distinct from direct portal acceptance and cannot be silently edited or replaced.
@@ -2179,7 +2359,7 @@ The itemized ریال-denominated snapshot of proposed base salary and each recu
 _Avoid_: entering compensation only after signing, a manually typed total without components, renaming predefined compensation components, saving سایر without a title, different offer and contract values, editing the accepted snapshot for a later raise
 
 **Offer Compensation Approval**:
-The sequential authorization in which the Hiring Manager proposes the package, an HR/Payroll Processor classifies its components, the designated HR/Payroll Manager approves payroll and policy correctness, and the Finance Manager approves the financial commitment before Candidate presentation. Each pending step identifies its responsible business role rather than a preassigned individual; after completion, it identifies the actual participant and timestamp. The displayed chain applies only to the latest offer version. A participant cannot approve their own preparation, and Finance later compares the signed contract with this snapshot without editing it.
+The sequential authorization in which the single responsible Company Manager proposes the package, an HR/Payroll Processor classifies its components, the designated HR/Payroll Manager approves payroll and policy correctness, and the Finance Manager approves the financial commitment before Candidate presentation. Each pending step identifies its responsible business role; after completion, it identifies the actual participant and timestamp. The displayed chain applies only to the latest offer version. A participant cannot approve their own preparation, and Finance later compares the signed contract with this snapshot without editing it.
 _Avoid_: Candidate presentation before all approvals, implying a pending step belongs to a named person when it remains role-owned, hiding the actual completed approver or time, mixing approvals from different offer versions, self-approval, an unclassified lump sum, Finance changing HR/Payroll components during contract verification
 
 **Candidate Offer Notification**:
@@ -2214,6 +2394,10 @@ _Avoid_: deleting converted Personnel, leaving Position capacity committed, reta
 The Responsible Supervisor's request for ERP access when the Personnel's Position requires it, approved by the relevant workspace or data owners and fulfilled by an authorized User administrator by linking one User to the existing Personnel identity. Hire Conversion never creates the User automatically; the account remains disabled until its approved access-start time and receives only explicitly approved permissions.
 _Avoid_: deriving login access from Personnel or Position alone, creating a second Personnel identity, enabling access before its approved start, generic default workspace permissions
 
+**Personnel-First User Provisioning**:
+The guided administration flow for a person who needs both an employment record and ERP access: create or confirm the Personnel identity first, then optionally create or link one separate User account when login access is actually required. Personnel remains the workforce source of truth; User remains the authentication and access identity, and either may exist without manufacturing the other when the real-world situation requires it.
+_Avoid_: merging User and Personnel into one lifecycle, automatically creating login access for every worker, duplicating Personnel when linking an existing User, or storing employment truth only on the User account
+
 **Onboarding Case**:
 The new hire's effective onboarding file created by Hire Conversion from snapshots of the current company-wide checklist and the applicable Job or Position checklist. Later template changes do not rewrite an active or completed case.
 _Avoid_: one universal checklist for every Job, recalculating active onboarding from current templates, losing which requirements applied when hiring occurred
@@ -2227,7 +2411,7 @@ The actionable fields, files, and controls for a cross-functional hiring task, v
 _Avoid_: exposing every task panel as read-only, showing protected evidence to unrelated roles, hiding the existence of a dependency, granting task visibility through generic workspace access
 
 **Guided Hiring Lifecycle**:
-The evidence-derived progress and navigation model inside a Unified Hiring Case View, grouping the case into eight phases: Formation and Applicant Form, Pre-Identity Requirements and Decisions, Identity Review, Assessment, Offer and Acceptance, Collateral and Hire Conversion, Start Preparation, and Employment Activation. It reports phase position and completed mandatory items rather than a false global percentage, and guides work across ownership boundaries without allowing manual phase advancement or replacing the underlying domain controls.
+The evidence-derived progress and navigation model inside a Unified Hiring Case View, grouping the case into nine phases: Formation and Applicant Form, Initial Human Resources Review, Optional Formal Assessments, Company Evaluation Plan, Identity Review, Offer and Acceptance, Collateral and Hire Conversion, Start Preparation, and Employment Activation. It reports phase position and completed mandatory items rather than a false global percentage, and guides work across ownership boundaries without allowing manual phase advancement or replacing the underlying domain controls.
 _Avoid_: a manually advanced form wizard, treating every recruitment activity as an Application Stage, implying parallel work is strictly sequential, bypassing backend controls with next/previous navigation
 
 **Hiring Lifecycle Phase Status**:
@@ -2235,8 +2419,8 @@ The single visible condition of a Guided Hiring Lifecycle phase: Completed, Acti
 _Avoid_: presenting every delay as an error, hiding actionable work inside generic in-progress status, treating a rejected or withdrawn case as successful completion
 
 **Hiring Lifecycle Completion Gate**:
-The mandatory evidence that completes one Guided Hiring Lifecycle phase without inventing a new business approval. Optional assessments, non-blocking insurance work, and optional onboarding tasks remain visible but cannot block progress unless an explicit policy makes them mandatory.
-_Avoid_: equating every checklist item with a blocker, hiding a rejected mandatory requirement, changing hiring policy through presentation logic
+The mandatory evidence that completes one Guided Hiring Lifecycle phase without inventing a new business approval. Formal assessments are optional individually, but every assessment selected in the active Formal Assessment Plan blocks progress until it has a valid result. Non-blocking insurance work and optional onboarding tasks remain visible without becoming gates unless an explicit policy makes them mandatory.
+_Avoid_: equating every optional activity with a blocker, treating an incomplete selected assessment as skipped, hiding a rejected mandatory requirement, or changing hiring policy through presentation logic
 
 **Hiring Lifecycle Guidance Scope**:
 The sanitized phase status, responsible function, explanation, and permitted next work visible to an authorized hiring participant. It prioritizes one unblocked action the participant can perform, retains other available parallel actions as secondary work, and shares the lifecycle map while Recruitment Data Scope continues to protect underlying details.
@@ -2426,6 +2610,58 @@ _Avoid_: Organizational Unit, Cost Center
 The accounting classification to which workforce cost is attributed, independent of the Organizational Unit and Workplace hierarchies.
 _Avoid_: Department, Workplace, deriving accounting ownership only from organizational placement
 
+**Organizational Foundation Record Lifecycle**:
+The retained identity of an Organizational Unit, Job, Position, Workplace, or Cost Center across active and inactive use. Ordinary removal deactivates the record and later reactivation restores the same identity and code; permanent deletion is limited to a record with no current or historical reference, and every lifecycle action remains auditable.
+_Avoid_: deleting referenced foundation data, re-creating an inactive record under a new identity, cascading removal into history, or treating deactivation as erasure
+
+**Effective-Dated Foundation Status**:
+An Organizational Foundation Record's activation or deactivation taking effect today or on a scheduled future date, never retroactively through the ordinary lifecycle action. A scheduled deactivation prevents new dependencies from extending beyond its effective date, a scheduled activation remains unavailable until its date arrives, and changing or cancelling either schedule requires a reason and separate audit evidence.
+_Avoid_: backdating ordinary status changes, hiding a scheduled transition, accepting a dependency beyond retirement, or treating a future activation as currently usable
+
+**Organizational Foundation Identity Check**:
+Each Organizational Unit, Job, Position, Workplace, and Cost Center has a required immutable code unique within its record type, while normalized similar names or titles produce a reviewable warning rather than a uniqueness failure. Creating a similarly named record requires explicit confirmation after showing the matching records' codes, states, and organizational context.
+_Avoid_: allowing a duplicate code, globally forbidding legitimate shared titles, silently creating a near-duplicate, or treating Persian and Arabic character variants as different names
+
+**Organizational Foundation Creation**:
+The atomic creation of a complete, validated Organizational Unit, Job, Position, Workplace, or Cost Center as active today by default, active from a scheduled future date, or inactive, with its creator, server time, initial state, and effective date retained. Incomplete drafts are not persisted, and an inactive or not-yet-active record cannot be selected by operational work.
+_Avoid_: saving incomplete foundation drafts, silently defaulting an unknown state, allowing premature operational use, or creating a record when the user abandons the form
+
+**Organizational Foundation Correction**:
+An audited in-place repair to descriptive foundation data such as a spelling error in a name, title, description, or responsibility, preserving the record's identity while retaining before/after evidence. An immutable code can be corrected only by deleting and re-creating a completely unreferenced record.
+_Avoid_: disguising a real reorganization as a correction, changing an immutable code on a referenced record, or losing the prior value
+
+**Organizational Foundation Save Recovery**:
+The atomic, retry-safe save behavior that preserves unsaved foundation form input and the Last Successful View after failure, prevents duplicate creation, and rejects an update when another actor changed the record since the form loaded. A conflict presents the user's starting version beside the current version for review and requires reapplying the intended change rather than allowing a blind overwrite.
+_Avoid_: partial persistence, clearing input after failure, duplicate records after retry, last-write-wins overwrites, or replacing a usable list with a full-page error
+
+**Effective-Dated Organizational Change**:
+A reasoned change to organizational structure whose effective date preserves both the prior and new states, including Organizational Unit parent or type, Position Job or Organizational Unit placement, and Position reporting line. A completely unreferenced record may be changed directly, but an operationally referenced record's structural history is never overwritten.
+_Avoid_: rewriting historical organization charts, treating a transfer as a spelling correction, or forcing a new identity for every genuine reorganization
+
+**Organizational Foundation Deactivation Dependency**:
+An active Organizational Unit cannot be deactivated while it has active child units, Positions, or current or future direct Employment Assignment references; an active Job cannot be deactivated while an active Position or Recruitment Request depends on it; and an active Workplace or Cost Center cannot be deactivated while an active Position, current or future direct assignment, or open operational or financial workflow requires it. Deactivation never cascades; finalized and historical references remain readable without blocking the action, and the impact preview groups every live blocker with a count and filtered drilldown.
+_Avoid_: silently deactivating dependents, checking only Position defaults, leaving an open financial workflow without an active Cost Center, treating historical references as active blockers, or hiding blocker detail
+
+**Organizational Foundation Activation Gate**:
+Activation or reactivation requires every applicable upstream foundation record to be active, every hierarchy and reporting line to remain acyclic, and every Position capacity schedule to remain valid. Activation never cascades and never reopens an old assignment, Recruitment Request, or hiring Application; unresolved prerequisites are shown as actionable blockers and the activation is audited.
+_Avoid_: activating a Position with an inactive dependency, silently activating dependents, reviving operational work from history, or relying on UI visibility instead of validation
+
+**Inactive Organizational Foundation Record**:
+An Organizational Foundation Record retained outside ordinary active lists and operational selectors with its deactivation reason, actor, effective date, history, and historical references visible. It permits only audited descriptive correction, history inspection, validated reactivation preparation, or permanent deletion when completely unreferenced; structural and capacity changes needed for return are validated together with the reactivation effective date.
+_Avoid_: treating inactivity as erasure, allowing hidden standalone structural edits, exposing the record in active selectors, or obscuring historical identity
+
+**Organizational Foundation Permanent Deletion Authority**:
+The narrowly granted capability to permanently delete a completely unreferenced Organizational Foundation Record after destructive-action safeguards; every active ADMIN possesses it, and specifically approved active Users may receive it directly without receiving the ADMIN role or broader Human Resources authority. The grant belongs to the stable User identity, never transfers through a display name, email, job title, or general Manager role, and becomes unusable while that User is inactive.
+_Avoid_: granting permanent deletion to every Manager, deriving it from Human Resources workspace access, transferring it when a person's title changes, or bypassing deletion safeguards for a named User
+
+**Organizational Foundation Change Evidence**:
+The permanent audit evidence for every creation, correction, structural change, capacity change, status transition or schedule change, and permanent deletion, including the actor, server time, effective date when applicable, and before/after values. A reason is mandatory for structural changes, capacity decreases, activation or deactivation, changing or cancelling a future schedule, and permanent deletion, while creation, descriptive correction, and capacity increase may omit it.
+_Avoid_: auditing only destructive actions, accepting a client-authored event time, requiring meaningless reasons for routine creation, or losing the prior value
+
+**Position Deactivation Blocker**:
+A current or future Employment Assignment of any type, an open or paused hiring Application, an active Recruitment Request with committed capacity, or an active subordinate Position that must be resolved before a Position can be deactivated. Ended assignments and closed hiring history remain linked to the inactive Position and do not block deactivation; no dependency is cancelled or transferred automatically.
+_Avoid_: deactivating a Position still carrying live work, treating historical references as blockers, or silently cancelling or moving dependent records
+
 **User Creation Provenance**:
 The immutable origin of a system user account. Public self-registration is disabled, and managed accounts created after provenance tracking is introduced record their creation source and exact creating user when one exists. Existing accounts without trustworthy historical evidence are shown as `Unknown — Historical Data`; an administrator may record a historical creator only as an explicitly manual, timestamped, audited correction.
 _Avoid_: guessing a creator from timestamps, roles, permissions, or the administrator who probably created the account; presenting a manual correction as automatically captured history
@@ -2511,8 +2747,8 @@ A random identifier stored in a secure cookie after successful authentication an
 _Avoid_: treating browser recognition as proof of hardware identity, silently fingerprinting users, trusting a recognized browser with extra permission, or forcing a password change after every user-reported session
 
 **User and Personnel Administration Boundary**:
-ADMIN and MANAGER may create and edit non-admin Users and may create, edit, activate, deactivate, and run approved bulk operations for Personnel. HR_MANAGER and ADMIN may archive or restore Applicants and Personnel with a mandatory reason; only ADMIN may permanently delete a Job Application, perform Permanent Personnel Erasure, reset passwords, erase accounts, inspect organization-wide authentication evidence, revoke another user's sessions, correct historical creator attribution, change roles, or apply bulk permissions. Managers may never modify, deactivate, or erase an ADMIN.
-_Avoid_: granting sensitive identity or authentication control through the manager role, blocking managers from routine personnel maintenance, or allowing a manager to affect an administrator account
+User administration is presented inside the Human Resources workspace beside Personnel administration, but relocating that surface does not grant access or capabilities to Human Resources authorities. ADMIN and MANAGER may create and edit non-admin Users and may create, edit, activate, deactivate, and run approved bulk operations for Personnel. HR_MANAGER and ADMIN may archive or restore Applicants and Personnel with a mandatory reason; only ADMIN may permanently delete a Job Application, perform Permanent Personnel Erasure, reset passwords, erase accounts, inspect organization-wide authentication evidence, revoke another user's sessions, correct historical creator attribution, change roles, or apply bulk permissions. Managers may never modify, deactivate, or erase an ADMIN.
+_Avoid_: treating navigation location as authorization, granting sensitive identity or authentication control through the Human Resources workspace or manager role, blocking managers from routine personnel maintenance, or allowing a manager to affect an administrator account
 
 **Failed Login Monitoring Without Throttling**:
 Failed logins never permanently lock an account and do not trigger request rate limits or progressive delays. A successful login resets the applicable failure counter. Unauthenticated callers receive only a generic failure response, while ADMIN-visible security evidence retains a safe internal category and repeated failures generate administrator alerts.

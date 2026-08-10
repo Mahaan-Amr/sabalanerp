@@ -2,6 +2,12 @@
   "version": 1,
   "rules": [
     {
+      "pattern": "frontend/src/app/prototype/**/page.tsx",
+      "status": "exempt",
+      "acceptanceStatus": "prototype-only",
+      "reason": "Throwaway local-only routes support design decisions and remain disabled in ordinary production builds."
+    },
+    {
       "pattern": "frontend/src/app/dashboard/*/duties/**/page.tsx",
       "status": "migrated",
       "acceptanceStatus": "accepted",

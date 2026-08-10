@@ -55,7 +55,7 @@ export interface HiringLifecyclePhase {
 export interface HiringLifecycleProjection {
   currentPhaseId: HiringLifecyclePhaseId;
   currentPhaseNumber: number;
-  totalPhases: 9;
+  totalPhases: number;
   terminal: boolean;
   phases: HiringLifecyclePhase[];
 }
@@ -144,6 +144,7 @@ interface FormalAssessmentPlanLike {
   version: number;
   status: "ACTIVE" | "SUPERSEDED";
   explicitlyNoAssessment: boolean;
+  executionMethod?: "APPLICANT" | "COMPANY" | null;
   selections?: FormalAssessmentSelectionLike[];
   results?: FormalAssessmentResultLike[];
 }
@@ -841,7 +842,7 @@ export const projectHiringLifecycle = (
   const effectiveIndex =
     firstIncomplete === -1 ? gates.length - 1 : firstIncomplete;
 
-  const phases = HIRING_LIFECYCLE_PHASES.map(
+  const projectedPhases = HIRING_LIFECYCLE_PHASES.map(
     (phase, index): HiringLifecyclePhase => {
       const gate = gates[index];
       let status: HiringLifecycleStatus;
@@ -901,10 +902,27 @@ export const projectHiringLifecycle = (
     },
   );
 
+  const activeAssessmentPlan = [...(source.formalAssessmentPlans || [])]
+    .sort((left, right) => right.version - left.version)
+    .find((plan) => plan.status === "ACTIVE");
+  const assessmentExecutionMethod = activeAssessmentPlan?.executionMethod
+    || activeAssessmentPlan?.selections?.find((selection) => selection.selected)?.executionMethod
+    || null;
+  const hidesFormalAssessmentPhase = Boolean(
+    activeAssessmentPlan
+    && (activeAssessmentPlan.explicitlyNoAssessment || assessmentExecutionMethod === "APPLICANT")
+    && gates[2].complete,
+  );
+  const phases = projectedPhases
+    .filter((phase) => !hidesFormalAssessmentPhase || phase.id !== "FORMAL_ASSESSMENTS")
+    .map((phase, index) => ({ ...phase, number: index + 1 }));
+  const currentPhaseId = HIRING_LIFECYCLE_PHASES[effectiveIndex].id;
+  const currentPhase = phases.find((phase) => phase.id === currentPhaseId) || phases[0];
+
   return {
-    currentPhaseId: HIRING_LIFECYCLE_PHASES[effectiveIndex].id,
-    currentPhaseNumber: HIRING_LIFECYCLE_PHASES[effectiveIndex].number,
-    totalPhases: 9,
+    currentPhaseId: currentPhase.id,
+    currentPhaseNumber: currentPhase.number,
+    totalPhases: phases.length,
     terminal,
     phases,
   };

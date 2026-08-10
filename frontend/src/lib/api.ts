@@ -314,6 +314,7 @@ export const hrAPI = {
   changePositionCapacity: (id: string, data: any) => api.post(`/hr/positions/${id}/capacity-changes`, data),
   getFoundationDependencies: (entityType: string, id: string) => api.get(`/hr/foundation/${entityType}/${id}/dependencies`),
   changeFoundationLifecycle: (entityType: string, id: string, data: any) => api.post(`/hr/foundation/${entityType}/${id}/lifecycle`, data),
+  permanentlyDeleteFoundation: (entityType: string, id: string, data: any) => api.delete(`/hr/foundation/${entityType}/${id}/permanent`, { data }),
   createOrganizationalUnit: (data: any) => api.post('/hr/organizational-units', data),
   updateOrganizationalUnit: (id: string, data: any) => api.put(`/hr/organizational-units/${id}`, data),
   createWorkplace: (data: any) => api.post('/hr/workplaces', data),

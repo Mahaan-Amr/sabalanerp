@@ -163,13 +163,13 @@ export default function HrDashboardPage() {
           ...(canAdministerAuthority ? [{
             id: "authority",
             title: "اختیار و مسئولیت",
-            href: "/dashboard/hr/hiring/authorities",
+            href: "/dashboard/hr/permissions",
             icon: FaClipboardCheck,
           }] : []),
           ...(["ADMIN", "MANAGER"].includes(currentUser?.role) ? [{
             id: "users",
             title: "مدیریت کاربران",
-            href: "/dashboard/users",
+            href: "/dashboard/hr/users",
             icon: FaUsers,
           }] : []),
         ]}

@@ -57,6 +57,9 @@ export const hiringAPI = {
     ),
   recordDecision: (id: string, kind: string, data: any) =>
     internal.post(`/applications/${id}/decisions/${kind}`, data),
+  getInitialInterview: (id: string) => internal.get(`/applications/${id}/initial-interview`),
+  saveInitialInterviewDraft: (id: string, payload: Record<string, unknown>, expectedVersion: number) =>
+    internal.put(`/applications/${id}/initial-interview/draft`, { payload, expectedVersion }),
   preIdentityTemplates: () => internal.get("/pre-identity/templates"),
   createPreIdentityTemplate: (data: any) =>
     internal.post("/pre-identity/templates", data),
@@ -95,6 +98,11 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/formal-assessment-plans`, data),
   recordFormalAssessmentResult: (id: string, kind: string, data: any) =>
     internal.post(`/applications/${id}/formal-assessments/${kind}/result`, data),
+  uploadFormalAssessmentEvidence: (id: string, kind: string, files: File[]) => {
+    const data = new FormData();
+    files.forEach((file) => data.append("files", file));
+    return internal.post(`/applications/${id}/formal-assessments/${kind}/evidence`, data);
+  },
   finallyReject: (id: string, data: any) =>
     internal.post(`/applications/${id}/final-rejection`, data),
   reactivateDisposition: (id: string, reason: string) =>
@@ -241,6 +249,11 @@ export const applicantHiringAPI = {
     }),
   submitFormalAssessmentResult: (kind: string, result: Record<string, unknown>) =>
     applicant.post(`/public/application/formal-assessments/${kind}/result`, { result }),
+  uploadFormalAssessmentEvidence: (kind: string, files: File[]) => {
+    const data = new FormData();
+    files.forEach((file) => data.append("files", file));
+    return applicant.post(`/public/application/formal-assessments/${kind}/evidence`, data);
+  },
 };
 
 export const hiringError = (error: any) =>

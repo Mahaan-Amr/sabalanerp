@@ -10,6 +10,19 @@ export const GUIDED_HR_INTERVIEW_CRITERION_IDS = [
 
 export const assertGuidedHrInterviewEvidence = (input: unknown) => {
   const evidence = input as Record<string, unknown> | null;
+  if (evidence?.schemaVersion === 2) {
+    const state = evidence.state as Record<string, unknown> | undefined;
+    const answers = state?.answers as Record<string, unknown> | undefined;
+    const decision = state?.decision;
+    const decisionReason = String(state?.decisionReason || "").trim();
+    if (!answers || !["POSITIVE", "NEGATIVE"].includes(String(decision)) || !decisionReason) {
+      throw new Error("The guided interview decision and reason are required.");
+    }
+    if (GUIDED_HR_INTERVIEW_CRITERION_IDS.some((criterionId) => !answers[criterionId])) {
+      throw new Error("The guided interview must contain every canonical criterion.");
+    }
+    return;
+  }
   const criteria = evidence && Array.isArray(evidence.criteria) ? evidence.criteria : [];
   const validScores = new Set<unknown>([1, 2, 3, 4, 5, "UNASSESSED"]);
   if (criteria.length !== GUIDED_HR_INTERVIEW_CRITERION_IDS.length || criteria.some((raw, index) => {
@@ -33,6 +46,7 @@ export interface FormalAssessmentPlanSelectionCommand {
 
 export interface FormalAssessmentPlanCommand {
   explicitlyNoAssessment: boolean;
+  executionMethod: FormalAssessmentExecutionMethod | null;
   selections: FormalAssessmentPlanSelectionCommand[];
   repeatKinds: FormalAssessmentKind[];
   reason: string;
@@ -49,14 +63,18 @@ export const normalizeFormalAssessmentPlanCommand = (
   revisesExistingPlan: boolean,
 ): FormalAssessmentPlanCommand => {
   const explicitlyNoAssessment = input.explicitlyNoAssessment === true;
+  const requestedExecutionMethod = isExecutionMethod(input.executionMethod)
+    ? input.executionMethod
+    : null;
   const rawSelections = Array.isArray(input.selections) ? input.selections : [];
   const selections = rawSelections.map((raw) => {
     const selection = raw as Record<string, unknown>;
     if (!isKind(selection.assessmentKind)) throw new Error("A formal assessment kind is invalid.");
-    if (!isExecutionMethod(selection.executionMethod)) throw new Error("An execution method is required for every selected assessment.");
+    const executionMethod = requestedExecutionMethod ?? selection.executionMethod;
+    if (!isExecutionMethod(executionMethod)) throw new Error("One execution method is required for the assessment package.");
     return {
       assessmentKind: selection.assessmentKind,
-      executionMethod: selection.executionMethod,
+      executionMethod,
     };
   });
   if (new Set(selections.map(({ assessmentKind }) => assessmentKind)).size !== selections.length) {
@@ -68,6 +86,13 @@ export const normalizeFormalAssessmentPlanCommand = (
   if (!explicitlyNoAssessment && !selections.length) {
     throw new Error("An explicit decision is required: select assessments or confirm no assessment.");
   }
+  const packageMethods = new Set(selections.map(({ executionMethod }) => executionMethod));
+  if (packageMethods.size > 1) {
+    throw new Error("All selected formal assessments must use one package execution method.");
+  }
+  const executionMethod = explicitlyNoAssessment
+    ? null
+    : requestedExecutionMethod ?? selections[0]?.executionMethod ?? null;
   const repeatKinds = [...new Set(
     (Array.isArray(input.repeatKinds) ? input.repeatKinds : []).filter(isKind),
   )];
@@ -76,7 +101,7 @@ export const normalizeFormalAssessmentPlanCommand = (
   }
   const reason = String(input.reason || "").trim();
   if (revisesExistingPlan && !reason) throw new Error("A reason is required when revising an assessment plan.");
-  return { explicitlyNoAssessment, selections, repeatKinds, reason };
+  return { explicitlyNoAssessment, executionMethod, selections, repeatKinds, reason };
 };
 
 export const authorizeFormalAssessmentResultCommand = (input: {

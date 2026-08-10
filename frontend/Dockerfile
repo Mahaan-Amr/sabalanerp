@@ -37,7 +37,21 @@ ARG NEXT_PUBLIC_SOCKET_URL
 ENV NEXT_PUBLIC_SOCKET_URL=${NEXT_PUBLIC_SOCKET_URL}
 ARG BACKEND_API_ORIGIN
 ENV BACKEND_API_ORIGIN=${BACKEND_API_ORIGIN}
+ARG NEXT_PUBLIC_ENABLE_PROTOTYPES=0
+ENV NEXT_PUBLIC_ENABLE_PROTOTYPES=${NEXT_PUBLIC_ENABLE_PROTOTYPES}
 ENV NEXT_TELEMETRY_DISABLED=1
+
+FROM builder AS local-dev
+
+ENV NODE_ENV=development
+ENV NEXT_DIST_DIR=.next-local
+ENV PORT=3000
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev", "--", "-p", "3000"]
+
+FROM builder AS production-builder
 
 RUN ./node_modules/.bin/next build
 RUN npm prune --omit=dev
@@ -50,12 +64,12 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /packages/contract-product-graph /packages/contract-product-graph
-COPY --from=builder /app/.next-build ./.next-build
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/next.config.js ./next.config.js
+COPY --from=production-builder /app/package*.json ./
+COPY --from=production-builder /app/node_modules ./node_modules
+COPY --from=production-builder /packages/contract-product-graph /packages/contract-product-graph
+COPY --from=production-builder /app/.next-build ./.next-build
+COPY --from=production-builder /app/public ./public
+COPY --from=production-builder /app/next.config.js ./next.config.js
 
 EXPOSE 3000
 

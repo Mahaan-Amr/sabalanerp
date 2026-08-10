@@ -3793,6 +3793,7 @@ model HrJobApplication {
   assessments                        HrCandidateAssessment[]
   formalAssessmentPlans              HrFormalAssessmentPlan[]
   formalAssessmentResults            HrFormalAssessmentResult[]
+  initialInterviewDraft              HrInitialInterviewDraft?
   assessmentMigrationEvents          HrAssessmentMigrationEvent[]
   preIdentityChecklistItems          HrPreIdentityChecklistItem[]
   hiringDecisions                    HrApplicationDecision[]
@@ -3916,20 +3917,36 @@ model HrPreIdentityChecklistEvent {
 }
 
 model HrApplicationDecision {
-  id            String                  @id @default(cuid())
-  applicationId String
-  kind          HrHiringDecisionKind
-  outcome       HrHiringDecisionOutcome
-  explanation   String?
-  changeReason  String?
-  version       Int
-  decidedBy     String
-  decidedAt     DateTime                @default(now())
-  application   HrJobApplication        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  id                      String                  @id @default(cuid())
+  applicationId           String
+  kind                    HrHiringDecisionKind
+  outcome                 HrHiringDecisionOutcome
+  explanation             String?
+  evidenceJson            Json?
+  criteriaTemplateVersion Int?
+  changeReason            String?
+  version                 Int
+  decidedBy               String
+  decidedAt               DateTime                @default(now())
+  application             HrJobApplication        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@unique([applicationId, kind, version])
   @@index([applicationId, kind, decidedAt])
   @@map("hr_application_decisions")
+}
+
+model HrInitialInterviewDraft {
+  id                      String           @id @default(cuid())
+  applicationId           String           @unique
+  version                 Int              @default(1)
+  criteriaTemplateVersion Int              @default(1)
+  dataJson                Json
+  updatedByUserId         String
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+  application             HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("hr_initial_interview_drafts")
 }
 
 model HrApplicationReopening {
@@ -4762,16 +4779,16 @@ model HrSeparationOfDutyConstraint {
 }
 
 model HrAuthorizationAuditEvent {
-  id            String   @id @default(cuid())
-  entityType    String
-  entityId      String
-  action        String
-  actorUserId   String
-  reason        String
-  effectiveAt   DateTime
-  beforeJson    Json?
-  afterJson     Json?
-  createdAt     DateTime @default(now())
+  id          String   @id @default(cuid())
+  entityType  String
+  entityId    String
+  action      String
+  actorUserId String
+  reason      String
+  effectiveAt DateTime
+  beforeJson  Json?
+  afterJson   Json?
+  createdAt   DateTime @default(now())
 
   @@index([entityType, entityId, createdAt])
   @@index([actorUserId, createdAt])
@@ -4906,6 +4923,7 @@ model HrFormalAssessmentPlan {
   version                Int
   status                 HrFormalAssessmentPlanStatus      @default(ACTIVE)
   explicitlyNoAssessment Boolean                           @default(false)
+  executionMethod        HrAssessmentExecutionMethod?
   finalizedByUserId      String
   finalizedAt            DateTime                          @default(now())
   reason                 String?

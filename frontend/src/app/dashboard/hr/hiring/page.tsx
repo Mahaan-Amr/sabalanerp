@@ -1,5 +1,5 @@
 "use client";
-import { ErpInput, ErpPressable, ErpSelect } from "@/components/erp";
+import { ErpCheckbox, ErpInput, ErpPressable, ErpSegmentedControl, ErpSelect } from "@/components/erp";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -39,12 +39,34 @@ import {
 } from "@/features/hr-hiring/hiringQueueViewModel";
 import { HR_HIRING_METRIC_VIEWS } from "@/features/hr-hiring/hrHiringMetricViews";
 
-const blank = {
+type AssessmentKind = "DISC" | "EQ" | "BIG_FIVE";
+type HiringCreateForm = {
+  firstName: string;
+  lastName: string;
+  mobile: string;
+  nationalCode: string;
+  positionId: string;
+  formalAssessmentPlan: {
+    explicitlyNoAssessment: boolean;
+    executionMethod: "" | "APPLICANT" | "COMPANY";
+    selections: AssessmentKind[];
+    repeatKinds: AssessmentKind[];
+    reason: string;
+  };
+};
+const blank: HiringCreateForm = {
   firstName: "",
   lastName: "",
   mobile: "",
   nationalCode: "",
   positionId: "",
+  formalAssessmentPlan: {
+    explicitlyNoAssessment: false,
+    executionMethod: "",
+    selections: [],
+    repeatKinds: [],
+    reason: "",
+  },
 };
 const blankFilters: HiringQueueFilters = {
   attention: "",
@@ -76,7 +98,7 @@ export default function HiringCasesPage() {
     : "";
   const [rows, setRows] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
-  const [form, setForm] = useState(blank);
+  const [form, setForm] = useState<HiringCreateForm>(blank);
   const [filters, setFilters] = useState<HiringQueueFilters>(initialContext.filters);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -88,7 +110,14 @@ export default function HiringCasesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createDiscardOpen, setCreateDiscardOpen] = useState(false);
   const [inviteTarget, setInviteTarget] = useState<any>(null);
-  const createDirty = Object.values(form).some(Boolean);
+  const createDirty = Boolean(
+    form.firstName || form.lastName || form.mobile || form.nationalCode || form.positionId
+    || form.formalAssessmentPlan.explicitlyNoAssessment
+    || form.formalAssessmentPlan.executionMethod
+    || form.formalAssessmentPlan.selections.length,
+  );
+  const assessmentDecisionComplete = form.formalAssessmentPlan.explicitlyNoAssessment
+    || Boolean(form.formalAssessmentPlan.executionMethod && form.formalAssessmentPlan.selections.length);
 
   const load = async (nextFilters: HiringQueueFilters = filters, nextArchiveView = archiveView) => {
     try {
@@ -148,7 +177,16 @@ export default function HiringCasesPage() {
     try {
       setBusy(true);
       setError("");
-      const result = await hiringAPI.create(form);
+      const result = await hiringAPI.create({
+        ...form,
+        formalAssessmentPlan: {
+          ...form.formalAssessmentPlan,
+          selections: form.formalAssessmentPlan.selections.map((assessmentKind) => ({
+            assessmentKind,
+            executionMethod: form.formalAssessmentPlan.executionMethod,
+          })),
+        },
+      });
       const invitation = await hiringAPI.invite(result.data.data.id);
       setMessage(
         `پرونده و دعوت‌نامه ساخته شد.${invitation.data.data.debugOtp ? ` کد محیط آزمایشی: ${invitation.data.data.debugOtp}` : ""}`,
@@ -205,9 +243,9 @@ export default function HiringCasesPage() {
           onClick: () => commitContext({ ...filters, page: 1 }, !archiveView),
         },
         {
-          label: "اختیارها",
+          label: "اختیار و مسئولیت",
           icon: FaCog,
-          href: "/dashboard/hr/hiring/authorities",
+          href: "/dashboard/hr/permissions",
         },
         { label: "به‌روزرسانی", icon: FaSync, onClick: () => load() },
       ]}
@@ -230,9 +268,10 @@ export default function HiringCasesPage() {
           else setCreateOpen(false);
         }}
         title="ایجاد متقاضی و ارسال دعوت"
+        presentation="modal"
         dismissible={!busy}
       >
-        <ErpCard className="grid gap-3 p-4 md:grid-cols-5">
+        <ErpCard className="grid gap-3 p-4 sm:grid-cols-2">
           <ErpInput
             className={field}
             placeholder="نام"
@@ -281,7 +320,60 @@ export default function HiringCasesPage() {
                 </option>
               ))}
           </ErpSelect>
-          <div className="md:col-span-5">
+          <div className="space-y-3 border-t border-[var(--sds-border-default)] pt-4 sm:col-span-2">
+            <b className="block">برنامه ارزیابی‌های رسمی</b>
+            <ErpCheckbox
+              label="برای این پرونده ارزیابی رسمی لازم نیست"
+              checked={form.formalAssessmentPlan.explicitlyNoAssessment}
+              onChange={(event) => setForm({
+                ...form,
+                formalAssessmentPlan: event.target.checked
+                  ? { ...form.formalAssessmentPlan, explicitlyNoAssessment: true, executionMethod: "", selections: [] }
+                  : { ...form.formalAssessmentPlan, explicitlyNoAssessment: false },
+              })}
+            />
+            {!form.formalAssessmentPlan.explicitlyNoAssessment && (
+              <>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {([
+                    ["DISC", "DISC"],
+                    ["EQ", "EQ"],
+                    ["BIG_FIVE", "BIG FIVE"],
+                  ] as Array<[AssessmentKind, string]>).map(([kind, label]) => (
+                    <ErpCheckbox
+                      key={kind}
+                      label={label}
+                      checked={form.formalAssessmentPlan.selections.includes(kind)}
+                      onChange={(event) => setForm({
+                        ...form,
+                        formalAssessmentPlan: {
+                          ...form.formalAssessmentPlan,
+                          selections: event.target.checked
+                            ? [...form.formalAssessmentPlan.selections, kind]
+                            : form.formalAssessmentPlan.selections.filter((item) => item !== kind),
+                        },
+                      })}
+                    />
+                  ))}
+                </div>
+                <ErpSegmentedControl<"APPLICANT" | "COMPANY" | "">
+                  value={form.formalAssessmentPlan.executionMethod}
+                  onChange={(value) => setForm({
+                    ...form,
+                    formalAssessmentPlan: {
+                      ...form.formalAssessmentPlan,
+                      executionMethod: value,
+                    },
+                  })}
+                  options={[
+                    { value: "APPLICANT", label: "تکمیل توسط متقاضی" },
+                    { value: "COMPANY", label: "اجرا در شرکت" },
+                  ]}
+                />
+              </>
+            )}
+          </div>
+          <div className="sm:col-span-2">
             <ErpButton
               label="ساخت پرونده و ارسال دعوت"
               icon={FaPlus}
@@ -290,7 +382,8 @@ export default function HiringCasesPage() {
                 !form.firstName ||
                 !form.lastName ||
                 !form.mobile ||
-                !form.positionId
+                !form.positionId ||
+                !assessmentDecisionComplete
               }
               onClick={create}
               tone="success"

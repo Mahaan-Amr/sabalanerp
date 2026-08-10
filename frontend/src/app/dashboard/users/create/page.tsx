@@ -388,7 +388,7 @@ export default function CreateUserPage() {
         const createdUserId = userResponse.data.data.id;
         const permissionCount = userResponse.data.data.permissionSummary?.workspacePermissions || workspacePermissions.length;
         alert(`کاربر با موفقیت ایجاد شد${permissionCount > 0 ? ` و ${permissionCount} دسترسی فضای کاری ثبت شد` : ''}.`);
-        router.push(`/dashboard/users?createdUserId=${createdUserId}`);
+        router.push(`/dashboard/hr/users?createdUserId=${createdUserId}`);
       }
     } catch (error: any) {
       console.error('Error creating user:', error);
@@ -415,7 +415,7 @@ export default function CreateUserPage() {
             </div>
           </div>
           <Link
-            href="/dashboard/users"
+            href="/dashboard/hr/users"
             className="sds-action px-6 py-2 flex items-center space-x-2 space-x-reverse"
           >
             <FaArrowRight />
@@ -795,7 +795,7 @@ export default function CreateUserPage() {
         <div className="sds-workspace-surface p-6">
           <div className="flex items-center justify-end space-x-4 space-x-reverse">
             <Link
-              href="/dashboard/users"
+              href="/dashboard/hr/users"
               className="sds-action px-6 py-2"
             >
               انصراف

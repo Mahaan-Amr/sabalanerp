@@ -60,7 +60,34 @@ const base = (
     }],
   }));
   assert.equal(result.phases[1].status, "COMPLETED");
-  assert.equal(result.phases[2].status, "COMPLETED");
+  assert.equal(result.totalPhases, 8);
+  assert.equal(result.phases.some((phase) => phase.id === "FORMAL_ASSESSMENTS"), false);
+  assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
+}
+
+{
+  const result = projectHiringLifecycle(base({
+    preIdentityGrandfatheredAt: null,
+    formRevisions: [submitted],
+    hiringDecisions: [
+      { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+      { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+    ],
+    formalAssessmentPlans: [{
+      version: 1,
+      status: "ACTIVE",
+      explicitlyNoAssessment: false,
+      executionMethod: "APPLICANT",
+      selections: [
+        { assessmentKind: "DISC", selected: true, executionMethod: "APPLICANT" },
+      ],
+      results: [
+        { assessmentKind: "DISC", resultVersion: 1, status: "COMPLETED" },
+      ],
+    }],
+  }));
+  assert.equal(result.totalPhases, 8);
+  assert.equal(result.phases.some((phase) => phase.id === "FORMAL_ASSESSMENTS"), false);
   assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
 }
 
@@ -458,8 +485,9 @@ const base = (
     ["COMPANY_MANAGER"],
   );
   assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
-  assert.equal(result.phases[3].status, "ACTION_REQUIRED");
-  assert.equal(result.phases[3].primaryAction?.id, "APPROVE_PRE_IDENTITY");
+  const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
+  assert.equal(companyEvaluationPhase?.status, "ACTION_REQUIRED");
+  assert.equal(companyEvaluationPhase?.primaryAction?.id, "APPROVE_PRE_IDENTITY");
 }
 
 {
@@ -476,9 +504,10 @@ const base = (
     }),
   );
   assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
-  assert.equal(result.phases[3].status, "PAUSED");
-  assert.equal(result.phases[3].primaryAction, null);
-  assert.equal(result.phases[3].secondaryActions.length, 0);
+  const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
+  assert.equal(companyEvaluationPhase?.status, "PAUSED");
+  assert.equal(companyEvaluationPhase?.primaryAction, null);
+  assert.equal(companyEvaluationPhase?.secondaryActions.length, 0);
 }
 
 {

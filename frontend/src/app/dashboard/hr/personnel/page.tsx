@@ -581,6 +581,7 @@ export default function HrPersonnelPage() {
           onClose={closeExceptionalRegistration}
           dismissible={!saving}
           title="ثبت استثنایی پرسنل"
+          presentation="modal"
         >
           <p className="mb-4 text-sm text-[var(--sds-text-secondary)]">
             فقط برای مهاجرت داده، اصلاح سابقه یا انتقال سازمانی؛ جذب عادی باید از پرونده متقاضی انجام شود.
@@ -912,6 +913,7 @@ export default function HrPersonnelPage() {
         onClose={closeSchedule}
         dismissible={!saving}
         title={scheduleTarget ? `برنامه کاری ${scheduleTarget.firstName} ${scheduleTarget.lastName}` : "برنامه کاری"}
+        presentation="modal"
       >
         {scheduleLoading && !scheduleData ? <ErpLoading /> : null}
         {scheduleData && scheduleTarget ? (

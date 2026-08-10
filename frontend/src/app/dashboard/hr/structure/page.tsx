@@ -8,6 +8,8 @@ import {
   FaMapMarkerAlt,
   FaPlus,
   FaPowerOff,
+  FaEdit,
+  FaTrash,
   FaSitemap,
   FaSync,
 } from "react-icons/fa";
@@ -20,6 +22,7 @@ import {
   ErpPage,
   ErpSection,
   ErpSegmentedControl,
+  ErpSheet,
 } from "@/components/erp";
 import { hrAPI } from "@/lib/api";
 import {
@@ -32,6 +35,7 @@ import {
 
 type Tab = "units" | "jobs" | "positions" | "contexts";
 type BlockedDependency = { kind: string; count: number; href: string };
+type FoundationEntityType = "organizational-unit" | "job" | "position" | "workplace" | "cost-center";
 const creationLifecycle = () => ({ status: "ACTIVE", effectiveFrom: new Date().toISOString().slice(0, 10) });
 const blankUnit = { code: "", name: "", type: "DEPARTMENT", parentId: "", ...creationLifecycle() };
 const blankJob = { code: "", title: "", description: "", responsibilities: "", ...creationLifecycle() };
@@ -84,6 +88,9 @@ export default function HrStructurePage() {
     description: "",
     ...creationLifecycle(),
   });
+  const [editTarget, setEditTarget] = useState<{ entityType: FoundationEntityType; item: any; form: any } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ entityType: FoundationEntityType; item: any } | null>(null);
+  const [deleteForm, setDeleteForm] = useState({ confirmationCode: "", reason: "", adminPassword: "" });
   const load = useCallback(async () => {
     try {
       setLoading(true);
@@ -126,6 +133,54 @@ export default function HrStructurePage() {
     } finally {
       setSaving(false);
     }
+  };
+  const openEdit = (entityType: FoundationEntityType, item: any) => setEditTarget({
+    entityType,
+    item,
+    form: {
+      name: item.name || item.title || "",
+      description: item.description || "",
+      responsibilities: item.responsibilities || "",
+      type: item.type || "DEPARTMENT",
+      parentId: item.parentId || "",
+      jobId: item.jobId || "",
+      organizationalUnitId: item.organizationalUnitId || "",
+      workplaceId: item.workplaceId || "",
+      costCenterId: item.costCenterId || "",
+      supervisorPositionId: item.supervisorPositionId || "",
+      effectiveFrom: new Date().toISOString().slice(0, 10),
+      reason: "اصلاح از مدیریت ساختار",
+      expectedUpdatedAt: item.updatedAt,
+    },
+  });
+  const saveEdit = () => {
+    if (!editTarget) return Promise.resolve();
+    const { entityType, item, form } = editTarget;
+    const action = entityType === "organizational-unit"
+      ? () => hrAPI.updateOrganizationalUnit(item.id, { ...form, name: form.name })
+      : entityType === "job"
+        ? () => hrAPI.updateJob(item.id, { ...form, title: form.name })
+        : entityType === "position"
+          ? () => hrAPI.updatePosition(item.id, { ...form, title: form.name })
+          : entityType === "workplace"
+            ? () => hrAPI.updateWorkplace(item.id, { ...form, name: form.name })
+            : () => hrAPI.updateCostCenter(item.id, { ...form, name: form.name });
+    return run(action, "اطلاعات سازمانی به‌روزرسانی شد.", () => setEditTarget(null));
+  };
+  const permanentlyDelete = () => {
+    if (!deleteTarget) return Promise.resolve();
+    return run(
+      () => hrAPI.permanentlyDeleteFoundation(deleteTarget.entityType, deleteTarget.item.id, {
+        ...deleteForm,
+        entityId: deleteTarget.item.id,
+        expectedUpdatedAt: deleteTarget.item.updatedAt,
+      }),
+      "رکورد بدون سابقه برای همیشه حذف شد.",
+      () => {
+        setDeleteTarget(null);
+        setDeleteForm({ confirmationCode: "", reason: "", adminPassword: "" });
+      },
+    );
   };
   if (loading) return <ErpLoading />;
   return (
@@ -197,6 +252,8 @@ export default function HrStructurePage() {
                   title={item.name}
                   meta={`${item.code} · ${unitTypeLabel[item.type] || item.type}${item.parentId ? ` · زیرمجموعه ${data.organizationalUnits.find((p: any) => p.id === item.parentId)?.name || "—"}` : ""}`}
                   active={item.isActive}
+                  onEdit={() => openEdit("organizational-unit", item)}
+                  onDelete={() => setDeleteTarget({ entityType: "organizational-unit", item })}
                   onToggle={() =>
                     run(
                       () =>
@@ -295,6 +352,8 @@ export default function HrStructurePage() {
                   title={item.title}
                   meta={`${item.code}${item.description ? ` · ${item.description}` : ""}`}
                   active={item.isActive}
+                  onEdit={() => openEdit("job", item)}
+                  onDelete={() => setDeleteTarget({ entityType: "job", item })}
                   onToggle={() =>
                     run(
                       () =>
@@ -394,6 +453,19 @@ export default function HrStructurePage() {
                         {item.occupancy.committed.toLocaleString("fa-IR")} متعهد
                         · {item.vacancy.toLocaleString("fa-IR")} خالی
                       </ErpBadge>
+                      <ErpButton
+                        label="ویرایش"
+                        icon={FaEdit}
+                        variant="ghost"
+                        onClick={() => openEdit("position", item)}
+                      />
+                      <ErpButton
+                        label="حذف دائمی"
+                        icon={FaTrash}
+                        tone="danger"
+                        variant="ghost"
+                        onClick={() => setDeleteTarget({ entityType: "position", item })}
+                      />
                       <ErpButton
                         label={item.isActive ? "غیرفعال" : "فعال"}
                         icon={FaPowerOff}
@@ -586,6 +658,7 @@ export default function HrStructurePage() {
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
           <CatalogSection
             title="محل‌های کار"
+            entityType="workplace"
             rows={visible(data.workplaces)}
             form={workplace}
             setForm={setWorkplace}
@@ -610,9 +683,12 @@ export default function HrStructurePage() {
                 "وضعیت محل کار به‌روزرسانی شد.",
               )
             }
+            onEdit={(item: any) => openEdit("workplace", item)}
+            onDelete={(item: any) => setDeleteTarget({ entityType: "workplace", item })}
           />
           <CatalogSection
             title="مراکز هزینه"
+            entityType="cost-center"
             rows={visible(data.costCenters)}
             form={costCenter}
             setForm={setCostCenter}
@@ -637,9 +713,86 @@ export default function HrStructurePage() {
                 "وضعیت مرکز هزینه به‌روزرسانی شد.",
               )
             }
+            onEdit={(item: any) => openEdit("cost-center", item)}
+            onDelete={(item: any) => setDeleteTarget({ entityType: "cost-center", item })}
           />
         </div>
       )}
+      <ErpSheet
+        open={Boolean(editTarget)}
+        onClose={() => { if (!saving) setEditTarget(null); }}
+        title="ویرایش تعریف سازمانی"
+        presentation="modal"
+        dismissible={!saving}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setEditTarget(null)} />
+            <ErpButton label="ذخیره تغییرات" icon={FaEdit} disabled={saving || !editTarget?.form.name.trim()} onClick={saveEdit} />
+          </div>
+        }
+      >
+        {editTarget && (
+          <div className="space-y-3">
+            <HrField label={editTarget.entityType === "job" || editTarget.entityType === "position" ? "عنوان" : "نام"} required>
+              <ErpInput value={editTarget.form.name} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, name: event.target.value } })} />
+            </HrField>
+            {editTarget.entityType === "organizational-unit" && (
+              <>
+                <HrField label="نوع" required>
+                  <ErpSelect value={editTarget.form.type} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, type: event.target.value } })}>
+                    {Object.entries(unitTypeLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </ErpSelect>
+                </HrField>
+                <HrField label="واحد والد">
+                  <ErpSelect value={editTarget.form.parentId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, parentId: event.target.value } })}>
+                    <option value="">بدون والد</option>
+                    {data.organizationalUnits.filter((item: any) => item.id !== editTarget.item.id && item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </ErpSelect>
+                </HrField>
+              </>
+            )}
+            {editTarget.entityType === "position" && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <HrField label="شغل" required><ErpSelect value={editTarget.form.jobId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, jobId: event.target.value } })}>{data.jobs.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.title}</option>)}</ErpSelect></HrField>
+                <HrField label="واحد سازمانی" required><ErpSelect value={editTarget.form.organizationalUnitId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, organizationalUnitId: event.target.value } })}>{data.organizationalUnits.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></HrField>
+                <HrField label="جایگاه سرپرست"><ErpSelect value={editTarget.form.supervisorPositionId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, supervisorPositionId: event.target.value } })}><option value="">بدون سرپرست</option>{data.positions.filter((item: any) => item.id !== editTarget.item.id && item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.title}</option>)}</ErpSelect></HrField>
+                <HrField label="محل کار"><ErpSelect value={editTarget.form.workplaceId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, workplaceId: event.target.value } })}><option value="">بدون پیش‌فرض</option>{data.workplaces.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></HrField>
+                <HrField label="مرکز هزینه"><ErpSelect value={editTarget.form.costCenterId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, costCenterId: event.target.value } })}><option value="">بدون پیش‌فرض</option>{data.costCenters.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></HrField>
+              </div>
+            )}
+            {editTarget.entityType !== "position" && (
+              <HrField label="توضیح"><ErpTextarea value={editTarget.form.description} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, description: event.target.value } })} /></HrField>
+            )}
+            {editTarget.entityType === "job" && (
+              <HrField label="مسئولیت‌ها"><ErpTextarea value={editTarget.form.responsibilities} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, responsibilities: event.target.value } })} /></HrField>
+            )}
+            <HrField label="تاریخ اثر" required><ErpInput type="date" value={editTarget.form.effectiveFrom} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, effectiveFrom: event.target.value } })} /></HrField>
+            <HrField label="دلیل تغییر" required><ErpTextarea value={editTarget.form.reason} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, reason: event.target.value } })} /></HrField>
+          </div>
+        )}
+      </ErpSheet>
+      <ErpSheet
+        open={Boolean(deleteTarget)}
+        onClose={() => { if (!saving) setDeleteTarget(null); }}
+        title="حذف دائمی تعریف بدون سابقه"
+        presentation="modal"
+        dismissible={!saving}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setDeleteTarget(null)} />
+            <ErpButton label="حذف دائمی" icon={FaTrash} tone="danger" disabled={saving || !deleteForm.reason.trim() || deleteForm.confirmationCode !== deleteTarget?.item.code || !deleteForm.adminPassword} onClick={permanentlyDelete} />
+          </div>
+        }
+      >
+        {deleteTarget && (
+          <div className="space-y-3">
+            <p className="text-sm text-[var(--sds-text-secondary)]">حذف فقط وقتی انجام می‌شود که هیچ ارجاع جاری یا تاریخی وجود نداشته باشد. کد دقیق رکورد را وارد کنید: <b>{deleteTarget.item.code}</b></p>
+            <HrField label="کد تأیید" required><ErpInput value={deleteForm.confirmationCode} onChange={(event) => setDeleteForm({ ...deleteForm, confirmationCode: event.target.value })} /></HrField>
+            <HrField label="دلیل حذف" required><ErpTextarea value={deleteForm.reason} onChange={(event) => setDeleteForm({ ...deleteForm, reason: event.target.value })} /></HrField>
+            <HrField label="رمز عبور مدیر سامانه" required><ErpInput type="password" value={deleteForm.adminPassword} onChange={(event) => setDeleteForm({ ...deleteForm, adminPassword: event.target.value })} /></HrField>
+          </div>
+        )}
+      </ErpSheet>
     </ErpPage>
   );
 }
@@ -671,11 +824,15 @@ function ItemCard({
   meta,
   active,
   onToggle,
+  onEdit,
+  onDelete,
 }: {
   title: string;
   meta: string;
   active: boolean;
   onToggle: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }) {
   return (
     <ErpCard className="p-4">
@@ -690,6 +847,8 @@ function ItemCard({
           <ErpBadge tone={active ? "success" : "neutral"}>
             {active ? "فعال" : "غیرفعال"}
           </ErpBadge>
+          {onEdit && <ErpButton label="ویرایش" icon={FaEdit} variant="ghost" onClick={onEdit} />}
+          {onDelete && <ErpButton label="حذف دائمی" icon={FaTrash} tone="danger" variant="ghost" onClick={onDelete} />}
           <ErpButton
             label={active ? "غیرفعال" : "فعال"}
             icon={FaPowerOff}
@@ -704,12 +863,15 @@ function ItemCard({
 }
 function CatalogSection({
   title,
+  entityType: _entityType,
   rows,
   form,
   setForm,
   saving,
   onCreate,
   onToggle,
+  onEdit,
+  onDelete,
 }: any) {
   return (
     <ErpSection title={title}>
@@ -759,6 +921,8 @@ function CatalogSection({
             meta={`${item.code}${item.description ? ` · ${item.description}` : ""}`}
             active={item.isActive}
             onToggle={() => onToggle(item)}
+            onEdit={() => onEdit(item)}
+            onDelete={() => onDelete(item)}
           />
         ))}
       </div>

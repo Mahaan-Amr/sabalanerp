@@ -411,7 +411,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         },
         {
           name: "سطوح دسترسی",
-          href: "/dashboard/admin/permissions",
+          href: "/dashboard/hr/permissions",
           icon: FaShieldAlt,
           show: true,
         },

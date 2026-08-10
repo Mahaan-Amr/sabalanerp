@@ -14,6 +14,7 @@ assert.deepEqual(normalizeFormalAssessmentPlanCommand({
   reason: "برای این جایگاه لازم نیست",
 }, false), {
   explicitlyNoAssessment: true,
+  executionMethod: null,
   selections: [],
   repeatKinds: [],
   reason: "برای این جایگاه لازم نیست",
@@ -21,16 +22,25 @@ assert.deepEqual(normalizeFormalAssessmentPlanCommand({
 
 assert.deepEqual(normalizeFormalAssessmentPlanCommand({
   explicitlyNoAssessment: false,
+  executionMethod: "COMPANY",
   selections: [
-    { assessmentKind: "DISC", executionMethod: "APPLICANT" },
-    { assessmentKind: "EQ", executionMethod: "COMPANY" },
+    { assessmentKind: "DISC" },
+    { assessmentKind: "EQ" },
   ],
   repeatKinds: ["EQ"],
   reason: "دامنه ارزیابی اصلاح شد",
 }, true).selections, [
-  { assessmentKind: "DISC", executionMethod: "APPLICANT" },
+  { assessmentKind: "DISC", executionMethod: "COMPANY" },
   { assessmentKind: "EQ", executionMethod: "COMPANY" },
 ]);
+
+assert.throws(() => normalizeFormalAssessmentPlanCommand({
+  explicitlyNoAssessment: false,
+  selections: [
+    { assessmentKind: "DISC", executionMethod: "APPLICANT" },
+    { assessmentKind: "EQ", executionMethod: "COMPANY" },
+  ],
+}, false), /one package execution method/i);
 
 assert.throws(
   () => normalizeFormalAssessmentPlanCommand({ explicitlyNoAssessment: false, selections: [] }, false),

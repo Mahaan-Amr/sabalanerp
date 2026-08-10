@@ -409,7 +409,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: input.waybillId,
         eventType: input.status === 'SUCCEEDED' ? 'PRINT_BYTES_HANDED_OFF' : 'PRINT_BYTES_HANDOFF_FAILED',
         payload: { handoffId: handoff.id, attemptId: input.attemptId, operationIdempotencyKey: input.operationIdempotencyKey,
-          artifactIds: input.artifacts.map(item => item.id), failureCode: input.failureCode ?? null,
+          requestedKinds: input.kinds, artifactIds: input.artifacts.map(item => item.id), failureCode: input.failureCode ?? null,
           correlationId: input.correlationId }, actorId: input.actorId, at: completedAt });
     });
   }

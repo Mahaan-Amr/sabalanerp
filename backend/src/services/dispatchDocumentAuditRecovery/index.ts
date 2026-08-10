@@ -322,7 +322,9 @@ export type DispatchArtifactAuditEvent = {
   detail: Readonly<Record<string, unknown>>;
 };
 
-type AuditPort = { append(event: DispatchArtifactAuditEvent): Promise<void>; hasCompletedRestoration?(artifactId: string, idempotencyKey: string): Promise<boolean>;
+type AuditPort = { append(event: DispatchArtifactAuditEvent): Promise<void>;
+  readCompletedRestoration?(artifactId: string, idempotencyKey: string): Promise<DispatchArtifactAuditEvent | null>;
+  hasCompletedRestoration?(artifactId: string, idempotencyKey: string): Promise<boolean>;
   hasCompletedCleanup?(storageKey: string, idempotencyKey: string): Promise<boolean> };
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
@@ -390,6 +392,42 @@ export const restoreDispatchDocumentArtifact = async (input: {
   now?: Date;
 }) => {
   const occurredAt = (input.now ?? new Date()).toISOString();
+  const restorationIntentHash = dispatchRecoveryIntegrityHash({
+    artifactId: input.metadata.id,
+    waybillId: input.metadata.waybillId,
+    storageKey: input.metadata.storageKey,
+    byteLength: input.metadata.byteLength,
+    sha256: input.metadata.sha256,
+    sourceIntegrityHash: input.metadata.sourceIntegrityHash,
+    actorId: input.actorId,
+    reason: input.reason,
+    idempotencyKey: input.idempotencyKey,
+    authority: input.authority,
+  });
+  const persisted = await input.audit.readCompletedRestoration?.(input.metadata.id, input.idempotencyKey) ?? null;
+  if (persisted) {
+    const detail = persisted.detail as Record<string, unknown>;
+    const result = detail.result as Record<string, unknown> | undefined;
+    if (persisted.action !== 'RESTORATION_COMPLETED'
+      || persisted.artifactId !== input.metadata.id
+      || persisted.storageKey !== input.metadata.storageKey
+      || persisted.idempotencyKey !== input.idempotencyKey
+      || detail.restorationIntentHash !== restorationIntentHash
+      || result?.status !== 'RESTORED'
+      || result.artifactId !== input.metadata.id
+      || result.byteLength !== input.metadata.byteLength
+      || result.sha256 !== input.metadata.sha256
+      || result.cleanupWarning !== null) {
+      throw new Error('Idempotency key conflicts with a different restoration intent.');
+    }
+    return {
+      status: 'RESTORED' as const,
+      artifactId: input.metadata.id,
+      byteLength: input.metadata.byteLength,
+      sha256: input.metadata.sha256,
+      cleanupWarning: null,
+    };
+  }
   const runId = dispatchRecoveryIntegrityHash({ artifactId: input.metadata.id, idempotencyKey: input.idempotencyKey }).slice(0, 24);
   let previous: Buffer | null = null;
   let mutated = false;
@@ -402,7 +440,7 @@ export const restoreDispatchDocumentArtifact = async (input: {
     previous = await input.storage.read(input.metadata.storageKey);
     await input.audit.append({ action: 'RESTORATION_INTENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, artifactId: input.metadata.id,
-      storageKey: input.metadata.storageKey, reason: input.reason, detail: { expectedByteLength: input.metadata.byteLength, expectedSha256: input.metadata.sha256, recoveryPackageId: backup.recoveryPackageId } });
+      storageKey: input.metadata.storageKey, reason: input.reason, detail: { restorationIntentHash, expectedByteLength: input.metadata.byteLength, expectedSha256: input.metadata.sha256, recoveryPackageId: backup.recoveryPackageId } });
     mutated = true;
     await input.storage.stageOriginal(input.metadata.storageKey, backup.bytes, runId);
     await input.storage.commitStagedOriginal(input.metadata.storageKey, runId);
@@ -413,7 +451,8 @@ export const restoreDispatchDocumentArtifact = async (input: {
     await input.audit.append({ action: 'RESTORATION_COMPLETED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority,
       idempotencyKey: input.idempotencyKey, occurredAt, artifactId: input.metadata.id, storageKey: input.metadata.storageKey,
-      reason: input.reason, detail: { byteLength: restored.length, sha256: input.metadata.sha256, recoveryPackageId: backup.recoveryPackageId } });
+      reason: input.reason, detail: { restorationIntentHash, byteLength: restored.length, sha256: input.metadata.sha256, recoveryPackageId: backup.recoveryPackageId,
+        result: { status: 'RESTORED', artifactId: input.metadata.id, byteLength: restored.length, sha256: input.metadata.sha256, cleanupWarning: null } } });
     let cleanupWarning: string | null = null;
     try {
       await input.storage.markStagedOriginalCompleted(input.metadata.storageKey, runId);
@@ -424,7 +463,9 @@ export const restoreDispatchDocumentArtifact = async (input: {
         authority: input.authority, idempotencyKey: `${input.idempotencyKey}:cleanup-warning`, occurredAt, artifactId: input.metadata.id,
         storageKey: input.metadata.storageKey, reason: input.reason, detail: { code: 'RESTORATION_COMPLETED_CLEANUP_PENDING', cleanupWarning } }).catch(() => undefined);
     }
-    return { status: 'RESTORED' as const, artifactId: input.metadata.id, byteLength: restored.length, sha256: input.metadata.sha256, cleanupWarning };
+    return { status: 'RESTORED' as const, artifactId: input.metadata.id, byteLength: restored.length, sha256: input.metadata.sha256,
+      // Cleanup health is durable incident evidence, not part of the idempotent restoration result.
+      cleanupWarning: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Artifact restoration failed.';
     const completionDurable = await input.audit.hasCompletedRestoration?.(input.metadata.id, input.idempotencyKey).catch(() => false) ?? false;
@@ -433,7 +474,8 @@ export const restoreDispatchDocumentArtifact = async (input: {
       await input.audit.append({ action: 'INCIDENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
         authority: input.authority, idempotencyKey: `${input.idempotencyKey}:ambiguous-completion`, occurredAt, artifactId: input.metadata.id,
         storageKey: input.metadata.storageKey, reason: input.reason, detail: { code: 'RESTORATION_COMPLETION_DURABLE_AFTER_AMBIGUOUS_RESPONSE', warning: message } }).catch(() => undefined);
-      return { status: 'RESTORED' as const, artifactId: input.metadata.id, byteLength: input.metadata.byteLength, sha256: input.metadata.sha256, cleanupWarning: message };
+      return { status: 'RESTORED' as const, artifactId: input.metadata.id, byteLength: input.metadata.byteLength,
+        sha256: input.metadata.sha256, cleanupWarning: null };
     }
     let compensationError: string | null = null;
     if (mutated) try { await input.storage.restorePrevious(input.metadata.storageKey, previous, runId); } catch (compensation) { compensationError = compensation instanceof Error ? compensation.message : 'Restore compensation failed.'; }

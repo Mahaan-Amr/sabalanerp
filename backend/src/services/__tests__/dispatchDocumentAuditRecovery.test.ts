@@ -29,6 +29,12 @@ import {
   isTerminalVoidWaybill,
   validatesPrintHandoffTransition,
   validatesStatementAdjustmentEvidence,
+  validatesManualOutageExitEvidence,
+  validatesPersistedShipmentQuantityEvidence,
+  requiresCurrentWaybillAudit,
+  createDurableDispatchRecoveryAuditPort,
+  dispatchRecoveryIntegrityHash,
+  validatesAdjustmentLedgerContinuity,
 } from '../dispatchDocumentAuditRecovery';
 import { recoveryEngineInternals, sanitizedDispatchArtifactMetadata } from '../systemRecoveryEngine';
 import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
@@ -39,6 +45,7 @@ import { dispatchDocumentLifecycleAuditEventHash } from '../dispatchDocuments/pr
 import { dispatchDocumentSourceIntegrityHash } from '../dispatchDocuments/prismaSourceReader';
 import { approvedPricingLifecycleAuditHash } from '../approvedPricing/prismaRepository';
 import { dispatchAllocationLifecycleAuditHash } from '../dispatchAllocation';
+import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>)
@@ -288,14 +295,70 @@ test('print handoff replay accepts exact success and legitimate failed attempts 
     items: [{ artifactId: 'statement-pdf', ordinal: 2 }, { artifactId: 'waybill-pdf', ordinal: 1 }] };
   const successAudit = { eventType: 'PRINT_BYTES_HANDED_OFF', actorId: 'accountant-1', recordedAt: at,
     payload: { handoffId: 'handoff-1', attemptId: 'attempt-1', operationIdempotencyKey: 'print-1', correlationId: 'attempt-1',
-      artifactIds: ['waybill-pdf', 'statement-pdf'], failureCode: null } };
+      requestedKinds: ['WAYBILL', 'STATEMENT'], artifactIds: ['waybill-pdf', 'statement-pdf'], failureCode: null } };
   assert.equal(validatesPrintHandoffTransition({ handoff: success, audit: successAudit, artifactKinds }), true);
   const failed = { ...base, status: 'FAILED', failureCode: 'BYTE_HANDOFF_FAILED', items: [] };
   const failedAudit = { ...successAudit, eventType: 'PRINT_BYTES_HANDOFF_FAILED',
     payload: { ...successAudit.payload, failureCode: 'BYTE_HANDOFF_FAILED' } };
   assert.equal(validatesPrintHandoffTransition({ handoff: failed, audit: failedAudit, artifactKinds }), true);
   assert.equal(validatesPrintHandoffTransition({ handoff: failed,
+    audit: { ...failedAudit, payload: { ...failedAudit.payload, requestedKinds: ['WAYBILL'] } }, artifactKinds }), false);
+  assert.equal(validatesPrintHandoffTransition({ handoff: failed,
     audit: { ...failedAudit, payload: { ...failedAudit.payload, failureCode: 'tampered' } }, artifactKinds }), false);
+});
+
+test('a replacement successor requires its current aggregate audit when it owns a print handoff', () => {
+  assert.equal(requiresCurrentWaybillAudit({ replacesWaybillId: 'old', printHandoffs: [] }), false);
+  assert.equal(requiresCurrentWaybillAudit({ replacesWaybillId: 'old', printHandoffs: [{ id: 'handoff-1' }] }), true);
+  assert.equal(requiresCurrentWaybillAudit({ replacesWaybillId: null, printHandoffs: [] }), true);
+});
+
+test('manual outage replay binds immutable evidence, dual approvals, Guard authority, and exact transition', () => {
+  const at = new Date('2026-08-09T12:00:00.000Z'); const actual = new Date('2026-08-09T11:30:00.000Z');
+  const waybill = { id: 'waybill-1', integrityHash: 'a'.repeat(64) };
+  const revision = { id: 'revision-1', integrityHash: 'b'.repeat(64), queueTurnId: 'turn-1' };
+  const snapshot = { schemaVersion: 1, method: 'MANUAL_OUTAGE_EXIT', paperNumber: 'MOE-000001', outageId: 'outage-1',
+    waybillId: waybill.id, waybillIntegrityHash: waybill.integrityHash, allocationRevisionId: revision.id,
+    allocationIntegrityHash: revision.integrityHash, queueTurnId: revision.queueTurnId, actualOccurredAt: actual.toISOString(),
+    recordedAt: at.toISOString(), accountingApprovedBy: 'accounting-1', guardApprovedBy: 'guard-1',
+    biometricSuccess: false, otpSuccess: false, paperEvidence: { attachmentReference: 'paper/1' } };
+  const exit = { id: 'manual-1', paperNumber: snapshot.paperNumber, outageId: snapshot.outageId, waybillId: waybill.id,
+    allocationRevisionId: revision.id, queueTurnId: revision.queueTurnId, status: 'REGISTERED', actualOccurredAt: actual,
+    recordedAt: at, recordedBy: 'guard-2', accountingApprovedBy: snapshot.accountingApprovedBy,
+    guardApprovedBy: snapshot.guardApprovedBy, paperEvidence: snapshot.paperEvidence, snapshot,
+    integrityHash: dispatchRecoveryIntegrityHash(snapshot) };
+  const audit = { eventType: 'MANUAL_OUTAGE_EXIT_REGISTERED', actorId: exit.recordedBy, recordedAt: at,
+    payload: { paperNumber: exit.paperNumber, waybillId: waybill.id, actualOccurredAt: actual.toISOString(),
+      recordedAt: at.toISOString(), integrityHash: exit.integrityHash,
+      before: { waybill: 'ISSUED', queueTurn: 'LOADING_FINALIZED' }, after: { waybill: 'EXIT_RECORDED', queueTurn: 'EXIT_RECORDED' },
+      effectiveAuthority: { workspace: 'security', workspacePermission: 'admin', actorRole: 'GUARD_SUPERVISOR' } } };
+  assert.equal(validatesManualOutageExitEvidence({ waybill, revision, exit, audit }), true);
+  assert.equal(validatesManualOutageExitEvidence({ waybill, revision, exit: { ...exit, guardApprovedBy: 'tampered' }, audit }), false);
+  assert.equal(validatesManualOutageExitEvidence({ waybill, revision, exit,
+    audit: { ...audit, payload: { ...audit.payload, effectiveAuthority: { workspace: 'security', workspacePermission: 'edit' } } } }), false);
+});
+
+test('persisted exit quantity evidence binds every stable row field and its writer hash', () => {
+  const evidence = { id: 'evidence-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1',
+    unit: 'M3', kind: 'MANUAL_OUTAGE_EXIT', quantity: '2.000', effectiveAt: '2026-08-09T11:30:00.000Z',
+    recordedAt: '2026-08-09T12:00:00.000Z', sourceType: 'MANUAL_OUTAGE_EXIT', sourceId: 'manual-1:line-1',
+    sourceVersion: 1, integrityHash: '', metadata: { waybillId: 'waybill-1', allocationRevisionId: 'revision-1' } };
+  evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence as never);
+  const expected = { lineId: 'line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'M3',
+    quantity: '2.000', sourceType: 'MANUAL_OUTAGE_EXIT', sourceId: 'manual-1', kind: 'MANUAL_OUTAGE_EXIT',
+    effectiveAt: evidence.effectiveAt, recordedAt: evidence.recordedAt, waybillId: 'waybill-1', allocationRevisionId: 'revision-1' };
+  assert.equal(validatesPersistedShipmentQuantityEvidence(evidence, expected), true);
+  assert.equal(validatesPersistedShipmentQuantityEvidence({ ...evidence, quantity: '2.001' }, expected), false);
+  assert.equal(validatesPersistedShipmentQuantityEvidence({ ...evidence, metadata: { ...evidence.metadata, waybillId: 'other' } }, expected), false);
+});
+
+test('durable restoration lookup reconstructs the exact persisted completion event', async () => {
+  const persisted = { actorId: 'support-1', recordedAt: new Date('2026-08-09T12:00:00.000Z'), payload: {
+    action: 'RESTORATION_COMPLETED', correlationId: 'restore-1', idempotencyKey: 'restore-key', storageKey: 'issued/1.pdf',
+    artifactId: 'artifact-1', reason: 'restore', authority, detail: { restorationIntentHash: 'a'.repeat(64), result: { status: 'RESTORED' } } } };
+  const prisma = { dispatchLifecycleAudit: { findFirst: async () => persisted } };
+  const event = await createDurableDispatchRecoveryAuditPort(prisma as never).readCompletedRestoration('artifact-1', 'restore-key');
+  assert.deepEqual(event, { ...persisted.payload, actorId: persisted.actorId, occurredAt: persisted.recordedAt.toISOString() });
 });
 
 test('statement adjustment replay cross-binds immutable sources and rejects a self-consistent row tamper', () => {
@@ -310,7 +373,9 @@ test('statement adjustment replay cross-binds immutable sources and rejects a se
     lines: [{ correctionLineId: line.id, contractId: line.contractId, contractItemId: line.contractItemId, productRowId: line.productRowId,
       pricingVersionId: 'pricing-1', pricingRowId: 'pricing-row-1', label: 'row', unit: line.unit, quantityDelta: '-1.000',
       grossAmountDelta: '-10.000000000000', discountDelta: '-1.000000000000', netAmountDelta: '-9.000000000000',
-      afterQuantity: '1.000', ledgerSequence: 2, consumesFinalRemainder: false, evidence: {} }], quantityDeltasByUnit: { M3: '-1.000' },
+      afterQuantity: '1.000', ledgerSequence: 2, consumesFinalRemainder: false, evidence: { beforeQuantity: '2.000', afterQuantity: '1.000',
+        beforeGross: '20.000000000000', afterGross: '10.000000000000', beforeDiscount: '2.000000000000', afterDiscount: '1.000000000000', ledgerSequence: 2,
+        pricingIntegrityHash: 'd'.repeat(64), pricingRowIntegrityHash: 'f'.repeat(64), readinessEvidenceHash: 'e'.repeat(64) } }], quantityDeltasByUnit: { M3: '-1.000' },
     totals: { grossAmountDelta: '-10.000000000000', discountDelta: '-1.000000000000', netAmountDelta: '-9.000000000000' } };
   const integrityHash = pricedAllocationIntegrityHash(snapshot); const artifact = { id: 'adjustment-pdf', waybillId: 'waybill-1',
     statementAdjustmentId: 'adjustment-1', sourceIntegrityHash: integrityHash, publishedAt: at, publishedBy: 'accountant-1' };
@@ -322,13 +387,31 @@ test('statement adjustment replay cross-binds immutable sources and rejects a se
     statementAdjustmentId: adjustment.id, statementAdjustmentSequence: 1, statementAdjustmentIntegrityHash: integrityHash,
     statementAdjustmentArtifactId: artifact.id, statementAdjustmentArtifactSourceIntegrityHash: integrityHash } };
   const input = { waybillId: 'waybill-1', correction, adjustment, originalStatement,
-    pricingReferences: [{ contractId: 'contract-1', pricingVersionId: 'pricing-1', expectedPricingHash: 'd'.repeat(64), readinessEvidenceHash: 'e'.repeat(64) }], command, audit };
+    pricingReferences: [{ contractId: 'contract-1', pricingVersionId: 'pricing-1', expectedPricingHash: 'd'.repeat(64), readinessEvidenceHash: 'e'.repeat(64),
+      pricingVersion: { rows: [{ id: 'pricing-row-1', contractItemId: line.contractItemId, productRowId: line.productRowId,
+        unit: line.unit, integrityHash: 'f'.repeat(64) }] } }], command, audit };
   assert.equal(validatesStatementAdjustmentEvidence(input), true);
+  const amount = (value: string) => ({ toFixed: () => value });
+  const baseEvents = [{ pricingRowId: 'pricing-row-1', ledgerSequence: 1, quantity: amount('2.000'),
+    grossAmount: amount('20.000000000000'), discountAmount: amount('2.000000000000'), evidence: {
+      ledgerSequence: 1, beforeQuantity: '0.000', afterQuantity: '2.000', beforeGross: '0.000000000000',
+      afterGross: '20.000000000000', beforeDiscount: '0.000000000000', afterDiscount: '2.000000000000' } }];
+  assert.equal(validatesAdjustmentLedgerContinuity({ baseEvents, adjustments: [{ sequence: 1, snapshot }] }), true);
   const tamperedSnapshot = { ...snapshot, lines: [{ ...snapshot.lines[0], contractId: 'contract-tampered' }] };
   const tamperedHash = pricedAllocationIntegrityHash(tamperedSnapshot);
   assert.equal(validatesStatementAdjustmentEvidence({ ...input, adjustment: { ...adjustment, snapshot: tamperedSnapshot, integrityHash: tamperedHash,
     artifact: { ...artifact, sourceIntegrityHash: tamperedHash } }, audit: { ...audit, payload: { ...audit.payload,
       statementAdjustmentIntegrityHash: tamperedHash, statementAdjustmentArtifactSourceIntegrityHash: tamperedHash } } }), false);
+  const ledgerTamper = { ...snapshot, lines: [{ ...snapshot.lines[0], pricingRowId: 'other-pricing-row', ledgerSequence: 99,
+    evidence: { ...snapshot.lines[0].evidence, ledgerSequence: 99 } }] };
+  const ledgerTamperHash = pricedAllocationIntegrityHash(ledgerTamper);
+  assert.equal(validatesAdjustmentLedgerContinuity({ baseEvents, adjustments: [{ sequence: 1, snapshot: ledgerTamper }] }), false);
+  assert.equal(validatesStatementAdjustmentEvidence({ ...input, adjustment: { ...adjustment, snapshot: ledgerTamper,
+    integrityHash: ledgerTamperHash, artifact: { ...artifact, sourceIntegrityHash: ledgerTamperHash } }, audit: { ...audit,
+      payload: { ...audit.payload, statementAdjustmentIntegrityHash: ledgerTamperHash,
+        statementAdjustmentArtifactSourceIntegrityHash: ledgerTamperHash } } }), false);
+  assert.equal(validatesStatementAdjustmentEvidence({ ...input, adjustment: { ...adjustment,
+    artifact: { ...artifact, publishedAt: new Date(at.getTime() + 1) } } }), false);
 });
 
 test('mandatory Prisma truth verifier accepts only immutable writer-owned pricing/event/provenance sources', async () => {
@@ -451,6 +534,7 @@ test('restore accepts only original verified bytes and records failures without 
       audit: { append: async event => { phaseAudits.push(event); } },
     });
     assert.equal(completed.status, 'RESTORED');
+    assert.equal(completed.cleanupWarning, null);
     assert.equal(rollbackCalled, false);
     assert.equal(phaseAudits.at(-1)?.action, 'INCIDENT_RECORDED');
     assert.equal(phaseAudits.at(-1)?.detail.code, 'RESTORATION_COMPLETED_CLEANUP_PENDING');
@@ -464,7 +548,57 @@ test('restore accepts only original verified bytes and records failures without 
     audit: { append: async () => { ambiguousAuditCalls += 1; if (ambiguousAuditCalls === 2) throw new Error('connection lost after commit'); }, hasCompletedRestoration: async () => true },
   });
   assert.equal(ambiguous.status, 'RESTORED');
+  assert.equal(ambiguous.cleanupWarning, null);
   assert.equal(ambiguousRollback, false);
+});
+
+test('restore replays its durable result without rewriting bytes and rejects an idempotency intent conflict', async () => {
+  const original = Buffer.from('original-pdf-bytes');
+  const metadata = artifact('artifact-retry', 'issued/retry.pdf', original);
+  const persisted: DispatchArtifactAuditEvent[] = [];
+  let recovered = 0;
+  let reads = 0;
+  let staged = 0;
+  let committed = 0;
+  const audit = {
+    append: async (event: DispatchArtifactAuditEvent) => { persisted.push(event); },
+    readCompletedRestoration: async (artifactId: string, idempotencyKey: string) => persisted.find(event =>
+      event.action === 'RESTORATION_COMPLETED' && event.artifactId === artifactId && event.idempotencyKey === idempotencyKey) ?? null,
+  };
+  const base = {
+    actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-retry', idempotencyKey: 'restore-command-retry', metadata, authority,
+    encryptedBackup: { readOriginal: async () => ({ bytes: original, recoveryPackageId: 'backup-retry', encrypted: true }) },
+    storage: {
+      recoverInterruptedWrite: async () => { recovered += 1; },
+      stageOriginal: async () => { staged += 1; },
+      commitStagedOriginal: async () => { committed += 1; },
+      markStagedOriginalCompleted: async () => {},
+      finalizeStagedOriginal: async () => {},
+      read: async () => { reads += 1; return original; },
+      restorePrevious: async () => {},
+    },
+    audit,
+  };
+
+  const first = await restoreDispatchDocumentArtifact(base);
+  const auditCount = persisted.length;
+  const retried = await restoreDispatchDocumentArtifact({ ...base, correlationId: 'restore-retry-request-2' });
+
+  assert.deepEqual(retried, first);
+  assert.equal(recovered, 1);
+  assert.equal(reads, 2);
+  assert.equal(staged, 1);
+  assert.equal(committed, 1);
+  assert.equal(persisted.length, auditCount);
+  await assert.rejects(
+    restoreDispatchDocumentArtifact({ ...base, reason: 'different restoration intent' }),
+    /idempotency key conflicts with a different restoration intent/i,
+  );
+  assert.equal(recovered, 1);
+  assert.equal(reads, 2);
+  assert.equal(staged, 1);
+  assert.equal(committed, 1);
+  assert.equal(persisted.length, auditCount);
 });
 
 test('orphan quarantine rechecks references and cleanup waits for the safety window', async () => {

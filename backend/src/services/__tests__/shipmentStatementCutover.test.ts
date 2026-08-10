@@ -132,6 +132,9 @@ test('acceptance semantic digest ignores volatile metadata but rejects changed d
     passedCount: 9, anomalyCount: 1, evidenceHash: 'b'.repeat(64) });
   assert.equal(acceptanceSemanticDigest(first), acceptanceSemanticDigest(volatileOnly));
   assert.notEqual(acceptanceSemanticDigest(first), acceptanceSemanticDigest(semanticChange));
+  const textEvidence = 'path=C:\\tmp\\run passedCount=9 anomalyCount=0 evidenceHash=' + 'a'.repeat(64);
+  const changedTextEvidence = 'path=C:\\tmp\\other passedCount=9 anomalyCount=1 evidenceHash=' + 'b'.repeat(64);
+  assert.notEqual(acceptanceSemanticDigest(textEvidence), acceptanceSemanticDigest(changedTextEvidence));
 
   const signed = passingEvidence();
   const current = structuredClone(signed);

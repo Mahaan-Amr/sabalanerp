@@ -141,7 +141,7 @@ export const acceptanceSemanticDigest = (output: string): string => {
       .replace(/\u001b\[[0-9;]*m/g, '')
       .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/g, '<timestamp>')
       .replace(/\b(runId|duration(?:Ms)?|elapsed(?:Ms)?|path)\s*[:=]\s*[^\s,;]+/gi, '$1=<volatile>')
-      .replace(/[A-Za-z]:\\[^\r\n\t"']+/g, '<path>')
+      .replace(/[A-Za-z]:\\[^\s,;]+/g, '<path>')
       .replace(/[ \t]+/g, ' ')
       .trim();
   }

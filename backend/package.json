@@ -55,6 +55,8 @@
     "verify:dispatch-cutover": "tsx scripts/verify-dispatch-cutover.ts",
     "verify:shipment-statement-migration": "tsx scripts/verify-shipment-statement-migration.ts",
     "verify:shipment-statement-constraints": "tsx scripts/verify-shipment-statement-constraints.ts",
+    "shipment-statement:cutover:manifest": "tsx scripts/shipment-statement-cutover.ts manifest",
+    "shipment-statement:cutover:activate": "tsx scripts/shipment-statement-cutover.ts activate",
     "test:dispatch-cutover": "tsx src/services/__tests__/dispatchCutoverPolicy.test.ts && tsx src/services/__tests__/dispatchCaseTimeline.test.ts",
     "test:dispatch-document-contracts": "tsx src/services/__tests__/dispatchDocumentContracts.test.ts && tsx src/services/__tests__/shipmentStatementMigration.test.ts",
     "test:approved-pricing": "tsx src/services/__tests__/approvedPricing.test.ts",

@@ -30,5 +30,13 @@ assert.ok(defaultAxis);
 assert.ok(leftAxis);
 assert.equal((defaultAxis.props as { orientation?: string }).orientation, 'right');
 assert.equal((leftAxis.props as { orientation?: string }).orientation, 'left');
+assert.equal(
+  (defaultAxis.props as { tick?: { textAnchor?: string } }).tick?.textAnchor,
+  undefined,
+);
+assert.equal(
+  (leftAxis.props as { tick?: { textAnchor?: string } }).tick?.textAnchor,
+  'start',
+);
 
 console.log('RTL chart regression tests passed');

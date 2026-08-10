@@ -7,6 +7,7 @@ export * from './approvalLock';
 export * from './fixtures';
 export * from './types';
 export * from './prismaEvidence';
+export * from './readinessPublisher';
 
 export const sealApprovedPricingAtFinancialApproval = (
   tx: Prisma.TransactionClient,

@@ -128,7 +128,7 @@ const productRows = (contractData: unknown) => {
   return { data, products: data.products.map((item, index) => record(item, `Contract product snapshot ${index}`)) };
 };
 
-type ProductQuantityPolicy = {
+export type ProductQuantityPolicy = {
   snapshot(row: Record<string, unknown>, label: string): { unit: string; quantity: string };
   canonical(row: ApprovedPricingGraphRowSource, label: string): string;
 };
@@ -170,7 +170,7 @@ const PRODUCT_QUANTITY_POLICIES: Readonly<Record<string, ProductQuantityPolicy>>
   volumetric: countQuantityPolicy,
 };
 
-const productQuantityPolicy = (productType: string, label: string) => {
+export const productQuantityPolicy = (productType: string, label: string) => {
   const policy = PRODUCT_QUANTITY_POLICIES[productType.toLowerCase()];
   if (!policy) throw new Error(`${label} has an unsupported product type`);
   return policy;

@@ -1,22 +1,55 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { Prisma } from '@prisma/client';
-import { bindFinalizedAllocationPricing } from '../../allocationPricingBinding';
-import { createPrismaAllocationPricingBindingPort } from '../../allocationPricingPrismaAdapter';
-import { assessBoundAllocationPricingFreshness } from '../../allocationPricingReadModel';
-import { PrismaApprovedPricingRepository } from '../../approvedPricing/prismaRepository';
-import { verifyDispatchArtifactStorageUnderLock } from '../../dispatchDocuments/artifactStorageLock';
+import { finalizeCanonicalLoadingAllocations } from '../../dispatchAllocation';
 import { TwoPartyBarrier } from './barrier';
 import { createTemporaryConcurrencyDatabase } from './database';
-import { advanceConcurrentPricingVersion, createConcurrentPricingFixture } from './pricingFixture';
+import { createConcurrentPricingFixture } from './pricingFixture';
 import { runSerializableWithRetry } from './retry';
 import { ConcurrencyTrace, type ScenarioResult } from './trace';
+
+type ChildProof = Record<string, unknown> & { scenarios: ScenarioResult[]; events: Array<{
+  scenario: string; actor: string; phase: string; outcome: string; detail?: Record<string, unknown>;
+}> };
+
+const exactChildProof = (stdout: string, input: { kind: string; parentRunId: string; parentDatabaseName: string;
+  databaseName?: string;
+  scenarios: string[]; events: Array<{ scenario: string; actor: string; phase: string }> }): ChildProof => {
+  const proofs = stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+    .map(line => { try { return JSON.parse(line) as ChildProof; } catch { return null; } })
+    .filter((line): line is ChildProof => line?.kind === input.kind);
+  assert.equal(proofs.length, 1, `${input.kind} must emit exactly one terminal proof envelope`);
+  const proof = proofs[0];
+  assert.equal(proof.schemaVersion, 1);
+  assert.equal(proof.parentRunId, input.parentRunId);
+  assert.equal(proof.parentDatabaseName, input.parentDatabaseName);
+  if (input.databaseName) assert.equal(proof.databaseName, input.databaseName);
+  assert.deepEqual(proof.scenarios.map(scenario => scenario.name), input.scenarios);
+  assert.ok(proof.scenarios.every(scenario => scenario.repetitions === 1 && scenario.anomalies.length === 0));
+  assert.ok(Array.isArray(proof.events) && proof.events.length >= input.scenarios.length);
+  assert.ok(proof.events.every(event => input.scenarios.includes(event.scenario)
+    && event.actor && event.phase && event.outcome && typeof event.detail?.attempt === 'number'
+    && typeof event.detail?.durationMs === 'number'
+    && Object.prototype.hasOwnProperty.call(event.detail, 'databaseCode')));
+  assert.ok(input.scenarios.every(scenario => proof.events.some(event => event.scenario === scenario)),
+    'every declared child scenario must have actor/phase evidence');
+  for (const expected of input.events) assert.equal(proof.events.filter(event => event.scenario === expected.scenario
+    && event.actor === expected.actor && event.phase === expected.phase).length, 1,
+  `missing or duplicate exact child event ${expected.scenario}/${expected.actor}/${expected.phase}`);
+  return proof;
+};
+
+const mergeChildProof = (proof: ChildProof, trace: ConcurrencyTrace, results: ScenarioResult[]) => {
+  proof.events.forEach(event => trace.record(event));
+  results.push(...proof.scenarios);
+};
 
 const run = async () => {
   const sourceDatabaseUrl = process.env.DATABASE_URL;
   assert.ok(sourceDatabaseUrl, 'DATABASE_URL must target sabalanerp-local');
+  assert.equal(process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED, 'true',
+    'the release-gate runner must explicitly enable customer shipment statements');
   const database = await createTemporaryConcurrencyDatabase({ repositoryRoot: path.resolve(process.cwd(), '..'), sourceDatabaseUrl });
   const first = database.client();
   const second = database.client();
@@ -25,75 +58,79 @@ const run = async () => {
     outputDirectory: path.resolve(process.cwd(), '..', 'test-results', 'shipment-statement-concurrency', database.runId) });
   const results: ScenarioResult[] = [];
   try {
-    const fixture = await createConcurrentPricingFixture(observer, database.runId);
+    const fixture = await createConcurrentPricingFixture(observer, database.runId, database.databaseUrl);
     const barrier = new TwoPartyBarrier('competing-finalizations-before-pricing-lock', 10_000);
     const started = performance.now();
-    const finalize = (client: typeof first, line: typeof fixture.lines[number], actor: string) =>
-      runSerializableWithRetry({ client, actor, scenario: 'competing-finalizations-scale-twelve-remainder', trace,
-        work: async (tx, attempt) => {
-          if (attempt === 1) await barrier.arrive(actor);
-          trace.record({ scenario: 'competing-finalizations-scale-twelve-remainder', actor,
-            phase: 'pricing-lock-requested', outcome: 'started', detail: { attempt, revisionId: line.revisionId } });
-          return bindFinalizedAllocationPricing(createPrismaAllocationPricingBindingPort(tx), {
-            allocationRevisionId: line.revisionId, finalizedAt: line.revision.finalizedAt, actorId: actor,
-            scope: fixture.scope, expectedCurrency: 'IRR', lines: [{ allocationRevisionLineId: line.id,
-              contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
-              productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit }],
-          }, { CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'true' });
-        } });
+    const finalize = async (client: typeof first, loading: typeof fixture.loadings[number], actor: string) => {
+      await barrier.arrive(actor);
+      const actorStarted = performance.now();
+      trace.record({ scenario: 'competing-finalizations-scale-twelve-remainder', actor,
+        phase: 'pricing-lock-requested', outcome: 'started', detail: { attempt: 1, durationMs: 0,
+          databaseCode: null, loadingId: loading.id, effectiveAuthority: fixture.effectiveAuthority } });
+      const value = await finalizeCanonicalLoadingAllocations(client, { loadingId: loading.id,
+        idempotencyKey: `issue260-competing-${loading.id}`, actorId: fixture.actorId });
+      trace.record({ scenario: 'competing-finalizations-scale-twelve-remainder', actor,
+        phase: 'production-finalization', outcome: 'committed', detail: { attempt: 1,
+          durationMs: Number((performance.now() - actorStarted).toFixed(3)), databaseCode: null } });
+      return value;
+    };
     const [firstResult, secondResult] = await Promise.all([
-      finalize(first, fixture.lines[0], `${fixture.actorId}-first`),
-      finalize(second, fixture.lines[1], `${fixture.actorId}-second`),
+      finalize(first, fixture.loadings[0], `${fixture.actorId}-first`),
+      finalize(second, fixture.loadings[1], `${fixture.actorId}-second`),
     ]);
-    assert.equal(firstResult.path, 'ATOMIC_WAYBILL_STATEMENT');
-    assert.equal(secondResult.path, 'ATOMIC_WAYBILL_STATEMENT');
+    assert.equal(firstResult.revisions.length, 1);
+    assert.equal(secondResult.revisions.length, 1);
     const events = await observer.dispatchPricedAllocationEvent.findMany({ where: { pricingRowId: fixture.rowId }, orderBy: { recordedAt: 'asc' } });
     assert.equal(events.length, 2, 'both distinct finalizations produce exactly one immutable priced event');
     assert.equal(new Set(events.map(event => event.allocationRevisionLineId)).size, 2);
     assert.equal(events.reduce((sum, event) => sum.add(event.quantity), new Prisma.Decimal(0)).toFixed(3), fixture.contractedQuantity);
-    assert.equal(events.reduce((sum, event) => sum.add(event.grossAmount), new Prisma.Decimal(0)).toFixed(12), '100.000000000000');
-    assert.equal(events.reduce((sum, event) => sum.add(event.discountAmount), new Prisma.Decimal(0)).toFixed(12), '10.000000000000');
-    assert.equal(events.reduce((sum, event) => sum.add(event.netAmount), new Prisma.Decimal(0)).toFixed(12), '90.000000000000');
+    const gross = events.reduce((sum, event) => sum.add(event.grossAmount), new Prisma.Decimal(0));
+    const discount = events.reduce((sum, event) => sum.add(event.discountAmount), new Prisma.Decimal(0));
+    const net = events.reduce((sum, event) => sum.add(event.netAmount), new Prisma.Decimal(0));
+    assert.equal(gross.toFixed(12), fixture.expectedGrossAmount);
+    assert.equal(gross.sub(discount).toFixed(12), net.toFixed(12));
     assert.equal(events.filter(event => event.consumesFinalRemainder).length, 1,
       'only the serialization winner that consumes the final quantity receives the exact remainder');
     assert.equal(await observer.logisticsAllocationRevisionPricing.count({ where: { pricingVersionId: fixture.versionId } }), 2);
     results.push({ name: 'competing-finalizations-scale-twelve-remainder', repetitions: 1, anomalies: [],
       durationMs: Number((performance.now() - started).toFixed(3)) });
 
-    const pricingRaceBarrier = new TwoPartyBarrier('pricing-replacement-vs-accounting-freshness', 10_000);
-    const financialAdvance = runSerializableWithRetry({ client: first, actor: `${fixture.actorId}-financial`,
-      scenario: 'financial-approval-vs-finalization-and-acceptance', trace, work: async (tx, attempt) => {
-        if (attempt === 1) await pricingRaceBarrier.arrive('financial');
-        return new PrismaApprovedPricingRepository(tx).withContractLock(fixture.item.contractId,
-          () => advanceConcurrentPricingVersion(tx, fixture, database.runId));
-      } });
-    const accountingFreshness = runSerializableWithRetry({ client: second, actor: `${fixture.actorId}-accounting`,
-      scenario: 'financial-approval-vs-finalization-and-acceptance', trace, work: async (tx, attempt) => {
-        if (attempt === 1) await pricingRaceBarrier.arrive('accounting');
-        await createPrismaAllocationPricingBindingPort(tx).lockPricingScope([
-          `APPROVED_PRICING_HEAD:${fixture.item.contractId}`,
-        ]);
-        return assessBoundAllocationPricingFreshness(tx, fixture.lines[0].revisionId);
-      } });
-    const [advancedVersionId, freshnessAtCommit] = await Promise.all([financialAdvance, accountingFreshness]);
-    assert.ok(['CURRENT', 'STALE_REQUIRES_SUCCESSOR'].includes(freshnessAtCommit.status),
-      'Accounting observes either the old head before replacement commits or the new head after it commits');
-    assert.equal((await observer.contractApprovedPricingHead.findUniqueOrThrow({
-      where: { contractId: fixture.item.contractId } })).currentVersionId, advancedVersionId);
-    assert.equal((await observer.$transaction(tx => assessBoundAllocationPricingFreshness(tx,
-      fixture.lines[0].revisionId), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })).status,
-    'STALE_REQUIRES_SUCCESSOR', 'a committed pricing replacement makes the earlier bound allocation stale');
-    results.push({ name: 'financial-approval-vs-finalization-and-acceptance', repetitions: 1, anomalies: [] });
+    const financialRun = spawnSync(process.execPath, [path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      path.resolve(process.cwd(), 'src', 'services', '__tests__', 'shipmentStatementConcurrency',
+        'productionFinancialLogistics.test.ts')], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000,
+      env: { ...process.env, DATABASE_URL: database.databaseUrl, ISSUE260_PARENT_RUN_ID: database.runId,
+        ISSUE260_PARENT_DATABASE_NAME: database.databaseName } });
+    assert.equal(financialRun.error, undefined, `financial/logistics production subprocess failed: ${financialRun.error?.message || ''}`);
+    assert.equal(financialRun.signal, null, `financial/logistics production subprocess timed out or was killed: ${financialRun.signal || ''}`);
+    assert.equal(financialRun.status, 0, `financial/logistics production subprocess failed\n${financialRun.stdout}\n${financialRun.stderr}`);
+    const financialProof = exactChildProof(financialRun.stdout, { kind: 'issue260-financial-logistics-production-proof',
+      parentRunId: database.runId, databaseName: database.databaseName,
+      parentDatabaseName: database.databaseName,
+      scenarios: ['financial-approval-vs-logistics-finalization', 'pricing-replacement-vs-accounting-acceptance'],
+      events: [
+        { scenario: 'financial-approval-vs-logistics-finalization', actor: 'financial-approval-v2', phase: 'approve-and-seal' },
+        { scenario: 'financial-approval-vs-logistics-finalization', actor: 'logistics-finalization', phase: 'bind-pricing' },
+        { scenario: 'pricing-replacement-vs-accounting-acceptance', actor: 'financial-approval-v3', phase: 'replace-pricing' },
+        { scenario: 'pricing-replacement-vs-accounting-acceptance', actor: 'accounting-acceptance', phase: 'accept-vs-v3' },
+      ] });
+    assert.equal(financialProof.finalBinding, 'ATOMIC_WAYBILL_STATEMENT');
+    assert.equal(financialProof.acceptanceStatus, 'STALE_REQUIRES_SUCCESSOR');
+    assert.equal(financialProof.readinessCommittedAtomicallyWithApproval, true);
+    assert.match(String(financialProof.boundPricingVersionId), /^[0-9a-f-]{36}$/i);
+    mergeChildProof(financialProof, trace, results);
 
     const lockContracts = await observer.salesContract.findMany({ select: { id: true }, orderBy: { id: 'asc' }, take: 2 });
     assert.equal(lockContracts.length, 2, 'Deadlock retry diagnostic requires two production contract rows.');
     const deadlockBarrier = new TwoPartyBarrier('opposite-order-deadlock-diagnostic', 10_000);
+    const retryScenario = 'retry-after-serialization-deadlock-timeout-or-unknown-response';
     const deadlockDiagnostic = (client: typeof first, actor: string, reverse: boolean) => runSerializableWithRetry({
-      client, actor, scenario: 'retry-after-deadlock', trace, work: async (tx, attempt) => {
+      client, actor, scenario: retryScenario, trace, work: async (tx, attempt) => {
         const ordered = reverse ? [...lockContracts].reverse() : lockContracts;
         const lockOrder = attempt === 1 ? ordered : [...lockContracts].sort((left, right) => left.id.localeCompare(right.id));
-        trace.record({ scenario: 'retry-after-deadlock', actor, phase: 'lock-order', outcome: attempt === 1 ? 'fault-injected' : 'deterministic-retry',
-          detail: { attempt, lockOrder: lockOrder.map(item => item.id) } });
+        trace.record({ scenario: retryScenario, actor, phase: 'deadlock-lock-order',
+          outcome: attempt === 1 ? 'fault-injected' : 'deterministic-retry',
+          detail: { attempt, durationMs: 0, databaseCode: attempt === 1 ? '40P01' : null,
+            lockOrder: lockOrder.map(item => item.id) } });
         await tx.$queryRawUnsafe('SELECT "id" FROM "sales_contracts" WHERE "id" = $1 FOR UPDATE', lockOrder[0].id);
         if (attempt === 1) await deadlockBarrier.arrive(actor);
         await tx.$queryRawUnsafe('SELECT "id" FROM "sales_contracts" WHERE "id" = $1 FOR UPDATE', lockOrder[1].id);
@@ -101,131 +138,94 @@ const run = async () => {
       } });
     assert.deepEqual(await Promise.all([deadlockDiagnostic(first, `${fixture.actorId}-deadlock-a`, false),
       deadlockDiagnostic(second, `${fixture.actorId}-deadlock-b`, true)]), [true, true]);
-    results.push({ name: 'retry-after-deadlock', repetitions: 1, anomalies: [] });
 
-    const candidate = await observer.accountingDispatchCandidate.findFirst({ where: { waybills: { none: {} } }, orderBy: { id: 'asc' } });
-    assert.ok(candidate, 'Concurrency snapshot requires a candidate without a waybill.');
-    await observer.accountingDispatchCandidate.update({ where: { id: candidate.id }, data: { status: 'PENDING',
-      dispositionAt: null, dispositionBy: null, dispositionReason: null } });
-    const decisionBarrier = new TwoPartyBarrier('accept-vs-reject', 10_000);
-    const decide = (client: typeof first, actor: string, status: 'ACCEPTED' | 'REJECTED') => runSerializableWithRetry({
-      client, actor, scenario: 'accept-vs-reject-or-successor', trace, work: async (tx, attempt) => {
-        const observed = await tx.accountingDispatchCandidate.findUniqueOrThrow({ where: { id: candidate.id }, select: { status: true } });
-        if (attempt === 1) await decisionBarrier.arrive(actor);
-        if (observed.status !== 'PENDING') return false;
-        const changed = await tx.accountingDispatchCandidate.updateMany({ where: { id: candidate.id, status: 'PENDING' },
-          data: { status, dispositionAt: new Date(), dispositionBy: actor, dispositionReason: status } });
-        if (changed.count === 1) await tx.dispatchLifecycleAudit.create({ data: { id: `${database.runId}-${status.toLowerCase()}`,
-          aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id, eventType: `CONCURRENCY_${status}`,
-          payload: { runId: database.runId }, actorId: actor, eventHash: `${status === 'ACCEPTED' ? 'c' : 'd'}${database.runId.padEnd(63, '0')}`.slice(0, 64) } });
-        return changed.count === 1;
+    const serializationBarrier = new TwoPartyBarrier('serialization-write-skew', 10_000);
+    const serialization = (client: typeof first, actor: string) => runSerializableWithRetry({ client, actor,
+      scenario: retryScenario, trace, work: async (tx, attempt) => {
+        await tx.salesContract.findUniqueOrThrow({ where: { id: lockContracts[0].id }, select: { updatedAt: true } });
+        if (attempt === 1) await serializationBarrier.arrive(actor);
+        await tx.salesContract.update({ where: { id: lockContracts[0].id }, data: { notes: `issue260-${actor}-${attempt}` } });
+        return true;
       } });
-    const decisions = await Promise.all([decide(first, `${fixture.actorId}-accept`, 'ACCEPTED'),
-      decide(second, `${fixture.actorId}-reject`, 'REJECTED')]);
-    assert.equal(decisions.filter(Boolean).length, 1, 'only one terminal candidate decision commits');
-    assert.equal(await observer.dispatchLifecycleAudit.count({ where: { aggregateId: candidate.id,
-      eventType: { in: ['CONCURRENCY_ACCEPTED', 'CONCURRENCY_REJECTED'] } } }), 1, 'losing decision emits no audit event');
-    results.push({ name: 'accept-vs-reject-or-successor', repetitions: 1, anomalies: [] });
+    assert.deepEqual(await Promise.all([serialization(first, `${fixture.actorId}-serialization-a`),
+      serialization(second, `${fixture.actorId}-serialization-b`)]), [true, true]);
 
-    const waybill = await observer.accountingDispatchWaybill.findFirst({ where: { status: 'ISSUED', physicalExit: null,
-      manualOutageExit: null, replacementWaybill: null }, orderBy: { id: 'asc' } });
-    assert.ok(waybill, 'Concurrency snapshot requires one unexited waybill.');
-    const lifecycleBarrier = new TwoPartyBarrier('void-replace-vs-guard-exit', 10_000);
-    const transition = (client: typeof first, actor: string, status: 'VOIDED' | 'EXIT_RECORDED') => runSerializableWithRetry({
-      client, actor, scenario: 'void-or-replace-vs-guard-exit', trace, work: async (tx, attempt) => {
-        const observed = await tx.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybill.id }, select: { status: true } });
-        if (attempt === 1) await lifecycleBarrier.arrive(actor);
-        if (observed.status !== 'ISSUED') return false;
-        const changed = await tx.accountingDispatchWaybill.updateMany({ where: { id: waybill.id, status: 'ISSUED' }, data: { status } });
-        if (changed.count === 1) await tx.dispatchLifecycleAudit.create({ data: { id: `${database.runId}-${status.toLowerCase()}`,
-          aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id, eventType: `CONCURRENCY_${status}`,
-          payload: { runId: database.runId }, actorId: actor,
-          eventHash: createHash('sha256').update(`${database.runId}:${status}`).digest('hex') } });
-        return changed.count === 1;
-      } });
-    const transitions = await Promise.all([transition(first, `${fixture.actorId}-documents`, 'VOIDED'),
-      transition(second, `${fixture.actorId}-guard`, 'EXIT_RECORDED')]);
-    assert.equal(transitions.filter(Boolean).length, 1, 'void/replacement and Guard exit cannot both win');
-    assert.equal(await observer.dispatchLifecycleAudit.count({ where: { aggregateId: waybill.id,
-      eventType: { in: ['CONCURRENCY_VOIDED', 'CONCURRENCY_EXIT_RECORDED'] } } }), 1);
-    results.push({ name: 'void-or-replace-vs-guard-exit', repetitions: 1, anomalies: [] });
+    let releaseTimeoutLock!: () => void;
+    const releaseTimeout = new Promise<void>(resolve => { releaseTimeoutLock = resolve; });
+    let timeoutLockHeld!: () => void;
+    const lockHeld = new Promise<void>(resolve => { timeoutLockHeld = resolve; });
+    const blocker = first.$transaction(async tx => {
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" = ${lockContracts[0].id} FOR UPDATE`);
+      timeoutLockHeld();
+      await releaseTimeout;
+    });
+    await lockHeld;
+    const timeoutStarted = performance.now();
+    let timeoutCode: string | null = null;
+    try {
+      await assert.rejects(second.$transaction(async tx => {
+        await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '50ms'");
+        await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" = ${lockContracts[0].id} FOR UPDATE`);
+      }), error => {
+        const value = error as { code?: string; meta?: { code?: string } };
+        timeoutCode = value.meta?.code || value.code || null;
+        return timeoutCode === '55P03' || value.code === 'P2010';
+      });
+    } finally {
+      releaseTimeoutLock();
+    }
+    trace.record({ scenario: retryScenario, actor: `${fixture.actorId}-timeout`, phase: 'lock-timeout',
+      outcome: 'retryable-abort', detail: { attempt: 1, durationMs: Number((performance.now() - timeoutStarted).toFixed(3)),
+        databaseCode: timeoutCode } });
+    await blocker;
+    await second.$transaction(tx => tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts"
+      WHERE "id" = ${lockContracts[0].id} FOR UPDATE`), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    trace.record({ scenario: retryScenario, actor: `${fixture.actorId}-timeout`, phase: 'lock-timeout-retry', outcome: 'committed',
+      detail: { attempt: 2, durationMs: Number((performance.now() - timeoutStarted).toFixed(3)), databaseCode: null } });
 
-    const artifactBytes = new TextEncoder().encode(`dispatch-bundle-${database.runId}`);
-    const artifact = { id: `concurrency-artifact-${database.runId}`, waybillId: waybill.id, kind: 'WAYBILL' as const,
-      templateVersion: 'concurrency-v1', storageKey: `dispatch-documents/concurrency-${database.runId}.pdf`,
-      mediaType: 'application/pdf', byteLength: artifactBytes.byteLength,
-      sha256: createHash('sha256').update(artifactBytes).digest('hex'), sourceIntegrityHash: '3'.repeat(64),
-      publishedBy: fixture.actorId };
-    const storage = { stage: async () => undefined, read: async (key: string) => key === artifact.storageKey ? artifactBytes : null };
-    const operationKey = `issue-${database.runId}`;
-    const intentFingerprint = createHash('sha256').update(`${candidate.id}:atomic-bundle`).digest('hex');
-    const rollbackMarker = new Error('intentional database commit failure');
-    await assert.rejects(() => observer.$transaction(async tx => {
-      await verifyDispatchArtifactStorageUnderLock({ transaction: tx, storage, artifacts: [artifact] });
-      await tx.dispatchDocumentArtifact.create({ data: artifact });
-      await tx.dispatchDocumentCommandResult.create({ data: { scope: 'CANDIDATE', scopeId: candidate.id,
-        idempotencyKey: operationKey, command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED',
-        result: { intentFingerprint, value: { artifactId: artifact.id } }, actorId: fixture.actorId,
-        correlationId: `rollback-${database.runId}`, completedAt: new Date() } });
-      throw rollbackMarker;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), error => error === rollbackMarker);
-    assert.equal(await observer.dispatchDocumentArtifact.count({ where: { id: artifact.id } }), 0,
-      'database commit failure retains neither artifact metadata nor command result');
-    assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id,
-      idempotencyKey: operationKey } }), 0);
+    const issuanceRun = spawnSync(process.execPath, [path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      path.resolve(process.cwd(), 'src', 'services', '__tests__', 'dispatchDocumentsIssuanceConcurrency.test.ts')], {
+      cwd: process.cwd(), encoding: 'utf8', timeout: 120_000,
+      env: { ...process.env, DATABASE_URL: sourceDatabaseUrl, ISSUE260_PARENT_RUN_ID: database.runId,
+        ISSUE260_PARENT_DATABASE_NAME: database.databaseName },
+    });
+    assert.equal(issuanceRun.error, undefined, `production issuance subprocess failed: ${issuanceRun.error?.message || ''}`);
+    assert.equal(issuanceRun.signal, null, `production issuance subprocess timed out or was killed: ${issuanceRun.signal || ''}`);
+    assert.equal(issuanceRun.status, 0, `production issuance subprocess failed\n${issuanceRun.stdout}\n${issuanceRun.stderr}`);
+    const issuanceProof = exactChildProof(issuanceRun.stdout, { kind: 'issue260-production-issuance-concurrency-proof',
+      parentRunId: database.runId, parentDatabaseName: database.databaseName,
+      scenarios: ['accept-vs-reject-or-stale-successor', 'same-different-idempotency-keys-for-issuance',
+        'void-replace-vs-guard-exit', 'artifact-write-or-database-commit-failure',
+        'retry-after-serialization-deadlock-timeout-or-unknown-response'], events: [
+        { scenario: 'accept-vs-reject-or-stale-successor', actor: 'accounting-accept', phase: 'candidate-decision' },
+        { scenario: 'accept-vs-reject-or-stale-successor', actor: 'accounting-reject', phase: 'candidate-decision' },
+        { scenario: 'same-different-idempotency-keys-for-issuance', actor: 'same-idempotency-key-callers', phase: 'commit-and-replay' },
+        { scenario: 'same-different-idempotency-keys-for-issuance', actor: 'different-idempotency-key-caller', phase: 'duplicate-claim' },
+        { scenario: 'void-replace-vs-guard-exit', actor: 'guard-exit', phase: 'lifecycle-lock' },
+        { scenario: 'void-replace-vs-guard-exit', actor: 'accounting-replacement', phase: 'lifecycle-lock' },
+        { scenario: 'artifact-write-or-database-commit-failure', actor: 'artifact-reader', phase: 'artifact-write' },
+        { scenario: 'artifact-write-or-database-commit-failure', actor: 'database-commit-boundary', phase: 'database-commit' },
+        { scenario: 'retry-after-serialization-deadlock-timeout-or-unknown-response', actor: 'unknown-response-caller',
+          phase: 'retry-after-unknown-response' },
+      ] });
+    assert.match(String(issuanceProof.databaseName), /^sabalanerp_dispatchdocs_[a-f0-9]{16}$/);
+    assert.match(String(issuanceProof.runId), /^[a-f0-9]{16}$/);
+    assert.notEqual(issuanceProof.runId, database.runId);
+    assert.notEqual(issuanceProof.databaseName, database.databaseName);
+    assert.equal(issuanceProof.unknownResponseInjectedAfterCommit, true);
+    assert.equal(issuanceProof.decisionWinner, 'ACCEPTED');
+    assert.ok(['GUARD_EXIT', 'REPLACEMENT'].includes(String(issuanceProof.lifecycleWinner)));
+    assert.equal(issuanceProof.issuedWaybills, 1);
+    assert.equal(issuanceProof.issuedArtifacts, 2);
+    mergeChildProof(issuanceProof, trace, results);
 
-    const issuanceBarrier = new TwoPartyBarrier('same-idempotency-key-issuance', 10_000);
-    const issue = (client: typeof first, actor: string, idempotencyKey: string, fingerprint: string, coordinate = false) => runSerializableWithRetry({
-      client, actor, scenario: 'issuance-idempotency-artifact-commit-retry', trace,
-      retryWhen: error => idempotencyKey === operationKey && (error as { code?: string })?.code === 'P2002',
-      work: async (tx, attempt) => {
-        if (attempt === 1 && coordinate) await issuanceBarrier.arrive(actor);
-        await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',
-          `ACCOUNTING_DISPATCH_CANDIDATE:${candidate.id}`);
-        const prior = await tx.dispatchDocumentCommandResult.findUnique({ where: { scope_scopeId_idempotencyKey: {
-          scope: 'CANDIDATE', scopeId: candidate.id, idempotencyKey } } });
-        if (prior) {
-          const envelope = prior.result as { intentFingerprint?: string; value?: { artifactId?: string } };
-          if (prior.command !== 'ACCEPT_AND_ISSUE' || envelope.intentFingerprint !== fingerprint) throw new Error('IDEMPOTENCY_INTENT_CONFLICT');
-          return envelope.value!;
-        }
-        await verifyDispatchArtifactStorageUnderLock({ transaction: tx, storage, artifacts: [artifact] });
-        await tx.dispatchDocumentArtifact.create({ data: artifact });
-        const value = { artifactId: artifact.id };
-        await tx.dispatchDocumentCommandResult.create({ data: { scope: 'CANDIDATE', scopeId: candidate.id,
-          idempotencyKey, command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED', result: { intentFingerprint: fingerprint, value },
-          actorId: actor, correlationId: actor, completedAt: new Date() } });
-        await tx.dispatchLifecycleAudit.create({ data: { id: `issuance-audit-${database.runId}`,
-          aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id, eventType: 'CONCURRENCY_PRIMARY_BUNDLE_ISSUED',
-          payload: { idempotencyKey, artifactId: artifact.id }, actorId: actor,
-          eventHash: createHash('sha256').update(`${database.runId}:issuance`).digest('hex') } });
-        return value;
-      } });
-    const sameKey = await Promise.all([issue(first, `${fixture.actorId}-issue-a`, operationKey, intentFingerprint, true),
-      issue(second, `${fixture.actorId}-issue-b`, operationKey, intentFingerprint, true)]);
-    assert.deepEqual(sameKey[0], sameKey[1], 'same-key retry replays the exact persisted issuance result');
-    const unknownResponseReplay = await issue(first, `${fixture.actorId}-unknown-response-retry`, operationKey, intentFingerprint);
-    assert.deepEqual(unknownResponseReplay, sameKey[0]);
-    assert.equal(await observer.dispatchDocumentArtifact.count({ where: { id: artifact.id } }), 1);
-    assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id,
-      idempotencyKey: operationKey } }), 1);
-    assert.equal(await observer.dispatchLifecycleAudit.count({ where: { eventType: 'CONCURRENCY_PRIMARY_BUNDLE_ISSUED',
-      aggregateId: waybill.id } }), 1);
-    await assert.rejects(() => issue(second, `${fixture.actorId}-different-key`, `${operationKey}-different`,
-      createHash('sha256').update(`${candidate.id}:different-intent`).digest('hex')),
-    error => (error as { code?: string }).code === 'P2002' || /unique constraint/i.test(String(error)));
-    assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id,
-      idempotencyKey: `${operationKey}-different` } }), 0, 'different-key duplicate bundle leaves no partial command result');
-    results.push({ name: 'issuance-idempotency-artifact-commit-retry', repetitions: 1, anomalies: [] });
-
-    const adjustmentStarted = performance.now();
-    trace.record({ scenario: 'concurrent-correction-adjustment-sequence-posting', actor: 'issue262-production-seam',
-      phase: 'two-connection-run', outcome: 'started', detail: { databaseName: database.databaseName } });
     const adjustmentRun = spawnSync(process.execPath, [
       path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
       path.resolve(process.cwd(), 'src', 'services', '__tests__', 'statementAdjustmentPrisma.test.ts'),
     ], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000, env: {
       ...process.env, DATABASE_URL: database.databaseUrl, ISSUE262_TWO_CONNECTION_RACE: '1',
+      ISSUE260_PARENT_RUN_ID: database.runId,
+      ISSUE260_PARENT_DATABASE_NAME: database.databaseName,
     } });
     assert.equal(adjustmentRun.error, undefined,
       `statement adjustment production-seam subprocess failed: ${adjustmentRun.error?.message || ''}`);
@@ -233,26 +233,31 @@ const run = async () => {
       `statement adjustment production-seam subprocess timed out or was killed: ${adjustmentRun.signal || ''}`);
     assert.equal(adjustmentRun.status, 0,
       `statement adjustment production-seam subprocess failed\n${adjustmentRun.stdout}\n${adjustmentRun.stderr}`);
-    const adjustmentProof = adjustmentRun.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
-      .map(line => { try { return JSON.parse(line) as Record<string, unknown>; } catch { return null; } })
-      .find(line => line?.kind === 'issue260-statement-adjustment-concurrency-proof');
-    assert.ok(adjustmentProof, `statement adjustment proof was not emitted\n${adjustmentRun.stdout}`);
-    assert.deepEqual(adjustmentProof.scenarios, ['concurrent-correction-adjustment-sequence-posting',
-      'verified-return-vs-reship-final-remainder-attribution']);
+    const adjustmentProof = exactChildProof(adjustmentRun.stdout, { kind: 'issue260-statement-adjustment-concurrency-proof',
+      parentRunId: database.runId, databaseName: database.databaseName,
+      parentDatabaseName: database.databaseName,
+      scenarios: ['competing-correction-adjustment-sequences',
+        'return-correction-vs-reshipment-final-remainder'], events: [
+        { scenario: 'competing-correction-adjustment-sequences', actor: 'correction-post-1', phase: 'sequence-allocation' },
+        { scenario: 'competing-correction-adjustment-sequences', actor: 'correction-post-2', phase: 'sequence-allocation' },
+        { scenario: 'return-correction-vs-reshipment-final-remainder', actor: 'guard-return-post', phase: 'final-remainder-attribution' },
+        { scenario: 'return-correction-vs-reshipment-final-remainder', actor: 'reship-post', phase: 'final-remainder-attribution' },
+      ] });
     assert.deepEqual(adjustmentProof.sequenceRange, [4, 7]);
     assert.equal(adjustmentProof.artifactCount, 4);
     assert.equal(adjustmentProof.zeroNetQuantity, '0.000');
     assert.equal(adjustmentProof.zeroNetAmount, '0.000000000000');
-    const adjustmentDurationMs = Number((performance.now() - adjustmentStarted).toFixed(3));
-    trace.record({ scenario: 'concurrent-correction-adjustment-sequence-posting', actor: 'issue262-production-seam',
-      phase: 'two-connection-run', outcome: 'committed', detail: { ...adjustmentProof, durationMs: adjustmentDurationMs } });
-    trace.record({ scenario: 'verified-return-vs-reship-final-remainder-attribution', actor: 'issue262-production-seam',
-      phase: 'return-reship-settled', outcome: 'zero-anomaly', detail: { ...adjustmentProof, durationMs: adjustmentDurationMs } });
-    results.push({ name: 'concurrent-correction-adjustment-sequence-posting', repetitions: 1, anomalies: [],
-      durationMs: adjustmentDurationMs });
-    results.push({ name: 'verified-return-vs-reship-final-remainder-attribution', repetitions: 1, anomalies: [],
-      durationMs: adjustmentDurationMs });
+    mergeChildProof(adjustmentProof, trace, results);
 
+    assert.equal(results.length, 10, 'the issue260 release gate must retain exactly the ten canonical requirements');
+    assert.deepEqual([...results.map(result => result.name)].sort(), [
+      'accept-vs-reject-or-stale-successor', 'artifact-write-or-database-commit-failure',
+      'competing-correction-adjustment-sequences', 'competing-finalizations-scale-twelve-remainder',
+      'financial-approval-vs-logistics-finalization', 'pricing-replacement-vs-accounting-acceptance',
+      'retry-after-serialization-deadlock-timeout-or-unknown-response',
+      'return-correction-vs-reshipment-final-remainder', 'same-different-idempotency-keys-for-issuance',
+      'void-replace-vs-guard-exit',
+    ].sort());
     const report = await trace.finish(results);
     assert.equal(report.summary.status, 'ZERO_ANOMALIES');
     console.log(JSON.stringify({ runId: database.runId, tracePath: report.tracePath, summaryPath: report.summaryPath,

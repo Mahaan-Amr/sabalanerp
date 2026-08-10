@@ -3,12 +3,25 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { TwoPartyBarrier, ConcurrencyBarrierTimeoutError } from './barrier';
-import { assertTemporaryConcurrencyDatabaseName, temporaryDatabaseUrl } from './database';
+import { assertSabalanerpLocalPostgresTarget, assertTemporaryConcurrencyDatabaseName, temporaryDatabaseUrl } from './database';
 import { ConcurrencyTrace } from './trace';
 import { isRetryableConcurrencyError } from './retry';
 import { assertStatementAdjustmentRaceEvidence } from './statementAdjustmentEvidence';
+import { resolveEffectiveNarrowAuthority } from '../../narrowFeatureAccess';
 
 const run = async () => {
+  const permission = { isActive: true, expiresAt: null, permissionLevel: 'edit' };
+  const authorityPrisma = { user: { findUnique: async () => ({ id: 'guard', role: 'USER', isActive: true }) },
+    featurePermission: { findUnique: async () => permission }, roleFeaturePermission: { findUnique: async () => null },
+    workspacePermission: { findUnique: async () => permission }, roleWorkspacePermission: { findUnique: async () => null } } as any;
+  assert.deepEqual(await resolveEffectiveNarrowAuthority(authorityPrisma, { userId: 'guard', workspace: 'security',
+    feature: 'security_dispatch_confirmation_approve', requiredPermission: 'edit' }), {
+    actorRole: 'USER', workspace: 'security', workspacePermission: 'edit',
+    feature: 'security_dispatch_confirmation_approve', featurePermission: 'edit',
+  });
+  await assert.rejects(resolveEffectiveNarrowAuthority({ ...authorityPrisma,
+    user: { findUnique: async () => ({ id: 'guard', role: 'USER', isActive: false }) } }, { userId: 'guard',
+    workspace: 'security', feature: 'security_dispatch_confirmation_approve', requiredPermission: 'edit' }), /active actor/i);
   const barrier = new TwoPartyBarrier('pricing-head-locked', 1000);
   const order: string[] = [];
   await Promise.all([
@@ -28,6 +41,14 @@ const run = async () => {
   'postgresql://postgres:secret@127.0.0.1:55432/sabalanerp_concurrency_0123456789abcdef?schema=public');
   assert.throws(() => temporaryDatabaseUrl('postgresql://postgres:secret@example.com:5432/production',
     'sabalanerp_concurrency_0123456789abcdef'));
+  assert.deepEqual(assertSabalanerpLocalPostgresTarget(JSON.stringify([{ Project: 'sabalanerp-local', Service: 'postgres',
+    State: 'running', Health: 'healthy', Name: 'sabalanerp-local-postgres-1' }])), {
+    project: 'sabalanerp-local', service: 'postgres', container: 'sabalanerp-local-postgres-1',
+  });
+  assert.throws(() => assertSabalanerpLocalPostgresTarget(JSON.stringify([{ Project: 'other', Service: 'postgres',
+    State: 'running', Health: 'healthy', Name: 'other-postgres-1' }])), /refusing docker target/i);
+  assert.throws(() => assertSabalanerpLocalPostgresTarget(JSON.stringify([{ Project: 'sabalanerp-local', Service: 'postgres',
+    State: 'running', Health: 'unhealthy', Name: 'sabalanerp-local-postgres-1' }])), /verified healthy/i);
   assert.equal(isRetryableConcurrencyError({ code: 'P2010', meta: { code: '40001' } }), true);
   assert.equal(isRetryableConcurrencyError({ code: 'P2010', meta: { code: '40P01' } }), true);
   assert.equal(isRetryableConcurrencyError({ code: 'P2002' }), false);

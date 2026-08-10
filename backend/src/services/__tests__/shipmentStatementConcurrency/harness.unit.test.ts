@@ -8,6 +8,7 @@ import { ConcurrencyTrace } from './trace';
 import { isRetryableConcurrencyError } from './retry';
 import { assertStatementAdjustmentRaceEvidence } from './statementAdjustmentEvidence';
 import { resolveEffectiveNarrowAuthority } from '../../narrowFeatureAccess';
+import { FEATURES } from '../../../middleware/feature';
 
 const run = async () => {
   const permission = { isActive: true, expiresAt: null, permissionLevel: 'edit' };
@@ -18,6 +19,13 @@ const run = async () => {
     feature: 'security_dispatch_confirmation_approve', requiredPermission: 'edit' }), {
     actorRole: 'USER', workspace: 'security', workspacePermission: 'edit',
     feature: 'security_dispatch_confirmation_approve', featurePermission: 'edit',
+  });
+  const accountingAuthorityPrisma = { ...authorityPrisma,
+    workspacePermission: { findUnique: async () => ({ ...permission, permissionLevel: 'admin' }) } };
+  assert.deepEqual(await resolveEffectiveNarrowAuthority(accountingAuthorityPrisma, { userId: 'guard',
+    workspace: 'accounting', feature: FEATURES.ACCOUNTING_ACTIONS_MANAGE, requiredPermission: 'edit' }), {
+    actorRole: 'USER', workspace: 'accounting', workspacePermission: 'admin',
+    feature: FEATURES.ACCOUNTING_ACTIONS_MANAGE, featurePermission: 'admin',
   });
   await assert.rejects(resolveEffectiveNarrowAuthority({ ...authorityPrisma,
     user: { findUnique: async () => ({ id: 'guard', role: 'USER', isActive: false }) } }, { userId: 'guard',

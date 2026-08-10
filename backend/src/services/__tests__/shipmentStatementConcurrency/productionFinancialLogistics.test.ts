@@ -107,6 +107,8 @@ const run = async () => {
   };
   const secondInvoiceId = await cloneInvoice();
   const firstRace = await coordinatedApproval({ ...approvalBase, invoiceId: secondInvoiceId,
+    idempotencyKey: `issue260-approve-v2-${randomUUID()}`,
+    correlationId: `issue260-approval-v2-correlation-${randomUUID()}`,
     systemInvoiceNumber: invoiceNumber() }, actor, finalize);
   assert.equal(firstRace[0].status, 'fulfilled', 'production financial replacement must commit');
   assert.equal(firstRace[1].status, 'fulfilled',
@@ -159,6 +161,8 @@ const run = async () => {
     intentFingerprint: createHash('sha256').update(`pricing-accept-${revision.id}`).digest('hex') });
   const thirdInvoiceId = await cloneInvoice();
   const secondRace = await coordinatedApproval({ ...approvalBase, invoiceId: thirdInvoiceId,
+    idempotencyKey: `issue260-approve-v3-${randomUUID()}`,
+    correlationId: `issue260-approval-v3-correlation-${randomUUID()}`,
     systemInvoiceNumber: invoiceNumber() }, actor, accept);
   assert.equal(secondRace[0].status, 'fulfilled');
   if (secondRace[1].status === 'rejected') {

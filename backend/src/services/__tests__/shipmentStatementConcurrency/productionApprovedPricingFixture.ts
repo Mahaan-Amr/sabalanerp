@@ -3,6 +3,8 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { parseCanonicalProductGraph, projectCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { executeAccountingAction } from '../../accountingService';
 import { productQuantityPolicy } from '../../approvedPricing';
+import { FEATURES } from '../../../middleware/feature';
+import { createAuthorizedActorFixture } from './authorityFixture';
 
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value)
@@ -82,8 +84,9 @@ export const createProductionApprovedPricingFixture = async (prisma: PrismaClien
     productGraphState: { create: { schemaVersion: graph.schemaVersion, revision: graph.revision, graph: json(graph),
       policySnapshot: json(graph.calculationPolicy), inputHash: graphHash, resultHash: graphHash,
       totalAmountToman: new Prisma.Decimal(amount) } } }, include: { customer: true, items: true } });
-  const actorUser = await prisma.user.findUniqueOrThrow({ where: { id: contract.createdBy }, select: { id: true, role: true } });
-  const actor = { userId: actorUser.id, role: actorUser.role };
+  const accounting = await createAuthorizedActorFixture(prisma, { runId: input.runId, workspace: 'accounting',
+    feature: FEATURES.ACCOUNTING_ACTIONS_MANAGE, workspacePermission: 'admin' });
+  const actor = { userId: accounting.actor.id, role: accounting.actor.role, effectiveAuthority: accounting.authority };
   const created = await executeAccountingAction({ kind: 'CREATE_INVOICE', contractId: contract.id,
     mode: 'FROM_CONTRACT_TOTAL', idempotencyKey: `issue260-create-${input.runId}-${randomUUID()}` }, actor);
   const invoiceId = String((record(created.affected).financialRecordIds as unknown[])?.[0] || '');
@@ -91,6 +94,8 @@ export const createProductionApprovedPricingFixture = async (prisma: PrismaClien
   const approvalBase = { kind: 'APPROVE_FINANCIAL_INVOICE' as const,
     systemInvoiceDate: new Date().toISOString().slice(0, 10), sepidarAmount: invoice.amount.toString() };
   await executeAccountingAction({ ...approvalBase, invoiceId: invoice.id,
+    idempotencyKey: `issue260-approve-${input.runId}-${randomUUID()}`,
+    correlationId: `issue260-approval-correlation-${input.runId}-${randomUUID()}`,
     systemInvoiceNumber: `260${Date.now()}${Math.floor(Math.random() * 10_000)}` }, actor);
   const head = await prisma.contractApprovedPricingHead.findUniqueOrThrow({ where: { contractId: contract.id },
     include: { currentVersion: { include: { rows: true } } } });

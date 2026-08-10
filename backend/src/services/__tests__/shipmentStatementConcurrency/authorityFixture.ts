@@ -3,13 +3,15 @@ import type { PrismaClient } from '@prisma/client';
 import { resolveEffectiveNarrowAuthority } from '../../narrowFeatureAccess';
 
 export const createAuthorizedActorFixture = async (prisma: PrismaClient, input: {
-  runId: string; workspace: 'security' | 'logistics'; feature: string; withSecurityPersonnel?: boolean;
+  runId: string; workspace: 'security' | 'logistics' | 'accounting'; feature: string;
+  workspacePermission?: 'edit' | 'admin'; withSecurityPersonnel?: boolean;
 }) => {
   const id = randomUUID();
   const actor = await prisma.user.create({ data: { id, email: `${input.workspace}-${id}@issue260.invalid`,
     username: `issue260-${input.workspace}-${id}`, password: 'test-only-not-a-login', firstName: 'Issue260',
     lastName: input.workspace, role: 'USER', isActive: true,
-    workspacePermissions: { create: { workspace: input.workspace, permissionLevel: 'edit', isActive: true } },
+    workspacePermissions: { create: { workspace: input.workspace,
+      permissionLevel: input.workspacePermission || 'edit', isActive: true } },
     featurePermissions: { create: { workspace: input.workspace, feature: input.feature,
       permissionLevel: 'edit', isActive: true } } } });
   if (input.withSecurityPersonnel) {

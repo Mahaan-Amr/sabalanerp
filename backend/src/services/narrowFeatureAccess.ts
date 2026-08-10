@@ -31,6 +31,8 @@ type NarrowAccessPrisma = Pick<PrismaClient,
   'featurePermission' | 'roleFeaturePermission' | 'workspacePermission' | 'roleWorkspacePermission'
 >;
 
+type NarrowAuthorityPrisma = NarrowAccessPrisma & Pick<PrismaClient, 'user'>;
+
 export const resolveNarrowFeatureAccess = async (prisma: NarrowAccessPrisma, input: {
   userId: string; role: string; workspace: string; feature: string; requiredPermission: NarrowPermissionLevel;
 }, at = new Date()) => {
@@ -41,5 +43,17 @@ export const resolveNarrowFeatureAccess = async (prisma: NarrowAccessPrisma, inp
     prisma.roleWorkspacePermission.findUnique({ where: { role_workspace: { role: input.role, workspace: input.workspace } } }),
   ]);
   return evaluateNarrowFeatureAccess({ role: input.role, requiredPermission: input.requiredPermission, userFeature, roleFeature, userWorkspace, roleWorkspace }, at);
+};
+
+export const resolveEffectiveNarrowAuthority = async (prisma: NarrowAuthorityPrisma, input: {
+  userId: string; workspace: string; feature: string; requiredPermission: NarrowPermissionLevel;
+}, at = new Date()) => {
+  const actor = await prisma.user.findUnique({ where: { id: input.userId }, select: { id: true, role: true, isActive: true } });
+  if (!actor?.isActive) throw new Error('Effective authority requires an active actor.');
+  const access = await resolveNarrowFeatureAccess(prisma, { userId: actor.id, role: actor.role,
+    workspace: input.workspace, feature: input.feature, requiredPermission: input.requiredPermission }, at);
+  if (!access.allowed || !access.permissionLevel) throw new Error('Actor lacks current narrow feature authority.');
+  return { actorRole: actor.role, workspace: input.workspace, workspacePermission: access.permissionLevel,
+    feature: input.feature, featurePermission: access.permissionLevel } as const;
 };
 import type { PrismaClient } from '@prisma/client';

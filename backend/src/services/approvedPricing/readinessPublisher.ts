@@ -18,13 +18,13 @@ const stable = (value: unknown): unknown => {
 export const approvedPricingReadinessHash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 
-export const publishCurrentApprovedPricingReadiness = (
-  prisma: PrismaClient,
+export const publishCurrentApprovedPricingReadinessWithinTransaction = (
+  tx: Prisma.TransactionClient,
   input: { contractId: string; pricingVersionId: string; sourceFinancialRecordId: string; evaluatedBy: string },
-) => prisma.$transaction(async tx => {
+) => (async () => {
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" = ${input.contractId} FOR UPDATE`);
   await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',
     `APPROVED_PRICING_HEAD:${input.contractId}`);
-  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" = ${input.contractId} FOR UPDATE`);
   const head = await tx.contractApprovedPricingHead.findUnique({ where: { contractId: input.contractId },
     include: { currentVersion: { include: persistedApprovedPricingInclude } } });
   if (!head || head.currentVersionId !== input.pricingVersionId
@@ -66,4 +66,10 @@ export const publishCurrentApprovedPricingReadiness = (
     status: PricingReadinessStatus.READY, sourceCount: 1, sourceIdentityHash,
     quantityTotal: evidence.quantityTotal, amountTotal: evidence.amountTotal, evidenceHash,
     evaluatedBy: input.evaluatedBy } });
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+})();
+
+export const publishCurrentApprovedPricingReadiness = (
+  prisma: PrismaClient,
+  input: { contractId: string; pricingVersionId: string; sourceFinancialRecordId: string; evaluatedBy: string },
+) => prisma.$transaction(tx => publishCurrentApprovedPricingReadinessWithinTransaction(tx, input),
+  { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });

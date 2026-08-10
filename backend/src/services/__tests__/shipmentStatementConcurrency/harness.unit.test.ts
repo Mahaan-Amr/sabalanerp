@@ -7,8 +7,21 @@ import { assertSabalanerpLocalPostgresTarget, assertTemporaryConcurrencyDatabase
 import { ConcurrencyTrace } from './trace';
 import { isRetryableConcurrencyError } from './retry';
 import { assertStatementAdjustmentRaceEvidence } from './statementAdjustmentEvidence';
+import { resolveEffectiveNarrowAuthority } from '../../narrowFeatureAccess';
 
 const run = async () => {
+  const permission = { isActive: true, expiresAt: null, permissionLevel: 'edit' };
+  const authorityPrisma = { user: { findUnique: async () => ({ id: 'guard', role: 'USER', isActive: true }) },
+    featurePermission: { findUnique: async () => permission }, roleFeaturePermission: { findUnique: async () => null },
+    workspacePermission: { findUnique: async () => permission }, roleWorkspacePermission: { findUnique: async () => null } } as any;
+  assert.deepEqual(await resolveEffectiveNarrowAuthority(authorityPrisma, { userId: 'guard', workspace: 'security',
+    feature: 'security_dispatch_confirmation_approve', requiredPermission: 'edit' }), {
+    actorRole: 'USER', workspace: 'security', workspacePermission: 'edit',
+    feature: 'security_dispatch_confirmation_approve', featurePermission: 'edit',
+  });
+  await assert.rejects(resolveEffectiveNarrowAuthority({ ...authorityPrisma,
+    user: { findUnique: async () => ({ id: 'guard', role: 'USER', isActive: false }) } }, { userId: 'guard',
+    workspace: 'security', feature: 'security_dispatch_confirmation_approve', requiredPermission: 'edit' }), /active actor/i);
   const barrier = new TwoPartyBarrier('pricing-head-locked', 1000);
   const order: string[] = [];
   await Promise.all([

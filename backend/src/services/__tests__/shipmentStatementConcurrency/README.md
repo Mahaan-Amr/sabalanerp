@@ -15,18 +15,17 @@ npm run test:shipment-statement-concurrency:db
 ```
 
 The DB command runs three independent snapshots. Every scenario uses at least two real connections and PostgreSQL
-`SERIALIZABLE` transactions. The current suite covers:
+`SERIALIZABLE` transactions. Its machine-readable summary preserves the ten canonical Issue 260 requirements:
 
 - competing Logistics finalizations and one exact scale-twelve final remainder;
-- production financial approval versus `finalizeCanonicalLoadingAllocations`: version 1 has no READY evidence and
-  finalization leaves no writes; replacement version 2 is published READY only after commit and a fresh finalization
-  binds exactly that version;
+- production financial approval versus `finalizeCanonicalLoadingAllocations`: sealing and READY publication commit
+  atomically in the Financial owner transaction, while Logistics waits and binds exactly the committed head;
 - production financial replacement versus Accounting acceptance with the real source reader and integrity verifier;
-- an intentionally injected `40P01` deadlock followed by deterministic lock-order retry;
+- real `40001` serialization failure, `40P01` deadlock, and `55P03` lock timeout followed by deterministic retries;
 - production candidate acceptance versus rejection/successor disposition;
 - production document replacement versus `PhysicalGateExitService.recordExit`;
-- production same-key issuance replay, different-key duplicate conflict, artifact-failure rollback, storage-key locking,
-  and retry after an injected unknown response that occurs after the durable commit;
+- production same-key issuance replay, different-key duplicate conflict, separate artifact-write and pre-commit database
+  failure rollback evidence, storage-key locking, and retry after an injected unknown response following durable commit;
 - concurrent correction posting through the production issue262 command, with adjacent immutable statement-adjustment
   sequences, distinct verified artifacts, exact command results, and exact lifecycle audits;
 - a verified Guard return racing a reship on the same stable row, including deterministic retry when the reship

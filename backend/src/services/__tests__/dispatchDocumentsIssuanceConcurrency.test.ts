@@ -7,6 +7,7 @@ import { DispatchDocumentConflictError } from '../dispatchDocuments/service';
 import { DispatchConfirmationService } from '../dispatchConfirmation';
 import { PhysicalGateExitService } from '../physicalGateExit';
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
+import { createAuthorizedActorFixture } from './shipmentStatementConcurrency/authorityFixture';
 
 const countSourceEvidence = async (prisma: PrismaClient) => ({
   candidates: await prisma.accountingDispatchCandidate.count(),
@@ -131,6 +132,18 @@ const run = async () => {
     assert.equal(await observer.dispatchDocumentArtifact.count({ where: { waybillId } }), 0);
     assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id } }), 0);
 
+    const databaseCommitFailure = new Error('injected database commit boundary failure');
+    const commitFailingClient = new Proxy(firstRaw, { get(target, property, receiver) {
+      if (property !== '$transaction') return Reflect.get(target, property, receiver);
+      return (work: (tx: Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]) => Promise<unknown>, options?: unknown) =>
+        target.$transaction(async tx => { await work(tx); throw databaseCommitFailure; }, options as never);
+    } }) as PrismaClient;
+    const commitFailingRepository = new PrismaDispatchDocumentRepository(commitFailingClient, verifier, storage);
+    await assert.rejects(() => commitFailingRepository.acceptAndIssue(input), error => error === databaseCommitFailure);
+    assert.equal(await observer.accountingDispatchWaybill.count({ where: { candidateId: candidate.id } }), 0);
+    assert.equal(await observer.dispatchDocumentArtifact.count({ where: { waybillId } }), 0);
+    assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id } }), 0);
+
     const unknownResponse = new Error('injected unknown response after durable issuance commit');
     let firstCommittedResult: Awaited<ReturnType<typeof first.acceptAndIssue>> | undefined;
     const results = await Promise.allSettled([
@@ -185,7 +198,9 @@ const run = async () => {
       workstationId: `issue260-${database.runId}` });
     assert.match(deliveredOtp, /^\d{6}$/);
     await confirmation.verifyOtp({ sessionId: session.id, code: deliveredOtp, actorId: actor.id });
-    const guard = await observer.user.findFirstOrThrow({ where: { isActive: true, id: { not: actor.id } }, select: { id: true } });
+    const { actor: guard, authority: guardAuthority } = await createAuthorizedActorFixture(observer, {
+      runId: database.runId, workspace: 'security', feature: 'security_dispatch_confirmation_approve',
+      withSecurityPersonnel: true });
     const authorization = await confirmation.approveByGuard({ sessionId: session.id, guardActorId: guard.id,
       reauthenticatedAt: new Date(), reason: 'Issue 260 production lifecycle race' });
     const predecessor = await observer.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybillId },
@@ -207,7 +222,7 @@ const run = async () => {
     const exitService = new PhysicalGateExitService(firstRaw, { now: () => new Date() });
     const lifecycleResults = await Promise.allSettled([
       exitService.recordExit({ authorizationId: authorization.id, actorId: guard.id,
-        effectiveAuthority: { actorRole: 'SECURITY', workspace: 'security' } }),
+        effectiveAuthority: guardAuthority }),
       second.replaceWaybill(replacementInput),
     ]);
     assert.equal(lifecycleResults.filter(result => result.status === 'fulfilled').length, 1,
@@ -225,24 +240,36 @@ const run = async () => {
     console.log(JSON.stringify({ kind: 'issue260-production-issuance-concurrency-proof', runId: database.runId,
       schemaVersion: 1, parentRunId: process.env.ISSUE260_PARENT_RUN_ID,
       parentDatabaseName: process.env.ISSUE260_PARENT_DATABASE_NAME, databaseName: database.databaseName,
-      scenarios: ['accept-vs-reject-or-successor', 'issuance-idempotency-artifact-commit-retry',
-        'void-or-replace-vs-guard-exit'].map(name => ({ name, repetitions: 1, anomalies: [] })),
+      scenarios: ['accept-vs-reject-or-stale-successor', 'same-different-idempotency-keys-for-issuance',
+        'void-replace-vs-guard-exit', 'artifact-write-or-database-commit-failure',
+        'retry-after-serialization-deadlock-timeout-or-unknown-response']
+        .map(name => ({ name, repetitions: 1, anomalies: [], durationMs: proofDurationMs })),
       events: [
-        { scenario: 'accept-vs-reject-or-successor', actor: 'accounting-accept', phase: 'candidate-decision',
+        { scenario: 'accept-vs-reject-or-stale-successor', actor: 'accounting-accept', phase: 'candidate-decision',
           outcome: 'winner', detail: { attempt: 1, durationMs: proofDurationMs, databaseCode: null } },
-        { scenario: 'accept-vs-reject-or-successor', actor: 'accounting-reject', phase: 'candidate-decision',
+        { scenario: 'accept-vs-reject-or-stale-successor', actor: 'accounting-reject', phase: 'candidate-decision',
           outcome: 'loser', detail: { attempt: 1, durationMs: proofDurationMs, databaseCode: null } },
-        { scenario: 'issuance-idempotency-artifact-commit-retry', actor: 'same-idempotency-key-callers',
+        { scenario: 'same-different-idempotency-keys-for-issuance', actor: 'same-idempotency-key-callers',
           phase: 'commit-and-replay', outcome: 'winner-and-replay', detail: { attempt: 1, durationMs: proofDurationMs, databaseCode: runnerErrorCode } },
-        { scenario: 'void-or-replace-vs-guard-exit', actor: exit ? 'guard-exit' : 'accounting-replacement',
+        { scenario: 'same-different-idempotency-keys-for-issuance', actor: 'different-idempotency-key-caller',
+          phase: 'duplicate-claim', outcome: 'loser-conflict', detail: { attempt: 1, durationMs: proofDurationMs, databaseCode: null } },
+        { scenario: 'void-replace-vs-guard-exit', actor: exit ? 'guard-exit' : 'accounting-replacement',
           phase: 'lifecycle-lock', outcome: 'winner', detail: { attempt: 1, durationMs: proofDurationMs, databaseCode: null } },
-        { scenario: 'void-or-replace-vs-guard-exit', actor: exit ? 'accounting-replacement' : 'guard-exit',
+        { scenario: 'void-replace-vs-guard-exit', actor: exit ? 'accounting-replacement' : 'guard-exit',
           phase: 'lifecycle-lock', outcome: 'loser', detail: { attempt: 1, durationMs: proofDurationMs, databaseCode: null } },
+        { scenario: 'artifact-write-or-database-commit-failure', actor: 'artifact-reader', phase: 'artifact-write',
+          outcome: 'rolled-back', detail: { attempt: 1, durationMs: proofDurationMs, databaseCode: null } },
+        { scenario: 'artifact-write-or-database-commit-failure', actor: 'database-commit-boundary', phase: 'database-commit',
+          outcome: 'rolled-back', detail: { attempt: 1, durationMs: proofDurationMs, databaseCode: 'INJECTED_COMMIT_FAILURE' } },
+        { scenario: 'retry-after-serialization-deadlock-timeout-or-unknown-response', actor: 'unknown-response-caller',
+          phase: 'retry-after-unknown-response', outcome: 'replayed-durable-result',
+          detail: { attempt: 2, durationMs: proofDurationMs, databaseCode: null } },
       ],
       observedTransactionErrors: [...firstErrors, ...secondErrors], issuedWaybills: 1, issuedArtifacts: 2,
       commandResults: 1, issuanceAudits: 1, artifactFailureRolledBack: true,
       decisionWinner: 'ACCEPTED', decisionCommandResults: 1,
-      lifecycleWinner: exit ? 'GUARD_EXIT' : 'REPLACEMENT', unknownResponseInjectedAfterCommit: true }));
+      lifecycleWinner: exit ? 'GUARD_EXIT' : 'REPLACEMENT',
+      databaseCommitFailureRolledBack: true, unknownResponseInjectedAfterCommit: true }));
   } finally {
     await Promise.all([firstRaw.$disconnect(), secondRaw.$disconnect(), observer.$disconnect()]);
     await database.cleanup();

@@ -30,7 +30,7 @@ export const runSerializableWithRetry = async <T>(input: {
         timeout: 30_000,
       });
       input.trace.record({ scenario: input.scenario, actor: input.actor, phase: 'transaction', outcome: 'committed',
-        detail: { attempt, durationMs: Number((performance.now() - started).toFixed(3)) } });
+        detail: { attempt, durationMs: Number((performance.now() - started).toFixed(3)), databaseCode: null } });
       return value;
     } catch (error) {
       lastError = error;

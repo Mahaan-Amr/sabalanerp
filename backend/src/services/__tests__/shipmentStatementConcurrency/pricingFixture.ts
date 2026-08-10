@@ -1,59 +1,99 @@
-import { randomUUID } from 'node:crypto';
-import { Prisma, type PrismaClient } from '@prisma/client';
-import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from '../../approvedPricing';
-import { publishCurrentApprovedPricingReadiness } from '../../approvedPricing';
+import { createHash, randomUUID } from 'node:crypto';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { GuardDriverQueueTurnStatus, Prisma, type LogisticsLoading, type PrismaClient } from '@prisma/client';
+import { createAuthorizedActorFixture } from './authorityFixture';
+import { createProductionApprovedPricingFixture } from './productionApprovedPricingFixture';
 
-export const createConcurrentPricingFixture = async (client: PrismaClient, runId: string) => {
-  const groups = await client.$queryRawUnsafe<Array<{ itemId: string; unit: string; productRowId: string; count: bigint }>>(`
-    SELECT "sourceContractItemId" AS "itemId", "unit", "productRowId", count(*) AS "count"
-    FROM "logistics_allocation_revision_lines"
-    GROUP BY "sourceContractItemId", "unit", "productRowId"
-    HAVING count(*) >= 2
-    ORDER BY count(*) DESC, "sourceContractItemId"
-    LIMIT 1`);
-  if (!groups[0]) throw new Error('Concurrency fixture requires two finalized allocation lines for one stable contract item.');
-  const item = await client.contractItem.findUniqueOrThrow({ where: { id: groups[0].itemId } });
-  const lines = await client.logisticsAllocationRevisionLine.findMany({ where: { sourceContractItemId: item.id,
-    unit: groups[0].unit, productRowId: groups[0].productRowId }, include: { revision: true }, orderBy: { id: 'asc' }, take: 2 });
-  if (lines.length !== 2 || !item.productRowId) throw new Error('Stable concurrency pricing fixture is incomplete.');
-  const contractedQuantity = lines.reduce((sum, line) => sum.add(line.quantity), new Prisma.Decimal(0)).toFixed(3);
-  const actorId = `concurrency-${runId}`;
-  const financialRecordId = `concurrency-financial-${runId}`;
-  const versionId = `concurrency-pricing-${runId}`;
-  const rowId = `concurrency-pricing-row-${runId}`;
-  const approvedAt = new Date(Math.max(...lines.map(line => line.revision.finalizedAt.getTime())) - 1_000);
-  const componentEvidence = { discountBasis: '100.000000000000' };
-  const rowHash = approvedPricingRowIntegrityHash({ versionId, contractId: item.contractId,
-    sourceFinancialRecordId: financialRecordId, versionNumber: 1, contractItemId: item.id,
-    productRowId: item.productRowId, ordinal: 1, contractedQuantity, unit: groups[0].unit,
-    canonicalAllInTotal: '100.000000000000', discountEligible: true, componentEvidence });
-  const sourceEvidence = { customer: { id: `customer-${runId}` }, project: { id: `project-${runId}` },
-    destination: { projectId: `project-${runId}`, address: `destination-${runId}` } };
-  const versionHash = approvedPricingVersionIntegrityHash({ id: versionId, contractId: item.contractId,
-    versionNumber: 1, sourceFinancialRecordId: financialRecordId, approvedAt, approvedBy: actorId,
-    schemaVersion: 1, currency: 'IRR', grossAmount: '100.000000000000', discountAmount: '10.000000000000',
-    netAmount: '90.000000000000', sourceEvidence, rowHashes: [rowHash] });
-  await client.accountingFinancialRecord.create({ data: { id: financialRecordId, kind: 'INVOICE_CANDIDATE', status: 'ISSUED',
-    sourceKind: 'SALES_CONTRACT', sourceId: item.contractId, contractId: item.contractId, amount: '90', currency: 'IRR',
-    createdBy: actorId, financiallyApprovedAt: approvedAt, financiallyApprovedBy: actorId } });
-  await client.contractApprovedPricingVersion.create({ data: { id: versionId, contractId: item.contractId, versionNumber: 1,
-    sourceFinancialRecordId: financialRecordId, origin: 'FINANCIAL_APPROVAL', approvedAt, approvedBy: actorId,
-    schemaVersion: 1, currency: 'IRR', grossAmount: '100.000000000000', discountAmount: '10.000000000000',
-    netAmount: '90.000000000000', sourceEvidence, integrityHash: versionHash, rows: { create: { id: rowId,
-      contractItemId: item.id, productRowId: item.productRowId, ordinal: 1, contractedQuantity, unit: groups[0].unit,
-      canonicalAllInTotal: '100.000000000000', discountEligible: true, componentEvidence, integrityHash: rowHash } } } });
-  await client.contractApprovedPricingHead.create({ data: { contractId: item.contractId, currentVersionId: versionId,
-    advancedAt: approvedAt, advancedBy: actorId } });
-  await publishCurrentApprovedPricingReadiness(client, { contractId: item.contractId, pricingVersionId: versionId,
-    sourceFinancialRecordId: financialRecordId, evaluatedBy: actorId });
+const json = (value: unknown) => value as Prisma.InputJsonValue;
+
+export const authorConcurrentPricingFixture = async (client: PrismaClient, runId: string) => {
+  const approved = await createProductionApprovedPricingFixture(client, { runId, quantity: '2', amount: '100' });
+  const logistics = await createAuthorizedActorFixture(client, { runId, workspace: 'logistics',
+    feature: 'logistics_loadings_finalize' });
   const manifest = await client.shipmentStatementMigrationManifest.create({ data: { id: `concurrency-manifest-${runId}`,
-    migrationName: `concurrency-${runId}`, schemaVersion: 1, sourceSchemaHash: 'e'.repeat(64), createdBy: actorId } });
-  const activatedAt = new Date('2000-01-01T00:00:01.000Z');
+    migrationName: `concurrency-${runId}`, schemaVersion: 1, sourceSchemaHash: 'e'.repeat(64), createdBy: logistics.actor.id } });
   await client.shipmentStatementCutover.update({ where: { id: 'customer-shipment-statements' }, data: {
-    enabled: true, cutoverAt: new Date('2000-01-01T00:00:00.000Z'), activatedAt, activatedBy: actorId,
-    manifestId: manifest.id, integrityHash: 'f'.repeat(64) } });
-  return { actorId, item, lines, versionId, rowId, contractedQuantity, sourceEvidence, componentEvidence,
-    scope: { customerId: `customer-${runId}`, projectId: `project-${runId}`, destination: `destination-${runId}` } };
+    enabled: true, cutoverAt: new Date('2000-01-01T00:00:00.000Z'), activatedAt: new Date('2000-01-01T00:00:01.000Z'),
+    activatedBy: logistics.actor.id, manifestId: manifest.id, integrityHash: 'f'.repeat(64) } });
+  const expiresAt = new Date(Date.now() + 86_400_000 * 365);
+  const loadings: LogisticsLoading[] = [];
+  for (let index = 0; index < 2; index += 1) {
+    const driverId = randomUUID();
+    const vehicleId = randomUUID();
+    const loadingId = randomUUID();
+    const queueTurnId = randomUUID();
+    await client.externalDriver.create({ data: { id: driverId, firstName: 'Issue', lastName: `260-${index}`,
+      nationalCode: createHash('sha256').update(driverId).digest('hex').slice(0, 10),
+      phone: `09${createHash('sha256').update(driverId).digest('hex').replace(/[a-f]/g, '1').slice(0, 9)}`,
+      status: 'ACTIVE', statusRecordedBy: logistics.actor.id, createdBy: logistics.actor.id,
+      documents: { create: { documentType: 'DRIVING_LICENCE', reference: `issue260-${driverId}`,
+        expiresAt, recordedBy: logistics.actor.id } } } });
+    await client.externalVehicle.create({ data: { id: vehicleId, vehicleType: 'Issue 260 test vehicle',
+      status: 'ACTIVE', statusRecordedBy: logistics.actor.id, createdBy: logistics.actor.id,
+      plates: { create: { plate: `260-${vehicleId.slice(0, 8)}`, normalizedPlate: `260${vehicleId.replace(/-/g, '').slice(0, 8)}`,
+        effectiveFrom: new Date(), reason: 'Issue 260 isolated concurrency fixture', recordedBy: logistics.actor.id } },
+      documents: { create: { documentType: 'VEHICLE_REGISTRATION', reference: `issue260-${vehicleId}`,
+        expiresAt, recordedBy: logistics.actor.id } } } });
+    const loading = await client.logisticsLoading.create({ data: { id: loadingId,
+      loadingNumber: `ISSUE260-${runId}-${index}`, customerId: approved.contract.customerId, projectId: approved.project.id,
+      status: 'DRAFT', createdBy: logistics.actor.id, lines: { create: { sourceContractId: approved.contract.id,
+        sourceContractItemId: approved.item.id, productRowId: approved.productRowId, productId: approved.productId,
+        quantity: '1.000', unit: approved.pricingRow.unit, sourceSnapshot: json({ issue260: runId }) } } } });
+    await client.guardDriverQueueTurn.create({ data: { id: queueTurnId, driverSource: 'EXTERNAL',
+      status: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING, externalDriverId: driverId, externalVehicleId: vehicleId,
+      admittedAt: new Date(), admittedBy: logistics.actor.id, snapshotSchemaVersion: 1,
+      admissionSnapshot: json({ schemaVersion: 1, externalDriverId: driverId, externalVehicleId: vehicleId }),
+      integrityHash: createHash('sha256').update(`queue:${queueTurnId}`).digest('hex'), loadingId: loading.id,
+      availableAt: new Date(), availableBy: logistics.actor.id, reservedAt: new Date(), reservedBy: logistics.actor.id } });
+    await client.logisticsAllocationDraft.create({ data: { loadingId: loading.id, queueTurnId, createdBy: logistics.actor.id,
+      lines: { create: { sourceContractId: approved.contract.id, sourceContractItemId: approved.item.id,
+        productRowId: approved.productRowId, productId: approved.productId, quantity: '1.000', unit: approved.pricingRow.unit,
+        snapshot: json({ issue260: runId, index }) } } } });
+    loadings.push(loading);
+  }
+  return { actorId: logistics.actor.id, effectiveAuthority: logistics.authority, loadings,
+    versionId: approved.head.currentVersion.id, rowId: approved.pricingRow.id, contractedQuantity: '2.000',
+    expectedGrossAmount: approved.pricingRow.canonicalAllInTotal.toFixed(12),
+    approvedVersionGrossAmount: approved.head.currentVersion.grossAmount.toFixed(12),
+    versionIntegrityHash: approved.head.currentVersion.integrityHash,
+    readinessEvidenceHash: approved.readiness.evidenceHash };
+};
+
+export const createConcurrentPricingFixture = async (client: PrismaClient, runId: string, databaseUrl: string) => {
+  const child = spawnSync(process.execPath, [path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+    path.resolve(process.cwd(), 'src', 'services', '__tests__', 'shipmentStatementConcurrency',
+      'pricingFixtureSetup.test.ts')], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000,
+    env: { ...process.env, DATABASE_URL: databaseUrl, ISSUE260_PARENT_RUN_ID: runId } });
+  assert.equal(child.error, undefined, `production pricing fixture subprocess failed: ${child.error?.message || ''}`);
+  assert.equal(child.signal, null, `production pricing fixture subprocess timed out: ${child.signal || ''}`);
+  assert.equal(child.status, 0, `production pricing fixture subprocess failed\n${child.stdout}\n${child.stderr}`);
+  const proofs = child.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+    try { return JSON.parse(line) as Record<string, any>; } catch { return null; }
+  }).filter((proof): proof is Record<string, any> => proof?.kind === 'issue260-production-pricing-fixture');
+  assert.equal(proofs.length, 1, 'production pricing fixture must emit exactly one proof');
+  const proof = proofs[0];
+  assert.equal(proof.schemaVersion, 1);
+  assert.equal(proof.parentRunId, runId);
+  assert.equal(proof.databaseName, new URL(databaseUrl).pathname.slice(1));
+  assert.deepEqual(proof.loadingIds?.length, 2);
+  assert.match(String(proof.versionIntegrityHash), /^[a-f0-9]{64}$/);
+  assert.match(String(proof.readinessEvidenceHash), /^[a-f0-9]{64}$/);
+  assert.equal(proof.expectedGrossAmount, proof.approvedVersionGrossAmount);
+  const loadings = await client.logisticsLoading.findMany({ where: { id: { in: proof.loadingIds } }, orderBy: { loadingNumber: 'asc' } });
+  assert.equal(loadings.length, 2);
+  const head = await client.contractApprovedPricingHead.findFirstOrThrow({ where: { currentVersionId: proof.versionId },
+    include: { currentVersion: true } });
+  assert.equal(head.currentVersion.integrityHash, proof.versionIntegrityHash);
+  const readiness = await client.contractPricingReadinessResult.findFirstOrThrow({ where: {
+    pricingVersionId: proof.versionId, status: 'READY' }, orderBy: { evaluatedAt: 'desc' } });
+  assert.equal(readiness.evidenceHash, proof.readinessEvidenceHash);
+  return { actorId: String(proof.actorId), effectiveAuthority: proof.effectiveAuthority,
+    loadings, versionId: String(proof.versionId), rowId: String(proof.rowId),
+    contractedQuantity: String(proof.contractedQuantity), expectedGrossAmount: String(proof.expectedGrossAmount),
+    approvedVersionGrossAmount: String(proof.approvedVersionGrossAmount),
+    versionIntegrityHash: String(proof.versionIntegrityHash), readinessEvidenceHash: String(proof.readinessEvidenceHash) };
 };
 
 export type ConcurrentPricingFixture = Awaited<ReturnType<typeof createConcurrentPricingFixture>>;

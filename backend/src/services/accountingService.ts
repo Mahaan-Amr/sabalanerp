@@ -19,7 +19,8 @@ import {
   TaxSubmissionStatus
 } from '@prisma/client';
 import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
-import { lockFinancialApprovalRecord, sealApprovedPricingAtFinancialApproval } from './approvedPricing';
+import { lockFinancialApprovalRecord, publishCurrentApprovedPricingReadinessWithinTransaction,
+  sealApprovedPricingAtFinancialApproval } from './approvedPricing';
 import { captureContractQuantityVersionAtFinancialApproval } from './shipmentQuantityProjectionStore';
 
 const prisma = new PrismaClient();
@@ -1352,11 +1353,14 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       }
     });
 
-    await sealApprovedPricingAtFinancialApproval(tx, updated.id, {
+    const pricingSeal = await sealApprovedPricingAtFinancialApproval(tx, updated.id, {
       reason: String(command.note || 'Financial invoice approval').trim(), correlationId: approvalCorrelationId,
       idempotencyKey: approvalIdempotencyKey,
       effectiveAuthority: approvalAuthorityEvidence,
     });
+    await publishCurrentApprovedPricingReadinessWithinTransaction(tx, { contractId: pricingSeal.version.contractId,
+      pricingVersionId: pricingSeal.version.id, sourceFinancialRecordId: pricingSeal.version.sourceFinancialRecordId,
+      evaluatedBy: actor.userId });
 
     if (updated.contractId) {
       await captureContractQuantityVersionAtFinancialApproval(tx, {

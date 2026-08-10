@@ -7,6 +7,7 @@ import type { ApprovedPricingVersionInsert } from '../approvedPricing/types';
 import { createDispatchCorrection, dispatchLifecycleAuditEventHash, postDispatchCorrection, verifyGuardPhysicalReturn } from '../dispatchCorrectionOutage';
 import { createStatementAdjustmentArtifactPreparer, type DispatchArtifactStorage } from '../dispatchDocuments';
 import { completeGuardInboundMovement, recordGuardInboundMovement } from '../guardInboundMovement';
+import { createAuthorizedActorFixture } from './shipmentStatementConcurrency/authorityFixture';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 import { readShipmentQuantityProjection, shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { assertStatementAdjustmentRaceEvidence } from './shipmentStatementConcurrency/statementAdjustmentEvidence';
@@ -280,13 +281,16 @@ const run = async () => {
   }
   if (runConcurrency) {
     assert.ok(committedFixture, 'temporary DB race fixture must commit before opening independent connections');
+    const { actor: guard, authority: guardAuthority } = await createAuthorizedActorFixture(prisma, {
+      runId: process.env.ISSUE260_PARENT_RUN_ID || randomUUID(), workspace: 'security',
+      feature: 'security_dispatch_confirmation_approve', withSecurityPersonnel: true });
     const inbound = await recordGuardInboundMovement(prisma, { purpose: 'SALES_RETURN',
       loadingId: committedFixture.loadingId, customerId: committedFixture.customerId,
-      occurredAt: new Date(Date.now() - 1_000), actorId: committedFixture.actorId });
+      occurredAt: new Date(Date.now() - 1_000), actorId: guard.id });
     await completeGuardInboundMovement(prisma, { movementId: inbound.id });
     const concurrentReturn = await verifyGuardPhysicalReturn(prisma, { movementId: inbound.id,
-      dispatchEvidenceId: committedFixture.dispatchEvidenceId, quantity: '0.001', actorId: committedFixture.actorId,
-      authority: { actorRole: 'SECURITY', workspace: 'security', workspacePermission: 'EDIT' } });
+      dispatchEvidenceId: committedFixture.dispatchEvidenceId, quantity: '0.001', actorId: guard.id,
+      authority: guardAuthority });
     const returnedAgain = await createDispatchCorrection(prisma, { waybillId: committedFixture.waybillId,
       reason: 'DB concurrent verified return', effectiveAt: concurrentReturn.recordedAt,
       actorId: committedFixture.actorId, authority: committedFixture.authority,
@@ -371,13 +375,14 @@ const run = async () => {
         schemaVersion: 1, parentRunId: process.env.ISSUE260_PARENT_RUN_ID,
         parentDatabaseName: process.env.ISSUE260_PARENT_DATABASE_NAME,
         databaseName: new URL(process.env.DATABASE_URL!).pathname.slice(1),
-        scenarios: ['concurrent-correction-adjustment-sequence-posting',
-          'verified-return-vs-reship-final-remainder-attribution'].map(name => ({ name, repetitions: 1, anomalies: [] })),
+        scenarios: ['competing-correction-adjustment-sequences',
+          'return-correction-vs-reshipment-final-remainder'].map(name => ({ name, repetitions: 1, anomalies: [],
+            durationMs: proofDurationMs })),
         events: [
-          ...sequenceProof.map((proof, index) => ({ scenario: 'concurrent-correction-adjustment-sequence-posting',
+          ...sequenceProof.map((proof, index) => ({ scenario: 'competing-correction-adjustment-sequences',
             actor: `correction-post-${index + 1}`, phase: 'sequence-allocation', outcome: 'committed',
             detail: { attempt: 1, durationMs: proofDurationMs, databaseCode: null, sequence: proof.sequence } })),
-          ...returnProof.map((proof, index) => ({ scenario: 'verified-return-vs-reship-final-remainder-attribution',
+          ...returnProof.map((proof, index) => ({ scenario: 'return-correction-vs-reshipment-final-remainder',
             actor: index === 0 ? 'guard-return-post' : 'reship-post', phase: 'final-remainder-attribution',
             outcome: 'committed', detail: { attempt: index === 1 && reshipRetried ? 2 : 1, durationMs: proofDurationMs,
               databaseCode: null, sequence: proof.sequence } })),

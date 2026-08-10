@@ -5,7 +5,6 @@ const labels: Record<string, string> = {
   HR_PAYROLL_MANAGER: "مدیر حقوق و دستمزد",
   FINANCE_RECORDER: "کارشناس امور مالی",
   FINANCE_MANAGER: "مدیر امور مالی",
-  HIRING_MANAGER: "مدیر استخدام‌کننده",
   COMPANY_MANAGER: "مدیریت شرکت",
   CANDIDATE: "متقاضی",
   PERSONNEL: "پرسنل",
@@ -28,7 +27,7 @@ const labels: Record<string, string> = {
   RESERVE: "رد/ذخیره",
   REPEAT_REQUIRED: "نیازمند تکرار",
   DELIVERED: "تحویل‌شده",
-  UNKNOWN: "نامشخص",
+  UNKNOWN: "خطای طبقه‌بندی",
   SENT: "ارسال‌شده",
   FAILED: "ناموفق",
   ACCEPTED: "پذیرفته‌شده",
@@ -75,7 +74,7 @@ const labels: Record<string, string> = {
 };
 
 export const authorityLabel = (value?: string | null) =>
-  (value && labels[value]) || (value ? "نامشخص" : "—");
+  (value && labels[value]) || (value ? "خطای طبقه‌بندی" : "—");
 
 export const hrDisplayLabel = authorityLabel;
 

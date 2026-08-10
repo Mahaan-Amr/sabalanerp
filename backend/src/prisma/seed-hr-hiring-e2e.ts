@@ -75,6 +75,112 @@ async function main() {
     },
   });
 
+  const authorizationEffectiveFrom = new Date("2026-01-01T00:00:00.000Z");
+  await prisma.hrWorkspaceCatalog.upsert({
+    where: { code: "HUMAN_RESOURCES" },
+    update: { isActive: true },
+    create: { code: "HUMAN_RESOURCES", displayName: "Human Resources" },
+  });
+  await prisma.hrFeatureCatalog.upsert({
+    where: { code: "RECRUITMENT_CASES" },
+    update: { workspaceCode: "HUMAN_RESOURCES", isActive: true },
+    create: { code: "RECRUITMENT_CASES", workspaceCode: "HUMAN_RESOURCES", displayName: "Recruitment Cases" },
+  });
+  await prisma.hrFeatureCatalog.upsert({
+    where: { code: "ORGANIZATIONAL_STRUCTURE" },
+    update: { workspaceCode: "HUMAN_RESOURCES", isActive: true },
+    create: { code: "ORGANIZATIONAL_STRUCTURE", workspaceCode: "HUMAN_RESOURCES", displayName: "Organizational Structure" },
+  });
+  await prisma.hrAuthorityCatalog.upsert({
+    where: { code: "HR_PROCESSOR" },
+    update: { isActive: true },
+    create: { code: "HR_PROCESSOR", displayName: "HR Processor" },
+  });
+  await prisma.hrResponsibilityTypeCatalog.upsert({
+    where: { code: "HR_PROCESSOR" },
+    update: { isActive: true },
+    create: { code: "HR_PROCESSOR", displayName: "HR Processor" },
+  });
+  await prisma.hrWorkspaceAccessGrant.upsert({
+    where: { stableKey: `hr-e2e:workspace:${user.id}:HUMAN_RESOURCES` },
+    update: { level: "EDIT", status: "ACTIVE", effectiveTo: null },
+    create: {
+      stableKey: `hr-e2e:workspace:${user.id}:HUMAN_RESOURCES`,
+      userId: user.id,
+      workspaceCode: "HUMAN_RESOURCES",
+      level: "EDIT",
+      effectiveFrom: authorizationEffectiveFrom,
+      grantedByUserId: user.id,
+      reason: "HR hiring E2E fixture",
+    },
+  });
+  await prisma.hrFeatureAccessGrant.upsert({
+    where: { stableKey: `hr-e2e:feature:${user.id}:RECRUITMENT_CASES` },
+    update: { level: "EDIT", status: "ACTIVE", effectiveTo: null },
+    create: {
+      stableKey: `hr-e2e:feature:${user.id}:RECRUITMENT_CASES`,
+      userId: user.id,
+      featureCode: "RECRUITMENT_CASES",
+      level: "EDIT",
+      effectiveFrom: authorizationEffectiveFrom,
+      grantedByUserId: user.id,
+      reason: "HR hiring E2E fixture",
+    },
+  });
+  await prisma.hrFeatureAccessGrant.upsert({
+    where: { stableKey: `hr-e2e:feature:${user.id}:ORGANIZATIONAL_STRUCTURE` },
+    update: { level: "VIEW", status: "ACTIVE", effectiveTo: null },
+    create: {
+      stableKey: `hr-e2e:feature:${user.id}:ORGANIZATIONAL_STRUCTURE`,
+      userId: user.id,
+      featureCode: "ORGANIZATIONAL_STRUCTURE",
+      level: "VIEW",
+      effectiveFrom: authorizationEffectiveFrom,
+      grantedByUserId: user.id,
+      reason: "HR hiring E2E fixture",
+    },
+  });
+  await prisma.hrBusinessAuthorityGrant.upsert({
+    where: { stableKey: `hr-e2e:authority:${user.id}:HR_PROCESSOR` },
+    update: { status: "ACTIVE", effectiveTo: null },
+    create: {
+      stableKey: `hr-e2e:authority:${user.id}:HR_PROCESSOR`,
+      userId: user.id,
+      authorityCode: "HR_PROCESSOR",
+      effectiveFrom: authorizationEffectiveFrom,
+      grantedByUserId: user.id,
+      reason: "HR hiring E2E fixture",
+    },
+  });
+  await prisma.hrNamedResponsibility.upsert({
+    where: { stableKey: `hr-e2e:responsibility:${user.id}:HR_PROCESSOR:GLOBAL` },
+    update: { assignedUserId: user.id, effectiveTo: null },
+    create: {
+      stableKey: `hr-e2e:responsibility:${user.id}:HR_PROCESSOR:GLOBAL`,
+      responsibilityTypeCode: "HR_PROCESSOR",
+      scopeType: "GLOBAL",
+      scopeId: null,
+      assignedUserId: user.id,
+      effectiveFrom: authorizationEffectiveFrom,
+      reason: "HR hiring E2E fixture",
+      createdByUserId: user.id,
+    },
+  });
+  await prisma.hrResponsibilityDestination.upsert({
+    where: { stableKey: "hr-e2e:destination:HR_PROCESSOR:GLOBAL" },
+    update: { isActive: true },
+    create: {
+      stableKey: "hr-e2e:destination:HR_PROCESSOR:GLOBAL",
+      responsibilityTypeCode: "HR_PROCESSOR",
+      scopeType: "GLOBAL",
+      scopeId: null,
+      workspaceCode: "HUMAN_RESOURCES",
+      featureCode: "RECRUITMENT_CASES",
+      queueCode: "HR_HIRING",
+      createdByUserId: user.id,
+    },
+  });
+
   await prisma.hrOrganizationalUnit.upsert({
     where: { id: fixture.unitId },
     update: { name: "واحد آزمایشی منابع انسانی", isActive: true },
@@ -380,6 +486,36 @@ async function main() {
       candidateNotifiedAt: null,
     },
   });
+
+  for (const applicationId of [fixture.applicationId, fixture.releaseApplicationId, fixture.blockedApplicationId]) {
+    const companyExecutedDisc = applicationId === fixture.applicationId;
+    const plan = await prisma.hrFormalAssessmentPlan.upsert({
+      where: { stableKey: `hr-e2e:formal-assessment-plan:${applicationId}:1` },
+      update: {
+        status: "ACTIVE",
+        explicitlyNoAssessment: !companyExecutedDisc,
+        executionMethod: companyExecutedDisc ? "COMPANY" : null,
+      },
+      create: {
+        stableKey: `hr-e2e:formal-assessment-plan:${applicationId}:1`,
+        applicationId,
+        version: 1,
+        explicitlyNoAssessment: !companyExecutedDisc,
+        executionMethod: companyExecutedDisc ? "COMPANY" : null,
+        finalizedByUserId: user.id,
+        reason: companyExecutedDisc
+          ? "Company-executed DISC for localized score acceptance"
+          : "Explicit no-assessment decision for the HR hiring E2E fixture",
+      },
+    });
+    if (companyExecutedDisc) {
+      await prisma.hrFormalAssessmentPlanSelection.upsert({
+        where: { planId_assessmentKind: { planId: plan.id, assessmentKind: "DISC" } },
+        update: { selected: true, executionMethod: "COMPANY" },
+        create: { planId: plan.id, assessmentKind: "DISC", selected: true, executionMethod: "COMPANY" },
+      });
+    }
+  }
 
   await prisma.hrCandidateInvitation.deleteMany({
     where: { applicationId: fixture.applicationId },

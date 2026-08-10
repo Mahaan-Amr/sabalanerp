@@ -35,6 +35,12 @@ export const hiringAPI = {
   permanentlyDelete: (id: string, data: any) =>
     internal.post(`/applications/${id}/permanent-delete`, data),
   get: (id: string) => internal.get(`/applications/${id}`),
+  getOverview: (id: string, returnTo?: string) =>
+    internal.get(`/applications/${id}/overview`, { params: returnTo ? { returnTo } : undefined }),
+  getFullInformation: (id: string) =>
+    internal.get(`/applications/${id}/full-information`),
+  getClosureSummary: (id: string) =>
+    internal.get(`/applications/${id}/closure-summary`),
   myAuthorities: () => internal.get("/me/authorities"),
   workItemSummary: () => internal.get("/work-items/summary"),
   workItems: (params?: Record<string, string>) =>
@@ -51,6 +57,9 @@ export const hiringAPI = {
     ),
   recordDecision: (id: string, kind: string, data: any) =>
     internal.post(`/applications/${id}/decisions/${kind}`, data),
+  getInitialInterview: (id: string) => internal.get(`/applications/${id}/initial-interview`),
+  saveInitialInterviewDraft: (id: string, payload: Record<string, unknown>, expectedVersion: number) =>
+    internal.put(`/applications/${id}/initial-interview/draft`, { payload, expectedVersion }),
   preIdentityTemplates: () => internal.get("/pre-identity/templates"),
   createPreIdentityTemplate: (data: any) =>
     internal.post("/pre-identity/templates", data),
@@ -85,6 +94,17 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/pre-identity/release`),
   decideAssessment: (id: string, data: any) =>
     internal.post(`/applications/${id}/assessments/decision`, data),
+  createFormalAssessmentPlan: (id: string, data: any) =>
+    internal.post(`/applications/${id}/formal-assessment-plans`, data),
+  recordFormalAssessmentResult: (id: string, kind: string, data: any) =>
+    internal.post(`/applications/${id}/formal-assessments/${kind}/result`, data),
+  uploadFormalAssessmentEvidence: (id: string, kind: string, files: File[]) => {
+    const data = new FormData();
+    files.forEach((file) => data.append("files", file));
+    return internal.post(`/applications/${id}/formal-assessments/${kind}/evidence`, data);
+  },
+  finallyReject: (id: string, data: any) =>
+    internal.post(`/applications/${id}/final-rejection`, data),
   reactivateDisposition: (id: string, reason: string) =>
     internal.post(`/applications/${id}/disposition/reactivate`, { reason }),
   authorizeReopening: (id: string, reason: string) =>
@@ -139,7 +159,8 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/collateral/${itemId}/return-confirm`),
   approveCollateral: (id: string) =>
     internal.post(`/applications/${id}/collateral/approve`),
-  collateralTemplates: () => internal.get("/collateral-templates"),
+  collateralTemplates: (params?: Record<string, string>) =>
+    internal.get("/collateral-templates", { params }),
   createCollateralTemplate: (data: any) =>
     internal.post("/collateral-templates", data),
   setCollateralTemplateActive: (id: string, isActive: boolean) =>
@@ -213,6 +234,7 @@ export const applicantHiringAPI = {
   verify: (mobile: string, otp: string) =>
     axios.post(`${baseURL}/public/invitations/verify`, { mobile, otp }),
   get: () => applicant.get("/public/application"),
+  getClosedState: () => applicant.get("/public/application/closed-state"),
   saveDraft: (data: any) => applicant.put("/public/application/draft", data),
   submit: (data: any) => applicant.post("/public/application/submit", data),
   acceptCompensation: (fullName: string) =>
@@ -225,6 +247,13 @@ export const applicantHiringAPI = {
       category,
       note,
     }),
+  submitFormalAssessmentResult: (kind: string, result: Record<string, unknown>) =>
+    applicant.post(`/public/application/formal-assessments/${kind}/result`, { result }),
+  uploadFormalAssessmentEvidence: (kind: string, files: File[]) => {
+    const data = new FormData();
+    files.forEach((file) => data.append("files", file));
+    return applicant.post(`/public/application/formal-assessments/${kind}/evidence`, data);
+  },
 };
 
 export const hiringError = (error: any) =>

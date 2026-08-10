@@ -1,6 +1,7 @@
 'use client';
 import { ErpPressable } from '@/components/erp';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   FaCheckCircle,
   FaClipboardCheck,
@@ -27,6 +28,11 @@ import PersianCalendar from '@/lib/persian-calendar';
 import { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
+import {
+  canonicalizeContractsQuery,
+  patchContractsQuery,
+  type ContractsQueryState,
+} from '@/features/accounting/accountingQueryState';
 import {
   AccountingContractRow,
   FinancialInvoiceApprovalForm,
@@ -64,14 +70,18 @@ const sourceStatusOptions = [
 const toPdfViewerUrl = (url: string) => `${url}#page=1&zoom=page-fit`;
 
 export default function AccountingContractsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const canonicalQuery = useMemo(
+    () => canonicalizeContractsQuery(new URLSearchParams(searchParams.toString())),
+    [searchParams],
+  );
+  const query = canonicalQuery.state;
   const [rows, setRows] = useState<AccountingContractRow[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0 });
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('ALL');
-  const [sourceStatus, setSourceStatus] = useState('ALL');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [searchInput, setSearchInput] = useState(query.search);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [correctionTarget, setCorrectionTarget] = useState<AccountingContractRow | null>(null);
@@ -81,25 +91,46 @@ export default function AccountingContractsPage() {
     invoice: NonNullable<AccountingContractRow['financialRecords']>[number];
   } | null>(null);
 
-  const toGregorianFilterDate = useCallback((value: string, endOfDay = false) => {
-    if (!value) return undefined;
-    const date = PersianCalendar.toGregorian(value);
-    if (endOfDay) date.setHours(23, 59, 59, 999);
-    else date.setHours(0, 0, 0, 0);
-    return date.toISOString();
-  }, []);
+  const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeContractsQuery>) => {
+    const serialized = next.params.toString();
+    router.replace(serialized ? `${pathname}?${serialized}` : pathname, { scroll: false });
+  }, [pathname, router]);
 
-  const loadContracts = useCallback(async (page = 1) => {
+  const updateQuery = useCallback((patch: Partial<ContractsQueryState>) => {
+    replaceQuery(patchContractsQuery(new URLSearchParams(searchParams.toString()), patch));
+  }, [replaceQuery, searchParams]);
+
+  useEffect(() => {
+    if (canonicalQuery.params.toString() !== searchParams.toString()) replaceQuery(canonicalQuery);
+  }, [canonicalQuery, replaceQuery, searchParams]);
+
+  useEffect(() => setSearchInput(query.search), [query.search]);
+
+  useEffect(() => {
+    if (searchInput.trim() === query.search) return;
+    const timeout = window.setTimeout(() => updateQuery({ search: searchInput }), 350);
+    return () => window.clearTimeout(timeout);
+  }, [query.search, searchInput, updateQuery]);
+
+  const jalaliFilterValue = useCallback((value: string) => (
+    value ? PersianCalendar.toPersian(`${value}T12:00:00.000Z`) : ''
+  ), []);
+
+  const setDateFilter = useCallback((key: 'dateFrom' | 'dateTo', value: string) => {
+    updateQuery({ [key]: value ? PersianCalendar.toGregorianDateOnly(value) : '' });
+  }, [updateQuery]);
+
+  const loadContracts = useCallback(async () => {
     try {
       setLoading(true);
       const response = await accountingAPI.getContracts({
-        search,
-        status,
-        sourceStatus,
-        dateFrom: toGregorianFilterDate(dateFrom),
-        dateTo: toGregorianFilterDate(dateTo, true),
-        sort: 'attention',
-        page,
+        view: query.view || undefined,
+        search: query.search || undefined,
+        status: query.status,
+        sourceStatus: query.sourceStatus,
+        dateFrom: query.dateFrom || undefined,
+        dateTo: query.dateTo || undefined,
+        page: query.page,
         pageSize: pagination.pageSize,
       });
       if (response.data.success) {
@@ -115,10 +146,10 @@ export default function AccountingContractsPage() {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, pagination.pageSize, search, sourceStatus, status, toGregorianFilterDate]);
+  }, [pagination.pageSize, query.dateFrom, query.dateTo, query.page, query.search, query.sourceStatus, query.status, query.view]);
 
   useEffect(() => {
-    loadContracts(1);
+    loadContracts();
   }, [loadContracts]);
 
   const execute = async (contract: AccountingContractRow, action: any) => {
@@ -126,7 +157,7 @@ export default function AccountingContractsPage() {
     try {
       setActionError(null);
       await accountingAPI.executeAction(action);
-      await loadContracts(pagination.page);
+      await loadContracts();
       return true;
     } catch (error) {
       console.error('Accounting action failed:', error);
@@ -392,30 +423,30 @@ export default function AccountingContractsPage() {
       eyebrow="حسابداری"
       title="قراردادهای قابل بررسی"
       description="همه قراردادها در هر وضعیت دیده می‌شوند؛ اقدام مالی فقط برای قراردادهای تایید شده، امضا شده یا چاپ شده فعال است."
-      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: () => loadContracts(pagination.page), tone: 'neutral' }]}
+      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadContracts, tone: 'neutral' }]}
       filters={[
         {
           id: 'search',
           label: 'جستجو',
           type: 'search',
-          value: search,
-          onChange: setSearch,
+          value: searchInput,
+          onChange: setSearchInput,
           placeholder: 'جستجو در شماره قرارداد، مشتری، کد ملی یا عنوان...',
         },
         {
           id: 'status',
           label: 'وضعیت قرارداد',
           type: 'select',
-          value: status,
-          onChange: setStatus,
+          value: query.status,
+          onChange: (value) => updateQuery({ status: value }),
           options: statusOptions,
         },
         {
           id: 'sourceStatus',
           label: 'وضعیت حسابداری',
           type: 'select',
-          value: sourceStatus,
-          onChange: setSourceStatus,
+          value: query.sourceStatus,
+          onChange: (value) => updateQuery({ sourceStatus: value }),
           options: sourceStatusOptions,
         },
       ]}
@@ -431,7 +462,7 @@ export default function AccountingContractsPage() {
           totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)}
           totalItems={pagination.total}
           itemsPerPage={pagination.pageSize}
-          onPageChange={loadContracts}
+          onPageChange={(page) => updateQuery({ page })}
           itemLabel="قرارداد"
         />
       }
@@ -445,11 +476,19 @@ export default function AccountingContractsPage() {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">از تاریخ</span>
-            <PersianCalendarComponent value={dateFrom} onChange={setDateFrom} placeholder="از تاریخ" />
+            <PersianCalendarComponent
+              value={jalaliFilterValue(query.dateFrom)}
+              onChange={(value) => setDateFilter('dateFrom', value)}
+              placeholder="از تاریخ"
+            />
           </label>
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">تا تاریخ</span>
-            <PersianCalendarComponent value={dateTo} onChange={setDateTo} placeholder="تا تاریخ" />
+            <PersianCalendarComponent
+              value={jalaliFilterValue(query.dateTo)}
+              onChange={(value) => setDateFilter('dateTo', value)}
+              placeholder="تا تاریخ"
+            />
           </label>
         </div>
       </ErpSection>

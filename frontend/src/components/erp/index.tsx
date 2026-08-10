@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+export { default as ErpPersianDateField } from './ErpPersianDateField';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -387,12 +388,14 @@ export function ErpMetricGrid({ items }: { items: ErpMetric[] }) {
   );
 }
 
-export function ErpActionGrid({ items, columns = 3, compact = false }: { items: ErpActionTile[]; columns?: 1 | 2 | 3 | 4; compact?: boolean }) {
+export function ErpActionGrid({ items, columns = 3, compact = false }: { items: ErpActionTile[]; columns?: 1 | 2 | 3 | 4 | 5; compact?: boolean }) {
   if (!items.length) return null;
 
   const gridClass =
     columns === 1
       ? ''
+      : columns === 5
+      ? 'md:grid-cols-2 xl:grid-cols-5'
       : columns === 4
       ? 'sm:grid-cols-2 xl:grid-cols-4'
       : columns === 2
@@ -554,7 +557,7 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             className={cx(
-              'inline-flex min-h-10 flex-shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
+              'inline-flex min-h-[var(--sds-control-height)] flex-shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
               active
                 ? 'bg-[var(--sds-surface-raised)] text-[var(--sds-accent)] shadow-sm dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent)]'
                 : 'text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-raised)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:bg-[var(--sds-surface-raised)] dark:hover:text-[var(--sds-text-primary)]'
@@ -779,16 +782,29 @@ export function ErpLoading() {
   );
 }
 
-export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions, emptyState, isLoading, footer, children, ...pageProps }: {
+export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions, focusedRowKey, emptyState, isLoading, footer, children, ...pageProps }: {
   rows: T[];
   rowKey: (row: T) => string;
   columns: ErpColumn<T>[];
   filters?: ErpFilter[];
   rowActions?: (row: T) => ErpAction[];
+  focusedRowKey?: string;
   emptyState?: React.ReactNode;
   isLoading?: boolean;
   footer?: React.ReactNode;
 } & Omit<Parameters<typeof ErpPage>[0], 'children'> & { children?: React.ReactNode }) {
+  React.useEffect(() => {
+    if (!focusedRowKey) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = Array.from(document.querySelectorAll<HTMLElement>('[data-erp-focused-row="true"]'))
+        .find((element) => element.getClientRects().length > 0);
+      if (!target) return;
+      const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+      target.scrollIntoView({ behavior, block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedRowKey, rows]);
+
   return (
     <ErpPage {...pageProps}>
       <ErpFilters filters={filters} />
@@ -802,7 +818,11 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
           <>
             <div className="space-y-3 lg:hidden">
               {rows.map((row) => (
-                <ErpCard key={rowKey(row)} interactive className="p-4">
+                <div key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined}>
+                <ErpCard
+                  interactive
+                  className={cx('scroll-mt-24 p-4', focusedRowKey === rowKey(row) && 'ring-2 ring-[var(--sds-focus-ring)]')}
+                >
                   <div className="space-y-3">
                     {columns.filter((column) => column.priority !== 'hidden-mobile').map((column) => (
                       <div key={column.id} className={column.priority === 'primary' ? '' : 'flex items-start justify-between gap-3 text-sm'}>
@@ -817,6 +837,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
                     )}
                   </div>
                 </ErpCard>
+                </div>
               ))}
             </div>
             <div className="hidden overflow-x-auto lg:block">
@@ -833,7 +854,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], rowActions
                 </thead>
                 <tbody>
                   {rows.map((row) => (
-                    <tr key={rowKey(row)} className="border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]">
+                    <tr key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined} className={cx('border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]', focusedRowKey === rowKey(row) && 'bg-[var(--sds-accent-soft)] ring-2 ring-inset ring-[var(--sds-focus-ring)]')}>
                       {columns.map((column) => (
                         <td key={column.id} className={cx('px-3 py-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
                           {column.cell(row)}
@@ -1225,14 +1246,27 @@ export function ErpMotionSection({ children, className, delay = 0 }: WithChildre
   );
 }
 
-export function ErpSkeleton({ lines = 3, className, label = 'در حال بارگذاری' }: { lines?: number; className?: string; label?: string }) {
+export function ErpSkeletonBlock({ className }: { className?: string }) {
+  return <span aria-hidden="true" className={cx('sds-skeleton block rounded-xl', className)} />;
+}
+
+export function ErpSkeleton({ lines = 3, className, label = 'در حال بارگذاری', children }: {
+  lines?: number;
+  className?: string;
+  label?: string;
+  children?: React.ReactNode;
+}) {
   return (
     <div className={cx('sds-card animate-pulse space-y-3 p-4 motion-reduce:animate-none', className)} role="status" aria-label={label}>
       <span className="sr-only">{label}</span>
-      <div className="sds-skeleton h-4 w-28 rounded-full" />
-      {Array.from({ length: lines }).map((_, index) => (
-        <div key={index} className={cx('sds-skeleton h-11 rounded-xl', index === lines - 1 && 'w-4/5')} />
-      ))}
+      {children || (
+        <>
+          <ErpSkeletonBlock className="h-4 w-28 rounded-full" />
+          {Array.from({ length: lines }).map((_, index) => (
+            <ErpSkeletonBlock key={index} className={cx('h-11', index === lines - 1 && 'w-4/5')} />
+          ))}
+        </>
+      )}
     </div>
   );
 }

@@ -1,14 +1,18 @@
 'use client';
 import { ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { FaPlus, FaSync } from "react-icons/fa";
 import { ErpButton, ErpCard, ErpLoading, ErpPage, ErpSheet } from "@/components/erp";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
+import { HR_HIRING_METRIC_VIEWS } from "@/features/hr-hiring/hrHiringMetricViews";
 
 const field =
   "w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]";
 
 export default function CollateralTemplatesPage() {
+  const searchParams = useSearchParams();
+  const activeView = searchParams.get("view") === HR_HIRING_METRIC_VIEWS.activeCollateralTemplates;
   const [rows, setRows] = useState<any[]>([]);
   const [name, setName] = useState("");
   const [items, setItems] = useState<any[]>([
@@ -22,16 +26,16 @@ export default function CollateralTemplatesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
-      setRows((await hiringAPI.collateralTemplates()).data.data);
+      setRows((await hiringAPI.collateralTemplates(activeView ? { view: HR_HIRING_METRIC_VIEWS.activeCollateralTemplates } : undefined)).data.data);
     } catch (e) {
       setError(hiringError(e));
     }
-  };
+  }, [activeView]);
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
   const save = async () => {
     try {
       setBusy(true);
@@ -76,7 +80,7 @@ export default function CollateralTemplatesPage() {
       {error && (
         <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)]">{error}</p>
       )}
-      <ErpSheet open={createOpen} onClose={() => setCreateOpen(false)} title="قالب جدید وثیقه">
+      <ErpSheet open={createOpen} onClose={() => setCreateOpen(false)} title="قالب جدید وثیقه" presentation="modal">
       <ErpCard className="space-y-3 p-4">
         <ErpInput
           className={field}

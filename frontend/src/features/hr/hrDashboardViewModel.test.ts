@@ -10,7 +10,7 @@ assert.deepEqual(positionCapacityCoverage(8, 20), {
 assert.deepEqual(positionCapacityCoverage(0, 0), {
   committed: 0,
   total: 0,
-  percentage: 0,
+  percentage: null,
 });
 
 assert.deepEqual(positionCapacityCoverage(-3, 7), {
@@ -22,7 +22,7 @@ assert.deepEqual(positionCapacityCoverage(-3, 7), {
 assert.deepEqual(positionCapacityCoverage(Number.NaN, Number.NaN), {
   committed: 0,
   total: 0,
-  percentage: 0,
+  percentage: null,
 });
 
 console.log("HR dashboard view-model tests passed.");

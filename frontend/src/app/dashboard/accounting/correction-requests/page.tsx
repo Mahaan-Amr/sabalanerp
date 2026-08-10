@@ -1,14 +1,21 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaCheckCircle, FaEdit, FaExclamationTriangle, FaEye, FaSync, FaTimesCircle } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
+import {
+  canonicalizeCorrectionRequestsQuery,
+  patchCorrectionRequestsQuery,
+  type StatusDrilldownQueryState,
+} from '@/features/accounting/accountingQueryState';
 
 const statusOptions = [
   { label: 'همه وضعیت‌ها', value: 'ALL' },
   { label: 'در انتظار بررسی مدیر', value: 'OPEN' },
+  { label: 'در جریان', value: 'ACKNOWLEDGED' },
   { label: 'تایید شده برای اصلاح فروش', value: 'APPROVED_FOR_SALES_EDIT' },
   { label: 'اصلاح شده توسط فروش', value: 'SALES_EDITED' },
   { label: 'بسته شده', value: 'RESOLVED' },
@@ -16,21 +23,55 @@ const statusOptions = [
 ];
 
 export default function AccountingCorrectionRequestsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const canonicalQuery = useMemo(
+    () => canonicalizeCorrectionRequestsQuery(new URLSearchParams(searchParams.toString())),
+    [searchParams],
+  );
+  const query = canonicalQuery.state;
   const [rows, setRows] = useState<any[]>([]);
   const [pagination, setPagination] = useState(emptyAccountingPagination);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('ALL');
+  const [searchInput, setSearchInput] = useState(query.search);
   const [approveTarget, setApproveTarget] = useState<any | null>(null);
   const [declineTarget, setDeclineTarget] = useState<any | null>(null);
   const [resolveTarget, setResolveTarget] = useState<any | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const loadRows = useCallback(async (page = 1) => {
+  const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeCorrectionRequestsQuery>) => {
+    const serialized = next.params.toString();
+    router.replace(serialized ? `${pathname}?${serialized}` : pathname, { scroll: false });
+  }, [pathname, router]);
+
+  const updateQuery = useCallback((patch: Partial<StatusDrilldownQueryState<'active'>>) => {
+    replaceQuery(patchCorrectionRequestsQuery(new URLSearchParams(searchParams.toString()), patch));
+  }, [replaceQuery, searchParams]);
+
+  useEffect(() => {
+    if (canonicalQuery.params.toString() !== searchParams.toString()) replaceQuery(canonicalQuery);
+  }, [canonicalQuery, replaceQuery, searchParams]);
+
+  useEffect(() => setSearchInput(query.search), [query.search]);
+
+  useEffect(() => {
+    if (searchInput.trim() === query.search) return;
+    const timeout = window.setTimeout(() => updateQuery({ search: searchInput }), 350);
+    return () => window.clearTimeout(timeout);
+  }, [query.search, searchInput, updateQuery]);
+
+  const loadRows = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await accountingAPI.getCorrectionRequests({ search, status, page, pageSize: pagination.pageSize });
+      const response = await accountingAPI.getCorrectionRequests({
+        view: query.view || undefined,
+        search: query.search || undefined,
+        status: query.status,
+        page: query.page,
+        pageSize: pagination.pageSize,
+      });
       if (response.data.success) {
         const data = readAccountingListResponse<any>(response.data.data);
         setRows(data.items);
@@ -41,10 +82,10 @@ export default function AccountingCorrectionRequestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.pageSize, search, status]);
+  }, [pagination.pageSize, query.page, query.search, query.status, query.view]);
 
   useEffect(() => {
-    loadRows(1);
+    loadRows();
   }, [loadRows]);
 
   const approveCorrection = async (values: Record<string, string | number>) => {
@@ -58,7 +99,7 @@ export default function AccountingCorrectionRequestsPage() {
         note: String(values.note || '').trim() || undefined,
       });
       setApproveTarget(null);
-      await loadRows(pagination.page);
+      await loadRows();
     } catch (error) {
       console.error('Approve correction failed:', error);
       setActionError((error as any)?.response?.data?.error || 'تایید درخواست اصلاح انجام نشد');
@@ -78,7 +119,7 @@ export default function AccountingCorrectionRequestsPage() {
         resolutionNote: String(values.resolutionNote || '').trim(),
       });
       setDeclineTarget(null);
-      await loadRows(pagination.page);
+      await loadRows();
     } catch (error) {
       console.error('Decline correction failed:', error);
       setActionError((error as any)?.response?.data?.error || 'رد درخواست اصلاح انجام نشد');
@@ -98,7 +139,7 @@ export default function AccountingCorrectionRequestsPage() {
         resolutionNote: String(values.resolutionNote || '').trim() || undefined,
       });
       setResolveTarget(null);
-      await loadRows(pagination.page);
+      await loadRows();
     } catch (error) {
       console.error('Resolve correction failed:', error);
       setActionError((error as any)?.response?.data?.error || 'بستن درخواست اصلاح انجام نشد');
@@ -148,17 +189,17 @@ export default function AccountingCorrectionRequestsPage() {
       eyebrow="حسابداری"
       title="بررسی اصلاحات"
       description="بررسی مدیریتی درخواست‌های اصلاح، باز کردن پنجره اصلاح فروش، و بستن اصلاح پس از بازبینی حسابداری."
-      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: () => loadRows(pagination.page), tone: 'neutral' }]}
+      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadRows, tone: 'neutral' }]}
       filters={[
-        { id: 'search', label: 'جستجو', type: 'search', value: search, onChange: setSearch, placeholder: 'شماره قرارداد یا مشتری...' },
-        { id: 'status', label: 'وضعیت', type: 'select', value: status, onChange: setStatus, options: statusOptions },
+        { id: 'search', label: 'جستجو', type: 'search', value: searchInput, onChange: setSearchInput, placeholder: 'شماره قرارداد یا مشتری...' },
+        { id: 'status', label: 'وضعیت', type: 'select', value: query.status, onChange: (value) => updateQuery({ status: value }), options: statusOptions },
       ]}
       rows={rows}
       rowKey={(row) => row.id}
       columns={columns}
       rowActions={rowActions}
       isLoading={loading}
-      footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={loadRows} itemLabel="درخواست" />}
+      footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={(page) => updateQuery({ page })} itemLabel="درخواست" />}
       emptyState={<ErpEmptyState icon={FaExclamationTriangle} title="درخواست اصلاح بازی وجود ندارد" description="از رجیستر قراردادها یا پرونده قرارداد می‌توانید درخواست اصلاح ثبت کنید." />}
     >
       <AccountingActionModal

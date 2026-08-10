@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { assertHiringAuthorityMutationAllowed } from '../hrHiringAuthorityPolicy';
+import { activeHiringAuthoritiesAt } from '../hrHiringDashboardMetrics';
 
 const companyManager = { actorRole: 'USER', actorUserId: 'manager-1', actorAuthorities: ['COMPANY_MANAGER'], targetRole: 'USER' };
 
@@ -23,5 +24,11 @@ assert.throws(() => assertHiringAuthorityMutationAllowed({
 assert.throws(() => assertHiringAuthorityMutationAllowed({
   actorRole: 'ADMIN', actorUserId: 'admin-1', actorAuthorities: [], action: 'REVOKE', targetUserId: 'manager-1', targetRole: 'USER', authority: 'COMPANY_MANAGER', activeCompanyManagerCount: 1,
 }), /آخرین مدیر شرکت/);
+
+assert.deepEqual(activeHiringAuthoritiesAt([
+  { authority: 'FINANCE_RECORDER', isActive: true, expiresAt: null },
+  { authority: 'FINANCE_MANAGER', isActive: true, expiresAt: new Date('2026-08-08T07:59:59.999Z') },
+  { authority: 'FINANCE_MANAGER', isActive: false, expiresAt: null },
+], new Date('2026-08-08T08:00:00.000Z')), ['FINANCE_RECORDER']);
 
 console.log('HR hiring authority policy tests passed.');

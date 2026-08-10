@@ -1,6 +1,7 @@
 'use client';
 import { ErpInput, ErpSelect } from '@/components/erp';
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   FaBalanceScale,
   FaCheckCircle,
@@ -18,6 +19,7 @@ import {
 } from 'react-icons/fa';
 import {
   ErpButton,
+  ErpInlineState,
   ErpLoading,
   ErpPage,
   ErpSection,
@@ -105,6 +107,11 @@ const defaultCustomPrintSettings: CustomPrintSettings = {
 };
 
 export default function AccountingContractDetailPage({ params }: { params: { contractId: string } }) {
+  const searchParams = useSearchParams();
+  const focusKind = searchParams.get('focus') === 'receivable' || searchParams.get('focus') === 'check'
+    ? searchParams.get('focus') as 'receivable' | 'check'
+    : null;
+  const focusedRecordId = (searchParams.get('recordId') || '').trim();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -119,6 +126,8 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const [correctionModalOpen, setCorrectionModalOpen] = useState(false);
   const [salesPdfVariant, setSalesPdfVariant] = useState<SalesPdfVariant>('accounting');
   const [customPrintSettings, setCustomPrintSettings] = useState<CustomPrintSettings>(defaultCustomPrintSettings);
+  const [collectionFocusState, setCollectionFocusState] = useState<'focused' | 'missing' | null>(null);
+  const [highlightedCollectionId, setHighlightedCollectionId] = useState<string | null>(null);
 
   const loadDetail = useCallback(async () => {
     try {
@@ -135,6 +144,30 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   useEffect(() => {
     loadDetail();
   }, [loadDetail]);
+
+  useEffect(() => {
+    if (!data || !focusKind || !focusedRecordId) {
+      setCollectionFocusState(null);
+      setHighlightedCollectionId(null);
+      return;
+    }
+    const rows = focusKind === 'receivable' ? data.receivables || [] : data.paymentEvents || [];
+    const target = rows.find((row: any) => row.id === focusedRecordId);
+    if (!target) {
+      setCollectionFocusState('missing');
+      setHighlightedCollectionId(null);
+      const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+      document.getElementById('collections')?.scrollIntoView({ behavior, block: 'start' });
+      return;
+    }
+    const domId = `collection-${focusKind}-${focusedRecordId}`;
+    setCollectionFocusState('focused');
+    setHighlightedCollectionId(domId);
+    const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    window.requestAnimationFrame(() => document.getElementById(domId)?.scrollIntoView({ behavior, block: 'center' }));
+    const timeout = window.setTimeout(() => setHighlightedCollectionId(null), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [data, focusKind, focusedRecordId]);
 
   const execute = async (action: any) => {
     try {
@@ -701,30 +734,48 @@ export default function AccountingContractDetailPage({ params }: { params: { con
               </div>
             </ErpSection>
 
+            <div id="collections" className="scroll-mt-6">
             <ErpSection title="دریافتنی‌ها و دریافت‌ها">
+              {collectionFocusState === 'missing' && (
+                <ErpInlineState kind="stale" title="رکورد پیوندشده دیگر در این پرونده در دسترس نیست؛ اطلاعات فعلی قرارداد نمایش داده می‌شود." />
+              )}
+              {collectionFocusState === 'focused' && (
+                <ErpInlineState kind="success" title="رکورد پیوندشده در وضعیت فعلی پرونده پیدا و متمرکز شد." />
+              )}
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {(data.receivables || []).map((item: any) => (
-                  <CompactQueueItem
+                  <div
+                    id={`collection-receivable-${item.id}`}
                     key={item.id}
+                    className={`scroll-mt-24 rounded-[var(--sds-radius-lg)] transition ${highlightedCollectionId === `collection-receivable-${item.id}` ? 'ring-2 ring-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-raised)]' : ''}`}
+                  >
+                  <CompactQueueItem
                     icon={FaReceipt}
                     title="دریافتنی"
                     meta={`سررسید: ${dateFa(item.dueDate)} · پرداخت شده: ${money(item.paidAmount, item.currency)}`}
                     amount={money(item.remainingAmount, item.currency)}
                     status={<StatusBadge status={item.status} />}
                   />
+                  </div>
                 ))}
                 {(data.paymentEvents || []).map((item: any) => (
-                  <CompactQueueItem
+                  <div
+                    id={`collection-check-${item.id}`}
                     key={item.id}
+                    className={`scroll-mt-24 rounded-[var(--sds-radius-lg)] transition ${highlightedCollectionId === `collection-check-${item.id}` ? 'ring-2 ring-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-raised)]' : ''}`}
+                  >
+                  <CompactQueueItem
                     icon={FaMoneyCheckAlt}
                     title={item.method === 'CHECK' ? `چک ${item.checkNumber || ''}` : 'دریافت'}
                     meta={`تاریخ: ${dateFa(item.occurredAt || item.createdAt)}`}
                     amount={money(item.amount, item.currency)}
                     status={<StatusBadge status={item.checkStatus || item.status} />}
                   />
+                  </div>
                 ))}
               </div>
             </ErpSection>
+            </div>
             </>
           }
           aside={

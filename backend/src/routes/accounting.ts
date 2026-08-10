@@ -22,6 +22,7 @@ import {
   getAccountantPerformanceReport,
   getAccountingSettings,
   getAccountingContractDetail,
+  getAccountingFinancialTrend,
   getAccountingWorkspace,
   listAccountingContracts,
   listAuditLogs,
@@ -342,15 +343,31 @@ const markOriginalSalesContractPrinted = async (
   });
 };
 
-router.get('/workspace', accountingView, async (_req: AuthRequest, res: Response) => {
+export const getAccountingWorkspaceResponse = async (req: AuthRequest, res: Response) => {
   try {
-    const workspace = await getAccountingWorkspace();
+    const workspace = await getAccountingWorkspace(req.query);
     res.json({ success: true, data: workspace });
   } catch (error) {
     console.error('Accounting workspace error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
-});
+};
+
+router.get('/workspace', accountingView, getAccountingWorkspaceResponse);
+
+export const createAccountingFinancialTrendResponse = (
+  loadTrend: typeof getAccountingFinancialTrend = getAccountingFinancialTrend,
+) => async (req: AuthRequest, res: Response) => {
+  try {
+    const trend = await loadTrend(req.query.range);
+    res.json({ success: true, data: trend });
+  } catch (error) {
+    console.error('Accounting financial trend error:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+};
+
+router.get('/financial-trend', accountingView, createAccountingFinancialTrendResponse());
 
 router.get('/contracts', accountingView, async (req: AuthRequest, res: Response) => {
   try {

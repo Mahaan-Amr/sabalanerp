@@ -1,7 +1,9 @@
 "use client";
 import {
   ErpInput,
+  ErpCheckbox,
   ErpPressable,
+  ErpSegmentedControl,
   ErpSelect,
   ErpTextarea,
 } from "@/components/erp";
@@ -37,6 +39,10 @@ import {
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
+import { ApplicantCaseOverview } from "@/features/hr-hiring/ApplicantCaseOverview";
+import { GuidedHrInterview } from "@/features/hr-hiring/GuidedHrInterview";
+import { FinalHiringRejection } from "@/features/hr-hiring/FinalHiringRejection";
+import { validateHiringQueueReturnHref } from "@/features/hr-hiring/hiringQueueViewModel";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
 import RetentionAction from "@/features/hr/RetentionActionSheet";
@@ -358,6 +364,7 @@ export default function HiringCasePage() {
     values.some((value) => authorities.includes(value));
   const canHrSensitive = hasAuthority("HR_PROCESSOR", "HR_MANAGER");
   const canCompanyManager = hasAuthority("COMPANY_MANAGER");
+  const canFinallyReject = hasAuthority("HR_MANAGER", "COMPANY_MANAGER");
   const canFinance = hasAuthority("FINANCE_RECORDER", "FINANCE_MANAGER");
   const canViewContractTask = hiringTaskDetailVisible(
     data.taskCapabilities,
@@ -506,12 +513,13 @@ export default function HiringCasePage() {
                 : () => hiringAPI.downloadCollateral(id, item.id);
     return download(request, item.originalName || item.title);
   };
+  const returnHref = validateHiringQueueReturnHref(searchParams.get("returnTo"));
   return (
     <ErpPage
       eyebrow="منابع انسانی · پرونده استخدام"
       title={`${data.candidate.firstName} ${data.candidate.lastName}`}
       description={`${data.position.title} · ${data.candidate.mobile}`}
-      backHref="/dashboard/hr/hiring"
+      backHref={returnHref}
       actions={[
         { label: "به‌روزرسانی", icon: FaSync, onClick: load, disabled: busy },
         ...(data.retentionCapabilities?.canArchive ||
@@ -556,6 +564,10 @@ export default function HiringCasePage() {
           این پرونده بایگانی شده و تا زمان بازیابی فقط قابل مشاهده است.
         </p>
       )}
+      <ApplicantCaseOverview
+        applicationId={id}
+        returnTo={searchParams.get("returnTo") || undefined}
+      />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
         <Metric label="مرحله" value={data.stage} />
         <Metric label="هویت" value={data.identityClearance} />
@@ -649,9 +661,10 @@ export default function HiringCasePage() {
           </div>
         </ErpSection>
       )}
-      {selectedLifecyclePhase === "PRE_IDENTITY" &&
+      {["INITIAL_HR_REVIEW", "COMPANY_EVALUATION_PLAN"].includes(selectedLifecyclePhase || "") &&
         (canHrSensitive || canCompanyManager) && (
           <PreIdentitySection
+            phase={selectedLifecyclePhase as "INITIAL_HR_REVIEW" | "COMPANY_EVALUATION_PLAN"}
             application={data}
             authorities={authorities}
             busy={busy}
@@ -660,6 +673,26 @@ export default function HiringCasePage() {
             download={download}
           />
         )}
+      {selectedLifecyclePhase === "FORMAL_ASSESSMENTS" &&
+        (canHrSensitive || canCompanyManager) && (
+          <>
+            <FormalAssessmentPlanPanel
+              application={data}
+              authorities={authorities}
+              busy={busy}
+              applicationId={id}
+              run={run}
+            />
+          </>
+        )}
+      {canFinallyReject && data.stage !== "CLOSED" && !data.convertedAt && data.outcome !== "HIRED" && (
+        <FinalHiringRejection
+          applicationId={id}
+          plans={data.formalAssessmentPlans || []}
+          busy={busy}
+          run={run}
+        />
+      )}
       {(canHrSensitive ||
         (canCompanyManager && selectedLifecyclePhase === "ASSESSMENT")) && (
         <>
@@ -1308,7 +1341,7 @@ export default function HiringCasePage() {
                     onClick={() =>
                       run(
                         () => hiringAPI.completeAssessments(id),
-                        "مرحله ارزیابی تکمیل شد و برای تصمیم مدیر استخدام‌کننده آماده است.",
+                        "مرحله ارزیابی تکمیل شد و برای تصمیم مدیریت شرکت آماده است.",
                       )
                     }
                     tone="success"
@@ -1345,7 +1378,7 @@ export default function HiringCasePage() {
       )}
       {selectedLifecyclePhase === "OFFER" &&
         hasAuthority(
-          "HIRING_MANAGER",
+          "COMPANY_MANAGER",
           "HR_PAYROLL_PROCESSOR",
           "HR_PAYROLL_MANAGER",
           "FINANCE_MANAGER",
@@ -1431,7 +1464,7 @@ export default function HiringCasePage() {
                   ))}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {hasAuthority("HIRING_MANAGER", "HR_PAYROLL_PROCESSOR") && (
+                  {hasAuthority("COMPANY_MANAGER", "HR_PAYROLL_PROCESSOR") && (
                     <ErpPressable
                       type="submit"
                       className="rounded-lg border px-3 py-2 text-sm"
@@ -1445,9 +1478,9 @@ export default function HiringCasePage() {
                       افزودن ردیف
                     </ErpPressable>
                   )}
-                  {hasAuthority("HIRING_MANAGER") && (
+                  {hasAuthority("COMPANY_MANAGER") && (
                     <ErpButton
-                      label="پیشنهاد Hiring Manager"
+                      label="پیشنهاد مدیریت شرکت"
                       onClick={() =>
                         run(
                           () =>
@@ -1519,7 +1552,7 @@ export default function HiringCasePage() {
                       {[
                         {
                           title: "ثبت پیشنهاد",
-                          role: "مدیر استخدام‌کننده",
+                          role: "مدیریت شرکت",
                           actor: compensation.proposedBy,
                           at: compensation.createdAt,
                         },
@@ -2083,7 +2116,7 @@ export default function HiringCasePage() {
                 }
               >
                 <option value="HR_MANAGER">مدیر منابع انسانی</option>
-                <option value="HIRING_MANAGER">مدیر استخدام‌کننده</option>
+                <option value="COMPANY_MANAGER">مدیریت شرکت</option>
                 <option value="HR_PROCESSOR">کارشناس منابع انسانی</option>
                 <option value="FINANCE_MANAGER">مدیر مالی</option>
               </ErpSelect>
@@ -2689,6 +2722,7 @@ type CaseActionRunner = (
 ) => Promise<void>;
 
 function PreIdentitySection({
+  phase,
   application,
   authorities,
   busy,
@@ -2696,6 +2730,7 @@ function PreIdentitySection({
   run,
   download,
 }: {
+  phase: "INITIAL_HR_REVIEW" | "COMPANY_EVALUATION_PLAN";
   application: any;
   authorities: string[];
   busy: boolean;
@@ -2721,11 +2756,11 @@ function PreIdentitySection({
     decisions
       .filter((item: any) => item.kind === kind)
       .sort((a: any, b: any) => b.version - a.version)[0];
-  const decisionDefinitions = [
-    ["HR_INTERVIEW", "مصاحبه اولیه با HR", "HR_PROCESSOR"],
-    ["HR_PRELIMINARY_APPROVAL", "تأیید اولیه HR", "HR_MANAGER"],
-    ["COMPANY_APPROVAL", "تأیید مدیریت شرکت", "COMPANY_MANAGER"],
-  ];
+  const decisionDefinitions = phase === "INITIAL_HR_REVIEW"
+    ? [
+        ["HR_PRELIMINARY_APPROVAL", "تأیید اولیه HR", "HR_MANAGER"],
+      ]
+    : [["COMPANY_APPROVAL", "تأیید مدیریت شرکت", "COMPANY_MANAGER"]];
   useEffect(() => {
     if (!has("COMPANY_MANAGER")) return;
     void hiringAPI.preIdentityTemplates().then((response) => {
@@ -2738,9 +2773,21 @@ function PreIdentitySection({
 
   return (
     <ErpSection
-      title="بررسی‌های پیش از احراز هویت"
-      description="این چک‌لیست فقط در فضای داخلی پیگیری می‌شود و در صفحه متقاضی نمایش داده نمی‌شود."
+      title={phase === "INITIAL_HR_REVIEW" ? "بررسی اولیه منابع انسانی" : "برنامه ارزیابی مدیریت شرکت"}
+      description={phase === "INITIAL_HR_REVIEW" ? "مصاحبه و تأیید اولیه پیش از تصمیم ارزیابی‌های رسمی ثبت می‌شود." : "فعالیت‌های مدیریتی جدا از ارزیابی‌های رسمی برنامه‌ریزی و پیگیری می‌شوند."}
     >
+      {phase === "INITIAL_HR_REVIEW" && has("HR_PROCESSOR") && (
+        <GuidedHrInterview
+          busy={busy}
+          onSubmit={(payload) => run(
+            () => hiringAPI.recordDecision(applicationId, "HR_INTERVIEW", {
+              ...payload,
+              changeReason: latest("HR_INTERVIEW") ? "ثبت نسخه اصلاحی مصاحبه" : "",
+            }),
+            "نسخه مصاحبه هدایت‌شده ثبت شد.",
+          )}
+        />
+      )}
       <div className="grid gap-3 xl:grid-cols-3">
         {decisionDefinitions.map(([kind, label, authority]) => {
           const current = latest(kind);
@@ -2846,7 +2893,7 @@ function PreIdentitySection({
         })}
       </div>
 
-      <ErpCard className="mt-4 space-y-3 p-4">
+      {phase === "COMPANY_EVALUATION_PLAN" && <ErpCard className="mt-4 space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <b>چک‌لیست الزامات مدیریت شرکت</b>
           <ErpBadge
@@ -3222,7 +3269,237 @@ function PreIdentitySection({
             }
           />
         )}
-      </ErpCard>
+      </ErpCard>}
+    </ErpSection>
+  );
+}
+
+const formalAssessmentLabels: Record<string, string> = {
+  DISC: "DISC (الگوی رفتاری)",
+  EQ: "EQ (هوش هیجانی)",
+  BIG_FIVE: "BIG FIVE (پنج عامل شخصیت)",
+};
+const formalAssessmentFields: Record<string, Array<{ key: string; label: string }>> = {
+  DISC: [
+    { key: "dominance", label: "تسلط‌گرایی (D)" },
+    { key: "influence", label: "تأثیرگذاری (I)" },
+    { key: "steadiness", label: "ثبات (S)" },
+    { key: "conscientiousness", label: "وظیفه‌شناسی (C)" },
+  ],
+  EQ: [{ key: "score", label: "امتیاز کل هوش هیجانی" }],
+  BIG_FIVE: [
+    { key: "openness", label: "پذیرش تجربه‌های جدید" },
+    { key: "conscientiousness", label: "وظیفه‌شناسی" },
+    { key: "extraversion", label: "برون‌گرایی" },
+    { key: "agreeableness", label: "توافق‌پذیری" },
+    { key: "neuroticism", label: "روان‌رنجوری" },
+  ],
+};
+
+function FormalAssessmentPlanPanel({
+  application,
+  authorities,
+  busy,
+  applicationId,
+  run,
+}: {
+  application: any;
+  authorities: string[];
+  busy: boolean;
+  applicationId: string;
+  run: CaseActionRunner;
+}) {
+  const plans = application.formalAssessmentPlans || [];
+  const activePlan = plans.find((plan: any) => plan.status === "ACTIVE");
+  const [explicitlyNoAssessment, setExplicitlyNoAssessment] = useState(
+    Boolean(activePlan?.explicitlyNoAssessment),
+  );
+  const [selections, setSelections] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(["DISC", "EQ", "BIG_FIVE"].map((kind) => {
+      const current = activePlan?.selections?.find((item: any) => item.assessmentKind === kind);
+      return [kind, Boolean(current?.selected)];
+    })),
+  );
+  const [executionMethods, setExecutionMethods] = useState<Record<string, "APPLICANT" | "COMPANY">>(() =>
+    Object.fromEntries(["DISC", "EQ", "BIG_FIVE"].map((kind) => {
+      const current = activePlan?.selections?.find((item: any) => item.assessmentKind === kind);
+      return [kind, current?.executionMethod || "COMPANY"];
+    })),
+  );
+  const [repeatKinds, setRepeatKinds] = useState<string[]>([]);
+  const [reason, setReason] = useState("");
+  const [resultDrafts, setResultDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [resultFiles, setResultFiles] = useState<Record<string, File[]>>({});
+  const [correctionReasons, setCorrectionReasons] = useState<Record<string, string>>({});
+  const canManagePlan = authorities.includes("COMPANY_MANAGER");
+  const canRecord = authorities.includes("HR_PROCESSOR") || authorities.includes("HR_MANAGER");
+  const selected = Object.entries(selections).filter(([, value]) => value);
+
+  return (
+    <ErpSection
+      title="ارزیابی‌های رسمی اختیاری"
+      description="نبود داده به‌معنای بدون ارزیابی نیست؛ مدیریت شرکت باید انتخاب صریح و نسخه‌دار ثبت کند."
+    >
+      {canManagePlan && (
+        <ErpCard className="space-y-4 p-4">
+          <ErpCheckbox
+            checked={explicitlyNoAssessment}
+            onChange={(event) => {
+              setExplicitlyNoAssessment(event.target.checked);
+              if (event.target.checked) setSelections(Object.fromEntries(Object.keys(selections).map((kind) => [kind, false])));
+            }}
+            label="برای این پرونده ارزیابی رسمی لازم نیست"
+          />
+          {!explicitlyNoAssessment && (
+            <div className="grid gap-3 md:grid-cols-3">
+              {Object.entries(selections).map(([kind, isSelected]) => (
+                <ErpCard key={kind} className="space-y-3 p-3">
+                  <ErpCheckbox
+                    checked={isSelected}
+                    onChange={(event) => setSelections({ ...selections, [kind]: event.target.checked })}
+                    label={formalAssessmentLabels[kind]}
+                  />
+                  {isSelected && (
+                    <ErpSegmentedControl
+                      value={executionMethods[kind]}
+                      onChange={(value) => setExecutionMethods({
+                        ...executionMethods,
+                        [kind]: value as "APPLICANT" | "COMPANY",
+                      })}
+                      options={[
+                        { value: "APPLICANT", label: "تکمیل توسط متقاضی" },
+                        { value: "COMPANY", label: "اجرا در شرکت" },
+                      ]}
+                    />
+                  )}
+                  {activePlan && isSelected && (
+                    <ErpCheckbox
+                      checked={repeatKinds.includes(kind)}
+                      onChange={(event) => setRepeatKinds(event.target.checked ? [...repeatKinds, kind] : repeatKinds.filter((item) => item !== kind))}
+                      label="تکرار و ایجاد نسخه نتیجه جدید"
+                    />
+                  )}
+                </ErpCard>
+              ))}
+            </div>
+          )}
+          <ErpTextarea
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder={activePlan ? "دلیل بازنگری برنامه (الزامی)" : "توضیح تصمیم (اختیاری)"}
+          />
+          <ErpButton
+            label={activePlan ? "ثبت نسخه جدید برنامه" : "نهایی‌سازی برنامه ارزیابی"}
+            tone="success"
+            disabled={busy || (!explicitlyNoAssessment && selected.length === 0) || Boolean(activePlan && !reason.trim())}
+            onClick={() => run(() => hiringAPI.createFormalAssessmentPlan(applicationId, {
+              explicitlyNoAssessment,
+              executionMethod: null,
+              selections: selected.map(([assessmentKind]) => ({
+                assessmentKind,
+                executionMethod: executionMethods[assessmentKind],
+              })),
+              repeatKinds,
+              reason,
+            }), "نسخه برنامه ارزیابی رسمی ثبت شد.")}
+          />
+        </ErpCard>
+      )}
+
+      <div className="mt-4 space-y-3">
+        {!activePlan && <ErpCard className="p-4 text-sm text-[var(--sds-warning)]">تصمیم ارزیابی رسمی هنوز ثبت نشده است.</ErpCard>}
+        {plans.map((plan: any) => (
+          <ErpCard key={plan.id} className="p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <b>نسخه {plan.version.toLocaleString("fa-IR")}</b>
+              <ErpBadge tone={plan.status === "ACTIVE" ? "success" : "neutral"}>{plan.status === "ACTIVE" ? "جاری" : "جایگزین‌شده"}</ErpBadge>
+            </div>
+            <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">
+              {plan.explicitlyNoAssessment
+                ? "بدون ارزیابی رسمی"
+                : plan.selections.filter((item: any) => item.selected).map((item: any) =>
+                  `${formalAssessmentLabels[item.assessmentKind]} · ${item.executionMethod === "APPLICANT" ? "تکمیل توسط متقاضی" : "اجرا در شرکت"}`
+                ).join("، ")}
+            </p>
+            {plan.reason && <p className="mt-2 text-xs text-[var(--sds-text-muted)]">دلیل: {plan.reason}</p>}
+            {plan.status === "ACTIVE" && plan.selections.filter((item: any) => item.selected).map((selection: any) => {
+              const results = plans.flatMap((item: any) => item.results || []).filter((item: any) => item.assessmentKind === selection.assessmentKind).sort((a: any, b: any) => b.resultVersion - a.resultVersion);
+              const latest = results[0];
+              const maySubmit = canRecord && selection.executionMethod === "COMPANY" && (!latest || latest.status === "PENDING" || authorities.includes("HR_MANAGER"));
+              const resultValidation = Object.fromEntries(
+                formalAssessmentFields[selection.assessmentKind].map(({ key }) => [
+                  key,
+                  parseLocalizedAssessmentScore(resultDrafts[selection.assessmentKind]?.[key]),
+                ]),
+              );
+              return (
+                <div key={selection.assessmentKind} className="mt-3 rounded-xl border border-[var(--sds-border-default)] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <b>{formalAssessmentLabels[selection.assessmentKind]}</b>
+                    <ErpBadge tone={latest?.status === "COMPLETED" ? "success" : "warning"}>{latest?.status === "COMPLETED" ? `تکمیل‌شده · نسخه ${latest.resultVersion}` : selection.executionMethod === "APPLICANT" ? "در انتظار متقاضی" : "در انتظار ثبت شرکت"}</ErpBadge>
+                  </div>
+                  {maySubmit && (
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      {formalAssessmentFields[selection.assessmentKind].map((item) => (
+                        <label key={item.key} className="space-y-1">
+                          <ErpInput
+                            inputMode="decimal"
+                            value={resultDrafts[selection.assessmentKind]?.[item.key] || ""}
+                            onChange={(event) => setResultDrafts({
+                              ...resultDrafts,
+                              [selection.assessmentKind]: {
+                                ...(resultDrafts[selection.assessmentKind] || {}),
+                                [item.key]: event.target.value,
+                              },
+                            })}
+                            placeholder={`${item.label} · ۰ تا ۱۰۰`}
+                            aria-label={`امتیاز ${item.label}`}
+                          />
+                          {resultDrafts[selection.assessmentKind]?.[item.key] !== undefined && resultValidation[item.key]?.error && (
+                            <span className="text-xs text-[var(--sds-danger)]">{resultValidation[item.key].error}</span>
+                          )}
+                        </label>
+                      ))}
+                      {latest?.status === "COMPLETED" && authorities.includes("HR_MANAGER") && (
+                        <ErpInput
+                          value={correctionReasons[selection.assessmentKind] || ""}
+                          onChange={(event) => setCorrectionReasons({ ...correctionReasons, [selection.assessmentKind]: event.target.value })}
+                          placeholder="دلیل نسخه اصلاحی"
+                        />
+                      )}
+                      <label className="space-y-1 text-sm font-semibold md:col-span-2">
+                        <span>نمودارها و گزارش‌ها (اختیاری، حداکثر ۵ فایل)</span>
+                        <ErpInput
+                          type="file"
+                          multiple
+                          accept="image/png,image/jpeg,image/webp,application/pdf"
+                          onChange={(event) => setResultFiles({
+                            ...resultFiles,
+                            [selection.assessmentKind]: Array.from(event.target.files || []).slice(0, 5),
+                          })}
+                        />
+                      </label>
+                      <ErpButton
+                        label={latest?.status === "COMPLETED" ? "ثبت نسخه اصلاحی" : "ثبت نتیجه"}
+                        disabled={busy || !formalAssessmentFields[selection.assessmentKind].every(({ key }) => resultValidation[key]?.value !== undefined) || Boolean(latest?.status === "COMPLETED" && !(correctionReasons[selection.assessmentKind] || "").trim())}
+                        onClick={() => run(async () => {
+                          await hiringAPI.recordFormalAssessmentResult(applicationId, selection.assessmentKind, {
+                            result: Object.fromEntries(formalAssessmentFields[selection.assessmentKind].map(({ key }) => [key, resultValidation[key].value])),
+                            correctionReason: correctionReasons[selection.assessmentKind] || "",
+                          });
+                          if (resultFiles[selection.assessmentKind]?.length) {
+                            await hiringAPI.uploadFormalAssessmentEvidence(applicationId, selection.assessmentKind, resultFiles[selection.assessmentKind]);
+                          }
+                        }, "نسخه نتیجه ارزیابی ثبت شد.")}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </ErpCard>
+        ))}
+      </div>
     </ErpSection>
   );
 }

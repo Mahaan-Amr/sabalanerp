@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./hrHiringDashboardMetrics.test";
 import {
   buildHiringQueueItem,
   projectHiringTaskCapabilities,
@@ -28,10 +29,105 @@ const base = (
 
 {
   const result = projectHiringLifecycle(base());
+  assert.equal(result.totalPhases, 9);
+  assert.deepEqual(result.phases.map(({ id }) => id), [
+    "APPLICATION",
+    "INITIAL_HR_REVIEW",
+    "FORMAL_ASSESSMENTS",
+    "COMPANY_EVALUATION_PLAN",
+    "IDENTITY",
+    "OFFER",
+    "CONVERSION",
+    "ONBOARDING",
+    "ACTIVATION",
+  ]);
+}
+
+{
+  const result = projectHiringLifecycle(base({
+    preIdentityGrandfatheredAt: null,
+    formRevisions: [submitted],
+    hiringDecisions: [
+      { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+      { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+    ],
+    formalAssessmentPlans: [{
+      version: 1,
+      status: "ACTIVE",
+      explicitlyNoAssessment: true,
+      selections: [],
+      results: [],
+    }],
+  }));
+  assert.equal(result.phases[1].status, "COMPLETED");
+  assert.equal(result.totalPhases, 8);
+  assert.equal(result.phases.some((phase) => phase.id === "FORMAL_ASSESSMENTS"), false);
+  assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
+}
+
+{
+  const result = projectHiringLifecycle(base({
+    preIdentityGrandfatheredAt: null,
+    formRevisions: [submitted],
+    hiringDecisions: [
+      { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+      { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+    ],
+    formalAssessmentPlans: [{
+      version: 1,
+      status: "ACTIVE",
+      explicitlyNoAssessment: false,
+      executionMethod: "APPLICANT",
+      selections: [
+        { assessmentKind: "DISC", selected: true, executionMethod: "APPLICANT" },
+      ],
+      results: [
+        { assessmentKind: "DISC", resultVersion: 1, status: "COMPLETED" },
+      ],
+    }],
+  }));
+  assert.equal(result.totalPhases, 8);
+  assert.equal(result.phases.some((phase) => phase.id === "FORMAL_ASSESSMENTS"), false);
+  assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
+}
+
+{
+  const result = projectHiringLifecycle(base({
+    preIdentityGrandfatheredAt: null,
+    formRevisions: [submitted],
+    hiringDecisions: [
+      { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+      { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+    ],
+    formalAssessmentPlans: [{
+      version: 2,
+      status: "ACTIVE",
+      explicitlyNoAssessment: false,
+      selections: [
+        { assessmentKind: "DISC", selected: true, executionMethod: "APPLICANT" },
+        { assessmentKind: "EQ", selected: true, executionMethod: "COMPANY" },
+      ],
+      results: [
+        { assessmentKind: "DISC", resultVersion: 1, status: "COMPLETED" },
+        { assessmentKind: "EQ", resultVersion: 1, status: "PENDING" },
+      ],
+    }],
+  }), ["HR_PROCESSOR"]);
+  assert.equal(result.currentPhaseId, "FORMAL_ASSESSMENTS");
+  assert.equal(result.phases[2].requiredComplete, 1);
+  assert.equal(result.phases[2].requiredTotal, 2);
+  assert.deepEqual(result.phases[2].blockers.map(({ code }) => code), [
+    "FORMAL_ASSESSMENT_RESULT_MISSING:EQ",
+  ]);
+  assert.equal(result.phases[2].primaryAction?.id, "RECORD_COMPANY_ASSESSMENT_RESULT:EQ");
+}
+
+{
+  const result = projectHiringLifecycle(base());
   assert.equal(result.currentPhaseId, "APPLICATION");
   assert.equal(result.phases[0].status, "WAITING");
   assert.equal(result.phases[1].status, "COMPLETED");
-  assert.equal(result.phases[2].status, "UPCOMING");
+  assert.equal(result.phases[4].status, "UPCOMING");
 }
 
 {
@@ -45,10 +141,10 @@ const base = (
     }),
     ["HR_PAYROLL_PROCESSOR"],
   );
-  assert.equal(result.phases[4].status, "ACTION_REQUIRED");
-  assert.equal(result.phases[4].primaryAction?.id, "PREPARE_OFFER_PAYROLL");
-  assert.equal(result.phases[4].requiredComplete, 1);
-  assert.equal(result.phases[4].requiredTotal, 5);
+  assert.equal(result.phases[5].status, "ACTION_REQUIRED");
+  assert.equal(result.phases[5].primaryAction?.id, "PREPARE_OFFER_PAYROLL");
+  assert.equal(result.phases[5].requiredComplete, 1);
+  assert.equal(result.phases[5].requiredTotal, 5);
 }
 
 {
@@ -66,7 +162,7 @@ const base = (
   );
   assert.equal(result.currentPhaseId, "IDENTITY");
   assert.equal(result.phases[0].status, "COMPLETED");
-  assert.equal(result.phases[2].status, "ACTION_REQUIRED");
+  assert.equal(result.phases[4].status, "ACTION_REQUIRED");
 }
 
 {
@@ -78,25 +174,25 @@ const base = (
     }),
     ["HR_PROCESSOR"],
   );
-  assert.equal(result.phases[2].status, "BLOCKED");
+  assert.equal(result.phases[4].status, "BLOCKED");
   assert.deepEqual(
-    result.phases[2].blockers.map((item) => item.code),
+    result.phases[4].blockers.map((item) => item.code),
     ["IDENTITY_REJECTED"],
   );
 }
 
 {
-  const result = projectHiringLifecycle(
-    base({
-      formRevisions: [submitted],
-      stage: "ASSESSMENT",
-      identityClearance: "APPROVED",
-    }),
-    ["HR_PROCESSOR"],
-  );
-  assert.equal(result.currentPhaseId, "ASSESSMENT");
-  assert.equal(result.phases[3].status, "ACTION_REQUIRED");
-  assert.equal(result.phases[3].primaryAction?.id, "COMPLETE_ASSESSMENT");
+  const result = projectHiringLifecycle(base({
+    preIdentityGrandfatheredAt: null,
+    formRevisions: [submitted],
+    hiringDecisions: [
+      { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+      { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+    ],
+  }), ["COMPANY_MANAGER"]);
+  assert.equal(result.currentPhaseId, "FORMAL_ASSESSMENTS");
+  assert.equal(result.phases[2].status, "BLOCKED");
+  assert.equal(result.phases[2].primaryAction, null);
 }
 
 {
@@ -117,10 +213,10 @@ const base = (
     }),
   );
   assert.equal(result.currentPhaseId, "OFFER");
-  assert.equal(result.phases[4].status, "WAITING");
-  assert.equal(result.phases[4].requiredComplete, 4);
-  assert.equal(result.phases[4].requiredTotal, 5);
-  assert.equal(result.phases[4].primaryAction, null);
+  assert.equal(result.phases[5].status, "WAITING");
+  assert.equal(result.phases[5].requiredComplete, 4);
+  assert.equal(result.phases[5].requiredTotal, 5);
+  assert.equal(result.phases[5].primaryAction, null);
 }
 
 {
@@ -161,9 +257,9 @@ const base = (
     ["HR_MANAGER"],
   );
   assert.equal(result.currentPhaseId, "ACTIVATION");
-  assert.equal(result.phases[6].status, "COMPLETED");
-  assert.equal(result.phases[7].status, "ACTION_REQUIRED");
-  assert.equal(result.phases[7].primaryAction?.id, "ACTIVATE_EMPLOYMENT");
+  assert.equal(result.phases[7].status, "COMPLETED");
+  assert.equal(result.phases[8].status, "ACTION_REQUIRED");
+  assert.equal(result.phases[8].primaryAction?.id, "ACTIVATE_EMPLOYMENT");
 }
 
 {
@@ -190,8 +286,8 @@ const base = (
     ["FINANCE_MANAGER"],
   );
   assert.equal(result.currentPhaseId, "CONVERSION");
-  assert.equal(result.phases[5].status, "ACTION_REQUIRED");
-  assert.equal(result.phases[5].requiredComplete, 0);
+  assert.equal(result.phases[6].status, "ACTION_REQUIRED");
+  assert.equal(result.phases[6].requiredComplete, 0);
 }
 
 {
@@ -219,9 +315,9 @@ const base = (
     }),
   );
   assert.equal(result.currentPhaseId, "CONVERSION");
-  assert.equal(result.phases[5].status, "BLOCKED");
+  assert.equal(result.phases[6].status, "BLOCKED");
   assert.deepEqual(
-    result.phases[5].blockers.map((item) => item.code),
+    result.phases[6].blockers.map((item) => item.code),
     ["EMPLOYMENT_LINK_MISSING"],
   );
 }
@@ -274,14 +370,14 @@ const base = (
       identityClearance: "APPROVED",
       assessmentCompletedAt: new Date(),
     }),
-    ["HIRING_MANAGER"],
+    ["COMPANY_MANAGER"],
   );
   assert.equal(result.currentPhaseId, "OFFER");
   assert.equal(result.phases[0].status, "COMPLETED");
   assert.equal(result.phases[1].status, "COMPLETED");
-  assert.equal(result.phases[3].status, "COMPLETED");
-  assert.ok(result.phases.slice(4).every((phase) => phase.status === "ENDED"));
-  assert.equal(result.phases[3].primaryAction, null);
+  assert.equal(result.phases[4].status, "COMPLETED");
+  assert.ok(result.phases.slice(5).every((phase) => phase.status === "ENDED"));
+  assert.equal(result.phases[4].primaryAction, null);
 }
 
 {
@@ -289,21 +385,21 @@ const base = (
     base({ formRevisions: [submitted], stage: "SCREENING" }),
     ["HR_MANAGER"],
   );
-  assert.equal(result.phases[2].status, "WAITING");
-  assert.equal(result.phases[2].primaryAction, null);
-  assert.equal(result.phases[2].secondaryActions.length, 0);
-  assert.doesNotMatch(JSON.stringify(result.phases[2]), /REVIEW_IDENTITY/);
+  assert.equal(result.phases[4].status, "WAITING");
+  assert.equal(result.phases[4].primaryAction, null);
+  assert.equal(result.phases[4].secondaryActions.length, 0);
+  assert.doesNotMatch(JSON.stringify(result.phases[4]), /REVIEW_IDENTITY/);
   const summary = summarizeHiringLifecycle(result);
   assert.equal(summary.phaseId, "IDENTITY");
   assert.equal(summary.actionLabel, null);
-  assert.equal(summary.stepLabel, "مرحله 3 از 8");
+  assert.equal(summary.stepLabel, "مرحله 5 از 9");
 }
 
 {
   const result = projectHiringLifecycle(
     base({ formRevisions: [submitted], stage: "SCREENING" }),
   );
-  assert.equal(result.phases[2].responsibleFunction, "کارشناس منابع انسانی");
+  assert.equal(result.phases[4].responsibleFunction, "کارشناس منابع انسانی");
 }
 
 {
@@ -325,12 +421,12 @@ const base = (
     }),
     ["FINANCE_MANAGER"],
   );
-  assert.equal(result.phases[4].status, "BLOCKED");
-  assert.equal(result.phases[4].primaryAction, null);
-  assert.equal(result.phases[4].secondaryActions.length, 0);
+  assert.equal(result.phases[5].status, "BLOCKED");
+  assert.equal(result.phases[5].primaryAction, null);
+  assert.equal(result.phases[5].secondaryActions.length, 0);
   assert.equal(
-    result.phases[4].responsibleFunction,
-    "مدیر استخدام‌کننده یا مدیریت حقوق و دستمزد",
+    result.phases[5].responsibleFunction,
+    "مدیریت شرکت یا مدیریت حقوق و دستمزد",
   );
   assert.equal(summarizeHiringLifecycle(result).actionLabel, null);
 }
@@ -384,12 +480,14 @@ const base = (
       ],
       preIdentityRequirementsFinalizedAt: new Date(),
       preIdentityChecklistItems: [{ status: "POSITIVE" }],
+      formalAssessmentPlans: [{ version: 1, status: "ACTIVE", explicitlyNoAssessment: true }],
     }),
     ["COMPANY_MANAGER"],
   );
-  assert.equal(result.currentPhaseId, "PRE_IDENTITY");
-  assert.equal(result.phases[1].status, "ACTION_REQUIRED");
-  assert.equal(result.phases[1].primaryAction?.id, "APPROVE_PRE_IDENTITY");
+  assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
+  const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
+  assert.equal(companyEvaluationPhase?.status, "ACTION_REQUIRED");
+  assert.equal(companyEvaluationPhase?.primaryAction?.id, "APPROVE_PRE_IDENTITY");
 }
 
 {
@@ -398,12 +496,18 @@ const base = (
       disposition: "RESERVE",
       preIdentityGrandfatheredAt: null,
       formRevisions: [submitted],
+      hiringDecisions: [
+        { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+        { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+      ],
+      formalAssessmentPlans: [{ version: 1, status: "ACTIVE", explicitlyNoAssessment: true }],
     }),
   );
-  assert.equal(result.currentPhaseId, "PRE_IDENTITY");
-  assert.equal(result.phases[1].status, "PAUSED");
-  assert.equal(result.phases[1].primaryAction, null);
-  assert.equal(result.phases[1].secondaryActions.length, 0);
+  assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
+  const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
+  assert.equal(companyEvaluationPhase?.status, "PAUSED");
+  assert.equal(companyEvaluationPhase?.primaryAction, null);
+  assert.equal(companyEvaluationPhase?.secondaryActions.length, 0);
 }
 
 {
@@ -499,7 +603,7 @@ const base = (
     contracts: [{ uploadedBy: "recorder-1", approvedAt: null }],
   });
   const recorder = projectHiringLifecycle(onboardingSource, ["FINANCE_RECORDER"]);
-  assert.equal(recorder.phases[6].primaryAction?.id, "SUBMIT_CONTRACT");
+  assert.equal(recorder.phases[7].primaryAction?.id, "SUBMIT_CONTRACT");
 
   const submittedSource = base({
     ...onboardingSource,
@@ -512,9 +616,9 @@ const base = (
     ],
   });
   const manager = projectHiringLifecycle(submittedSource, ["FINANCE_MANAGER"], "manager-2");
-  assert.equal(manager.phases[6].primaryAction?.id, "APPROVE_CONTRACT");
+  assert.equal(manager.phases[7].primaryAction?.id, "APPROVE_CONTRACT");
   const selfReview = projectHiringLifecycle(submittedSource, ["FINANCE_MANAGER"], "recorder-1");
-  assert.equal(selfReview.phases[6].primaryAction, null);
+  assert.equal(selfReview.phases[7].primaryAction, null);
   assert.deepEqual(
     projectHiringTaskCapabilities(submittedSource, ["FINANCE_MANAGER"], "recorder-1")
       .find((task) => task.id === "SIGNED_CONTRACT")?.actionIds,
@@ -560,7 +664,7 @@ const base = (
     ["RECORD_CONTRACT"],
   );
   assert.ok(
-    returned.phases[6].blockers.some(
+    returned.phases[7].blockers.some(
       (item) => item.code === "CONTRACT_REJECTED",
     ),
   );

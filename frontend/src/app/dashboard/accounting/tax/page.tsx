@@ -1,11 +1,17 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaBalanceScale, FaCheck, FaSync, FaTimes } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa, money, taxStatusLabels } from '@/features/accounting/accountingUi';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import PersianCalendar from '@/lib/persian-calendar';
+import {
+  canonicalizeTaxQuery,
+  patchTaxQuery,
+  type StatusDrilldownQueryState,
+} from '@/features/accounting/accountingQueryState';
 
 const submissionStatusOptions = [
   { label: 'همه وضعیت‌ها', value: 'ALL' },
@@ -18,19 +24,53 @@ const submissionStatusOptions = [
 ];
 
 export default function AccountingTaxPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const canonicalQuery = useMemo(
+    () => canonicalizeTaxQuery(new URLSearchParams(searchParams.toString())),
+    [searchParams],
+  );
+  const query = canonicalQuery.state;
   const [rows, setRows] = useState<any[]>([]);
   const [pagination, setPagination] = useState(emptyAccountingPagination);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [submissionStatus, setSubmissionStatus] = useState('ALL');
+  const [searchInput, setSearchInput] = useState(query.search);
   const [trackTarget, setTrackTarget] = useState<{ row: any; status: string } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const loadRows = useCallback(async (page = 1) => {
+  const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeTaxQuery>) => {
+    const serialized = next.params.toString();
+    router.replace(serialized ? `${pathname}?${serialized}` : pathname, { scroll: false });
+  }, [pathname, router]);
+
+  const updateQuery = useCallback((patch: Partial<StatusDrilldownQueryState<'needs-attention'>>) => {
+    replaceQuery(patchTaxQuery(new URLSearchParams(searchParams.toString()), patch));
+  }, [replaceQuery, searchParams]);
+
+  useEffect(() => {
+    if (canonicalQuery.params.toString() !== searchParams.toString()) replaceQuery(canonicalQuery);
+  }, [canonicalQuery, replaceQuery, searchParams]);
+
+  useEffect(() => setSearchInput(query.search), [query.search]);
+
+  useEffect(() => {
+    if (searchInput.trim() === query.search) return;
+    const timeout = window.setTimeout(() => updateQuery({ search: searchInput }), 350);
+    return () => window.clearTimeout(timeout);
+  }, [query.search, searchInput, updateQuery]);
+
+  const loadRows = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await accountingAPI.getTaxRecords({ search, submissionStatus, page, pageSize: pagination.pageSize });
+      const response = await accountingAPI.getTaxRecords({
+        view: query.view || undefined,
+        search: query.search || undefined,
+        status: query.status,
+        page: query.page,
+        pageSize: pagination.pageSize,
+      });
       if (response.data.success) {
         const data = readAccountingListResponse<any>(response.data.data);
         setRows(data.items);
@@ -41,10 +81,10 @@ export default function AccountingTaxPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.pageSize, search, submissionStatus]);
+  }, [pagination.pageSize, query.page, query.search, query.status, query.view]);
 
   useEffect(() => {
-    loadRows(1);
+    loadRows();
   }, [loadRows]);
 
   const track = async (values: Record<string, string | number>) => {
@@ -62,7 +102,7 @@ export default function AccountingTaxPage() {
         submittedAt: values.submittedAt ? PersianCalendar.toGregorian(String(values.submittedAt)).toISOString() : new Date().toISOString(),
       });
       setTrackTarget(null);
-      await loadRows(pagination.page);
+      await loadRows();
     } catch (error) {
       console.error('Error tracking tax:', error);
       setActionError((error as any)?.response?.data?.error || 'به‌روزرسانی مالیات انجام نشد');
@@ -91,17 +131,17 @@ export default function AccountingTaxPage() {
       eyebrow="حسابداری"
       title="مالیات و سامانه مودیان"
       description="آمادگی اطلاعات مالیاتی و پیگیری دستی وضعیت ارسال، پذیرش یا رد صورتحساب در سامانه مودیان."
-      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: () => loadRows(pagination.page), tone: 'neutral' }]}
+      actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadRows, tone: 'neutral' }]}
       filters={[
-        { id: 'search', label: 'جستجو', type: 'search', value: search, onChange: setSearch, placeholder: 'شماره قرارداد یا مشتری...' },
-        { id: 'submissionStatus', label: 'وضعیت مالیات', type: 'select', value: submissionStatus, onChange: setSubmissionStatus, options: submissionStatusOptions },
+        { id: 'search', label: 'جستجو', type: 'search', value: searchInput, onChange: setSearchInput, placeholder: 'شماره قرارداد یا مشتری...' },
+        { id: 'submissionStatus', label: 'وضعیت مالیات', type: 'select', value: query.status, onChange: (value) => updateQuery({ status: value }), options: submissionStatusOptions },
       ]}
       rows={rows}
       rowKey={(row) => row.id}
       columns={columns}
       rowActions={rowActions}
       isLoading={loading}
-      footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={loadRows} itemLabel="پرونده" />}
+      footer={<ErpPagination currentPage={pagination.page} totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)} totalItems={pagination.total} itemsPerPage={pagination.pageSize} onPageChange={(page) => updateQuery({ page })} itemLabel="پرونده" />}
       emptyState={<ErpEmptyState icon={FaBalanceScale} title="پرونده مالیاتی ثبت نشده است" description="با ایجاد پیش‌نویس صورتحساب، پرونده مالیاتی و آمادگی سامانه مودیان ایجاد می‌شود." />}
     >
       <AccountingActionModal

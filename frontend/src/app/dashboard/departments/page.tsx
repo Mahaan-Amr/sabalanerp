@@ -162,7 +162,7 @@ export default function DepartmentsManagementPage() {
         metrics={metrics}
         actions={[
           { label: 'دپارتمان جدید', href: '/dashboard/departments/create', icon: FaPlus, tone: 'primary', variant: 'solid' },
-          { label: 'مدیریت کاربران', href: '/dashboard/users', icon: FaUsers, tone: 'neutral', variant: 'outline' },
+          { label: 'مدیریت کاربران', href: '/dashboard/hr/users', icon: FaUsers, tone: 'neutral', variant: 'outline' },
           { label: 'دانلود', icon: FaDownload, tone: 'neutral', variant: 'ghost', title: 'دانلود' },
         ]}
         filters={[

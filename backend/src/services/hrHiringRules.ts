@@ -74,11 +74,11 @@ export const normalizeCompensationComponents = (components: CompensationComponen
     if (category === 'OTHER') {
       const label = String(component.label || '').trim();
       if (!label) throw new Error('عنوان مورد سایر الزامی است.');
-      return { category, label, amountRials: component.amountRials };
+      return { category, label, amountRials: normalizeHiringRial(component.amountRials) };
     }
     const label = COMPENSATION_CATEGORY_LABELS[category];
     if (!label) throw new Error('طبقه‌بندی ساختاریافته همه ردیف‌های جبران خدمات الزامی است.');
-    return { category, label, amountRials: component.amountRials };
+    return { category, label, amountRials: normalizeHiringRial(component.amountRials) };
   });
 };
 
@@ -111,3 +111,4 @@ export const unresolvedActivationRequirements = (input: {
   unresolved.push(...input.tasks.filter((task) => task.activationBlocker && !['COMPLETE', 'WAIVED'].includes(task.status)).map((task) => task.title));
   return unresolved;
 };
+import { normalizeHiringRial } from './hrApplicantExperience';

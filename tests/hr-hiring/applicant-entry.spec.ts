@@ -64,6 +64,7 @@ test("HR Processor can enter the hiring case and control the external SMS bounda
     .locator("xpath=ancestor::tr")
     .getByRole("button", { name: "ارسال مجدد دعوت" })
     .click();
+  await page.getByRole("button", { name: "ارسال دعوت‌نامه جدید" }).click();
   await expect(page.getByText("خطای آزمایشی ارسال پیامک")).toBeVisible();
 
   const smsSnapshot = await page.request.get(
@@ -97,7 +98,7 @@ test("latest pre-identity decisions and identity evidence modes persist through 
   await page.goto("/dashboard/hr/hiring/hr-e2e-release-application");
   await expect(page.locator('[aria-current="step"]').first()).toHaveAttribute(
     "aria-label",
-    /^مرحله 3: بررسی و احراز هویت/,
+    /^مرحله 4: بررسی و احراز هویت/,
     { timeout: 30_000 },
   );
 
@@ -273,6 +274,33 @@ test("Offer notification includes the applicant's existing OTP for /apply", asyn
   });
 });
 
+test("localized assessment scores reject invalid values and accept 0 through 100", async ({
+  page,
+}) => {
+  await page.goto("/login");
+  await page
+    .locator('input[name="identifier"]')
+    .fill("hr.processor.e2e@sabalanerp.test");
+  await page.locator('input[name="password"]').fill("HrE2ePass123!");
+  await page.locator("form").getByRole("button", { name: "ورود" }).click();
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
+
+  await page.goto(
+    "/dashboard/hr/hiring/hr-e2e-application?phase=FORMAL_ASSESSMENTS",
+  );
+  const scores = page.locator('input[inputmode="decimal"]');
+  await scores.nth(0).fill("۱۰۱");
+  await expect(page.getByText("امتیاز باید بین ۰ تا ۱۰۰ باشد.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "ثبت نتیجه" })).toBeDisabled();
+
+  await scores.nth(0).fill("۰");
+  await scores.nth(1).fill("٢٥٫٥");
+  await scores.nth(2).fill("50.25");
+  await scores.nth(3).fill("۱۰۰");
+  await page.getByRole("button", { name: "ثبت نتیجه" }).click();
+  await expect(page.getByText("نسخه نتیجه ارزیابی ثبت شد.")).toBeVisible();
+});
+
 test("Candidate accepts the latest offer with fresh dedicated evidence", async ({
   page,
 }) => {
@@ -289,35 +317,6 @@ test("Candidate accepts the latest offer with fresh dedicated evidence", async (
     .check();
   await page.getByRole("button", { name: "پذیرش پیشنهاد" }).click();
   await expect(page.getByText("پیشنهاد همکاری پذیرفته شد.")).toBeVisible();
-});
-
-test("localized assessment scores reject invalid values and accept 0 through 100", async ({
-  page,
-}) => {
-  await page.goto("/login");
-  await page
-    .locator('input[name="identifier"]')
-    .fill("hr.processor.e2e@sabalanerp.test");
-  await page.locator('input[name="password"]').fill("HrE2ePass123!");
-  await page.locator("form").getByRole("button", { name: "ورود" }).click();
-  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
-
-  await page.goto(
-    "/dashboard/hr/hiring/hr-e2e-application?phase=ASSESSMENT",
-  );
-  const scores = page.locator('input[inputmode="decimal"]');
-  await scores.nth(0).fill("۱۰۱");
-  await expect(page.getByText("امتیاز باید بین ۰ تا ۱۰۰ باشد.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "ثبت ارزیابی" })).toBeDisabled();
-
-  await scores.nth(0).fill("۰");
-  await scores.nth(1).fill("٢٥٫٥");
-  await scores.nth(2).fill("50.25");
-  await scores.nth(3).fill("۱۰۰");
-  await page.getByRole("button", { name: "ثبت ارزیابی" }).click();
-  await expect(page.getByText("نتیجه ارزیابی ثبت شد.")).toBeVisible();
-  await page.getByRole("button", { name: "تکمیل مرحله ارزیابی" }).click();
-  await expect(page.getByRole("button", { name: "ارزیابی تکمیل‌شده" })).toBeVisible();
 });
 
 test("Candidate portal and HR hiring remain readable in both remembered themes", async ({

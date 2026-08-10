@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { TwoPartyBarrier, ConcurrencyBarrierTimeoutError } from './barrier';
-import { assertTemporaryConcurrencyDatabaseName, temporaryDatabaseUrl } from './database';
+import { assertSabalanerpLocalPostgresTarget, assertTemporaryConcurrencyDatabaseName, temporaryDatabaseUrl } from './database';
 import { ConcurrencyTrace } from './trace';
 import { isRetryableConcurrencyError } from './retry';
 import { assertStatementAdjustmentRaceEvidence } from './statementAdjustmentEvidence';
@@ -28,6 +28,14 @@ const run = async () => {
   'postgresql://postgres:secret@127.0.0.1:55432/sabalanerp_concurrency_0123456789abcdef?schema=public');
   assert.throws(() => temporaryDatabaseUrl('postgresql://postgres:secret@example.com:5432/production',
     'sabalanerp_concurrency_0123456789abcdef'));
+  assert.deepEqual(assertSabalanerpLocalPostgresTarget(JSON.stringify([{ Project: 'sabalanerp-local', Service: 'postgres',
+    State: 'running', Health: 'healthy', Name: 'sabalanerp-local-postgres-1' }])), {
+    project: 'sabalanerp-local', service: 'postgres', container: 'sabalanerp-local-postgres-1',
+  });
+  assert.throws(() => assertSabalanerpLocalPostgresTarget(JSON.stringify([{ Project: 'other', Service: 'postgres',
+    State: 'running', Health: 'healthy', Name: 'other-postgres-1' }])), /refusing docker target/i);
+  assert.throws(() => assertSabalanerpLocalPostgresTarget(JSON.stringify([{ Project: 'sabalanerp-local', Service: 'postgres',
+    State: 'running', Health: 'unhealthy', Name: 'sabalanerp-local-postgres-1' }])), /verified healthy/i);
   assert.equal(isRetryableConcurrencyError({ code: 'P2010', meta: { code: '40001' } }), true);
   assert.equal(isRetryableConcurrencyError({ code: 'P2010', meta: { code: '40P01' } }), true);
   assert.equal(isRetryableConcurrencyError({ code: 'P2002' }), false);

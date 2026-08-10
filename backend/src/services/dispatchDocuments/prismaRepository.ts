@@ -12,7 +12,7 @@ import { DispatchDocumentConflictError, DispatchDocumentValidationError } from '
 import { DispatchDocumentEvidenceConflictError } from './service';
 import { assertCanonicalDispatchCommandAllowed } from '../dispatchCutover';
 import { isPostCutoverFinalization, isShipmentStatementFlowActive } from './featureGate';
-import { refreshProjectionContracts } from '../dispatchAllocation';
+import { isRetryableDispatchTransactionError, refreshProjectionContracts } from '../dispatchAllocation';
 import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { createPrismaAllocationPricingBindingPort } from '../allocationPricingPrismaAdapter';
 import { verifyDispatchArtifactStorageUnderLock } from './artifactStorageLock';
@@ -52,7 +52,7 @@ export const runSerializableDispatchOperation = async <T>(prisma: PrismaClient, 
         if (replay !== null) return replay;
         throw caught;
       }
-      if (caught.code !== 'P2034') throw caught;
+      if (!isRetryableDispatchTransactionError(caught)) throw caught;
     }
   }
   throw error;

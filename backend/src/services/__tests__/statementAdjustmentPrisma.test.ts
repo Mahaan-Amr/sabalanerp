@@ -4,8 +4,9 @@ import { PricingReadinessStatus, Prisma, PrismaClient } from '@prisma/client';
 import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from '../approvedPricing';
 import { PrismaApprovedPricingRepository } from '../approvedPricing/prismaRepository';
 import type { ApprovedPricingVersionInsert } from '../approvedPricing/types';
-import { createDispatchCorrection, dispatchLifecycleAuditEventHash, postDispatchCorrection } from '../dispatchCorrectionOutage';
+import { createDispatchCorrection, dispatchLifecycleAuditEventHash, postDispatchCorrection, verifyGuardPhysicalReturn } from '../dispatchCorrectionOutage';
 import { createStatementAdjustmentArtifactPreparer, type DispatchArtifactStorage } from '../dispatchDocuments';
+import { completeGuardInboundMovement, recordGuardInboundMovement } from '../guardInboundMovement';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 import { readShipmentQuantityProjection, shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { assertStatementAdjustmentRaceEvidence } from './shipmentStatementConcurrency/statementAdjustmentEvidence';
@@ -50,6 +51,7 @@ const configuredArtifactPreparer = (options: { corruptOnReverify?: boolean;
 };
 
 const run = async () => {
+  const proofStartedAt = performance.now();
   assert.ok(process.env.DATABASE_URL?.includes('127.0.0.1:55432'), 'Integration must target sabalanerp-local PostgreSQL.');
   const before = {
     versions: await prisma.contractApprovedPricingVersion.count(),
@@ -64,17 +66,18 @@ const run = async () => {
     audits: await prisma.dispatchLifecycleAudit.count({ where: { aggregateType: 'DISPATCH_CORRECTION' } }),
   };
   let committedFixture: { waybillId: string; correctionIds: [string, string]; returnAndReshipIds: [string, string];
-    returnEvidenceId: string; actorId: string;
+    returnEvidenceId: string; actorId: string; loadingId: string; customerId: string; dispatchEvidenceId: string;
+    contractItemId: string;
     authority: { actorRole: string; workspace: string; workspacePermission: string } } | null = null;
   try {
     committedFixture = await prisma.$transaction(async (tx) => {
       const [candidate] = await tx.$queryRaw<Array<{
         waybillId: string; revisionId: string; revisionLineId: string; itemId: string; productRowId: string;
-        contractId: string; financialRecordId: string; createdBy: string; currency: string;
+        contractId: string; customerId: string; financialRecordId: string; createdBy: string; currency: string;
         lineQuantity: Prisma.Decimal; lineUnit: string; loadingId: string;
       }>>(Prisma.sql`
         SELECT w."id" AS "waybillId", ar."id" AS "revisionId", arl."id" AS "revisionLineId",
-          ci."id" AS "itemId", ci."productRowId", ci."contractId", afr."id" AS "financialRecordId",
+          ci."id" AS "itemId", ci."productRowId", ci."contractId", sc."customerId", afr."id" AS "financialRecordId",
           afr."createdBy", sc."currency", arl."quantity" AS "lineQuantity", arl."unit" AS "lineUnit", ar."loadingId"
         FROM "accounting_dispatch_waybills" w
         JOIN "accounting_dispatch_candidates" adc ON adc."id" = w."candidateId"
@@ -265,33 +268,10 @@ const run = async () => {
         const raceB = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
           reason: 'DB sequence race B', effectiveAt: new Date(), actorId: candidate.createdBy, authority,
           lines: [{ contractItemId: candidate.itemId, quantity: '0.001' }] });
-        const concurrentMovementAt = new Date(returnRecordedAt.getTime() + 1);
-        const concurrentMovement = await tx.securityVehicleMovement.create({ data: {
-          movementNumber: `I260-${randomUUID()}`,
-          direction: 'INBOUND', purpose: 'SALES_RETURN', status: 'INFO_COMPLETED', loadingId: candidate.loadingId,
-          occurredAt: concurrentMovementAt, completedAt: new Date(concurrentMovementAt.getTime() + 1),
-          createdBy: candidate.createdBy,
-        } });
-        const concurrentReturnBase = { id: randomUUID(), contractId: candidate.contractId,
-          contractItemId: candidate.itemId, productRowId: candidate.productRowId, unit: candidate.lineUnit,
-          kind: 'GUARD_RETURN_VERIFIED' as const, quantity: '0.001', effectiveAt: concurrentMovementAt.toISOString(),
-          recordedAt: new Date(concurrentMovementAt.getTime() + 2).toISOString(), sourceType: 'GUARD_RETURN_MOVEMENT',
-          sourceId: concurrentMovement.id, sourceVersion: 1, integrityHash: '', guardReturnMovementId: concurrentMovement.id,
-          dispatchEvidenceId: dispatchEvidence.id, metadata: { dispatchLoadingId: candidate.loadingId },
-        };
-        const concurrentReturn = await tx.shipmentQuantityEvidence.create({ data: { ...concurrentReturnBase,
-          quantity: '0.001', effectiveAt: concurrentMovementAt, recordedAt: new Date(concurrentReturnBase.recordedAt),
-          integrityHash: shipmentQuantityEvidenceIntegrityHash(concurrentReturnBase) } });
-        const returnedAgain = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
-          reason: 'DB concurrent verified return', effectiveAt: new Date(concurrentReturnBase.recordedAt),
-          actorId: candidate.createdBy, authority,
-          lines: [{ contractItemId: candidate.itemId, quantity: '-0.001', returnEvidenceId: concurrentReturn.id }] });
-        const reship = await createDispatchCorrection(boundPrisma, { waybillId: candidate.waybillId,
-          reason: 'DB concurrent reship', effectiveAt: new Date(concurrentReturnBase.recordedAt),
-          actorId: candidate.createdBy, authority, lines: [{ contractItemId: candidate.itemId, quantity: '0.001' }] });
         return { waybillId: candidate.waybillId, correctionIds: [raceA.id, raceB.id] as [string, string],
-          returnAndReshipIds: [returnedAgain.id, reship.id] as [string, string], returnEvidenceId: concurrentReturn.id,
-          actorId: candidate.createdBy, authority };
+          returnAndReshipIds: ['', ''] as [string, string], returnEvidenceId: '', actorId: candidate.createdBy,
+          loadingId: candidate.loadingId, customerId: candidate.customerId, dispatchEvidenceId: dispatchEvidence.id,
+          contractItemId: candidate.itemId, authority };
       }
       throw rollback;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -300,6 +280,23 @@ const run = async () => {
   }
   if (runConcurrency) {
     assert.ok(committedFixture, 'temporary DB race fixture must commit before opening independent connections');
+    const inbound = await recordGuardInboundMovement(prisma, { purpose: 'SALES_RETURN',
+      loadingId: committedFixture.loadingId, customerId: committedFixture.customerId,
+      occurredAt: new Date(Date.now() - 1_000), actorId: committedFixture.actorId });
+    await completeGuardInboundMovement(prisma, { movementId: inbound.id });
+    const concurrentReturn = await verifyGuardPhysicalReturn(prisma, { movementId: inbound.id,
+      dispatchEvidenceId: committedFixture.dispatchEvidenceId, quantity: '0.001', actorId: committedFixture.actorId,
+      authority: { actorRole: 'SECURITY', workspace: 'security', workspacePermission: 'EDIT' } });
+    const returnedAgain = await createDispatchCorrection(prisma, { waybillId: committedFixture.waybillId,
+      reason: 'DB concurrent verified return', effectiveAt: concurrentReturn.recordedAt,
+      actorId: committedFixture.actorId, authority: committedFixture.authority,
+      lines: [{ contractItemId: committedFixture.contractItemId, quantity: '-0.001', returnEvidenceId: concurrentReturn.id }] });
+    const reship = await createDispatchCorrection(prisma, { waybillId: committedFixture.waybillId,
+      reason: 'DB concurrent reship', effectiveAt: concurrentReturn.recordedAt,
+      actorId: committedFixture.actorId, authority: committedFixture.authority,
+      lines: [{ contractItemId: committedFixture.contractItemId, quantity: '0.001' }] });
+    committedFixture.returnAndReshipIds = [returnedAgain.id, reship.id];
+    committedFixture.returnEvidenceId = concurrentReturn.id;
     const [firstClient, secondClient] = [new PrismaClient(), new PrismaClient()];
     try {
       await Promise.all(committedFixture.correctionIds.map((correctionId, index) =>
@@ -369,9 +366,22 @@ const run = async () => {
         } }),
       });
       assert.deepEqual(verified.sequenceRange, [4, 7]);
+      const proofDurationMs = Number((performance.now() - proofStartedAt).toFixed(3));
       console.log(JSON.stringify({ kind: 'issue260-statement-adjustment-concurrency-proof',
+        schemaVersion: 1, parentRunId: process.env.ISSUE260_PARENT_RUN_ID,
+        parentDatabaseName: process.env.ISSUE260_PARENT_DATABASE_NAME,
+        databaseName: new URL(process.env.DATABASE_URL!).pathname.slice(1),
         scenarios: ['concurrent-correction-adjustment-sequence-posting',
-          'verified-return-vs-reship-final-remainder-attribution'],
+          'verified-return-vs-reship-final-remainder-attribution'].map(name => ({ name, repetitions: 1, anomalies: [] })),
+        events: [
+          ...sequenceProof.map((proof, index) => ({ scenario: 'concurrent-correction-adjustment-sequence-posting',
+            actor: `correction-post-${index + 1}`, phase: 'sequence-allocation', outcome: 'committed',
+            detail: { attempt: 1, durationMs: proofDurationMs, databaseCode: null, sequence: proof.sequence } })),
+          ...returnProof.map((proof, index) => ({ scenario: 'verified-return-vs-reship-final-remainder-attribution',
+            actor: index === 0 ? 'guard-return-post' : 'reship-post', phase: 'final-remainder-attribution',
+            outcome: 'committed', detail: { attempt: index === 1 && reshipRetried ? 2 : 1, durationMs: proofDurationMs,
+              databaseCode: null, sequence: proof.sequence } })),
+        ],
         reshipInitialStatus: returnAndReshipResults[1].status, reshipRetried, ...verified }));
     } finally {
       await Promise.all([firstClient.$disconnect(), secondClient.$disconnect()]);

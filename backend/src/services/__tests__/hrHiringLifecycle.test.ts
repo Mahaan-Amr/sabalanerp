@@ -343,7 +343,7 @@ const base = (
       identityClearance: "APPROVED",
       assessmentCompletedAt: new Date(),
     }),
-    ["HIRING_MANAGER"],
+    ["COMPANY_MANAGER"],
   );
   assert.equal(result.currentPhaseId, "OFFER");
   assert.equal(result.phases[0].status, "COMPLETED");
@@ -399,7 +399,7 @@ const base = (
   assert.equal(result.phases[5].secondaryActions.length, 0);
   assert.equal(
     result.phases[5].responsibleFunction,
-    "مدیر استخدام‌کننده یا مدیریت حقوق و دستمزد",
+    "مدیریت شرکت یا مدیریت حقوق و دستمزد",
   );
   assert.equal(summarizeHiringLifecycle(result).actionLabel, null);
 }

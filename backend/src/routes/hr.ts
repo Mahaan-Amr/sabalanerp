@@ -1805,7 +1805,7 @@ router.get('/redesign/compatibility/applications/:applicationId/assessments', vi
       prisma.hrHiringAuthority.findFirst({
         where: {
           userId: actorId(req),
-          authority: { in: ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HIRING_MANAGER'] },
+          authority: { in: ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER'] },
           isActive: true,
           OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
         },
@@ -1851,7 +1851,6 @@ router.get('/migration/redesign-preview', adminAccess, async (req: WorkspaceRequ
   try {
     const report = await runHrRedesignBackfill(prisma, {
       apply: false,
-      shakilaUserId: nullableText(req.query.shakilaUserId) || process.env.HR_SHAKILA_USER_ID,
       actorUserId: actorId(req),
     });
     res.json({ success: true, data: report });
@@ -1862,7 +1861,6 @@ router.post('/migration/redesign-backfill', adminAccess, async (req: WorkspaceRe
   try {
     const report = await runHrRedesignBackfill(prisma, {
       apply: true,
-      shakilaUserId: nullableText(req.body.shakilaUserId) || process.env.HR_SHAKILA_USER_ID,
       actorUserId: actorId(req),
     });
     res.json({ success: true, data: report });

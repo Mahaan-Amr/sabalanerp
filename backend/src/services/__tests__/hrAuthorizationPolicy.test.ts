@@ -11,7 +11,6 @@ const activeWindow = { effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effe
 
 const snapshot = (overrides: Partial<HrAuthorizationSnapshot> = {}): HrAuthorizationSnapshot => ({
   user: { id: 'hr-user', role: 'USER', isActive: true },
-  shakilaUserId: 'shakila-stable-id',
   workspaceGrants: [{ workspaceCode: 'HUMAN_RESOURCES', level: 'EDIT', status: 'ACTIVE', ...activeWindow }],
   featureGrants: [{ featureCode: 'PERSONNEL', level: 'EDIT', status: 'ACTIVE', ...activeWindow }],
   authorityGrants: [{ authorityCode: 'HR_PROCESSOR', status: 'ACTIVE', ...activeWindow }],
@@ -61,7 +60,6 @@ const snapshot = (overrides: Partial<HrAuthorizationSnapshot> = {}): HrAuthoriza
 {
   for (const user of [
     { id: 'admin-1', role: 'ADMIN', isActive: true },
-    { id: 'shakila-stable-id', role: 'USER', isActive: true },
   ]) {
     const baseline = snapshot({ user, workspaceGrants: [], featureGrants: [], authorityGrants: [] });
     assert.equal(evaluateHrAuthorization(baseline, {
@@ -71,6 +69,10 @@ const snapshot = (overrides: Partial<HrAuthorizationSnapshot> = {}): HrAuthoriza
     }, now).allowed, true);
   }
   assert.equal(evaluateHrAuthorization(snapshot({
+    user: { id: 'shakila-stable-id', role: 'USER', isActive: true },
+    workspaceGrants: [], featureGrants: [], authorityGrants: [],
+  }), { workspaceLevel: 'VIEW' }, now).allowed, false, 'named users do not bypass governed grants');
+  assert.equal(evaluateHrAuthorization(snapshot({
     user: { id: 'sales-manager', role: 'MANAGER', isActive: true },
     workspaceGrants: [], featureGrants: [], authorityGrants: [],
   }), { workspaceLevel: 'VIEW' }, now).allowed, false, 'MANAGER is not an HR baseline role');
@@ -78,10 +80,6 @@ const snapshot = (overrides: Partial<HrAuthorizationSnapshot> = {}): HrAuthoriza
     user: { id: 'demoted-admin', role: 'MANAGER', isActive: true },
     workspaceGrants: [{ workspaceCode: 'HUMAN_RESOURCES', level: 'ADMIN', status: 'ACTIVE', bootstrapOnly: true, ...activeWindow }],
   }), { workspaceLevel: 'VIEW' }, now).allowed, false, 'persisted bootstrap grants do not survive role demotion');
-  assert.equal(evaluateHrAuthorization(snapshot({
-    user: { id: 'shakila-stable-id', role: 'USER', isActive: false },
-    workspaceGrants: [], featureGrants: [], authorityGrants: [],
-  }), { workspaceLevel: 'VIEW' }, now).allowed, false, 'inactive baseline users fail closed');
 }
 
 const users = [

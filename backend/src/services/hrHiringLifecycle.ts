@@ -348,7 +348,6 @@ const isCompleteTask = (status: string) =>
 const authorityLabels: Record<string, string> = {
   HR_PROCESSOR: "کارشناس منابع انسانی",
   HR_MANAGER: "مدیریت منابع انسانی",
-  HIRING_MANAGER: "مدیر استخدام‌کننده",
   HR_PAYROLL_PROCESSOR: "کارشناس حقوق و دستمزد",
   HR_PAYROLL_MANAGER: "مدیریت حقوق و دستمزد",
   FINANCE_RECORDER: "کارشناس امور مالی",
@@ -549,7 +548,7 @@ const assessmentGate = (source: HiringLifecycleSource): Gate => {
       ? [
           blocker(
             "ASSESSMENT_REVIEW_REQUIRED",
-            "ارزیابی پس از تغییر نیازمند تأیید دوباره مدیر استخدام‌کننده است.",
+            "ارزیابی پس از تغییر نیازمند تأیید دوباره مدیریت شرکت است.",
             "COMPANY_MANAGER",
           ),
         ]
@@ -588,7 +587,7 @@ const offerGate = (source: HiringLifecycleSource): Gate => {
   let nextAction = action(
     "CREATE_OFFER",
     "ایجاد پیشنهاد همکاری",
-    "HIRING_MANAGER",
+    "COMPANY_MANAGER",
   );
   if (latest && !prepared)
     nextAction = action(
@@ -623,7 +622,7 @@ const offerGate = (source: HiringLifecycleSource): Gate => {
             blocker(
               "OFFER_REJECTED",
               "پیشنهاد همکاری رد شده و نیازمند رسیدگی است.",
-              "HIRING_MANAGER",
+              "COMPANY_MANAGER",
               "HR_PAYROLL_MANAGER",
             ),
           ]

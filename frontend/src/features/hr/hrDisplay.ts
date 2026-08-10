@@ -5,7 +5,6 @@ const labels: Record<string, string> = {
   HR_PAYROLL_MANAGER: "مدیر حقوق و دستمزد",
   FINANCE_RECORDER: "کارشناس امور مالی",
   FINANCE_MANAGER: "مدیر امور مالی",
-  HIRING_MANAGER: "مدیر استخدام‌کننده",
   COMPANY_MANAGER: "مدیریت شرکت",
   CANDIDATE: "متقاضی",
   PERSONNEL: "پرسنل",

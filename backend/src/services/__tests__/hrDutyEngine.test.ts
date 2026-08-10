@@ -32,13 +32,13 @@ assert.deepEqual(
   { scopeType: 'GLOBAL', scopeId: null },
 );
 assert.deepEqual(
-  deriveHrDutyRoutingContext(HR_DUTY_DEFINITIONS.HIRING_MANAGER_REVIEW, {
+  deriveHrDutyRoutingContext(HR_DUTY_DEFINITIONS.COMPANY_MANAGER_REVIEW, {
     sourceKey: 'HIRING:application-42:REVIEW:user-7',
     positionId: 'position-9',
   }),
-  { scopeType: 'POSITION', scopeId: 'position-9' },
+  { scopeType: 'GLOBAL', scopeId: null },
 );
-assert.equal(HR_DUTY_DEFINITIONS.HIRING_MANAGER_REVIEW.destinationWorkspaceCode, null);
+assert.equal(HR_DUTY_DEFINITIONS.COMPANY_MANAGER_REVIEW.destinationWorkspaceCode, null);
 assert.equal(HR_DUTY_DEFINITIONS.COMPANY_MANAGER_DECISION.routingScope, 'GLOBAL');
 assert.equal(HR_DUTY_DEFINITIONS.COMPANY_MANAGER_DECISION.destinationWorkspaceCode, null);
 assert.throws(

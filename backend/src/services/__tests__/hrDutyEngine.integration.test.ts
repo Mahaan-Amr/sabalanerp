@@ -40,7 +40,10 @@ const run = async () => {
       }),
     ]);
     await tx.hrNamedResponsibility.updateMany({
-      where: { responsibilityTypeCode: { in: ['FINANCE_MANAGER', 'FINANCE_RECORDER'] }, scopeType: 'GLOBAL', scopeId: null },
+      where: {
+        responsibilityTypeCode: { in: ['FINANCE_MANAGER', 'FINANCE_RECORDER'] }, scopeType: 'GLOBAL', scopeId: null,
+        effectiveFrom: { lt: new Date('2026-07-31T23:59:59.000Z') },
+      },
       data: { effectiveTo: new Date('2026-07-31T23:59:59.000Z') },
     });
     await tx.hrResponsibilityDestination.updateMany({
@@ -477,6 +480,7 @@ const runCompetingTransactionTest = async () => {
       tx.hrDutyAssignmentHistory.create({ data: {
         dutyId: duty.id, sequence: 1, assignedUserId: assignee.id, responsibilityId: responsibility.id,
         destinationWorkspaceCode: 'ACCOUNTING', destinationQueueCode: 'FINANCE_APPROVALS',
+        startedAt: new Date('2026-08-01T00:00:00.000Z'), createdAt: new Date('2026-08-01T00:00:00.000Z'),
         changedByUserId: sourceActor.id, policyVersion: 1,
       } }),
       tx.hrDutyAuditVersion.create({ data: {

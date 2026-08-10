@@ -6,6 +6,7 @@ import {
   type HrReconciliationAttentionFlag as ActionableHrReconciliationFlag,
   type HrReconciliationReviewOutcome as ActionableHrReconciliationOutcome,
 } from './hrMigrationReconciliation';
+import { applyHrCompanyManagerCutover, inspectHrCompanyManagerCutover } from './hrCompanyManagerCutover';
 
 export const HR_REDESIGN_CATALOG = Object.freeze({
   contractVersion: 1,
@@ -25,7 +26,6 @@ export const HR_REDESIGN_CATALOG = Object.freeze({
     'HR_PROCESSOR',
     'HR_MANAGER',
     'COMPANY_MANAGER',
-    'HIRING_MANAGER',
     'HR_PAYROLL_PROCESSOR',
     'HR_PAYROLL_MANAGER',
     'FINANCE_RECORDER',
@@ -35,7 +35,6 @@ export const HR_REDESIGN_CATALOG = Object.freeze({
     'HR_PROCESSOR',
     'HR_MANAGER',
     'RESPONSIBLE_SUPERVISOR',
-    'HIRING_MANAGER',
     'COMPANY_MANAGER',
     'HR_PAYROLL_PROCESSOR',
     'HR_PAYROLL_MANAGER',
@@ -74,10 +73,6 @@ export const HR_QA_ACCESS_MATRIX: Record<string, QaAccessContract> = Object.free
     workspaceLevel: 'EDIT',
     features: { DASHBOARD: 'VIEW', PERSONNEL: 'VIEW', RECRUITMENT_CASES: 'EDIT', HR_WORK_MANAGEMENT: 'EDIT' },
     authority: 'HR_PAYROLL_PROCESSOR', responsibility: 'HR_PAYROLL_PROCESSOR', destinationWorkspace: 'HUMAN_RESOURCES',
-  },
-  qa_hiring_manager: {
-    workspaceLevel: null, features: {}, authority: 'HIRING_MANAGER', responsibility: 'HIRING_MANAGER',
-    destinationWorkspace: null, responsibilityScope: 'RECORDED_POSITION',
   },
   qa_hr_manager: { workspaceLevel: 'ADMIN', features: everyFeatureAt('ADMIN'), authority: 'HR_MANAGER', responsibility: 'HR_MANAGER', destinationWorkspace: 'HUMAN_RESOURCES' },
   qa_hr_processor: {
@@ -354,7 +349,6 @@ const stableKey = (...parts: string[]) => ['hr-redesign-v1', ...parts].join(':')
 
 export type RunHrRedesignBackfillOptions = {
   apply: boolean;
-  shakilaUserId?: string;
   actorUserId?: string;
 };
 
@@ -433,20 +427,13 @@ export const runHrRedesignBackfill = async (
   ]);
 
   const blockingFailures: BackfillReportRow[] = [];
-  let shakilaUser: { id: string; isActive: boolean } | null = null;
-  if (!options.shakilaUserId) {
-    blockingFailures.push({ code: 'MISSING_SHAKILA_STABLE_USER_ID', count: 1 });
-  } else {
-    shakilaUser = await client.user.findUnique({ where: { id: options.shakilaUserId }, select: { id: true, isActive: true } });
-    if (!shakilaUser) blockingFailures.push({ code: 'SHAKILA_USER_NOT_FOUND', count: 1 });
-    else if (!shakilaUser.isActive) blockingFailures.push({ code: 'SHAKILA_USER_INACTIVE', count: 1 });
-  }
-
-  const baselineUserIds = [...new Set([
-    ...users.filter((user) => user.role === 'ADMIN' && user.isActive).map((user) => user.id),
-    ...(shakilaUser?.isActive ? [shakilaUser.id] : []),
-  ])];
-  const qaUsersByUsername = new Map(users
+  const companyManagerCutover = await inspectHrCompanyManagerCutover(client);
+  for (const code of companyManagerCutover.blockers) blockingFailures.push({ code, count: 1 });
+  const currentUsers = users.filter((user) => user.username !== 'qa_hiring_manager');
+  const baselineUserIds = [...new Set(currentUsers
+    .filter((user) => user.role === 'ADMIN' && user.isActive)
+    .map((user) => user.id))];
+  const qaUsersByUsername = new Map(currentUsers
     .filter((user) => user.isActive && Object.prototype.hasOwnProperty.call(HR_QA_ACCESS_MATRIX, user.username))
     .map((user) => [user.username, user]));
   const missingQaUsernames = Object.keys(HR_QA_ACCESS_MATRIX).filter((username) => !qaUsersByUsername.has(username));
@@ -454,21 +441,8 @@ export const runHrRedesignBackfill = async (
   for (const [username, user] of qaUsersByUsername) {
     const contract = HR_QA_ACCESS_MATRIX[username];
     if (!contract.responsibility) continue;
-    if (contract.responsibilityScope !== 'RECORDED_POSITION') {
-      if (contract.destinationWorkspace) qaResponsibilityRouting.set(username, {
-        scopeType: 'GLOBAL', scopeId: null, destinationWorkspace: contract.destinationWorkspace,
-      });
-      continue;
-    }
-    const workspaces = [...new Set(user.workspacePermissions
-      .filter(({ workspace, expiresAt }) => workspace.toLowerCase() !== 'hr' && (!expiresAt || expiresAt > now))
-      .map(({ workspace }) => workspace.toUpperCase()))];
-    const positionIds = [...new Set(user.personnel?.hrEmploymentRelationships
-      .flatMap(({ assignments }) => assignments.map(({ positionId }) => positionId)) ?? [])];
-    if (workspaces.length !== 1) blockingFailures.push({ code: 'HIRING_MANAGER_OPERATIONAL_WORKSPACE_UNRESOLVED', count: 1 });
-    if (positionIds.length !== 1) blockingFailures.push({ code: 'HIRING_MANAGER_POSITION_ASSIGNMENT_UNRESOLVED', count: 1 });
-    if (workspaces.length === 1 && positionIds.length === 1) qaResponsibilityRouting.set(username, {
-      scopeType: 'POSITION', scopeId: positionIds[0], destinationWorkspace: workspaces[0],
+    if (contract.destinationWorkspace) qaResponsibilityRouting.set(username, {
+      scopeType: 'GLOBAL', scopeId: null, destinationWorkspace: contract.destinationWorkspace,
     });
   }
   const qaGrantKeys = [...qaUsersByUsername].flatMap(([username, user]) => {
@@ -560,7 +534,7 @@ export const runHrRedesignBackfill = async (
       });
     }
   }
-  for (const user of users) reconciliationInputs.push({
+  for (const user of currentUsers) reconciliationInputs.push({
     sourceType: 'USER',
     sourceId: user.id,
     isOperationallyCurrent: user.isActive,
@@ -674,6 +648,7 @@ export const runHrRedesignBackfill = async (
 
   const report = buildHrRedesignBackfillReport({
     safeBackfills: [
+      { code: 'COMPANY_MANAGER_WORKFLOW_CUTOVER', count: companyManagerCutover.pendingChanges },
       { code: 'CATALOGS', count: missingCatalogCount },
       { code: 'BASELINE_GRANTS', count: expectedGrantKeys.length - existingGrantCount },
       { code: 'ASSESSMENT_MIGRATION_EVENTS', count: assessmentEventKeys.length - existingAssessmentEventCount },
@@ -715,6 +690,8 @@ export const runHrRedesignBackfill = async (
       update: { version: HR_REDESIGN_CATALOG.contractVersion, isActive: true },
       create: { code, version: HR_REDESIGN_CATALOG.contractVersion, displayName: code },
     });
+
+    await applyHrCompanyManagerCutover(tx, companyManagerCutover, now);
 
     for (const userId of baselineUserIds) {
       await tx.hrWorkspaceAccessGrant.upsert({

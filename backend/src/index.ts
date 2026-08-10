@@ -104,7 +104,6 @@ const validateProductionEnvironment = () => {
     "SMS_IR_API_KEY",
     "SMS_IR_HIRING_INVITATION_TEMPLATE_ID",
     "SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS",
-    "HR_SHAKILA_USER_ID",
     "HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH",
     "HR_REDESIGN_CUTOVER_REVISION",
   ];
@@ -375,7 +374,6 @@ initializeSystemRecovery(prisma).then(async () => {
   if (isProduction) {
     const acceptanceAttestation = JSON.parse(await readFile(process.env.HR_REDESIGN_CUTOVER_ACCEPTANCE_PATH!, "utf8")) as unknown;
     await verifyHrRedesignCutover(prisma, {
-      shakilaUserId: process.env.HR_SHAKILA_USER_ID,
       acceptanceAttestation,
       sourceRevision: process.env.HR_REDESIGN_CUTOVER_REVISION!,
     });

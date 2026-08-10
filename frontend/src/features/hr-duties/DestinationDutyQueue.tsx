@@ -23,7 +23,7 @@ const statusLabel: Record<string, string> = {
 const actionLabel: Record<string, string> = {
   FINANCE_RECORDING: 'ثبت مالی',
   FINANCE_APPROVAL: 'تأیید مالی',
-  HIRING_MANAGER_REVIEW: 'بررسی مدیر استخدام',
+  COMPANY_MANAGER_REVIEW: 'بررسی مدیریت شرکت',
   COMPANY_MANAGER_DECISION: 'تصمیم مدیریت شرکت',
   RESPONSIBLE_SUPERVISOR_REVIEW: 'بررسی سرپرست مسئول',
   PAYROLL_PREPARATION: 'آماده‌سازی حقوق',

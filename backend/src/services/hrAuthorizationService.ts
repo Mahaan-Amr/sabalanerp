@@ -39,7 +39,6 @@ export const loadHrAuthorizationSnapshot = async (
   ]);
   return {
     user: user ?? { id: userId, role: 'USER', isActive: false },
-    shakilaUserId: process.env.HR_SHAKILA_USER_ID || null,
     workspaceGrants: workspaceGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
     featureGrants: featureGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
     authorityGrants: authorityGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
@@ -61,7 +60,7 @@ export const activeHrAuthoritiesForUser = async (
 ) => {
   const snapshot = await loadHrAuthorizationSnapshot(client, userId);
   if (!snapshot.user.isActive) return [];
-  if (snapshot.user.role === 'ADMIN' || (snapshot.shakilaUserId && snapshot.user.id === snapshot.shakilaUserId)) {
+  if (snapshot.user.role === 'ADMIN') {
     const catalog = await client.hrAuthorityCatalog.findMany({ where: { isActive: true }, select: { code: true } });
     return catalog.map(({ code }) => code);
   }
@@ -144,9 +143,7 @@ export const resolveHrNamedResponsibility = async (
     }),
     client.hrAuthorityCatalog.findUnique({ where: { code: input.responsibilityTypeCode }, select: { code: true } }),
   ]);
-  const baselineIds = users.filter((user) => user.isActive && (
-    user.role === 'ADMIN' || Boolean(process.env.HR_SHAKILA_USER_ID && user.id === process.env.HR_SHAKILA_USER_ID)
-  )).map(({ id }) => id);
+  const baselineIds = users.filter((user) => user.isActive && user.role === 'ADMIN').map(({ id }) => id);
   const authorityEligibleUserIds = authorityCatalog
     ? [...new Set([
       ...authorityGrants.filter(({ reason }) => reason !== 'HR redesign baseline').map(({ userId }) => userId),

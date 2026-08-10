@@ -9,6 +9,22 @@ const rollback = new Error('ROLLBACK_HR_REDESIGN_INTEGRATION_TEST');
 const run = async () => {
   await assert.rejects(prisma.$transaction(async (tx) => {
     const suffix = `${Date.now()}`;
+    const retiredQaUser = await tx.user.create({ data: {
+      email: `qa-hiring-manager-${suffix}@example.invalid`,
+      username: 'qa_hiring_manager',
+      password: 'not-a-login-secret',
+      firstName: 'QA',
+      lastName: 'Hiring Manager',
+    } });
+    const retiredQaReconciliation = await tx.hrReconciliationRecord.create({ data: {
+      stableKey: `hr-redesign-v1:reconciliation:USER:${retiredQaUser.id}`,
+      sourceType: 'USER', sourceId: retiredQaUser.id, primaryState: 'USER_LINKAGE_UNRESOLVED',
+      detailsJson: {}, cutoverBlocker: true,
+    } });
+    await tx.hrReconciliationAttentionFlag.create({ data: {
+      stableKey: `test:retired-qa-flag:${suffix}`, reconciliationId: retiredQaReconciliation.id,
+      flagCode: 'UNRESOLVED_PERSONNEL_LINKAGE', detailsJson: {},
+    } });
     const unlinkedUser = await tx.user.create({ data: {
       email: `hr-reconciliation-${suffix}@example.invalid`,
       username: `hr-reconciliation-${suffix}`,
@@ -47,8 +63,8 @@ const run = async () => {
     assert.equal(repeatReport.totals.safeBackfills, 0);
     assert.equal(await tx.hrWorkspaceCatalog.count(), 1);
     assert.equal(await tx.hrFeatureCatalog.count(), HR_REDESIGN_CATALOG.workspaceFeatures.length);
-    assert.equal(await tx.hrAuthorityCatalog.count(), HR_REDESIGN_CATALOG.businessAuthorities.length);
-    assert.equal(await tx.hrResponsibilityTypeCatalog.count(), HR_REDESIGN_CATALOG.responsibilityTypes.length);
+    assert.equal(await tx.hrAuthorityCatalog.count({ where: { isActive: true } }), HR_REDESIGN_CATALOG.businessAuthorities.length);
+    assert.equal(await tx.hrResponsibilityTypeCatalog.count({ where: { isActive: true } }), HR_REDESIGN_CATALOG.responsibilityTypes.length);
     assert.equal((await tx.hrFeatureAccessGrant.findUniqueOrThrow({ where: { id: excessViewerGrant.id } })).status, 'REVOKED');
     assert.equal(await tx.hrAuthorizationAuditEvent.count({ where: {
       entityType: 'FEATURE_GRANT', entityId: excessViewerGrant.id, action: 'QA_MATRIX_REVOKED',
@@ -69,15 +85,18 @@ const run = async () => {
     const hrViewerQa = await tx.user.findUniqueOrThrow({ where: { username: 'qa_hr_viewer' } });
     assert.equal(await tx.hrWorkspaceAccessGrant.count({ where: { userId: hrViewerQa.id, status: 'ACTIVE', level: 'VIEW' } }), 1);
     assert.equal(await tx.hrBusinessAuthorityGrant.count({ where: { userId: hrViewerQa.id, status: 'ACTIVE' } }), 0);
-    const hiringManagerQa = await tx.user.findUniqueOrThrow({ where: { username: 'qa_hiring_manager' } });
-    const hiringResponsibilities = await tx.hrNamedResponsibility.findMany({
-      where: { assignedUserId: hiringManagerQa.id, responsibilityTypeCode: 'HIRING_MANAGER', effectiveTo: null },
-    });
-    assert.equal(hiringResponsibilities.every(({ scopeType, scopeId }) => scopeType === 'POSITION' && Boolean(scopeId)), true);
+    assert.equal(await tx.user.findUnique({ where: { username: 'qa_hiring_manager' } }), null);
+    assert.equal(await tx.hrReconciliationRecord.findUnique({ where: { id: retiredQaReconciliation.id } }), null);
+    const companyManager = await tx.user.findUniqueOrThrow({ where: { username: 'behpour' } });
+    assert.equal((await tx.hrHiringAuthorityDefaultOwner.findUniqueOrThrow({ where: { authority: 'COMPANY_MANAGER' } })).userId, companyManager.id);
+    assert.equal(await tx.hrNamedResponsibility.count({ where: {
+      assignedUserId: companyManager.id, responsibilityTypeCode: 'COMPANY_MANAGER', scopeType: 'GLOBAL', scopeId: null, effectiveTo: null,
+    } }), 1);
     assert.equal(await tx.hrResponsibilityDestination.count({ where: {
-      responsibilityTypeCode: 'HIRING_MANAGER', isActive: true, workspaceCode: 'PERSONAL',
-      stableKey: { startsWith: 'hr-redesign-v1:qa-destination:' },
-    } }), 0, 'Hiring Manager routing never falls back to a personal/global destination');
+      responsibilityTypeCode: 'COMPANY_MANAGER', scopeType: 'GLOBAL', scopeId: null, isActive: true, workspaceCode: 'HUMAN_RESOURCES',
+    } }), 1);
+    assert.equal(await tx.hrBusinessAuthorityGrant.count({ where: { authorityCode: 'HIRING_MANAGER', status: 'ACTIVE' } }), 0);
+    assert.equal(await tx.hrAuthorityCatalog.count({ where: { code: 'HIRING_MANAGER', isActive: true } }), 0);
     assert.equal(await tx.hrFormalAssessmentPlan.count(), planCountBefore, 'legacy evidence must not create an assessment plan');
     assert.equal(
       await tx.hrAssessmentMigrationEvent.count(),

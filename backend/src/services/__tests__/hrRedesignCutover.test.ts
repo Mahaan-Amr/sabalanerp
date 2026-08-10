@@ -11,7 +11,7 @@ const readyReport = {
   safeBackfills: [{ code: 'CATALOGS', count: 0 }],
   actionableConflicts: [{ code: 'CURRENT_HR_RECONCILIATION', count: 0 }],
   neutralLegacyOutcomes: [{ code: 'NO_LEGACY_ASSESSMENT_HISTORY', count: 12 }],
-  blockingFailures: [{ code: 'MISSING_SHAKILA_STABLE_USER_ID', count: 0 }],
+  blockingFailures: [],
   totals: {
     safeBackfills: 0,
     actionableConflicts: 0,

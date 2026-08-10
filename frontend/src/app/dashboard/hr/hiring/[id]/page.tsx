@@ -1340,7 +1340,7 @@ export default function HiringCasePage() {
                     onClick={() =>
                       run(
                         () => hiringAPI.completeAssessments(id),
-                        "مرحله ارزیابی تکمیل شد و برای تصمیم مدیر استخدام‌کننده آماده است.",
+                        "مرحله ارزیابی تکمیل شد و برای تصمیم مدیریت شرکت آماده است.",
                       )
                     }
                     tone="success"
@@ -1377,7 +1377,7 @@ export default function HiringCasePage() {
       )}
       {selectedLifecyclePhase === "OFFER" &&
         hasAuthority(
-          "HIRING_MANAGER",
+          "COMPANY_MANAGER",
           "HR_PAYROLL_PROCESSOR",
           "HR_PAYROLL_MANAGER",
           "FINANCE_MANAGER",
@@ -1463,7 +1463,7 @@ export default function HiringCasePage() {
                   ))}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {hasAuthority("HIRING_MANAGER", "HR_PAYROLL_PROCESSOR") && (
+                  {hasAuthority("COMPANY_MANAGER", "HR_PAYROLL_PROCESSOR") && (
                     <ErpPressable
                       type="submit"
                       className="rounded-lg border px-3 py-2 text-sm"
@@ -1477,9 +1477,9 @@ export default function HiringCasePage() {
                       افزودن ردیف
                     </ErpPressable>
                   )}
-                  {hasAuthority("HIRING_MANAGER") && (
+                  {hasAuthority("COMPANY_MANAGER") && (
                     <ErpButton
-                      label="پیشنهاد Hiring Manager"
+                      label="پیشنهاد مدیریت شرکت"
                       onClick={() =>
                         run(
                           () =>
@@ -1551,7 +1551,7 @@ export default function HiringCasePage() {
                       {[
                         {
                           title: "ثبت پیشنهاد",
-                          role: "مدیر استخدام‌کننده",
+                          role: "مدیریت شرکت",
                           actor: compensation.proposedBy,
                           at: compensation.createdAt,
                         },
@@ -2115,7 +2115,7 @@ export default function HiringCasePage() {
                 }
               >
                 <option value="HR_MANAGER">مدیر منابع انسانی</option>
-                <option value="HIRING_MANAGER">مدیر استخدام‌کننده</option>
+                <option value="COMPANY_MANAGER">مدیریت شرکت</option>
                 <option value="HR_PROCESSOR">کارشناس منابع انسانی</option>
                 <option value="FINANCE_MANAGER">مدیر مالی</option>
               </ErpSelect>

@@ -74,12 +74,11 @@ export const assertHrRedesignCutoverDryRunDeterministic = <T extends CutoverRepo
 };
 
 export const verifyHrRedesignCutover = async (client: PrismaClient, options: {
-  shakilaUserId?: string;
   acceptanceAttestation: unknown;
   sourceRevision: string;
 }) => {
   assertHrRedesignReleaseAcceptance(options.acceptanceAttestation, options.sourceRevision);
-  const first = await runHrRedesignBackfill(client, { apply: false, shakilaUserId: options.shakilaUserId });
-  const retry = await runHrRedesignBackfill(client, { apply: false, shakilaUserId: options.shakilaUserId });
+  const first = await runHrRedesignBackfill(client, { apply: false });
+  const retry = await runHrRedesignBackfill(client, { apply: false });
   return assertHrRedesignCutoverReady(assertHrRedesignCutoverDryRunDeterministic(first, retry));
 };

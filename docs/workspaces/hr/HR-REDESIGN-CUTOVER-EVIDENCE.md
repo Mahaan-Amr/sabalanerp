@@ -7,7 +7,7 @@ Ticket: [#245](https://github.com/Mahaan-Amr/sabalanerp/issues/245)
 
 **BLOCKED — do not activate the HR redesign in production.**
 
-The supported production backend now runs the database-backed HR redesign dry-run before opening its listening port. Startup fails closed while safe backfills, actionable reconciliation conflicts, or blocking configuration/ownership failures remain. `HR_SHAKILA_USER_ID` is also a required production setting.
+The supported production backend now runs the database-backed HR redesign dry-run before opening its listening port. Startup fails closed while safe backfills, actionable reconciliation conflicts, or blocking configuration/ownership failures remain. Full-access baseline authorization is limited to active `ADMIN` users; there is no named-user exception.
 
 ## Local rehearsal
 
@@ -24,19 +24,17 @@ The rehearsal used the existing `sabalanerp-local` Compose project. No second da
 
 Both post-apply dry-runs returned identical results. This proves the additive write set reached an idempotent fixed point without clearing unresolved business blockers.
 
+A governed follow-up retired the unsupported Hiring Manager capability, assigned the single global Company Manager compensation-proposal responsibility to active user `behpour` in `HUMAN_RESOURCES`, and permanently deleted the exact `qa_hiring_manager` test account plus its permitted QA-only sessions, browser/auth events, notifications, completed QA work item/audit, grants, and reconciliation graph. The follow-up reported 11 safe changes before apply and 0 on immediate retry. It has 0 blocking configuration failures. Current database checks report 0 matching QA users and 0 active Hiring Manager grants.
+
 ### Active blockers
 
-Configuration and ownership:
-
-- `MISSING_SHAKILA_STABLE_USER_ID`: 1. The local database contains an active Shakila Marzban Personnel row (`cmrgdl616000tixtxhkuqqqn8`) but no corresponding User. Because User/Personnel identity merger and automatic User creation are explicitly out of scope, the stable User identity cannot be inferred safely.
-- `HIRING_MANAGER_OPERATIONAL_WORKSPACE_UNRESOLVED`: 1.
-- `HIRING_MANAGER_POSITION_ASSIGNMENT_UNRESOLVED`: 1.
+Configuration and ownership blockers: none.
 
 Record reconciliation:
 
 | Flag | Active rows |
 | --- | ---: |
-| Unresolved Personnel linkage | 9 |
+| Unresolved Personnel linkage | 8 |
 | Possible duplicate identity | 6 |
 | Incomplete organizational mapping | 88 |
 | Missing primary assignment | 88 |
@@ -44,7 +42,7 @@ Record reconciliation:
 | Open start-date review | 90 |
 | Assessment-plan reconciliation | 7 |
 
-There are 128 classified records: 109 remain Cutover blockers and 19 are clear. Classification errors are zero. Flags are independent, so their counts intentionally exceed the blocked-record count.
+There are 127 current classified records: 108 remain Cutover blockers and 19 are clear. The blockers comprise 46 Personnel, 46 Employment Relationship, 8 User, and 8 Application records. None has a durable human review. Classification errors are zero. Flags are independent, so their counts intentionally exceed the blocked-record count.
 
 ## Compatibility and activation boundary
 
@@ -59,7 +57,7 @@ The release attestation is bound to `HR_REDESIGN_CUTOVER_REVISION` and must mark
 
 - #226 is closed as the approved governing resolution.
 - #236–#244 are closed with focused implementation evidence.
-- #245 remains open with `needs-info` and is blocked by this evidence; its progress/disposition comment records the live counts.
+- #245 remains open with `needs-info` and is blocked by this evidence; its progress/disposition comment records the live counts and the approved Company Manager workflow change.
 - #246 is the umbrella specification and is not independently runnable; its contradictory `ready-for-agent` label was removed and a disposition comment points remaining work to #245.
 - #130 and #136 remain open and independent. This Cutover does not absorb, weaken, or close their Applicant/Personnel archival and irreversible-erasure acceptance scope.
 
@@ -68,7 +66,9 @@ The release attestation is bound to `HR_REDESIGN_CUTOVER_REVISION` and must mark
 Passed:
 
 - backend TypeScript build;
-- frontend production build (completed successfully in 304.6 seconds);
+- frontend production build inside the verified Docker image;
+- Prisma migration deploy against `sabalanerp-local`;
+- `npm run docker:verify` (all images built and backend/database, frontend proxy/page, and inquiry health checks passed in 637.7 seconds);
 - HR redesign data-contract, authorization, route, Cutover-gate, Personnel collection, hiring lifecycle, Applicant access/correction/assessment, duty, organization-capacity, retention, erasure, decision-version, and schedule-governance suites;
 - `npm run design-system:check`;
 - `npm run test:design-system-foundation` (21/21).
@@ -76,19 +76,17 @@ Passed:
 Not passed or not proven:
 
 - `npm run test:design-system-adoption`: repository-wide baseline mismatch (134 hardcoded semantic colors, 11 raw-control risks, 2 duplicate-primitive risks). The changed-file gate reports no new violations.
-- Docker verification: exceeded its five-minute command limit while rebuilding the existing Compose project; service health remained reported as healthy by Compose, so this is not counted as a pass.
-- migration-deploy command: previously exceeded its command limit without returning a result.
+- standalone host frontend build: blocked before compilation by a Windows `EPERM` lock on `frontend/.next-build/trace`; the Docker production build passed.
+- HR hiring browser E2E: clean-database setup applies 105 migrations and seeds successfully, but the configured web-server readiness window expires before browser assertions; no E2E pass is claimed.
 - 200% zoom: browser control did not provide a reliable zoom measurement.
-- production identity/ownership verification and full visual/E2E matrix: blocked by the active Cutover data above.
+- the authenticated eight-persona authorization/privacy/recovery matrix and full visual/E2E matrix: not proven; production data activation remains blocked by the 108 reconciliation records above.
 
 Visual inspection of the live reconciliation screen passed Persian RTL light/dark rendering at 1280px and 390px. The document width stayed within the viewport at both sizes, and the blocked counts/drilldowns were visible and consistent with the database.
 
 ## Recovery and rollback
 
-1. Do not set or deploy a guessed `HR_SHAKILA_USER_ID`; obtain the authoritative stable User ID.
-2. Resolve the Hiring Manager operational workspace and Position assignment through the governed responsibility interfaces.
-3. Reconcile each active flag through its registered review/action path. Do not edit classification rows directly or fabricate identity, dates, organization mappings, assignments, or assessment decisions.
-4. After the release pipeline produces a passing revision-bound attestation, re-run the additive backfill and `npm --prefix backend run hr-redesign:cutover:verify -- --acceptance=<path> --source-revision=<revision>` against the target database. Safe backfills, actionable conflicts, and blocking failures must all be zero.
-5. Re-run every mandatory build, Design System, E2E, migration, Docker, and visual gate before production activation.
-6. If a deployment attempt fails, keep the prior application release active. The additive records remain compatible and audit-preserving; do not delete reconciliation, grant, assessment, duty, assignment, schedule, closure, or audit history to force readiness.
-7. If production startup rejects the Cutover, restore the prior application release/configuration while retaining the database evidence, correct the blocker through its governed path, and rehearse again.
+1. Reconcile each active flag through its registered review/action path. Do not edit classification rows directly or fabricate identity, dates, organization mappings, assignments, or assessment decisions.
+2. After the release pipeline produces a passing revision-bound attestation, re-run the additive backfill and `npm --prefix backend run hr-redesign:cutover:verify -- --acceptance=<path> --source-revision=<revision>` against the target database. Safe backfills, actionable conflicts, and blocking failures must all be zero.
+3. Re-run every mandatory build, Design System, E2E, migration, Docker, and visual gate before production activation.
+4. If a deployment attempt fails, keep the prior application release active. The additive records remain compatible and audit-preserving; do not delete reconciliation, grant, assessment, duty, assignment, schedule, closure, or audit history to force readiness.
+5. If production startup rejects the Cutover, restore the prior application release/configuration while retaining the database evidence, correct the blocker through its governed path, and rehearse again.

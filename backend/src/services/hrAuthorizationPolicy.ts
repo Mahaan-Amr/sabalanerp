@@ -10,7 +10,6 @@ type EffectiveGrant = {
 
 export type HrAuthorizationSnapshot = {
   user: { id: string; role: string; isActive: boolean };
-  shakilaUserId?: string | null;
   workspaceGrants: Array<EffectiveGrant & { workspaceCode: string; level: HrAccessLevel }>;
   featureGrants: Array<EffectiveGrant & { featureCode: string; level: HrAccessLevel }>;
   authorityGrants: Array<EffectiveGrant & { authorityCode: string }>;
@@ -35,7 +34,7 @@ const isEffective = (grant: EffectiveGrant, at: Date) => (
 
 export const hasFullHrBaseline = (snapshot: HrAuthorizationSnapshot) => (
   snapshot.user.isActive
-  && (snapshot.user.role === 'ADMIN' || Boolean(snapshot.shakilaUserId && snapshot.user.id === snapshot.shakilaUserId))
+  && snapshot.user.role === 'ADMIN'
 );
 
 export const evaluateHrAuthorization = (

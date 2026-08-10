@@ -100,7 +100,7 @@ const THROTTLED_ACCESS_ERROR = 'تعداد تلاش‌ها بیش از حد مج
 const CONTACT_HR_ACCESS_ERROR = 'تعداد تلاش‌های ناموفق به حد مجاز رسیده است. لطفاً برای دریافت کد ورود جدید با منابع انسانی تماس بگیرید.';
 const DOCUMENT_CATEGORIES = new Set(['BIRTH_CERTIFICATE_ALL_PAGES', 'BIRTH_CERTIFICATE_EXPLANATIONS', 'NATIONAL_ID_FRONT', 'NATIONAL_ID_BACK', 'MILITARY', 'EDUCATION', 'PHOTO', 'OTHER']);
 const COLLATERAL_TYPES = new Set(['PROMISSORY_NOTE', 'CHEQUE', 'GUARANTEE', 'UNDERTAKING', 'OTHER']);
-const HIRING_AUTHORITY_TYPES = new Set(['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HR_PAYROLL_PROCESSOR', 'HR_PAYROLL_MANAGER', 'FINANCE_RECORDER', 'FINANCE_MANAGER', 'HIRING_MANAGER']);
+const HIRING_AUTHORITY_TYPES = new Set(['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HR_PAYROLL_PROCESSOR', 'HR_PAYROLL_MANAGER', 'FINANCE_RECORDER', 'FINANCE_MANAGER']);
 ensureHrHiringStorage();
 
 const formalAssessmentPlanInclude = {
@@ -231,20 +231,20 @@ const notifyOfferDecline = async (
       identityChecks: { select: { reviewedBy: true } }
     }
   });
-  const hiringManagerIds = [
+  const proposerIds = [
     application.compensationSnapshots[0]?.proposedBy,
     application.createdBy
   ].filter(Boolean) as string[];
   const processorIds = application.identityChecks.map((item) => item.reviewedBy);
-  const responsibleIds = [...new Set([...hiringManagerIds, ...processorIds])];
+  const responsibleIds = [...new Set([...proposerIds, ...processorIds])];
   const recipients = responsibleIds.length
     ? await tx.hrHiringAuthority.findMany({
         where: {
           isActive: true,
           OR: [
             {
-              userId: { in: hiringManagerIds },
-              authority: 'HIRING_MANAGER'
+              userId: { in: proposerIds },
+              authority: 'COMPANY_MANAGER'
             },
             {
               userId: { in: processorIds },
@@ -346,16 +346,12 @@ const requireEffectiveResponsibilityOwner = async (
 ) => {
   const requestedTypes = Array.isArray(responsibilityTypeCodes) ? responsibilityTypeCodes : [responsibilityTypeCodes];
   const activeTypes = (await activeHiringAuthoritiesForUser(actorId(req))).filter((code) => requestedTypes.includes(code));
-  const applicationId = String(req.params.id || '');
-  const application = activeTypes.includes('HIRING_MANAGER') && applicationId
-    ? await prisma.hrJobApplication.findUnique({ where: { id: applicationId }, select: { positionId: true } })
-    : null;
   const sourceActionCode = `${req.method}:${req.baseUrl}${req.route?.path ?? req.path}`;
   const resolutions = await Promise.all(activeTypes.map((responsibilityTypeCode) => resolveHrNamedResponsibility(prisma, {
     sourceActionCode,
     responsibilityTypeCode,
-    scopeType: responsibilityTypeCode === 'HIRING_MANAGER' ? 'POSITION' : 'GLOBAL',
-    scopeId: responsibilityTypeCode === 'HIRING_MANAGER' ? application?.positionId ?? null : null,
+    scopeType: 'GLOBAL',
+    scopeId: null,
     sourceActorUserId: actorId(req),
   })));
   const owned = resolutions.filter((resolution) => resolution.status === 'RESOLVED' && resolution.assignedUserId === actorId(req));
@@ -1363,7 +1359,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const canSeeHrSensitive = authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
   const canSeeDecisionDetails = canSeeHrSensitive || authorities.has('COMPANY_MANAGER');
   const canSeeFinanceSensitive = authorities.has('FINANCE_RECORDER') || authorities.has('FINANCE_MANAGER');
-  const canSeeCompensation = canSeeFinanceSensitive || authorities.has('HIRING_MANAGER') || authorities.has('HR_PROCESSOR') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
+  const canSeeCompensation = canSeeFinanceSensitive || authorities.has('COMPANY_MANAGER') || authorities.has('HR_PROCESSOR') || authorities.has('HR_PAYROLL_PROCESSOR') || authorities.has('HR_PAYROLL_MANAGER') || authorities.has('HR_MANAGER');
   const data: any = row;
   data.retentionCapabilities = projectRecordRetentionCapabilities({
     role: req.user!.role,
@@ -1912,7 +1908,7 @@ router.post('/applications/:id/identity/approve', requireAuthority('HR_MANAGER')
   res.json({ success: true });
 }));
 
-router.post('/applications/:id/compensation', requireAuthority('HIRING_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.post('/applications/:id/compensation', requireAuthority('COMPANY_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } });
   if (application.identityClearance !== 'APPROVED') throw new Error('پیشنهاد جبران خدمات پس از تأیید هویت ثبت می‌شود.');
   await assertFormalAssessmentEvidenceComplete(req.params.id);
@@ -3001,7 +2997,7 @@ router.put('/applications/:id/insurance', requireAuthority('HR_PROCESSOR'), asyn
 router.post('/applications/:id/onboarding-tasks', requireAuthority('HR_MANAGER'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { employmentRelationship: true } });
   if (!application.employmentRelationship || application.employmentRelationship.status !== 'PLANNED') throw new Error('وظیفه موقت فقط برای پرسنل برنامه‌ریزی‌شده قابل ثبت است.');
-  if (!String(req.body.title || '').trim() || !['HR_PROCESSOR', 'HR_MANAGER', 'HR_PAYROLL_PROCESSOR', 'HR_PAYROLL_MANAGER', 'FINANCE_RECORDER', 'FINANCE_MANAGER', 'HIRING_MANAGER'].includes(req.body.ownerAuthority)) throw new Error('عنوان و مالک سازمانی معتبر وظیفه الزامی است.');
+  if (!String(req.body.title || '').trim() || !['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HR_PAYROLL_PROCESSOR', 'HR_PAYROLL_MANAGER', 'FINANCE_RECORDER', 'FINANCE_MANAGER'].includes(req.body.ownerAuthority)) throw new Error('عنوان و مالک سازمانی معتبر وظیفه الزامی است.');
   const row = await prisma.hrOnboardingTask.create({ data: {
     applicationId: req.params.id, title: req.body.title, ownerAuthority: req.body.ownerAuthority,
     activationBlocker: !!req.body.activationBlocker, dueDate: req.body.dueDate ? parseDate(req.body.dueDate, 'مهلت') : null, createdBy: actorId(req),

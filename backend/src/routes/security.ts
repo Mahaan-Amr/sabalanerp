@@ -20,6 +20,8 @@ import { renderCompletedSecurityShiftPdfHtml } from '../services/securityComplet
 import { deduplicatePersonnelReportParticipants, normalizePersonnelReportDirectoryQuery, normalizePersonnelReportHistoryQuery, personnelReportParticipantWhere, personnelReportReporterSearchWhere } from '../services/securityPersonnelReportHistory';
 import { prepareSecurityPersonnelReportPdfEvidence, renderSecurityPersonnelReportHistoryPdfHtml } from '../services/securityPersonnelReportPdf';
 import { personnelSearchWhere } from '../services/hrPersonnelBoundary';
+import { completeGuardInboundMovement, GuardInboundMovementConflictError, guardInboundMovementInclude,
+  GuardInboundMovementNotFoundError, GuardInboundMovementValidationError, recordGuardInboundMovement } from '../services/guardInboundMovement';
 import canonicalGuardQueueRoutes from './canonical-guard-queue';
 
 const router = express.Router();
@@ -479,32 +481,7 @@ const pairSnapshot = (pair: any, override: any = {}) => ({
   capturedAt: new Date().toISOString()
 });
 
-const generateMovementNumber = async (prefix: 'IN' | 'OUT') => {
-  const now = new Date();
-  const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  const count = await prisma.securityVehicleMovement.count({
-    where: {
-      createdAt: {
-        gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
-        lt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-      }
-    }
-  });
-  return `${prefix}-${datePart}-${String(count + 1).padStart(4, '0')}`;
-};
-
-const includeMovement = {
-  vehiclePair: true,
-  loading: {
-    include: {
-      customer: true,
-      project: true
-    }
-  },
-  customer: true,
-  project: true,
-  attachments: true
-};
+const includeMovement = guardInboundMovementInclude;
 
 // @desc    Get security-owned driver/vehicle pairs
 // @route   GET /api/security/vehicle-pairs
@@ -881,36 +858,19 @@ router.post('/vehicle-movements/inbound', protect, securityEdit, [
       return res.status(400).json({ success: false, error: 'Customer is required for sales return' });
     }
     const occurredAt = req.body.occurredAt ? new Date(req.body.occurredAt) : new Date();
-    if (occurredAt > new Date()) return res.status(400).json({ success: false, error: 'Inbound movement cannot occur in the future' });
-    if (req.body.purpose === 'SALES_RETURN' && !await prisma.logisticsLoading.findUnique({ where: { id: req.body.loadingId } })) {
-      return res.status(400).json({ success: false, error: 'Original dispatch loading was not found' });
-    }
     if (req.body.vehiclePairId) {
       return res.status(410).json({ success: false, error: 'Legacy combined driver-vehicle records cannot be attached to new movements. Record a visit snapshot or use canonical identities.' });
     }
-
-    const movement = await prisma.securityVehicleMovement.create({
-      data: {
-        movementNumber: await generateMovementNumber('IN'),
-        direction: 'INBOUND',
-        purpose: req.body.purpose,
-        status: 'ENTRY_RECORDED',
-        vehiclePairId: null,
-        loadingId: req.body.purpose === 'SALES_RETURN' ? req.body.loadingId : null,
-        customerId: req.body.customerId || null,
-        projectId: req.body.projectId || null,
-        occurredAt,
-        driverSnapshot: req.body.driverSnapshot || null,
-        documentSnapshot: req.body.documentSnapshot || null,
-        settlementSnapshot: req.body.settlementSnapshot || null,
-        notes: req.body.notes || null,
-        createdBy: req.user!.id
-      },
-      include: includeMovement
-    });
+    const movement = await recordGuardInboundMovement(prisma, { purpose: req.body.purpose,
+      loadingId: req.body.loadingId, customerId: req.body.customerId, projectId: req.body.projectId, occurredAt,
+      driverSnapshot: req.body.driverSnapshot || undefined, documentSnapshot: req.body.documentSnapshot || undefined,
+      settlementSnapshot: req.body.settlementSnapshot || undefined, notes: req.body.notes, actorId: req.user!.id });
     res.status(201).json({ success: true, data: movement });
   } catch (error: any) {
     console.error('Create inbound movement error:', error);
+    if (error instanceof GuardInboundMovementValidationError) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
     res.status(500).json({ success: false, error: error.message || 'Server error' });
   }
 });
@@ -919,27 +879,16 @@ router.post('/vehicle-movements/inbound', protect, securityEdit, [
 // @route   PUT /api/security/vehicle-movements/:id/complete
 router.put('/vehicle-movements/:id/complete', protect, securityEdit, async (req: AuthRequest, res: Response) => {
   try {
-    const movement = await prisma.securityVehicleMovement.findUnique({ where: { id: req.params.id } });
-    if (!movement) return res.status(404).json({ success: false, error: 'Movement not found' });
-    if (movement.direction !== 'INBOUND') return res.status(400).json({ success: false, error: 'Only inbound movements can be completed here' });
-    if (movement.purpose === 'CONSIGNMENT') return res.status(400).json({ success: false, error: 'Consignment flow is not defined yet' });
-
-    const updated = await prisma.securityVehicleMovement.update({
-      where: { id: movement.id },
-      data: {
-        status: 'INFO_COMPLETED',
-        completedAt: new Date(),
-        driverSnapshot: req.body.driverSnapshot ?? movement.driverSnapshot,
-        documentSnapshot: req.body.documentSnapshot ?? movement.documentSnapshot,
-        settlementSnapshot: req.body.settlementSnapshot ?? movement.settlementSnapshot,
-        notes: req.body.notes ?? movement.notes
-      },
-      include: includeMovement
-    });
+    const updated = await completeGuardInboundMovement(prisma, { movementId: req.params.id,
+      driverSnapshot: req.body.driverSnapshot, documentSnapshot: req.body.documentSnapshot,
+      settlementSnapshot: req.body.settlementSnapshot, notes: req.body.notes });
     res.json({ success: true, data: updated });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Complete inbound movement error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    if (error instanceof GuardInboundMovementNotFoundError) return res.status(404).json({ success: false, error: error.message });
+    if (error instanceof GuardInboundMovementValidationError) return res.status(400).json({ success: false, error: error.message });
+    if (error instanceof GuardInboundMovementConflictError) return res.status(409).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: error.message || 'Server error' });
   }
 });
 

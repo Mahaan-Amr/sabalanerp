@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import { PrismaDispatchDocumentRepository } from '../dispatchDocuments/prismaRepository';
+import { PrismaDispatchDocumentRepository, runSerializableDispatchOperation } from '../dispatchDocuments/prismaRepository';
 import { DispatchDocumentConflictError, DispatchDocumentEvidenceConflictError } from '../dispatchDocuments/service';
 import { dispatchArtifactStorageLockKey } from '../dispatchDocuments/artifactStorageLock';
 
@@ -122,6 +122,21 @@ const run = async () => {
       idempotencyKey: 'race-key', actorId: 'accountant', correlationId: 'race-correlation', intentFingerprint: 'race-intent' }),
     error => error === unrelatedTarget,
     'a P2002 for another unique target is rethrown even when an exact durable command result exists');
+
+    for (const databaseCode of ['40001', '40P01']) {
+      let attempts = 0;
+      const retryingPrisma = { $transaction: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Prisma.PrismaClientKnownRequestError('retryable PostgreSQL concurrency abort', {
+          code: 'P2010', clientVersion: '5.16.1', meta: { code: databaseCode },
+        });
+        return `committed-${databaseCode}`;
+      } } as any;
+      assert.equal(await runSerializableDispatchOperation(retryingPrisma, async () => 'unreachable'),
+        `committed-${databaseCode}`,
+        `the dispatch transaction retries PostgreSQL ${databaseCode} through the shared production classifier`);
+      assert.equal(attempts, 2);
+    }
 
     replacementMode = true;
     advisoryLocks.length = 0;

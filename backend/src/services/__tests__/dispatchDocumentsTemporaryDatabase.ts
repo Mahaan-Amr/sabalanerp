@@ -69,13 +69,20 @@ export const createDispatchDocumentsTemporaryDatabase = async (input: {
     client: () => new PrismaClient({ datasources: { db: { url: databaseUrl.toString() } } }),
     cleanup: async () => {
       if (cleaned) return;
-      cleaned = true;
       checkedName(databaseName);
-      compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${databaseName}' AND pid <> pg_backend_pid()"`);
-      compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE ${quoted}'`);
-      const remaining = compose(input.repositoryRoot,
-        `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT count(*) FROM pg_database WHERE datname = '${databaseName}'"`).trim();
-      if (remaining !== '0') throw new Error(`Temporary database cleanup failed for ${databaseName}.`);
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${databaseName}' AND pid <> pg_backend_pid()"`);
+          compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
+          const remaining = compose(input.repositoryRoot,
+            `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT count(*) FROM pg_database WHERE datname = '${databaseName}'"`).trim();
+          if (remaining === '0') { cleaned = true; return; }
+          lastError = new Error(`Exact database still exists after cleanup attempt ${attempt}.`);
+        } catch (error) { lastError = error; }
+      }
+      throw new Error(`Temporary database cleanup failed for ${databaseName}: ${
+        lastError instanceof Error ? lastError.message : String(lastError)}`);
     },
   };
 };

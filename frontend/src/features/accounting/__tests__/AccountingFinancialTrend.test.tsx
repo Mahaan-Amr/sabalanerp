@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { YAxis } from 'recharts';
 import { AccountingFinancialTrend } from '../AccountingFinancialTrend';
 import { ErpSegmentedControl } from '@/components/erp';
 import type { FinancialTrendState } from '../accountingFinancialTrendState';
@@ -65,4 +66,35 @@ test('range control forwards the selected production range', () => {
   assert.ok(control);
   (control.props as { onChange: (range: '3m') => void }).onChange('3m');
   assert.equal(selected, '3m');
+});
+
+test('daily trend lets the value axis size itself to full compact Persian labels', () => {
+  const state: FinancialTrendState = {
+    status: 'available',
+    data: {
+      range: '1m',
+      currency: 'RIAL',
+      hasLegacyFallback: false,
+      points: [point('1405-05-01', true)],
+    },
+  };
+  const tree = AccountingFinancialTrend({
+    range: '1m',
+    state,
+    onRangeChange: () => undefined,
+    onRetry: () => undefined,
+  }) as React.ReactElement;
+  const visit = (node: React.ReactNode): React.ReactElement | null => {
+    if (!React.isValidElement(node)) return null;
+    if (node.type === YAxis) return node;
+    for (const child of React.Children.toArray((node.props as { children?: React.ReactNode }).children)) {
+      const match = visit(child);
+      if (match) return match;
+    }
+    return null;
+  };
+
+  const axis = visit(tree);
+  assert.ok(axis);
+  assert.equal((axis.props as { width?: number | 'auto' }).width, 'auto');
 });

@@ -14,6 +14,11 @@ test('dashboard loading view preserves both panels and all ten metric-card posit
   assert.match(html, /aria-label="در حال بارگذاری روند مالی"/);
   assert.match(html, /aria-label="در حال بارگذاری سررسیدها"/);
   assert.match(html, /aria-label="در حال بارگذاری شاخص‌های عملیاتی"/);
+  assert.ok(
+    html.indexOf('aria-label="در حال بارگذاری شاخص‌های عملیاتی"')
+      < html.indexOf('aria-label="در حال بارگذاری روند مالی"'),
+    'metric-card skeleton must render before the trend and deadline panels',
+  );
   assert.match(html, /grid grid-cols-1 items-stretch gap-5/);
   assert.match(html, /grid grid-cols-2 gap-3 xl:grid-cols-4/);
   assert.equal((html.match(/sds-skeleton block rounded-xl h-48/g) || []).length, 4);

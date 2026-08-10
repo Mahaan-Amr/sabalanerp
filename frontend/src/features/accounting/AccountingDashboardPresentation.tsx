@@ -68,6 +68,15 @@ const accountingMetricDefinitions: AccountingMetricDefinition[] = [
 export function AccountingDashboardSkeleton() {
   return (
     <div className="space-y-5" aria-label="در حال بارگذاری داشبورد حسابداری">
+      <ErpNeumorphicMetricGrid
+        label="در حال بارگذاری شاخص‌های عملیاتی"
+        items={accountingMetricDefinitions.map((item) => ({
+          ...item,
+          value: <ErpSkeletonBlock className="h-8 w-12 rounded-lg" />,
+          href: undefined,
+          hint: undefined,
+        }))}
+      />
       <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,.9fr)]">
         <ErpSkeleton label="در حال بارگذاری روند مالی" className="h-full overflow-hidden p-4 sm:p-5">
           <div className="flex items-start justify-between gap-3">
@@ -91,15 +100,6 @@ export function AccountingDashboardSkeleton() {
           </div>
         </ErpSkeleton>
       </div>
-      <ErpNeumorphicMetricGrid
-        label="در حال بارگذاری شاخص‌های عملیاتی"
-        items={accountingMetricDefinitions.map((item) => ({
-          ...item,
-          value: <ErpSkeletonBlock className="h-8 w-12 rounded-lg" />,
-          href: undefined,
-          hint: undefined,
-        }))}
-      />
     </div>
   );
 }

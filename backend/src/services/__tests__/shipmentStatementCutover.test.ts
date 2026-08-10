@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   CUTOVER_ACCEPTANCE_COMMANDS,
   activateShipmentStatementCutover,
+  assertAuthoritativeGateParity,
   buildCutoverManifest,
   captureAuthoritativeCutoverGates,
   evaluateCutoverEvidence,
@@ -104,6 +105,20 @@ test('authoritative gate capture replaces caller success claims with executed re
   assert.equal(captured.acceptance.find(item => item.command === 'npm run build')?.exitCode, 1);
   assert.deepEqual(captured.operations, { incidentContacts: ['release-on-call'], monitoringChecks: ['audit-gap-monitor'] });
   assert.equal(evaluateCutoverEvidence(captured).decision, 'NO_GO');
+});
+
+test('activation gate parity rejects command, health, or operations drift', () => {
+  const signed = passingEvidence();
+  assert.doesNotThrow(() => assertAuthoritativeGateParity(signed, structuredClone(signed)));
+  const commandDrift = structuredClone(signed);
+  commandDrift.acceptance[0].exitCode = 1;
+  assert.throws(() => assertAuthoritativeGateParity(signed, commandDrift), /acceptance gate drift/i);
+  const healthDrift = structuredClone(signed);
+  healthDrift.environment.servicesHealthy = false;
+  assert.throws(() => assertAuthoritativeGateParity(signed, healthDrift), /environment gate drift/i);
+  const operationsDrift = structuredClone(signed);
+  operationsDrift.operations.incidentContacts = ['somebody-else'];
+  assert.throws(() => assertAuthoritativeGateParity(signed, operationsDrift), /operations gate drift/i);
 });
 
 test('file-backed verification recomputes hashes and binds legacy evidence to the current cohort', async () => {

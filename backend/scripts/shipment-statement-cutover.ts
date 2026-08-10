@@ -1,12 +1,15 @@
 import { exec, execFileSync } from 'node:child_process';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
-import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, open, readFile, rm, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import {
   activateShipmentStatementCutover,
+  assertAuthoritativeGateParity,
   buildCutoverManifest,
   captureAuthoritativeCutoverGates,
+  evaluateCutoverEvidence,
   readAndVerifyCutoverManifest,
   verifyFileBackedCutoverEvidence,
   writeImmutableCutoverManifest,
@@ -149,6 +152,21 @@ const run = async () => {
       preservationScopes: run.evidence.length, mismatches: run.evidence.filter(item => item.outcome !== 'MATCHED').length }));
     if (JSON.stringify(currentRuns) !== JSON.stringify(manifest.evidence.deployment.migrationRuns)) {
       throw new Error('Migration evidence changed after the cutover manifest was signed; rerun the gates.');
+    }
+    const activationArtifacts = await mkdtemp(join(tmpdir(), 'shipment-cutover-activation-'));
+    try {
+      const captured = await captureAuthoritativeCutoverGates(manifest.evidence, {
+        artifactDirectory: activationArtifacts, sourceCommit,
+        incidentContacts: requiredEnvironmentList('SHIPMENT_STATEMENT_INCIDENT_CONTACTS'),
+        monitoringChecks: requiredEnvironmentList('SHIPMENT_STATEMENT_MONITORING_CHECKS'), run: runCommand,
+      });
+      const verified = await verifyFileBackedCutoverEvidence(captured, recaptureLegacyCohort);
+      assertAuthoritativeGateParity(manifest.evidence, verified);
+      if (evaluateCutoverEvidence(verified).decision !== 'GO') {
+        throw new Error('The immediately repeated authoritative cutover gates returned NO-GO.');
+      }
+    } finally {
+      await rm(activationArtifacts, { recursive: true, force: true });
     }
     const activatedBy = requiredEnvironment('SHIPMENT_STATEMENT_CUTOVER_ACTOR_ID');
     const result = await activateShipmentStatementCutover({ repository, manifest, activatedBy, signingKey, environment: process.env });

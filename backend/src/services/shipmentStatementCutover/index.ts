@@ -181,6 +181,29 @@ export const captureAuthoritativeCutoverGates = async (evidence: CutoverEvidence
   return verified;
 };
 
+export const assertAuthoritativeGateParity = (signed: CutoverEvidence, current: CutoverEvidence): void => {
+  if (signed.environment.composeProject !== current.environment.composeProject
+    || signed.environment.servicesHealthy !== current.environment.servicesHealthy
+    || !current.environment.servicesHealthy) {
+    throw new Error('Authoritative environment gate drifted after the cutover manifest was signed.');
+  }
+  if (signed.deployment.additiveMigrationsOnly !== current.deployment.additiveMigrationsOnly
+    || signed.deployment.constraintsVerified !== current.deployment.constraintsVerified
+    || !current.deployment.additiveMigrationsOnly || !current.deployment.constraintsVerified) {
+    throw new Error('Authoritative migration or constraint gate drifted after the cutover manifest was signed.');
+  }
+  const signedCommands = new Map(signed.acceptance.map(item => [item.command, item.exitCode]));
+  const currentCommands = new Map(current.acceptance.map(item => [item.command, item.exitCode]));
+  if (signedCommands.size !== CUTOVER_ACCEPTANCE_COMMANDS.length || currentCommands.size !== CUTOVER_ACCEPTANCE_COMMANDS.length
+    || CUTOVER_ACCEPTANCE_COMMANDS.some(command => signedCommands.get(command) !== 0 || currentCommands.get(command) !== 0)) {
+    throw new Error('Authoritative acceptance gate drifted after the cutover manifest was signed.');
+  }
+  if (JSON.stringify(signed.operations) !== JSON.stringify(current.operations)
+    || current.operations.incidentContacts.length === 0 || current.operations.monitoringChecks.length === 0) {
+    throw new Error('Authoritative operations gate drifted after the cutover manifest was signed.');
+  }
+};
+
 /** Replaces caller claims with values read from immutable run artifacts and an independently recaptured legacy cohort. */
 export const verifyFileBackedCutoverEvidence = async (
   evidence: CutoverEvidence,

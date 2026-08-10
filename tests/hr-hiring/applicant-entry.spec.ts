@@ -51,7 +51,7 @@ test("HR Processor can enter the hiring case and control the external SMS bounda
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
 
   await page.goto("/dashboard/hr/hiring");
-  await expect(page.getByText("متقاضی آزمایشی")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("link", { name: "متقاضی آزمایشی" })).toBeVisible({ timeout: 30_000 });
 
   const controlResponse = await page.request.put(
     "http://127.0.0.1:3100/api/test/hr-hiring-sms",
@@ -347,7 +347,7 @@ test("Candidate portal and HR hiring remain readable in both remembered themes",
   await page.locator("form").getByRole("button", { name: "ورود" }).click();
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
   await page.goto("/dashboard/hr/hiring");
-  await expectReadable(page.getByText("متقاضی آزمایشی"));
+  await expectReadable(page.getByRole("link", { name: "متقاضی آزمایشی" }));
   const visibleText = await page.locator("body").innerText();
   expect(visibleText).not.toMatch(
     /\b(?:HR_MANAGER|HR_PROCESSOR|APPROVED|NOT_STARTED|CANDIDATE)\b/,

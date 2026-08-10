@@ -92,7 +92,7 @@ export type CutoverEvidence = {
     evidenceArtifactSha256: string;
   };
   concurrency: { artifactPath: string; completedRuns: number; anomalyCount: number; evidenceArtifactSha256: string };
-  acceptance: Array<{ command: string; artifactPath: string; artifactSha256: string; exitCode: number; outputSha256: string }>;
+  acceptance: Array<{ command: string; artifactPath: string; artifactSha256: string; semanticDigest: string; exitCode: number; outputSha256: string }>;
   operations: { incidentContacts: string[]; monitoringChecks: string[] };
 };
 
@@ -121,6 +121,32 @@ const readArtifact = async (path: unknown, label: string): Promise<{ bytes: Buff
   return { bytes, value: value as Record<string, any> };
 };
 const hashBytes = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+const volatileEvidenceKey = /^(?:runId|duration(?:Ms)?|elapsed(?:Ms)?|path|.*Path|timestamp|startedAt|completedAt|createdAt|updatedAt)$/i;
+const normalizeSemanticValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(normalizeSemanticValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !volatileEvidenceKey.test(key))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, normalizeSemanticValue(item)]));
+  }
+  return value;
+};
+export const acceptanceSemanticDigest = (output: string): string => {
+  let normalized: string;
+  try {
+    normalized = JSON.stringify(normalizeSemanticValue(JSON.parse(output)));
+  } catch {
+    normalized = output
+      .replace(/\u001b\[[0-9;]*m/g, '')
+      .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/g, '<timestamp>')
+      .replace(/\b(runId|duration(?:Ms)?|elapsed(?:Ms)?|path)\s*[:=]\s*[^\s,;]+/gi, '$1=<volatile>')
+      .replace(/[A-Za-z]:\\[^\r\n\t"']+/g, '<path>')
+      .replace(/[ \t]+/g, ' ')
+      .trim();
+  }
+  return hashBytes(Buffer.from(normalized));
+};
 const exact = (actual: unknown, expected: unknown, label: string) => {
   if (actual !== expected) throw new Error(`${label} does not match the independently captured evidence.`);
 };
@@ -166,11 +192,12 @@ export const captureAuthoritativeCutoverGates = async (evidence: CutoverEvidence
     const output = `${result.stdout}${result.stderr}`;
     await writeFile(outputPath, output, { encoding: 'utf8', flag: 'wx' });
     const artifactPath = join(input.artifactDirectory, `acceptance-${String(index + 1).padStart(2, '0')}.json`);
-    const receipt = { schemaVersion: 1, command, exitCode: result.exitCode, startedAt, completedAt,
+    const semanticDigest = acceptanceSemanticDigest(output);
+    const receipt = { schemaVersion: 1, command, exitCode: result.exitCode, semanticDigest, startedAt, completedAt,
       sourceCommit: input.sourceCommit, outputPath };
     const receiptBytes = Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`);
     await writeFile(artifactPath, receiptBytes, { flag: 'wx' });
-    acceptance.push({ command, artifactPath, artifactSha256: hashBytes(receiptBytes), exitCode: result.exitCode,
+    acceptance.push({ command, artifactPath, artifactSha256: hashBytes(receiptBytes), semanticDigest, exitCode: result.exitCode,
       outputSha256: hashBytes(Buffer.from(output)) });
   }
   verified.acceptance = acceptance;
@@ -192,10 +219,14 @@ export const assertAuthoritativeGateParity = (signed: CutoverEvidence, current: 
     || !current.deployment.additiveMigrationsOnly || !current.deployment.constraintsVerified) {
     throw new Error('Authoritative migration or constraint gate drifted after the cutover manifest was signed.');
   }
-  const signedCommands = new Map(signed.acceptance.map(item => [item.command, item.exitCode]));
-  const currentCommands = new Map(current.acceptance.map(item => [item.command, item.exitCode]));
+  const signedCommands = new Map(signed.acceptance.map(item => [item.command, { exitCode: item.exitCode, semanticDigest: item.semanticDigest }]));
+  const currentCommands = new Map(current.acceptance.map(item => [item.command, { exitCode: item.exitCode, semanticDigest: item.semanticDigest }]));
   if (signedCommands.size !== CUTOVER_ACCEPTANCE_COMMANDS.length || currentCommands.size !== CUTOVER_ACCEPTANCE_COMMANDS.length
-    || CUTOVER_ACCEPTANCE_COMMANDS.some(command => signedCommands.get(command) !== 0 || currentCommands.get(command) !== 0)) {
+    || CUTOVER_ACCEPTANCE_COMMANDS.some(command => {
+      const before = signedCommands.get(command);
+      const after = currentCommands.get(command);
+      return before?.exitCode !== 0 || after?.exitCode !== 0 || before.semanticDigest !== after.semanticDigest;
+    })) {
     throw new Error('Authoritative acceptance gate drifted after the cutover manifest was signed.');
   }
   if (JSON.stringify(signed.operations) !== JSON.stringify(current.operations)
@@ -256,7 +287,9 @@ export const verifyFileBackedCutoverEvidence = async (
     const output = await readFile(outputPath).catch(() => {
       throw new Error(`Acceptance output artifact could not be read: ${outputPath}`);
     });
-    return { command: claim.command, artifactPath: claim.artifactPath, artifactSha256: hashBytes(artifact.bytes),
+    const semanticDigest = acceptanceSemanticDigest(output.toString('utf8'));
+    exact(artifact.value.semanticDigest, semanticDigest, `Acceptance semantic digest ${claim.command}`);
+    return { command: claim.command, artifactPath: claim.artifactPath, artifactSha256: hashBytes(artifact.bytes), semanticDigest,
       exitCode: Number(artifact.value.exitCode), outputSha256: hashBytes(output) };
   }));
 
@@ -372,7 +405,8 @@ export const evaluateCutoverEvidence = (evidence: CutoverEvidence): CutoverDecis
   for (const command of CUTOVER_ACCEPTANCE_COMMANDS) {
     const result = commandResults.get(command);
     if (!result) failures.push(`ACCEPTANCE_MISSING:${command}`);
-    else if (result.exitCode !== 0 || !sha256Pattern.test(result.artifactSha256) || !sha256Pattern.test(result.outputSha256)) failures.push(`ACCEPTANCE_FAILED:${command}`);
+    else if (result.exitCode !== 0 || !sha256Pattern.test(result.artifactSha256)
+      || !sha256Pattern.test(result.semanticDigest) || !sha256Pattern.test(result.outputSha256)) failures.push(`ACCEPTANCE_FAILED:${command}`);
   }
   if (evidence.operations.incidentContacts.length === 0) failures.push('INCIDENT_CONTACTS_MISSING');
   if (evidence.operations.monitoringChecks.length === 0) failures.push('MONITORING_CHECKLIST_MISSING');

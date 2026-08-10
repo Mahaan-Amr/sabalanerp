@@ -8,6 +8,7 @@ import {
   CUTOVER_ACCEPTANCE_COMMANDS,
   activateShipmentStatementCutover,
   assertAuthoritativeGateParity,
+  acceptanceSemanticDigest,
   buildCutoverManifest,
   captureAuthoritativeCutoverGates,
   evaluateCutoverEvidence,
@@ -46,7 +47,8 @@ const passingEvidence = (): CutoverEvidence => ({
   integrity: { artifactPath: '', orphanArtifactCount: 0, incompleteBundleCount: 0, auditGapCount: 0,
     corruptArtifactCount: 0, recoveryFailures: 0, evidenceArtifactSha256: sha },
   concurrency: { artifactPath: '', completedRuns: 3, anomalyCount: 0, evidenceArtifactSha256: sha },
-  acceptance: CUTOVER_ACCEPTANCE_COMMANDS.map(command => ({ command, artifactPath: '', artifactSha256: sha, exitCode: 0, outputSha256: sha })),
+  acceptance: CUTOVER_ACCEPTANCE_COMMANDS.map(command => ({ command, artifactPath: '', artifactSha256: sha,
+    semanticDigest: sha, exitCode: 0, outputSha256: sha })),
   operations: { incidentContacts: ['accounting-on-call'], monitoringChecks: ['bundle integrity', 'audit gaps'] },
 });
 
@@ -121,6 +123,23 @@ test('activation gate parity rejects command, health, or operations drift', () =
   assert.throws(() => assertAuthoritativeGateParity(signed, operationsDrift), /operations gate drift/i);
 });
 
+test('acceptance semantic digest ignores volatile metadata but rejects changed domain evidence', () => {
+  const first = JSON.stringify({ status: 'PASSED', runId: 'run-one', durationMs: 12, path: 'C:\\tmp\\one',
+    passedCount: 10, anomalyCount: 0, evidenceHash: 'a'.repeat(64) });
+  const volatileOnly = JSON.stringify({ status: 'PASSED', runId: 'run-two', durationMs: 999, path: '/tmp/two',
+    passedCount: 10, anomalyCount: 0, evidenceHash: 'a'.repeat(64) });
+  const semanticChange = JSON.stringify({ status: 'PASSED', runId: 'run-three', durationMs: 1, path: '/tmp/three',
+    passedCount: 9, anomalyCount: 1, evidenceHash: 'b'.repeat(64) });
+  assert.equal(acceptanceSemanticDigest(first), acceptanceSemanticDigest(volatileOnly));
+  assert.notEqual(acceptanceSemanticDigest(first), acceptanceSemanticDigest(semanticChange));
+
+  const signed = passingEvidence();
+  const current = structuredClone(signed);
+  current.acceptance[0].semanticDigest = acceptanceSemanticDigest(semanticChange);
+  signed.acceptance[0].semanticDigest = acceptanceSemanticDigest(first);
+  assert.throws(() => assertAuthoritativeGateParity(signed, current), /acceptance gate drift/i);
+});
+
 test('file-backed verification recomputes hashes and binds legacy evidence to the current cohort', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'shipment-evidence-'));
   const writeJson = async (name: string, value: unknown) => {
@@ -141,9 +160,11 @@ test('file-backed verification recomputes hashes and binds legacy evidence to th
   ] });
   evidence.acceptance = await Promise.all(CUTOVER_ACCEPTANCE_COMMANDS.map(async (command, index) => {
     const outputPath = join(directory, `acceptance-${index}.log`);
-    await writeFile(outputPath, `passed: ${command}`);
-    return { command, artifactPath: await writeJson(`acceptance-${index}.json`, { command, exitCode: 0, outputPath }),
-      artifactSha256: sha, exitCode: 99, outputSha256: sha };
+    const output = `passed: ${command}`;
+    await writeFile(outputPath, output);
+    const semanticDigest = acceptanceSemanticDigest(output);
+    return { command, artifactPath: await writeJson(`acceptance-${index}.json`, { command, exitCode: 0, semanticDigest, outputPath }),
+      artifactSha256: sha, semanticDigest: sha, exitCode: 99, outputSha256: sha };
   }));
   const current = { manifestHash: 'b'.repeat(64), sourceContractCount: '2', sourceApprovalRecordCount: '2', sourceRowCount: '4',
     counts: { SEALED: 2, LEGACY_REVIEW_REQUIRED: 0, REPAIR_REQUIRED: 0, EVIDENCE_CONFLICT: 0, STALE: 0 } };

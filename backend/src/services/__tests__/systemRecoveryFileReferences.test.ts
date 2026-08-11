@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { recoveryEngineInternals } from '../systemRecoveryEngine';
+import { recoveryEngineInternals, validateLiveStoredFileReferences } from '../systemRecoveryEngine';
 
 const applicationRoot = path.join(path.sep, 'srv', 'sabalanerp');
 const recoveryRoot = path.join(applicationRoot, 'storage', 'recovery');
@@ -29,4 +29,26 @@ assert.deepEqual(
   [path.join(applicationRoot, 'storage', 'support-tickets', 'evidence.pdf')],
 );
 
-console.log('system recovery file reference tests passed');
+const main = async () => {
+  let discoverySql = '';
+  const fakeClient = {
+    $queryRawUnsafe: async (sql: string) => {
+      discoverySql = sql;
+      return [];
+    },
+  } as any;
+
+  await validateLiveStoredFileReferences(fakeClient);
+  assert.match(
+    discoverySql,
+    /table_name\s*<>\s*'recovery_operations'/,
+    'expired recovery packages must not be treated as live business-file references',
+  );
+
+  console.log('system recovery file reference tests passed');
+};
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

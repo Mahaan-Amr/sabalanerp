@@ -688,8 +688,13 @@ export const validateLiveStoredFileReferences = async (client: PrismaClient) => 
   const columns = await client.$queryRawUnsafe<Array<{ tableName: string; columnName: string }>>(`
     SELECT table_name AS "tableName", column_name AS "columnName"
     FROM information_schema.columns
-    WHERE table_schema = 'public' AND column_name IN ('storageName', 'returnEvidenceStorageName')
+    WHERE table_schema = 'public'
+      AND column_name IN ('storageName', 'returnEvidenceStorageName')
+      AND table_name <> 'recovery_operations'
   `);
+  // Recovery packages have their own expiry lifecycle and deliberately do not
+  // recursively embed older recovery packages. Deployment checkpoints protect
+  // the live databases and business-owned file roots instead.
   const missing: Array<{ table: string; column: string; storageName: string }> = [];
   for (const column of columns) {
     if (!/^[A-Za-z0-9_]+$/.test(column.tableName) || !/^[A-Za-z0-9_]+$/.test(column.columnName)) continue;

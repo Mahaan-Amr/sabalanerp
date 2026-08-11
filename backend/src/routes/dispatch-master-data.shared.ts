@@ -1,9 +1,10 @@
+import { prisma } from '../lib/prisma';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { projectInternalDriverReadiness } from '../services/dispatchMasterDataPolicy';
 
-export const prisma = new PrismaClient();
+export { prisma };
 export const actor = (req: AuthRequest) => req.user!.id;
 export const requiredText = (value: unknown, label: string) => {
   const normalized = String(value ?? '').trim();

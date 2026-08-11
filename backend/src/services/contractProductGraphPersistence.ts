@@ -256,7 +256,7 @@ export class PrismaProductGraphAtomicStore implements ProductGraphAtomicStore {
   }
 }
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 export const persistSalesContractProductGraphCommand = (
   input: PersistProductGraphCommandInput
 ) => persistProductGraphCommand(new PrismaProductGraphAtomicStore(prisma), input);

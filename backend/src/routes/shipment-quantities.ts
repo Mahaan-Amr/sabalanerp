@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { RequestHandler, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect, type AuthRequest } from '../middleware/auth';
@@ -67,4 +68,4 @@ export const createShipmentQuantityRouter = ({
   return router;
 };
 
-export default createShipmentQuantityRouter({ prisma: new PrismaClient() });
+export default createShipmentQuantityRouter({ prisma });

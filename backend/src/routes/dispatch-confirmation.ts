@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect, AuthRequest } from '../middleware/auth';
@@ -13,7 +14,6 @@ import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const unavailableConnector: BiometricConnector = { execute: async (command) => ({ commandId: command.commandId, operation: command.operation,
   availability: 'UNAVAILABLE', device: { model: 'UNCONFIGURED', serial: 'UNCONFIGURED', connectorVersion: 'none', sdkVersion: 'none' },
   captureQuality: { state: 'NOT_EVALUATED' }, liveness: { state: 'NOT_EVALUATED' }, match: { state: 'NOT_EVALUATED' },

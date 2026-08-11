@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { body, validationResult } from 'express-validator';
@@ -16,7 +17,6 @@ import {
   resolveSalesContractPdfUrl,
   salesContractPrintableInclude
 } from '../utils/salesContractPdf';
-import { PrismaClient } from '@prisma/client';
 import {
   executeAccountingAction,
   getAccountantPerformanceReport,
@@ -61,7 +61,6 @@ import { getStatementAdjustmentArtifactPreparer } from '../services/statementAdj
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
 
 export const readAccountingActionIdentities = (req: Pick<Request, 'body' | 'get'>) => ({

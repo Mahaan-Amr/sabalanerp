@@ -1,6 +1,6 @@
 import express, { NextFunction, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { AuthRequest, protect } from '../middleware/auth';
 import { requireHrFeature } from '../middleware/hrAuthorization';
 import { activeHrAuthoritiesForUser } from '../services/hrAuthorizationService';
@@ -13,8 +13,6 @@ import {
 } from '../services/hrApplicantExperience';
 
 const router = express.Router();
-const prisma = new PrismaClient();
-
 const asyncHandler = (handler: (req: any, res: Response, next: NextFunction) => Promise<unknown>) =>
   (req: any, res: Response, next: NextFunction) => handler(req, res, next).catch(next);
 

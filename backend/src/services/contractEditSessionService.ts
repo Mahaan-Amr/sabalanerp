@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 
@@ -356,7 +357,6 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
   }
 }
 
-const prisma = new PrismaClient();
 const prismaStore = new PrismaContractEditSessionStore(prisma);
 
 export const acquireSalesContractEditSession = (

@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import {
@@ -58,7 +59,6 @@ import { publishNotificationEvent } from '../services/notificationService';
 import { resolveWorkspaceRecipientIds } from '../services/domainNotificationRecipients';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const rejectContractGraphWritesWhenReadOnly = (_req: any, res: Response, next: () => void) => {
   if (String(process.env.CONTRACT_PRODUCT_GRAPH_READ_ONLY || '').toLowerCase() === 'true') {
     res.status(503).json({

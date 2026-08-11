@@ -1,10 +1,10 @@
-﻿// Payment service
+import { prisma } from '../lib/prisma';
+// Payment service
 // Handles payment business logic
 
 import { PrismaClient } from '@prisma/client';
 import { validateContractAccess } from './contractService';
 
-const prisma = new PrismaClient();
 
 export interface CreatePaymentData {
   paymentMethod: 'CASH' | 'RECEIPT' | 'CHECK';

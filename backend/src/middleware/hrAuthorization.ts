@@ -1,10 +1,8 @@
 import type { NextFunction, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import type { AuthRequest } from './auth';
 import type { HrAccessLevel, HrAuthorizationLayer } from '../services/hrAuthorizationPolicy';
 import { authorizeHrUser } from '../services/hrAuthorizationService';
-
-const prisma = new PrismaClient();
 
 export type HrAuthorizedRequest = AuthRequest & {
   hrAuthorization?: { missingLayers: HrAuthorizationLayer[] };

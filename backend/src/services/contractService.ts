@@ -1,4 +1,5 @@
-﻿// Contract service
+import { prisma } from '../lib/prisma';
+// Contract service
 // Handles contract business logic
 
 import { CorrectionRequestStatus, Prisma, PrismaClient } from '@prisma/client';
@@ -19,7 +20,6 @@ import {
 import { repairContractDataOperationIdentities } from './contractOperationIdentityRepair';
 import { repairContractDataProductSemantics } from './contractProductSemanticRepair';
 
-const prisma = new PrismaClient();
 
 // Contract writes intentionally reload the built canonical graph package so
 // validation and financial reconciliation use the same policy implementation.

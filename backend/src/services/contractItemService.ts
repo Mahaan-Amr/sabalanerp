@@ -1,10 +1,10 @@
+import { prisma } from '../lib/prisma';
 // Contract item service
 // Handles contract item business logic
 
 import { PrismaClient } from '@prisma/client';
 import { validateContractAccess } from './contractService';
 
-const prisma = new PrismaClient();
 
 export interface CreateContractItemData {
   productId: string;

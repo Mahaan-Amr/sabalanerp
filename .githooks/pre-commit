@@ -3,3 +3,4 @@ set -eu
 
 npm run design-system:check
 npm run test:design-system-foundation
+npm run architecture:check

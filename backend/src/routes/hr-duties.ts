@@ -1,5 +1,5 @@
 import express, { type NextFunction, type Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { enforceMutationIdempotency } from '../middleware/idempotency';
 import { requireHrFeature } from '../middleware/hrAuthorization';
@@ -17,7 +17,6 @@ import {
 } from '../services/hrDutySurface';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const manageHrWork = requireHrFeature('HR_WORK_MANAGEMENT', 'EDIT');
 const asyncHandler = (
   handler: (req: AuthRequest, res: Response, next: NextFunction) => Promise<unknown>,

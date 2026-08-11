@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -25,7 +26,6 @@ import { completeGuardInboundMovement, GuardInboundMovementConflictError, guardI
 import canonicalGuardQueueRoutes from './canonical-guard-queue';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 const securityView = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
 const securityEdit = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);

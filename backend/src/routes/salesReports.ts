@@ -1,7 +1,7 @@
 import express, { Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
@@ -11,7 +11,7 @@ import { renderReportPdfHeaderTemplate, renderYekanFontFaces } from '../utils/pr
 import { formatMoney, roundMoneyFields } from '../utils/money';
 
 const router = express.Router();
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 const reportAccess = [protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW)];
 
 const accessFor = (req: WorkspaceRequest): SalesReportAccess => ({

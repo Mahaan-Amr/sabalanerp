@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -34,7 +35,6 @@ import {
 import { publishNotificationEvent } from '../services/notificationService';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const uploadTemp = path.join(RECOVERY_ROOT, 'upload-temp');
 fs.mkdirSync(uploadTemp, { recursive: true, mode: 0o700 });
 const upload = multer({

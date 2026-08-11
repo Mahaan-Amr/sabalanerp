@@ -41,6 +41,12 @@ server {
   add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
   client_max_body_size 10m;
+  error_page 503 /maintenance.html;
+
+  location = /maintenance.html {
+    internal;
+    root /usr/share/nginx/html;
+  }
 
   proxy_set_header Host $host;
   proxy_set_header X-Real-IP $remote_addr;
@@ -57,6 +63,7 @@ server {
   }
 
   location /socket.io/ {
+    include /etc/nginx/maintenance-check.conf;
     proxy_pass http://backend:5000;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
@@ -64,22 +71,27 @@ server {
   }
 
   location /api/ {
+    include /etc/nginx/maintenance-check.conf;
     proxy_pass http://backend:5000/api/;
   }
 
   location /files/contracts/ {
+    include /etc/nginx/maintenance-check.conf;
     proxy_pass http://backend:5000/files/contracts/;
   }
 
   location /files/accounting-contracts/ {
+    include /etc/nginx/maintenance-check.conf;
     proxy_pass http://backend:5000/files/accounting-contracts/;
   }
 
   location /files/uploads/images/ {
+    include /etc/nginx/maintenance-check.conf;
     proxy_pass http://backend:5000/files/uploads/images/;
   }
 
   location / {
+    include /etc/nginx/maintenance-check.conf;
     proxy_pass http://frontend:3000/;
   }
 }
@@ -103,6 +115,12 @@ server {
   add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
   client_max_body_size 10m;
+  error_page 503 /maintenance.html;
+
+  location = /maintenance.html {
+    internal;
+    root /usr/share/nginx/html;
+  }
 
   proxy_set_header Host $host;
   proxy_set_header X-Real-IP $remote_addr;
@@ -119,6 +137,7 @@ server {
   }
 
   location / {
+    include /etc/nginx/maintenance-check.conf;
     proxy_pass http://inquiry:3001/;
   }
 }

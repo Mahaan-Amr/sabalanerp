@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -12,7 +13,6 @@ import { resolveExistingPersonnelLink } from '../services/hrPersonnelBoundary';
 import { assertUserCanBeDeleted, collectUserDeletionBlockers, UserDeletionPolicyError } from '../services/userDeletionPolicy';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const CUID_REGEX = /^c[a-z0-9]{24}$/;
 const FEATURE_EXCEPTION_PERMISSION_LEVELS = [
   FEATURE_PERMISSIONS.VIEW,

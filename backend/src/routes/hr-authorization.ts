@@ -1,13 +1,13 @@
 import crypto from 'node:crypto';
 import express, { type NextFunction, type Response } from 'express';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import type { AuthRequest } from '../middleware/auth';
 import { requireHrFeature } from '../middleware/hrAuthorization';
 import { activeCompanyManagerUserIds, activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
 import { HR_REDESIGN_CATALOG } from '../services/hrRedesignDataContracts';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const administer = requireHrFeature('AUTHORITY_RESPONSIBILITY_ADMINISTRATION', 'ADMIN');
 const levelValues = new Set(HR_REDESIGN_CATALOG.featureLevels);
 const authorityValues = new Set<string>(HR_REDESIGN_CATALOG.businessAuthorities);

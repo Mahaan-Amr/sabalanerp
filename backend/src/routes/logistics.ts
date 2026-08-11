@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { GuardDriverQueueTurnStatus, Prisma, PrismaClient, SecurityDriverQueueTurnStatus } from '@prisma/client';
@@ -10,7 +11,6 @@ import { createSuccessorAllocationRevision, DispatchAllocationConflictError, Dis
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 const LINEAR_TOLERANCE = 0.5;
 const EDITABLE_STATUS = 'DRAFT';

@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -7,7 +8,6 @@ import { generatePdfFromHtml } from './pdf';
 import { ContractCustomPrintOptions, ContractPrintVariant, renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
 
 export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-consumed-stone-pricing-v22-2026-08-08';
-const prisma = new PrismaClient();
 
 export const salesContractPrintableInclude = {
   productGraphState: true,

@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
@@ -42,7 +43,6 @@ import { buildPersonnelCollection, personnelOriginFeature } from '../services/hr
 import { publishRealtime } from '../services/realtimePublisher';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 router.use(protect);
 router.use('/authorization', hrAuthorizationRoutes);

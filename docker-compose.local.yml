@@ -44,11 +44,12 @@ services:
         DEBIAN_MIRROR: http://deb.debian.org/debian
         DEBIAN_SECURITY_MIRROR: http://security.debian.org/debian-security
         NPM_CONFIG_REGISTRY: https://mirror.abrha.net/repository/npm/
+    stop_grace_period: 30s
     command: ["sh", "-c", "node dist/scripts/recovery-database-preflight.js && npx prisma migrate deploy && node dist/index.js"]
     environment:
       NODE_ENV: development
       PORT: 5000
-      DATABASE_URL: postgresql://postgres:${LOCAL_POSTGRES_PASSWORD:-sabalanerp-local-only}@postgres:5432/sabalanerp?schema=public
+      DATABASE_URL: postgresql://postgres:${LOCAL_POSTGRES_PASSWORD:-sabalanerp-local-only}@postgres:5432/sabalanerp?schema=public&connection_limit=${BACKEND_DB_CONNECTION_LIMIT:-10}&pool_timeout=${BACKEND_DB_POOL_TIMEOUT_SECONDS:-10}&application_name=${DATABASE_APPLICATION_NAME:-sabalanerp-backend-local}
       JWT_SECRET: local-docker-jwt-secret-at-least-32-characters
       FRONTEND_URL: http://localhost:3000
       PUBLIC_APP_URL: http://localhost:3000
@@ -125,6 +126,7 @@ services:
     mem_limit: 1g
     cpus: 1
     restart: unless-stopped
+    stop_grace_period: 30s
 
   frontend:
     build:

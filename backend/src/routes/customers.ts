@@ -1,11 +1,11 @@
-﻿import express from 'express';
+import { prisma } from '../lib/prisma';
+import express from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize } from '../middleware/auth';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Legacy customer model routes.
 // NOTE: New sales contract wizard must use /api/crm/customers (CrmCustomer) only.

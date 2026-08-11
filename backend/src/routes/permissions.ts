@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
@@ -5,7 +6,6 @@ import { protect, authorize } from '../middleware/auth';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES, FEATURE_LABELS, FEATURE_WORKSPACE_MAP } from '../middleware/feature';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 const isManager = (req: any) => req.user?.role === 'MANAGER';
 const isAdminPermissionLevel = (permissionLevel?: string) =>

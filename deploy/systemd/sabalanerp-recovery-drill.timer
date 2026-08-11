@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the SabalanERP restore drill every month
+
+[Timer]
+OnCalendar=monthly
+Persistent=true
+RandomizedDelaySec=6h
+Unit=sabalanerp-recovery-drill.service
+
+[Install]
+WantedBy=timers.target

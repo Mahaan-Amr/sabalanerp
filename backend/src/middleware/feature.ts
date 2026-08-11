@@ -1,9 +1,9 @@
+import { prisma } from '../lib/prisma';
 import { Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from './auth';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 
-const prisma = new PrismaClient();
 
 const isPermissionActiveAndNotExpired = (
   permission: { isActive: boolean; expiresAt?: Date | null } | null | undefined

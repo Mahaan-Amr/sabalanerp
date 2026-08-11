@@ -6,7 +6,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-import { decryptRecoveryArchive, encryptRecoveryArchive, sha256File } from './recoveryCrypto';
+import { decryptRecoveryArchive, encryptRecoveryArchive, encryptRecoveryArchiveForRecipients, sha256File } from './recoveryCrypto';
 import { RECOVERY_FORMAT_VERSION, recoveryCompatibility, RecoveryPackageType } from './systemRecoveryPolicy';
 import { RECOVERY_COORDINATION_DIR, RECOVERY_ROOT } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
@@ -44,6 +44,13 @@ export type RecoveryManifest = {
 const ensureDirectories = async () => {
   await Promise.all([PACKAGES_DIR, UPLOADS_DIR, WORK_DIR, RECOVERY_COORDINATION_DIR].map((directory) =>
     fs.promises.mkdir(directory, { recursive: true, mode: 0o700 })));
+  for (const entry of await fs.promises.readdir(WORK_DIR, { withFileTypes: true })) {
+    const absolute = path.join(WORK_DIR, entry.name);
+    const stat = await fs.promises.stat(absolute);
+    if (Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000) {
+      await fs.promises.rm(absolute, { recursive: entry.isDirectory(), force: true });
+    }
+  }
 };
 
 const databaseConfig = (databaseUrl = process.env.DATABASE_URL || '') => {
@@ -317,7 +324,8 @@ export const currentPostgresVersion = async (prisma: PrismaClient) => {
 export const createRecoveryPackage = async (input: {
   operationId: string;
   packageType: RecoveryPackageType;
-  passphrase: string;
+  passphrase?: string;
+  recipients?: Array<{ keyId: string; passphrase: string } | { keyId: string; publicKeyPem: string }>;
   prisma: PrismaClient;
   onProgress: (progress: number) => Promise<void>;
 }) => {
@@ -350,6 +358,12 @@ export const createRecoveryPackage = async (input: {
       ),
       copyComponent(path.join(process.cwd(), 'uploads'), path.join(payloadRoot, 'files', 'uploads'), sanitized),
       backupInquiry(path.join(payloadRoot, 'inquiry'), sanitized),
+      copyComponent(
+        RECOVERY_COORDINATION_DIR,
+        path.join(payloadRoot, 'recovery-coordination'),
+        sanitized,
+        (relative) => path.basename(relative).startsWith('deployment-'),
+      ),
     ]);
     await input.onProgress(55);
     if (sanitized) {
@@ -376,7 +390,9 @@ export const createRecoveryPackage = async (input: {
     await input.onProgress(75);
     const storageName = `${input.operationId}.sabrec`;
     const destination = path.join(PACKAGES_DIR, storageName);
-    await encryptRecoveryArchive(archivePath, destination, input.passphrase);
+    if (input.recipients) await encryptRecoveryArchiveForRecipients(archivePath, destination, input.recipients);
+    else if (input.passphrase) await encryptRecoveryArchive(archivePath, destination, input.passphrase);
+    else throw Object.assign(new Error('Recovery package encryption key is required.'), { code: 'RECOVERY_ENCRYPTION_KEY_REQUIRED' });
     await input.onProgress(95);
     const stat = await fs.promises.stat(destination);
     return { storageName, destination, sha256: await sha256File(destination), size: stat.size, manifest };
@@ -402,11 +418,13 @@ export const validateRecoveryPackage = async (input: {
   sourcePath: string;
   passphrase: string;
   prisma: PrismaClient;
+  verifyRestore?: boolean;
 }) => {
   await ensureDirectories();
   const jobRoot = await fs.promises.mkdtemp(path.join(WORK_DIR, 'validate-'));
   const archivePath = path.join(jobRoot, 'payload.tar.gz');
   const payloadRoot = path.join(jobRoot, 'payload');
+  let stagedDatabase: string | null = null;
   try {
     await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
@@ -435,8 +453,25 @@ export const validateRecoveryPackage = async (input: {
       sourcePostgresVersion: manifest.postgresVersion,
       targetPostgresVersion: await currentPostgresVersion(input.prisma),
     });
+    if (input.verifyRestore) {
+      const sqlite = await execFileAsync('sqlite3', [path.join(payloadRoot, 'inquiry', 'inquiry.db'), 'PRAGMA integrity_check;'], { windowsHide: true });
+      if (sqlite.stdout.trim() !== 'ok') {
+        throw Object.assign(new Error(`Recovery SQLite integrity check failed: ${sqlite.stdout.trim()}`), { code: 'RECOVERY_SQLITE_INTEGRITY_FAILED' });
+      }
+      stagedDatabase = safeDatabaseName('sabalan_checkpoint_verify');
+      await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
+      await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
+      const stagedClient = new PrismaClient({ datasources: { db: { url: databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase) } } });
+      try {
+        await stagedClient.$queryRawUnsafe('SELECT 1');
+        await validateStoredFileReferences(stagedClient, payloadRoot);
+      } finally {
+        await stagedClient.$disconnect();
+      }
+    }
     return { manifest, compatibility };
   } finally {
+    if (stagedDatabase) await dropDatabase(process.env.DATABASE_URL || '', stagedDatabase);
     await fs.promises.rm(jobRoot, { recursive: true, force: true });
   }
 };
@@ -459,6 +494,7 @@ type RestoreJournal = {
   packageStoragePath: string;
   bootstrapUsername?: string;
   startedAt: string;
+  preservePackage?: boolean;
 };
 
 export const RESTORE_JOURNAL_PATH = path.join(RECOVERY_COORDINATION_DIR, 'pending-restore.json');
@@ -468,6 +504,7 @@ const INQUIRY_STOPPED_MARKER = path.join(RECOVERY_COORDINATION_DIR, 'inquiry-sto
 
 const pauseInquiryForRecovery = async (operationId: string) => {
   if (process.env.INQUIRY_RECOVERY_COORDINATED !== 'true') return;
+  if (process.env.INQUIRY_ALREADY_DRAINED === 'true') return;
   await fs.promises.writeFile(INQUIRY_RESTART_MARKER, operationId, { encoding: 'utf8', mode: 0o600 });
   const deadline = Date.now() + 30_000;
   while (!fs.existsSync(INQUIRY_STOPPED_MARKER) && Date.now() < deadline) {
@@ -618,6 +655,44 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
   }
 };
 
+export const validateLiveStoredFileReferences = async (client: PrismaClient) => {
+  const columns = await client.$queryRawUnsafe<Array<{ tableName: string; columnName: string }>>(`
+    SELECT table_name AS "tableName", column_name AS "columnName"
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND column_name IN ('storageName', 'returnEvidenceStorageName')
+  `);
+  const missing: Array<{ table: string; column: string; storageName: string }> = [];
+  for (const column of columns) {
+    if (!/^[A-Za-z0-9_]+$/.test(column.tableName) || !/^[A-Za-z0-9_]+$/.test(column.columnName)) continue;
+    const values = await client.$queryRawUnsafe<Array<{ value: string }>>(
+      `SELECT "${column.columnName}" AS value FROM "${column.tableName}" WHERE "${column.columnName}" IS NOT NULL`,
+    );
+    for (const row of values) {
+      const storageName = path.basename(String(row.value || ''));
+      if (!storageName) continue;
+      const candidates = column.tableName.startsWith('hr_')
+        ? [path.join(process.cwd(), 'storage', 'hr-hiring', storageName)]
+        : column.tableName === 'support_ticket_attachments'
+          ? [path.join(process.cwd(), 'storage', 'support-tickets', storageName)]
+          : [
+              path.join(process.cwd(), 'uploads', 'security-vehicle-pairs', storageName),
+              path.join(process.cwd(), 'uploads', 'security-shift-log', storageName),
+              path.join(process.cwd(), 'uploads', storageName),
+            ];
+      if (!candidates.some((candidate) => fs.existsSync(candidate))) missing.push({ table: column.tableName, column: column.columnName, storageName });
+      if (missing.length >= 25) break;
+    }
+    if (missing.length >= 25) break;
+  }
+  if (missing.length) {
+    throw Object.assign(new Error(`Live storage has missing database file references (${missing.length} shown).`), {
+      code: 'DEPLOYMENT_FILE_REFERENCE_MISSING',
+      details: missing,
+    });
+  }
+  return { checkedColumns: columns.length };
+};
+
 export const stageAndPromoteRecovery = async (input: {
   operationId: string;
   sourcePath: string;
@@ -631,6 +706,8 @@ export const stageAndPromoteRecovery = async (input: {
   approvalExpiresAt?: Date | null;
   breakGlassReason?: string | null;
   bootstrapPassword?: string;
+  applyMigrations?: boolean;
+  preservePackage?: boolean;
   onProgress: (progress: number) => Promise<void>;
 }) => {
   await ensureDirectories();
@@ -659,6 +736,7 @@ export const stageAndPromoteRecovery = async (input: {
     packageStoragePath: input.sourcePath,
     bootstrapUsername: input.packageType === 'SANITIZED_TEST' ? 'local_recovery_admin' : undefined,
     startedAt: new Date().toISOString(),
+    preservePackage: input.preservePackage,
   };
   try {
     await writeRestoreJournal(journal);
@@ -669,7 +747,7 @@ export const stageAndPromoteRecovery = async (input: {
     await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
     await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
     const stagedUrl = databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase);
-    await migrateDatabase(stagedUrl);
+    if (input.applyMigrations !== false) await migrateDatabase(stagedUrl);
     if (input.packageType === 'SANITIZED_TEST') {
       if (process.env.NODE_ENV === 'production' || process.env.ALLOW_SANITIZED_RECOVERY !== 'true') {
         throw Object.assign(new Error('Sanitized test restore is disabled in this environment.'), { code: 'SANITIZED_RESTORE_DISABLED' });
@@ -840,7 +918,7 @@ export const finalizePromotedRecovery = async (prisma: PrismaClient, journal: Re
   }
   await dropDatabase(process.env.DATABASE_URL || '', journal.safetyDatabase);
   await fs.promises.rm(journal.safetyFilesRoot, { recursive: true, force: true });
-  await fs.promises.rm(journal.packageStoragePath, { force: true });
+  if (!journal.preservePackage) await fs.promises.rm(journal.packageStoragePath, { force: true });
   await fs.promises.rm(RESTORE_JOURNAL_PATH, { force: true });
 };
 

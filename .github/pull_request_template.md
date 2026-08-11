@@ -4,11 +4,13 @@
 
 ## Validation
 - [ ] `npm run build` (frontend/backend as applicable)
+- [ ] `npm run architecture:check` (backend or database changes)
 - [ ] `npm run design-system:check` (interactive frontend changes)
 - [ ] Relevant behavioral, keyboard, responsive, light/dark, and reduced-motion acceptance completed
 - [ ] `npm run text:scan`
 - [ ] `npm run text:check` (must pass for finalized text-fix PRs)
 - [ ] Security-sensitive paths reviewed (auth, HTML rendering, file upload)
+- [ ] Deployment/recovery changes preserve ADR-0039 and `docs/operations/zero-data-loss-deployment.md`
 
 ## Encoding Safety Checklist
 - [ ] All edited source files are UTF-8 encoded

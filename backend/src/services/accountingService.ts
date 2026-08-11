@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import {
   AccountingFlagCategory,
   AccountingFlagSeverity,
@@ -55,7 +56,6 @@ import {
   taxRecordPopulationWhere,
 } from './accountingPopulations';
 
-const prisma = new PrismaClient();
 
 const ELIGIBLE_CONTRACT_STATUSES: ContractStatus[] = [
   ContractStatus.APPROVED,

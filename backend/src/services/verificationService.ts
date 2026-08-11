@@ -1,4 +1,5 @@
-﻿/**
+import { prisma } from '../lib/prisma';
+/**
  * Verification Service
  * Manages contract verification codes, validation, and cleanup
  */
@@ -6,7 +7,6 @@
 import { PrismaClient } from '@prisma/client';
 import smsService from './smsService';
 
-const prisma = new PrismaClient();
 
 interface CreateVerificationCodeParams {
   contractId: string | null;

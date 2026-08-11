@@ -1,9 +1,9 @@
+import { prisma } from '../lib/prisma';
 import crypto from 'node:crypto';
 import type { NextFunction, Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import type { AuthRequest } from './auth';
 
-const prisma = new PrismaClient();
 const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 let lastExpiredRecordCleanupAt = 0;
 

@@ -7,6 +7,17 @@ stopped_marker="$coordination_dir/inquiry-stopped"
 mkdir -p "$coordination_dir"
 rm -f "$stopped_marker"
 
+child_pid=""
+shutdown_inquiry() {
+  if [ -n "${child_pid}" ] && kill -0 "${child_pid}" 2>/dev/null; then
+    kill -TERM "${child_pid}" 2>/dev/null || true
+    wait "${child_pid}" 2>/dev/null || true
+  fi
+  touch "$stopped_marker"
+  exit 0
+}
+trap shutdown_inquiry TERM INT
+
 while true; do
   npm run db:push || exit 1
   npm run db:seed || exit 1

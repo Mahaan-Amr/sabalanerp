@@ -16,5 +16,29 @@
     "dist/",
     "node_modules/"
   ],
-  "rules": {}
+  "rules": {
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "NewExpression[callee.name='PrismaClient']",
+        "message": "Runtime code must reuse the canonical client from src/lib/prisma.ts."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/lib/prisma.ts",
+        "src/services/systemRecoveryEngine.ts",
+        "src/prisma/**/*.ts",
+        "src/scripts/**/*.ts",
+        "scripts/**/*.{ts,js,cjs,mjs}",
+        "src/**/__tests__/**/*.ts",
+        "src/**/*.test.ts"
+      ],
+      "rules": {
+        "no-restricted-syntax": "off"
+      }
+    }
+  ]
 }

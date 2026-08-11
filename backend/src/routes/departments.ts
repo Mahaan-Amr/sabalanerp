@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
@@ -5,7 +6,6 @@ import { protect, authorize } from '../middleware/auth';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // @desc    Get all departments
 // @route   GET /api/departments

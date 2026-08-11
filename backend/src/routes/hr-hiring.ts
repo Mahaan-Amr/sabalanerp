@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -89,7 +90,6 @@ import {
 } from '../services/hrFormalAssessmentPolicy';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const ACCESS_TTL_DAYS = 7;
 const PHONE_FAILURE_LIMIT = 5;
 const IP_FAILURE_LIMIT = 30;

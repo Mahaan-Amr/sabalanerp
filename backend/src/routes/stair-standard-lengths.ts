@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Request, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import { PrismaClient, Prisma } from '@prisma/client';
@@ -6,7 +7,6 @@ import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../mi
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 const decimalFromInput = (value: number | string) => {
   const parsed = typeof value === 'number' ? value : parseFloat(value);

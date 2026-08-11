@@ -1,10 +1,10 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { LEGACY_PERSONNEL_WRITE_DISABLED } from '../services/hrPersonnelBoundary';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 const normalizedDepartmentId = (value: unknown) => String(value || '').trim() || null;
 

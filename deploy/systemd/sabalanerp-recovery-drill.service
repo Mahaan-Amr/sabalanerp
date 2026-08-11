@@ -1,0 +1,13 @@
+[Unit]
+Description=SabalanERP isolated zero-data-loss recovery drill
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sabalanerp-drill
+Group=sabalanerp-drill
+EnvironmentFile=/etc/sabalanerp/recovery-drill.env
+ExecStart=/opt/sabalanerp/deploy/scripts/run-recovery-drill.sh
+PrivateTmp=true
+NoNewPrivileges=true

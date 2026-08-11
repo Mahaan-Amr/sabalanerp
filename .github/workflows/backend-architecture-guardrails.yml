@@ -1,0 +1,39 @@
+name: Backend architecture guardrails
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "backend/**"
+      - "docker-compose.local.yml"
+      - "docker-compose.prod.yml"
+      - "scripts/check-database-client-ownership.mjs"
+      - "package.json"
+      - "AGENTS.md"
+      - "docs/architecture/database-connections.md"
+      - "docs/adr/0038-own-one-runtime-database-client.md"
+      - "docs/adr/0039-require-verified-zero-data-loss-deployments.md"
+      - "docs/operations/zero-data-loss-*.md"
+      - "deploy/**"
+      - ".github/workflows/backend-architecture-guardrails.yml"
+  workflow_dispatch:
+
+jobs:
+  database-client-ownership:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm run architecture:check
+      - run: npm ci --prefix backend
+      - run: npm run lint:backend
+      - run: npm run build:backend
+      - run: npm run test:deployment-control --prefix backend
+      - run: npm run test:system-recovery --prefix backend
+      - run: npm run test:notifications --prefix backend
+      - run: docker compose --env-file deploy/.env.prod.template -f docker-compose.prod.yml config --quiet
+      - run: sh -n deploy/scripts/deploy.sh deploy/scripts/run-inquiry-with-recovery.sh deploy/scripts/run-recovery-drill.sh

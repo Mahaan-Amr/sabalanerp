@@ -84,6 +84,8 @@ assert.equal(JSON.stringify(privacySafeWebPushPayload('/dashboard')).includes('t
 assert.deepEqual(registeredNotificationEventTypes(), [
   'ACCOUNTING_CORRECTION_REQUIRED',
   'ACCOUNTING_RECORD_SUBMITTED',
+  'DEPLOYMENT_COMPLETED',
+  'DEPLOYMENT_FAILED',
   'FAILED_LOGIN_ALERT',
   'HIRING_CHECKLIST_OVERDUE',
   'HIRING_INVITATION_SMS_FAILED',

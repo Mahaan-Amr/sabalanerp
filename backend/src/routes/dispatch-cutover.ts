@@ -1,12 +1,12 @@
 import express, { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { DispatchCutoverConflictError, DispatchCutoverValidationError, executeDispatchCutover, getDispatchCutoverStatus,
   recordDispatchCriticalFailure, recordLegacyDriverVehicleDisposition, resumeDispatchPilot, rollbackDispatchCutover,
   runDispatchCutoverRehearsal, recordDispatchPilotResumeApproval } from '../services/dispatchCutover';
 
 const router = express.Router();
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 router.use(protect);
 const handle = (res: Response, error: unknown) => {
   if (error instanceof DispatchCutoverValidationError) return res.status(400).json({ success: false, error: error.message });

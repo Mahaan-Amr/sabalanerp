@@ -19,6 +19,8 @@ build/
 .env.production.local
 backend/.env
 deploy/.env.prod
+deploy/secrets/
+.deploy-state/
 
 # IDE
 .vscode/

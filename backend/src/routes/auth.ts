@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { body, validationResult } from 'express-validator';
@@ -9,7 +10,6 @@ import { describeClient, privateNetworkLabel } from '../services/sessionClientMe
 import { publishNotificationEvent } from '../services/notificationService';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const ALERT_DEDUP_MS = 60 * 60 * 1000;
 

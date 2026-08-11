@@ -18,9 +18,38 @@ export type CheckpointObject = {
 
 export interface RemoteCheckpointStore {
   assertAvailable(requiredBytes: number): Promise<{ availableBytes: number }>;
-  uploadVerified(sourcePath: string, objectKey: string): Promise<{ objectPath: string; checksum: string; size: number }>;
+  uploadVerified(sourcePath: string, objectKey: string): Promise<{
+    objectPath: string;
+    checksum: string;
+    size: number;
+    fingerprint: RemoteCheckpointFingerprint;
+  }>;
   readMetadata(objectKey: string): Promise<Record<string, unknown>>;
 }
+
+export type RemoteCheckpointFingerprint = { size: number; mtimeMs: number };
+
+export const readRemoteCheckpointFingerprint = async (remotePath: string): Promise<RemoteCheckpointFingerprint> => {
+  const stat = await fs.promises.stat(remotePath);
+  if (!stat.isFile()) throw Object.assign(new Error('Remote checkpoint is not a regular file.'), { code: 'DEPLOYMENT_REMOTE_OBJECT_INVALID' });
+  return { size: stat.size, mtimeMs: stat.mtimeMs };
+};
+
+export const assertRemoteCheckpointFingerprint = async (
+  remotePath: string,
+  expected: RemoteCheckpointFingerprint | undefined,
+) => {
+  if (!expected || !Number.isFinite(expected.size) || !Number.isFinite(expected.mtimeMs)) {
+    throw Object.assign(new Error('Remote checkpoint fingerprint is missing.'), { code: 'DEPLOYMENT_REMOTE_FINGERPRINT_MISSING' });
+  }
+  const actual = await readRemoteCheckpointFingerprint(remotePath);
+  if (actual.size !== expected.size || actual.mtimeMs !== expected.mtimeMs) {
+    throw Object.assign(new Error('Remote checkpoint fingerprint changed after pre-mutation verification.'), {
+      code: 'DEPLOYMENT_REMOTE_FINGERPRINT_MISMATCH',
+    });
+  }
+  return actual;
+};
 
 const safeObjectKey = (value: string) => {
   const normalized = value.replace(/\\/g, '/').replace(/^\/+/, '');
@@ -91,7 +120,12 @@ export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
       });
     }
     await fs.promises.rename(temporary, destination);
-    return { objectPath: destination, checksum: sourceChecksum, size: stat.size };
+    return {
+      objectPath: destination,
+      checksum: sourceChecksum,
+      size: stat.size,
+      fingerprint: await readRemoteCheckpointFingerprint(destination),
+    };
   }
 
   async readMetadata(objectKey: string) {

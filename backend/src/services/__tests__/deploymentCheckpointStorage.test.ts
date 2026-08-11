@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { FilesystemRemoteCheckpointStore, ensureLocalCapacity, estimateCheckpointCapacity, type CheckpointObject } from '../deploymentCheckpointStorage';
+import {
+  assertRemoteCheckpointFingerprint,
+  FilesystemRemoteCheckpointStore,
+  ensureLocalCapacity,
+  estimateCheckpointCapacity,
+  type CheckpointObject,
+} from '../deploymentCheckpointStorage';
 
 const run = async () => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sabalan-remote-checkpoint-'));
@@ -16,6 +22,13 @@ const run = async () => {
     await fs.promises.writeFile(partialPath, 'verified');
     const uploaded = await store.uploadVerified(source, 'release-1/deployment-1.sabrec');
     assert.equal(await fs.promises.readFile(uploaded.objectPath, 'utf8'), 'verified-checkpoint');
+    assert.deepEqual(await assertRemoteCheckpointFingerprint(uploaded.objectPath, uploaded.fingerprint), uploaded.fingerprint);
+    await fs.promises.appendFile(uploaded.objectPath, '-changed');
+    await assert.rejects(
+      () => assertRemoteCheckpointFingerprint(uploaded.objectPath, uploaded.fingerprint),
+      (error: any) => error?.code === 'DEPLOYMENT_REMOTE_FINGERPRINT_MISMATCH',
+    );
+    await fs.promises.writeFile(uploaded.objectPath, 'verified-checkpoint');
     const metadataPath = path.join(root, 'release-1', 'deployment-1.sabrec.json');
     await fs.promises.writeFile(metadataPath, JSON.stringify({ checksum: uploaded.checksum }));
     assert.equal((await store.readMetadata('release-1/deployment-1.sabrec.json')).checksum, uploaded.checksum);

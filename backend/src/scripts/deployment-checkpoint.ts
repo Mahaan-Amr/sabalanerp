@@ -106,6 +106,7 @@ const main = async () => {
     archivePath: result.destination,
     localPath: result.destination,
     remotePath: uploaded.objectPath,
+    remoteFingerprint: uploaded.fingerprint,
     checksum: uploaded.checksum,
     size: uploaded.size,
     remoteVerified: true,

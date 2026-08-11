@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { disconnectDatabase, prisma } from '../lib/prisma';
 import { assertMandatoryDeploymentGates, connectionUtilizationDecision, runMandatoryDeploymentGates } from '../services/deploymentGates';
+import { assertRemoteCheckpointFingerprint } from '../services/deploymentCheckpointStorage';
 import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 import { sha256File } from '../services/recoveryCrypto';
 import { validateLiveStoredFileReferences } from '../services/systemRecoveryEngine';
@@ -83,20 +84,20 @@ const main = async () => {
         const remotePath = path.resolve(String(checkpoint.remotePath || ''));
         const localPath = path.resolve(String(checkpoint.localPath || checkpoint.archivePath || ''));
         if (!remotePath.startsWith(`${remoteRoot}${path.sep}`)) throw new Error('Remote checkpoint path is outside its configured mount.');
-        const [localChecksum, remoteChecksum, remoteSidecar] = await Promise.all([
+        const [localChecksum, remoteFingerprint, remoteSidecar] = await Promise.all([
           sha256File(localPath),
-          sha256File(remotePath),
+          assertRemoteCheckpointFingerprint(remotePath, checkpoint.remoteFingerprint),
           fs.promises.readFile(`${remotePath}.json`, 'utf8').then((value) => JSON.parse(value)),
         ]);
-        if (localChecksum !== checkpoint.checksum || remoteChecksum !== checkpoint.checksum) {
-          throw new Error('Local and remote checkpoint checksums no longer match the release checkpoint.');
+        if (localChecksum !== checkpoint.checksum) {
+          throw new Error('Local checkpoint checksum no longer matches the release checkpoint.');
         }
         if (remoteSidecar.checksum !== checkpoint.checksum
           || remoteSidecar.deploymentId !== deploymentId
           || remoteSidecar.remoteVerified !== true) {
           throw new Error('Remote checkpoint manifest read-back no longer proves this deployment.');
         }
-        return { checksum: checkpoint.checksum, releaseId: checkpoint.releaseId, remoteReadBack: true };
+        return { checksum: checkpoint.checksum, releaseId: checkpoint.releaseId, remoteReadBack: true, remoteFingerprint };
       },
     }] : []),
     {

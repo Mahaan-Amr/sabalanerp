@@ -25,10 +25,11 @@ const canonicalize = (value: unknown): unknown => {
 export const projectRecordRetentionCapabilities = (input: {
   role: string;
   authorities: string[];
+  canManageArchive?: boolean;
   archived: boolean;
   archiveEligible?: boolean;
 }) => {
-  const archiveManager = input.role === 'ADMIN' || input.authorities.includes('HR_MANAGER');
+  const archiveManager = input.role === 'ADMIN' || input.canManageArchive === true || input.authorities.includes('HR_MANAGER');
   return {
     canArchive: archiveManager && !input.archived && (input.archiveEligible ?? true),
     canRestore: archiveManager && input.archived,

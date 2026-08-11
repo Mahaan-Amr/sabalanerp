@@ -43,7 +43,7 @@ const source = {
         fatherName: 'private family value',
         workHistory: [{ organization: 'Sabalan', lastSalaryBenefits: '۱۲٬۳۴۵' }],
         skills: [{ name: 'Excel' }],
-        questions: ['private answer'],
+        questions: [{ questionId: 'application-question-1', questionText: 'پرسش دقیق ثبت‌شده چیست؟', answer: 'private answer' }],
         desiredSalary: '١٢,٣٤٥',
       },
     },
@@ -66,10 +66,12 @@ const restricted = projectApplicantFullInformation(source, new Set());
 assert.deepEqual(
   restricted.groups.map((group) => ({ key: group.key, status: group.status })),
   [
-    { key: 'PROFILE_IDENTITY', status: 'RESTRICTED' },
-    { key: 'EXPERIENCE_QUALIFICATIONS', status: 'RESTRICTED' },
+    { key: 'CASE_SUMMARY', status: 'RESTRICTED' },
+    { key: 'IDENTITY_CONTACT', status: 'RESTRICTED' },
+    { key: 'EDUCATION_SKILLS_LANGUAGES', status: 'RESTRICTED' },
+    { key: 'WORK_HISTORY', status: 'RESTRICTED' },
     { key: 'APPLICATION_ANSWERS', status: 'RESTRICTED' },
-    { key: 'DOCUMENT_EVIDENCE', status: 'RESTRICTED' },
+    { key: 'DOCUMENTS_FILES', status: 'RESTRICTED' },
   ],
 );
 const restrictedJson = JSON.stringify(restricted);
@@ -78,21 +80,32 @@ for (const secret of ['09120000000', '09990000000', '0012345678', 'private addre
 }
 
 const full = projectApplicantFullInformation(source, new Set([
-  'PROFILE_IDENTITY',
-  'EXPERIENCE_QUALIFICATIONS',
+  'CASE_SUMMARY',
+  'IDENTITY_CONTACT',
+  'EDUCATION_SKILLS_LANGUAGES',
+  'WORK_HISTORY',
   'APPLICATION_ANSWERS',
-  'DOCUMENT_EVIDENCE',
+  'DOCUMENTS_FILES',
 ]));
 assert.equal(full.groups[0].status, 'AVAILABLE');
-assert.equal((full.groups[0] as any).revisions[0].contact.mobile, '09120000000');
-assert.equal((full.groups[1] as any).revisions[0].workHistory[0].lastSalaryBenefits, '۱۲٬۳۴۵');
-assert.equal((full.groups[2] as any).revisions[0].answers[0], 'private answer');
-assert.deepEqual((full.groups[3] as any).documents[0], {
+assert.equal((full.groups[1] as any).revisions[0].contact.mobile, '09120000000');
+assert.equal((full.groups[3] as any).revisions[0].workHistory[0].lastSalaryBenefits, '۱۲٬۳۴۵');
+assert.deepEqual((full.groups[4] as any).revisions[0].answers[0], {
+  identifier: 'application-question-1', questionText: 'پرسش دقیق ثبت‌شده چیست؟', answer: 'private answer', legacyQuestionTextMissing: false,
+});
+assert.deepEqual((full.groups[5] as any).documents[0], {
   id: 'document-1',
   category: 'OTHER',
   customTitle: 'گواهی مستقل',
   version: 1,
   originalName: 'identity.pdf',
+});
+const legacyAnswers = projectApplicantFullInformation({
+  ...source,
+  formRevisions: [{ ...source.formRevisions[0], dataJson: { ...source.formRevisions[0].dataJson, questions: ['legacy answer'] } }],
+}, new Set(['APPLICATION_ANSWERS']));
+assert.deepEqual((legacyAnswers.groups[4] as any).revisions[0].answers[0], {
+  identifier: 'answer-1', questionText: null, answer: 'legacy answer', legacyQuestionTextMissing: true,
 });
 
 assert.equal(normalizeHiringRial('۱۲٬۳۴۵'), '12345');

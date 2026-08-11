@@ -1,0 +1,77 @@
+export type HrActionPermissionDefinition = {
+  code: string;
+  labelFa: string;
+  level: 'VIEW' | 'EDIT' | 'ADMIN';
+  prerequisites: string[];
+};
+
+export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
+  code: string;
+  labelFa: string;
+  permissions: readonly HrActionPermissionDefinition[];
+}> = [
+  {
+    code: 'CASE_EVIDENCE', labelFa: 'مشاهده پرونده و شواهد', permissions: [
+      { code: 'VIEW_INITIAL_INTERVIEW_REPORT', labelFa: 'مشاهده گزارش مصاحبه اولیه', level: 'VIEW', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'VIEW_FULL_APPLICANT_INFORMATION', labelFa: 'مشاهده اطلاعات کامل متقاضی', level: 'VIEW', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'VIEW_COMPANY_EVALUATION_RESULTS', labelFa: 'مشاهده نتایج ارزیابی شرکت', level: 'VIEW', prerequisites: ['RECRUITMENT_CASES'] },
+    ],
+  },
+  {
+    code: 'INITIAL_INTERVIEW', labelFa: 'مصاحبه اولیه', permissions: [
+      { code: 'RECORD_INITIAL_INTERVIEW', labelFa: 'ثبت و تکمیل مصاحبه اولیه', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_INITIAL_INTERVIEW_CRITERIA'] },
+      { code: 'VIEW_INITIAL_INTERVIEW_CRITERIA', labelFa: 'مشاهده معیارهای مصاحبه اولیه', level: 'VIEW', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'MANAGE_INITIAL_INTERVIEW_CRITERIA', labelFa: 'مدیریت و انتشار معیارهای مصاحبه اولیه', level: 'ADMIN', prerequisites: ['VIEW_INITIAL_INTERVIEW_CRITERIA'] },
+      { code: 'RECORD_PRELIMINARY_DECISION', labelFa: 'ثبت تصمیم مقدماتی', level: 'EDIT', prerequisites: ['VIEW_INITIAL_INTERVIEW_REPORT'] },
+    ],
+  },
+  {
+    code: 'COMPANY_EVALUATION', labelFa: 'ارزیابی‌های شرکت', permissions: [
+      { code: 'MANAGE_COMPANY_EVALUATION_PLAN', labelFa: 'مدیریت برنامه ارزیابی شرکت', level: 'EDIT', prerequisites: ['VIEW_INITIAL_INTERVIEW_REPORT', 'VIEW_COMPANY_EVALUATION_RESULTS'] },
+      { code: 'RECORD_COMPANY_EVALUATION_RESULT', labelFa: 'ثبت نتیجه ارزیابی شرکت', level: 'EDIT', prerequisites: ['VIEW_COMPANY_EVALUATION_RESULTS'] },
+      { code: 'RECORD_FINAL_MANAGEMENT_DECISION', labelFa: 'ثبت تصمیم نهایی مدیریت', level: 'EDIT', prerequisites: ['VIEW_INITIAL_INTERVIEW_REPORT', 'VIEW_COMPANY_EVALUATION_RESULTS'] },
+    ],
+  },
+  {
+    code: 'CASE_ADMINISTRATION', labelFa: 'اداره پرونده و عملیات تکمیلی', permissions: [
+      { code: 'MANAGE_RECRUITMENT_CASE', labelFa: 'مدیریت پرونده استخدام', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS', labelFa: 'مدیریت الزامات پیش از استخدام', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'MANAGE_PERSONNEL_SCHEDULE', labelFa: 'مدیریت برنامه کار پرسنل', level: 'EDIT', prerequisites: ['PERSONNEL'] },
+      { code: 'ARCHIVE_RECRUITMENT_CASE', labelFa: 'بایگانی و بازیابی پرونده', level: 'ADMIN', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'MANAGE_HR_WORK', labelFa: 'مدیریت کارهای منابع انسانی', level: 'EDIT', prerequisites: ['HR_WORK_MANAGEMENT'] },
+      { code: 'MANAGE_COMPENSATION', labelFa: 'مدیریت پیشنهاد و جبران خدمت', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'MANAGE_PAYROLL', labelFa: 'ثبت و تأیید اطلاعات حقوق', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'MANAGE_FINANCE_EVIDENCE', labelFa: 'ثبت و تأیید شواهد مالی', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
+    ],
+  },
+] as const;
+
+export const HR_ACTION_PERMISSIONS = HR_ACTION_PERMISSION_GROUPS.flatMap((group) => group.permissions);
+const definitions = new Map(HR_ACTION_PERMISSIONS.map((permission) => [permission.code, permission]));
+
+export const getHrActionPermissionDefinition = (code: string) => definitions.get(code);
+
+const LEGACY_AUTHORITY_ACTION_BUNDLES: Record<string, string[]> = {
+  HR_PROCESSOR: ['RECORD_INITIAL_INTERVIEW', 'RECORD_COMPANY_EVALUATION_RESULT', 'VIEW_FULL_APPLICANT_INFORMATION', 'MANAGE_RECRUITMENT_CASE', 'MANAGE_PERSONNEL_SCHEDULE'],
+  HR_MANAGER: ['RECORD_PRELIMINARY_DECISION', 'MANAGE_INITIAL_INTERVIEW_CRITERIA', 'ARCHIVE_RECRUITMENT_CASE', 'MANAGE_HR_WORK', 'MANAGE_RECRUITMENT_CASE', 'MANAGE_PERSONNEL_SCHEDULE'],
+  COMPANY_MANAGER: ['MANAGE_COMPANY_EVALUATION_PLAN', 'RECORD_FINAL_MANAGEMENT_DECISION', 'MANAGE_COMPENSATION', 'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS'],
+  HR_PAYROLL_PROCESSOR: ['MANAGE_PAYROLL'],
+  HR_PAYROLL_MANAGER: ['MANAGE_PAYROLL'],
+  FINANCE_RECORDER: ['MANAGE_FINANCE_EVIDENCE'],
+  FINANCE_MANAGER: ['MANAGE_FINANCE_EVIDENCE'],
+};
+
+export const expandHrActionPermissionSelection = (selectedCodes: readonly string[]) => {
+  const expanded = new Set<string>();
+  const include = (code: string) => {
+    const definition = definitions.get(code);
+    for (const prerequisite of definition?.prerequisites ?? []) include(prerequisite);
+    expanded.add(code);
+  };
+  selectedCodes.forEach(include);
+  return [...expanded];
+};
+
+export const actionPermissionsForLegacyAuthority = (authorityCode: string) => (
+  expandHrActionPermissionSelection(LEGACY_AUTHORITY_ACTION_BUNDLES[authorityCode] ?? [])
+);

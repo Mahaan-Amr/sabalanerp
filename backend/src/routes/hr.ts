@@ -23,7 +23,7 @@ import {
   runHrRedesignBackfill,
 } from '../services/hrRedesignDataContracts';
 import hrAuthorizationRoutes from './hr-authorization';
-import { authorizeHrUser, resolveHrNamedResponsibility } from '../services/hrAuthorizationService';
+import { activeHrActionPermissionsForUser, authorizeHrUser } from '../services/hrAuthorizationService';
 import {
   assertCapacityChangeAllowed,
   assertFreshVersion,
@@ -79,25 +79,14 @@ const editAccess: express.RequestHandler = (_req, _res, next) => next();
 const adminAccess: express.RequestHandler = (_req, _res, next) => next();
 const EXCEPTIONAL_PERSONNEL_SOURCES = new Set(['DATA_MIGRATION', 'HISTORICAL_CORRECTION', 'ORGANIZATIONAL_TRANSFER']);
 
-const requireHrResponsibility = (responsibilityTypeCode: 'HR_PROCESSOR' | 'HR_MANAGER') => async (
+const requireHrActionPermission = (actionPermissionCode: string) => async (
   req: WorkspaceRequest,
   res: Response,
   next: express.NextFunction,
 ) => {
   try {
-    const resolution = await resolveHrNamedResponsibility(prisma, {
-      sourceActionCode: `${req.method}:${req.baseUrl}${req.route?.path ?? req.path}`,
-      responsibilityTypeCode,
-      scopeType: 'GLOBAL',
-      scopeId: null,
-      sourceActorUserId: actorId(req),
-    });
-    if (resolution.status === 'UNRESOLVED') {
-      return res.status(409).json({ success: false, error: 'HR_RESPONSIBILITY_UNRESOLVED', reason: resolution.reason });
-    }
-    if (resolution.assignedUserId !== actorId(req)) {
-      return res.status(403).json({ success: false, error: 'HR_RESPONSIBILITY_NOT_ASSIGNED' });
-    }
+    const decision = await authorizeHrUser(prisma, actorId(req), { actionPermissionCodes: [actionPermissionCode] });
+    if (!decision.allowed) return res.status(403).json({ success: false, error: 'HR_ACTION_PERMISSION_REQUIRED' });
     return next();
   } catch (error) {
     return next(error);
@@ -106,11 +95,11 @@ const requireHrResponsibility = (responsibilityTypeCode: 'HR_PROCESSOR' | 'HR_MA
 
 const requireHrManagerAuthority = async (req: WorkspaceRequest, res: Response, next: express.NextFunction) => {
   try {
-    const authority = await authorizeHrUser(prisma, req.user!.id, { authorityCodes: ['HR_MANAGER'] });
+    const authority = await authorizeHrUser(prisma, req.user!.id, { actionPermissionCodes: ['ARCHIVE_RECRUITMENT_CASE'] });
     if (!authority.allowed) {
       return res.status(403).json({ success: false, error: 'اختیار سازمانی HR_MANAGER برای ثبت استثنایی پرسنل الزامی است.' });
     }
-    return requireHrResponsibility('HR_MANAGER')(req, res, next);
+    return next();
   } catch (error) {
     next(error);
   }
@@ -148,9 +137,6 @@ const isValidIranianNationalCode = (value: string) => {
   return check === (remainder < 2 ? remainder : 11 - remainder);
 };
 const actorId = (req: WorkspaceRequest) => req.user!.id;
-const hasHiringAuthority = async (userId: string, authority: 'HR_PROCESSOR' | 'HR_MANAGER') => Boolean(
-  (await authorizeHrUser(prisma, userId, { authorityCodes: [authority] })).allowed
-);
 const badRequest = (res: Response, error: unknown) => res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'اطلاعات واردشده معتبر نیست.' });
 const handleError = (res: Response, error: unknown, context: string) => {
   console.error(context, error);
@@ -1087,12 +1073,12 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
     };
     // Authorization and structural filters are applied by middleware/where first. Search,
     // Persian collation, focus canonicalization, and pagination then operate on that complete set.
-    const [authorizedRows, authorityRows] = await Promise.all([
+    const [authorizedRows, actionPermissionCodes] = await Promise.all([
       prisma.personnel.findMany({
         where,
         select: { id: true, firstName: true, lastName: true, nationalCode: true, employeeNumber: true }
       }),
-      prisma.hrHiringAuthority.findMany({ where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { authority: true } })
+      activeHrActionPermissionsForUser(prisma, actorId(req)),
     ]);
     const collection = buildPersonnelCollection(authorizedRows, { search, page, focusId });
     const pageIds = collection.rows.map((person) => person.id);
@@ -1106,11 +1092,11 @@ router.get('/personnel', viewAccess, async (req: WorkspaceRequest, res) => {
       ? await prisma.user.findMany({ where: { id: { in: archivedActorIds } }, select: { id: true, firstName: true, lastName: true, username: true } })
       : [];
     const archivedActorNames = new Map(archivedActors.map((actor) => [actor.id, `${actor.firstName} ${actor.lastName}`.trim() || actor.username]));
-    const authorities = new Set(authorityRows.map((row) => row.authority));
+    const authorities = actionPermissionCodes.includes('ARCHIVE_RECRUITMENT_CASE') ? ['HR_MANAGER'] : [];
     const data = rows.map((person) => ({
       ...person,
       archivedByDisplayName: person.archivedBy ? archivedActorNames.get(person.archivedBy) || person.archivedBy : null,
-      retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities: [...authorities], archived: Boolean(person.archivedAt) }),
+      retentionCapabilities: projectRecordRetentionCapabilities({ role: req.user!.role, authorities, archived: Boolean(person.archivedAt) }),
     }));
     res.json({ success: true, data, meta: collection.meta });
   } catch (error) { handleError(res, error, 'List HR personnel'); }
@@ -1408,7 +1394,7 @@ router.use('/assignments/:id', async (req: WorkspaceRequest, res, next) => {
 
 router.get('/personnel/:id/work-schedule', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const [person, authorityRows] = await Promise.all([
+    const [person, actionPermissionCodes] = await Promise.all([
       prisma.personnel.findUnique({
         where: { id: req.params.id },
         select: {
@@ -1439,13 +1425,10 @@ router.get('/personnel/:id/work-schedule', viewAccess, async (req: WorkspaceRequ
           },
         },
       }),
-      prisma.hrHiringAuthority.findMany({
-        where: { userId: actorId(req), isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-        select: { authority: true },
-      }),
+      activeHrActionPermissionsForUser(prisma, actorId(req)),
     ]);
     if (!person) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
-    const authorities = new Set(authorityRows.map((row) => row.authority));
+    const canManageSchedule = actionPermissionCodes.includes('MANAGE_PERSONNEL_SCHEDULE');
     const now = new Date();
     const isEffective = (from: Date, to: Date | null) => dateOnlyRangeIncludes(from, to, now);
     const relationship = person.hrEmploymentRelationships.find((candidate) =>
@@ -1464,7 +1447,7 @@ router.get('/personnel/:id/work-schedule', viewAccess, async (req: WorkspaceRequ
       supervisorRelationship.personnel.user?.id === actorId(req)
     );
     const change = person.workScheduleChanges[0];
-    const canSeeChangeDetails = isResponsibleSupervisor || authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
+    const canSeeChangeDetails = isResponsibleSupervisor || canManageSchedule;
     const separateReviewer = change?.preparedBy !== actorId(req);
     res.json({
       success: true,
@@ -1475,10 +1458,10 @@ router.get('/personnel/:id/work-schedule', viewAccess, async (req: WorkspaceRequ
         workScheduleChanges: canSeeChangeDetails ? person.workScheduleChanges : [],
         workScheduleCapabilities: {
           canPropose: isResponsibleSupervisor && (!change || change.status === 'APPROVED'),
-          canPrepare: authorities.has('HR_PROCESSOR') && Boolean(change && ['PROPOSED', 'RETURNED', 'DRAFT'].includes(change.status)),
-          canSubmit: authorities.has('HR_PROCESSOR') && change?.status === 'DRAFT',
-          canApprove: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer,
-          canReturn: authorities.has('HR_MANAGER') && change?.status === 'SUBMITTED' && separateReviewer,
+          canPrepare: canManageSchedule && Boolean(change && ['PROPOSED', 'RETURNED', 'DRAFT'].includes(change.status)),
+          canSubmit: canManageSchedule && change?.status === 'DRAFT',
+          canApprove: canManageSchedule && change?.status === 'SUBMITTED' && separateReviewer,
+          canReturn: canManageSchedule && change?.status === 'SUBMITTED' && separateReviewer,
         },
       },
     });
@@ -1599,12 +1582,10 @@ router.post('/personnel/:id/work-schedule/proposals', viewAccess, async (req: Wo
   } catch (error) { handleError(res, error, 'Propose personnel work schedule'); }
 });
 
-router.put('/personnel/:id/work-schedule/changes/:changeId/prepare', editAccess, requireHrResponsibility('HR_PROCESSOR'), async (req: WorkspaceRequest, res) => {
+router.put('/personnel/:id/work-schedule/changes/:changeId/prepare', editAccess, requireHrActionPermission('MANAGE_PERSONNEL_SCHEDULE'), async (req: WorkspaceRequest, res) => {
   try {
-    const [change, hasHrProcessor] = await Promise.all([
-      prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
-      hasHiringAuthority(actorId(req), 'HR_PROCESSOR')
-    ]);
+    const change = await prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } });
+    const hasHrProcessor = true;
     assertWorkScheduleAction('PREPARE', { hasHrProcessor, status: change.status });
     const schedule = normalizeWorkSchedule(req.body);
     if (!schedule) throw new Error('برنامه کاری کامل الزامی است.');
@@ -1620,12 +1601,10 @@ router.put('/personnel/:id/work-schedule/changes/:changeId/prepare', editAccess,
   } catch (error) { handleError(res, error, 'Prepare personnel work schedule'); }
 });
 
-router.post('/personnel/:id/work-schedule/changes/:changeId/submit', editAccess, requireHrResponsibility('HR_PROCESSOR'), async (req: WorkspaceRequest, res) => {
+router.post('/personnel/:id/work-schedule/changes/:changeId/submit', editAccess, requireHrActionPermission('MANAGE_PERSONNEL_SCHEDULE'), async (req: WorkspaceRequest, res) => {
   try {
-    const [change, hasHrProcessor] = await Promise.all([
-      prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
-      hasHiringAuthority(actorId(req), 'HR_PROCESSOR')
-    ]);
+    const change = await prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } });
+    const hasHrProcessor = true;
     assertWorkScheduleAction('SUBMIT', { hasHrProcessor, status: change.status, actorId: actorId(req) });
     const row = await prisma.hrWorkScheduleChange.update({ where: { id: change.id }, data: { status: 'SUBMITTED', submittedBy: actorId(req), submittedAt: new Date() } });
     await prisma.hrPersonnelAudit.create({ data: { personnelId: req.params.id, actorUserId: actorId(req), eventType: 'WORK_SCHEDULE_SUBMITTED', sourceCategory: 'WORK_SCHEDULE', reason: 'ارسال برنامه کاری برای تأیید', payloadJson: { changeId: change.id } } });
@@ -1633,12 +1612,10 @@ router.post('/personnel/:id/work-schedule/changes/:changeId/submit', editAccess,
   } catch (error) { handleError(res, error, 'Submit personnel work schedule'); }
 });
 
-router.post('/personnel/:id/work-schedule/changes/:changeId/return', adminAccess, requireHrResponsibility('HR_MANAGER'), async (req: WorkspaceRequest, res) => {
+router.post('/personnel/:id/work-schedule/changes/:changeId/return', adminAccess, requireHrActionPermission('MANAGE_PERSONNEL_SCHEDULE'), async (req: WorkspaceRequest, res) => {
   try {
-    const [change, hasHrManager] = await Promise.all([
-      prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
-      hasHiringAuthority(actorId(req), 'HR_MANAGER')
-    ]);
+    const change = await prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } });
+    const hasHrManager = true;
     const reason = textValue(req.body.reason);
     assertWorkScheduleAction('RETURN', { hasHrManager, status: change.status, returnReason: reason });
     const row = await prisma.hrWorkScheduleChange.update({ where: { id: change.id }, data: { status: 'RETURNED', returnedBy: actorId(req), returnedAt: new Date(), returnReason: reason } });
@@ -1647,12 +1624,10 @@ router.post('/personnel/:id/work-schedule/changes/:changeId/return', adminAccess
   } catch (error) { handleError(res, error, 'Return personnel work schedule'); }
 });
 
-router.post('/personnel/:id/work-schedule/changes/:changeId/approve', adminAccess, requireHrResponsibility('HR_MANAGER'), async (req: WorkspaceRequest, res) => {
+router.post('/personnel/:id/work-schedule/changes/:changeId/approve', adminAccess, requireHrActionPermission('MANAGE_PERSONNEL_SCHEDULE'), async (req: WorkspaceRequest, res) => {
   try {
-    const [change, hasHrManager] = await Promise.all([
-      prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } }),
-      hasHiringAuthority(actorId(req), 'HR_MANAGER')
-    ]);
+    const change = await prisma.hrWorkScheduleChange.findFirstOrThrow({ where: { id: req.params.changeId, personnelId: req.params.id } });
+    const hasHrManager = true;
     assertWorkScheduleAction('APPROVE', { hasHrManager, status: change.status, actorId: actorId(req), preparedBy: change.preparedBy });
     if (!change.effectiveFrom || !Array.isArray(change.daysJson)) throw new Error('پیش‌نویس کامل برنامه کاری پیدا نشد.');
     const row = await prisma.$transaction(async (tx) => {
@@ -1802,14 +1777,8 @@ router.get('/redesign/compatibility/work-items', viewAccess, async (req: Workspa
 router.get('/redesign/compatibility/applications/:applicationId/assessments', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
     const [authority, assignedDuty] = await Promise.all([
-      prisma.hrHiringAuthority.findFirst({
-        where: {
-          userId: actorId(req),
-          authority: { in: ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER'] },
-          isActive: true,
-          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-        },
-        select: { id: true },
+      authorizeHrUser(prisma, actorId(req), {
+        actionPermissionCodes: ['MANAGE_RECRUITMENT_CASE', 'VIEW_COMPANY_EVALUATION_RESULTS'],
       }),
       prisma.hrWorkItem.findFirst({
         where: {
@@ -1825,7 +1794,7 @@ router.get('/redesign/compatibility/applications/:applicationId/assessments', vi
     ]);
     if (!canReadLegacyAssessmentCompatibility({
       hasAssignedAssessmentDuty: Boolean(assignedDuty),
-      hasActiveHiringAuthority: Boolean(authority),
+      hasActiveHiringAuthority: authority.allowed,
     })) {
       return res.status(403).json({ success: false, error: 'Assigned hiring assessment duty and active authority are required.' });
     }

@@ -1,12 +1,24 @@
 ﻿import { calculatePartitionPositions, validatePartitionFit } from '../partitionPositioningService';
 import type { StonePartition } from '../../types/contract.types';
 
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+const expect = (actual: any) => ({
+  toBe: (expected: any) => assert.equal(actual, expected),
+  toEqual: (expected: any) => assert.deepEqual(actual, expected),
+  toHaveLength: (expected: number) => assert.equal(actual.length, expected),
+  toBeDefined: () => assert.notEqual(actual, undefined),
+  toBeUndefined: () => assert.equal(actual, undefined),
+  toContain: (expected: any) => assert.ok(actual.includes(expected)),
+});
+
 describe('partitionPositioningService', () => {
   describe('calculatePartitionPositions', () => {
     it('should position a single partition that fits perfectly', () => {
       const partitions: StonePartition[] = [
         {
-          id: '1',
+          id: '1', quantity: 1,
           width: 100, // 100cm
           length: 2, // 2m
           squareMeters: 2
@@ -22,8 +34,8 @@ describe('partitionPositioningService', () => {
 
     it('should position multiple partitions sequentially using full width', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 100, length: 1, squareMeters: 1 },
-        { id: '2', width: 100, length: 1, squareMeters: 1 }
+        { id: '1', quantity: 1, width: 100, length: 1, squareMeters: 1 },
+        { id: '2', quantity: 1, width: 100, length: 1, squareMeters: 1 }
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
@@ -35,39 +47,39 @@ describe('partitionPositioningService', () => {
       expect(result[1].validationError).toBeUndefined();
     });
 
-    it('should split width slices when partitions use partial width', () => {
+    it('should continue the earliest compatible width slice before opening another', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 60, length: 1, squareMeters: 0.6 },
-        { id: '2', width: 40, length: 1, squareMeters: 0.4 }
+        { id: '1', quantity: 1, width: 60, length: 1, squareMeters: 0.6 },
+        { id: '2', quantity: 1, width: 40, length: 1, squareMeters: 0.4 }
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
 
       expect(result).toHaveLength(2);
       expect(result[0].position).toEqual({ startWidth: 0, startLength: 0 });
-      expect(result[1].position).toEqual({ startWidth: 60, startLength: 0 });
+      expect(result[1].position).toEqual({ startWidth: 0, startLength: 1 });
       expect(result[0].validationError).toBeUndefined();
       expect(result[1].validationError).toBeUndefined();
     });
 
     it('should handle complex sequential cutting with length progression', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 100, length: 1, squareMeters: 1 }, // Full width, 1m
-        { id: '2', width: 50, length: 1, squareMeters: 0.5 }, // Half width, next 1m
-        { id: '3', width: 50, length: 1, squareMeters: 0.5 } // Other half, same position
+        { id: '1', quantity: 1, width: 100, length: 1, squareMeters: 1 }, // Full width, 1m
+        { id: '2', quantity: 1, width: 50, length: 1, squareMeters: 0.5 }, // Half width, next 1m
+        { id: '3', quantity: 1, width: 50, length: 1, squareMeters: 0.5 } // Other half, same position
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
 
       expect(result[0].position).toEqual({ startWidth: 0, startLength: 0 });
       expect(result[1].position).toEqual({ startWidth: 0, startLength: 1 });
-      expect(result[2].position).toEqual({ startWidth: 50, startLength: 1 });
+      expect(result[2].position).toEqual({ startWidth: 0, startLength: 2 });
       expect(result.every(p => !p.validationError)).toBe(true);
     });
 
     it('should detect when partition width exceeds available width', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 150, length: 1, squareMeters: 1.5 }
+        { id: '1', quantity: 1, width: 150, length: 1, squareMeters: 1.5 }
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
@@ -80,7 +92,7 @@ describe('partitionPositioningService', () => {
 
     it('should detect when partition length exceeds available length', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 50, length: 6, squareMeters: 3 }
+        { id: '1', quantity: 1, width: 50, length: 6, squareMeters: 3 }
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
@@ -93,8 +105,8 @@ describe('partitionPositioningService', () => {
 
     it('should detect when partition cannot fit in remaining space', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 100, length: 4, squareMeters: 4 }, // Uses 4m of length
-        { id: '2', width: 100, length: 2, squareMeters: 2 } // Needs 2m but only 1m left
+        { id: '1', quantity: 1, width: 100, length: 4, squareMeters: 4 }, // Uses 4m of length
+        { id: '2', quantity: 1, width: 100, length: 2, squareMeters: 2 } // Needs 2m but only 1m left
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
@@ -105,26 +117,29 @@ describe('partitionPositioningService', () => {
       expect(result[1].validationError).toBeDefined();
     });
 
-    it('should filter out empty partitions but preserve them in result', () => {
+    it('should preserve empty partitions after positioned partitions', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 50, length: 1, squareMeters: 0.5 },
-        { id: '2', width: 0, length: 0, squareMeters: 0 }, // Empty
-        { id: '3', width: 50, length: 1, squareMeters: 0.5 }
+        { id: '1', quantity: 1, width: 50, length: 1, squareMeters: 0.5 },
+        { id: '2', quantity: 1, width: 0, length: 0, squareMeters: 0 }, // Empty
+        { id: '3', quantity: 1, width: 50, length: 1, squareMeters: 0.5 }
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
 
       expect(result).toHaveLength(3);
+      expect(result[0].id).toBe('1');
       expect(result[0].position).toBeDefined();
-      expect(result[1].position).toBeUndefined(); // Empty partition has no position
-      expect(result[2].position).toBeDefined();
+      expect(result[1].id).toBe('3');
+      expect(result[1].position).toBeDefined();
+      expect(result[2].id).toBe('2');
+      expect(result[2].position).toBeUndefined();
     });
 
     it('should maintain user-defined order (no automatic sorting)', () => {
       const partitions: StonePartition[] = [
-        { id: '3', width: 30, length: 1, squareMeters: 0.3 },
-        { id: '1', width: 50, length: 1, squareMeters: 0.5 },
-        { id: '2', width: 20, length: 1, squareMeters: 0.2 }
+        { id: '3', quantity: 1, width: 30, length: 1, squareMeters: 0.3 },
+        { id: '1', quantity: 1, width: 50, length: 1, squareMeters: 0.5 },
+        { id: '2', quantity: 1, width: 20, length: 1, squareMeters: 0.2 }
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
@@ -137,7 +152,7 @@ describe('partitionPositioningService', () => {
 
     it('should handle edge case with zero available space', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 50, length: 1, squareMeters: 0.5 }
+        { id: '1', quantity: 1, width: 50, length: 1, squareMeters: 0.5 }
       ];
 
       const result = calculatePartitionPositions(partitions, 0, 0);
@@ -148,7 +163,7 @@ describe('partitionPositioningService', () => {
 
     it('should handle edge case with partition exactly filling remaining space', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 100, length: 5, squareMeters: 5 }
+        { id: '1', quantity: 1, width: 100, length: 5, squareMeters: 5 }
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
@@ -159,24 +174,24 @@ describe('partitionPositioningService', () => {
 
     it('should handle three partitions with mixed width usage', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 40, length: 1, squareMeters: 0.4 },
-        { id: '2', width: 30, length: 1, squareMeters: 0.3 },
-        { id: '3', width: 30, length: 1, squareMeters: 0.3 }
+        { id: '1', quantity: 1, width: 40, length: 1, squareMeters: 0.4 },
+        { id: '2', quantity: 1, width: 30, length: 1, squareMeters: 0.3 },
+        { id: '3', quantity: 1, width: 30, length: 1, squareMeters: 0.3 }
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
 
       expect(result).toHaveLength(3);
       expect(result[0].position).toEqual({ startWidth: 0, startLength: 0 });
-      expect(result[1].position).toEqual({ startWidth: 40, startLength: 0 });
-      expect(result[2].position).toEqual({ startWidth: 70, startLength: 0 });
+      expect(result[1].position).toEqual({ startWidth: 0, startLength: 1 });
+      expect(result[2].position).toEqual({ startWidth: 0, startLength: 2 });
       expect(result.every(p => !p.validationError)).toBe(true);
     });
 
     it('should return original partitions array when all are empty', () => {
       const partitions: StonePartition[] = [
-        { id: '1', width: 0, length: 0, squareMeters: 0 },
-        { id: '2', width: 0, length: 0, squareMeters: 0 }
+        { id: '1', quantity: 1, width: 0, length: 0, squareMeters: 0 },
+        { id: '2', quantity: 1, width: 0, length: 0, squareMeters: 0 }
       ];
 
       const result = calculatePartitionPositions(partitions, 100, 5);
@@ -188,7 +203,7 @@ describe('partitionPositioningService', () => {
   describe('validatePartitionFit', () => {
     it('should validate partition that fits within bounds', () => {
       const partition: StonePartition = {
-        id: '1',
+        id: '1', quantity: 1,
         width: 50,
         length: 2,
         squareMeters: 1
@@ -202,7 +217,7 @@ describe('partitionPositioningService', () => {
 
     it('should reject partition with zero dimensions', () => {
       const partition: StonePartition = {
-        id: '1',
+        id: '1', quantity: 1,
         width: 0,
         length: 0,
         squareMeters: 0
@@ -216,7 +231,7 @@ describe('partitionPositioningService', () => {
 
     it('should reject partition with excessive width', () => {
       const partition: StonePartition = {
-        id: '1',
+        id: '1', quantity: 1,
         width: 150,
         length: 2,
         squareMeters: 3
@@ -231,7 +246,7 @@ describe('partitionPositioningService', () => {
 
     it('should reject partition with excessive length', () => {
       const partition: StonePartition = {
-        id: '1',
+        id: '1', quantity: 1,
         width: 50,
         length: 6,
         squareMeters: 3
@@ -246,7 +261,7 @@ describe('partitionPositioningService', () => {
 
     it('should validate partition at exact bounds', () => {
       const partition: StonePartition = {
-        id: '1',
+        id: '1', quantity: 1,
         width: 100,
         length: 5,
         squareMeters: 5

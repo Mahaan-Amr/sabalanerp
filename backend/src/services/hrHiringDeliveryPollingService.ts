@@ -2,9 +2,16 @@ import type { PrismaClient } from '@prisma/client';
 import hrHiringSmsGateway from './hrHiringSmsGateway';
 import { getRecoveryRuntimeState } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
+import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
 
 const POLL_INTERVAL_MS = 5 * 60_000;
 const REPORT_WINDOW_MS = 24 * 60 * 60_000;
+
+const actionPermissionRecipientIds = async (prisma: PrismaClient, permissionCode: string, at: Date) => {
+  const users = await prisma.user.findMany({ where: { isActive: true }, select: { id: true } });
+  const permissions = await Promise.all(users.map(({ id }) => activeHrActionPermissionsForUser(prisma, id, at)));
+  return users.filter((_user, index) => permissions[index].includes(permissionCode)).map(({ id }) => id);
+};
 
 export const mapSmsIrDeliveryState = (deliveryState?: number | null) =>
   deliveryState === 1
@@ -28,7 +35,9 @@ export const pollHiringInvitationDelivery = async (prisma: PrismaClient, now = n
     take: 100,
     orderBy: { createdAt: 'asc' }
   });
+  if (!rows.length) return { checked: 0, updated: 0 };
   let updated = 0;
+  const failureRecipientIds = await actionPermissionRecipientIds(prisma, 'MANAGE_RECRUITMENT_CASE', now);
   for (const invitation of rows) {
     const report = await hrHiringSmsGateway.getDeliveryReport(Number(invitation.providerMessageId));
     const state = report.success ? mapSmsIrDeliveryState(report.deliveryState) : 'UNKNOWN';
@@ -42,15 +51,10 @@ export const pollHiringInvitationDelivery = async (prisma: PrismaClient, now = n
         }
       });
       if (state === 'FAILED' && invitation.providerDeliveryState !== 'FAILED') {
-        const recipients = await tx.hrHiringAuthority.findMany({
-          where: { authority: { in: ['HR_PROCESSOR', 'HR_MANAGER'] }, isActive: true },
-          select: { userId: true },
-          distinct: ['userId']
-        });
-        if (recipients.length) await publishNotificationEvent(tx, {
+        if (failureRecipientIds.length) await publishNotificationEvent(tx, {
           type: 'HIRING_INVITATION_SMS_FAILED',
           deduplicationKey: `hiring-invitation-sms-failed:${invitation.id}`,
-          recipientIds: recipients.map(({ userId }) => userId),
+          recipientIds: failureRecipientIds,
           workspace: 'hr',
           feature: 'hr_hiring',
           resourceType: 'HrJobApplication',
@@ -76,16 +80,13 @@ export const notifyOverduePreIdentityChecklist = async (prisma: PrismaClient, no
     orderBy: { dueAt: 'asc' }
   });
   if (!items.length) return { notified: 0 };
-  const recipients = await prisma.hrHiringAuthority.findMany({
-    where: { authority: { in: ['HR_PROCESSOR', 'HR_MANAGER'] }, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
-    select: { userId: true }, distinct: ['userId']
-  });
+  const recipientIds = await actionPermissionRecipientIds(prisma, 'MANAGE_RECRUITMENT_CASE', now);
   for (const item of items) {
     await prisma.$transaction(async (tx) => {
-      if (recipients.length) await publishNotificationEvent(tx, {
+      if (recipientIds.length) await publishNotificationEvent(tx, {
         type: 'HIRING_CHECKLIST_OVERDUE',
         deduplicationKey: `hiring-checklist-overdue:${item.id}`,
-        recipientIds: recipients.map(({ userId }) => userId),
+        recipientIds,
         workspace: 'hr',
         feature: 'hr_hiring',
         resourceType: 'HrJobApplication',

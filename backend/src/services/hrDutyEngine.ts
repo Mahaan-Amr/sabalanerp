@@ -16,6 +16,7 @@ function dutyDefinition(
   sourceActionCode: string,
   responsibilityTypeCode: string,
   destinationWorkspaceCode: string | null,
+  actionPermissionCode: string | null,
   routingScope: 'GLOBAL' | 'HIRING_POSITION' = 'GLOBAL',
 ) {
   return {
@@ -23,6 +24,7 @@ function dutyDefinition(
     envelopeCode: `HR_${sourceActionCode}`,
     envelopeVersion: 1,
     responsibilityTypeCode,
+    actionPermissionCode,
     destinationWorkspaceCode,
     routingScope,
     allowedFields: ['title', 'description', 'dueAt'] as const,
@@ -40,18 +42,19 @@ export const HR_DUTY_DEFINITIONS = Object.freeze({
     allowedFields: ['title', 'description', 'dueAt'] as const,
     allowedEvidence: [] as const,
     responsibilityTypeCode: 'HR_PROCESSOR',
+    actionPermissionCode: 'MANAGE_HR_WORK',
     destinationWorkspaceCode: 'HUMAN_RESOURCES',
     routingScope: 'GLOBAL' as const,
     allowedActionCodes,
     responseSchema,
   },
-  FINANCE_RECORDING: dutyDefinition('FINANCE_RECORDING', 'FINANCE_RECORDER', 'ACCOUNTING'),
-  FINANCE_APPROVAL: dutyDefinition('FINANCE_APPROVAL', 'FINANCE_MANAGER', 'ACCOUNTING'),
-  COMPANY_MANAGER_REVIEW: dutyDefinition('COMPANY_MANAGER_REVIEW', 'COMPANY_MANAGER', null),
-  COMPANY_MANAGER_DECISION: dutyDefinition('COMPANY_MANAGER_DECISION', 'COMPANY_MANAGER', null),
-  RESPONSIBLE_SUPERVISOR_REVIEW: dutyDefinition('RESPONSIBLE_SUPERVISOR_REVIEW', 'RESPONSIBLE_SUPERVISOR', null, 'HIRING_POSITION'),
-  PAYROLL_PREPARATION: dutyDefinition('PAYROLL_PREPARATION', 'HR_PAYROLL_PROCESSOR', 'HUMAN_RESOURCES'),
-  PAYROLL_APPROVAL: dutyDefinition('PAYROLL_APPROVAL', 'HR_PAYROLL_MANAGER', 'HUMAN_RESOURCES'),
+  FINANCE_RECORDING: dutyDefinition('FINANCE_RECORDING', 'FINANCE_RECORDER', 'ACCOUNTING', 'MANAGE_FINANCE_EVIDENCE'),
+  FINANCE_APPROVAL: dutyDefinition('FINANCE_APPROVAL', 'FINANCE_MANAGER', 'ACCOUNTING', 'MANAGE_FINANCE_EVIDENCE'),
+  COMPANY_MANAGER_REVIEW: dutyDefinition('COMPANY_MANAGER_REVIEW', 'COMPANY_MANAGER', null, 'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS'),
+  COMPANY_MANAGER_DECISION: dutyDefinition('COMPANY_MANAGER_DECISION', 'COMPANY_MANAGER', null, 'RECORD_FINAL_MANAGEMENT_DECISION'),
+  RESPONSIBLE_SUPERVISOR_REVIEW: dutyDefinition('RESPONSIBLE_SUPERVISOR_REVIEW', 'RESPONSIBLE_SUPERVISOR', null, null, 'HIRING_POSITION'),
+  PAYROLL_PREPARATION: dutyDefinition('PAYROLL_PREPARATION', 'HR_PAYROLL_PROCESSOR', 'HUMAN_RESOURCES', 'MANAGE_PAYROLL'),
+  PAYROLL_APPROVAL: dutyDefinition('PAYROLL_APPROVAL', 'HR_PAYROLL_MANAGER', 'HUMAN_RESOURCES', 'MANAGE_PAYROLL'),
 });
 
 type DutyDefinition = typeof HR_DUTY_DEFINITIONS[keyof typeof HR_DUTY_DEFINITIONS];
@@ -536,20 +539,6 @@ export const respondToHrDuty = (
   assertDutyEnvelopeCurrent(definition, duty.envelope);
   const source = await tx.hrWorkItem.findUniqueOrThrow({ where: { id: duty.sourceId } });
   const currentSourceVersion = await legacySourceVersion(tx, source.id);
-  const responsibility = duty.responsibility;
-  const routingResponsibilityTypeCode = duty.routingResponsibilityTypeCode
-    ?? responsibility?.responsibilityTypeCode;
-  const routingScopeType = duty.routingScopeType ?? responsibility?.scopeType;
-  const routingScopeId = duty.routingScopeId ?? responsibility?.scopeId ?? null;
-  const currentResolution = routingResponsibilityTypeCode && routingScopeType
-    ? await resolveHrNamedResponsibility(tx, {
-    sourceActionCode: duty.sourceActionCode,
-    responsibilityTypeCode: routingResponsibilityTypeCode,
-    scopeType: routingScopeType,
-    scopeId: routingScopeId,
-    sourceActorUserId: duty.sourceActorUserId ?? undefined,
-    now,
-  }) : null;
   if (duty.status === 'COMPLETED') {
     const storedResult = duty.structuredResultJson && typeof duty.structuredResultJson === 'object'
       && !Array.isArray(duty.structuredResultJson)
@@ -563,12 +552,13 @@ export const respondToHrDuty = (
       : storedResult?.actionCode === 'REJECT'
         ? source.status === 'WAIVED'
         : source.status === 'IN_PROGRESS';
-    const replayIsAuthorized = input.expectedSourceVersion === duty.sourceVersion
+    const replayPermission = definition.actionPermissionCode
+      ? await authorizeHrUser(tx, input.actorUserId, { actionPermissionCodes: [definition.actionPermissionCode] }, now)
+      : { allowed: true };
+    const replayIsAuthorized = replayPermission.allowed
+      && input.expectedSourceVersion === duty.sourceVersion
       && input.expectedEnvelopeVersion === duty.envelopeVersion
       && currentSourceVersion === duty.sourceVersion
-      && currentResolution?.status === 'RESOLVED'
-      && currentResolution.responsibilityId === duty.responsibilityId
-      && currentResolution.assignedUserId === duty.currentAssigneeUserId
       && duty.currentAssigneeUserId === input.actorUserId
       && duty.sourceActorUserId !== input.actorUserId
       && terminalSourceMatches;
@@ -577,7 +567,7 @@ export const respondToHrDuty = (
   }
   const authorization = await authorizeHrUser(tx, input.actorUserId, {
     dutyId: duty.id,
-    authorityCodes: responsibility ? [responsibility.responsibilityTypeCode] : [],
+    ...(definition.actionPermissionCode ? { actionPermissionCodes: [definition.actionPermissionCode] } : {}),
   }, now);
   const decision = evaluateHrDutyResponse({
     duty,
@@ -588,10 +578,8 @@ export const respondToHrDuty = (
     reason: input.reason,
     sourceIsCurrent: currentSourceVersion === duty.sourceVersion && ['PENDING', 'IN_PROGRESS'].includes(source.status),
     assigneeIsEligible: authorization.allowed,
-    responsibilityIsCurrent: currentResolution?.status === 'RESOLVED'
-      && currentResolution.responsibilityId === duty.responsibilityId
-      && currentResolution.assignedUserId === duty.currentAssigneeUserId,
-    separationOfDutiesSatisfied: currentResolution?.status === 'RESOLVED',
+    responsibilityIsCurrent: true,
+    separationOfDutiesSatisfied: duty.sourceActorUserId !== input.actorUserId,
     sourceActorUserId: duty.sourceActorUserId,
     allowedActionCodes: definition.allowedActionCodes,
   });

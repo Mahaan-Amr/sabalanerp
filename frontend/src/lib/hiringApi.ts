@@ -42,6 +42,14 @@ export const hiringAPI = {
   getClosureSummary: (id: string) =>
     internal.get(`/applications/${id}/closure-summary`),
   myAuthorities: () => internal.get("/me/authorities"),
+  myActionPermissions: () => internal.get("/me/action-permissions"),
+  interviewCriteria: () => internal.get("/interview-criteria"),
+  publishInterviewCriteria: (criteria: any[]) => internal.post("/interview-criteria/publish", { criteria }),
+  companyEvaluations: (id: string) => internal.get(`/applications/${id}/company-evaluations`),
+  addCompanyEvaluation: (id: string, data: any) => internal.post(`/applications/${id}/company-evaluations`, data),
+  cancelCompanyEvaluation: (id: string, occurrenceId: string) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/cancel`),
+  recordCompanyEvaluationResult: (id: string, occurrenceId: string, data: FormData) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/result`, data),
+  downloadCompanyEvaluationEvidence: (id: string, occurrenceId: string) => internal.get(`/applications/${id}/company-evaluations/${occurrenceId}/evidence/download`, { responseType: "blob" }),
   workItemSummary: () => internal.get("/work-items/summary"),
   workItems: (params?: Record<string, string>) =>
     internal.get("/work-items", { params }),

@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
 import { requireHrFeature } from '../middleware/hrAuthorization';
-import { activeHrAuthoritiesForUser } from '../services/hrAuthorizationService';
+import { activeHrActionPermissionsForUser } from '../services/hrAuthorizationService';
 import {
   ApplicantInformationGroup,
   buildCandidateClosedState,
@@ -49,15 +49,18 @@ router.get('/public/application/closed-state', asyncHandler(async (req: express.
 router.use(protect);
 router.use(requireHrFeature('RECRUITMENT_CASES', 'VIEW'));
 
-const informationGroupsFor = (authorities: ReadonlySet<string>) => {
-  const groups = new Set<ApplicantInformationGroup>();
-  if (authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER')) {
-    groups.add('PROFILE_IDENTITY');
-    groups.add('EXPERIENCE_QUALIFICATIONS');
+const informationGroupsForActionPermissions = (permissions: ReadonlySet<string>) => {
+  const groups = new Set<ApplicantInformationGroup>(['CASE_SUMMARY']);
+  if (permissions.has('VIEW_FULL_APPLICANT_INFORMATION')) {
+    groups.add('IDENTITY_CONTACT');
+    groups.add('DOCUMENTS_FILES');
+    groups.add('EDUCATION_SKILLS_LANGUAGES');
+    groups.add('WORK_HISTORY');
     groups.add('APPLICATION_ANSWERS');
-    groups.add('DOCUMENT_EVIDENCE');
-  } else if (authorities.has('COMPANY_MANAGER')) {
-    groups.add('EXPERIENCE_QUALIFICATIONS');
+  }
+  if (permissions.has('VIEW_INITIAL_INTERVIEW_REPORT') || permissions.has('VIEW_COMPANY_EVALUATION_RESULTS')) {
+    groups.add('EDUCATION_SKILLS_LANGUAGES');
+    groups.add('WORK_HISTORY');
     groups.add('APPLICATION_ANSWERS');
   }
   return groups;
@@ -79,9 +82,9 @@ router.get('/applications/:id/overview', asyncHandler(async (req: AuthRequest, r
     },
   });
   if (!row) return res.status(404).json({ success: false, error: 'پرونده متقاضی پیدا نشد.' });
-  const authorities = new Set(await activeHrAuthoritiesForUser(prisma, req.user!.id));
-  const canViewContact = authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
-  const permittedGroups = informationGroupsFor(authorities);
+  const actionPermissions = new Set(await activeHrActionPermissionsForUser(prisma, req.user!.id));
+  const canViewContact = actionPermissions.has('VIEW_FULL_APPLICANT_INFORMATION');
+  const permittedGroups = informationGroupsForActionPermissions(actionPermissions);
   return res.json({
     success: true,
     data: {
@@ -94,7 +97,7 @@ router.get('/applications/:id/overview', asyncHandler(async (req: AuthRequest, r
       disposition: row.disposition,
       archivedAt: row.archivedAt,
       updatedAt: row.updatedAt,
-      informationGroups: (['PROFILE_IDENTITY', 'EXPERIENCE_QUALIFICATIONS', 'APPLICATION_ANSWERS', 'DOCUMENT_EVIDENCE'] as ApplicantInformationGroup[])
+      informationGroups: (['CASE_SUMMARY', 'IDENTITY_CONTACT', 'EDUCATION_SKILLS_LANGUAGES', 'WORK_HISTORY', 'APPLICATION_ANSWERS', 'DOCUMENTS_FILES'] as ApplicantInformationGroup[])
         .map((key) => ({ key, status: permittedGroups.has(key) ? 'AVAILABLE' : 'RESTRICTED' })),
       counts: row._count,
       returnHref: validateApplicantReturnContext(req.query.returnTo, row.id),
@@ -103,6 +106,7 @@ router.get('/applications/:id/overview', asyncHandler(async (req: AuthRequest, r
 }));
 
 router.get('/applications/:id/full-information', asyncHandler(async (req: AuthRequest, res: Response) => {
+  const actionPermissions = new Set(await activeHrActionPermissionsForUser(prisma, req.user!.id));
   const row = await prisma.hrJobApplication.findUnique({
     where: { id: req.params.id },
     include: {
@@ -116,8 +120,8 @@ router.get('/applications/:id/full-information', asyncHandler(async (req: AuthRe
     },
   });
   if (!row) return res.status(404).json({ success: false, error: 'پرونده متقاضی پیدا نشد.' });
-  const authorities = new Set(await activeHrAuthoritiesForUser(prisma, req.user!.id));
-  return res.json({ success: true, data: projectApplicantFullInformation(row, informationGroupsFor(authorities)) });
+  const permittedGroups = informationGroupsForActionPermissions(actionPermissions);
+  return res.json({ success: true, data: projectApplicantFullInformation(row, permittedGroups) });
 }));
 
 router.get('/applications/:id/closure-summary', asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -142,18 +146,18 @@ router.get('/applications/:id/closure-summary', asyncHandler(async (req: AuthReq
     const payload = event.payloadJson as Record<string, unknown> | null;
     return payload?.decision === 'REJECTED';
   }) || null;
-  const [authorities, actor] = await Promise.all([
-    activeHrAuthoritiesForUser(prisma, req.user!.id),
+  const [actionPermissions, actor] = await Promise.all([
+    activeHrActionPermissionsForUser(prisma, req.user!.id),
     closureAudit?.actorUserId
       ? prisma.user.findUnique({ where: { id: closureAudit.actorUserId }, select: { firstName: true, lastName: true, username: true } })
       : null,
   ]);
-  const authoritySet = new Set(authorities);
+  const permissionSet = new Set(actionPermissions);
   const actorDisplayName = actor ? `${actor.firstName} ${actor.lastName}`.trim() || actor.username : null;
   return res.json({
     success: true,
     data: projectApplicantClosureSummary(row, closureAudit, {
-      canViewExplanation: authoritySet.has('HR_MANAGER') || authoritySet.has('COMPANY_MANAGER'),
+      canViewExplanation: permissionSet.has('VIEW_INITIAL_INTERVIEW_REPORT') || permissionSet.has('VIEW_COMPANY_EVALUATION_RESULTS'),
       actorDisplayName,
     }),
   });

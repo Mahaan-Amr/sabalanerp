@@ -88,6 +88,7 @@ const product = (overrides: Partial<ContractProduct> = {}): ContractProduct => (
       subServiceId: 'tool-1',
       subService: {
         id: 'tool-1',
+        code: 'tool-1',
         namePersian: 'ابزار تست',
         pricePerMeter: 100_000,
         calculationBase: 'length',

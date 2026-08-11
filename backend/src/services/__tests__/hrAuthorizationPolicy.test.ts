@@ -5,6 +5,7 @@ import {
   type HrAuthorizationSnapshot,
 } from '../hrAuthorizationPolicy';
 import { activeCompanyManagerUserIds, activeHrAuthoritiesForUser, resolveHrNamedResponsibility } from '../hrAuthorizationService';
+import { actionPermissionsForLegacyAuthority, expandHrActionPermissionSelection, getHrActionPermissionDefinition } from '../hrActionPermissionCatalog';
 
 const now = new Date('2026-08-08T10:00:00.000Z');
 const activeWindow = { effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null };
@@ -18,11 +19,18 @@ const snapshot = (overrides: Partial<HrAuthorizationSnapshot> = {}): HrAuthoriza
   ...overrides,
 });
 
+const actionGrants = (code: string, window = activeWindow) => expandHrActionPermissionSelection([code])
+  .map((featureCode) => ({
+    featureCode,
+    level: getHrActionPermissionDefinition(featureCode)?.level ?? 'VIEW' as const,
+    status: 'ACTIVE' as const,
+    ...window,
+  }));
+
 {
   const decision = evaluateHrAuthorization(snapshot(), {
     workspaceLevel: 'VIEW',
     feature: { code: 'PERSONNEL', level: 'EDIT' },
-    authorityCodes: ['HR_PROCESSOR'],
   }, now);
   assert.deepEqual(decision, { allowed: true, missingLayers: [] });
 }
@@ -38,11 +46,45 @@ const snapshot = (overrides: Partial<HrAuthorizationSnapshot> = {}): HrAuthoriza
 
 {
   const withoutAuthority = snapshot({ authorityGrants: [] });
-  assert.deepEqual(
-    evaluateHrAuthorization(withoutAuthority, { workspaceLevel: 'VIEW', authorityCodes: ['HR_PROCESSOR'] }, now),
-    { allowed: false, missingLayers: ['BUSINESS_AUTHORITY'] },
-    'workspace access must not imply governed authority',
-  );
+  assert.deepEqual(evaluateHrAuthorization(withoutAuthority, {
+    workspaceLevel: 'VIEW',
+    actionPermissionCodes: ['RECORD_INITIAL_INTERVIEW'],
+  }, now), { allowed: false, missingLayers: ['ACTION_PERMISSION'] });
+}
+
+{
+  const viewOnly = snapshot({ featureGrants: actionGrants('VIEW_FULL_APPLICANT_INFORMATION') });
+  assert.equal(evaluateHrAuthorization(viewOnly, { actionPermissionCodes: ['VIEW_FULL_APPLICANT_INFORMATION'] }, now).allowed, true, 'VIEW actions accept VIEW grants');
+  assert.equal(evaluateHrAuthorization(viewOnly, { actionPermissionCodes: ['RECORD_INITIAL_INTERVIEW'] }, now).allowed, false, 'VIEW grants cannot perform EDIT actions');
+  const criteriaEditor = snapshot({ featureGrants: actionGrants('MANAGE_INITIAL_INTERVIEW_CRITERIA').map((grant) => (
+    grant.featureCode === 'MANAGE_INITIAL_INTERVIEW_CRITERIA' ? { ...grant, level: 'EDIT' as const } : grant
+  )) });
+  assert.equal(evaluateHrAuthorization(criteriaEditor, { actionPermissionCodes: ['MANAGE_INITIAL_INTERVIEW_CRITERIA'] }, now).allowed, false, 'EDIT grants cannot perform ADMIN actions');
+}
+
+{
+  const futurePrerequisite = snapshot({ featureGrants: [
+    { featureCode: 'VIEW_FULL_APPLICANT_INFORMATION', level: 'VIEW', status: 'ACTIVE', ...activeWindow },
+    { featureCode: 'RECRUITMENT_CASES', level: 'VIEW', status: 'ACTIVE', effectiveFrom: new Date('2026-08-09T00:00:00.000Z'), effectiveTo: null },
+  ] });
+  assert.equal(evaluateHrAuthorization(futurePrerequisite, { actionPermissionCodes: ['VIEW_FULL_APPLICANT_INFORMATION'] }, now).allowed, false, 'future prerequisites do not satisfy an active action');
+  const expiredPrerequisite = snapshot({ featureGrants: [
+    { featureCode: 'VIEW_FULL_APPLICANT_INFORMATION', level: 'VIEW', status: 'ACTIVE', ...activeWindow },
+    { featureCode: 'RECRUITMENT_CASES', level: 'VIEW', status: 'ACTIVE', effectiveFrom: activeWindow.effectiveFrom, effectiveTo: new Date('2026-08-08T09:00:00.000Z') },
+  ] });
+  assert.equal(evaluateHrAuthorization(expiredPrerequisite, { actionPermissionCodes: ['VIEW_FULL_APPLICANT_INFORMATION'] }, now).allowed, false, 'expired prerequisites do not satisfy an active action');
+}
+
+{
+  const interviewOnly = snapshot({ featureGrants: [{ featureCode: 'RECORD_INITIAL_INTERVIEW', level: 'EDIT', status: 'ACTIVE', ...activeWindow }] });
+  assert.equal(evaluateHrAuthorization(interviewOnly, { authorityCodes: ['HR_PROCESSOR'] }, now).allowed, false, 'an interview-only grant cannot unlock legacy processor routes');
+  const processorBundle = actionPermissionsForLegacyAuthority('HR_PROCESSOR').map((code) => ({
+    featureCode: code,
+    level: getHrActionPermissionDefinition(code)?.level ?? 'VIEW',
+    status: 'ACTIVE' as const,
+    ...activeWindow,
+  }));
+  assert.equal(evaluateHrAuthorization(snapshot({ featureGrants: processorBundle }), { authorityCodes: ['HR_PROCESSOR'] }, now).allowed, true, 'legacy compatibility requires the complete migrated action bundle');
 }
 
 {
@@ -76,6 +118,23 @@ const snapshot = (overrides: Partial<HrAuthorizationSnapshot> = {}): HrAuthoriza
     user: { id: 'sales-manager', role: 'MANAGER', isActive: true },
     workspaceGrants: [], featureGrants: [], authorityGrants: [],
   }), { workspaceLevel: 'VIEW' }, now).allowed, false, 'MANAGER is not an HR baseline role');
+  assert.equal(evaluateHrAuthorization(snapshot({
+    user: { id: 'hr-manager', role: 'MANAGER', isActive: true },
+    workspaceGrants: [{ workspaceCode: 'HUMAN_RESOURCES', level: 'ADMIN', status: 'ACTIVE', ...activeWindow }],
+    featureGrants: [], authorityGrants: [],
+  }), {
+    workspaceLevel: 'ADMIN',
+    actionPermissionCodes: ['RECORD_INITIAL_INTERVIEW', 'RECORD_PRELIMINARY_DECISION'],
+  }, now).allowed, true, 'a MANAGER with complete HR workspace access receives the broad-manager override');
+  assert.equal(evaluateHrAuthorization(snapshot({
+    user: { id: 'hr-editor', role: 'MANAGER', isActive: true },
+    workspaceGrants: [{ workspaceCode: 'HUMAN_RESOURCES', level: 'EDIT', status: 'ACTIVE', ...activeWindow }],
+    featureGrants: [{ featureCode: 'RECORD_INITIAL_INTERVIEW', level: 'EDIT', status: 'ACTIVE', ...activeWindow }],
+    authorityGrants: [{ authorityCode: 'HR_MANAGER', status: 'ACTIVE', ...activeWindow }],
+  }), {
+    workspaceLevel: 'EDIT',
+    actionPermissionCodes: ['RECORD_PRELIMINARY_DECISION'],
+  }, now).allowed, false, 'legacy authority does not grant an action and incomplete workspace access does not activate the override');
   assert.equal(evaluateHrAuthorization(snapshot({
     user: { id: 'demoted-admin', role: 'MANAGER', isActive: true },
     workspaceGrants: [{ workspaceCode: 'HUMAN_RESOURCES', level: 'ADMIN', status: 'ACTIVE', bootstrapOnly: true, ...activeWindow }],

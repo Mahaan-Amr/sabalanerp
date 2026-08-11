@@ -5086,6 +5086,46 @@ model HrInitialInterviewDraft {
   @@map("hr_initial_interview_drafts")
 }
 
+model HrInterviewCriteriaVersion {
+  id                String   @id @default(cuid())
+  version           Int      @unique
+  criteriaJson      Json
+  publishedByUserId String
+  publishedAt       DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  @@map("hr_interview_criteria_versions")
+}
+
+model HrCompanyEvaluationOccurrence {
+  id                String   @id @default(cuid())
+  applicationId     String
+  type              String
+  occurrenceNumber  Int
+  subject           String?
+  instructions      String?
+  evidencePolicy    String
+  status            String   @default("PLANNED")
+  resultEffect      String?
+  resultExplanation String?
+  resultStorageName String?
+  resultOriginalName String?
+  resultMimeType    String?
+  resultSize        Int?
+  resultSha256      String?
+  resultMalwareScanStatus String?
+  createdByUserId   String
+  createdAt         DateTime @default(now())
+  completedByUserId String?
+  completedAt       DateTime?
+  cancelledByUserId String?
+  cancelledAt       DateTime?
+
+  @@unique([applicationId, type, occurrenceNumber])
+  @@index([applicationId, status, createdAt])
+  @@map("hr_company_evaluation_occurrences")
+}
+
 model HrApplicationReopening {
   id                     String            @id @default(cuid())
   applicationId          String

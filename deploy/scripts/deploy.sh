@@ -559,7 +559,16 @@ postgres_available_bytes=$((postgres_available_kb * 1024))
 }
 
 echo "Creating, decrypt-validating, uploading, and reading back the coordinated checkpoint..."
-run_backend_timed 600 node dist/scripts/deployment-checkpoint.js
+checkpoint_timeout="$(env_value DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS)"
+checkpoint_timeout="${checkpoint_timeout:-3600}"
+case "${checkpoint_timeout}" in
+  *[!0-9]*|'') echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be an integer." >&2; exit 1 ;;
+esac
+[ "${checkpoint_timeout}" -ge 600 ] && [ "${checkpoint_timeout}" -le 7200 ] || {
+  echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be between 600 and 7200 seconds." >&2
+  exit 1
+}
+run_backend_timed "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js
 phase LOCAL_CHECKPOINT_VERIFIED
 phase REMOTE_CHECKPOINT_VERIFIED
 

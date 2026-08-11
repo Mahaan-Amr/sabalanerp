@@ -10,6 +10,7 @@ COMPOSE_FILE="docker-compose.prod.yml"
 ADVISORY_LOCK_KEY="741936425"
 LOCK_FILE="${REPO_ROOT}/.deploy-state/deployment.lock"
 ADVISORY_PID=""
+ADVISORY_APPLICATION_NAME=""
 MUTATION_STARTED=0
 BOOTSTRAP=0
 SESSION_PREPARED=0
@@ -150,8 +151,11 @@ drain_release_for_rollback() {
 
 try_acquire_advisory() {
   lock_token="SABALAN_DEPLOYMENT_LOCK_${DEPLOYMENT_ID}"
+  ADVISORY_APPLICATION_NAME="sabalan-lock-${DEPLOYMENT_ID}"
   rm -f "${REPO_ROOT}/.deploy-state/advisory-lock.log"
-  compose exec -T postgres sh -c "psql -At -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT pg_advisory_lock(741936425); SELECT '${lock_token}'; SELECT pg_sleep(21600);\"" \
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T \
+    -e "PGAPPNAME=${ADVISORY_APPLICATION_NAME}" postgres sh -c \
+    "psql -At -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT pg_advisory_lock(741936425); SELECT '${lock_token}'; SELECT pg_sleep(21600);\"" \
     >"${REPO_ROOT}/.deploy-state/advisory-lock.log" 2>&1 &
   ADVISORY_PID=$!
   attempt=0
@@ -164,8 +168,17 @@ try_acquire_advisory() {
   done
   kill "${ADVISORY_PID}" >/dev/null 2>&1 || true
   wait "${ADVISORY_PID}" >/dev/null 2>&1 || true
+  release_advisory_database_session
   ADVISORY_PID=""
   return 1
+}
+
+release_advisory_database_session() {
+  [ -n "${ADVISORY_APPLICATION_NAME}" ] || return 0
+  compose exec -T postgres sh -c \
+    "psql -At -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = '${ADVISORY_APPLICATION_NAME}' AND pid <> pg_backend_pid();\"" \
+    >/dev/null 2>&1 || true
+  ADVISORY_APPLICATION_NAME=""
 }
 
 cleanup_locks() {
@@ -174,6 +187,7 @@ cleanup_locks() {
     wait "${ADVISORY_PID}" >/dev/null 2>&1 || true
     ADVISORY_PID=""
   fi
+  release_advisory_database_session
   flock -u 9 >/dev/null 2>&1 || true
 }
 

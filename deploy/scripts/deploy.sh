@@ -161,7 +161,10 @@ try_acquire_advisory() {
   attempt=0
   while [ "${attempt}" -lt 10 ]; do
     attempt=$((attempt + 1))
-    if grep -q "${lock_token}" "${REPO_ROOT}/.deploy-state/advisory-lock.log" 2>/dev/null && kill -0 "${ADVISORY_PID}" 2>/dev/null; then
+    holder_count="$(compose exec -T postgres sh -c \
+      "psql -At -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT count(*) FROM pg_locks lock JOIN pg_stat_activity activity ON activity.pid = lock.pid WHERE activity.application_name = '${ADVISORY_APPLICATION_NAME}' AND lock.locktype = 'advisory' AND lock.granted;\"" \
+      2>/dev/null || printf '0')"
+    if [ "${holder_count}" = "1" ] && kill -0 "${ADVISORY_PID}" 2>/dev/null; then
       return 0
     fi
     sleep 1

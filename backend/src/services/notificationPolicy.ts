@@ -140,6 +140,16 @@ const REGISTERED_NOTIFICATION_EVENTS = {
     allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
     allowedRecipientResolvers: ['HR_AUTHORITIES'],
   },
+  HIRING_SHARED_WORK_AVAILABLE: {
+    type: 'HIRING_SHARED_WORK_AVAILABLE',
+    mandatory: true,
+    titleTemplate: 'کار مشترک استخدام آماده رسیدگی است',
+    messageTemplate: 'اقدام «{{actionLabel}}» برای {{candidateName}} آماده رسیدگی است.',
+    priority: 'HIGH',
+    allowedVariables: ['actionLabel', 'candidateName'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
   NEW_BROWSER_LOGIN: {
     type: 'NEW_BROWSER_LOGIN',
     mandatory: true,

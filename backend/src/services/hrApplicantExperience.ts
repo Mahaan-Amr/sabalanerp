@@ -1,14 +1,18 @@
 export type ApplicantInformationGroup =
-  | 'PROFILE_IDENTITY'
-  | 'EXPERIENCE_QUALIFICATIONS'
+  | 'CASE_SUMMARY'
+  | 'IDENTITY_CONTACT'
+  | 'EDUCATION_SKILLS_LANGUAGES'
+  | 'WORK_HISTORY'
   | 'APPLICATION_ANSWERS'
-  | 'DOCUMENT_EVIDENCE';
+  | 'DOCUMENTS_FILES';
 
 const GROUPS: ApplicantInformationGroup[] = [
-  'PROFILE_IDENTITY',
-  'EXPERIENCE_QUALIFICATIONS',
+  'CASE_SUMMARY',
+  'IDENTITY_CONTACT',
+  'EDUCATION_SKILLS_LANGUAGES',
+  'WORK_HISTORY',
   'APPLICATION_ANSWERS',
-  'DOCUMENT_EVIDENCE',
+  'DOCUMENTS_FILES',
 ];
 
 const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
@@ -67,7 +71,15 @@ export const projectApplicantFullInformation = (
   const revisions = Array.isArray(source.formRevisions) ? source.formRevisions : [];
   const groups = GROUPS.map((key) => {
     if (!permittedGroups.has(key)) return restricted(key);
-    if (key === 'PROFILE_IDENTITY') {
+    if (key === 'CASE_SUMMARY') {
+      return available(key, {
+        stage: source.stage,
+        outcome: source.outcome,
+        disposition: source.disposition,
+        positionTitle: source.position?.title ?? null,
+      });
+    }
+    if (key === 'IDENTITY_CONTACT') {
       return available(key, {
         revisions: revisions.map((revision: any) => {
           const data = revision.dataJson || {};
@@ -104,7 +116,7 @@ export const projectApplicantFullInformation = (
         }),
       });
     }
-    if (key === 'EXPERIENCE_QUALIFICATIONS') {
+    if (key === 'EDUCATION_SKILLS_LANGUAGES') {
       return available(key, {
         revisions: revisions.map((revision: any) => ({
           ...revisionIdentity(revision),
@@ -113,22 +125,34 @@ export const projectApplicantFullInformation = (
             fieldOfStudy: revision.dataJson?.fieldOfStudy ?? null,
             graduationYear: revision.dataJson?.graduationYear ?? null,
           },
-          workHistory: revision.dataJson?.workHistory ?? [],
           skills: revision.dataJson?.skills ?? [],
           languages: revision.dataJson?.languages ?? [],
           hasSocialSecurityHistory: revision.dataJson?.hasSocialSecurityHistory ?? null,
         })),
       });
     }
+    if (key === 'WORK_HISTORY') return available(key, {
+      revisions: revisions.map((revision: any) => ({
+        ...revisionIdentity(revision),
+        workHistory: revision.dataJson?.workHistory ?? [],
+      })),
+    });
     if (key === 'APPLICATION_ANSWERS') {
       return available(key, {
         revisions: revisions.map((revision: any) => ({
-          ...revisionIdentity(revision),
-          cooperationType: revision.dataJson?.cooperationType ?? null,
-          cooperationDuration: revision.dataJson?.cooperationDuration ?? null,
-          requestedPosition: revision.dataJson?.requestedPosition ?? null,
-          desiredSalary: revision.dataJson?.desiredSalary ?? null,
-          answers: revision.dataJson?.questions ?? [],
+          id: revision.id,
+          answers: (revision.dataJson?.questions ?? []).map((entry: any, index: number) => {
+            if (entry && typeof entry === 'object') {
+              const questionText = String(entry.questionText ?? entry.question ?? entry.label ?? '').trim();
+              return {
+                identifier: String(entry.questionId ?? entry.id ?? `answer-${index + 1}`),
+                questionText: questionText || null,
+                answer: entry.answer ?? entry.value ?? null,
+                legacyQuestionTextMissing: !questionText,
+              };
+            }
+            return { identifier: `answer-${index + 1}`, questionText: null, answer: entry ?? null, legacyQuestionTextMissing: true };
+          }),
         })),
       });
     }

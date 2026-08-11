@@ -1,6 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { HR_DUTY_DEFINITIONS, formatHrDutyDeadlineTehran } from './hrDutyEngine';
-import { resolveHrNamedResponsibility } from './hrAuthorizationService';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 type Access = 'ASSIGNEE' | 'MANAGER_TRIAGE';
@@ -197,23 +196,10 @@ const authorizeLoadedDuty = async (
   const currentSourceVersion = (await database.hrWorkItemAudit.count({
     where: { workItemId: source.id, NOT: { eventType: { startsWith: 'DUTY_' } } },
   })) + 1;
-  const routingType = duty.routingResponsibilityTypeCode ?? duty.responsibility?.responsibilityTypeCode;
-  const routingScope = duty.routingScopeType ?? duty.responsibility?.scopeType;
-  const resolution = routingType && routingScope
-    ? await resolveHrNamedResponsibility(database, {
-      sourceActionCode: duty.sourceActionCode,
-      responsibilityTypeCode: routingType,
-      scopeType: routingScope,
-      scopeId: duty.routingScopeId ?? duty.responsibility?.scopeId ?? null,
-      sourceActorUserId: duty.sourceActorUserId ?? undefined,
-      now,
-    })
-    : null;
-  const assignmentIsCurrent = duty.currentAssigneeUserId === null || (
-    resolution?.status === 'RESOLVED'
-    && resolution.responsibilityId === duty.responsibilityId
-    && resolution.assignedUserId === duty.currentAssigneeUserId
-  );
+  // Named-responsibility assignments are retained only as historical evidence.
+  // Existing duties keep their snapshotted assignee until completion; new duties
+  // are created by the action-permission shared-work flow instead.
+  const assignmentIsCurrent = true;
   const decision = authorizeDestinationDutySurface({
     duty,
     actorUserId,

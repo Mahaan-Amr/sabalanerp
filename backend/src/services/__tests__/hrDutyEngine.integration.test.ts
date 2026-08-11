@@ -18,6 +18,44 @@ process.env.DATABASE_URL ??= 'postgresql://postgres:sabalanerp-local-only@127.0.
 const prisma = new PrismaClient();
 const rollback = new Error('ROLLBACK_HR_DUTY_ENGINE_TEST');
 
+const grantFinanceAction = async (
+  tx: any,
+  input: { userId: string; actorUserId: string; suffix: string; effectiveFrom: Date },
+) => {
+  await Promise.all([
+    tx.hrWorkspaceCatalog.upsert({
+      where: { code: 'HUMAN_RESOURCES' },
+      update: { isActive: true },
+      create: { code: 'HUMAN_RESOURCES', displayName: 'Human Resources' },
+    }),
+    tx.hrFeatureCatalog.upsert({
+      where: { code: 'RECRUITMENT_CASES' },
+      update: { isActive: true },
+      create: { code: 'RECRUITMENT_CASES', workspaceCode: 'HUMAN_RESOURCES', displayName: 'Recruitment cases' },
+    }),
+    tx.hrFeatureCatalog.upsert({
+      where: { code: 'MANAGE_FINANCE_EVIDENCE' },
+      update: { isActive: true },
+      create: { code: 'MANAGE_FINANCE_EVIDENCE', workspaceCode: 'HUMAN_RESOURCES', displayName: 'Manage finance evidence' },
+    }),
+  ]);
+  await tx.hrWorkspaceAccessGrant.create({ data: {
+    stableKey: `${input.suffix}:workspace`, userId: input.userId,
+    workspaceCode: 'HUMAN_RESOURCES', level: 'VIEW', effectiveFrom: input.effectiveFrom,
+    grantedByUserId: input.actorUserId, reason: 'Duty engine action-permission workspace',
+  } });
+  await tx.hrFeatureAccessGrant.create({ data: {
+    stableKey: `${input.suffix}:recruitment-cases`, userId: input.userId,
+    featureCode: 'RECRUITMENT_CASES', level: 'VIEW', effectiveFrom: input.effectiveFrom,
+    grantedByUserId: input.actorUserId, reason: 'Duty engine action-permission prerequisite',
+  } });
+  return tx.hrFeatureAccessGrant.create({ data: {
+    stableKey: `${input.suffix}:finance-action`, userId: input.userId,
+    featureCode: 'MANAGE_FINANCE_EVIDENCE', level: 'EDIT', effectiveFrom: input.effectiveFrom,
+    grantedByUserId: input.actorUserId, reason: 'Duty engine action-permission test',
+  } });
+};
+
 const run = async () => {
   await assert.rejects(prisma.$transaction(async (tx) => {
     const suffix = `${Date.now()}`;
@@ -81,14 +119,10 @@ const run = async () => {
       where: { code_version: { code: HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.envelopeCode, version: 1 } },
       data: { responseSchemaJson: HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.responseSchema },
     });
-    await tx.hrBusinessAuthorityGrant.create({ data: {
-      stableKey: `duty-test-authority:${suffix}`,
-      userId: assignee.id,
-      authorityCode: 'FINANCE_MANAGER',
+    await grantFinanceAction(tx, {
+      userId: assignee.id, actorUserId: sourceActor.id, suffix: `duty-test-authority:${suffix}`,
       effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
-      grantedByUserId: sourceActor.id,
-      reason: 'Duty engine integration test',
-    } });
+    });
     const responsibility = await tx.hrNamedResponsibility.create({ data: {
       stableKey: `duty-test-responsibility:${suffix}`,
       responsibilityTypeCode: 'FINANCE_MANAGER',
@@ -157,12 +191,10 @@ const run = async () => {
       email: `duty-successor-${suffix}@example.invalid`, username: `duty-successor-${suffix}`,
       password: 'not-a-login-secret', firstName: 'Duty', lastName: 'Successor',
     } });
-    const successorGrant = await tx.hrBusinessAuthorityGrant.create({ data: {
-      stableKey: `duty-test-successor-authority:${suffix}`,
-      userId: successorOwner.id, authorityCode: 'FINANCE_MANAGER',
+    const successorGrant = await grantFinanceAction(tx, {
+      userId: successorOwner.id, actorUserId: sourceActor.id, suffix: `duty-test-successor-authority:${suffix}`,
       effectiveFrom: new Date('2026-08-09T08:30:00.000Z'),
-      grantedByUserId: sourceActor.id, reason: 'Duty engine reassignment test',
-    } });
+    });
     const successorResponsibility = await tx.hrNamedResponsibility.create({ data: {
       stableKey: `duty-test-successor-responsibility:${suffix}`,
       responsibilityTypeCode: 'FINANCE_MANAGER', scopeType: 'GLOBAL', scopeId: null,
@@ -267,12 +299,10 @@ const run = async () => {
       email: `duty-recorder-${suffix}@example.invalid`, username: `duty-recorder-${suffix}`,
       password: 'not-a-login-secret', firstName: 'Duty', lastName: 'Recorder',
     } });
-    await tx.hrBusinessAuthorityGrant.create({ data: {
-      stableKey: `duty-test-recorder-authority:${suffix}`,
-      userId: recorder.id, authorityCode: 'FINANCE_RECORDER',
+    await grantFinanceAction(tx, {
+      userId: recorder.id, actorUserId: sourceActor.id, suffix: `duty-test-recorder-authority:${suffix}`,
       effectiveFrom: new Date('2026-08-09T08:01:00.000Z'),
-      grantedByUserId: sourceActor.id, reason: 'Duty engine triage recovery test',
-    } });
+    });
     await tx.hrNamedResponsibility.create({ data: {
       stableKey: `duty-test-recorder-responsibility:${suffix}`,
       responsibilityTypeCode: 'FINANCE_RECORDER', scopeType: 'GLOBAL', scopeId: null,
@@ -402,7 +432,7 @@ const run = async () => {
     assert.equal(cancelled!.successor, null, 'a terminal source cancels without inventing replacement work');
     assert.equal(await tx.hrDuty.count({ where: { predecessorDutyId: externallyCompletedDuty.id } }), 0);
 
-    await tx.hrBusinessAuthorityGrant.update({
+    await tx.hrFeatureAccessGrant.update({
       where: { id: successorGrant.id },
       data: {
         status: 'REVOKED', revokedAt: new Date('2026-08-09T10:02:00.000Z'),
@@ -446,11 +476,10 @@ const runCompetingTransactionTest = async () => {
       } }),
     ]);
     await syncHrDutyEnvelopeDefinitions(tx, 'SYSTEM');
-    const grant = await tx.hrBusinessAuthorityGrant.create({ data: {
-      stableKey: `${suffix}:grant`, userId: assignee.id, authorityCode: 'FINANCE_MANAGER',
-      effectiveFrom: new Date('2026-08-01T00:00:00.000Z'), grantedByUserId: sourceActor.id,
-      reason: 'True competing-transaction duty response test',
-    } });
+    const grant = await grantFinanceAction(tx, {
+      userId: assignee.id, actorUserId: sourceActor.id, suffix: `${suffix}:grant`,
+      effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+    });
     const responsibility = await tx.hrNamedResponsibility.create({ data: {
       stableKey: `${suffix}:responsibility`, responsibilityTypeCode: 'FINANCE_MANAGER',
       scopeType: 'CONCURRENCY_TEST', scopeId: suffix, assignedUserId: assignee.id,
@@ -529,9 +558,10 @@ const runCompetingTransactionTest = async () => {
       await tx.hrWorkItem.delete({ where: { id: seeded.source.id } });
       await tx.hrNamedResponsibility.delete({ where: { id: seeded.responsibility.id } });
       await tx.hrResponsibilityDestination.delete({ where: { id: seeded.destination.id } });
-      await tx.hrBusinessAuthorityGrant.delete({ where: { id: seeded.grant.id } });
+      await tx.hrFeatureAccessGrant.deleteMany({ where: { userId: seeded.assignee.id } });
+      await tx.hrWorkspaceAccessGrant.deleteMany({ where: { userId: seeded.assignee.id } });
       await tx.user.deleteMany({ where: { id: { in: [seeded.sourceActor.id, seeded.assignee.id] } } });
-    });
+    }, { timeout: 30_000 });
   }
   console.log('HR duty competing-transaction test passed.');
 };

@@ -155,7 +155,7 @@ export default function HrPersonnelPage() {
   const [assignment, setAssignment] = useState(blankAssignment);
   const [assignmentSupervisors, setAssignmentSupervisors] = useState<any[]>([]);
   const [endDates, setEndDates] = useState<Record<string, string>>({});
-  const [authorities, setAuthorities] = useState<string[]>([]);
+  const [actionPermissions, setActionPermissions] = useState<string[]>([]);
   const [meta, setMeta] = useState({ page: 1, total: 0, totalPages: 1 });
   const [deletionTarget, setDeletionTarget] = useState<any>(null);
   const [retentionTarget, setRetentionTarget] = useState<any>(null);
@@ -173,8 +173,8 @@ export default function HrPersonnelPage() {
   const page = listState.page;
   const search = listState.search;
   const showExceptionalForm = listState.panel === "exceptional";
-  const canCreateExceptionalPersonnel = authorities.includes("HR_MANAGER");
-  const authoritySignature = authorities.join("|");
+  const canCreateExceptionalPersonnel = actionPermissions.includes("ARCHIVE_RECRUITMENT_CASE");
+  const permissionSignature = actionPermissions.join("|");
   const scheduleTarget = rows.find((person) => person.id === expanded) || null;
 
   const load = useCallback(async () => {
@@ -195,7 +195,7 @@ export default function HrPersonnelPage() {
           ...(expanded ? { focus: expanded } : {}),
         }),
         hrAPI.getFoundation(),
-        hiringAPI.myAuthorities(),
+        hiringAPI.myActionPermissions(),
       ]);
       const nextMeta = people.data.meta || {
           page: 1,
@@ -205,7 +205,7 @@ export default function HrPersonnelPage() {
       setRows(people.data.data);
       setMeta(nextMeta);
       setFoundation(base.data.data);
-      setAuthorities(authorityResponse.data.data || []);
+      setActionPermissions(authorityResponse.data.data || []);
       lastSuccessfulView.current = true;
       if (nextMeta.page !== page || nextMeta.focus === "removed") {
         replaceListState({
@@ -217,7 +217,7 @@ export default function HrPersonnelPage() {
       if ([401, 403].includes(Number((err as any)?.response?.status))) {
         setRows([]);
         setFoundation({ positions: [], availableUsers: [] });
-        setAuthorities([]);
+        setActionPermissions([]);
         setScheduleData(null);
         setScheduleDirty(false);
         setForm(blankPerson());
@@ -342,7 +342,7 @@ export default function HrPersonnelPage() {
 
   useEffect(() => {
     void loadSchedule();
-  }, [authoritySignature, loadSchedule]);
+  }, [permissionSignature, loadSchedule]);
   useEffect(() => {
     const refresh = () => {
       void load();
@@ -871,7 +871,6 @@ export default function HrPersonnelPage() {
               endDates={endDates}
               setEndDates={setEndDates}
               run={run}
-              authorities={authorities}
               changeArchiveState={changeArchiveState}
               permanentlyDelete={permanentlyDelete}
             />
@@ -1000,7 +999,6 @@ function PersonnelCard(props: any) {
     endDates,
     setEndDates,
     run,
-    authorities,
     changeArchiveState,
     permanentlyDelete,
   } = props;

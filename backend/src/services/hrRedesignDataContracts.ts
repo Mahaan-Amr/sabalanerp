@@ -7,6 +7,7 @@ import {
   type HrReconciliationReviewOutcome as ActionableHrReconciliationOutcome,
 } from './hrMigrationReconciliation';
 import { applyHrCompanyManagerCutover, inspectHrCompanyManagerCutover } from './hrCompanyManagerCutover';
+import { HR_ACTION_PERMISSIONS, actionPermissionsForLegacyAuthority } from './hrActionPermissionCatalog';
 
 export const HR_REDESIGN_CATALOG = Object.freeze({
   contractVersion: 1,
@@ -20,6 +21,7 @@ export const HR_REDESIGN_CATALOG = Object.freeze({
     { code: 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION' },
     { code: 'DATA_MIGRATION_RECONCILIATION' },
     { code: 'USER_ADMINISTRATION' },
+    ...HR_ACTION_PERMISSIONS.map(({ code }) => ({ code })),
   ] as const,
   featureLevels: ['VIEW', 'EDIT', 'ADMIN'] as const,
   businessAuthorities: [
@@ -343,6 +345,7 @@ const featureDisplayNames: Record<string, string> = {
   AUTHORITY_RESPONSIBILITY_ADMINISTRATION: 'Authority and Responsibility Administration',
   DATA_MIGRATION_RECONCILIATION: 'Data Migration and Reconciliation',
   USER_ADMINISTRATION: 'User Administration',
+  ...Object.fromEntries(HR_ACTION_PERMISSIONS.map(({ code, labelFa }) => [code, labelFa])),
 };
 
 const stableKey = (...parts: string[]) => ['hr-redesign-v1', ...parts].join(':');

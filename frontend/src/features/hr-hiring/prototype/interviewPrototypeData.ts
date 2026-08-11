@@ -2,7 +2,7 @@ export type NumericScore = 1 | 2 | 3 | 4 | 5;
 export type Score = NumericScore | "UNASSESSED" | null;
 export type Judgment = "POSITIVE" | "NEUTRAL" | "NEGATIVE" | null;
 export type CriterionKind =
-  "score" | "text" | "address" | "strengthsWeaknesses" | "companion";
+  "score" | "text" | "yesNo" | "address" | "strengthsWeaknesses" | "companion";
 
 export type InterviewCriterion = {
   id: string;
@@ -10,6 +10,7 @@ export type InterviewCriterion = {
   title: string;
   prompt?: string;
   kind: CriterionKind;
+  allowUnassessed?: boolean;
 };
 
 export type CriterionAnswer = {
@@ -122,9 +123,9 @@ const emptyAnswer = (): CriterionAnswer => ({
   weaknesses: Array.from({ length: 5 }, () => ""),
 });
 
-export const createInitialInterviewState = (): InterviewState => ({
+export const createInitialInterviewState = (criteria: InterviewCriterion[] = interviewCriteria): InterviewState => ({
   answers: Object.fromEntries(
-    interviewCriteria.map((criterion) => [criterion.id, emptyAnswer()]),
+    criteria.map((criterion) => [criterion.id, emptyAnswer()]),
   ),
   decision: null,
   decisionReason: "",
@@ -182,8 +183,8 @@ export const criterionIsComplete = (
   answer: CriterionAnswer,
 ) => {
   if (criterion.kind === "score") {
-    if (answer.score === "UNASSESSED") return true;
-    return answer.score !== null && (criterion.id !== "stability" || answer.note.trim().length > 0);
+    if (answer.score === "UNASSESSED") return criterion.allowUnassessed !== false;
+    return answer.score !== null;
   }
   if (criterion.kind === "address") {
     return (
@@ -193,6 +194,13 @@ export const criterionIsComplete = (
     );
   }
   if (criterion.kind === "companion") {
+    return (
+      answer.companionPresent !== null &&
+      answer.judgment !== null &&
+      (answer.judgment !== "NEGATIVE" || answer.note.trim().length > 0)
+    );
+  }
+  if (criterion.kind === "yesNo") {
     return (
       answer.companionPresent !== null &&
       answer.judgment !== null &&

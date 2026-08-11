@@ -4,9 +4,7 @@ import { protect, type AuthRequest } from '../middleware/auth';
 import { enforceMutationIdempotency } from '../middleware/idempotency';
 import { requireHrFeature } from '../middleware/hrAuthorization';
 import {
-  createHrDutyFromLegacyWorkItem,
   formatHrDutyDeadlineTehran,
-  reconcileHrDutyAssignment,
   respondToHrDuty,
 } from '../services/hrDutyEngine';
 import {
@@ -123,15 +121,7 @@ router.post(
   '/legacy-work-items/:id/duties',
   enforceMutationIdempotency,
   manageHrWork,
-  asyncHandler(async (req, res) => {
-    const duty = await createHrDutyFromLegacyWorkItem(prisma, {
-      sourceWorkItemId: req.params.id,
-      sourceActionCode: requiredText(req.body.sourceActionCode, 'HR_DUTY_ACTION_REQUIRED'),
-      actorUserId: req.user!.id,
-      policyVersion: 1,
-    });
-    res.status(201).json({ success: true, data: serializeDuty(duty) });
-  }),
+  (_req, res) => res.status(410).json({ success: false, error: 'HR_LEGACY_DUTY_ROUTING_RETIRED' }),
 );
 
 router.post(
@@ -155,18 +145,7 @@ router.post(
   '/:id/reconcile',
   enforceMutationIdempotency,
   manageHrWork,
-  asyncHandler(async (req, res) => {
-    const result = await reconcileHrDutyAssignment(prisma, {
-      dutyId: req.params.id,
-      actorUserId: req.user!.id,
-      policyVersion: 1,
-    });
-    res.json({ success: true, data: result ? {
-      ...result,
-      predecessor: serializeDuty(result.predecessor),
-      successor: result.successor ? serializeDuty(result.successor) : null,
-    } : null });
-  }),
+  (_req, res) => res.status(410).json({ success: false, error: 'HR_NAMED_RESPONSIBILITY_ROUTING_RETIRED' }),
 );
 
 export default router;

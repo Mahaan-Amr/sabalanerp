@@ -353,6 +353,17 @@ const formatMoneyNumber = (value: unknown): string => toFaNumber(value);
 const shouldShowRialEquivalent = (currency = 'تومان'): boolean =>
   String(currency || '').trim() === 'تومان';
 
+type PrintMoneyOptions = {
+  includeRialEquivalent?: boolean;
+  displayInRials?: boolean;
+};
+
+const convertToRials = (value: unknown, currency = 'تومان'): number =>
+  shouldShowRialEquivalent(currency) ? toNumber(value) * 10 : toNumber(value);
+
+const formatRialAmount = (value: unknown, currency = 'تومان'): string =>
+  `${toFaNumber(convertToRials(value, currency))} ریال`;
+
 const formatAccountingAmount = (value: unknown, currency = 'تومان'): string => {
   const base = formatAmount(value, currency);
   if (!shouldShowRialEquivalent(currency)) return base;
@@ -362,24 +373,30 @@ const formatAccountingAmount = (value: unknown, currency = 'تومان'): string
 const formatPrintAmount = (
   value: unknown,
   currency = 'تومان',
-  options: { includeRialEquivalent?: boolean } = {}
-): string => options.includeRialEquivalent
-  ? formatAccountingAmount(value, currency)
-  : formatAmount(value, currency);
+  options: PrintMoneyOptions = {}
+): string => {
+  if (options.displayInRials) return formatRialAmount(value, currency);
+  return options.includeRialEquivalent
+    ? formatAccountingAmount(value, currency)
+    : formatAmount(value, currency);
+};
 
 const formatPrintMoneyCell = (
   value: unknown,
   currency = 'تومان',
-  options: { includeRialEquivalent?: boolean } = {}
-): string => options.includeRialEquivalent
-  ? formatAccountingAmount(value, currency)
-  : formatMoneyNumber(value);
+  options: PrintMoneyOptions = {}
+): string => {
+  if (options.displayInRials) return formatRialAmount(value, currency);
+  return options.includeRialEquivalent
+    ? formatAccountingAmount(value, currency)
+    : formatMoneyNumber(value);
+};
 
 const formatPrintRate = (
   value: unknown,
   currency = 'تومان',
   unitLabel = '',
-  options: { includeRialEquivalent?: boolean } = {}
+  options: PrintMoneyOptions = {}
 ): string => {
   const amount = formatPrintMoneyCell(value, currency, options);
   return unitLabel ? `${amount} / ${escapeHtml(unitLabel)}` : amount;
@@ -1367,7 +1384,7 @@ const summaryAmountLabel = (group: SummaryAddOnGroup): string => {
 const summaryRateLabel = (
   group: SummaryAddOnGroup,
   currency: string,
-  options: { includeRialEquivalent?: boolean } = {}
+  options: PrintMoneyOptions = {}
 ): string => {
   if (group.rates.size !== 1) return '';
   const rate = Array.from(group.rates)[0];
@@ -1378,7 +1395,7 @@ const summaryRateLabel = (
 const summaryAddOnGroupsToRows = (
   groups: Map<string, SummaryAddOnGroup>,
   currency: string,
-  options: { includeRialEquivalent?: boolean } = {}
+  options: PrintMoneyOptions = {}
 ): FlatProductRow[] => Array.from(groups.values())
   .filter((group) => group.total > 0 || group.amount > 0 || hasTextValue(group.description))
   .sort((a, b) => `${a.category}-${a.description}`.localeCompare(`${b.category}-${b.description}`, 'fa'))
@@ -1477,6 +1494,7 @@ const buildFlatProductRows = (
   financials?: NormalizedFinancials,
   options: {
     includeRialEquivalent?: boolean;
+    displayInRials?: boolean;
     productRowsMode?: 'detailed' | 'summarized';
     showExplanatoryRows?: boolean;
     showTotals?: boolean;
@@ -1744,7 +1762,10 @@ const buildFlatProductRows = (
       width: '',
       ...emptyMeasurementCells(),
       rate: '',
-      total: formatPrintMoneyCell(grandTotal, currency, { includeRialEquivalent: shouldShowRialEquivalent(currency) }),
+      total: formatPrintMoneyCell(grandTotal, currency, {
+        ...options,
+        includeRialEquivalent: !options.displayInRials && shouldShowRialEquivalent(currency)
+      }),
       className: 'total-row'
     });
   }
@@ -1761,6 +1782,7 @@ const renderProductMainRows = (
   options: {
     hidePrices?: boolean;
     includeRialEquivalent?: boolean;
+    displayInRials?: boolean;
     productRowsMode?: 'detailed' | 'summarized';
     showExplanatoryRows?: boolean;
     showTotals?: boolean;
@@ -1877,7 +1899,7 @@ const renderDeliveryRows = (deliveries: NormalizedDelivery[], options: { hideRec
 const renderPaymentRows = (
   payments: NormalizedPayment[],
   financials: NormalizedFinancials,
-  options: { includeRialEquivalent?: boolean } = {}
+  options: PrintMoneyOptions = {}
 ): string => {
   if (!payments.length) {
     return `<tr><td colspan="9" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
@@ -1937,7 +1959,7 @@ const renderPaymentRows = (
 
 const renderFinancialSummary = (
   financials: NormalizedFinancials,
-  options: { includeRialEquivalent?: boolean } = {}
+  options: PrintMoneyOptions = {}
 ): string => {
   const rows = [
     `<div><strong>جمع محصولات:</strong> ${formatPrintAmount(financials.productsTotal, financials.currency, options)}</div>`,
@@ -1946,7 +1968,7 @@ const renderFinancialSummary = (
     financials.finishingTotal > 0 ? `<div><strong>جمع پرداخت سنگ:</strong> ${formatPrintAmount(financials.finishingTotal, financials.currency, options)}</div>` : '',
     financials.discountAmount > 0 ? `<div><strong>تخفیف قرارداد${financials.discountPercent > 0 ? ` (${toFaNumber(financials.discountPercent)}٪)` : ''}:</strong> ${formatPrintAmount(-financials.discountAmount, financials.currency, options)}</div>` : '',
     `<div><strong>مبلغ نهایی قرارداد:</strong> ${formatPrintAmount(financials.grandTotal, financials.currency, options)}</div>`,
-    `<div><strong>واحد پول:</strong> ${escapeHtml(financials.currency)}</div>`
+    `<div><strong>واحد پول:</strong> ${escapeHtml(options.displayInRials ? 'ریال' : financials.currency)}</div>`
   ].filter(Boolean);
 
   return rows.join('');
@@ -2071,6 +2093,7 @@ type RenderContractHtmlOptions = {
 
 export function renderContractHtml(contract: RenderableContract, options: RenderContractHtmlOptions = {}): string {
   const variant = options.variant || 'original';
+  const isAccountingVariant = variant === 'accounting';
   const isWorkshopVariant = variant === 'workshop';
   const isCustomVariant = variant === 'custom';
   const isSummaryVariant = variant === 'summary';
@@ -2079,7 +2102,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     : isSummaryVariant
       ? { productRowsMode: 'summarized' as const }
       : {};
-  const priceFormatOptions = {};
+  const priceFormatOptions: PrintMoneyOptions = isAccountingVariant
+    ? { displayInRials: true }
+    : {};
   const showFormalSection = variant === 'original' || isSummaryVariant;
   const showCustomerSection = !isWorkshopVariant && customPrint.showCustomerSection !== false;
   const showProductsSection = customPrint.showProductsSection !== false;
@@ -2142,8 +2167,8 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     { key: 'count', className: 'main-area-col', label: 'تعداد' },
     { key: 'linearMeasurement', className: 'main-linear-col', label: 'متر طول' },
     { key: 'squareMeasurement', className: 'main-square-col', label: 'متر مربع' },
-    { key: 'rate', className: 'main-rate-col', label: 'نرخ - تومان' },
-    { key: 'total', className: 'main-total-col', label: 'مبلغ کل - تومان' }
+    { key: 'rate', className: 'main-rate-col', label: `نرخ - ${isAccountingVariant ? 'ریال' : 'تومان'}` },
+    { key: 'total', className: 'main-total-col', label: `مبلغ کل - ${isAccountingVariant ? 'ریال' : 'تومان'}` }
   ];
   const visibleProductColumnDefinitions = productColumnDefinitions.filter((column) => productColumns[column.key]);
 

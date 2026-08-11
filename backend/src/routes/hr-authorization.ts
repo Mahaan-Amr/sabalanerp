@@ -6,6 +6,11 @@ import type { AuthRequest } from '../middleware/auth';
 import { requireHrFeature } from '../middleware/hrAuthorization';
 import { activeCompanyManagerUserIds, activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
 import { HR_REDESIGN_CATALOG } from '../services/hrRedesignDataContracts';
+import {
+  HR_ACTION_PERMISSION_GROUPS,
+  expandHrActionPermissionSelection,
+  getHrActionPermissionDefinition,
+} from '../services/hrActionPermissionCatalog';
 
 const router = express.Router();
 const administer = requireHrFeature('AUTHORITY_RESPONSIBILITY_ADMINISTRATION', 'ADMIN');
@@ -34,6 +39,16 @@ const requiredReason = (value: unknown) => {
   return reason;
 };
 const jsonValue = (value: unknown) => value == null ? Prisma.JsonNull : JSON.parse(JSON.stringify(value));
+const legacyAuthorizationReadOnly = (_req: AuthRequest, res: Response) => res.status(410).json({
+  success: false,
+  error: 'HR_LEGACY_AUTHORIZATION_READ_ONLY',
+});
+
+router.post('/business-authorities', legacyAuthorizationReadOnly);
+router.post('/business-authorities/:id/revoke', legacyAuthorizationReadOnly);
+router.post('/responsibilities', legacyAuthorizationReadOnly);
+router.post('/responsibilities/:id/end', legacyAuthorizationReadOnly);
+router.post('/destinations', legacyAuthorizationReadOnly);
 
 const assertOperationalAdministrator = async (req: AuthRequest, authorityCode?: string) => {
   if (req.user!.role === 'ADMIN') return;
@@ -102,7 +117,8 @@ router.get('/context', administer, asyncHandler(async (_req, res) => {
     prisma.hrAuthorizationAuditEvent.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }),
   ]);
   res.json({ success: true, data: {
-    users, workspaceCatalog, featureCatalog, authorityCatalog, responsibilityTypes,
+    users, workspaceCatalog, featureCatalog, actionPermissionGroups: HR_ACTION_PERMISSION_GROUPS,
+    authorityCatalog, responsibilityTypes,
     workspaceGrants, featureGrants, authorityGrants, responsibilities, destinations, constraints, audit,
   } });
 }));
@@ -114,12 +130,13 @@ router.post('/workspace-grants', administer, asyncHandler(async (req, res) => {
   const reason = requiredReason(req.body.reason);
   if (!userId || !levelValues.has(level as never)) throw badRequest('کاربر یا سطح دسترسی معتبر نیست.');
   const effectiveAt = optionalDate(req.body.effectiveFrom) ?? new Date();
+  const effectiveTo = optionalDate(req.body.effectiveTo);
   const row = await prisma.$transaction(async (tx) => {
     await assertActiveUser(tx, userId);
     const created = await tx.hrWorkspaceAccessGrant.create({ data: {
       stableKey: `hr-access:${userId}:workspace:${effectiveAt.toISOString()}:${crypto.randomUUID()}`,
       userId, workspaceCode: HR_REDESIGN_CATALOG.workspaceCode, level: level as never,
-      effectiveFrom: effectiveAt, effectiveTo: optionalDate(req.body.effectiveTo), grantedByUserId: actorId(req), reason,
+      effectiveFrom: effectiveAt, effectiveTo, grantedByUserId: actorId(req), reason,
     } });
     await writeAudit(tx, { entityType: 'WORKSPACE_GRANT', entityId: created.id, action: 'GRANTED', actorUserId: actorId(req), reason, effectiveAt, after: created });
     return created;
@@ -137,17 +154,35 @@ router.post('/feature-grants', administer, asyncHandler(async (req, res) => {
     throw badRequest('کاربر، قابلیت یا سطح دسترسی معتبر نیست.');
   }
   const effectiveAt = optionalDate(req.body.effectiveFrom) ?? new Date();
-  const row = await prisma.$transaction(async (tx) => {
+  const effectiveTo = optionalDate(req.body.effectiveTo);
+  const featureCodes = expandHrActionPermissionSelection([featureCode]);
+  const rows = await prisma.$transaction(async (tx) => {
     await assertActiveUser(tx, userId);
-    const created = await tx.hrFeatureAccessGrant.create({ data: {
-      stableKey: `hr-access:${userId}:feature:${featureCode}:${effectiveAt.toISOString()}:${crypto.randomUUID()}`,
-      userId, featureCode, level: level as never, effectiveFrom: effectiveAt,
-      effectiveTo: optionalDate(req.body.effectiveTo), grantedByUserId: actorId(req), reason,
-    } });
-    await writeAudit(tx, { entityType: 'FEATURE_GRANT', entityId: created.id, action: 'GRANTED', actorUserId: actorId(req), reason, effectiveAt, after: created });
+    const created: any[] = [];
+    for (const code of featureCodes) {
+      const requiredLevel = getHrActionPermissionDefinition(code)?.level ?? (code === featureCode ? level : 'VIEW');
+      const rank = { VIEW: 1, EDIT: 2, ADMIN: 3 } as const;
+      const requestedLevel = code === featureCode && levelValues.has(level as never) ? level as keyof typeof rank : requiredLevel;
+      const grantLevel = rank[requestedLevel] >= rank[requiredLevel as keyof typeof rank] ? requestedLevel : requiredLevel;
+      const active = await tx.hrFeatureAccessGrant.findFirst({ where: {
+        userId, featureCode: code, status: 'ACTIVE',
+        effectiveFrom: { lte: effectiveAt },
+        ...(effectiveTo
+          ? { OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveTo } }] }
+          : { effectiveTo: null }),
+      } });
+      if (active && rank[active.level] >= rank[grantLevel as keyof typeof rank]) continue;
+      const row = await tx.hrFeatureAccessGrant.create({ data: {
+        stableKey: `hr-access:${userId}:feature:${code}:${effectiveAt.toISOString()}:${crypto.randomUUID()}`,
+        userId, featureCode: code, level: grantLevel as never, effectiveFrom: effectiveAt,
+        effectiveTo, grantedByUserId: actorId(req), reason,
+      } });
+      await writeAudit(tx, { entityType: 'FEATURE_GRANT', entityId: row.id, action: 'GRANTED', actorUserId: actorId(req), reason, effectiveAt, after: row });
+      created.push(row);
+    }
     return created;
   });
-  res.status(201).json({ success: true, data: row });
+  res.status(201).json({ success: true, data: rows[rows.length - 1] ?? null, prerequisiteGrants: rows.slice(0, -1) });
 }));
 
 router.post('/business-authorities', administer, asyncHandler(async (req, res) => {

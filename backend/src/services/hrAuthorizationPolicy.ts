@@ -1,5 +1,11 @@
+import {
+  actionPermissionsForLegacyAuthority,
+  expandHrActionPermissionSelection,
+  getHrActionPermissionDefinition,
+} from './hrActionPermissionCatalog';
+
 export type HrAccessLevel = 'VIEW' | 'EDIT' | 'ADMIN';
-export type HrAuthorizationLayer = 'WORKSPACE' | 'FEATURE' | 'BUSINESS_AUTHORITY' | 'TASK_DUTY' | 'SYSTEM_ROLE';
+export type HrAuthorizationLayer = 'WORKSPACE' | 'FEATURE' | 'ACTION_PERMISSION' | 'TASK_DUTY' | 'SYSTEM_ROLE';
 
 type EffectiveGrant = {
   status: 'ACTIVE' | 'REVOKED' | 'EXPIRED';
@@ -20,6 +26,7 @@ export type HrAuthorizationRequirement = {
   workspaceLevel?: HrAccessLevel;
   feature?: { code: string; level: HrAccessLevel };
   authorityCodes?: string[];
+  actionPermissionCodes?: string[];
   dutyId?: string;
   systemRoles?: string[];
 };
@@ -32,10 +39,17 @@ const isEffective = (grant: EffectiveGrant, at: Date) => (
   && (!grant.effectiveTo || grant.effectiveTo > at)
 );
 
-export const hasFullHrBaseline = (snapshot: HrAuthorizationSnapshot) => (
-  snapshot.user.isActive
-  && snapshot.user.role === 'ADMIN'
-);
+export const hasFullHrBaseline = (snapshot: HrAuthorizationSnapshot, at = new Date()) => {
+  if (!snapshot.user.isActive) return false;
+  if (snapshot.user.role === 'ADMIN') return true;
+  if (snapshot.user.role !== 'MANAGER') return false;
+  return snapshot.workspaceGrants.some((grant) => (
+    grant.workspaceCode === 'HUMAN_RESOURCES'
+    && grant.level === 'ADMIN'
+    && isEffective(grant, at)
+    && !grant.bootstrapOnly
+  ));
+};
 
 export const evaluateHrAuthorization = (
   snapshot: HrAuthorizationSnapshot,
@@ -46,13 +60,13 @@ export const evaluateHrAuthorization = (
     const missingLayers = new Set<HrAuthorizationLayer>();
     if (requirement.workspaceLevel) missingLayers.add('WORKSPACE');
     if (requirement.feature) missingLayers.add('FEATURE');
-    if (requirement.authorityCodes?.length) missingLayers.add('BUSINESS_AUTHORITY');
+    if (requirement.actionPermissionCodes?.length || requirement.authorityCodes?.length) missingLayers.add('ACTION_PERMISSION');
     if (requirement.dutyId) missingLayers.add('TASK_DUTY');
     if (requirement.systemRoles?.length) missingLayers.add('SYSTEM_ROLE');
     return { allowed: false, missingLayers: [...missingLayers] };
   }
 
-  const baseline = hasFullHrBaseline(snapshot);
+  const baseline = hasFullHrBaseline(snapshot, at);
   const missingLayers: HrAuthorizationLayer[] = [];
   if (requirement.workspaceLevel && !baseline) {
     const grant = snapshot.workspaceGrants.find((candidate) => (
@@ -72,11 +86,24 @@ export const evaluateHrAuthorization = (
     ));
     if (!grant) missingLayers.push('FEATURE');
   }
+  const hasFeatureAt = (code: string, level: HrAccessLevel) => snapshot.featureGrants.some((candidate) => (
+    candidate.featureCode === code && isEffective(candidate, at) && !candidate.bootstrapOnly
+    && accessRank[candidate.level] >= accessRank[level]
+  ));
+  const hasActionPermission = (code: string) => expandHrActionPermissionSelection([code]).every((requiredCode) => (
+    hasFeatureAt(requiredCode, getHrActionPermissionDefinition(requiredCode)?.level ?? 'VIEW')
+  ));
+  const actionPermissionCodes = requirement.actionPermissionCodes ?? [];
+  if (actionPermissionCodes.length && !baseline) {
+    const authorized = actionPermissionCodes.some(hasActionPermission);
+    if (!authorized) missingLayers.push('ACTION_PERMISSION');
+  }
   if (requirement.authorityCodes?.length && !baseline) {
-    const authorized = snapshot.authorityGrants.some((candidate) => (
-      requirement.authorityCodes!.includes(candidate.authorityCode) && isEffective(candidate, at) && !candidate.bootstrapOnly
-    ));
-    if (!authorized) missingLayers.push('BUSINESS_AUTHORITY');
+    const authorized = requirement.authorityCodes.some((authorityCode) => {
+      const bundle = actionPermissionsForLegacyAuthority(authorityCode).filter((code) => getHrActionPermissionDefinition(code));
+      return bundle.length > 0 && bundle.every(hasActionPermission);
+    });
+    if (!authorized) missingLayers.push('ACTION_PERMISSION');
   }
   if (requirement.dutyId && !snapshot.assignedDutyIds.includes(requirement.dutyId)) {
     missingLayers.push('TASK_DUTY');

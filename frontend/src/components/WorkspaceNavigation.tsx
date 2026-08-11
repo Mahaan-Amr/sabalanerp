@@ -516,6 +516,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             show: true,
           },
           {
+            name: "Initial interview criteria",
+            namePersian: "معیارهای مصاحبه اولیه",
+            href: "/dashboard/hr/interview-criteria",
+            icon: FaClipboardList,
+            show: true,
+          },
+          {
             name: "My HR Tasks",
             namePersian: "وظایف منابع انسانی",
             href: "/dashboard/hr/tasks",

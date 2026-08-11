@@ -1,6 +1,6 @@
 import { paperContractReviewState } from './hrEmploymentContract';
 
-type Authority = string;
+type ActionPermission = string;
 
 const labels: Record<string, string> = {
   BIRTH_CERTIFICATE_ALL_PAGES: 'تمام صفحات شناسنامه',
@@ -36,11 +36,11 @@ const restricted = (entry: any) => ({
 
 export const buildHiringDocumentIndex = (
   application: any,
-  authorities: Set<Authority>
+  permissions: Set<ActionPermission>
 ) => {
-  const canHr = authorities.has('HR_PROCESSOR') || authorities.has('HR_MANAGER');
-  const canCompanyManagement = authorities.has('COMPANY_MANAGER');
-  const canFinance = authorities.has('FINANCE_RECORDER') || authorities.has('FINANCE_MANAGER');
+  const canHr = permissions.has('VIEW_FULL_APPLICANT_INFORMATION');
+  const canCompanyManagement = permissions.has('VIEW_COMPANY_EVALUATION_RESULTS');
+  const canFinance = permissions.has('MANAGE_FINANCE_EVIDENCE');
   const entries: any[] = [];
 
   for (const row of application.preIdentityChecklistItems || []) {

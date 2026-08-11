@@ -14,6 +14,7 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { useTheme } from "@/contexts/ThemeContext";
+import { hiringAPI } from "@/lib/hiringApi";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -56,6 +57,46 @@ export type ProductionInterviewPayload = {
   schemaVersion: 2;
   state: InterviewState;
   customCriteria: CustomCriterion[];
+  criteriaTemplateVersion?: number;
+  criteriaSnapshot?: PublishedInterviewCriterion[];
+};
+
+type PublishedInterviewCriterion = {
+  stableId: string;
+  title: string;
+  description?: string | null;
+  answerType: string;
+  isActive?: boolean;
+  order?: number;
+  allowUnassessed?: boolean;
+};
+
+const publishedCriteriaForInterview = (snapshot?: PublishedInterviewCriterion[]) => {
+  if (!snapshot?.length) return interviewCriteria;
+  const kindByAnswerType: Record<string, InterviewCriterion["kind"]> = {
+    TEXT: "text",
+    SCORE_1_TO_5: "score",
+    YES_NO: "yesNo",
+    ADDRESS: "address",
+    STRENGTHS_WEAKNESSES: "strengthsWeaknesses",
+    COMPANION: "companion",
+  };
+  return snapshot
+    .filter((criterion) => criterion.isActive !== false)
+    .map((criterion, index) => ({
+      id: criterion.stableId,
+      order: criterion.order ?? index + 1,
+      title: criterion.title,
+      prompt: criterion.description || undefined,
+      kind: kindByAnswerType[criterion.answerType] ?? "text",
+      allowUnassessed: criterion.allowUnassessed === true,
+    }));
+};
+
+const hydrateInterviewState = (state: InterviewState | undefined, criteria: InterviewCriterion[]) => {
+  const empty = createInitialInterviewState(criteria);
+  if (!state) return empty;
+  return { ...state, answers: { ...empty.answers, ...state.answers } };
 };
 
 const variantNames: Record<Variant, string> = {
@@ -81,9 +122,11 @@ const surfaceOptions = [
 function ScoreControl({
   value,
   onChange,
+  allowUnassessed = true,
 }: {
   value: Score;
   onChange: (score: Score) => void;
+  allowUnassessed?: boolean;
 }) {
   return (
     <div
@@ -106,13 +149,13 @@ function ScoreControl({
           );
         },
       )}
-      <ErpButton
+      {allowUnassessed && <ErpButton
         label="ارزیابی نشد"
         onClick={() => onChange("UNASSESSED")}
         variant={value === "UNASSESSED" ? "outline" : "ghost"}
         tone="neutral"
         className="min-h-11"
-      />
+      />}
     </div>
   );
 }
@@ -187,6 +230,7 @@ function CriterionEditor({
             <FieldLabel required>امتیاز مصاحبه‌گر</FieldLabel>
             <ScoreControl
               value={answer.score}
+              allowUnassessed={criterion.allowUnassessed !== false}
               onChange={(score) => {
                 update("score", score);
                 onScoreChange?.(score);
@@ -194,18 +238,14 @@ function CriterionEditor({
             />
           </div>
           <div>
-            <FieldLabel required={criterion.id === "stability"}>
+            <FieldLabel>
               یادداشت مصاحبه‌گر
             </FieldLabel>
             <ErpTextarea
               rows={compact ? 2 : 3}
               value={answer.note}
               onChange={(event) => update("note", event.target.value)}
-              placeholder={
-                criterion.id === "stability"
-                  ? "دلیل امتیاز و منطقی بودن یا نبودن علت ترک کار"
-                  : "شواهد مشاهده‌شده برای این امتیاز"
-              }
+              placeholder="یادداشت مصاحبه‌گر (اختیاری)"
             />
           </div>
         </>
@@ -220,6 +260,25 @@ function CriterionEditor({
             onChange={(event) => update("text", event.target.value)}
             placeholder="پاسخ متقاضی را ثبت کنید"
           />
+        </div>
+      ) : null}
+
+      {criterion.kind === "yesNo" ? (
+        <div className="space-y-4">
+          <div>
+            <FieldLabel required>پاسخ</FieldLabel>
+            <ErpSegmentedControl
+              value={answer.companionPresent ?? "UNSET"}
+              onChange={(value) => update("companionPresent", value === "UNSET" ? null : value as "YES" | "NO")}
+              options={[
+                { value: "YES", label: "بله" },
+                { value: "NO", label: "خیر" },
+                { value: "UNSET", label: "ثبت نشده" },
+              ]}
+            />
+          </div>
+          <div><FieldLabel required>اثر این پاسخ بر متقاضی</FieldLabel><JudgmentControl value={answer.judgment} onChange={(value) => update("judgment", value)} /></div>
+          {answer.judgment === "NEGATIVE" && <div><FieldLabel required>دلیل اثر منفی</FieldLabel><ErpTextarea value={answer.note} onChange={(event) => update("note", event.target.value)} /></div>}
         </div>
       ) : null}
 
@@ -376,11 +435,11 @@ function DecisionEditor({
   );
 }
 
-function ProgressSummary({ state }: { state: InterviewState }) {
-  const complete = interviewCriteria.filter((criterion) =>
+function ProgressSummary({ state, criteria = interviewCriteria }: { state: InterviewState; criteria?: InterviewCriterion[] }) {
+  const complete = criteria.filter((criterion) =>
     criterionIsComplete(criterion, state.answers[criterion.id]),
   ).length;
-  const scores = interviewCriteria
+  const scores = criteria
     .map((criterion) => state.answers[criterion.id].score)
     .filter((score): score is NumericScore => typeof score === "number");
   const average = scores.length
@@ -409,12 +468,14 @@ function ProgressSummary({ state }: { state: InterviewState }) {
 function GuidedVariant({
   state,
   onChange,
+  criteria = interviewCriteria,
 }: {
   state: InterviewState;
   onChange: (state: InterviewState) => void;
+  criteria?: InterviewCriterion[];
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const criterion = interviewCriteria[activeIndex];
+  const criterion = criteria[Math.min(activeIndex, criteria.length - 1)];
   return (
     <div className="grid gap-4 xl:grid-cols-[15rem_minmax(0,1fr)_18rem]">
       <ErpSection
@@ -422,7 +483,7 @@ function GuidedVariant({
         description="هر معیار را جداگانه بررسی کنید."
       >
         <div className="max-h-[65vh] space-y-1 overflow-y-auto pe-1">
-          {interviewCriteria.map((item, index) => {
+          {criteria.map((item, index) => {
             const complete = criterionIsComplete(item, state.answers[item.id]);
             return (
               <ErpPressable
@@ -449,7 +510,6 @@ function GuidedVariant({
 
       <ErpSection
         title={`${criterion.order.toLocaleString("fa-IR")}. ${criterion.title}`}
-        description={criterion.prompt}
       >
         <CriterionEditor
           criterion={criterion}
@@ -462,7 +522,7 @@ function GuidedVariant({
           }
           onScoreChange={() =>
             setActiveIndex((value) =>
-              Math.min(value + 1, interviewCriteria.length - 1),
+              Math.min(value + 1, criteria.length - 1),
             )
           }
         />
@@ -488,14 +548,14 @@ function GuidedVariant({
           <ErpButton
             label="معیار بعدی"
             icon={FaArrowLeft}
-            disabled={activeIndex === interviewCriteria.length - 1}
+            disabled={activeIndex === criteria.length - 1}
             onClick={() => setActiveIndex((value) => value + 1)}
           />
         </div>
       </ErpSection>
 
       <div className="space-y-4 xl:sticky xl:top-4 xl:self-start">
-        <ProgressSummary state={state} />
+        <ProgressSummary state={state} criteria={criteria} />
         <ErpSection title="جمع‌بندی مصاحبه">
           <DecisionEditor state={state} onChange={onChange} />
         </ErpSection>
@@ -1205,19 +1265,38 @@ export function ProductionHrInterview({
   onSaveDraft: (payload: ProductionInterviewPayload, expectedVersion: number) => Promise<{ version: number }>;
   onComplete: (payload: ProductionInterviewPayload) => Promise<void>;
 }) {
-  const [state, setState] = useState<InterviewState>(() => initialPayload?.state || createInitialInterviewState());
+  const [criteriaSnapshot, setCriteriaSnapshot] = useState<PublishedInterviewCriterion[] | undefined>(() => initialPayload?.criteriaSnapshot);
+  const [criteriaTemplateVersion, setCriteriaTemplateVersion] = useState(initialPayload?.criteriaTemplateVersion ?? 0);
+  const [criteria, setCriteria] = useState<InterviewCriterion[]>(() => publishedCriteriaForInterview(initialPayload?.criteriaSnapshot));
+  const [state, setState] = useState<InterviewState>(() => hydrateInterviewState(initialPayload?.state, publishedCriteriaForInterview(initialPayload?.criteriaSnapshot)));
   const [customCriteria, setCustomCriteria] = useState<CustomCriterion[]>(() => initialPayload?.customCriteria || []);
   const [version, setVersion] = useState(initialVersion);
   const versionRef = useRef(initialVersion);
   const saveDraftRef = useRef(onSaveDraft);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const initialRender = useRef(true);
-  const payload = useMemo<ProductionInterviewPayload>(() => ({ schemaVersion: 2, state, customCriteria }), [customCriteria, state]);
-  const canComplete = interviewCriteria.every((criterion) => criterionIsComplete(criterion, state.answers[criterion.id]))
+  const payload = useMemo<ProductionInterviewPayload>(() => ({ schemaVersion: 2, state, customCriteria, criteriaTemplateVersion, criteriaSnapshot }), [criteriaSnapshot, criteriaTemplateVersion, customCriteria, state]);
+  const canComplete = criteria.every((criterion) => criterionIsComplete(criterion, state.answers[criterion.id]))
     && customCriteria.every(customCriterionIsComplete)
     && state.decision !== null
     && state.decisionReason.trim().length > 0;
   useEffect(() => { saveDraftRef.current = onSaveDraft; }, [onSaveDraft]);
+
+  useEffect(() => {
+    if (initialPayload?.criteriaSnapshot?.length) return;
+    let active = true;
+    void hiringAPI.interviewCriteria().then(({ data }) => {
+      if (!active) return;
+      const snapshot = data.data.criteriaJson as PublishedInterviewCriterion[];
+      const nextCriteria = publishedCriteriaForInterview(snapshot);
+      setCriteriaSnapshot(snapshot);
+      setCriteriaTemplateVersion(Number(data.data.version || 0));
+      setCriteria(nextCriteria);
+      setState((current) => hydrateInterviewState(current, nextCriteria));
+    }).catch(() => setSaveStatus("error"));
+    return () => { active = false; };
+  }, [initialPayload?.criteriaSnapshot]);
 
   useEffect(() => {
     if (initialRender.current) {
@@ -1246,7 +1325,7 @@ export function ProductionHrInterview({
         </ErpBadge>
         <span className="text-xs text-[var(--sds-text-muted)]">تغییرها به‌صورت خودکار ذخیره می‌شوند.</span>
       </div>
-      <GuidedVariant state={state} onChange={setState} />
+      <GuidedVariant state={state} onChange={setState} criteria={criteria} />
       <CaseSpecificCriteria criteria={customCriteria} onChange={setCustomCriteria} />
       <ErpSection title="تکمیل مصاحبه">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1262,18 +1341,61 @@ export function ProductionHrInterview({
       </ErpSection>
       {history.length > 0 && (
         <ErpSection title="تاریخچه نسخه‌ها">
-          <div className="space-y-2">
+          <ErpButton label={historyOpen ? "بستن تاریخچه" : "نمایش نسخه‌های قبلی"} variant="ghost" onClick={() => setHistoryOpen((open) => !open)} />
+          {historyOpen && <div className="mt-3 space-y-2">
             {history.map((item) => (
               <ErpCard key={item.version} className="flex items-center justify-between gap-3 p-3 text-sm">
                 <b>نسخه {item.version.toLocaleString("fa-IR")}</b>
                 <ErpBadge tone={item.outcome === "POSITIVE" ? "success" : "danger"}>{item.outcome === "POSITIVE" ? "مثبت" : "منفی"}</ErpBadge>
               </ErpCard>
             ))}
-          </div>
+          </div>}
         </ErpSection>
       )}
     </div>
   );
+}
+
+export function ProductionInterviewReport({
+  payload,
+  version,
+  history = [],
+}: {
+  payload: ProductionInterviewPayload;
+  version: number;
+  history?: Array<{ version: number; outcome?: string; evidenceJson?: ProductionInterviewPayload }>;
+}) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const criteria = publishedCriteriaForInterview(payload.criteriaSnapshot);
+  const state = hydrateInterviewState(payload.state, criteria);
+  const judgment = (value: Judgment) => value ? judgmentLabels[value] : "ثبت نشده";
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <ErpBadge tone={state.decision === "POSITIVE" ? "success" : "danger"}>{state.decision === "POSITIVE" ? "نتیجه مثبت" : "نتیجه منفی"}</ErpBadge>
+      <span className="text-sm text-[var(--sds-text-secondary)]">گزارش نسخه {version.toLocaleString("fa-IR")}</span>
+    </div>
+    <div className="grid gap-3 md:grid-cols-2">
+      {criteria.map((criterion) => {
+        const answer = state.answers[criterion.id];
+        return <ErpCard key={criterion.id} className="space-y-2 p-4">
+          <b>{criterion.order.toLocaleString("fa-IR")}. {criterion.title}</b>
+          {criterion.prompt && <p className="text-sm text-[var(--sds-text-secondary)]">{criterion.prompt}</p>}
+          {criterion.kind === "score" && <p>{answer.score === "UNASSESSED" ? "ارزیابی نشد" : `امتیاز ${answer.score?.toLocaleString("fa-IR")}`}</p>}
+          {criterion.kind === "text" && <p className="whitespace-pre-wrap">{answer.text}</p>}
+          {criterion.kind === "yesNo" && <><p>{answer.companionPresent === "YES" ? "بله" : "خیر"} · {judgment(answer.judgment)}</p></>}
+          {criterion.kind === "address" && <><p className="whitespace-pre-wrap">{answer.text}</p><p>{judgment(answer.judgment)}</p></>}
+          {criterion.kind === "companion" && <p>{answer.companionPresent === "YES" ? "با همراه" : "بدون همراه"} · {judgment(answer.judgment)}</p>}
+          {criterion.kind === "strengthsWeaknesses" && <div className="grid gap-2 sm:grid-cols-2"><div><b>نقاط قوت</b>{answer.strengths.map((item, index) => <p key={`s-${index}`}>{item}</p>)}</div><div><b>نقاط ضعف</b>{answer.weaknesses.map((item, index) => <p key={`w-${index}`}>{item}</p>)}</div></div>}
+          {answer.note && <p className="whitespace-pre-wrap text-sm text-[var(--sds-text-secondary)]">یادداشت: {answer.note}</p>}
+        </ErpCard>;
+      })}
+    </div>
+    <ErpSection title="جمع‌بندی مصاحبه"><p className="whitespace-pre-wrap">{state.decisionReason}</p></ErpSection>
+    {history.length > 0 && <ErpSection title="تاریخچه نسخه‌ها">
+      <ErpButton label={historyOpen ? "بستن تاریخچه" : "نمایش نسخه‌های قبلی"} variant="ghost" onClick={() => setHistoryOpen((open) => !open)} />
+      {historyOpen && <div className="mt-3 space-y-4">{history.map((item) => <ErpCard key={item.version} className="p-4">{item.evidenceJson ? <ProductionInterviewReport payload={item.evidenceJson} version={item.version} /> : <div className="flex items-center justify-between gap-3"><b>نسخه {item.version.toLocaleString("fa-IR")}</b><ErpBadge tone={item.outcome === "POSITIVE" ? "success" : "danger"}>{item.outcome === "POSITIVE" ? "مثبت" : "منفی"}</ErpBadge></div>}</ErpCard>)}</div>}
+    </ErpSection>}
+  </div>;
 }
 
 export default function HrInterviewPrototype() {

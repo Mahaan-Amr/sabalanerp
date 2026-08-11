@@ -1133,6 +1133,7 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
       {
         deliveryDate: '1405/04/10',
         receiverName: 'Receiver A',
+        projectManagerName: '',
         products: [{ productIndex: 0, productId: productRow.productId, quantity: 17, amount: 17, unit: 'meter' }]
       }
     ],
@@ -1170,7 +1171,7 @@ const wizardData = (overrides: Partial<ContractWizardData> = {}): ContractWizard
 {
   const invalidPayment = validatePayment({
     payments: [
-      { id: 'pay-1', method: 'CASH_SHIBA', amount: 1_000_000 },
+      { id: 'pay-1', method: 'CASH_SHIBA', amount: 1_000_000, paymentDate: '' },
       { id: 'pay-2', method: 'CHECK', amount: 2_000_000, paymentDate: '1405/05/01' }
     ],
     currency: 'تومان',

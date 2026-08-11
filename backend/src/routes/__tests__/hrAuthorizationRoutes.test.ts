@@ -22,10 +22,16 @@ for (const route of [
   'POST /destinations',
 ]) assert.ok(registeredRoutes.includes(route), `missing HR authorization route: ${route}`);
 
-for (const guardedRoute of ['/context', '/workspace-grants', '/feature-grants', '/business-authorities', '/responsibilities', '/destinations']) {
+for (const guardedRoute of ['/context', '/workspace-grants', '/feature-grants']) {
   const layer = (router as unknown as { stack: Array<{ route?: { path: string; stack: unknown[] } }> }).stack
     .find((candidate) => candidate.route?.path === guardedRoute);
   assert.ok(layer && layer.route!.stack.length >= 2, `${guardedRoute} must retain server-side authorization middleware`);
+}
+
+for (const historicalMutation of ['/business-authorities', '/business-authorities/:id/revoke', '/responsibilities', '/responsibilities/:id/end', '/destinations']) {
+  const layer = (router as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: RequestHandler }> } }> }).stack
+    .find((candidate) => candidate.route?.path === historicalMutation);
+  assert.equal(layer?.route?.stack[0]?.handle.name, 'legacyAuthorizationReadOnly', `${historicalMutation} must be a read-only historical endpoint`);
 }
 
 console.log('HR authorization administration route tests passed.');

@@ -7,7 +7,7 @@ import {
   ErpSelect,
   ErpTextarea,
 } from "@/components/erp";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   useParams,
   usePathname,
@@ -30,6 +30,7 @@ import {
   ErpLoading,
   ErpPage,
   ErpSection,
+  ErpSheet,
 } from "@/components/erp";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { HiringLifecycle } from "@/features/hr-hiring/HiringLifecycle";
@@ -40,7 +41,7 @@ import {
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import { ApplicantCaseOverview } from "@/features/hr-hiring/ApplicantCaseOverview";
-import { GuidedHrInterview } from "@/features/hr-hiring/GuidedHrInterview";
+import { ProductionHrInterview, ProductionInterviewReport, type ProductionInterviewPayload } from "@/features/hr-hiring/prototype/HrInterviewPrototype";
 import { FinalHiringRejection } from "@/features/hr-hiring/FinalHiringRejection";
 import { validateHiringQueueReturnHref } from "@/features/hr-hiring/hiringQueueViewModel";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
@@ -152,7 +153,7 @@ export default function HiringCasePage() {
   const [busy, setBusy] = useState(false);
   const [deletionTarget, setDeletionTarget] = useState<any>(null);
   const [retentionTarget, setRetentionTarget] = useState<any>(null);
-  const [authorities, setAuthorities] = useState<string[]>([]);
+  const [actionPermissions, setActionPermissions] = useState<string[]>([]);
   const [correctionExplanations, setCorrectionExplanations] = useState<
     Record<string, string>
   >({});
@@ -271,9 +272,9 @@ export default function HiringCasePage() {
   useEffect(() => {
     void load();
     void hiringAPI
-      .myAuthorities()
-      .then((result) => setAuthorities(result.data.data))
-      .catch(() => setAuthorities([]));
+      .myActionPermissions()
+      .then((result) => setActionPermissions(result.data.data))
+      .catch(() => setActionPermissions([]));
     void hiringAPI
       .collateralTemplates()
       .then((result) => {
@@ -359,13 +360,12 @@ export default function HiringCasePage() {
     toIsoDate(insurance.dueDate) < new Date().toISOString().slice(0, 10),
   );
   const latestContract = data.contracts?.[0];
-  const hasAuthority = (...values: string[]) =>
-    !data.readOnlyArchived &&
-    values.some((value) => authorities.includes(value));
-  const canHrSensitive = hasAuthority("HR_PROCESSOR", "HR_MANAGER");
-  const canCompanyManager = hasAuthority("COMPANY_MANAGER");
-  const canFinallyReject = hasAuthority("HR_MANAGER", "COMPANY_MANAGER");
-  const canFinance = hasAuthority("FINANCE_RECORDER", "FINANCE_MANAGER");
+  const hasActionPermission = (...values: string[]) =>
+    !data.readOnlyArchived && values.some((value) => actionPermissions.includes(value));
+  const canHrSensitive = hasActionPermission("MANAGE_RECRUITMENT_CASE");
+  const canCompanyManager = hasActionPermission("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS", "MANAGE_COMPANY_EVALUATION_PLAN", "RECORD_FINAL_MANAGEMENT_DECISION");
+  const canFinallyReject = hasActionPermission("RECORD_PRELIMINARY_DECISION", "RECORD_FINAL_MANAGEMENT_DECISION");
+  const canFinance = hasActionPermission("MANAGE_FINANCE_EVIDENCE");
   const canViewContractTask = hiringTaskDetailVisible(
     data.taskCapabilities,
     "SIGNED_CONTRACT",
@@ -666,7 +666,7 @@ export default function HiringCasePage() {
           <PreIdentitySection
             phase={selectedLifecyclePhase as "INITIAL_HR_REVIEW" | "COMPANY_EVALUATION_PLAN"}
             application={data}
-            authorities={authorities}
+            actionPermissions={actionPermissions}
             busy={busy}
             applicationId={id}
             run={run}
@@ -678,7 +678,7 @@ export default function HiringCasePage() {
           <>
             <FormalAssessmentPlanPanel
               application={data}
-              authorities={authorities}
+              actionPermissions={actionPermissions}
               busy={busy}
               applicationId={id}
               run={run}
@@ -789,7 +789,7 @@ export default function HiringCasePage() {
               <div className="grid gap-4 xl:grid-cols-2">
                 <ErpCard className="p-4">
                   <h3 className="font-black">بررسی منابع انسانی</h3>
-                  {hasAuthority("HR_PROCESSOR") && (
+                  {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
                     <div className="mt-3 grid gap-2 md:grid-cols-2">
                       <ErpSelect
                         className={field}
@@ -940,7 +940,7 @@ export default function HiringCasePage() {
                         >
                           <span>{identityFieldLabels[key]}</span>
                           <div className="flex gap-1">
-                            {hasAuthority("HR_PROCESSOR") && (
+                            {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
                               <>
                                 <ErpPressable
                                   type="submit"
@@ -1011,7 +1011,7 @@ export default function HiringCasePage() {
                       );
                     })}
                   </div>
-                  {hasAuthority("HR_PROCESSOR") &&
+                  {hasActionPermission("MANAGE_RECRUITMENT_CASE") &&
                     data.identityChecks.some((check: any) =>
                       ["MISMATCH", "UNREADABLE"].includes(check.status),
                     ) && (
@@ -1091,7 +1091,7 @@ export default function HiringCasePage() {
                         />
                       </div>
                     )}
-                  {hasAuthority("HR_MANAGER") && (
+                  {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
                     <ErpButton
                       className="mt-3"
                       label="تأیید نهایی مدیر منابع انسانی"
@@ -1113,8 +1113,8 @@ export default function HiringCasePage() {
           {selectedLifecyclePhase === "ASSESSMENT" && (
             <ErpSection title="ارزیابی‌های DISC / BIG FIVE / EQ">
               <ErpCard className="p-4">
-                {(hasAuthority("HR_PROCESSOR") ||
-                  (hasAuthority("HR_MANAGER") && editingAssessmentId)) && (
+                {(hasActionPermission("MANAGE_RECRUITMENT_CASE") ||
+                  (hasActionPermission("MANAGE_RECRUITMENT_CASE") && editingAssessmentId)) && (
                   <>
                     <p className="mb-4 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                       امتیازهای درج‌شده در گزارش رسمی ارزیابی را وارد کنید. همه
@@ -1275,7 +1275,7 @@ export default function HiringCasePage() {
                           دریافت فایل
                         </ErpPressable>
                       )}
-                      {hasAuthority("HR_MANAGER") &&
+                      {hasActionPermission("MANAGE_RECRUITMENT_CASE") &&
                         item.status === "ACTIVE" && (
                           <>
                             <ErpPressable
@@ -1323,7 +1323,7 @@ export default function HiringCasePage() {
                     </span>
                   ))}
                 </div>
-                {hasAuthority("HR_PROCESSOR") && (
+                {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
                   <ErpButton
                     className="mt-4"
                     label={
@@ -1347,7 +1347,7 @@ export default function HiringCasePage() {
                     tone="success"
                   />
                 )}
-                {hasAuthority("COMPANY_MANAGER") &&
+                {hasActionPermission("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS") &&
                   data.assessmentReviewRequired &&
                   data.assessmentCompletedAt && (
                     <ErpButton
@@ -1362,7 +1362,7 @@ export default function HiringCasePage() {
                       }
                     />
                   )}
-                {hasAuthority("COMPANY_MANAGER") &&
+                {hasActionPermission("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS") &&
                   data.assessmentCompletedAt && (
                     <AssessmentDecisionPanel
                       applicationId={id}
@@ -1377,18 +1377,16 @@ export default function HiringCasePage() {
         </>
       )}
       {selectedLifecyclePhase === "OFFER" &&
-        hasAuthority(
-          "COMPANY_MANAGER",
-          "HR_PAYROLL_PROCESSOR",
-          "HR_PAYROLL_MANAGER",
-          "FINANCE_MANAGER",
-          "HR_PROCESSOR",
-          "HR_MANAGER",
-          "COMPANY_MANAGER",
+        hasActionPermission(
+          "MANAGE_COMPENSATION",
+          "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+          "MANAGE_PAYROLL",
+          "MANAGE_FINANCE_EVIDENCE",
+          "MANAGE_RECRUITMENT_CASE",
         ) && (
           <>
             <ErpSection title="پیشنهاد حقوق و مزایا">
-              {hasAuthority("COMPANY_MANAGER") && (
+              {hasActionPermission("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS") && (
                 <CollateralRequirementPanel
                   applicationId={id}
                   current={data.collateralRequirements?.[0]}
@@ -1464,7 +1462,7 @@ export default function HiringCasePage() {
                   ))}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {hasAuthority("COMPANY_MANAGER", "HR_PAYROLL_PROCESSOR") && (
+                  {(actionPermissions.includes("MANAGE_COMPENSATION") || actionPermissions.includes("MANAGE_PAYROLL")) && !data.readOnlyArchived && (
                     <ErpPressable
                       type="submit"
                       className="rounded-lg border px-3 py-2 text-sm"
@@ -1478,7 +1476,7 @@ export default function HiringCasePage() {
                       افزودن ردیف
                     </ErpPressable>
                   )}
-                  {hasAuthority("COMPANY_MANAGER") && (
+                  {actionPermissions.includes("MANAGE_COMPENSATION") && !data.readOnlyArchived && (
                     <ErpButton
                       label="پیشنهاد مدیریت شرکت"
                       onClick={() =>
@@ -1491,7 +1489,7 @@ export default function HiringCasePage() {
                       disabled={busy || !compensationRowsValid}
                     />
                   )}
-                  {hasAuthority("HR_PAYROLL_PROCESSOR") && (
+                  {hasActionPermission("MANAGE_PAYROLL") && (
                     <ErpButton
                       label="آماده‌سازی منابع انسانی و حقوق و دستمزد"
                       onClick={() =>
@@ -1506,7 +1504,7 @@ export default function HiringCasePage() {
                       disabled={busy || !compensation || !compensationRowsValid}
                     />
                   )}
-                  {hasAuthority("HR_PAYROLL_MANAGER") && (
+                  {hasActionPermission("MANAGE_PAYROLL") && (
                     <ErpButton
                       label="تأیید مدیر حقوق و دستمزد"
                       onClick={() =>
@@ -1523,7 +1521,7 @@ export default function HiringCasePage() {
                       tone="success"
                     />
                   )}
-                  {hasAuthority("FINANCE_MANAGER") && (
+                  {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
                     <ErpButton
                       label="تأیید مدیر مالی"
                       onClick={() =>
@@ -1612,7 +1610,7 @@ export default function HiringCasePage() {
                           {compensation.candidateNotificationError ||
                             "ارسال پیامک پیشنهاد همکاری ناموفق بود."}
                         </p>
-                        {hasAuthority("HR_PROCESSOR", "HR_MANAGER") && (
+                        {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
                           <ErpButton
                             className="mt-2"
                             label="ارسال مجدد پیامک پیشنهاد"
@@ -1631,7 +1629,7 @@ export default function HiringCasePage() {
                         )}
                       </div>
                     )}
-                    {hasAuthority("HR_PROCESSOR") &&
+                    {hasActionPermission("MANAGE_RECRUITMENT_CASE") &&
                       compensation.hrApprovedAt &&
                       compensation.financeApprovedAt &&
                       !compensation.candidateDecision && (
@@ -1738,7 +1736,7 @@ export default function HiringCasePage() {
       {selectedLifecyclePhase === "CONVERSION" && canFinance && (
         <>
           <ErpSection title="وثیقه و تعهدات امور مالی">
-            {hasAuthority("FINANCE_RECORDER") && (
+            {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
               <ErpCard className="mb-4 grid gap-2 p-4 md:grid-cols-3">
                 <ErpSelect
                   className={field}
@@ -1769,7 +1767,7 @@ export default function HiringCasePage() {
               </ErpCard>
             )}
             <div className="grid gap-4 xl:grid-cols-2">
-              {hasAuthority("FINANCE_RECORDER") && (
+              {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
                 <ErpCard className="grid gap-2 p-4 md:grid-cols-2">
                   <ErpSelect
                     className={field}
@@ -1914,7 +1912,7 @@ export default function HiringCasePage() {
                           دریافت اسکن
                         </ErpPressable>
                       )}
-                      {hasAuthority("FINANCE_RECORDER") &&
+                      {hasActionPermission("MANAGE_FINANCE_EVIDENCE") &&
                         ["MISSING", "MISMATCH", "UNREADABLE"].includes(
                           item.status,
                         ) && (
@@ -1935,7 +1933,7 @@ export default function HiringCasePage() {
                               : "ثبت نسخه جایگزین"}
                           </ErpPressable>
                         )}
-                      {hasAuthority("FINANCE_MANAGER") && (
+                      {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
                         <ErpPressable
                           type="submit"
                           className="mt-2 rounded bg-[var(--sds-success-surface)] px-2 py-1 text-xs"
@@ -1952,7 +1950,7 @@ export default function HiringCasePage() {
                           تأیید مدیر مالی
                         </ErpPressable>
                       )}
-                      {hasAuthority("FINANCE_MANAGER") && (
+                      {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
                         <ErpPressable
                           type="submit"
                           className="mr-2 mt-2 rounded bg-[var(--sds-danger-surface)] px-2 py-1 text-xs"
@@ -1971,8 +1969,8 @@ export default function HiringCasePage() {
                           نیازمند پیگیری
                         </ErpPressable>
                       )}
-                      {(hasAuthority("FINANCE_RECORDER") ||
-                        hasAuthority("FINANCE_MANAGER")) &&
+                      {(hasActionPermission("MANAGE_FINANCE_EVIDENCE") ||
+                        hasActionPermission("MANAGE_FINANCE_EVIDENCE")) &&
                         item.receivedAt &&
                         !item.returnedAt && (
                           <ErpPressable
@@ -1993,7 +1991,7 @@ export default function HiringCasePage() {
                             ثبت تحویل اصل
                           </ErpPressable>
                         )}
-                      {hasAuthority("FINANCE_MANAGER") &&
+                      {hasActionPermission("MANAGE_FINANCE_EVIDENCE") &&
                         item.returnedAt &&
                         !item.returnConfirmedAt && (
                           <ErpPressable
@@ -2034,7 +2032,7 @@ export default function HiringCasePage() {
                     </div>
                   ))}
                 </div>
-                {hasAuthority("FINANCE_MANAGER") && (
+                {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
                   <ErpButton
                     className="mt-3"
                     label="تأیید نهایی وثیقه"
@@ -2053,7 +2051,7 @@ export default function HiringCasePage() {
         </>
       )}
       {selectedLifecyclePhase === "CONVERSION" &&
-        hasAuthority("HR_MANAGER") && (
+        hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
           <>
             <ErpSection title="تبدیل به پرسنل برنامه‌ریزی‌شده">
               <ErpCard className="grid gap-3 p-4 md:grid-cols-3">
@@ -2100,7 +2098,7 @@ export default function HiringCasePage() {
           title="وظایف موقت پیش از فعال‌سازی"
           description="وظیفه به پرسنل برنامه‌ریزی‌شده متصل می‌شود و هیچ کاربر یا شناسه ورود ایجاد نمی‌کند."
         >
-          {hasAuthority("HR_MANAGER") && (
+          {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
             <ErpCard className="grid gap-2 p-4 md:grid-cols-4">
               <ErpInput
                 className={field}
@@ -2156,7 +2154,15 @@ export default function HiringCasePage() {
                   </small>
                 </span>
                 {item.status !== "COMPLETE" &&
-                  hasAuthority(item.ownerAuthority) && (
+                  hasActionPermission(({
+                    HR_PROCESSOR: "MANAGE_RECRUITMENT_CASE",
+                    HR_MANAGER: "MANAGE_RECRUITMENT_CASE",
+                    COMPANY_MANAGER: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+                    HR_PAYROLL_PROCESSOR: "MANAGE_PAYROLL",
+                    HR_PAYROLL_MANAGER: "MANAGE_PAYROLL",
+                    FINANCE_RECORDER: "MANAGE_FINANCE_EVIDENCE",
+                    FINANCE_MANAGER: "MANAGE_FINANCE_EVIDENCE",
+                  } as Record<string, string>)[item.ownerAuthority] || item.ownerAuthority) && (
                     <ErpPressable
                       type="submit"
                       className="rounded bg-[var(--sds-success-surface)] px-2 py-1 text-xs"
@@ -2183,7 +2189,7 @@ export default function HiringCasePage() {
         <>
           <ErpSection title="قرارداد کاغذی">
             <div className="grid gap-3 md:grid-cols-4">
-              {hasAuthority("FINANCE_RECORDER") && (
+              {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
                 <>
                   <HrField label="شماره قرارداد" required>
                     <ErpInput
@@ -2255,7 +2261,7 @@ export default function HiringCasePage() {
                   )}
                 </>
               )}
-              {hasAuthority("FINANCE_MANAGER") && latestContract?.canReview && (
+              {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && latestContract?.canReview && (
                 <div className="space-y-2 md:col-span-2">
                   <div className="flex flex-wrap gap-2">
                     <ErpButton
@@ -2631,7 +2637,7 @@ export default function HiringCasePage() {
           "OFFER",
           "CONVERSION",
         ].includes(selectedLifecyclePhase) &&
-        hasAuthority("HR_MANAGER") && (
+        hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
           <>
             <ErpSection
               title="بستن یا لغو پرونده"
@@ -2673,7 +2679,7 @@ export default function HiringCasePage() {
         (data.stage === "CLOSED" && data.outcome !== "HIRED")) && (
         <CaseRecoveryPanel
           application={data}
-          authorities={authorities}
+          actionPermissions={actionPermissions}
           applicationId={id}
           busy={busy}
           run={run}
@@ -2721,10 +2727,43 @@ type CaseActionRunner = (
   success: string,
 ) => Promise<void>;
 
+function CompanyEvaluationPlan({ applicationId, actionPermissions, busy, run, onPendingChange }: { applicationId: string; actionPermissions: string[]; busy: boolean; run: CaseActionRunner; onPendingChange: (pending: boolean) => void }) {
+  const [items, setItems] = useState<any[]>([]);
+  const [draft, setDraft] = useState({ type: "MANAGEMENT_INTERVIEW", subject: "", instructions: "", evidencePolicy: "EXPLANATION_REQUIRED" });
+  const [results, setResults] = useState<Record<string, { effect: string; explanation: string; file?: File }>>({});
+  const [cancelTarget, setCancelTarget] = useState<any>();
+  const canPlan = actionPermissions.includes("MANAGE_COMPANY_EVALUATION_PLAN");
+  const canResult = actionPermissions.includes("RECORD_COMPANY_EVALUATION_RESULT");
+  const canViewResults = actionPermissions.includes("VIEW_COMPANY_EVALUATION_RESULTS");
+  const downloadEvidence = async (item: any) => {
+    const response = await hiringAPI.downloadCompanyEvaluationEvidence(applicationId, item.id);
+    const href = URL.createObjectURL(response.data);
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = item.resultOriginalName || "company-evaluation-evidence";
+    anchor.click();
+    URL.revokeObjectURL(href);
+  };
+  const refresh = useCallback(() => hiringAPI.companyEvaluations(applicationId).then(({ data }) => {
+    const rows = data.data || [];
+    setItems(rows);
+    onPendingChange(rows.some((item: any) => item.status === "PLANNED"));
+  }), [applicationId, onPendingChange]);
+  useEffect(() => { void refresh(); }, [refresh]);
+  const types = [["MANAGEMENT_INTERVIEW", "مصاحبه با مدیریت"], ["HR_MANAGER_INTERVIEW", "مصاحبه با مدیر منابع انسانی"], ["DEPARTMENT_SUPERVISOR_INTERVIEW", "مصاحبه با سرپرست بخش"], ["THERAPIST_CONSULTATION", "مراجعه به مشاور و تراپیست"], ["OTHER", "سایر"]];
+  return <ErpSection title="برنامه ارزیابی شرکت" description="هر ارزیابی یک نوبت پایدار دارد و نتیجه منفی به‌تنهایی پرونده را رد نمی‌کند.">
+    {canPlan && <ErpCard className="mb-4 space-y-3 p-4"><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4"><ErpSelect value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })}>{types.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</ErpSelect><ErpSelect value={draft.evidencePolicy} onChange={(event) => setDraft({ ...draft, evidencePolicy: event.target.value })}><option value="EXPLANATION_REQUIRED">توضیح الزامی</option><option value="FILE_REQUIRED">فایل الزامی</option><option value="FILE_OPTIONAL">فایل اختیاری</option><option value="NO_FILE">بدون فایل</option></ErpSelect>{draft.type === "OTHER" && <><ErpInput placeholder="موضوع" value={draft.subject} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} /><ErpInput placeholder="شرح و دستور پیگیری" value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} /></>}</div><ErpButton label="افزودن ارزیابی" variant="solid" disabled={busy || (draft.type === "OTHER" && (!draft.subject.trim() || !draft.instructions.trim()))} onClick={() => void run(() => hiringAPI.addCompanyEvaluation(applicationId, draft), "ارزیابی به برنامه افزوده شد.").then(refresh)} /></ErpCard>}
+    <div className="space-y-3">{items.map((item) => { const result = results[item.id] || { effect: "NEUTRAL", explanation: "" }; const label = types.find(([value]) => value === item.type)?.[1] || item.type; return <ErpCard key={item.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><b>{label} · نوبت {Number(item.occurrenceNumber).toLocaleString("fa-IR")}</b>{item.subject && <p className="text-sm text-[var(--sds-text-secondary)]">{item.subject}</p>}</div><ErpBadge tone={item.status === "COMPLETED" ? "success" : item.status === "CANCELLED" ? "neutral" : "warning"}>{item.status === "COMPLETED" ? "تکمیل‌شده" : item.status === "CANCELLED" ? "لغوشده" : "در انتظار نتیجه"}</ErpBadge></div>{item.status === "PLANNED" && canResult && <div className="mt-3 grid gap-2 md:grid-cols-4"><ErpSelect value={result.effect} onChange={(event) => setResults({ ...results, [item.id]: { ...result, effect: event.target.value } })}><option value="POSITIVE">مثبت</option><option value="NEUTRAL">خنثی</option><option value="NEGATIVE">منفی</option></ErpSelect><ErpInput placeholder={item.evidencePolicy === "EXPLANATION_REQUIRED" ? "توضیح الزامی" : "توضیح اختیاری"} value={result.explanation} onChange={(event) => setResults({ ...results, [item.id]: { ...result, explanation: event.target.value } })} />{item.evidencePolicy !== "NO_FILE" && <ErpInput type="file" onChange={(event) => setResults({ ...results, [item.id]: { ...result, file: event.target.files?.[0] } })} />}<ErpButton label="ثبت نتیجه" disabled={busy || (item.evidencePolicy === "EXPLANATION_REQUIRED" && !result.explanation.trim()) || (item.evidencePolicy === "FILE_REQUIRED" && !result.file)} onClick={() => { const data = new FormData(); data.append("effect", result.effect); data.append("explanation", result.explanation); if (result.file) data.append("file", result.file); void run(() => hiringAPI.recordCompanyEvaluationResult(applicationId, item.id, data), "نتیجه ارزیابی ثبت شد.").then(refresh); }} /></div>}{item.status === "PLANNED" && canPlan && <div className="mt-3"><ErpButton label="لغو ارزیابی" tone="danger" variant="ghost" disabled={busy} onClick={() => setCancelTarget(item)} /></div>}{item.status === "COMPLETED" && <div className="mt-3 flex flex-wrap items-center gap-3 text-sm"><span><b>اثر: </b>{item.resultEffect === "POSITIVE" ? "مثبت" : item.resultEffect === "NEGATIVE" ? "منفی" : "خنثی"}{item.resultExplanation && ` · ${item.resultExplanation}`}</span>{item.resultOriginalName && canViewResults && <ErpButton label="دریافت مدرک نتیجه" variant="ghost" onClick={() => void downloadEvidence(item)} />}</div>}</ErpCard>; })}</div>
+    <ErpSheet open={Boolean(cancelTarget)} onClose={() => { if (!busy) setCancelTarget(undefined); }} title="لغو ارزیابی" presentation="modal" dismissible={!busy}>
+      <ErpCard className="space-y-4 p-5"><p>لغو این نوبت بازگشت‌پذیر نیست و در سابقه پرونده ثبت می‌شود.</p><div className="flex gap-2"><ErpButton label="تأیید لغو" tone="danger" disabled={busy} onClick={() => { if (!cancelTarget) return; void run(() => hiringAPI.cancelCompanyEvaluation(applicationId, cancelTarget.id), "ارزیابی لغو شد.").then(() => { setCancelTarget(undefined); return refresh(); }); }} /><ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => setCancelTarget(undefined)} /></div></ErpCard>
+    </ErpSheet>
+  </ErpSection>;
+}
+
 function PreIdentitySection({
   phase,
   application,
-  authorities,
+  actionPermissions,
   busy,
   applicationId,
   run,
@@ -2732,15 +2771,16 @@ function PreIdentitySection({
 }: {
   phase: "INITIAL_HR_REVIEW" | "COMPANY_EVALUATION_PLAN";
   application: any;
-  authorities: string[];
+  actionPermissions: string[];
   busy: boolean;
   applicationId: string;
   run: CaseActionRunner;
   download: (request: () => Promise<any>, fileName: string) => Promise<void>;
 }) {
-  const has = (...values: string[]) =>
-    values.some((value) => authorities.includes(value));
+  const hasAction = (...values: string[]) => values.some((value) => actionPermissions.includes(value));
   const [decisionDrafts, setDecisionDrafts] = useState<Record<string, any>>({});
+  const [hasPendingCompanyEvaluations, setHasPendingCompanyEvaluations] = useState(false);
+  const [editingInterviewRevision, setEditingInterviewRevision] = useState(false);
   const [requirement, setRequirement] = useState({
     title: "",
     instructions: "",
@@ -2758,30 +2798,46 @@ function PreIdentitySection({
       .sort((a: any, b: any) => b.version - a.version)[0];
   const decisionDefinitions = phase === "INITIAL_HR_REVIEW"
     ? [
-        ["HR_PRELIMINARY_APPROVAL", "تأیید اولیه HR", "HR_MANAGER"],
+        ["HR_PRELIMINARY_APPROVAL", "تأیید اولیه HR", "RECORD_PRELIMINARY_DECISION"],
       ]
-    : [["COMPANY_APPROVAL", "تأیید مدیریت شرکت", "COMPANY_MANAGER"]];
-  useEffect(() => {
-    if (!has("COMPANY_MANAGER")) return;
-    void hiringAPI.preIdentityTemplates().then((response) => {
-      setTemplates(response.data.data || []);
-      setTemplateId(response.data.data?.[0]?.id || "");
-    });
-    // Authority membership is stable for the lifetime of this case view.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
+    : [["COMPANY_APPROVAL", "تأیید مدیریت شرکت", "RECORD_FINAL_MANAGEMENT_DECISION"]];
+  const latestInterview = latest("HR_INTERVIEW");
   return (
     <ErpSection
       title={phase === "INITIAL_HR_REVIEW" ? "بررسی اولیه منابع انسانی" : "برنامه ارزیابی مدیریت شرکت"}
       description={phase === "INITIAL_HR_REVIEW" ? "مصاحبه و تأیید اولیه پیش از تصمیم ارزیابی‌های رسمی ثبت می‌شود." : "فعالیت‌های مدیریتی جدا از ارزیابی‌های رسمی برنامه‌ریزی و پیگیری می‌شوند."}
     >
-      {phase === "INITIAL_HR_REVIEW" && has("HR_PROCESSOR") && (
-        <GuidedHrInterview
+      {(phase === "INITIAL_HR_REVIEW" || phase === "COMPANY_EVALUATION_PLAN") && hasAction("VIEW_INITIAL_INTERVIEW_REPORT") && latestInterview?.evidenceJson && (
+        <ProductionInterviewReport
+          payload={latestInterview.evidenceJson as ProductionInterviewPayload}
+          version={latestInterview.version}
+          history={decisions.filter((item: any) => item.kind === "HR_INTERVIEW" && item.version !== latestInterview.version)}
+        />
+      )}
+      {phase === "COMPANY_EVALUATION_PLAN" && latest("HR_PRELIMINARY_APPROVAL") && (
+        <ErpCard className="p-4">
+          <b>تصمیم مقدماتی منابع انسانی</b>
+          <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">{latest("HR_PRELIMINARY_APPROVAL").outcome === "POSITIVE" ? "تأیید" : "رد"} · {latest("HR_PRELIMINARY_APPROVAL").explanation || "بدون توضیح"}</p>
+        </ErpCard>
+      )}
+      {phase === "INITIAL_HR_REVIEW" && latestInterview && hasAction("RECORD_INITIAL_INTERVIEW") && !editingInterviewRevision && (
+        <div className="flex justify-end"><ErpButton label="ثبت نسخه اصلاحی مصاحبه" variant="ghost" onClick={() => setEditingInterviewRevision(true)} /></div>
+      )}
+      {phase === "INITIAL_HR_REVIEW" && hasAction("RECORD_INITIAL_INTERVIEW") && (!latestInterview || editingInterviewRevision) && (
+        <ProductionHrInterview
+          initialPayload={application.initialInterviewDraft?.dataJson as ProductionInterviewPayload | null}
+          initialVersion={application.initialInterviewDraft?.version || 0}
+          history={decisions.filter((item: any) => item.kind === "HR_INTERVIEW")}
           busy={busy}
-          onSubmit={(payload) => run(
+          onSaveDraft={async (payload, expectedVersion) => {
+            const response = await hiringAPI.saveInitialInterviewDraft(applicationId, payload, expectedVersion);
+            return response.data.data;
+          }}
+          onComplete={(payload) => run(
             () => hiringAPI.recordDecision(applicationId, "HR_INTERVIEW", {
-              ...payload,
+              outcome: payload.state.decision,
+              explanation: payload.state.decisionReason,
+              guidedInterview: payload,
               changeReason: latest("HR_INTERVIEW") ? "ثبت نسخه اصلاحی مصاحبه" : "",
             }),
             "نسخه مصاحبه هدایت‌شده ثبت شد.",
@@ -2797,7 +2853,7 @@ function PreIdentitySection({
             changeReason: "",
           };
           return (
-            <ErpCard key={kind} className="space-y-2 p-4">
+            <div key={kind} className="space-y-3 border-t border-[var(--sds-border-default)] pt-4">
               <div className="flex items-center justify-between gap-2">
                 <b>{label}</b>
                 <ErpBadge
@@ -2822,7 +2878,7 @@ function PreIdentitySection({
                   <small>نسخه {current.version.toLocaleString("fa-IR")}</small>
                 </div>
               )}
-              {has(authority) && (
+              {hasAction(authority) && (kind !== "HR_PRELIMINARY_APPROVAL" || Boolean(latest("HR_INTERVIEW"))) && (
                 <>
                   <ErpSelect
                     className={field}
@@ -2873,6 +2929,7 @@ function PreIdentitySection({
                     label="ثبت نسخه تصمیم"
                     disabled={
                       busy ||
+                      (kind === "COMPANY_APPROVAL" && hasPendingCompanyEvaluations) ||
                       ((kind !== "COMPANY_APPROVAL" ||
                         draft.outcome === "NEGATIVE") &&
                         !draft.explanation.trim()) ||
@@ -2888,12 +2945,13 @@ function PreIdentitySection({
                   />
                 </>
               )}
-            </ErpCard>
+            </div>
           );
         })}
       </div>
 
-      {phase === "COMPANY_EVALUATION_PLAN" && <ErpCard className="mt-4 space-y-3 p-4">
+      {phase === "COMPANY_EVALUATION_PLAN" && <CompanyEvaluationPlan applicationId={applicationId} actionPermissions={actionPermissions} busy={busy} run={run} onPendingChange={setHasPendingCompanyEvaluations} />}
+      {phase === "COMPANY_EVALUATION_PLAN" && false && <ErpCard className="mt-4 space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <b>چک‌لیست الزامات مدیریت شرکت</b>
           <ErpBadge
@@ -2908,7 +2966,7 @@ function PreIdentitySection({
               : "در حال تنظیم"}
           </ErpBadge>
         </div>
-        {has("COMPANY_MANAGER") && (
+        {hasAction("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS") && (
           <div className="space-y-3">
             <div className="grid gap-2 md:grid-cols-3">
               <ErpSelect
@@ -3087,7 +3145,7 @@ function PreIdentitySection({
                     {item.resultExplanation}
                   </p>
                 )}
-                {has("HR_PROCESSOR", "HR_MANAGER", "COMPANY_MANAGER") &&
+                {hasAction("VIEW_COMPANY_EVALUATION_RESULTS", "MANAGE_RECRUITMENT_CASE", "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS") &&
                   item.originalName && (
                     <ErpPressable
                       type="submit"
@@ -3106,7 +3164,7 @@ function PreIdentitySection({
                       دریافت گزارش محرمانه
                     </ErpPressable>
                   )}
-                {has("HR_PROCESSOR") &&
+                {hasAction("MANAGE_RECRUITMENT_CASE") &&
                   !["POSITIVE", "NEGATIVE"].includes(item.status) && (
                     <div className="mt-3 grid gap-2 md:grid-cols-4">
                       <ErpSelect
@@ -3194,7 +3252,7 @@ function PreIdentitySection({
                       />
                     </div>
                   )}
-                {has("HR_MANAGER") &&
+                {hasAction("MANAGE_RECRUITMENT_CASE") &&
                   ["POSITIVE", "NEGATIVE"].includes(item.status) && (
                     <ErpPressable
                       type="button"
@@ -3218,7 +3276,7 @@ function PreIdentitySection({
                       ایجاد نسخه اصلاحی
                     </ErpPressable>
                   )}
-                {has("COMPANY_MANAGER") &&
+                {hasAction("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS") &&
                   item.status === "NEGATIVE" &&
                   !item.managementResolution && (
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -3256,7 +3314,7 @@ function PreIdentitySection({
             );
           })}
         </div>
-        {has("HR_PROCESSOR") && application.preIdentityManagementApprovedAt && (
+        {hasAction("MANAGE_RECRUITMENT_CASE") && application.preIdentityManagementApprovedAt && (
           <ErpButton
             label="ارسال پرونده به احراز هویت"
             tone="success"
@@ -3298,13 +3356,13 @@ const formalAssessmentFields: Record<string, Array<{ key: string; label: string 
 
 function FormalAssessmentPlanPanel({
   application,
-  authorities,
+  actionPermissions,
   busy,
   applicationId,
   run,
 }: {
   application: any;
-  authorities: string[];
+  actionPermissions: string[];
   busy: boolean;
   applicationId: string;
   run: CaseActionRunner;
@@ -3331,8 +3389,8 @@ function FormalAssessmentPlanPanel({
   const [resultDrafts, setResultDrafts] = useState<Record<string, Record<string, string>>>({});
   const [resultFiles, setResultFiles] = useState<Record<string, File[]>>({});
   const [correctionReasons, setCorrectionReasons] = useState<Record<string, string>>({});
-  const canManagePlan = authorities.includes("COMPANY_MANAGER");
-  const canRecord = authorities.includes("HR_PROCESSOR") || authorities.includes("HR_MANAGER");
+  const canManagePlan = actionPermissions.includes("MANAGE_COMPANY_EVALUATION_PLAN");
+  const canRecord = actionPermissions.includes("RECORD_COMPANY_EVALUATION_RESULT");
   const selected = Object.entries(selections).filter(([, value]) => value);
 
   return (
@@ -3425,7 +3483,7 @@ function FormalAssessmentPlanPanel({
             {plan.status === "ACTIVE" && plan.selections.filter((item: any) => item.selected).map((selection: any) => {
               const results = plans.flatMap((item: any) => item.results || []).filter((item: any) => item.assessmentKind === selection.assessmentKind).sort((a: any, b: any) => b.resultVersion - a.resultVersion);
               const latest = results[0];
-              const maySubmit = canRecord && selection.executionMethod === "COMPANY" && (!latest || latest.status === "PENDING" || authorities.includes("HR_MANAGER"));
+              const maySubmit = canRecord && selection.executionMethod === "COMPANY";
               const resultValidation = Object.fromEntries(
                 formalAssessmentFields[selection.assessmentKind].map(({ key }) => [
                   key,
@@ -3460,7 +3518,7 @@ function FormalAssessmentPlanPanel({
                           )}
                         </label>
                       ))}
-                      {latest?.status === "COMPLETED" && authorities.includes("HR_MANAGER") && (
+                      {latest?.status === "COMPLETED" && canRecord && (
                         <ErpInput
                           value={correctionReasons[selection.assessmentKind] || ""}
                           onChange={(event) => setCorrectionReasons({ ...correctionReasons, [selection.assessmentKind]: event.target.value })}
@@ -3654,28 +3712,28 @@ function CollateralRequirementPanel({
 
 function CaseRecoveryPanel({
   application,
-  authorities,
+  actionPermissions,
   applicationId,
   busy,
   run,
 }: {
   application: any;
-  authorities: string[];
+  actionPermissions: string[];
   applicationId: string;
   busy: boolean;
   run: CaseActionRunner;
 }) {
   const [reason, setReason] = useState("");
   const [consent, setConsent] = useState({ method: "PHONE", at: "", note: "" });
-  const has = (...values: string[]) =>
-    values.some((value) => authorities.includes(value));
+  const hasAction = (...values: string[]) =>
+    values.some((value) => actionPermissions.includes(value));
   const authorized = (application.reopenings || []).some(
     (item: any) => item.status === "AUTHORIZED",
   );
   if (application.disposition) {
     const canReactivate =
-      (application.disposition === "INITIAL_REJECTED" && has("HR_MANAGER")) ||
-      (application.disposition === "RESERVE" && has("COMPANY_MANAGER"));
+      (application.disposition === "INITIAL_REJECTED" && hasAction("RECORD_PRELIMINARY_DECISION")) ||
+      (application.disposition === "RESERVE" && hasAction("RECORD_FINAL_MANAGEMENT_DECISION"));
     return (
       <ErpSection title="فعال‌سازی مجدد پرونده متوقف‌شده">
         <ErpCard className="grid gap-2 p-4 md:grid-cols-3">
@@ -3716,7 +3774,7 @@ function CaseRecoveryPanel({
           value={reason}
           onChange={(event) => setReason(event.target.value)}
         />
-        {has("COMPANY_MANAGER") && !authorized && (
+        {hasAction("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS") && !authorized && (
           <ErpButton
             label="صدور مجوز مدیریت شرکت"
             disabled={busy || !reason.trim()}
@@ -3729,7 +3787,7 @@ function CaseRecoveryPanel({
           />
         )}
         {application.outcome === "WITHDRAWN" &&
-          has("HR_MANAGER") &&
+          hasAction("MANAGE_RECRUITMENT_CASE") &&
           authorized && (
             <>
               <ErpSelect
@@ -3760,7 +3818,7 @@ function CaseRecoveryPanel({
               />
             </>
           )}
-        {has("HR_MANAGER") && authorized && (
+        {hasAction("MANAGE_RECRUITMENT_CASE") && authorized && (
           <ErpButton
             label="اجرای بازگشایی توسط مدیر HR"
             tone="success"

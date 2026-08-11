@@ -15,14 +15,14 @@ const application = {
   collateralItems: [{ id: 'collateral-1', type: 'CHECK', version: 1, status: 'RECEIVED', originalName: 'check.pdf', recordedBy: 'finance-2', createdAt: new Date('2026-07-22') }],
 };
 
-const hr = buildHiringDocumentIndex(application, new Set(['HR_MANAGER']));
+const hr = buildHiringDocumentIndex(application, new Set(['VIEW_FULL_APPLICANT_INFORMATION']));
 assert.equal(hr.find((item) => item.id === 'identity-1')?.canOpen, true);
 assert.equal(hr.find((item) => item.id === 'identity-original')?.title, 'گواهی سلامت');
 assert.equal(hr.find((item) => item.id === 'identity-original')?.canOpen, false);
 assert.equal(hr.find((item) => item.id === 'contract-1')?.canOpen, false);
 assert.equal(hr.find((item) => item.id === 'contract-1')?.originalName, undefined);
 
-const manager = buildHiringDocumentIndex(application, new Set(['COMPANY_MANAGER']));
+const manager = buildHiringDocumentIndex(application, new Set(['VIEW_COMPANY_EVALUATION_RESULTS']));
 assert.equal(manager.find((item) => item.id === 'assessment-1')?.canOpen, true);
 assert.equal(manager.find((item) => item.id === 'identity-1')?.canOpen, false);
 assert.equal(manager.find((item) => item.id === 'pre-1')?.canOpen, false);

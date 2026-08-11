@@ -43,7 +43,7 @@ assert.deepEqual(projectLegacyHrWorkItem({
   structuredResult: null, compatibilitySource: 'LEGACY_HR_WORK_ITEM', taskScopedOnly: true,
 });
 
-assert.deepEqual(HR_REDESIGN_CATALOG.workspaceFeatures.map((feature) => feature.code), [
+assert.deepEqual(HR_REDESIGN_CATALOG.workspaceFeatures.map((feature) => feature.code).slice(0, 8), [
   'DASHBOARD',
   'ORGANIZATIONAL_STRUCTURE',
   'PERSONNEL',
@@ -53,6 +53,8 @@ assert.deepEqual(HR_REDESIGN_CATALOG.workspaceFeatures.map((feature) => feature.
   'DATA_MIGRATION_RECONCILIATION',
   'USER_ADMINISTRATION',
 ]);
+assert.ok(HR_REDESIGN_CATALOG.workspaceFeatures.some((feature) => feature.code === 'RECORD_INITIAL_INTERVIEW'));
+assert.ok(HR_REDESIGN_CATALOG.workspaceFeatures.some((feature) => feature.code === 'RECORD_FINAL_MANAGEMENT_DECISION'));
 assert.deepEqual(HR_REDESIGN_CATALOG.featureLevels, ['VIEW', 'EDIT', 'ADMIN']);
 assert.deepEqual(HR_REDESIGN_CATALOG.assessmentKinds, ['DISC', 'EQ', 'BIG_FIVE']);
 assert.equal(HR_REDESIGN_CATALOG.dutyEnvelopeVersion, 1);

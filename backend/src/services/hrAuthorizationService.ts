@@ -5,6 +5,7 @@ import {
   type HrAuthorizationRequirement,
   type HrAuthorizationSnapshot,
 } from './hrAuthorizationPolicy';
+import { HR_ACTION_PERMISSIONS, actionPermissionsForLegacyAuthority } from './hrActionPermissionCatalog';
 
 type HrAuthorizationClient = PrismaClient | Prisma.TransactionClient;
 
@@ -18,7 +19,7 @@ export const loadHrAuthorizationSnapshot = async (
   client: HrAuthorizationClient,
   userId: string,
 ): Promise<HrAuthorizationSnapshot> => {
-  const [user, workspaceGrants, featureGrants, authorityGrants, duties] = await Promise.all([
+  const [user, workspaceGrants, featureGrants, duties] = await Promise.all([
     client.user.findUnique({ where: { id: userId }, select: { id: true, role: true, isActive: true } }),
     client.hrWorkspaceAccessGrant.findMany({
       where: { userId, workspaceCode: 'HUMAN_RESOURCES' },
@@ -27,10 +28,6 @@ export const loadHrAuthorizationSnapshot = async (
     client.hrFeatureAccessGrant.findMany({
       where: { userId },
       select: { featureCode: true, level: true, status: true, effectiveFrom: true, effectiveTo: true, reason: true },
-    }),
-    client.hrBusinessAuthorityGrant.findMany({
-      where: { userId },
-      select: { authorityCode: true, status: true, effectiveFrom: true, effectiveTo: true, reason: true },
     }),
     client.hrDuty.findMany({
       where: { currentAssigneeUserId: userId, status: 'OPEN' },
@@ -41,7 +38,8 @@ export const loadHrAuthorizationSnapshot = async (
     user: user ?? { id: userId, role: 'USER', isActive: false },
     workspaceGrants: workspaceGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
     featureGrants: featureGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
-    authorityGrants: authorityGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
+    // Legacy business-authority rows are retained as history but are not authorization input.
+    authorityGrants: [],
     assignedDutyIds: duties.map(({ id }) => id),
   };
 };
@@ -53,6 +51,25 @@ export const authorizeHrUser = async (
   at = new Date(),
 ) => evaluateHrAuthorization(await loadHrAuthorizationSnapshot(client, userId), requirement, at);
 
+export const authorizeHrAction = async (
+  client: HrAuthorizationClient,
+  userId: string,
+  actionPermissionCodes: string[],
+  at = new Date(),
+) => authorizeHrUser(client, userId, { workspaceLevel: 'EDIT', actionPermissionCodes }, at);
+
+export const activeHrActionPermissionsForUser = async (
+  client: HrAuthorizationClient,
+  userId: string,
+  at = new Date(),
+) => {
+  const snapshot = await loadHrAuthorizationSnapshot(client, userId);
+  if (!snapshot.user.isActive) return [];
+  return HR_ACTION_PERMISSIONS
+    .map(({ code }) => code)
+    .filter((code) => evaluateHrAuthorization(snapshot, { workspaceLevel: 'VIEW', actionPermissionCodes: [code] }, at).allowed);
+};
+
 export const activeHrAuthoritiesForUser = async (
   client: HrAuthorizationClient,
   userId: string,
@@ -60,13 +77,17 @@ export const activeHrAuthoritiesForUser = async (
 ) => {
   const snapshot = await loadHrAuthorizationSnapshot(client, userId);
   if (!snapshot.user.isActive) return [];
-  if (snapshot.user.role === 'ADMIN') {
-    const catalog = await client.hrAuthorityCatalog.findMany({ where: { isActive: true }, select: { code: true } });
-    return catalog.map(({ code }) => code);
-  }
-  return snapshot.authorityGrants
+  const broadOverride = evaluateHrAuthorization(snapshot, { workspaceLevel: 'ADMIN' }, at).allowed
+    && (snapshot.user.role === 'ADMIN' || snapshot.user.role === 'MANAGER');
+  const legacyCodes = ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HR_PAYROLL_PROCESSOR', 'HR_PAYROLL_MANAGER', 'FINANCE_RECORDER', 'FINANCE_MANAGER'];
+  if (broadOverride) return legacyCodes;
+  const activeFeatureCodes = new Set(snapshot.featureGrants
     .filter((grant) => !grant.bootstrapOnly && grant.status === 'ACTIVE' && grant.effectiveFrom <= at && (!grant.effectiveTo || grant.effectiveTo > at))
-    .map((grant) => grant.authorityCode);
+    .map((grant) => grant.featureCode));
+  return legacyCodes.filter((legacyCode) => {
+    const requiredActions = actionPermissionsForLegacyAuthority(legacyCode).filter((code) => HR_ACTION_PERMISSIONS.some((permission) => permission.code === code));
+    return requiredActions.length > 0 && requiredActions.every((code) => activeFeatureCodes.has(code));
+  });
 };
 
 export const activeCompanyManagerUserIds = async (
@@ -74,15 +95,8 @@ export const activeCompanyManagerUserIds = async (
   options: { excludeGrantId?: string; at?: Date } = {},
 ) => {
   const at = options.at ?? new Date();
-  const grants = await client.hrBusinessAuthorityGrant.findMany({
-    where: {
-      authorityCode: 'COMPANY_MANAGER',
-      id: options.excludeGrantId ? { not: options.excludeGrantId } : undefined,
-      ...activeHrGrantWhere(at),
-    },
-    select: { userId: true },
-  });
-  const userIds = [...new Set(grants.map(({ userId }) => userId))];
+  const users = await client.user.findMany({ where: { isActive: true }, select: { id: true } });
+  const userIds = users.map(({ id }) => id);
   const authoritySets = await Promise.all(userIds.map((userId) => activeHrAuthoritiesForUser(client, userId, at)));
   return userIds.filter((_userId, index) => authoritySets[index].includes('COMPANY_MANAGER'));
 };
@@ -135,20 +149,17 @@ export const resolveHrNamedResponsibility = async (
     }),
   ]);
   const assignedUserIds = [...new Set(responsibilities.map(({ assignedUserId }) => assignedUserId).filter(Boolean) as string[])];
-  const [users, authorityGrants, authorityCatalog] = await Promise.all([
-    client.user.findMany({ where: { id: { in: assignedUserIds } }, select: { id: true, role: true, isActive: true } }),
-    client.hrBusinessAuthorityGrant.findMany({
-      where: { userId: { in: assignedUserIds }, authorityCode: input.responsibilityTypeCode, ...activeHrGrantWhere(now) },
-      select: { userId: true, reason: true },
-    }),
-    client.hrAuthorityCatalog.findUnique({ where: { code: input.responsibilityTypeCode }, select: { code: true } }),
-  ]);
-  const baselineIds = users.filter((user) => user.isActive && user.role === 'ADMIN').map(({ id }) => id);
-  const authorityEligibleUserIds = authorityCatalog
-    ? [...new Set([
-      ...authorityGrants.filter(({ reason }) => reason !== 'HR redesign baseline').map(({ userId }) => userId),
-      ...baselineIds,
-    ])]
+  const users = await client.user.findMany({ where: { id: { in: assignedUserIds } }, select: { id: true, role: true, isActive: true } });
+  const requiredActionPermissions = actionPermissionsForLegacyAuthority(input.responsibilityTypeCode)
+    .filter((code) => HR_ACTION_PERMISSIONS.some((permission) => permission.code === code));
+  const permissionSets = await Promise.all(assignedUserIds.map(async (userId) => ({
+    userId,
+    permissions: new Set(await activeHrActionPermissionsForUser(client, userId, now)),
+  })));
+  const authorityEligibleUserIds = requiredActionPermissions.length
+    ? permissionSets
+      .filter(({ permissions }) => requiredActionPermissions.every((code) => permissions.has(code)))
+      .map(({ userId }) => userId)
     : undefined;
   const conflictedUserIds = new Set(input.disallowedUserIds ?? []);
   for (const constraint of constraints) {

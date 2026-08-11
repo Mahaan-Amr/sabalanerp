@@ -27,6 +27,17 @@ const questions = [
   "تا یک سال آینده چه هدفی برای خودتان در این شغل متصور هستید؟",
 ];
 
+const snapshotAnswers = (answers: unknown) => questions.map((questionText, index) => {
+  const current = Array.isArray(answers) ? answers[index] : undefined;
+  return {
+    questionId: `application-question-${index + 1}`,
+    questionText,
+    answer: current && typeof current === 'object'
+      ? String((current as { answer?: unknown }).answer ?? '')
+      : String(current ?? ''),
+  };
+});
+
 const blank = {
   firstName: "",
   lastName: "",
@@ -67,7 +78,7 @@ const blank = {
   cooperationDuration: "LONG_TERM",
   requestedPosition: "",
   desiredSalary: "",
-  questions: questions.map(() => ""),
+  questions: snapshotAnswers([]),
 };
 
 const inputClass =
@@ -157,7 +168,7 @@ export default function ApplicantFormPage() {
         birthDate: revisionData.birthDate
           ? PersianCalendar.toPersian(revisionData.birthDate)
           : "",
-        questions: revisionData.questions || blank.questions,
+        questions: snapshotAnswers(revisionData.questions),
       });
   };
 
@@ -889,10 +900,10 @@ export default function ApplicantFormPage() {
                   <ErpTextarea
                     rows={3}
                     className={inputClass}
-                    value={data.questions[i] || ""}
+                    value={data.questions[i]?.answer || ""}
                     onChange={(e) => {
                       const next = [...data.questions];
-                      next[i] = e.target.value;
+                      next[i] = { ...next[i], answer: e.target.value };
                       set("questions", next);
                     }}
                   />

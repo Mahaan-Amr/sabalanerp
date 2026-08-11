@@ -1,4 +1,4 @@
-import express, { Response } from 'express';
+import express, { Request, Response } from 'express';
 import path from 'path';
 import { body, validationResult } from 'express-validator';
 import { protect, AuthRequest } from '../middleware/auth';
@@ -63,6 +63,20 @@ import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 const router = express.Router();
 const prisma = new PrismaClient();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
+
+export const readAccountingActionIdentities = (req: Pick<Request, 'body' | 'get'>) => ({
+  idempotencyKey: String(
+    req.get('X-Idempotency-Key')
+    || req.get('Idempotency-Key')
+    || req.body?.idempotencyKey
+    || '',
+  ).trim(),
+  correlationId: String(
+    req.get('X-Correlation-ID')
+    || req.body?.correlationId
+    || '',
+  ).trim(),
+});
 
 const accountingView = [
   protect,
@@ -687,29 +701,9 @@ router.put(
   }
 );
 
-router.post(
-  '/actions',
-  accountingEdit,
-  [
-    body('kind').isString().notEmpty(),
-    body('contractId').optional().isString(),
-    body('recordId').optional().isString(),
-    body('invoiceId').optional().isString(),
-    body('receivableId').optional().isString(),
-    body('paymentEventId').optional().isString(),
-    body('correctionRequestId').optional().isString(),
-    body('flagId').optional().isString(),
-    body('replacesRecordId').optional().isString(),
-    body('externalReference').optional().isString(),
-    body('downstreamNote').optional().isString(),
-    body('note').optional().isString(),
-    body('resolutionNote').optional().isString(),
-    body('reason').optional().isString(),
-    body('systemInvoiceNumber').optional().isString(),
-    body('systemInvoiceDate').optional().isString(),
-    body('sepidarAmount').optional().isNumeric()
-  ],
-  async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+export const createAccountingActionHandler = (
+  executeAction: typeof executeAccountingAction = executeAccountingAction,
+) => async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
     if (handleValidation(req, res)) return;
 
     try {
@@ -724,9 +718,9 @@ router.post(
         });
       }
 
-      const result = await executeAccountingAction({ ...req.body,
-        idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''),
-        correlationId: String(req.get('X-Correlation-ID') || ''),
+      const result = await executeAction({
+        ...req.body,
+        ...readAccountingActionIdentities(req),
       }, {
         userId: req.user!.id,
         role: req.user!.role,
@@ -762,7 +756,31 @@ router.post(
         error: error.message || 'Accounting action failed'
       });
     }
-  }
+  };
+
+router.post(
+  '/actions',
+  accountingEdit,
+  [
+    body('kind').isString().notEmpty(),
+    body('contractId').optional().isString(),
+    body('recordId').optional().isString(),
+    body('invoiceId').optional().isString(),
+    body('receivableId').optional().isString(),
+    body('paymentEventId').optional().isString(),
+    body('correctionRequestId').optional().isString(),
+    body('flagId').optional().isString(),
+    body('replacesRecordId').optional().isString(),
+    body('externalReference').optional().isString(),
+    body('downstreamNote').optional().isString(),
+    body('note').optional().isString(),
+    body('resolutionNote').optional().isString(),
+    body('reason').optional().isString(),
+    body('systemInvoiceNumber').optional().isString(),
+    body('systemInvoiceDate').optional().isString(),
+    body('sepidarAmount').optional().isNumeric()
+  ],
+  createAccountingActionHandler(),
 );
 
 export default router;

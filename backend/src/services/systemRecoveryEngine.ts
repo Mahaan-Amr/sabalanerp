@@ -585,12 +585,41 @@ const createSanitizedBootstrapAdmin = async (databaseUrl: string, password: stri
   }
 };
 
+const liveStoredFileReferenceCandidates = (
+  tableName: string,
+  storageNameValue: string,
+  applicationRoot = process.cwd(),
+  recoveryRoot = RECOVERY_ROOT,
+) => {
+  const storageName = path.basename(String(storageNameValue || ''));
+  if (!storageName) return [];
+  if (tableName === 'recovery_operations') {
+    return [
+      path.join(recoveryRoot, 'packages', storageName),
+      path.join(recoveryRoot, 'uploads', storageName),
+    ];
+  }
+  if (tableName.startsWith('hr_')) return [path.join(applicationRoot, 'storage', 'hr-hiring', storageName)];
+  if (tableName === 'support_ticket_attachments') {
+    return [path.join(applicationRoot, 'storage', 'support-tickets', storageName)];
+  }
+  return [
+    path.join(applicationRoot, 'uploads', 'security-vehicle-pairs', storageName),
+    path.join(applicationRoot, 'uploads', 'security-shift-log', storageName),
+    path.join(applicationRoot, 'uploads', storageName),
+  ];
+};
+
 const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: string) => {
   const columns = await client.$queryRawUnsafe<Array<{ tableName: string; columnName: string }>>(`
     SELECT table_name AS "tableName", column_name AS "columnName"
     FROM information_schema.columns
-    WHERE table_schema = 'public' AND column_name IN ('storageName', 'returnEvidenceStorageName')
+    WHERE table_schema = 'public'
+      AND column_name IN ('storageName', 'returnEvidenceStorageName')
+      AND table_name <> 'recovery_operations'
   `);
+  // Recovery packages deliberately do not recursively embed older recovery
+  // packages. Live deployment gates validate those files in RECOVERY_ROOT.
   const missing: Array<{ table: string; column: string; storageName: string }> = [];
   for (const column of columns) {
     if (!/^[A-Za-z0-9_]+$/.test(column.tableName) || !/^[A-Za-z0-9_]+$/.test(column.columnName)) continue;
@@ -670,15 +699,7 @@ export const validateLiveStoredFileReferences = async (client: PrismaClient) => 
     for (const row of values) {
       const storageName = path.basename(String(row.value || ''));
       if (!storageName) continue;
-      const candidates = column.tableName.startsWith('hr_')
-        ? [path.join(process.cwd(), 'storage', 'hr-hiring', storageName)]
-        : column.tableName === 'support_ticket_attachments'
-          ? [path.join(process.cwd(), 'storage', 'support-tickets', storageName)]
-          : [
-              path.join(process.cwd(), 'uploads', 'security-vehicle-pairs', storageName),
-              path.join(process.cwd(), 'uploads', 'security-shift-log', storageName),
-              path.join(process.cwd(), 'uploads', storageName),
-            ];
+      const candidates = liveStoredFileReferenceCandidates(column.tableName, storageName);
       if (!candidates.some((candidate) => fs.existsSync(candidate))) missing.push({ table: column.tableName, column: column.columnName, storageName });
       if (missing.length >= 25) break;
     }
@@ -954,4 +975,5 @@ export const recoveryEngineInternals = {
   dispatchArtifactBackupPath,
   dispatchDocumentStorageDirectory: DISPATCH_DOCUMENT_STORAGE_DIR,
   validateStoredFileReferences,
+  liveStoredFileReferenceCandidates,
 };

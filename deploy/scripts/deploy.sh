@@ -346,6 +346,10 @@ public_key_path="${DEPLOYMENT_SECRET_DIR}/remote-recovery-public.pem"
   exit 1
 }
 
+# This host file is bind-mounted into nginx. A restrictive checkout or copy
+# mode must never turn the intended public 503 boundary into nginx's 403 page.
+chmod 0644 "${REPO_ROOT}/deploy/nginx/maintenance.html"
+
 mkdir -p "${REPO_ROOT}/.deploy-state"
 exec 9>"${LOCK_FILE}"
 if ! flock -n 9; then

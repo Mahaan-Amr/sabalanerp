@@ -36,6 +36,15 @@ compose() {
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
 }
 
+start_release_services() {
+  wait_seconds="$1"
+  compose up -d --no-build --wait --wait-timeout "${wait_seconds}" postgres clamav backend frontend inquiry nginx
+  # Nginx resolves Compose service names when its workers start. Recreate it
+  # after application containers have their final addresses so rollout and
+  # rollback cannot reopen traffic through stale upstream IPs.
+  compose up -d --no-deps --force-recreate --wait --wait-timeout "${wait_seconds}" nginx
+}
+
 run_backend() {
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run --rm --no-deps \
@@ -260,7 +269,7 @@ recover_failure() {
     control maintenance-on || true
     MAINTENANCE_ACTIVE=1
     switch_to_previous_images
-    if compose up -d --no-build --wait --wait-timeout 300 postgres clamav backend frontend inquiry nginx \
+    if start_release_services 300 \
       && DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js; then
       control maintenance-off || true
       MAINTENANCE_ACTIVE=0
@@ -299,7 +308,7 @@ recover_failure() {
     && run_backend node dist/scripts/deployment-rollback.js \
     && run_backend node dist/scripts/deployment-finalize-recovery.js; then
     switch_to_previous_images
-    if compose up -d --no-build --wait --wait-timeout 300 postgres clamav backend frontend inquiry nginx \
+    if start_release_services 300 \
       && DEPLOYMENT_GATE_MODE=ROLLBACK run_backend node dist/scripts/deployment-gates.js; then
       control maintenance-off
       MAINTENANCE_ACTIVE=0
@@ -407,7 +416,7 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   drain_release_for_rollback
   case "${DEPLOYMENT_PHASE}" in
     PREFLIGHT|LEASE_ACQUIRED|MAINTENANCE_REQUESTED|TRAFFIC_BLOCKED|SERVICES_DRAINED|LOCAL_CHECKPOINT_VERIFIED|REMOTE_CHECKPOINT_VERIFIED)
-      if compose up -d --no-build --wait --wait-timeout 300 postgres clamav backend frontend inquiry nginx \
+      if start_release_services 300 \
         && DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js; then
         control maintenance-off
         MAINTENANCE_ACTIVE=0
@@ -596,7 +605,7 @@ run_backend_timed "${remaining}" node dist/scripts/dry-run-contract-product-grap
 
 phase RELEASE_STARTED
 remaining="$(remaining_mutation_seconds)" || exit 1
-compose up -d --no-build --wait --wait-timeout "${remaining}" postgres clamav backend frontend inquiry nginx
+start_release_services "${remaining}"
 
 remaining="$(remaining_mutation_seconds)" || exit 1
 run_backend_timed "${remaining}" node dist/scripts/deployment-gates.js

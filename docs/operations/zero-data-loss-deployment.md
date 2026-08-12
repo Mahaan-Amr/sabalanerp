@@ -45,7 +45,7 @@ Each checkpoint uses a fresh random data-encryption key. That key is wrapped ind
 
 The local rollback key is restricted to the deployment service. The off-server recovery key or KMS authority is held outside the production host. Manual ADMIN recovery packages retain their independent passphrase flow.
 
-Before mutation, the deployment uploads the encrypted checkpoint, reads back its manifest, and verifies its checksum against the local artifact. An unavailable remote store, missing key authority, unreadable manifest, or checksum mismatch aborts the deployment and reopens the unchanged current release.
+Before mutation, the deployment locally decrypt-validates and restore-validates the encrypted checkpoint, uploads it, and performs one complete streaming read-back of the remote object to prove byte equality with the validated local artifact. The remote sidecar is then read back independently. Repeating decryption of byte-identical remote bytes is intentionally avoided because it adds a full off-server transfer without adding a distinct integrity proof. An unavailable remote store, missing key authority, unreadable manifest, or checksum mismatch aborts the deployment and reopens the unchanged current release. The deployment lease is renewed while checkpoint creation, upload, and read-back are running so a valid long operation cannot lose ownership merely because it exceeds one lease interval.
 
 ## Storage management
 

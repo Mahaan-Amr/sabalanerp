@@ -1281,6 +1281,13 @@ export const sabalanCalendarAPI = {
 export const hrAuthorizationAPI = {
   getMe: () => api.get('/hr/authorization/me'),
   getContext: () => api.get('/hr/authorization/context'),
+  saveUserAccess: (userId: string, data: {
+    role: string;
+    workspaceLevels: Record<string, string | null>;
+    features: Array<{ key: string; level: string }>;
+    expiresAt?: string;
+    reason: string;
+  }) => api.post(`/hr/authorization/user-access/${userId}`, data),
   grantWorkspace: (data: { userId: string; level: 'VIEW' | 'EDIT' | 'ADMIN'; reason: string }) =>
     api.post('/hr/authorization/workspace-grants', data),
   revokeWorkspace: (id: string, reason: string) =>

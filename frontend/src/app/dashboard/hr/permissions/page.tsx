@@ -155,13 +155,13 @@ export default function PermissionsPage() {
       setDraft(createAccessDraft({
         workspaceLevels: levels,
         explicitlySelectedFeatures: [...features.map((permission: DirectPermission) => permission.feature!), ...activeHrFeatures.map((permission: HrGrant) => permission.featureCode!)],
-      }));
+      }, definitions));
       setExpiresAt('');
       setReason('');
     } catch (error: any) {
       setFeedback({ kind: 'error', title: error.response?.data?.error || 'خواندن دسترسی‌های کاربر ناموفق بود.' });
     } finally { setLoadingUser(false); }
-  }, [hrContext, users]);
+  }, [definitions, hrContext, users]);
 
   useEffect(() => { void loadUser(selectedUserId); }, [loadUser, selectedUserId]);
 
@@ -183,41 +183,16 @@ export default function PermissionsPage() {
     }
     setSaving(true); setFeedback(undefined);
     try {
-      if (draftRole !== selectedUser.role) await usersAPI.updateUser(selectedUser.id, { role: draftRole });
-      for (const { key } of WORKSPACES.filter((workspace) => workspace.key !== 'hr')) {
-        const desired = draft.workspaceLevels[key];
-        const current = directWorkspaces.find((permission) => permission.workspace === key);
-        if (!desired && current) await workspacePermissionsAPI.deleteUserPermission(current.id);
-        else if (desired && !current) await workspacePermissionsAPI.createUserPermission({ userId: selectedUser.id, workspace: key, permissionLevel: desired, expiresAt: expiresAt || undefined });
-        else if (desired && current && (current.permissionLevel !== desired || expiresAt)) await workspacePermissionsAPI.updateUserPermission(current.id, { permissionLevel: desired, ...(expiresAt ? { expiresAt } : {}) });
-      }
-      const desiredLegacy = new Set(definitions.filter((definition) => definition.source === 'legacy' && draft.selectedFeatures.has(definition.key)).map(({ key }) => key));
-      for (const current of directFeatures) if (current.feature && !desiredLegacy.has(current.feature)) await permissionsAPI.deleteFeaturePermission(current.id);
-      for (const feature of Array.from(desiredLegacy)) {
-        const definition = definitions.find((candidate) => candidate.key === feature)!;
-        const current = directFeatures.find((permission) => permission.feature === feature);
-        const permissionLevel = definition.requiredLevel === 'admin' ? maxLevel : definition.requiredLevel;
-        if (!current) await permissionsAPI.createFeaturePermission({ userId: selectedUser.id, workspace: definition.workspace, feature, permissionLevel, expiresAt: expiresAt || undefined });
-        else if (current.permissionLevel !== permissionLevel || expiresAt) await permissionsAPI.updateFeaturePermission(current.id, { permissionLevel, ...(expiresAt ? { expiresAt } : {}) });
-      }
-      const desiredHrLevel = draft.workspaceLevels.hr;
-      const currentHrWorkspace = hrWorkspaces[0];
-      if (!desiredHrLevel && currentHrWorkspace) await hrAuthorizationAPI.revokeWorkspace(currentHrWorkspace.id, reason.trim());
-      else if (desiredHrLevel && (!currentHrWorkspace || FROM_HR_LEVEL[currentHrWorkspace.level] !== desiredHrLevel)) {
-        if (currentHrWorkspace) await hrAuthorizationAPI.revokeWorkspace(currentHrWorkspace.id, reason.trim());
-        await hrAuthorizationAPI.grantWorkspace({ userId: selectedUser.id, level: HR_LEVEL[desiredHrLevel], reason: reason.trim() });
-      }
-      const desiredHr = new Set(definitions.filter((definition) => definition.source === 'hr' && draft.selectedFeatures.has(definition.key)).map(({ key }) => key));
-      for (const current of hrFeatures) if (current.featureCode && !desiredHr.has(current.featureCode)) await hrAuthorizationAPI.revokeFeature(current.id, reason.trim());
-      for (const feature of Array.from(desiredHr)) {
-        const definition = definitions.find((candidate) => candidate.key === feature)!;
-        const desiredLevel = HR_LEVEL[definition.requiredLevel === 'admin' ? maxLevel : definition.requiredLevel];
-        const current = hrFeatures.find((permission) => permission.featureCode === feature);
-        if (!current || current.level !== desiredLevel) {
-          if (current) await hrAuthorizationAPI.revokeFeature(current.id, reason.trim());
-          await hrAuthorizationAPI.grantFeature({ userId: selectedUser.id, featureCode: feature, level: desiredLevel, reason: reason.trim() });
-        }
-      }
+      await hrAuthorizationAPI.saveUserAccess(selectedUser.id, {
+        role: draftRole,
+        workspaceLevels: draft.workspaceLevels,
+        features: definitions.filter(({ key }) => draft.selectedFeatures.has(key)).map((definition) => ({
+          key: definition.key,
+          level: definition.requiredLevel === 'admin' ? maxLevel : definition.requiredLevel,
+        })),
+        expiresAt: expiresAt || undefined,
+        reason: reason.trim(),
+      });
       setFeedback({ kind: 'success', title: `دسترسی‌های ${userName(selectedUser)} ذخیره شد.`, description: 'هیچ کاربر دیگری تغییر نکرد.' });
       await loadBase();
     } catch (error: any) {
@@ -256,7 +231,7 @@ export default function PermissionsPage() {
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">نقش</span><ErpSelect value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}>{ROLES.map((role) => <option key={role} value={role}>{role}</option>)}</ErpSelect></label>
             <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">فضای کاری</span><ErpSelect value={roleForm.workspace} onChange={(event) => setRoleForm((current) => ({ ...current, workspace: event.target.value, feature: '' }))}>{WORKSPACES.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}</ErpSelect></label>
-            <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">مجوز جزئی (اختیاری)</span><ErpSelect value={roleForm.feature} onChange={(event) => setRoleForm((current) => ({ ...current, feature: event.target.value }))}><option value="">سطح کلی فضای کاری</option>{definitions.filter((definition) => definition.source === 'legacy' && definition.workspace === roleForm.workspace).map((definition) => <option key={definition.key} value={definition.key}>{definition.label}</option>)}</ErpSelect></label>
+            <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">مجوز جزئی (اختیاری)</span><ErpSelect value={roleForm.feature} onChange={(event) => setRoleForm((current) => ({ ...current, feature: event.target.value }))}><option value="">سطح کلی فضای کاری</option>{definitions.filter((definition) => definition.workspace === roleForm.workspace).map((definition) => <option key={definition.key} value={definition.key}>{definition.label}</option>)}</ErpSelect></label>
             <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">سطح</span><ErpSelect value={roleForm.permissionLevel} onChange={(event) => setRoleForm((current) => ({ ...current, permissionLevel: event.target.value as AccessLevel }))}><option value="view">مشاهده</option><option value="edit">ویرایش</option><option value="admin">مدیریت</option></ErpSelect></label>
           </div>
           <div className="mt-4 flex justify-end"><ErpButton label="ثبت پیش‌فرض" variant="solid" onClick={saveRoleDefault} /></div>
@@ -288,8 +263,10 @@ export default function PermissionsPage() {
                   const workspaceDefinitions = filteredDefinitions.filter((definition) => definition.workspace === key);
                   const allWorkspaceDefinitions = definitions.filter((definition) => definition.workspace === key && (actor?.role === 'ADMIN' || definition.requiredLevel !== 'admin'));
                   const inheritedLevel = roleWorkspaceForSelected.find((permission) => permission.workspace === key)?.permissionLevel;
-                  const automatic = workspaceDefinitions.filter((definition) => draft.automaticallyAddedFeatures.has(definition.key));
-                  return <ErpSection key={key} title={label} description={inheritedLevel ? `دسترسی ارثی از نقش: ${LEVEL_LABELS[inheritedLevel]}` : undefined} actions={[{ label: expanded[key] ? 'بستن مجوزها' : 'نمایش مجوزها', variant: 'ghost', onClick: () => setExpanded((current) => ({ ...current, [key]: !current[key] })) }]}>
+                  const directLevel = draft.workspaceLevels[key];
+                  const effectiveLevel = directLevel || inheritedLevel;
+                  const automatic = definitions.filter((definition) => definition.workspace === key && draft.automaticallyAddedFeatures.has(definition.key));
+                  return <ErpSection key={key} title={label} description={effectiveLevel ? `دسترسی مؤثر: ${LEVEL_LABELS[effectiveLevel]} · منشأ: ${directLevel ? 'مستقیم' : 'از نقش'}` : 'بدون دسترسی مؤثر'} actions={[{ label: expanded[key] ? 'بستن مجوزها' : 'نمایش مجوزها', variant: 'ghost', onClick: () => setExpanded((current) => ({ ...current, [key]: !current[key] })) }]}>
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                       <label className="w-full lg:max-w-xs"><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">سطح مستقیم فضای کاری</span><ErpSelect disabled={!canEdit} value={draft.workspaceLevels[key] || ''} onChange={(event) => setDraft((current) => ({ ...current, workspaceLevels: { ...current.workspaceLevels, [key]: event.target.value ? event.target.value as AccessLevel : null } }))}><option value="">بدون دسترسی مستقیم</option><option value="view">مشاهده</option><option value="edit">ویرایش</option>{actor?.role === 'ADMIN' && <option value="admin">مدیریت</option>}</ErpSelect></label>
                       <div className="flex flex-wrap gap-2"><ErpButton label="انتخاب همه" variant="outline" disabled={!canEdit} onClick={() => setDraft((current) => selectAllInWorkspace(current, allWorkspaceDefinitions, key, maxLevel))} /><ErpButton label="لغو انتخاب همه" tone="danger" variant="ghost" disabled={!canEdit} onClick={() => setDraft((current) => deselectAllInWorkspace(current, definitions, key))} /></div>
@@ -297,7 +274,8 @@ export default function PermissionsPage() {
                     {expanded[key] && <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4"><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{workspaceDefinitions.map((definition) => {
                       const inherited = roleFeatureForSelected.some((permission) => permission.workspace === key && permission.feature === definition.key);
                       const isAutomatic = draft.automaticallyAddedFeatures.has(definition.key);
-                      return <div key={`${definition.source}-${definition.key}`} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3"><ErpCheckbox checked={draft.selectedFeatures.has(definition.key) || inherited || selectedUser.role === 'ADMIN'} disabled={!canEdit || inherited || isAutomatic || (actor?.role === 'MANAGER' && definition.requiredLevel === 'admin')} onChange={(event) => setDraft((current) => setFeatureSelection(current, definitions, definition.key, event.target.checked))} label={<span>{definition.label} {inherited && <ErpBadge tone="info">از نقش</ErpBadge>} {isAutomatic && <ErpBadge tone="purple">پیش‌نیاز</ErpBadge>}</span>} /></div>;
+                      const direct = draft.explicitlySelectedFeatures.has(definition.key);
+                      return <div key={`${definition.source}-${definition.key}`} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3"><ErpCheckbox checked={direct || inherited || selectedUser.role === 'ADMIN'} disabled={!canEdit || inherited || isAutomatic || (actor?.role === 'MANAGER' && definition.requiredLevel === 'admin')} onChange={(event) => setDraft((current) => setFeatureSelection(current, definitions, definition.key, event.target.checked))} label={<span>{definition.label} {direct && <ErpBadge tone="primary">مستقیم · {LEVEL_LABELS[definition.requiredLevel]}</ErpBadge>} {inherited && <ErpBadge tone="info">از نقش · مؤثر</ErpBadge>} {isAutomatic && <ErpBadge tone="purple">پیش‌نیاز</ErpBadge>}</span>} /></div>;
                     })}</div>{automatic.length > 0 && <ErpCard tone="info" className="mt-4 p-3"><strong className="text-sm">پیش‌نیازهای افزوده‌شده</strong><div className="mt-2 flex flex-wrap gap-2">{automatic.map((definition) => <ErpBadge key={definition.key} tone="info">{definition.label}</ErpBadge>)}</div></ErpCard>}</div>}
                   </ErpSection>;
                 })}

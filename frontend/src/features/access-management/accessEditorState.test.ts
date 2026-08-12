@@ -18,7 +18,13 @@ const definitions: AccessFeatureDefinition[] = [
 let draft = createAccessDraft({
   workspaceLevels: { hr: 'edit', sales: 'view' },
   explicitlySelectedFeatures: ['RECRUITMENT_CASES'],
-});
+}, definitions);
+
+const loaded = createAccessDraft({
+  explicitlySelectedFeatures: ['RECORD_INITIAL_INTERVIEW'],
+}, definitions);
+assert.ok(loaded.selectedFeatures.has('VIEW_INITIAL_INTERVIEW_CRITERIA'));
+assert.ok(loaded.automaticallyAddedFeatures.has('VIEW_INITIAL_INTERVIEW_CRITERIA'));
 
 draft = setFeatureSelection(draft, definitions, 'RECORD_INITIAL_INTERVIEW', true);
 assert.deepEqual(Array.from(draft.selectedFeatures).sort(), [

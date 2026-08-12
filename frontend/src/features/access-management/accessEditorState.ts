@@ -51,14 +51,12 @@ const rebuild = (
   };
 };
 
-export const createAccessDraft = (input: DraftInput = {}): AccessDraft => {
+export const createAccessDraft = (
+  input: DraftInput = {},
+  definitions: readonly AccessFeatureDefinition[] = [],
+): AccessDraft => {
   const explicit = new Set(input.explicitlySelectedFeatures ?? []);
-  return {
-    workspaceLevels: { ...input.workspaceLevels },
-    explicitlySelectedFeatures: explicit,
-    selectedFeatures: new Set(explicit),
-    automaticallyAddedFeatures: new Set(),
-  };
+  return rebuild(input.workspaceLevels ?? {}, explicit, definitions);
 };
 
 export const setFeatureSelection = (

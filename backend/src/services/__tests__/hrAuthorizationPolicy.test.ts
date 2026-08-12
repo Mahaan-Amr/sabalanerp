@@ -209,6 +209,8 @@ const serviceRegressionTests = async () => {
     },
     hrWorkspaceAccessGrant: { findMany: async () => [] },
     hrFeatureAccessGrant: { findMany: async () => [] },
+    roleWorkspacePermission: { findMany: async () => [] },
+    roleFeaturePermission: { findMany: async () => [] },
     hrBusinessAuthorityGrant: { findMany: async () => [grant] },
     hrDuty: { findMany: async () => [] },
     hrAuthorityCatalog: {

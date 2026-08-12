@@ -37,6 +37,14 @@ assert.deepEqual(Array.from(draft.automaticallyAddedFeatures).sort(), ['VIEW_INI
 const protectedPrerequisite = setFeatureSelection(draft, definitions, 'VIEW_INITIAL_INTERVIEW_CRITERIA', false);
 assert.deepEqual(Array.from(protectedPrerequisite.selectedFeatures).sort(), Array.from(draft.selectedFeatures).sort(), 'a required prerequisite stays checked');
 
+let crossWorkspaceDraft = createAccessDraft({}, definitions);
+crossWorkspaceDraft = setFeatureSelection(crossWorkspaceDraft, definitions, 'RECORD_INITIAL_INTERVIEW', true);
+crossWorkspaceDraft = selectAllInWorkspace(crossWorkspaceDraft, definitions, 'sales', 'admin');
+assert.ok(crossWorkspaceDraft.selectedFeatures.has('VIEW_INITIAL_INTERVIEW_CRITERIA'), 'select all preserves automatic prerequisites in another workspace');
+assert.ok(crossWorkspaceDraft.automaticallyAddedFeatures.has('VIEW_INITIAL_INTERVIEW_CRITERIA'));
+crossWorkspaceDraft = deselectAllInWorkspace(crossWorkspaceDraft, definitions, 'sales');
+assert.ok(crossWorkspaceDraft.selectedFeatures.has('VIEW_INITIAL_INTERVIEW_CRITERIA'), 'deselect all preserves automatic prerequisites in another workspace');
+
 draft = setFeatureSelection(draft, definitions, 'RECORD_INITIAL_INTERVIEW', false);
 assert.deepEqual(Array.from(draft.selectedFeatures), ['RECRUITMENT_CASES'], 'persisted explicit access is not removed with its dependent');
 

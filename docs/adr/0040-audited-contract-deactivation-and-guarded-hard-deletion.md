@@ -1,0 +1,3 @@
+# Audited Contract Deactivation and Guarded Hard Deletion
+
+Sales Contracts may be deactivated without losing history, while irreversible deletion is limited to Draft or Voided (`CANCELLED`) Contracts with no financial documents, conclusive physical operations, or unresolved operational work. Accounting owns the workflow: Accountants may request lifecycle changes, Managers or Admins may deactivate directly, only Admins may reactivate or hard-delete directly, and every request, decision, dependency check, reason, and outcome remains auditable even after the Contract row is removed. This preserves financial and physical evidence while still allowing genuinely disposable Contracts to disappear completely.

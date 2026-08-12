@@ -413,6 +413,7 @@ router.post(
           where: { id: contractId },
           select: {
             departmentId: true,
+            isInactive: true,
             productGraphState: { select: { revision: true } }
           }
         });
@@ -421,6 +422,9 @@ router.post(
         }
         if (!validateContractAccess(contract, req.user)) {
           return res.status(403).json({ success: false, error: 'Access denied' });
+        }
+        if (contract.isInactive) {
+          return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
         }
         baseRevision = contract.productGraphState?.revision ?? 0;
         if (requestedBaseRevision !== baseRevision) {
@@ -516,9 +520,10 @@ router.get('/contracts', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKS
     const statuses = parseContractStatuses(req.query.status);
     const departmentId = req.query.departmentId as string;
     const search = String(req.query.search || '').trim();
+    const lifecycleView = req.query.lifecycleView === 'inactive' ? 'inactive' : 'active';
 
     // Build where clause based on user role and department
-    let whereClause: any = {};
+    let whereClause: any = { isInactive: lifecycleView === 'inactive' };
     
     if (req.user.role === 'ADMIN') {
       // Admins can see all contracts
@@ -1215,6 +1220,10 @@ router.put('/contracts/:id/print', protect, requireFeatureAccess(FEATURES.SALES_
       });
     }
 
+    if (contract.isInactive) {
+      return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+    }
+
     // Check if user has access to this contract
     if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
       return res.status(403).json({
@@ -1364,6 +1373,10 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
       });
     }
 
+    if (contract.isInactive) {
+      return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+    }
+
     // Check if user has access to this contract
     if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
       return res.status(403).json({
@@ -1466,8 +1479,9 @@ router.put(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
     try {
-      const contract = await prisma.salesContract.findUnique({ where: { id: req.params.id }, select: { departmentId: true } });
+      const contract = await prisma.salesContract.findUnique({ where: { id: req.params.id }, select: { departmentId: true, isInactive: true } });
       if (!contract) return res.status(404).json({ success: false, error: 'Contract not found' });
+      if (contract.isInactive) return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
       if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({ success: false, error: 'Access denied' });
       }
@@ -1496,8 +1510,9 @@ router.put(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
     try {
-      const contract = await prisma.salesContract.findUnique({ where: { id: req.params.id }, select: { departmentId: true } });
+      const contract = await prisma.salesContract.findUnique({ where: { id: req.params.id }, select: { departmentId: true, isInactive: true } });
       if (!contract) return res.status(404).json({ success: false, error: 'Contract not found' });
+      if (contract.isInactive) return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
       if (req.user.role !== 'ADMIN' && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({ success: false, error: 'Access denied' });
       }
@@ -1522,7 +1537,7 @@ router.put(
 router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     // Build where clause based on user role and department
-    let whereClause: any = {};
+    let whereClause: any = { isInactive: false };
     
     if (req.user.role !== 'ADMIN' && req.user.departmentId) {
       whereClause.departmentId = req.user.departmentId;
@@ -1608,7 +1623,7 @@ router.get('/dashboard/stats', protect, requireWorkspaceAccess(WORKSPACES.SALES,
 router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.SALES_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     // Build where clause based on user role and department
-    let whereClause: any = {};
+    let whereClause: any = { isInactive: false };
     
     if (req.user.role !== 'ADMIN' && req.user.departmentId) {
       whereClause.departmentId = req.user.departmentId;
@@ -1771,6 +1786,9 @@ router.post('/contracts/:contractId/deliveries', protect, requireWorkspaceAccess
         error: error.message
       });
     }
+    if (error.message === 'Contract is inactive') {
+      return res.status(409).json({ success: false, error: 'قرارداد غیرفعال است و تحویل جدید برای آن ثبت نمی‌شود' });
+    }
     res.status(500).json({
       success: false,
       error: 'Server error'
@@ -1874,6 +1892,9 @@ router.post('/contracts/:contractId/payments', protect, requireWorkspaceAccess(W
         error: error.message
       });
     }
+    if (error.message === 'Contract is inactive') {
+      return res.status(409).json({ success: false, error: 'قرارداد غیرفعال است و پرداخت فروش جدید برای آن ثبت نمی‌شود' });
+    }
     if (error.message === 'Check number is required for check payments' || error.message === 'Cash type is required for cash payments') {
       return res.status(400).json({
         success: false,
@@ -1908,6 +1929,10 @@ router.post(
           success: false,
           error: 'Contract not found'
         });
+      }
+
+      if (contract.isInactive) {
+        return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
       }
 
       if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
@@ -1966,6 +1991,10 @@ router.post(
           success: false,
           error: 'Contract not found'
         });
+      }
+
+      if (contract.isInactive) {
+        return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
       }
 
       if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
@@ -2077,6 +2106,10 @@ router.post(
         });
       }
 
+      if (contract.isInactive) {
+        return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
+      }
+
       if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
         return res.status(403).json({
           success: false,
@@ -2167,6 +2200,9 @@ router.post('/contracts/:contractId/items', protect, requireWorkspaceAccess(WORK
         success: false,
         error: error.message
       });
+    }
+    if (error.message === 'Contract is inactive') {
+      return res.status(409).json({ success: false, error: 'Inactive contracts are read-only' });
     }
     res.status(500).json({
       success: false,

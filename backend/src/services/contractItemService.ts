@@ -64,6 +64,10 @@ export async function createContractItem(
     throw new Error('Access denied');
   }
 
+  if (contract.isInactive) {
+    throw new Error('Contract is inactive');
+  }
+
   // Create contract item
   const contractItem = await prisma.contractItem.create({
     data: {
@@ -168,6 +172,9 @@ export async function updateContractItem(
   if (!validateContractAccess(contractItem.contract, user)) {
     throw new Error('Access denied');
   }
+  if (contractItem.contract.isInactive) {
+    throw new Error('Inactive contracts are read-only');
+  }
 
   // Only allow updates if contract is in DRAFT status
   if (contractItem.contract.status !== 'DRAFT') {
@@ -233,6 +240,9 @@ export async function deleteContractItem(
 
   if (!validateContractAccess(contractItem.contract, user)) {
     throw new Error('Access denied');
+  }
+  if (contractItem.contract.isInactive) {
+    throw new Error('Inactive contracts are read-only');
   }
 
   // Only allow deletion if contract is in DRAFT status

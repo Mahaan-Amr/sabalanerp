@@ -466,7 +466,7 @@ export const departmentsAPI = {
 // Sales Workspace API
 export const salesAPI = {
   // Contracts
-  getContracts: (params?: { page?: number; limit?: number; status?: string; departmentId?: string; search?: string }) =>
+  getContracts: (params?: { page?: number; limit?: number; status?: string; departmentId?: string; search?: string; lifecycleView?: 'active' | 'inactive' }) =>
     api.get('/sales/contracts', { params }),
   
   getContract: (id: string) => api.get(`/sales/contracts/${id}`),
@@ -889,6 +889,14 @@ export const accountingAPI = {
     api.post(`/accounting/dispatch-waybills/${id}/replace`, data),
   getContracts: (params?: any) => api.get('/accounting/contracts', { params }),
   getContract: (contractId: string) => api.get(`/accounting/contracts/${contractId}`),
+  getContractLifecycle: (contractId: string) => api.get(`/accounting/contracts/${contractId}/lifecycle`),
+  getContractLifecycleRequests: (params?: any) => api.get('/accounting/contract-lifecycle-requests', { params }),
+  requestContractLifecycle: (contractId: string, data: { kind: 'DELETE' | 'DEACTIVATE' | 'REACTIVATE'; reason: string }) =>
+    api.post(`/accounting/contracts/${contractId}/lifecycle-requests`, data),
+  executeContractLifecycle: (contractId: string, data: { action: 'DELETE' | 'DEACTIVATE' | 'REACTIVATE'; reason: string }) =>
+    api.post(`/accounting/contracts/${contractId}/lifecycle-actions`, data),
+  decideContractLifecycleRequest: (requestId: string, data: { decision: 'APPROVE' | 'REJECT'; reason?: string }) =>
+    api.post(`/accounting/contract-lifecycle-requests/${requestId}/decision`, data),
   getContractPdf: (contractId: string) => api.get(`/accounting/contracts/${contractId}/pdf`),
   downloadContractPdf: (contractId: string) =>
     api.get(`/accounting/contracts/${contractId}/pdf`, {

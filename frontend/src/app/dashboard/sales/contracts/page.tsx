@@ -1,5 +1,5 @@
 'use client';
-import { ErpPressable } from '@/components/erp';
+import { ErpInlineState, ErpPressable } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -165,6 +165,7 @@ export default function ContractsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedStatusFilter = parseContractStatusQuery(searchParams.get('status')).join(',') || 'ALL';
+  const lifecycleView = searchParams.get('lifecycleView') === 'inactive' ? 'inactive' : 'active';
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [contractPermissions, setContractPermissions] = useState({
     canView: false,
@@ -219,6 +220,7 @@ export default function ContractsPage() {
         limit: CONTRACTS_PAGE_SIZE,
         ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
         ...(debouncedSearchTerm ? { search: debouncedSearchTerm } : {}),
+        lifecycleView,
       });
 
       if (response.data.success) {
@@ -236,7 +238,7 @@ export default function ContractsPage() {
         setLoading(false);
       }
     }
-  }, [debouncedSearchTerm, statusFilter]);
+  }, [debouncedSearchTerm, lifecycleView, statusFilter]);
 
   useEffect(() => {
     loadContracts(1, { append: false });
@@ -291,6 +293,14 @@ export default function ContractsPage() {
     const params = new URLSearchParams(searchParams.toString());
     if (value === 'ALL') params.delete('status');
     else params.set('status', value);
+    const query = params.toString();
+    router.replace(query ? `/dashboard/sales/contracts?${query}` : '/dashboard/sales/contracts', { scroll: false });
+  };
+
+  const changeLifecycleView = (value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value === 'inactive') params.set('lifecycleView', 'inactive');
+    else params.delete('lifecycleView');
     const query = params.toString();
     router.replace(query ? `/dashboard/sales/contracts?${query}` : '/dashboard/sales/contracts', { scroll: false });
   };
@@ -558,6 +568,10 @@ export default function ContractsPage() {
   };
 
   return (
+    <>
+    {searchParams.get('created') === '1' && (
+      <ErpInlineState kind="success" title="قرارداد با موفقیت ثبت شد" className="mb-4" />
+    )}
     <ErpListPage
       eyebrow="فروش"
       title="قراردادهای فروش"
@@ -567,6 +581,17 @@ export default function ContractsPage() {
       ]}
       metrics={metrics}
       filters={[
+        {
+          id: 'lifecycleView',
+          label: 'نمای قراردادها',
+          type: 'select',
+          value: lifecycleView,
+          onChange: changeLifecycleView,
+          options: [
+            { label: 'فعال', value: 'active' },
+            { label: 'غیرفعال', value: 'inactive' },
+          ],
+        },
         {
           id: 'search',
           label: 'جستجو',
@@ -622,5 +647,6 @@ export default function ContractsPage() {
         />
       }
     />
+    </>
   );
 }

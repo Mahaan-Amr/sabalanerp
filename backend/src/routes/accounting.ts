@@ -59,6 +59,16 @@ import { configureDispatchDocumentsRuntime, createAccountingDispatchDocumentRout
 import { renderDispatchDocumentPdf } from '../documents/dispatch/dispatchDocumentPdf';
 import { getStatementAdjustmentArtifactPreparer } from '../services/statementAdjustmentRuntime';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
+import { ContractLifecycleRequestKind } from '@prisma/client';
+import { mayDirectlyPerformContractLifecycleAction, type ContractLifecycleAction } from '../services/contractLifecyclePolicy';
+import {
+  ContractLifecycleBlockedError,
+  createContractLifecycleRequest,
+  decideContractLifecycleRequest,
+  executeContractLifecycleAction,
+  getContractLifecyclePreview,
+  listContractLifecycleRequests,
+} from '../services/contractLifecycleService';
 
 const router = express.Router();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
@@ -404,6 +414,107 @@ router.get('/contracts/:contractId', accountingView, async (req: AuthRequest, re
     });
   }
 });
+
+router.get('/contracts/:contractId/lifecycle', accountingView, async (req: AuthRequest, res: Response) => {
+  try {
+    const data = await getContractLifecyclePreview(req.params.contractId);
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(error.message === 'Contract not found' ? 404 : 400).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/contract-lifecycle-requests', accountingView, async (req: AuthRequest, res: Response) => {
+  try {
+    const data = await listContractLifecycleRequests(req.query as any);
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+router.post(
+  '/contracts/:contractId/lifecycle-requests',
+  accountingEdit,
+  [body('kind').isIn(Object.values(ContractLifecycleRequestKind)), body('reason').isString().isLength({ min: 3 })],
+  async (req: AuthRequest, res: Response) => {
+    if (handleValidation(req, res)) return;
+    try {
+      const data = await createContractLifecycleRequest({
+        contractId: req.params.contractId,
+        kind: req.body.kind,
+        reason: req.body.reason,
+        actorId: req.user!.id,
+      });
+      res.status(201).json({ success: true, data });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: error.message });
+    }
+  },
+);
+
+router.post(
+  '/contracts/:contractId/lifecycle-actions',
+  accountingEdit,
+  [body('action').isIn(['DELETE', 'DEACTIVATE', 'REACTIVATE']), body('reason').isString().isLength({ min: 3 })],
+  async (req: AuthRequest, res: Response) => {
+    if (handleValidation(req, res)) return;
+    const action = req.body.action as ContractLifecycleAction;
+    if (!mayDirectlyPerformContractLifecycleAction(req.user!.role, action)) {
+      res.status(403).json({ success: false, error: 'Direct lifecycle action is not permitted for this role' });
+      return;
+    }
+    try {
+      const data = await executeContractLifecycleAction({
+        contractId: req.params.contractId,
+        action,
+        reason: req.body.reason,
+        actorId: req.user!.id,
+      });
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(error instanceof ContractLifecycleBlockedError ? 409 : 400).json({
+        success: false,
+        error: error.message,
+        blockers: error instanceof ContractLifecycleBlockedError ? error.blockers : undefined,
+      });
+    }
+  },
+);
+
+router.post(
+  '/contract-lifecycle-requests/:requestId/decision',
+  accountingEdit,
+  [body('decision').isIn(['APPROVE', 'REJECT']), body('reason').optional().isString().isLength({ min: 3 })],
+  async (req: AuthRequest, res: Response) => {
+    if (handleValidation(req, res)) return;
+    const request = await prisma.contractLifecycleRequest.findUnique({ where: { id: req.params.requestId } });
+    if (!request) {
+      res.status(404).json({ success: false, error: 'Lifecycle request not found' });
+      return;
+    }
+    const managerMayDecide = req.user!.role === 'MANAGER' && request.kind === ContractLifecycleRequestKind.DEACTIVATE;
+    if (req.user!.role !== 'ADMIN' && !managerMayDecide) {
+      res.status(403).json({ success: false, error: 'Admin approval is required for this lifecycle request' });
+      return;
+    }
+    try {
+      const data = await decideContractLifecycleRequest({
+        requestId: request.id,
+        decision: req.body.decision,
+        reason: req.body.reason,
+        actorId: req.user!.id,
+      });
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(error instanceof ContractLifecycleBlockedError ? 409 : 400).json({
+        success: false,
+        error: error.message,
+        blockers: error instanceof ContractLifecycleBlockedError ? error.blockers : undefined,
+      });
+    }
+  },
+);
 
 router.get('/contracts/:contractId/pdf', accountingView, async (req: AuthRequest, res: Response) => {
   try {

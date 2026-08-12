@@ -2,6 +2,22 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**Contract Hard Deletion**:
+The irreversible removal of a Draft or Voided sales Contract after Admin approval, permitted only when the Contract has no financial document and no conclusive physical operation. An Accountant or Manager may request deletion, while an Admin may either decide that request or initiate and approve deletion directly; the reason, actors, dependency check, and outcome remain in the audit history after the Contract is removed. Any blocking dependency prevents deletion and is identified explicitly to the Admin.
+_Avoid_: deleting an active Contract, treating disappearance from ordinary lists as deletion, cascading through financial or conclusive physical evidence, requiring a second actor for an Admin-initiated deletion, allowing Manager approval alone, losing the deletion audit record, or reporting an unexplained deletion failure
+
+**Inactive Contract**:
+A sales Contract preserved with all of its history but removed from ordinary Sales and Accounting lists and blocked from new financial records, edits, delivery planning, and loading operations. It remains available in an explicit inactive view, and existing finalized operations, debts, and receivables remain visible and may be settled. Deactivation is blocked until every in-progress physical operation and unfinished mutable financial workflow is resolved, with each blocker identified explicitly; a settled financial record or an outstanding debt or receivable is not itself a blocker. An Accountant may request deactivation with a reason; a Manager or Admin may approve or reject that request and may also deactivate directly without a second actor, with a mandatory reason and audit record. Only an Admin may reactivate it, while a Manager or Accountant may request reactivation.
+_Avoid_: Voided Contract, deleted Contract, hiding existing obligations, allowing new commercial or physical work, stranding an in-progress operation, treating an outstanding settled obligation as a deactivation blocker, erasing history, requiring a second actor for direct Manager or Admin deactivation, deactivation without a reason and audit record, or allowing non-Admin reactivation
+
+**Contract Creation Draft**:
+The recoverable unfinished state of one sales Contract creation attempt. Opening Contract creation normally starts empty; when an unfinished Draft exists, the user explicitly chooses either to resume it or, after confirmation, discard it and start a new Contract. Successful Contract creation clears every browser and server recovery state for that Draft, and finishing returns to the Contract list with visible success feedback.
+_Avoid_: silently restoring a prior Draft, treating a successfully created Contract as recoverable Draft state, starting over without confirming Draft discard, leaving the user on the completed wizard, or carrying one Draft's state into another Contract
+
+**Contract Financial Record Eligibility**:
+The ability to create and manage Accounting records for an otherwise eligible sales Contract regardless of how long ago the Contract was created. A System Invoice may use any valid past issue date without an age-based or ten-day backdating restriction.
+_Avoid_: expiring Accounting access because a Contract is old, applying a hidden fifteen-day Contract limit, or rejecting a System Invoice solely because its issue date is more than ten days in the past
+
 **Shipment Quantity Reconciliation**:
 The event-derived, scale-three reconciliation for one financially approved stable Contract Item row and its snapshotted unit: Contracted Quantity equals Finalized/Reserved Quantity plus Physically Dispatched Quantity plus Available-to-Load Quantity. Identical-looking rows remain separate, incompatible units are never combined, and negative availability remains visible.
 _Avoid_: using catalog identity as row identity, binary floating-point arithmetic, mixing units, clamping negative balances, or treating a Logistics finalization as physical dispatch

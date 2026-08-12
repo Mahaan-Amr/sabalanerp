@@ -8,6 +8,7 @@ import { FaCalendarAlt, FaCheck, FaChevronLeft, FaChevronRight, FaTimes } from '
 import moment from 'moment-jalaali';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianTimePicker from './PersianTimePicker';
+import { isCalendarOwnedInteraction } from './calendarOverlayPolicy';
 
 export interface PersianCalendarProps {
   value?: string;
@@ -93,7 +94,11 @@ export default function PersianCalendarComponent({
     updateLayout();
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (!triggerRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
+      if (!isCalendarOwnedInteraction({
+        target: target instanceof Element ? target : null,
+        triggerContains: Boolean(triggerRef.current?.contains(target)),
+        panelContains: Boolean(panelRef.current?.contains(target)),
+      })) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
     window.addEventListener('resize', updateLayout);

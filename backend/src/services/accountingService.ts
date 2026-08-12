@@ -106,6 +106,7 @@ const publishAccountingActionWithinTransaction = async (
 
 type ListContractsQuery = {
   view?: string;
+  lifecycleView?: 'active' | 'inactive' | 'pending';
   search?: string;
   status?: string;
   sourceStatus?: string;
@@ -343,21 +344,16 @@ const parseBusinessDateKey = (value?: string) => {
   return `${match[1]}-${match[2]}-${match[3]}`;
 };
 
-const validateSystemInvoiceDate = (value?: string) => {
+export const validateSystemInvoiceDate = (value?: string) => {
   const dateKey = parseBusinessDateKey(value);
   const todayKey = getTehranDateKey(new Date());
   const invoiceDay = dateKeyToUtcDay(dateKey);
   const today = dateKeyToUtcDay(todayKey);
-  const oldestAllowed = today - (10 * 24 * 60 * 60 * 1000);
   const newestAllowed = today + (30 * 24 * 60 * 60 * 1000);
 
   if (invoiceDay > newestAllowed) {
     throw new Error('System invoice date cannot be more than 30 days in the future');
   }
-  if (invoiceDay < oldestAllowed) {
-    throw new Error('System invoice date cannot be older than 10 days');
-  }
-
   return new Date(`${dateKey}T00:00:00.000Z`);
 };
 
@@ -605,7 +601,7 @@ const buildContractRow = async (contract: any, settings: any) => {
     .reduce((sum: Prisma.Decimal, payment: any) => sum.plus(payment.amount), new Prisma.Decimal(0));
   const remainingAmount = Prisma.Decimal.max(contractAmount.minus(receivedAmount), new Prisma.Decimal(0));
   const missingFields = getTaxMissingFields(contract, settings);
-  const eligible = ELIGIBLE_CONTRACT_STATUSES.includes(contract.status);
+  const eligible = ELIGIBLE_CONTRACT_STATUSES.includes(contract.status) && !contract.isInactive;
   const openCorrections = corrections.filter((item: any) => activeCorrectionStatuses().includes(item.status));
   const openFlags = flags.filter((item: any) => item.status === 'OPEN');
   const issuedInvoices = records.filter(isValidFinanciallyApprovedInvoice);
@@ -638,7 +634,11 @@ const buildContractRow = async (contract: any, settings: any) => {
     sourceStatus = 'HAS_FINANCIAL_RECORDS';
   }
 
-  const disabledReason = eligible ? undefined : 'فقط قراردادهای تایید شده، امضا شده یا چاپ شده قابل ثبت مالی هستند';
+  const disabledReason = eligible
+    ? undefined
+    : contract.isInactive
+      ? 'قرارداد غیرفعال است و رکورد مالی جدید نمی‌پذیرد'
+      : 'فقط قراردادهای تایید شده، امضا شده یا چاپ شده قابل ثبت مالی هستند';
   const nextBestActions = [
     {
       kind: 'CREATE_INVOICE',
@@ -667,7 +667,8 @@ const buildContractRow = async (contract: any, settings: any) => {
     {
       kind: 'REQUEST_CORRECTION',
       labelFa: 'درخواست اصلاح',
-      enabled: true
+      enabled: !contract.isInactive,
+      disabledReason: contract.isInactive ? 'قرارداد غیرفعال و فقط‌خواندنی است' : undefined
     }
   ];
 
@@ -685,6 +686,9 @@ const buildContractRow = async (contract: any, settings: any) => {
       economicCode: contract.customer?.customFields?.economicCode
     },
     status: contract.status,
+    isInactive: contract.isInactive,
+    inactiveAt: contract.inactiveAt,
+    inactiveReason: contract.inactiveReason,
     accounting: {
       sourceStatus,
       eligibleForFinancialRecords: eligible,
@@ -774,6 +778,19 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}) =>
   const search = query.search?.trim();
 
   const where: Prisma.SalesContractWhereInput = {};
+  const lifecycleView = query.lifecycleView === 'inactive' || query.lifecycleView === 'pending'
+    ? query.lifecycleView
+    : 'active';
+  if (lifecycleView === 'inactive') where.isInactive = true;
+  if (lifecycleView === 'active') where.isInactive = false;
+  if (lifecycleView === 'pending') {
+    const pending = await prisma.contractLifecycleRequest.findMany({
+      where: { status: 'PENDING' },
+      select: { contractId: true },
+      distinct: ['contractId'],
+    });
+    where.id = { in: pending.map((item) => item.contractId) };
+  }
   if (query.status && query.status !== 'ALL' && Object.values(ContractStatus).includes(query.status as ContractStatus)) {
     where.status = query.status as ContractStatus;
   }
@@ -1044,14 +1061,15 @@ export const getAccountingContractDetail = async (contractId: string) => {
   if (!contract) throw new Error('Contract not found');
   const [enriched] = await attachAccountingCollections([contract]);
   const row = await buildContractRow(enriched, settings);
-  const [financialRecords, receivables, paymentEvents, tax, auditTrail, correctionRequests, flags] = await Promise.all([
+  const [financialRecords, receivables, paymentEvents, tax, auditTrail, correctionRequests, flags, lifecycleRequests] = await Promise.all([
     prisma.accountingFinancialRecord.findMany({ where: { contractId }, include: { invoiceItems: true }, orderBy: { createdAt: 'desc' } }),
     prisma.accountingReceivable.findMany({ where: { contractId }, orderBy: { dueDate: 'asc' } }),
     prisma.accountingPaymentStatus.findMany({ where: { contractId }, orderBy: { createdAt: 'desc' } }),
     prisma.accountingTaxRecord.findMany({ where: { contractId }, orderBy: { createdAt: 'desc' } }),
     prisma.accountingAuditLog.findMany({ where: { contractId }, orderBy: { createdAt: 'desc' } }),
     prisma.accountingCorrectionRequest.findMany({ where: { contractId }, orderBy: { createdAt: 'desc' } }),
-    prisma.accountingContractFlag.findMany({ where: { contractId }, orderBy: { createdAt: 'desc' } })
+    prisma.accountingContractFlag.findMany({ where: { contractId }, orderBy: { createdAt: 'desc' } }),
+    prisma.contractLifecycleRequest.findMany({ where: { contractId }, orderBy: { requestedAt: 'desc' } })
   ]);
   const replacementWorkflow = buildCorrectionReplacementWorkflow(
     toRialDecimal(getContractAmount(contract), contract.currency),
@@ -1088,6 +1106,7 @@ export const getAccountingContractDetail = async (contractId: string) => {
     flags,
     auditTrail,
     correctionRequests,
+    lifecycleRequests,
     replacementWorkflow,
     availableActions: row.nextBestActions
   };
@@ -1100,9 +1119,35 @@ const ensureEligibleContract = async (contractId: string) => {
   });
 
   if (!contract) throw new Error('Contract not found');
+  if (contract.isInactive) throw new Error('Inactive contracts cannot create new accounting records');
   if (!ELIGIBLE_CONTRACT_STATUSES.includes(contract.status)) {
     throw new Error('Only approved, signed, or printed contracts can create accounting records');
   }
+  return contract;
+};
+
+const ensureContractForReceipt = async (contractId: string, receivableId?: string) => {
+  const contract = await prisma.salesContract.findUnique({
+    where: { id: contractId },
+    include: getAccountingInclude(),
+  });
+  if (!contract) throw new Error('Contract not found');
+  if (!contract.isInactive) {
+    if (!ELIGIBLE_CONTRACT_STATUSES.includes(contract.status)) {
+      throw new Error('Only approved, signed, or printed contracts can create accounting records');
+    }
+    return contract;
+  }
+  if (!receivableId) throw new Error('Inactive contracts only allow settlement of an existing receivable');
+  const receivable = await prisma.accountingReceivable.findFirst({
+    where: {
+      id: receivableId,
+      contractId,
+      status: { notIn: [ReceivableStatus.SETTLED, ReceivableStatus.VOIDED] },
+    },
+    select: { id: true },
+  });
+  if (!receivable) throw new Error('No open receivable was found for settlement on this inactive contract');
   return contract;
 };
 
@@ -1582,7 +1627,7 @@ const createReceivable = async (command: AccountingActionRequest, actor: Actor, 
 
 const registerReceipt = async (command: AccountingActionRequest, actor: Actor, notificationHook?: AccountingActionNotificationHook) => {
   if (!command.contractId) throw new Error('contractId is required');
-  const contract = await ensureEligibleContract(command.contractId);
+  const contract = await ensureContractForReceipt(command.contractId, command.receivableId);
   const method = command.method && command.method in AccountingPaymentMethod
     ? AccountingPaymentMethod[command.method as keyof typeof AccountingPaymentMethod]
     : AccountingPaymentMethod.CASH;
@@ -1835,6 +1880,9 @@ const trackTaxSubmission = async (command: AccountingActionRequest, actor: Actor
 
 const requestCorrection = async (command: AccountingActionRequest, actor: Actor) => {
   if (!command.contractId) throw new Error('contractId is required');
+  const contract = await prisma.salesContract.findUnique({ where: { id: command.contractId }, select: { isInactive: true } });
+  if (!contract) throw new Error('Contract not found');
+  if (contract.isInactive) throw new Error('Inactive contracts are read-only');
   const correction = await prisma.$transaction(async (tx) => {
     const activeRequest = await tx.accountingCorrectionRequest.findFirst({
       where: {

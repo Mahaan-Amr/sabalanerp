@@ -90,6 +90,10 @@ export async function createPayment(
     throw new Error('Contract not found');
   }
 
+  if (contract.isInactive) {
+    throw new Error('Contract is inactive');
+  }
+
   // Validate user access
   const user = await prisma.user.findUnique({
     where: { id: userId },

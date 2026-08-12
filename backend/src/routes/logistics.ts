@@ -225,6 +225,7 @@ const getProjectContracts = async (projectId: string, customerId: string) => {
   const contracts = await prisma.salesContract.findMany({
     where: {
       customerId,
+      isInactive: false,
       status: { notIn: ['CANCELLED', 'EXPIRED'] as any },
       contractData: {
         path: ['projectId'],
@@ -553,6 +554,9 @@ const linePayloadToCreate = async (line: any) => {
   if (!sourceItem) {
     throw new Error('Source contract item not found');
   }
+  if (sourceItem.contract.isInactive) {
+    throw new Error('Inactive contracts cannot be used for new loading operations');
+  }
 
   const financiallyApprovedRecord = await prisma.accountingFinancialRecord.findFirst({
     where: {
@@ -726,6 +730,7 @@ const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string
   for (const line of lines) {
     const item = sourceById.get(line.sourceContractItemId);
     if (!item) throw new Error('Source contract item not found');
+    if (item.contract.isInactive) throw new Error('Inactive contracts cannot be used for loading operations');
     const snapshot = productSnapshotFor((item as any).contract, item, 0);
     const remaining = snapshot.quantity - (consumed.get(line.sourceContractItemId) || 0);
     const allowed = remaining + (isLinearUnit(line.unit) ? LINEAR_TOLERANCE : 0);

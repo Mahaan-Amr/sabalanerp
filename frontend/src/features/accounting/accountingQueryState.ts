@@ -65,7 +65,7 @@ const DUE_BUCKETS = new Set(['overdue', 'next7', 'days8to30', 'later30']);
 const DEADLINE_TYPES = new Set(['all', 'receivable', 'check']);
 
 const ACCOUNTING_DASHBOARD_KEYS = ['due', 'deadlineType'] as const;
-const CONTRACT_KEYS = ['view', 'search', 'status', 'sourceStatus', 'dateFrom', 'dateTo', 'page', 'pageSize', 'sort'] as const;
+const CONTRACT_KEYS = ['view', 'lifecycleView', 'search', 'status', 'sourceStatus', 'dateFrom', 'dateTo', 'page', 'pageSize', 'sort'] as const;
 const INVOICE_KEYS = ['view', 'search', 'status', 'period', 'date', 'cutoff', 'page', 'pageSize'] as const;
 const STATUS_DRILLDOWN_KEYS = ['view', 'search', 'status', 'page', 'pageSize'] as const;
 const AUDIT_KEYS = ['search', 'action', 'page', 'pageSize'] as const;
@@ -74,6 +74,7 @@ const COLLECTION_KEYS = ['view', 'search', 'status', 'due', 'period', 'date', 'c
 
 export type ContractsQueryState = {
   view: 'reviewable' | null;
+  lifecycleView: 'active' | 'inactive' | 'pending';
   search: string;
   status: string;
   sourceStatus: string;
@@ -208,6 +209,9 @@ export const canonicalizeContractsQuery = (
   const rawStatus = source.get('status') || '';
   const status = CONTRACT_STATUSES.has(rawStatus) ? rawStatus : 'ALL';
   const view = status === 'ALL' && source.get('view') === 'reviewable' ? 'reviewable' : null;
+  const lifecycleView = source.get('lifecycleView') === 'inactive' || source.get('lifecycleView') === 'pending'
+    ? source.get('lifecycleView') as 'inactive' | 'pending'
+    : 'active';
   const rawSourceStatus = source.get('sourceStatus') || '';
   const sourceStatus = CONTRACT_SOURCE_STATUSES.has(rawSourceStatus) ? rawSourceStatus : 'ALL';
   const search = normalizedSearch(source);
@@ -218,6 +222,7 @@ export const canonicalizeContractsQuery = (
   const page = normalizedPage(source);
 
   if (view) params.set('view', view);
+  if (lifecycleView !== 'active') params.set('lifecycleView', lifecycleView);
   if (search) params.set('search', search);
   if (status !== 'ALL') params.set('status', status);
   if (sourceStatus !== 'ALL') params.set('sourceStatus', sourceStatus);
@@ -226,7 +231,7 @@ export const canonicalizeContractsQuery = (
   if (page > 1) params.set('page', String(page));
 
   return {
-    state: { view, search, status, sourceStatus, dateFrom, dateTo, page },
+    state: { view, lifecycleView, search, status, sourceStatus, dateFrom, dateTo, page },
     params,
   };
 };

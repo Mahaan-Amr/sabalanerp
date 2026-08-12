@@ -474,6 +474,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         // Move to final step (Digital Signature) instead of redirecting
         if (typeof window !== 'undefined') {
           localStorage.removeItem(draftStorageKey);
+          localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+          localStorage.removeItem('contractWizardState');
         }
         await onCommitted?.();
         setCurrentStep(7);

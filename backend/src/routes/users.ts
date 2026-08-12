@@ -11,6 +11,7 @@ import { newOpaqueToken, revokeSessions, serializeSession } from '../services/id
 import { selectionVersionHash } from '../services/personnelBulkPolicy';
 import { resolveExistingPersonnelLink } from '../services/hrPersonnelBoundary';
 import { assertUserCanBeDeleted, collectUserDeletionBlockers, UserDeletionPolicyError } from '../services/userDeletionPolicy';
+import { canAssignSystemRole } from '../services/userRoleAdministrationPolicy';
 
 const router = express.Router();
 const CUID_REGEX = /^c[a-z0-9]{24}$/;
@@ -275,10 +276,14 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       }
     }
 
-    if (req.user?.role === 'MANAGER' && ['ADMIN', 'MANAGER'].includes(role)) {
+    if (role && !canAssignSystemRole({
+      actorRole: req.user!.role,
+      targetRole: 'USER',
+      requestedRole: role,
+    })) {
       return res.status(403).json({
         success: false,
-        error: 'Managers cannot create admin or manager users'
+        error: 'Managers may create users with non-admin roles but cannot create administrator accounts'
       });
     }
 
@@ -670,10 +675,14 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
-    if (req.user!.role === 'MANAGER' && role) {
+    if (role && !canAssignSystemRole({
+      actorRole: req.user!.role,
+      targetRole: existingUser.role,
+      requestedRole: role,
+    })) {
       return res.status(403).json({
         success: false,
-        error: 'Only administrators can change roles'
+        error: 'Managers may assign non-admin roles but cannot create or modify administrator accounts'
       });
     }
 

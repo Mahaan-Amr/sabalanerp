@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import {
   FaCog,
   FaArchive,
+  FaClipboardList,
   FaFilter,
   FaPlus,
   FaSync,
@@ -209,9 +210,14 @@ export default function HiringCasesPage() {
           onClick: () => commitContext({ ...filters, page: 1 }, !archiveView),
         },
         {
-          label: "اختیار و مسئولیت",
+          label: "مدیریت دسترسی",
           icon: FaCog,
           href: "/dashboard/hr/permissions",
+        },
+        {
+          label: "معیارهای مصاحبه اولیه",
+          icon: FaClipboardList,
+          href: "/dashboard/hr/interview-criteria",
         },
         { label: "به‌روزرسانی", icon: FaSync, onClick: () => load() },
       ]}

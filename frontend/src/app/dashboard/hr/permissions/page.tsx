@@ -1,120 +1,315 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   ErpBadge,
   ErpButton,
   ErpCard,
   ErpCheckbox,
+  ErpEmptyState,
   ErpInlineState,
   ErpInput,
   ErpLoading,
   ErpPage,
   ErpSection,
+  ErpSegmentedControl,
   ErpSelect,
   ErpTextarea,
-} from "@/components/erp";
-import { hrAuthorizationAPI } from "@/lib/api";
+} from '@/components/erp';
+import { authAPI, hrAuthorizationAPI, permissionsAPI, usersAPI, workspacePermissionsAPI } from '@/lib/api';
+import {
+  createAccessDraft,
+  deselectAllInWorkspace,
+  selectAllInWorkspace,
+  setFeatureSelection,
+  type AccessDraft,
+  type AccessFeatureDefinition,
+  type AccessLevel,
+} from '@/features/access-management/accessEditorState';
 
-type Permission = { code: string; labelFa: string; level: "VIEW" | "EDIT" | "ADMIN"; prerequisites: string[] };
-type Group = { code: string; labelFa: string; permissions: Permission[] };
+type User = { id: string; firstName: string; lastName: string; email: string; username: string; role: string };
+type DirectPermission = { id: string; workspace: string; permissionLevel: AccessLevel; feature?: string; expiresAt?: string | null; isActive: boolean };
+type RolePermission = { id: string; role: string; workspace: string; permissionLevel: AccessLevel; feature?: string; isActive: boolean };
+type HrGrant = { id: string; userId: string; level: 'VIEW' | 'EDIT' | 'ADMIN'; status: string; effectiveFrom: string; effectiveTo?: string | null; workspaceCode?: string; featureCode?: string };
+type FeatureDefinition = AccessFeatureDefinition & { source: 'legacy' | 'hr' };
+type Feedback = { kind: 'success' | 'error' | 'stale'; title: string; description?: string };
 
-export default function HrPermissionsPage() {
-  const [context, setContext] = useState<any>();
-  const [userId, setUserId] = useState("");
-  const [workspaceLevel, setWorkspaceLevel] = useState<"VIEW" | "EDIT" | "ADMIN">("VIEW");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [reason, setReason] = useState("");
-  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; title: string }>();
+const WORKSPACES = [
+  { key: 'crm', label: 'CRM' },
+  { key: 'sales', label: 'فروش' },
+  { key: 'inventory', label: 'انبار' },
+  { key: 'hr', label: 'منابع انسانی' },
+  { key: 'security', label: 'امنیت' },
+  { key: 'accounting', label: 'حسابداری' },
+  { key: 'bi', label: 'هوش تجاری' },
+  { key: 'logistics', label: 'لجستیک' },
+] as const;
+const ROLES = ['USER', 'SALES', 'MODERATOR', 'MANAGER', 'ADMIN'] as const;
+const LEVEL_LABELS: Record<AccessLevel, string> = { view: 'مشاهده', edit: 'ویرایش', admin: 'مدیریت' };
+const HR_LEVEL: Record<AccessLevel, 'VIEW' | 'EDIT' | 'ADMIN'> = { view: 'VIEW', edit: 'EDIT', admin: 'ADMIN' };
+const FROM_HR_LEVEL: Record<'VIEW' | 'EDIT' | 'ADMIN', AccessLevel> = { VIEW: 'view', EDIT: 'edit', ADMIN: 'admin' };
+
+const activeNow = (permission: { isActive?: boolean; status?: string; expiresAt?: string | null; effectiveFrom?: string; effectiveTo?: string | null }) => {
+  const now = Date.now();
+  if (permission.isActive === false || (permission.status && permission.status !== 'ACTIVE')) return false;
+  if (permission.expiresAt && new Date(permission.expiresAt).getTime() <= now) return false;
+  if (permission.effectiveFrom && new Date(permission.effectiveFrom).getTime() > now) return false;
+  return !permission.effectiveTo || new Date(permission.effectiveTo).getTime() > now;
+};
+const userName = (user: User) => `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username;
+const recommendedLevel = (feature: string): AccessLevel => /_(create|edit|delete|approve|reject|sign|import|export|update|toggle|start|end|assign|verify|validate|send)$/.test(feature) ? 'edit' : 'view';
+const normalizeLegacyDefinition = (definition: any): FeatureDefinition => ({
+  key: definition.key,
+  workspace: definition.workspace,
+  label: definition.label || definition.key,
+  requiredLevel: recommendedLevel(definition.key),
+  prerequisites: definition.prerequisites || [],
+  source: 'legacy',
+});
+
+export default function PermissionsPage() {
+  const requestedUserId = useSearchParams().get('userId');
+  const [actor, setActor] = useState<User | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [definitions, setDefinitions] = useState<FeatureDefinition[]>([]);
+  const [roleWorkspacePermissions, setRoleWorkspacePermissions] = useState<RolePermission[]>([]);
+  const [roleFeaturePermissions, setRoleFeaturePermissions] = useState<RolePermission[]>([]);
+  const [hrContext, setHrContext] = useState<any>();
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [directWorkspaces, setDirectWorkspaces] = useState<DirectPermission[]>([]);
+  const [directFeatures, setDirectFeatures] = useState<DirectPermission[]>([]);
+  const [hrWorkspaces, setHrWorkspaces] = useState<HrGrant[]>([]);
+  const [hrFeatures, setHrFeatures] = useState<HrGrant[]>([]);
+  const [draft, setDraft] = useState<AccessDraft>(() => createAccessDraft());
+  const [draftRole, setDraftRole] = useState('USER');
+  const [expiresAt, setExpiresAt] = useState('');
+  const [reason, setReason] = useState('');
+  const [userSearch, setUserSearch] = useState('');
+  const [permissionSearch, setPermissionSearch] = useState('');
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({ hr: true });
+  const [tab, setTab] = useState<'users' | 'roles'>('users');
+  const [loading, setLoading] = useState(true);
+  const [loadingUser, setLoadingUser] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [search, setSearch] = useState("");
+  const [feedback, setFeedback] = useState<Feedback>();
+  const [roleForm, setRoleForm] = useState({ role: 'USER', workspace: 'sales', feature: '', permissionLevel: 'view' as AccessLevel });
 
-  const load = () => hrAuthorizationAPI.getContext().then(({ data }) => {
-    setContext(data.data);
-    setUserId((current) => current || data.data.users[0]?.id || "");
-  }).catch((error) => setFeedback({ kind: "error", title: error.response?.data?.error || "بارگذاری مجوزها ناموفق بود." }));
-  useEffect(() => { void load(); }, []);
-
-  const groups: Group[] = useMemo(() => context?.actionPermissionGroups || [], [context]);
-  const definitions = useMemo(() => new Map(groups.flatMap((group) => group.permissions).map((permission) => [permission.code, permission])), [groups]);
-  const expanded = useMemo(() => {
-    const result = new Set<string>();
-    const include = (code: string) => {
-      const definition = definitions.get(code);
-      (definition?.prerequisites || []).forEach(include);
-      result.add(code);
-    };
-    selected.forEach(include);
-    return Array.from(result);
-  }, [definitions, selected]);
-  const automatic = expanded.filter((code) => !selected.includes(code));
-
-  const validateGrant = () => {
-    if (!userId || reason.trim().length < 3) {
-      setFeedback({ kind: "error", title: "کاربر و دلیل مستند حداقل سه‌حرفی الزامی است." });
-      return false;
-    }
-    return true;
-  };
-  const saveWorkspace = async () => {
-    if (!validateGrant()) return;
-    setSaving(true);
-    setFeedback(undefined);
+  const loadBase = useCallback(async () => {
+    setLoading(true);
     try {
-      await hrAuthorizationAPI.grantWorkspace({ userId, level: workspaceLevel, reason: reason.trim() });
-      setFeedback({ kind: "success", title: "مجوز فضای کاری ثبت شد." });
-      setReason("");
-      await load();
+      const [profileResponse, usersResponse, definitionsResponse, roleWorkspaceResponse, roleFeatureResponse, hrResponse] = await Promise.all([
+        authAPI.getMe(), usersAPI.getUsers(1, 1000), permissionsAPI.getFeatureDefinitions(),
+        workspacePermissionsAPI.getRolePermissions(), permissionsAPI.getRoleFeaturePermissions({ limit: 1000 }), hrAuthorizationAPI.getContext(),
+      ]);
+      const currentActor = profileResponse.data.data as User;
+      const availableUsers = (usersResponse.data.data || []).filter((user: User) => currentActor.role !== 'MANAGER' || user.role !== 'ADMIN');
+      const actionDefinitions = (hrResponse.data.data.actionPermissionGroups || []).flatMap((group: any) => group.permissions).map((permission: any): FeatureDefinition => ({
+        key: permission.code, workspace: 'hr', label: permission.labelFa, requiredLevel: FROM_HR_LEVEL[permission.level as 'VIEW' | 'EDIT' | 'ADMIN'], prerequisites: permission.prerequisites || [], source: 'hr',
+      }));
+      const actionKeys = new Set(actionDefinitions.map(({ key }: FeatureDefinition) => key));
+      const hrBaseDefinitions = (hrResponse.data.data.featureCatalog || []).filter((feature: any) => !actionKeys.has(feature.code)).map((feature: any): FeatureDefinition => ({
+        key: feature.code, workspace: 'hr', label: feature.labelFa || feature.namePersian || feature.name || feature.code, requiredLevel: 'view', prerequisites: [], source: 'hr',
+      }));
+      setActor(currentActor);
+      setUsers(availableUsers);
+      setDefinitions([...(definitionsResponse.data.data || []).map(normalizeLegacyDefinition).filter((definition: FeatureDefinition) => definition.workspace !== 'hr'), ...hrBaseDefinitions, ...actionDefinitions]);
+      setRoleWorkspacePermissions(roleWorkspaceResponse.data.data || []);
+      setRoleFeaturePermissions(roleFeatureResponse.data.data || []);
+      setHrContext(hrResponse.data.data);
+      setSelectedUserId((current) => {
+        const requested = availableUsers.some((user: User) => user.id === requestedUserId) ? requestedUserId! : '';
+        return current && availableUsers.some((user: User) => user.id === current) ? current : requested || availableUsers[0]?.id || '';
+      });
     } catch (error: any) {
-      setFeedback({ kind: "error", title: error.response?.data?.error || "ثبت مجوز ناموفق بود." });
-    } finally {
-      setSaving(false);
-    }
-  };
-  const saveActions = async () => {
-    if (!validateGrant() || !selected.length) return;
-    setSaving(true);
+      setFeedback({ kind: 'error', title: error.response?.data?.error || 'بارگذاری مرکز مدیریت دسترسی ناموفق بود.' });
+    } finally { setLoading(false); }
+  }, [requestedUserId]);
+
+  useEffect(() => { void loadBase(); }, [loadBase]);
+
+  const loadUser = useCallback(async (userId: string) => {
+    if (!userId || !hrContext) return;
+    setLoadingUser(true);
     setFeedback(undefined);
     try {
-      for (const featureCode of expanded) {
-        await hrAuthorizationAPI.grantFeature({
-          userId,
-          featureCode,
-          level: definitions.get(featureCode)?.level || "VIEW",
-          reason: reason.trim(),
-        });
+      const user = users.find((candidate) => candidate.id === userId) || null;
+      const [workspaceResponse, featureResponse] = await Promise.all([
+        workspacePermissionsAPI.getUserPermissions({ userId, limit: 100 }),
+        permissionsAPI.getUserFeaturePermissions(userId),
+      ]);
+      const workspaces = (workspaceResponse.data.data || []).filter(activeNow);
+      const features = (featureResponse.data.data || []).filter(activeNow);
+      const activeHrWorkspaces = (hrContext.workspaceGrants || []).filter((grant: HrGrant) => grant.userId === userId && activeNow(grant));
+      const activeHrFeatures = (hrContext.featureGrants || []).filter((grant: HrGrant) => grant.userId === userId && activeNow(grant));
+      const levels = Object.fromEntries(WORKSPACES.map(({ key }) => [key, workspaces.find((permission: DirectPermission) => permission.workspace === key)?.permissionLevel || null])) as Record<string, AccessLevel | null>;
+      const newestHrWorkspace = activeHrWorkspaces[0];
+      if (newestHrWorkspace) levels.hr = FROM_HR_LEVEL[newestHrWorkspace.level as 'VIEW' | 'EDIT' | 'ADMIN'];
+      setSelectedUser(user);
+      setDraftRole(user?.role || 'USER');
+      setDirectWorkspaces(workspaces);
+      setDirectFeatures(features);
+      setHrWorkspaces(activeHrWorkspaces);
+      setHrFeatures(activeHrFeatures);
+      setDraft(createAccessDraft({
+        workspaceLevels: levels,
+        explicitlySelectedFeatures: [...features.map((permission: DirectPermission) => permission.feature!), ...activeHrFeatures.map((permission: HrGrant) => permission.featureCode!)],
+      }));
+      setExpiresAt('');
+      setReason('');
+    } catch (error: any) {
+      setFeedback({ kind: 'error', title: error.response?.data?.error || 'خواندن دسترسی‌های کاربر ناموفق بود.' });
+    } finally { setLoadingUser(false); }
+  }, [hrContext, users]);
+
+  useEffect(() => { void loadUser(selectedUserId); }, [loadUser, selectedUserId]);
+
+  const maxLevel: AccessLevel = actor?.role === 'MANAGER' ? 'edit' : 'admin';
+  const isAdminTarget = selectedUser?.role === 'ADMIN';
+  const canEdit = !!selectedUser && !isAdminTarget;
+  const visibleUsers = useMemo(() => {
+    const query = userSearch.trim().toLowerCase();
+    if (!query) return users;
+    return users.filter((user) => user.id === selectedUserId || `${userName(user)} ${user.email} ${user.username} ${user.role}`.toLowerCase().includes(query));
+  }, [selectedUserId, userSearch, users]);
+  const filteredDefinitions = useMemo(() => definitions.filter((definition) => !permissionSearch.trim() || definition.label.includes(permissionSearch.trim()) || definition.key.toLowerCase().includes(permissionSearch.trim().toLowerCase())), [definitions, permissionSearch]);
+  const roleWorkspaceForSelected = roleWorkspacePermissions.filter((permission) => permission.role === draftRole && permission.isActive);
+  const roleFeatureForSelected = roleFeaturePermissions.filter((permission) => permission.role === draftRole && permission.isActive);
+
+  const save = async () => {
+    if (!selectedUser || !canEdit || reason.trim().length < 3) {
+      setFeedback({ kind: 'error', title: 'برای ذخیره، دلیل مستند با حداقل سه نویسه الزامی است.' }); return;
+    }
+    setSaving(true); setFeedback(undefined);
+    try {
+      if (draftRole !== selectedUser.role) await usersAPI.updateUser(selectedUser.id, { role: draftRole });
+      for (const { key } of WORKSPACES.filter((workspace) => workspace.key !== 'hr')) {
+        const desired = draft.workspaceLevels[key];
+        const current = directWorkspaces.find((permission) => permission.workspace === key);
+        if (!desired && current) await workspacePermissionsAPI.deleteUserPermission(current.id);
+        else if (desired && !current) await workspacePermissionsAPI.createUserPermission({ userId: selectedUser.id, workspace: key, permissionLevel: desired, expiresAt: expiresAt || undefined });
+        else if (desired && current && (current.permissionLevel !== desired || expiresAt)) await workspacePermissionsAPI.updateUserPermission(current.id, { permissionLevel: desired, ...(expiresAt ? { expiresAt } : {}) });
       }
-      setFeedback({ kind: "success", title: "مجوزهای عملیاتی و پیش‌نیازهای آن‌ها ثبت شد." });
-      setSelected([]);
-      setReason("");
-      await load();
+      const desiredLegacy = new Set(definitions.filter((definition) => definition.source === 'legacy' && draft.selectedFeatures.has(definition.key)).map(({ key }) => key));
+      for (const current of directFeatures) if (current.feature && !desiredLegacy.has(current.feature)) await permissionsAPI.deleteFeaturePermission(current.id);
+      for (const feature of Array.from(desiredLegacy)) {
+        const definition = definitions.find((candidate) => candidate.key === feature)!;
+        const current = directFeatures.find((permission) => permission.feature === feature);
+        const permissionLevel = definition.requiredLevel === 'admin' ? maxLevel : definition.requiredLevel;
+        if (!current) await permissionsAPI.createFeaturePermission({ userId: selectedUser.id, workspace: definition.workspace, feature, permissionLevel, expiresAt: expiresAt || undefined });
+        else if (current.permissionLevel !== permissionLevel || expiresAt) await permissionsAPI.updateFeaturePermission(current.id, { permissionLevel, ...(expiresAt ? { expiresAt } : {}) });
+      }
+      const desiredHrLevel = draft.workspaceLevels.hr;
+      const currentHrWorkspace = hrWorkspaces[0];
+      if (!desiredHrLevel && currentHrWorkspace) await hrAuthorizationAPI.revokeWorkspace(currentHrWorkspace.id, reason.trim());
+      else if (desiredHrLevel && (!currentHrWorkspace || FROM_HR_LEVEL[currentHrWorkspace.level] !== desiredHrLevel)) {
+        if (currentHrWorkspace) await hrAuthorizationAPI.revokeWorkspace(currentHrWorkspace.id, reason.trim());
+        await hrAuthorizationAPI.grantWorkspace({ userId: selectedUser.id, level: HR_LEVEL[desiredHrLevel], reason: reason.trim() });
+      }
+      const desiredHr = new Set(definitions.filter((definition) => definition.source === 'hr' && draft.selectedFeatures.has(definition.key)).map(({ key }) => key));
+      for (const current of hrFeatures) if (current.featureCode && !desiredHr.has(current.featureCode)) await hrAuthorizationAPI.revokeFeature(current.id, reason.trim());
+      for (const feature of Array.from(desiredHr)) {
+        const definition = definitions.find((candidate) => candidate.key === feature)!;
+        const desiredLevel = HR_LEVEL[definition.requiredLevel === 'admin' ? maxLevel : definition.requiredLevel];
+        const current = hrFeatures.find((permission) => permission.featureCode === feature);
+        if (!current || current.level !== desiredLevel) {
+          if (current) await hrAuthorizationAPI.revokeFeature(current.id, reason.trim());
+          await hrAuthorizationAPI.grantFeature({ userId: selectedUser.id, featureCode: feature, level: desiredLevel, reason: reason.trim() });
+        }
+      }
+      setFeedback({ kind: 'success', title: `دسترسی‌های ${userName(selectedUser)} ذخیره شد.`, description: 'هیچ کاربر دیگری تغییر نکرد.' });
+      await loadBase();
     } catch (error: any) {
-      setFeedback({ kind: "error", title: error.response?.data?.error || "ثبت مجوز ناموفق بود." });
-    } finally {
-      setSaving(false);
-    }
+      setFeedback({ kind: 'error', title: error.response?.data?.error || 'ذخیره دسترسی‌ها ناموفق بود.', description: 'تغییرات انجام‌شده را بازبینی و دوباره ذخیره کنید.' });
+      await loadBase();
+    } finally { setSaving(false); }
   };
 
-  if (!context && !feedback) return <ErpLoading />;
+  const saveRoleDefault = async () => {
+    if (actor?.role !== 'ADMIN') return;
+    try {
+      if (roleForm.feature) await permissionsAPI.createRoleFeaturePermission(roleForm);
+      else await workspacePermissionsAPI.createRolePermission(roleForm);
+      setFeedback({ kind: 'success', title: 'پیش‌فرض نقش ثبت شد.' });
+      await loadBase();
+    } catch (error: any) { setFeedback({ kind: 'error', title: error.response?.data?.error || 'ثبت پیش‌فرض نقش ناموفق بود.' }); }
+  };
+
+  const removeRoleDefault = async (permission: RolePermission) => {
+    if (actor?.role !== 'ADMIN') return;
+    try {
+      if (permission.feature) await permissionsAPI.deleteRoleFeaturePermission(permission.id);
+      else await workspacePermissionsAPI.deleteRolePermission(permission.id);
+      setFeedback({ kind: 'success', title: 'پیش‌فرض نقش حذف شد.' });
+      await loadBase();
+    } catch (error: any) { setFeedback({ kind: 'error', title: error.response?.data?.error || 'حذف پیش‌فرض نقش ناموفق بود.' }); }
+  };
+
+  if (loading) return <ErpLoading />;
   return (
-    <ErpPage eyebrow="منابع انسانی" title="مجوزهای منابع انسانی" description="دسترسی فضای کاری و مجوزهای کسب‌وکاری از همین صفحه مدیریت می‌شوند.">
-      {feedback && <ErpInlineState kind={feedback.kind} title={feedback.title} />}
-      <ErpSection title="افزودن مجوز فضای کاری">
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="space-y-2 text-sm text-[var(--sds-text-secondary)]"><span>کاربر</span><ErpSelect value={userId} onChange={(event) => setUserId(event.target.value)}>{context?.users.map((user: any) => <option key={user.id} value={user.id}>{`${user.firstName} ${user.lastName}`.trim() || user.username}</option>)}</ErpSelect></label>
-          <label className="space-y-2 text-sm text-[var(--sds-text-secondary)]"><span>سطح فضای کاری</span><ErpSelect value={workspaceLevel} onChange={(event) => setWorkspaceLevel(event.target.value as typeof workspaceLevel)}><option value="VIEW">مشاهده</option><option value="EDIT">ویرایش</option><option value="ADMIN">دسترسی کامل</option></ErpSelect></label>
-        </div>
-      </ErpSection>
-      <div className="flex justify-end"><ErpButton label={saving ? "در حال ثبت…" : "ثبت مجوز فضای کاری"} variant="outline" disabled={saving} onClick={saveWorkspace} /></div>
-      <ErpSection title="افزودن مجوز جدید" description="مجوزها بر اساس مرحله گردش کار گروه‌بندی شده‌اند. پیش‌نیازهای شواهد به‌صورت خودکار همراه انتخاب ثبت می‌شوند.">
-        <ErpInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="جست‌وجوی مجوز" aria-label="جست‌وجوی مجوز" />
-        <div className="grid gap-4 lg:grid-cols-2">
-          {groups.map((group) => ({ ...group, permissions: group.permissions.filter((permission) => permission.labelFa.includes(search.trim())) })).filter((group) => group.permissions.length).map((group) => <ErpCard key={group.code} className="p-4"><h3 className="mb-2 font-semibold text-[var(--sds-text-primary)]">{group.labelFa}</h3><div className="space-y-1">{group.permissions.map((permission) => <ErpCheckbox key={permission.code} checked={selected.includes(permission.code)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, permission.code] : current.filter((code) => code !== permission.code))} label={permission.labelFa} />)}</div></ErpCard>)}
-        </div>
-        {automatic.length > 0 && <ErpCard tone="info" className="mt-4 p-4"><div className="mb-2 text-sm font-semibold">پیش‌نیازهای افزوده‌شده</div><div className="flex flex-wrap gap-2">{automatic.map((code) => <ErpBadge key={code} tone="info">{definitions.get(code)?.labelFa || ({ RECRUITMENT_CASES: "پرونده‌های استخدام", HR_WORK_MANAGEMENT: "مدیریت کار منابع انسانی", PERSONNEL: "پرسنل" } as Record<string, string>)[code] || "دسترسی پایه"}</ErpBadge>)}</div></ErpCard>}
-        <label className="mt-4 block space-y-2 text-sm text-[var(--sds-text-secondary)]"><span>دلیل ثبت مجوز</span><ErpTextarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-        <div className="mt-4 flex justify-end"><ErpButton label={saving ? "در حال ثبت…" : "ثبت مجوزها"} variant="solid" disabled={saving || !selected.length} onClick={saveActions} /></div>
-      </ErpSection>
+    <ErpPage eyebrow="منابع انسانی" title="مدیریت دسترسی کاربران" description="نقش، دسترسی فضای کاری و مجوزهای جزئی تمام سامانه را از یک محل مدیریت کنید.">
+      {feedback && <ErpInlineState kind={feedback.kind} title={<span>{feedback.title}{feedback.description && <small className="mt-1 block font-normal">{feedback.description}</small>}</span>} />}
+      <ErpSegmentedControl options={[{ value: 'users', label: 'دسترسی کاربران' }, { value: 'roles', label: 'پیش‌فرض‌های نقش', disabled: actor?.role !== 'ADMIN' }]} value={tab} onChange={setTab} />
+      {tab === 'roles' ? (
+        <ErpSection title="پیش‌فرض‌های نقش" description="این دسترسی‌ها ارثی هستند و فقط مدیر سامانه می‌تواند آن‌ها را تغییر دهد.">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">نقش</span><ErpSelect value={roleForm.role} onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value }))}>{ROLES.map((role) => <option key={role} value={role}>{role}</option>)}</ErpSelect></label>
+            <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">فضای کاری</span><ErpSelect value={roleForm.workspace} onChange={(event) => setRoleForm((current) => ({ ...current, workspace: event.target.value, feature: '' }))}>{WORKSPACES.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}</ErpSelect></label>
+            <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">مجوز جزئی (اختیاری)</span><ErpSelect value={roleForm.feature} onChange={(event) => setRoleForm((current) => ({ ...current, feature: event.target.value }))}><option value="">سطح کلی فضای کاری</option>{definitions.filter((definition) => definition.source === 'legacy' && definition.workspace === roleForm.workspace).map((definition) => <option key={definition.key} value={definition.key}>{definition.label}</option>)}</ErpSelect></label>
+            <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">سطح</span><ErpSelect value={roleForm.permissionLevel} onChange={(event) => setRoleForm((current) => ({ ...current, permissionLevel: event.target.value as AccessLevel }))}><option value="view">مشاهده</option><option value="edit">ویرایش</option><option value="admin">مدیریت</option></ErpSelect></label>
+          </div>
+          <div className="mt-4 flex justify-end"><ErpButton label="ثبت پیش‌فرض" variant="solid" onClick={saveRoleDefault} /></div>
+          <div className="mt-5 grid gap-3 lg:grid-cols-2">
+            {[...roleWorkspacePermissions, ...roleFeaturePermissions].map((permission) => <ErpCard key={`${permission.feature || 'workspace'}-${permission.id}`} className="flex flex-wrap items-center justify-between gap-3 p-3"><div><strong className="text-sm text-[var(--sds-text-primary)]">{permission.role} · {WORKSPACES.find(({ key }) => key === permission.workspace)?.label || permission.workspace}</strong><p className="mt-1 text-xs text-[var(--sds-text-muted)]">{permission.feature ? definitions.find(({ key }) => key === permission.feature)?.label || permission.feature : 'سطح کلی فضای کاری'} · {LEVEL_LABELS[permission.permissionLevel]}</p></div><div className="flex items-center gap-2"><ErpBadge tone="info">ارثی از نقش</ErpBadge><ErpButton label="حذف" tone="danger" variant="ghost" onClick={() => removeRoleDefault(permission)} /></div></ErpCard>)}
+          </div>
+        </ErpSection>
+      ) : (
+        <>
+          <ErpSection title="انتخاب کاربر">
+            <div className="grid gap-3 md:grid-cols-2">
+              <ErpInput value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="جست‌وجو بر اساس نام، ایمیل یا نام کاربری" aria-label="جست‌وجوی کاربر" />
+              <ErpSelect value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} aria-label="انتخاب کاربر">{visibleUsers.map((user) => <option key={user.id} value={user.id}>{userName(user)} · {user.role}</option>)}</ErpSelect>
+            </div>
+            <div className="mt-3"><ErpInput value={permissionSearch} onChange={(event) => setPermissionSearch(event.target.value)} placeholder="جست‌وجوی مجوز در فضاهای کاری" aria-label="جست‌وجوی مجوز" /></div>
+          </ErpSection>
+          {loadingUser ? <ErpLoading /> : !selectedUser ? <ErpEmptyState title="کاربری برای مدیریت دسترسی پیدا نشد." /> : (
+            <>
+              <ErpSection title={userName(selectedUser)} description={`${selectedUser.email} · ${selectedUser.username}`}>
+                {isAdminTarget ? <ErpInlineState kind="stale" title={<span>دسترسی مدیر سامانه کامل و ضمنی است.<small className="mt-1 block font-normal">مجوزهای مستقیم حساب ADMIN از این صفحه تغییر نمی‌کنند.</small></span>} /> : null}
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">نقش سامانه</span><ErpSelect disabled={!canEdit} value={draftRole} onChange={(event) => setDraftRole(event.target.value)}>{ROLES.filter((role) => actor?.role === 'ADMIN' || role !== 'ADMIN').map((role) => <option key={role} value={role}>{role}</option>)}</ErpSelect></label>
+                  <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">انقضای تغییرات جدید</span><ErpInput disabled={!canEdit} type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></label>
+                  <div><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">دسترسی مؤثر</span><div className="flex min-h-11 flex-wrap items-center gap-2">{selectedUser.role === 'ADMIN' ? <ErpBadge tone="success">کامل · ضمنی مدیر سامانه</ErpBadge> : <><ErpBadge tone="primary">مستقیم: {directWorkspaces.length + directFeatures.length + hrFeatures.length}</ErpBadge><ErpBadge tone="info">از نقش: {roleWorkspaceForSelected.length + roleFeatureForSelected.length}</ErpBadge></>}</div></div>
+                </div>
+              </ErpSection>
+              <div className="space-y-4">
+                {WORKSPACES.map(({ key, label }) => {
+                  const workspaceDefinitions = filteredDefinitions.filter((definition) => definition.workspace === key);
+                  const allWorkspaceDefinitions = definitions.filter((definition) => definition.workspace === key && (actor?.role === 'ADMIN' || definition.requiredLevel !== 'admin'));
+                  const inheritedLevel = roleWorkspaceForSelected.find((permission) => permission.workspace === key)?.permissionLevel;
+                  const automatic = workspaceDefinitions.filter((definition) => draft.automaticallyAddedFeatures.has(definition.key));
+                  return <ErpSection key={key} title={label} description={inheritedLevel ? `دسترسی ارثی از نقش: ${LEVEL_LABELS[inheritedLevel]}` : undefined} actions={[{ label: expanded[key] ? 'بستن مجوزها' : 'نمایش مجوزها', variant: 'ghost', onClick: () => setExpanded((current) => ({ ...current, [key]: !current[key] })) }]}>
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                      <label className="w-full lg:max-w-xs"><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">سطح مستقیم فضای کاری</span><ErpSelect disabled={!canEdit} value={draft.workspaceLevels[key] || ''} onChange={(event) => setDraft((current) => ({ ...current, workspaceLevels: { ...current.workspaceLevels, [key]: event.target.value ? event.target.value as AccessLevel : null } }))}><option value="">بدون دسترسی مستقیم</option><option value="view">مشاهده</option><option value="edit">ویرایش</option>{actor?.role === 'ADMIN' && <option value="admin">مدیریت</option>}</ErpSelect></label>
+                      <div className="flex flex-wrap gap-2"><ErpButton label="انتخاب همه" variant="outline" disabled={!canEdit} onClick={() => setDraft((current) => selectAllInWorkspace(current, allWorkspaceDefinitions, key, maxLevel))} /><ErpButton label="لغو انتخاب همه" tone="danger" variant="ghost" disabled={!canEdit} onClick={() => setDraft((current) => deselectAllInWorkspace(current, definitions, key))} /></div>
+                    </div>
+                    {expanded[key] && <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4"><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{workspaceDefinitions.map((definition) => {
+                      const inherited = roleFeatureForSelected.some((permission) => permission.workspace === key && permission.feature === definition.key);
+                      const isAutomatic = draft.automaticallyAddedFeatures.has(definition.key);
+                      return <div key={`${definition.source}-${definition.key}`} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3"><ErpCheckbox checked={draft.selectedFeatures.has(definition.key) || inherited || selectedUser.role === 'ADMIN'} disabled={!canEdit || inherited || isAutomatic || (actor?.role === 'MANAGER' && definition.requiredLevel === 'admin')} onChange={(event) => setDraft((current) => setFeatureSelection(current, definitions, definition.key, event.target.checked))} label={<span>{definition.label} {inherited && <ErpBadge tone="info">از نقش</ErpBadge>} {isAutomatic && <ErpBadge tone="purple">پیش‌نیاز</ErpBadge>}</span>} /></div>;
+                    })}</div>{automatic.length > 0 && <ErpCard tone="info" className="mt-4 p-3"><strong className="text-sm">پیش‌نیازهای افزوده‌شده</strong><div className="mt-2 flex flex-wrap gap-2">{automatic.map((definition) => <ErpBadge key={definition.key} tone="info">{definition.label}</ErpBadge>)}</div></ErpCard>}</div>}
+                  </ErpSection>;
+                })}
+              </div>
+              <ErpSection title="ثبت تغییرات" description="فقط دسترسی‌های همین کاربر پس از ذخیره تغییر می‌کند.">
+                <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">دلیل تغییر</span><ErpTextarea disabled={!canEdit} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+                <div className="mt-4 flex justify-end"><ErpButton label={saving ? 'در حال ذخیره…' : 'ذخیره دسترسی‌های کاربر'} variant="solid" disabled={!canEdit || saving} onClick={save} /></div>
+              </ErpSection>
+            </>
+          )}
+        </>
+      )}
     </ErpPage>
   );
 }

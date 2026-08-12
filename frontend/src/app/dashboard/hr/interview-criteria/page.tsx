@@ -48,7 +48,7 @@ export default function InterviewCriteriaPage() {
     try { const { data } = await hiringAPI.publishInterviewCriteria(draft); setVersion(data.data.version); setPublished(draft); setReviewing(false); }
     catch (cause) { setError(hiringError(cause)); }
   };
-  return <ErpPage eyebrow="منابع انسانی" title="معیارهای مصاحبه اولیه" description={`نسخه منتشرشده ${version.toLocaleString("fa-IR")}`} backHref="/dashboard/hr">
+  return <ErpPage eyebrow="منابع انسانی · جذب" title="معیارهای مصاحبه اولیه" description={`نسخه منتشرشده ${version.toLocaleString("fa-IR")}`} backHref="/dashboard/hr/hiring">
     {error && <ErpInlineState kind="error" title={error} />}
     <ErpSection title="نسخه در حال ویرایش" description="تغییرات تا زمان انتشار فقط در این صفحه باقی می‌مانند.">
       <div className="space-y-3">

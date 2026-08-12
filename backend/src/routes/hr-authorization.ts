@@ -2,8 +2,7 @@ import crypto from 'node:crypto';
 import express, { type NextFunction, type Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import type { AuthRequest } from '../middleware/auth';
-import { requireHrFeature } from '../middleware/hrAuthorization';
+import { authorize, type AuthRequest } from '../middleware/auth';
 import { activeCompanyManagerUserIds, activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
 import { HR_REDESIGN_CATALOG } from '../services/hrRedesignDataContracts';
 import {
@@ -13,7 +12,7 @@ import {
 } from '../services/hrActionPermissionCatalog';
 
 const router = express.Router();
-const administer = requireHrFeature('AUTHORITY_RESPONSIBILITY_ADMINISTRATION', 'ADMIN');
+const administer = authorize('ADMIN', 'MANAGER');
 const levelValues = new Set(HR_REDESIGN_CATALOG.featureLevels);
 const authorityValues = new Set<string>(HR_REDESIGN_CATALOG.businessAuthorities);
 const responsibilityValues = new Set<string>(HR_REDESIGN_CATALOG.responsibilityTypes);
@@ -100,10 +99,10 @@ router.get('/me', asyncHandler(async (req, res) => {
   } });
 }));
 
-router.get('/context', administer, asyncHandler(async (_req, res) => {
+router.get('/context', administer, asyncHandler(async (req, res) => {
   const [users, workspaceCatalog, featureCatalog, authorityCatalog, responsibilityTypes, workspaceGrants,
     featureGrants, authorityGrants, responsibilities, destinations, constraints, audit] = await Promise.all([
-    prisma.user.findMany({ where: { isActive: true }, select: { id: true, username: true, firstName: true, lastName: true, role: true }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
+    prisma.user.findMany({ where: { isActive: true, ...(req.user!.role === 'MANAGER' ? { role: { not: 'ADMIN' } } : {}) }, select: { id: true, username: true, firstName: true, lastName: true, role: true }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
     prisma.hrWorkspaceCatalog.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
     prisma.hrFeatureCatalog.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
     prisma.hrAuthorityCatalog.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
@@ -116,15 +115,22 @@ router.get('/context', administer, asyncHandler(async (_req, res) => {
     prisma.hrSeparationOfDutyConstraint.findMany({ orderBy: [{ sourceActionCode: 'asc' }, { version: 'desc' }] }),
     prisma.hrAuthorizationAuditEvent.findMany({ orderBy: { createdAt: 'desc' }, take: 200 }),
   ]);
+  const visibleUserIds = new Set(users.map(({ id }) => id));
+  const visibleToActor = <T extends { userId: string }>(rows: T[]) => (
+    req.user!.role === 'ADMIN' ? rows : rows.filter(({ userId }) => visibleUserIds.has(userId))
+  );
   res.json({ success: true, data: {
     users, workspaceCatalog, featureCatalog, actionPermissionGroups: HR_ACTION_PERMISSION_GROUPS,
     authorityCatalog, responsibilityTypes,
-    workspaceGrants, featureGrants, authorityGrants, responsibilities, destinations, constraints, audit,
+    workspaceGrants: visibleToActor(workspaceGrants),
+    featureGrants: visibleToActor(featureGrants),
+    authorityGrants: visibleToActor(authorityGrants),
+    responsibilities: req.user!.role === 'ADMIN' ? responsibilities : responsibilities.filter(({ assignedUserId }) => !assignedUserId || visibleUserIds.has(assignedUserId)),
+    destinations, constraints, audit: req.user!.role === 'ADMIN' ? audit : [],
   } });
 }));
 
 router.post('/workspace-grants', administer, asyncHandler(async (req, res) => {
-  if (req.user!.role !== 'ADMIN') throw forbidden('فقط مدیر سامانه می‌تواند دسترسی فضای کاری را تغییر دهد.');
   const userId = text(req.body.userId);
   const level = text(req.body.level).toUpperCase();
   const reason = requiredReason(req.body.reason);
@@ -133,6 +139,10 @@ router.post('/workspace-grants', administer, asyncHandler(async (req, res) => {
   const effectiveTo = optionalDate(req.body.effectiveTo);
   const row = await prisma.$transaction(async (tx) => {
     await assertActiveUser(tx, userId);
+    const target = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { role: true } });
+    if (req.user!.role === 'MANAGER' && (target.role === 'ADMIN' || level === 'ADMIN')) {
+      throw forbidden('مدیر نمی‌تواند حساب مدیر سامانه یا سطح مدیریت کامل را تغییر دهد.');
+    }
     const created = await tx.hrWorkspaceAccessGrant.create({ data: {
       stableKey: `hr-access:${userId}:workspace:${effectiveAt.toISOString()}:${crypto.randomUUID()}`,
       userId, workspaceCode: HR_REDESIGN_CATALOG.workspaceCode, level: level as never,
@@ -144,8 +154,26 @@ router.post('/workspace-grants', administer, asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: row });
 }));
 
+router.post('/workspace-grants/:id/revoke', administer, asyncHandler(async (req, res) => {
+  const reason = requiredReason(req.body.reason);
+  const effectiveAt = new Date();
+  const row = await prisma.$transaction(async (tx) => {
+    const current = await tx.hrWorkspaceAccessGrant.findUniqueOrThrow({ where: { id: req.params.id } });
+    const target = await tx.user.findUniqueOrThrow({ where: { id: current.userId }, select: { role: true } });
+    if (req.user!.role === 'MANAGER' && (target.role === 'ADMIN' || current.level === 'ADMIN')) {
+      throw forbidden('مدیر نمی‌تواند دسترسی مدیر سامانه یا سطح مدیریت کامل را لغو کند.');
+    }
+    if (current.status !== 'ACTIVE') throw conflict('این دسترسی فعال نیست.');
+    const updated = await tx.hrWorkspaceAccessGrant.update({ where: { id: current.id }, data: {
+      status: 'REVOKED', effectiveTo: effectiveAt, revokedAt: effectiveAt, revokedByUserId: actorId(req), reason,
+    } });
+    await writeAudit(tx, { entityType: 'WORKSPACE_GRANT', entityId: current.id, action: 'REVOKED', actorUserId: actorId(req), reason, effectiveAt, before: current, after: updated });
+    return updated;
+  });
+  res.json({ success: true, data: row });
+}));
+
 router.post('/feature-grants', administer, asyncHandler(async (req, res) => {
-  if (req.user!.role !== 'ADMIN') throw forbidden('فقط مدیر سامانه می‌تواند دسترسی قابلیت را تغییر دهد.');
   const userId = text(req.body.userId);
   const featureCode = text(req.body.featureCode).toUpperCase();
   const level = text(req.body.level).toUpperCase();
@@ -158,6 +186,10 @@ router.post('/feature-grants', administer, asyncHandler(async (req, res) => {
   const featureCodes = expandHrActionPermissionSelection([featureCode]);
   const rows = await prisma.$transaction(async (tx) => {
     await assertActiveUser(tx, userId);
+    const target = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { role: true } });
+    if (req.user!.role === 'MANAGER' && (target.role === 'ADMIN' || level === 'ADMIN')) {
+      throw forbidden('مدیر نمی‌تواند حساب مدیر سامانه یا سطح مدیریت کامل را تغییر دهد.');
+    }
     const created: any[] = [];
     for (const code of featureCodes) {
       const requiredLevel = getHrActionPermissionDefinition(code)?.level ?? (code === featureCode ? level : 'VIEW');
@@ -183,6 +215,25 @@ router.post('/feature-grants', administer, asyncHandler(async (req, res) => {
     return created;
   });
   res.status(201).json({ success: true, data: rows[rows.length - 1] ?? null, prerequisiteGrants: rows.slice(0, -1) });
+}));
+
+router.post('/feature-grants/:id/revoke', administer, asyncHandler(async (req, res) => {
+  const reason = requiredReason(req.body.reason);
+  const effectiveAt = new Date();
+  const row = await prisma.$transaction(async (tx) => {
+    const current = await tx.hrFeatureAccessGrant.findUniqueOrThrow({ where: { id: req.params.id } });
+    const target = await tx.user.findUniqueOrThrow({ where: { id: current.userId }, select: { role: true } });
+    if (req.user!.role === 'MANAGER' && (target.role === 'ADMIN' || current.level === 'ADMIN')) {
+      throw forbidden('مدیر نمی‌تواند مجوز مدیر سامانه یا سطح مدیریت کامل را لغو کند.');
+    }
+    if (current.status !== 'ACTIVE') throw conflict('این مجوز فعال نیست.');
+    const updated = await tx.hrFeatureAccessGrant.update({ where: { id: current.id }, data: {
+      status: 'REVOKED', effectiveTo: effectiveAt, revokedAt: effectiveAt, revokedByUserId: actorId(req), reason,
+    } });
+    await writeAudit(tx, { entityType: 'FEATURE_GRANT', entityId: current.id, action: 'REVOKED', actorUserId: actorId(req), reason, effectiveAt, before: current, after: updated });
+    return updated;
+  });
+  res.json({ success: true, data: row });
 }));
 
 router.post('/business-authorities', administer, asyncHandler(async (req, res) => {

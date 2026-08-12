@@ -4,6 +4,7 @@ import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize } from '../middleware/auth';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES, FEATURE_LABELS, FEATURE_WORKSPACE_MAP } from '../middleware/feature';
+import { featurePrerequisites } from '../services/featurePermissionPrerequisites';
 
 const router = express.Router();
 
@@ -40,10 +41,12 @@ const validateFeatureWorkspacePair = (feature: string, workspace: string): strin
 // @access  Private/Admin
 router.get('/features/definitions', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
   try {
+    const availableFeatures = Object.values(FEATURES);
     const data = Object.values(FEATURES).map((feature) => ({
       key: feature,
       label: FEATURE_LABELS[feature] || feature,
-      workspace: FEATURE_WORKSPACE_MAP[feature]
+      workspace: FEATURE_WORKSPACE_MAP[feature],
+      prerequisites: featurePrerequisites(feature, availableFeatures),
     }));
 
     data.sort((a, b) => {

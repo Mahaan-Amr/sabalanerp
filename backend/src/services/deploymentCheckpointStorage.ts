@@ -18,7 +18,7 @@ export type CheckpointObject = {
 
 export interface RemoteCheckpointStore {
   assertAvailable(requiredBytes: number): Promise<{ availableBytes: number }>;
-  uploadVerified(sourcePath: string, objectKey: string): Promise<{
+  uploadVerified(sourcePath: string, objectKey: string, expectedChecksum?: string): Promise<{
     objectPath: string;
     checksum: string;
     size: number;
@@ -87,7 +87,7 @@ export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
     }
   }
 
-  async uploadVerified(sourcePath: string, objectKey: string) {
+  async uploadVerified(sourcePath: string, objectKey: string, expectedChecksum?: string) {
     const destination = path.join(this.root, safeObjectKey(objectKey));
     const resolvedRoot = path.resolve(this.root);
     if (!path.resolve(destination).startsWith(`${resolvedRoot}${path.sep}`)) {
@@ -109,7 +109,7 @@ export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
       );
     }
     const [sourceChecksum, uploadedChecksum, stat] = await Promise.all([
-      sha256File(sourcePath),
+      expectedChecksum ? Promise.resolve(expectedChecksum) : sha256File(sourcePath),
       sha256File(temporary),
       fs.promises.stat(temporary),
     ]);

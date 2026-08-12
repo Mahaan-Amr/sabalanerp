@@ -19,6 +19,7 @@ const CreateContractWizardClient = dynamic(
 interface ContractForEdit {
   id: string;
   status: string;
+  isInactive?: boolean;
   accountingEditLocked?: boolean;
   canOpenCorrectionEdit?: boolean;
   activeCorrectionRequest?: {
@@ -67,6 +68,11 @@ export default function SalesContractEditPage() {
 
         if (!permissions?.canEdit && nextContract.createdByUser?.id !== user?.id) {
           setError('شما مجاز به ویرایش این قرارداد نیستید');
+          return;
+        }
+
+        if (nextContract.isInactive) {
+          setError('قرارداد غیرفعال فقط‌خواندنی است و قابل ویرایش نیست');
           return;
         }
 

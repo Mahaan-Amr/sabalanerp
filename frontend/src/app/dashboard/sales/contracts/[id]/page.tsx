@@ -19,6 +19,7 @@ import {
   ErpBadge,
   ErpEmptyState,
   ErpFieldView,
+  ErpInlineState,
   ErpLoading,
   ErpPage,
   ErpSection,
@@ -54,6 +55,9 @@ interface Contract {
   signedAt?: string;
   printedAt?: string;
   isSigned?: boolean;
+  isInactive?: boolean;
+  inactiveAt?: string | null;
+  inactiveReason?: string | null;
   accountingEditLocked?: boolean;
   canOpenCorrectionEdit?: boolean;
   activeCorrectionRequest?: {
@@ -415,13 +419,13 @@ export default function ContractDetailPage() {
     sumNumericValues(products, (item: any) => item.totalPrice) ||
     toFiniteNumber(contract.contractData?.payment?.totalAmount);
 
-  const canEdit = (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) && (contractPermissions.canEdit || contract.createdByUser.id === currentUser?.id);
-  const canApprove = (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove;
-  const canReject = (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canReject;
-  const canSign = contract.status === 'APPROVED' && contractPermissions.canSign;
+  const canEdit = !contract.isInactive && (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) && (contractPermissions.canEdit || contract.createdByUser.id === currentUser?.id);
+  const canApprove = !contract.isInactive && (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canApprove;
+  const canReject = !contract.isInactive && (contract.status === 'DRAFT' || contract.status === 'PENDING_APPROVAL') && contractPermissions.canReject;
+  const canSign = !contract.isInactive && contract.status === 'APPROVED' && contractPermissions.canSign;
   const canDownloadPdf = contractPermissions.canView;
   const canPrint = contractPermissions.canPrint;
-  const canResendConfirmation =
+  const canResendConfirmation = !contract.isInactive &&
     contract.status !== 'CANCELLED' &&
     !contract.isSigned &&
     hasFeatureAccess(currentUser, 'sales_verification_send', 'edit');
@@ -469,7 +473,7 @@ export default function ContractDetailPage() {
   ];
 
   return (
-    <ErpPage
+      <ErpPage
       eyebrow="قرارداد فروش"
       title={sanitizeUiTextWithCandidates([contract.titlePersian, contract.title, contract.contractNumber], 'قرارداد فروش')}
       description={`شماره قرارداد: ${sanitizeUiText(contract.contractNumber, '—')}`}
@@ -477,6 +481,13 @@ export default function ContractDetailPage() {
       actions={actions}
       metrics={metrics}
     >
+      {contract.isInactive && (
+        <ErpInlineState
+          kind="stale"
+          title={`این قرارداد غیرفعال و فقط‌خواندنی است${contract.inactiveReason ? ` — ${contract.inactiveReason}` : ''}`}
+          className="mb-4"
+        />
+      )}
       {error && (
         <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {error}

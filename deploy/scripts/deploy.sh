@@ -94,6 +94,32 @@ run_backend_timed() {
       deployment "$@"
 }
 
+run_backend_timed_with_heartbeat() {
+  duration="$1"
+  shift
+  run_backend_timed "${duration}" "$@" &
+  timed_pid=$!
+  heartbeat_elapsed=0
+  while kill -0 "${timed_pid}" 2>/dev/null; do
+    sleep 5
+    heartbeat_elapsed=$((heartbeat_elapsed + 5))
+    if [ "${heartbeat_elapsed}" -ge 60 ] && kill -0 "${timed_pid}" 2>/dev/null; then
+      if ! control heartbeat; then
+        kill -TERM "${timed_pid}" 2>/dev/null || true
+        wait "${timed_pid}" 2>/dev/null || true
+        echo "Deployment lease heartbeat failed while checkpoint work was active." >&2
+        return 1
+      fi
+      heartbeat_elapsed=0
+    fi
+  done
+  set +e
+  wait "${timed_pid}"
+  timed_status=$?
+  set -e
+  return "${timed_status}"
+}
+
 control() {
   run_backend node dist/scripts/deployment-control.js "$@"
 }
@@ -577,7 +603,7 @@ esac
   echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be between 600 and 7200 seconds." >&2
   exit 1
 }
-run_backend_timed "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js
+run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js
 phase LOCAL_CHECKPOINT_VERIFIED
 phase REMOTE_CHECKPOINT_VERIFIED
 

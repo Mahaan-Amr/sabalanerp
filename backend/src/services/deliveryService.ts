@@ -50,6 +50,10 @@ export async function createDelivery(
     throw new Error('Contract not found');
   }
 
+  if (contract.isInactive) {
+    throw new Error('Contract is inactive');
+  }
+
   // Validate user access
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -175,6 +179,9 @@ export async function updateDelivery(
   if (!validateContractAccess(delivery.contract, user)) {
     throw new Error('Access denied');
   }
+  if (delivery.contract.isInactive) {
+    throw new Error('Inactive contracts cannot change delivery plans');
+  }
 
   // Update delivery
   const updatedDelivery = await prisma.delivery.update({
@@ -239,6 +246,9 @@ export async function deleteDelivery(
 
   if (!validateContractAccess(delivery.contract, user)) {
     throw new Error('Access denied');
+  }
+  if (delivery.contract.isInactive) {
+    throw new Error('Inactive contracts cannot change delivery plans');
   }
 
   // Delete delivery (products will be cascade deleted)

@@ -40,6 +40,9 @@ export type AccountingContractRow = {
     economicCode?: string;
   };
   status: string;
+  isInactive?: boolean;
+  inactiveAt?: string | null;
+  inactiveReason?: string | null;
   accounting: {
     sourceStatus: string;
     eligibleForFinancialRecords: boolean;

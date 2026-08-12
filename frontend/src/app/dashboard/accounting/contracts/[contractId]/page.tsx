@@ -1,7 +1,7 @@
 'use client';
 import { ErpInput, ErpSelect } from '@/components/erp';
 import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FaBalanceScale,
   FaCheckCircle,
@@ -26,7 +26,7 @@ import {
   ErpSummaryGrid,
   ErpTwoColumn,
 } from '@/components/erp';
-import { accountingAPI } from '@/lib/api';
+import { accountingAPI, dashboardAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import {
@@ -106,13 +106,27 @@ const defaultCustomPrintSettings: CustomPrintSettings = {
   },
 };
 
+const formatLifecycleBlockers = (blockers: any[]) => blockers.map((item) => {
+  const dependencies = (item.details || []).map((detail: any) =>
+    [detail.kind, detail.reference || detail.id, detail.status].filter(Boolean).join(' / '),
+  );
+  return `${item.label} (${item.count})${dependencies.length ? `: ${dependencies.join('، ')}` : ''}`;
+}).join('؛ ');
+
 export default function AccountingContractDetailPage({ params }: { params: { contractId: string } }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const focusKind = searchParams.get('focus') === 'receivable' || searchParams.get('focus') === 'check'
     ? searchParams.get('focus') as 'receivable' | 'check'
     : null;
   const focusedRecordId = (searchParams.get('recordId') || '').trim();
   const [data, setData] = useState<any>(null);
+  const [lifecycle, setLifecycle] = useState<any>(null);
+  const [userRole, setUserRole] = useState<string>('USER');
+  const [lifecycleTarget, setLifecycleTarget] = useState<{
+    action: 'DELETE' | 'DEACTIVATE' | 'REACTIVATE';
+    mode: 'REQUEST' | 'DIRECT';
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
@@ -132,8 +146,14 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const loadDetail = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await accountingAPI.getContract(params.contractId);
+      const [response, lifecycleResponse, profileResponse] = await Promise.all([
+        accountingAPI.getContract(params.contractId),
+        accountingAPI.getContractLifecycle(params.contractId),
+        dashboardAPI.getProfile(),
+      ]);
       if (response.data.success) setData(response.data.data);
+      if (lifecycleResponse.data.success) setLifecycle(lifecycleResponse.data.data);
+      if (profileResponse.data.success) setUserRole(profileResponse.data.data.role || 'USER');
     } catch (error) {
       console.error('Error loading accounting contract detail:', error);
     } finally {
@@ -180,6 +200,58 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       console.error('Accounting action failed:', error);
       setActionError((error as any)?.response?.data?.error || 'اقدام حسابداری انجام نشد');
       return false;
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const submitLifecycle = async (values: Record<string, string | number>) => {
+    if (!lifecycleTarget) return;
+    const reason = String(values.reason || '').trim();
+    try {
+      setActionError(null);
+      setActionLoading(true);
+      if (lifecycleTarget.mode === 'DIRECT') {
+        await accountingAPI.executeContractLifecycle(params.contractId, {
+          action: lifecycleTarget.action,
+          reason,
+        });
+      } else {
+        await accountingAPI.requestContractLifecycle(params.contractId, {
+          kind: lifecycleTarget.action,
+          reason,
+        });
+      }
+      setLifecycleTarget(null);
+      if (lifecycleTarget.action === 'DELETE' && lifecycleTarget.mode === 'DIRECT') {
+        router.push('/dashboard/accounting/contracts');
+        return;
+      }
+      await loadDetail();
+    } catch (error: any) {
+      const blockers = error?.response?.data?.blockers || [];
+      setActionError(blockers.length
+        ? `اقدام متوقف شد: ${formatLifecycleBlockers(blockers)}`
+        : error?.response?.data?.error || 'اقدام مدیریت وضعیت قرارداد انجام نشد');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const decideLifecycle = async (requestId: string, decision: 'APPROVE' | 'REJECT') => {
+    try {
+      setActionLoading(true);
+      setActionError(null);
+      await accountingAPI.decideContractLifecycleRequest(requestId, {
+        decision,
+        reason: decision === 'REJECT' ? 'درخواست مدیریت وضعیت رد شد' : undefined,
+      });
+      await loadDetail();
+    } catch (error: any) {
+      const blockers = error?.response?.data?.blockers || [];
+      setActionError(blockers.length
+        ? `اقدام متوقف شد: ${formatLifecycleBlockers(blockers)}`
+        : error?.response?.data?.error || 'تصمیم درخواست ثبت نشد');
     } finally {
       setActionLoading(false);
     }
@@ -426,6 +498,58 @@ export default function AccountingContractDetailPage({ params }: { params: { con
           {actionError}
         </div>
       )}
+      <ErpSection title="مدیریت وضعیت قرارداد">
+        {contract.isInactive && (
+          <ErpInlineState kind="stale" title={`قرارداد غیرفعال است${contract.inactiveReason ? ` — ${contract.inactiveReason}` : ''}`} className="mb-3" />
+        )}
+        <div className="flex flex-wrap gap-2">
+          {!contract.isInactive && (
+            <ErpButton
+              label={userRole === 'ADMIN' || userRole === 'MANAGER' ? 'غیرفعال‌سازی' : 'درخواست غیرفعال‌سازی'}
+              tone="warning"
+              variant="outline"
+              onClick={() => setLifecycleTarget({ action: 'DEACTIVATE', mode: userRole === 'ADMIN' || userRole === 'MANAGER' ? 'DIRECT' : 'REQUEST' })}
+            />
+          )}
+          {contract.isInactive && (
+            <ErpButton
+              label={userRole === 'ADMIN' ? 'فعال‌سازی مجدد' : 'درخواست فعال‌سازی مجدد'}
+              tone="success"
+              variant="outline"
+              onClick={() => setLifecycleTarget({ action: 'REACTIVATE', mode: userRole === 'ADMIN' ? 'DIRECT' : 'REQUEST' })}
+            />
+          )}
+          {['DRAFT', 'CANCELLED'].includes(contract.status) && (
+            <ErpButton
+              label={userRole === 'ADMIN' ? 'حذف دائمی' : 'درخواست حذف دائمی'}
+              icon={FaTrashAlt}
+              tone="danger"
+              variant="outline"
+              onClick={() => setLifecycleTarget({ action: 'DELETE', mode: userRole === 'ADMIN' ? 'DIRECT' : 'REQUEST' })}
+            />
+          )}
+        </div>
+        {lifecycle && (
+          <div className="mt-3 space-y-2">
+            {[
+              ...(contract.isInactive ? [] : lifecycle.deactivationEligibility?.blockers || []),
+              ...(['DRAFT', 'CANCELLED'].includes(contract.status) ? lifecycle.deleteEligibility?.blockers || [] : []),
+            ].map((blocker: any) => (
+              <ErpInlineState key={blocker.code} kind="stale" title={`${blocker.label}: ${Number(blocker.count).toLocaleString('fa-IR')}`} />
+            ))}
+          </div>
+        )}
+        {(data.lifecycleRequests || []).filter((request: any) => request.status === 'PENDING').map((request: any) => {
+          const canDecide = userRole === 'ADMIN' || (userRole === 'MANAGER' && request.kind === 'DEACTIVATE');
+          return (
+            <div key={request.id} className="mt-3 rounded-[var(--sds-radius-lg)] border border-[var(--sds-border-default)] p-3">
+              <p className="font-semibold">درخواست {request.kind === 'DELETE' ? 'حذف دائمی' : request.kind === 'DEACTIVATE' ? 'غیرفعال‌سازی' : 'فعال‌سازی مجدد'}</p>
+              <p className="mt-1 text-sm sds-text-secondary">{request.reason}</p>
+              {canDecide && <div className="mt-3 flex gap-2"><ErpButton label="تأیید" tone="success" onClick={() => void decideLifecycle(request.id, 'APPROVE')} disabled={actionLoading} /><ErpButton label="رد" tone="danger" variant="outline" onClick={() => void decideLifecycle(request.id, 'REJECT')} disabled={actionLoading} /></div>}
+            </div>
+          );
+        })}
+      </ErpSection>
       <ErpSection title="خروجی چاپ قرارداد" description="نسخه مورد نیاز حسابداری را انتخاب کنید و سپس چاپ یا دانلود بگیرید.">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
@@ -556,7 +680,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       </ErpSection>
 
       <div className="accounting-print-view">
-        <ErpTwoColumn
+      <ErpTwoColumn
           main={
             <>
             <ErpSection title="خلاصه قرارداد">
@@ -903,6 +1027,17 @@ export default function AccountingContractDetailPage({ params }: { params: { con
         error={actionError}
         onClose={() => setDeleteTarget(null)}
         onSubmit={deleteDraftRecord}
+      />
+      <AccountingActionModal
+        open={Boolean(lifecycleTarget)}
+        title={lifecycleTarget?.action === 'DELETE' ? 'حذف دائمی قرارداد' : lifecycleTarget?.action === 'DEACTIVATE' ? 'غیرفعال‌سازی قرارداد' : 'فعال‌سازی مجدد قرارداد'}
+        description={lifecycleTarget?.action === 'DELETE' ? 'حذف دائمی برگشت‌پذیر نیست و فقط در نبود وابستگی مسدودکننده انجام می‌شود.' : undefined}
+        fields={[{ id: 'reason', label: 'دلیل', type: 'textarea', required: true }]}
+        submitLabel={lifecycleTarget?.mode === 'REQUEST' ? 'ثبت درخواست' : lifecycleTarget?.action === 'DELETE' ? 'حذف دائمی' : 'ثبت اقدام'}
+        busy={actionLoading}
+        error={actionError}
+        onClose={() => setLifecycleTarget(null)}
+        onSubmit={submitLifecycle}
       />
       <AccountingActionModal
         open={Boolean(voidTarget)}

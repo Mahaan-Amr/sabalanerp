@@ -39,6 +39,7 @@ import EnhancedDropdown from '@/components/EnhancedDropdown';
 import StoneCanvas from '@/components/StoneCanvas';
 import {
   ErpInput,
+  ErpButton,
   ErpInlineState,
   ErpNeumorphicCard,
   ErpNeumorphicDialog,
@@ -197,8 +198,13 @@ import {
   clampContractDraftStep,
   createContractAutosaveDraft,
   getContractDraftStorageKey,
-  parseContractAutosaveDraft
+  parseContractAutosaveDraft,
+  type ContractAutosaveDraft
 } from '@/features/contract-creation/utils/contractDraftStorage';
+import {
+  contractCreationEntryDecision,
+  contractCreationPrimaryPending
+} from '@/features/contract-creation/services/contractCreationEntryPolicy';
 import {
   CONTRACT_RECOVERY_SCHEMA_VERSION,
   type ContractRecoveryScope
@@ -745,6 +751,8 @@ export default function CreateContractWizard({
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [autosaveHydrated, setAutosaveHydrated] = useState(false);
+  const [recoverableDraftOffer, setRecoverableDraftOffer] = useState<ContractAutosaveDraft | null>(null);
+  const [confirmDiscardDraft, setConfirmDiscardDraft] = useState(false);
   const [discountRanges, setDiscountRanges] = useState<DiscountRange[]>([]);
   const [discountPercentInput, setDiscountPercentInput] = useState<number>(0);
   const [serviceSearchTerm, setServiceSearchTerm] = useState('');
@@ -2558,6 +2566,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   ]);
 
   const recoveryUserId = currentUser?.id || currentUser?.username || null;
+  const freshEntryRequestedRef = useRef(
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('fresh') === '1'
+  );
   const recoveryBaseRevision = Number(
     (initialWizardData as any)?.productGraphRevision ??
     (initialWizardData as any)?.canonicalRevision ??
@@ -2584,10 +2595,18 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     () => getContractDraftStorageKey(recoveryDraftId),
     [recoveryDraftId]
   );
+  const handleRecoveredDraft = useCallback((draft: ContractAutosaveDraft) => {
+    if (freshEntryRequestedRef.current && !isContractEditMode) return;
+    if (isContractEditMode) {
+      applyContractAutosaveDraft(draft);
+      return;
+    }
+    setRecoverableDraftOffer(draft);
+  }, [applyContractAutosaveDraft, isContractEditMode]);
   const editRecovery = useContractEditRecovery({
     scope: recoveryScope,
     contractId: isContractEditMode ? contractId : null,
-    onRestore: applyContractAutosaveDraft
+    onRestore: handleRecoveredDraft
   });
   const editRecoveryBlocked = editRecovery.blocked;
   const takeoverEditRecovery = editRecovery.takeover;
@@ -2635,14 +2654,20 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       });
     }
   }, [closeProductModal, currentStep, setCurrentStep, takeoverEditRecovery]);
-  const handleCreateFreshContract = useCallback(() => {
+  const handleCreateFreshContract = useCallback(async () => {
     closeProductModal();
     returnToProductModalAfterRemainderRef.current = false;
+    await editRecovery.release();
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(contractDraftStorageKey);
+      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      localStorage.removeItem('contractWizardState');
+    }
     if (recoveryUserId) {
       createFreshContractDraftId(recoveryUserId);
     }
     window.location.assign('/dashboard/sales/contracts/create?fresh=1');
-  }, [closeProductModal, recoveryUserId]);
+  }, [closeProductModal, contractDraftStorageKey, editRecovery, recoveryUserId]);
 
   // Product filtering hook provides all filtered lists
   const productFiltering = useProductFiltering({
@@ -2696,7 +2721,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
     }
 
-    applyContractAutosaveDraft(draft);
+    if (contractCreationEntryDecision({
+      hasRecoverableDraft: true,
+      freshRequested
+    }) === 'OFFER_RESUME') {
+      setRecoverableDraftOffer(draft);
+    }
     setAutosaveHydrated(true);
   }, [
     applyContractAutosaveDraft,
@@ -2825,6 +2855,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const flushContractAutosaveDraft = useCallback(() => {
     if (typeof window === 'undefined') return;
     if (isContractEditMode || !autosaveHydrated) return;
+    if (recoverableDraftOffer) return;
     if (wizardData.signature?.contractId) {
       localStorage.removeItem(contractDraftStorageKey);
       return;
@@ -2842,6 +2873,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     buildContractAutosaveDraft,
     contractDraftStorageKey,
     isContractEditMode,
+    recoverableDraftOffer,
     wizardData.signature?.contractId
   ]);
 
@@ -5927,7 +5959,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   });
   const handleWizardSubmit = () => {
     if (isContractCreationComplete) {
-      router.push('/dashboard/sales/contracts');
+      router.push('/dashboard/sales/contracts?created=1');
       return;
     }
 
@@ -6075,6 +6107,51 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           />
         )}
 
+        {!isContractEditMode && recoverableDraftOffer && (
+          <ErpInlineState
+            kind="stale"
+            title="یک پیش‌نویس ناتمام برای این قرارداد پیدا شد"
+            className="mb-4"
+            action={{
+              label: 'ادامه پیش‌نویس قبلی',
+              onClick: () => {
+                applyContractAutosaveDraft(recoverableDraftOffer);
+                setRecoverableDraftOffer(null);
+              },
+              tone: 'primary',
+              variant: 'solid'
+            }}
+            actions={[{
+              label: 'شروع قرارداد جدید',
+              onClick: () => setConfirmDiscardDraft(true),
+              variant: 'outline'
+            }]}
+          />
+        )}
+
+        <ErpNeumorphicDialog
+          open={confirmDiscardDraft}
+          onClose={() => setConfirmDiscardDraft(false)}
+          labelledBy="discard-contract-draft-title"
+          className="w-full max-w-md rounded-[var(--sds-radius-dialog)] p-5 text-[var(--sds-text-primary)]"
+        >
+          <h2 id="discard-contract-draft-title" className="text-lg font-bold">شروع قرارداد جدید</h2>
+          <p className="mt-2 text-sm leading-7 text-[var(--sds-text-secondary)]">
+            پیش‌نویس قبلی کنار گذاشته می‌شود. آیا برای شروع یک قرارداد خالی مطمئن هستید؟
+          </p>
+          <div className="mt-5 flex flex-wrap justify-end gap-2">
+            <ErpButton label="انصراف" variant="outline" onClick={() => setConfirmDiscardDraft(false)} />
+            <ErpButton
+              label="شروع قرارداد جدید"
+              tone="danger"
+              onClick={() => {
+                setConfirmDiscardDraft(false);
+                void handleCreateFreshContract();
+              }}
+            />
+          </div>
+        </ErpNeumorphicDialog>
+
         <div
           aria-disabled={editRecovery.blocked}
           {...(editRecovery.blocked ? ({ inert: '' } as any) : {})}
@@ -6104,7 +6181,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           onPrevious={goToPreviousStep}
           onNext={goToNextStep}
           onSubmit={handleWizardSubmit}
-          loading={loading || wizardLoading || contractSubmission.isSubmitting || !editRecovery.ready}
+          loading={contractCreationPrimaryPending({
+            creationComplete: isContractCreationComplete,
+            mutationPending: loading || wizardLoading || contractSubmission.isSubmitting,
+            recoveryReady: editRecovery.ready
+          })}
           canGoNext={true}
           canGoPrevious={visibleCurrentStep > 1}
           showSubmitOnEveryStep={isContractEditMode}

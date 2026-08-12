@@ -1758,6 +1758,10 @@ model SalesContract {
   contractData                      Json?
   calculations                      Json?
   signatures                        Json?
+  isInactive                       Boolean                            @default(false)
+  inactiveAt                       DateTime?
+  inactiveBy                       String?
+  inactiveReason                   String?
   createdAt                         DateTime                           @default(now())
   updatedAt                         DateTime                           @updatedAt
   items                             ContractItem[]
@@ -1796,6 +1800,7 @@ model SalesContract {
   @@index([realizedSellerId])
   @@index([realizedAt])
   @@index([lostAt])
+  @@index([isInactive, createdAt])
   @@map("sales_contracts")
 }
 
@@ -4283,6 +4288,30 @@ model AccountingCorrectionRequest {
   @@map("accounting_correction_requests")
 }
 
+model ContractLifecycleRequest {
+  id                     String                         @id @default(cuid())
+  contractId             String
+  contractNumberSnapshot String
+  kind                   ContractLifecycleRequestKind
+  status                 ContractLifecycleRequestStatus @default(PENDING)
+  reason                 String
+  requestedBy            String
+  requestedAt            DateTime                       @default(now())
+  decidedBy              String?
+  decidedAt              DateTime?
+  decisionNote           String?
+  executedAt             DateTime?
+  blockers               Json?
+  contractSnapshot       Json?
+  createdAt              DateTime                       @default(now())
+  updatedAt              DateTime                       @updatedAt
+
+  @@index([contractId, createdAt])
+  @@index([status, requestedAt])
+  @@index([kind, status])
+  @@map("contract_lifecycle_requests")
+}
+
 model AccountingAuditLog {
   id          String   @id @default(cuid())
   action      String
@@ -4369,6 +4398,20 @@ enum ContractStatus {
   PRINTED
   CANCELLED
   EXPIRED
+}
+
+enum ContractLifecycleRequestKind {
+  DELETE
+  DEACTIVATE
+  REACTIVATE
+}
+
+enum ContractLifecycleRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXECUTED
+  BLOCKED
 }
 
 enum AttendanceStatus {

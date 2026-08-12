@@ -51,6 +51,7 @@ test('contract query canonicalization preserves unknown parameters and removes i
   assert.equal(result.params.toString(), 'campaign=summer');
   assert.deepEqual(result.state, {
     view: null,
+    lifecycleView: 'active',
     search: '',
     status: 'ALL',
     sourceStatus: 'ALL',
@@ -58,6 +59,16 @@ test('contract query canonicalization preserves unknown parameters and removes i
     dateTo: '',
     page: 1,
   });
+});
+
+test('contract lifecycle views are canonical and reset pagination when changed', () => {
+  const inactive = canonicalizeContractsQuery(new URLSearchParams('lifecycleView=inactive&page=2'));
+  const pending = patchContractsQuery(inactive.params, { lifecycleView: 'pending' });
+
+  assert.equal(inactive.params.toString(), 'lifecycleView=inactive&page=2');
+  assert.equal(inactive.state.lifecycleView, 'inactive');
+  assert.equal(pending.params.toString(), 'lifecycleView=pending');
+  assert.equal(pending.state.lifecycleView, 'pending');
 });
 
 test('status takes precedence over semantic view and remains the established enum filter', () => {

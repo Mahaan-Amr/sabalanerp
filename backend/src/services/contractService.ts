@@ -701,6 +701,10 @@ export async function updateContract(
     throw new Error('Access denied');
   }
 
+  if (contract.isInactive) {
+    throw new Error('Contract cannot be modified in current status');
+  }
+
   const financiallyApprovedRecord = await prisma.accountingFinancialRecord.findFirst({
     where: {
       contractId,
@@ -1078,6 +1082,10 @@ export async function approveContract(
     throw new Error('Contract not found');
   }
 
+  if (contract.isInactive) {
+    throw new Error('Contract cannot be approved in current status');
+  }
+
   if (contract.status !== 'DRAFT' && contract.status !== 'PENDING_APPROVAL') {
     throw new Error('Contract cannot be approved in current status');
   }
@@ -1115,6 +1123,10 @@ export async function rejectContract(
 
   if (!contract) {
     throw new Error('Contract not found');
+  }
+
+  if (contract.isInactive) {
+    throw new Error('Contract cannot be rejected in current status');
   }
 
   if (contract.status !== 'DRAFT' && contract.status !== 'PENDING_APPROVAL') {

@@ -125,6 +125,7 @@ export default function AccountingContractsPage() {
       setLoading(true);
       const response = await accountingAPI.getContracts({
         view: query.view || undefined,
+        lifecycleView: query.lifecycleView,
         search: query.search || undefined,
         status: query.status,
         sourceStatus: query.sourceStatus,
@@ -146,7 +147,7 @@ export default function AccountingContractsPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.pageSize, query.dateFrom, query.dateTo, query.page, query.search, query.sourceStatus, query.status, query.view]);
+  }, [pagination.pageSize, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceStatus, query.status, query.view]);
 
   useEffect(() => {
     loadContracts();
@@ -327,9 +328,12 @@ export default function AccountingContractsPage() {
       mobileLabel: 'وضعیت قرارداد',
       priority: 'secondary',
       cell: (contract) => (
-        <ErpBadge tone={contractStatusTones[contract.status] || 'neutral'}>
-          {contractStatusLabels[contract.status] || contract.status}
-        </ErpBadge>
+        <div className="flex flex-wrap gap-1">
+          <ErpBadge tone={contractStatusTones[contract.status] || 'neutral'}>
+            {contractStatusLabels[contract.status] || contract.status}
+          </ErpBadge>
+          {contract.isInactive && <ErpBadge tone="warning">غیرفعال</ErpBadge>}
+        </div>
       ),
     },
     {
@@ -415,7 +419,7 @@ export default function AccountingContractsPage() {
       onClick: () => openApprovalModal(contract),
     },
     { label: 'پرچم', icon: FaFlag, tone: 'warning', onClick: () => setFlagTarget(contract) },
-    { label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger', onClick: () => setCorrectionTarget(contract) },
+    { label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger', disabled: contract.isInactive, title: contract.isInactive ? 'قرارداد غیرفعال و فقط‌خواندنی است' : undefined, onClick: () => setCorrectionTarget(contract) },
   ];
 
   return (
@@ -425,6 +429,18 @@ export default function AccountingContractsPage() {
       description="همه قراردادها در هر وضعیت دیده می‌شوند؛ اقدام مالی فقط برای قراردادهای تایید شده، امضا شده یا چاپ شده فعال است."
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadContracts, tone: 'neutral' }]}
       filters={[
+        {
+          id: 'lifecycleView',
+          label: 'نمای قراردادها',
+          type: 'select',
+          value: query.lifecycleView,
+          onChange: (value) => updateQuery({ lifecycleView: value as ContractsQueryState['lifecycleView'] }),
+          options: [
+            { label: 'فعال', value: 'active' },
+            { label: 'غیرفعال', value: 'inactive' },
+            { label: 'درخواست‌های در انتظار', value: 'pending' },
+          ],
+        },
         {
           id: 'search',
           label: 'جستجو',

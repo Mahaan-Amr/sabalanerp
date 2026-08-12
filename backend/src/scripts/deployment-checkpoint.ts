@@ -94,8 +94,12 @@ const main = async () => {
   const localValidation = await validateRecoveryPackage({ sourcePath: result.destination, passphrase: localKey, prisma, verifyRestore: true });
 
   const objectKey = `${releaseId}/${deploymentId}.sabrec`;
-  const uploaded = await remote.uploadVerified(result.destination, objectKey);
-  const remoteValidation = await validateRecoveryPackage({ sourcePath: uploaded.objectPath, passphrase: localKey, prisma });
+  // The local package has already passed decrypt, manifest, compatibility, and
+  // restore validation. uploadVerified performs a full streaming read-back of
+  // the remote object and requires it to be byte-identical to that package.
+  // Decrypting the identical remote bytes again would add another complete
+  // off-server transfer without proving a different safety property.
+  const uploaded = await remote.uploadVerified(result.destination, objectKey, result.sha256);
 
   const metadata = {
     id: deploymentId,
@@ -111,8 +115,8 @@ const main = async () => {
     size: uploaded.size,
     remoteVerified: true,
     localVerified: true,
-    manifestReadable: Boolean(remoteValidation.manifest),
-    compatibility: { local: localValidation.compatibility, remote: remoteValidation.compatibility },
+    manifestReadable: Boolean(localValidation.manifest),
+    compatibility: { local: localValidation.compatibility, remote: localValidation.compatibility },
     capacity: { estimate: capacity, localAvailableBytes: localCapacity.availableBytes, remoteAvailableBytes: remoteCapacity.availableBytes },
     manifest: result.manifest,
     rollbackReleaseSet: {

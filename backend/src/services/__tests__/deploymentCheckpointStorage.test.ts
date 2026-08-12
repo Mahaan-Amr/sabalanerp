@@ -33,6 +33,19 @@ const run = async () => {
     await fs.promises.writeFile(metadataPath, JSON.stringify({ checksum: uploaded.checksum }));
     assert.equal((await store.readMetadata('release-1/deployment-1.sabrec.json')).checksum, uploaded.checksum);
 
+    const expectedChecksumPath = path.join(root, 'expected-checksum.sabrec');
+    await fs.promises.writeFile(expectedChecksumPath, 'verified-checkpoint');
+    const expectedChecksumUpload = await store.uploadVerified(
+      expectedChecksumPath,
+      'release-2/deployment-2.sabrec',
+      uploaded.checksum,
+    );
+    assert.equal(expectedChecksumUpload.checksum, uploaded.checksum);
+    await assert.rejects(
+      () => store.uploadVerified(expectedChecksumPath, 'release-3/deployment-3.sabrec', 'not-the-source-checksum'),
+      (error: any) => error?.code === 'DEPLOYMENT_REMOTE_CHECKSUM_MISMATCH',
+    );
+
     const capacity = estimateCheckpointCapacity({ databaseBytes: 100, protectedFilesBytes: 100, dockerWorkingBytes: 0, headroomBytes: 0 });
     assert.equal(capacity.checkpointBytes, 230);
     assert.equal(capacity.requiredLocalBytes, 480);

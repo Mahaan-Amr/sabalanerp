@@ -257,8 +257,11 @@ export const systemRecoveryAPI = {
 
 // Users API
 export const usersAPI = {
-  getUsers: (page = 1, limit = 10) =>
-    api.get(`/users?page=${page}&limit=${limit}`),
+  getUsers: (page = 1, limit = 10, filters: { search?: string; departmentId?: string; role?: string; status?: string } = {}) => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+    return api.get(`/users?${params.toString()}`);
+  },
   
   getUser: (id: string) => api.get(`/users/${id}`),
   

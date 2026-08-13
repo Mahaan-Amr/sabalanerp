@@ -143,6 +143,7 @@ export default function HrPersonnelPage() {
     availableUsers: [],
   });
   const [loading, setLoading] = useState(true);
+  const [resultsLoading, setResultsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -167,6 +168,7 @@ export default function HrPersonnelPage() {
   const [confirmDiscardExceptional, setConfirmDiscardExceptional] = useState(false);
   const [originHref, setOriginHref] = useState("/dashboard/hr");
   const lastSuccessfulView = useRef(false);
+  const loadSequence = useRef(0);
   const restoredFocus = useRef<string | null>(null);
   const expanded = listState.focus || null;
   const archiveView = listState.view === "archived";
@@ -178,8 +180,11 @@ export default function HrPersonnelPage() {
   const scheduleTarget = rows.find((person) => person.id === expanded) || null;
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current;
+    const needsFoundation = !lastSuccessfulView.current;
     try {
-      setLoading(true);
+      if (needsFoundation) setLoading(true);
+      setResultsLoading(true);
       setError("");
       const [people, base, authorityResponse] = await Promise.all([
         hrAPI.getPersonnel({
@@ -194,9 +199,10 @@ export default function HrPersonnelPage() {
           page,
           ...(expanded ? { focus: expanded } : {}),
         }),
-        hrAPI.getFoundation(),
-        hiringAPI.myActionPermissions(),
+        needsFoundation ? hrAPI.getFoundation() : Promise.resolve(null),
+        needsFoundation ? hiringAPI.myActionPermissions() : Promise.resolve(null),
       ]);
+      if (sequence !== loadSequence.current) return;
       const nextMeta = people.data.meta || {
           page: 1,
           total: people.data.data.length,
@@ -204,8 +210,8 @@ export default function HrPersonnelPage() {
         };
       setRows(people.data.data);
       setMeta(nextMeta);
-      setFoundation(base.data.data);
-      setActionPermissions(authorityResponse.data.data || []);
+      if (base) setFoundation(base.data.data);
+      if (authorityResponse) setActionPermissions(authorityResponse.data.data || []);
       lastSuccessfulView.current = true;
       if (nextMeta.page !== page || nextMeta.focus === "removed") {
         replaceListState({
@@ -230,7 +236,9 @@ export default function HrPersonnelPage() {
       }
       setError(apiError(err));
     } finally {
+      if (sequence !== loadSequence.current) return;
       setLoading(false);
+      setResultsLoading(false);
     }
   }, [search, archiveView, page, relationshipStatus, attention, organizationalUnitId, workplaceId, costCenterId, dependencyAt, expanded, replaceListState, currentUserId]);
 
@@ -254,7 +262,7 @@ export default function HrPersonnelPage() {
       if (nextSearch !== listState.search) {
         replaceListState({ search: nextSearch, page: 1, focus: "", panel: "" });
       }
-    }, 400);
+    }, 250);
     return () => window.clearTimeout(timeout);
   }, [listState.search, replaceListState, searchDraft]);
   useEffect(() => {
@@ -849,6 +857,9 @@ export default function HrPersonnelPage() {
               submitSearch();
             }}
           />
+          <div className="mt-2 min-h-5 text-xs text-[var(--sds-text-muted)]" role="status" aria-live="polite">
+            {resultsLoading ? "در حال به‌روزرسانی نتایج…" : null}
+          </div>
         </div>
         <div className="space-y-3">
           {rows.map((person) => (

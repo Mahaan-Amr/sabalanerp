@@ -7,6 +7,7 @@ import {
   ErpButton,
   ErpCard,
   ErpCheckbox,
+  ErpCombobox,
   ErpEmptyState,
   ErpInlineState,
   ErpInput,
@@ -49,6 +50,16 @@ const ROLES = ['USER', 'SALES', 'MODERATOR', 'MANAGER', 'ADMIN'] as const;
 const LEVEL_LABELS: Record<AccessLevel, string> = { view: 'مشاهده', edit: 'ویرایش', admin: 'مدیریت' };
 const HR_LEVEL: Record<AccessLevel, 'VIEW' | 'EDIT' | 'ADMIN'> = { view: 'VIEW', edit: 'EDIT', admin: 'ADMIN' };
 const FROM_HR_LEVEL: Record<'VIEW' | 'EDIT' | 'ADMIN', AccessLevel> = { VIEW: 'view', EDIT: 'edit', ADMIN: 'admin' };
+const HR_BASE_FEATURE_LABELS_FA: Record<string, string> = {
+  DASHBOARD: 'مشاهده داشبورد منابع انسانی',
+  ORGANIZATIONAL_STRUCTURE: 'مشاهده ساختار سازمانی',
+  PERSONNEL: 'مشاهده پرسنل',
+  RECRUITMENT_CASES: 'مشاهده پرونده‌های جذب',
+  HR_WORK_MANAGEMENT: 'مدیریت کارهای منابع انسانی',
+  AUTHORITY_RESPONSIBILITY_ADMINISTRATION: 'مدیریت اختیار و مسئولیت',
+  DATA_MIGRATION_RECONCILIATION: 'مدیریت مهاجرت و تطبیق داده‌ها',
+  USER_ADMINISTRATION: 'مدیریت کاربران',
+};
 
 const activeNow = (permission: { isActive?: boolean; status?: string; expiresAt?: string | null; effectiveFrom?: string; effectiveTo?: string | null }) => {
   const now = Date.now();
@@ -86,9 +97,8 @@ export default function PermissionsPage() {
   const [draftRole, setDraftRole] = useState('USER');
   const [expiresAt, setExpiresAt] = useState('');
   const [reason, setReason] = useState('');
-  const [userSearch, setUserSearch] = useState('');
   const [permissionSearch, setPermissionSearch] = useState('');
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({ hr: true });
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [tab, setTab] = useState<'users' | 'roles'>('users');
   const [loading, setLoading] = useState(true);
   const [loadingUser, setLoadingUser] = useState(false);
@@ -110,7 +120,7 @@ export default function PermissionsPage() {
       }));
       const actionKeys = new Set(actionDefinitions.map(({ key }: FeatureDefinition) => key));
       const hrBaseDefinitions = (hrResponse.data.data.featureCatalog || []).filter((feature: any) => !actionKeys.has(feature.code)).map((feature: any): FeatureDefinition => ({
-        key: feature.code, workspace: 'hr', label: feature.labelFa || feature.namePersian || feature.name || feature.code, requiredLevel: 'view', prerequisites: [], source: 'hr',
+        key: feature.code, workspace: 'hr', label: HR_BASE_FEATURE_LABELS_FA[feature.code] || feature.labelFa || feature.namePersian || feature.name || 'مجوز منابع انسانی', requiredLevel: 'view', prerequisites: [], source: 'hr',
       }));
       setActor(currentActor);
       setUsers(availableUsers);
@@ -168,11 +178,6 @@ export default function PermissionsPage() {
   const maxLevel: AccessLevel = actor?.role === 'MANAGER' ? 'edit' : 'admin';
   const isAdminTarget = selectedUser?.role === 'ADMIN';
   const canEdit = !!selectedUser && !isAdminTarget;
-  const visibleUsers = useMemo(() => {
-    const query = userSearch.trim().toLowerCase();
-    if (!query) return users;
-    return users.filter((user) => user.id === selectedUserId || `${userName(user)} ${user.email} ${user.username} ${user.role}`.toLowerCase().includes(query));
-  }, [selectedUserId, userSearch, users]);
   const filteredDefinitions = useMemo(() => definitions.filter((definition) => !permissionSearch.trim() || definition.label.includes(permissionSearch.trim()) || definition.key.toLowerCase().includes(permissionSearch.trim().toLowerCase())), [definitions, permissionSearch]);
   const roleWorkspaceForSelected = roleWorkspacePermissions.filter((permission) => permission.role === draftRole && permission.isActive);
   const roleFeatureForSelected = roleFeaturePermissions.filter((permission) => permission.role === draftRole && permission.isActive);
@@ -243,15 +248,32 @@ export default function PermissionsPage() {
         <>
           <ErpSection title="انتخاب کاربر">
             <div className="grid gap-3 md:grid-cols-2">
-              <ErpInput value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="جست‌وجو بر اساس نام، ایمیل یا نام کاربری" aria-label="جست‌وجوی کاربر" />
-              <ErpSelect value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} aria-label="انتخاب کاربر">{visibleUsers.map((user) => <option key={user.id} value={user.id}>{userName(user)} · {user.role}</option>)}</ErpSelect>
+              <ErpCombobox
+                label="کاربر"
+                placeholder="جست‌وجو و انتخاب کاربر"
+                value={selectedUserId}
+                onChange={setSelectedUserId}
+                options={users.map((user) => ({ value: user.id, label: `${userName(user)} · ${user.email || user.username}` }))}
+                noOptionsText="کاربری با این مشخصات پیدا نشد"
+              />
+              <label>
+                <span className="mb-1 block text-xs font-semibold text-[var(--sds-text-secondary)]">مجوز</span>
+                <ErpInput
+                  value={permissionSearch}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setPermissionSearch(value);
+                    if (!value.trim()) setExpanded({});
+                  }}
+                  placeholder="جست‌وجوی مجوز در فضاهای کاری"
+                  aria-label="جست‌وجوی مجوز"
+                />
+              </label>
             </div>
-            <div className="mt-3"><ErpInput value={permissionSearch} onChange={(event) => setPermissionSearch(event.target.value)} placeholder="جست‌وجوی مجوز در فضاهای کاری" aria-label="جست‌وجوی مجوز" /></div>
           </ErpSection>
           {loadingUser ? <ErpLoading /> : !selectedUser ? <ErpEmptyState title="کاربری برای مدیریت دسترسی پیدا نشد." /> : (
             <>
               <ErpSection title={userName(selectedUser)} description={`${selectedUser.email} · ${selectedUser.username}`}>
-                {isAdminTarget ? <ErpInlineState kind="stale" title={<span>دسترسی مدیر سامانه کامل و ضمنی است.<small className="mt-1 block font-normal">مجوزهای مستقیم حساب ADMIN از این صفحه تغییر نمی‌کنند.</small></span>} /> : null}
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">نقش سامانه</span><ErpSelect disabled={!canEdit} value={draftRole} onChange={(event) => setDraftRole(event.target.value)}>{ROLES.filter((role) => actor?.role === 'ADMIN' || role !== 'ADMIN').map((role) => <option key={role} value={role}>{role}</option>)}</ErpSelect></label>
                   <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">انقضای تغییرات جدید</span><ErpInput disabled={!canEdit} type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></label>
@@ -261,17 +283,20 @@ export default function PermissionsPage() {
               <div className="space-y-4">
                 {WORKSPACES.map(({ key, label }) => {
                   const workspaceDefinitions = filteredDefinitions.filter((definition) => definition.workspace === key);
+                  const searchingPermissions = Boolean(permissionSearch.trim());
+                  if (searchingPermissions && workspaceDefinitions.length === 0) return null;
+                  const workspaceExpanded = searchingPermissions || Boolean(expanded[key]);
                   const selectableDefinitions = definitions.filter((definition) => actor?.role === 'ADMIN' || definition.requiredLevel !== 'admin');
                   const inheritedLevel = roleWorkspaceForSelected.find((permission) => permission.workspace === key)?.permissionLevel;
                   const directLevel = draft.workspaceLevels[key];
                   const effectiveLevel = directLevel || inheritedLevel;
                   const automatic = definitions.filter((definition) => definition.workspace === key && draft.automaticallyAddedFeatures.has(definition.key));
-                  return <ErpSection key={key} title={label} description={effectiveLevel ? `دسترسی مؤثر: ${LEVEL_LABELS[effectiveLevel]} · منشأ: ${directLevel ? 'مستقیم' : 'از نقش'}` : 'بدون دسترسی مؤثر'} actions={[{ label: expanded[key] ? 'بستن مجوزها' : 'نمایش مجوزها', variant: 'ghost', onClick: () => setExpanded((current) => ({ ...current, [key]: !current[key] })) }]}>
+                  return <ErpSection key={key} title={label} description={effectiveLevel ? `دسترسی مؤثر: ${LEVEL_LABELS[effectiveLevel]} · منشأ: ${directLevel ? 'مستقیم' : 'از نقش'}` : 'بدون دسترسی مؤثر'} actions={searchingPermissions ? [] : [{ label: workspaceExpanded ? 'بستن مجوزها' : 'نمایش مجوزها', variant: 'ghost', onClick: () => setExpanded((current) => ({ ...current, [key]: !current[key] })) }]}>
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                       <label className="w-full lg:max-w-xs"><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">سطح مستقیم فضای کاری</span><ErpSelect disabled={!canEdit} value={draft.workspaceLevels[key] || ''} onChange={(event) => setDraft((current) => ({ ...current, workspaceLevels: { ...current.workspaceLevels, [key]: event.target.value ? event.target.value as AccessLevel : null } }))}><option value="">بدون دسترسی مستقیم</option><option value="view">مشاهده</option><option value="edit">ویرایش</option>{actor?.role === 'ADMIN' && <option value="admin">مدیریت</option>}</ErpSelect></label>
                       <div className="flex flex-wrap gap-2"><ErpButton label="انتخاب همه" variant="outline" disabled={!canEdit} onClick={() => setDraft((current) => selectAllInWorkspace(current, selectableDefinitions, key, maxLevel))} /><ErpButton label="لغو انتخاب همه" tone="danger" variant="ghost" disabled={!canEdit} onClick={() => setDraft((current) => deselectAllInWorkspace(current, definitions, key))} /></div>
                     </div>
-                    {expanded[key] && <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4"><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{workspaceDefinitions.map((definition) => {
+                    {workspaceExpanded && <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4"><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{workspaceDefinitions.map((definition) => {
                       const inherited = roleFeatureForSelected.some((permission) => permission.workspace === key && permission.feature === definition.key);
                       const isAutomatic = draft.automaticallyAddedFeatures.has(definition.key);
                       const direct = draft.explicitlySelectedFeatures.has(definition.key);

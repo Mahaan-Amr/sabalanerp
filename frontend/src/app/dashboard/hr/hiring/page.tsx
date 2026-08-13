@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  FaCog,
   FaArchive,
   FaClipboardList,
   FaFilter,
@@ -208,11 +207,6 @@ export default function HiringCasesPage() {
           label: archiveView ? "فهرست فعال" : "بایگانی متقاضیان",
           icon: archiveView ? FaUndo : FaArchive,
           onClick: () => commitContext({ ...filters, page: 1 }, !archiveView),
-        },
-        {
-          label: "مدیریت دسترسی",
-          icon: FaCog,
-          href: "/dashboard/hr/permissions",
         },
         {
           label: "معیارهای مصاحبه اولیه",

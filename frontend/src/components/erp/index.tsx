@@ -69,6 +69,7 @@ export type ErpFilter =
       value: string;
       placeholder?: string;
       onChange: (value: string) => void;
+      onSubmit?: () => void;
     }
   | {
       id: string;
@@ -251,6 +252,40 @@ export const ErpSelect = React.forwardRef<
     </select>
   );
 });
+
+export function ErpCombobox({
+  options,
+  value,
+  onChange,
+  label,
+  placeholder,
+  disabled,
+  className,
+  noOptionsText = 'نتیجه‌ای پیدا نشد',
+}: {
+  options: Array<{ value: string; label: string; disabled?: boolean; group?: string }>;
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  noOptionsText?: string;
+}) {
+  return (
+    <EnhancedDropdown
+      options={options}
+      value={value}
+      onChange={onChange}
+      label={label}
+      placeholder={placeholder || label}
+      disabled={disabled}
+      className={className}
+      searchable
+      noOptionsText={noOptionsText}
+    />
+  );
+}
 
 export const ErpTextarea = React.forwardRef<
   HTMLTextAreaElement,
@@ -716,25 +751,37 @@ export function ErpPage({ eyebrow, title, description, actions = [], metrics = [
 }
 
 export function ErpFilters({ filters }: { filters: ErpFilter[] }) {
+  const filterGroupId = React.useId();
   if (!filters.length) return null;
   return (
     <ErpSection>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {filters.map((filter) => (
-          <label key={filter.id} className="block">
-            <span className="sr-only">{filter.label}</span>
-            {filter.type === 'search' ? (
-              <div className="relative">
-                <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
-                <input
-                  type="text"
-                  value={filter.value}
-                  placeholder={filter.placeholder}
-                  onChange={(event) => filter.onChange(event.target.value)}
-                  className="sds-field min-h-12 w-full py-3 pl-4 pr-10"
-                />
+        {filters.map((filter) => {
+          const controlId = `${filterGroupId}-${filter.id}`;
+          return filter.type === 'search' ? (
+            <div key={filter.id} className="block">
+              <label htmlFor={controlId} className="sr-only">{filter.label}</label>
+              <div className="flex gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
+                  <ErpInput
+                    id={controlId}
+                    type="search"
+                    value={filter.value}
+                    placeholder={filter.placeholder}
+                    onChange={(event) => filter.onChange(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') filter.onSubmit?.();
+                    }}
+                    className="min-h-12 py-3 pl-4 pr-10"
+                  />
+                </div>
+                {filter.onSubmit && <ErpButton label="جستجو" variant="outline" tone="neutral" onClick={filter.onSubmit} />}
               </div>
-            ) : (
+            </div>
+          ) : (
+            <label key={filter.id} className="block">
+              <span className="sr-only">{filter.label}</span>
               <EnhancedDropdown
                 value={filter.value}
                 onChange={filter.onChange}
@@ -746,9 +793,9 @@ export function ErpFilters({ filters }: { filters: ErpFilter[] }) {
                 searchable
                 clearable
               />
-            )}
-          </label>
-        ))}
+            </label>
+          );
+        })}
       </div>
     </ErpSection>
   );

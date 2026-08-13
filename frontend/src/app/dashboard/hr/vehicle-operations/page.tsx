@@ -17,6 +17,8 @@ import {
 } from '@/components/erp';
 import { dispatchMasterDataAPI } from '@/lib/api';
 import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
+import HrPersianCalendar from '@/features/hr/HrPersianCalendar';
+import { fromIsoDate, toIsoDate } from '@/features/hr/hrUi';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const vehicleInitial = { fleetCode: '', vehicleType: '', make: '', model: '', vin: '', plate: '', effectiveFrom: today(), reason: 'ثبت خودروی ناوگان' };
@@ -109,7 +111,7 @@ export default function VehicleOperationsPage() {
               <label className={field}>راننده<ErpSelect required value={profileForm.driverId} onChange={(event) => { const selected = drivers.find((driver) => driver.id === event.target.value); setProfileForm({ ...profileInitial, driverId: event.target.value, licenceNumber: selected?.licenceNumber || '', licenceClass: selected?.licenceClass || '', licenceExpiresAt: selected?.licenceExpiresAt?.slice(0, 10) || '', notes: selected?.notes || '' }); }}><option value="">انتخاب برای ویرایش</option>{drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.personnel.firstName} {driver.personnel.lastName}</option>)}</ErpSelect></label>
               <label className={field}>شماره گواهینامه<ErpInput required value={profileForm.licenceNumber} onChange={(event) => setProfileForm({ ...profileForm, licenceNumber: event.target.value })} /></label>
               <label className={field}>پایه گواهینامه<ErpInput required value={profileForm.licenceClass} onChange={(event) => setProfileForm({ ...profileForm, licenceClass: event.target.value })} /></label>
-              <label className={field}>اعتبار گواهینامه<ErpInput type="date" value={profileForm.licenceExpiresAt} onChange={(event) => setProfileForm({ ...profileForm, licenceExpiresAt: event.target.value })} /></label>
+              <label className={field}>اعتبار گواهینامه<HrPersianCalendar value={fromIsoDate(profileForm.licenceExpiresAt)} onChange={(value) => setProfileForm({ ...profileForm, licenceExpiresAt: toIsoDate(value) })} clearable /></label>
               <label className={`${field} sm:col-span-2`}>دلیل ویرایش<ErpInput required value={profileForm.reason} onChange={(event) => setProfileForm({ ...profileForm, reason: event.target.value })} /></label>
               <ErpButton label="ذخیره مشخصات رانندگی" icon={FaSync} disabled={dispatchTimelineStale || saving || !profileForm.driverId} className="sm:col-span-2" onClick={() => void run(() => dispatchMasterDataAPI.updateInternalDrivingProfile(profileForm.driverId, profileForm), 'مشخصات رانندگی به‌روزرسانی شد.').then(() => setProfileForm(profileInitial))} />
             </form></ErpCard>}
@@ -129,7 +131,7 @@ export default function VehicleOperationsPage() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><label className={field}>سازنده<ErpInput value={vehicleForm.make} onChange={(event) => setVehicleForm({ ...vehicleForm, make: event.target.value })} /></label><label className={field}>مدل<ErpInput value={vehicleForm.model} onChange={(event) => setVehicleForm({ ...vehicleForm, model: event.target.value })} /></label></div>
               <label className={field}>شماره شاسی<ErpInput value={vehicleForm.vin} onChange={(event) => setVehicleForm({ ...vehicleForm, vin: event.target.value })} /></label>
               <label className={field}>پلاک<ErpInput required value={vehicleForm.plate} onChange={(event) => setVehicleForm({ ...vehicleForm, plate: event.target.value })} /></label>
-              <label className={field}>تاریخ شروع پلاک<ErpInput required type="date" value={vehicleForm.effectiveFrom} onChange={(event) => setVehicleForm({ ...vehicleForm, effectiveFrom: event.target.value })} /></label>
+              <label className={field}>تاریخ شروع پلاک<HrPersianCalendar value={fromIsoDate(vehicleForm.effectiveFrom)} onChange={(value) => setVehicleForm({ ...vehicleForm, effectiveFrom: toIsoDate(value) })} /></label>
               <label className={field}>دلیل<ErpInput required value={vehicleForm.reason} onChange={(event) => setVehicleForm({ ...vehicleForm, reason: event.target.value })} /></label>
               <ErpButton label="ثبت خودرو" icon={FaTruck} disabled={dispatchTimelineStale || saving} className="w-full" onClick={() => void run(() => dispatchMasterDataAPI.createCompanyVehicle(vehicleForm), 'خودروی شرکت ثبت شد.').then(() => setVehicleForm(vehicleInitial))} />
             </form>
@@ -138,7 +140,7 @@ export default function VehicleOperationsPage() {
             {capabilities.canManagePlates && <ErpCard className="mb-5 p-3"><form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void run(() => dispatchMasterDataAPI.changeCompanyVehiclePlate(plateForm.vehicleId, plateForm), 'پلاک جدید ثبت شد.').then(() => setPlateForm(plateInitial)); }}>
               <label className={field}>خودرو<ErpSelect required value={plateForm.vehicleId} onChange={(event) => setPlateForm({ ...plateForm, vehicleId: event.target.value })}><option value="">انتخاب خودرو</option>{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.fleetCode} · {vehicle.vehicleType}</option>)}</ErpSelect></label>
               <label className={field}>پلاک جدید<ErpInput required value={plateForm.plate} onChange={(event) => setPlateForm({ ...plateForm, plate: event.target.value })} /></label>
-              <label className={field}>شروع اعتبار<ErpInput required type="date" value={plateForm.effectiveFrom} onChange={(event) => setPlateForm({ ...plateForm, effectiveFrom: event.target.value })} /></label>
+              <label className={field}>شروع اعتبار<HrPersianCalendar value={fromIsoDate(plateForm.effectiveFrom)} onChange={(value) => setPlateForm({ ...plateForm, effectiveFrom: toIsoDate(value) })} /></label>
               <label className={field}>دلیل<ErpInput required value={plateForm.reason} onChange={(event) => setPlateForm({ ...plateForm, reason: event.target.value })} /></label>
               <ErpButton label="ثبت پلاک جدید" icon={FaPlus} disabled={dispatchTimelineStale || saving || !plateForm.vehicleId} className="sm:col-span-2" onClick={() => void run(() => dispatchMasterDataAPI.changeCompanyVehiclePlate(plateForm.vehicleId, plateForm), 'پلاک جدید ثبت شد.').then(() => setPlateForm(plateInitial))} />
             </form></ErpCard>}
@@ -153,7 +155,7 @@ export default function VehicleOperationsPage() {
           <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void run(() => dispatchMasterDataAPI.assignCompanyVehicle(assignmentForm), 'تخصیص خودرو ثبت شد.').then(() => setAssignmentForm(assignmentInitial)); }}>
             <label className={field}>راننده<ErpSelect required value={assignmentForm.driverId} onChange={(event) => setAssignmentForm({ ...assignmentForm, driverId: event.target.value })}><option value="">انتخاب کنید</option>{drivers.filter((driver) => driver.currentEligibility?.status === 'ELIGIBLE').map((driver) => <option key={driver.id} value={driver.id}>{driver.personnel.firstName} {driver.personnel.lastName}</option>)}</ErpSelect></label>
             <label className={field}>خودرو<ErpSelect required value={assignmentForm.vehicleId} onChange={(event) => setAssignmentForm({ ...assignmentForm, vehicleId: event.target.value })}><option value="">انتخاب کنید</option>{vehicles.filter((vehicle) => vehicle.status === 'ACTIVE').map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.fleetCode} · {vehicle.plates[0]?.plate || vehicle.vehicleType}</option>)}</ErpSelect></label>
-            <label className={field}>شروع تخصیص<ErpInput required type="date" value={assignmentForm.effectiveFrom} onChange={(event) => setAssignmentForm({ ...assignmentForm, effectiveFrom: event.target.value })} /></label>
+            <label className={field}>شروع تخصیص<HrPersianCalendar value={fromIsoDate(assignmentForm.effectiveFrom)} onChange={(value) => setAssignmentForm({ ...assignmentForm, effectiveFrom: toIsoDate(value) })} /></label>
             <label className={field}>دلیل<ErpInput required value={assignmentForm.reason} onChange={(event) => setAssignmentForm({ ...assignmentForm, reason: event.target.value })} /></label>
             <ErpButton label="ثبت تخصیص" icon={FaLink} disabled={dispatchTimelineStale || saving || !assignmentForm.driverId || !assignmentForm.vehicleId} className="md:col-span-2" onClick={() => void run(() => dispatchMasterDataAPI.assignCompanyVehicle(assignmentForm), 'تخصیص خودرو ثبت شد.').then(() => setAssignmentForm(assignmentInitial))} />
           </form>

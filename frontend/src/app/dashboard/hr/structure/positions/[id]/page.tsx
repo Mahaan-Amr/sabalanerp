@@ -14,7 +14,8 @@ import {
   ErpSection,
   ErpTextarea,
 } from "@/components/erp";
-import { apiError, HrField, HrMessage } from "@/features/hr/hrUi";
+import { apiError, fromIsoDate, HrField, HrMessage, toIsoDate } from "@/features/hr/hrUi";
+import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import { hrAPI } from "@/lib/api";
 
 const assignmentTypeLabel: Record<string, string> = {
@@ -150,7 +151,7 @@ export default function PositionHistoryPage() {
           <ErpSection title="تغییر ظرفیت" description={`ظرفیت جاری: ${data.position.capacity.toLocaleString("fa-IR")}`}>
             <ErpCard className="space-y-3 p-4">
               <HrField label="ظرفیت جدید" required><ErpInput type="number" min={1} value={capacity.newCapacity} onChange={(event) => setCapacity({ ...capacity, newCapacity: event.target.value })} /></HrField>
-              <HrField label="تاریخ اثر" required><ErpInput type="date" min={new Date().toISOString().slice(0, 10)} value={capacity.effectiveAt} onChange={(event) => setCapacity({ ...capacity, effectiveAt: event.target.value })} /></HrField>
+              <HrField label="تاریخ اثر" required><HrPersianCalendar value={fromIsoDate(capacity.effectiveAt)} onChange={(value) => setCapacity({ ...capacity, effectiveAt: toIsoDate(value) })} disablePastDates /></HrField>
               <HrField label="دلیل کاهش"><ErpTextarea value={capacity.reason} onChange={(event) => setCapacity({ ...capacity, reason: event.target.value })} /></HrField>
               <ErpButton label="ثبت تغییر ظرفیت" icon={FaPlus} disabled={saving || !capacity.newCapacity || Number(capacity.newCapacity) < 1} onClick={submitCapacity} />
             </ErpCard>

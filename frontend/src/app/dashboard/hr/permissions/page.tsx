@@ -19,6 +19,8 @@ import {
   ErpTextarea,
 } from '@/components/erp';
 import { authAPI, hrAuthorizationAPI, permissionsAPI, usersAPI, workspacePermissionsAPI } from '@/lib/api';
+import HrPersianCalendar from '@/features/hr/HrPersianCalendar';
+import { toIsoDateTime } from '@/features/hr/hrUi';
 import {
   createAccessDraft,
   deselectAllInWorkspace,
@@ -195,7 +197,7 @@ export default function PermissionsPage() {
           key: definition.key,
           level: definition.requiredLevel === 'admin' ? maxLevel : definition.requiredLevel,
         })),
-        expiresAt: expiresAt || undefined,
+        expiresAt: expiresAt ? toIsoDateTime(expiresAt) : undefined,
         reason: reason.trim(),
       });
       setFeedback({ kind: 'success', title: `دسترسی‌های ${userName(selectedUser)} ذخیره شد.`, description: 'هیچ کاربر دیگری تغییر نکرد.' });
@@ -276,7 +278,7 @@ export default function PermissionsPage() {
               <ErpSection title={userName(selectedUser)} description={`${selectedUser.email} · ${selectedUser.username}`}>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">نقش سامانه</span><ErpSelect disabled={!canEdit} value={draftRole} onChange={(event) => setDraftRole(event.target.value)}>{ROLES.filter((role) => actor?.role === 'ADMIN' || role !== 'ADMIN').map((role) => <option key={role} value={role}>{role}</option>)}</ErpSelect></label>
-                  <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">انقضای تغییرات جدید</span><ErpInput disabled={!canEdit} type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></label>
+                  <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">انقضای تغییرات جدید</span><HrPersianCalendar disabled={!canEdit} value={expiresAt} onChange={setExpiresAt} showTime clearable /></label>
                   <div><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">دسترسی مؤثر</span><div className="flex min-h-11 flex-wrap items-center gap-2">{selectedUser.role === 'ADMIN' ? <ErpBadge tone="success">کامل · ضمنی مدیر سامانه</ErpBadge> : <><ErpBadge tone="primary">مستقیم: {directWorkspaces.length + directFeatures.length + hrFeatures.length}</ErpBadge><ErpBadge tone="info">از نقش: {roleWorkspaceForSelected.length + roleFeatureForSelected.length}</ErpBadge></>}</div></div>
                 </div>
               </ErpSection>

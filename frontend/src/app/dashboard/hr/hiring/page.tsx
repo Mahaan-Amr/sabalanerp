@@ -2,12 +2,13 @@
 import { ErpInput, ErpPressable, ErpSelect } from "@/components/erp";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FaArchive,
   FaClipboardList,
   FaFilter,
   FaPlus,
+  FaSearch,
   FaSync,
   FaUndo,
 } from "react-icons/fa";
@@ -85,7 +86,9 @@ export default function HiringCasesPage() {
   const [positions, setPositions] = useState<any[]>([]);
   const [form, setForm] = useState<HiringCreateForm>(blank);
   const [filters, setFilters] = useState<HiringQueueFilters>(initialContext.filters);
+  const [searchDraft, setSearchDraft] = useState(initialContext.filters.search || "");
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -95,9 +98,14 @@ export default function HiringCasesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createDiscardOpen, setCreateDiscardOpen] = useState(false);
   const [inviteTarget, setInviteTarget] = useState<any>(null);
+  const requestSequence = useRef(0);
+  const foundationLoaded = useRef(false);
+  const programmaticHref = useRef("");
   const createDirty = Boolean(form.firstName || form.lastName || form.mobile || form.nationalCode || form.positionId);
 
   const load = async (nextFilters: HiringQueueFilters = filters, nextArchiveView = archiveView) => {
+    const sequence = ++requestSequence.current;
+    const needsFoundation = !foundationLoaded.current;
     try {
       setLoading(true);
       setError("");
@@ -107,8 +115,9 @@ export default function HiringCasesPage() {
           archived: String(nextArchiveView),
           ...(representedView ? { view: representedView } : {}),
         }),
-        hrAPI.getFoundation(),
+        needsFoundation ? hrAPI.getFoundation() : Promise.resolve(null),
       ]);
+      if (sequence !== requestSequence.current) return;
       setRows(cases.data.data);
       setMeta(
         cases.data.meta || {
@@ -117,18 +126,31 @@ export default function HiringCasesPage() {
           total: cases.data.data.length,
         },
       );
-      setPositions(foundation.data.data.positions || []);
+      if (foundation) {
+        setPositions(foundation.data.data.positions || []);
+        foundationLoaded.current = true;
+      }
     } catch (cause) {
       setError(hiringError(cause));
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) {
+        setLoading(false);
+        setHasLoaded(true);
+      }
     }
   };
 
   useEffect(() => {
     const restored = parseHiringQueueContext(searchParams);
     setFilters(restored.filters);
+    setSearchDraft(restored.filters.search || "");
     setArchiveView(restored.archived);
+    const currentHref = buildHiringQueueHref(restored.filters, restored.archived, representedView);
+    if (programmaticHref.current === currentHref) {
+      programmaticHref.current = "";
+      return;
+    }
+    programmaticHref.current = "";
     void load(restored.filters, restored.archived).then(() => {
       const focus = searchParams.get("focus");
       const storedScroll = sessionStorage.getItem("hrHiringQueueScroll");
@@ -142,11 +164,26 @@ export default function HiringCasesPage() {
   }, [searchParams, representedView]);
 
   const commitContext = (nextFilters: HiringQueueFilters, nextArchiveView = archiveView) => {
+    const href = buildHiringQueueHref(nextFilters, nextArchiveView, representedView);
     setFilters(nextFilters);
+    setSearchDraft(nextFilters.search || "");
     setArchiveView(nextArchiveView);
-    router.replace(buildHiringQueueHref(nextFilters, nextArchiveView, representedView));
+    programmaticHref.current = href;
+    router.replace(href);
     void load(nextFilters, nextArchiveView);
   };
+
+  useEffect(() => {
+    const committedSearch = (filters.search || "").trim();
+    const nextSearch = searchDraft.trim();
+    if (nextSearch === committedSearch) return;
+    const timeout = window.setTimeout(() => {
+      commitContext({ ...filters, search: nextSearch, page: 1 });
+    }, 250);
+    return () => window.clearTimeout(timeout);
+    // Only text entry owns this debounce; the remaining filters keep their explicit apply action.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchDraft]);
 
   const queueHref = buildHiringQueueHref(filters, archiveView, representedView);
   const rememberQueuePosition = () => sessionStorage.setItem("hrHiringQueueScroll", String(window.scrollY));
@@ -184,7 +221,7 @@ export default function HiringCasesPage() {
   };
 
 
-  if (loading && !rows.length) return <ErpLoading />;
+  if (loading && !hasLoaded) return <ErpLoading />;
 
   return (
     <ErpPage
@@ -333,14 +370,19 @@ export default function HiringCasesPage() {
         description="فیلترها از همان وضعیت محاسبه‌شده در پرونده استفاده می‌کنند."
       >
         <ErpCard className="mb-4 grid gap-3 p-4 md:grid-cols-4">
-          <ErpInput
-            aria-label="جست‌وجوی پرونده‌های متقاضیان"
-            className={field}
-            value={filters.search || ""}
-            onChange={(event) =>
-              setFilters({ ...filters, search: event.target.value, page: 1 })
-            }
-          />
+          <div className="relative">
+            <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
+            <ErpInput
+              type="search"
+              aria-label="جست‌وجوی پرونده‌های متقاضیان"
+              className={`${field} pr-10`}
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") commitContext({ ...filters, search: searchDraft.trim(), page: 1 });
+              }}
+            />
+          </div>
           <ErpSelect
             className={field}
             value={filters.positionId || ""}
@@ -458,7 +500,7 @@ export default function HiringCasesPage() {
             <ErpButton
               label="اعمال فیلتر"
               icon={FaFilter}
-              onClick={() => commitContext({ ...filters, page: 1 })}
+              onClick={() => commitContext({ ...filters, search: searchDraft.trim(), page: 1 })}
               disabled={loading}
             />
             <ErpPressable

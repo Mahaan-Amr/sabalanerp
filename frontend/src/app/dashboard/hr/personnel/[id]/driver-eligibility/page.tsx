@@ -6,6 +6,8 @@ import { FaPause, FaPlay, FaUserCheck } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpInlineState, ErpInput, ErpLoading, ErpSection, ErpWorkspacePage } from '@/components/erp';
 import { dispatchConfirmationAPI, dispatchMasterDataAPI } from '@/lib/api';
 import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
+import HrPersianCalendar from '@/features/hr/HrPersianCalendar';
+import { fromIsoDate, toIsoDate } from '@/features/hr/hrUi';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const field = 'space-y-1.5 text-sm font-medium sds-text-secondary';
@@ -58,7 +60,7 @@ export default function PersonnelDriverEligibilityPage() {
     </ErpSection>
     {capabilities.canManageEligibility && <ErpSection title={driver ? 'تغییر صلاحیت' : 'تعریف راننده داخلی'}>
       <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (!reason.trim()) return; void run(() => driver ? dispatchMasterDataAPI.transitionInternalDriverEligibility(driver.id, { status: eligible ? 'SUSPENDED' : 'ELIGIBLE', effectiveFrom, reason }) : dispatchMasterDataAPI.createInternalDriver({ personnelId, effectiveFrom, reason }), driver ? 'وضعیت صلاحیت ثبت شد.' : 'راننده داخلی تعریف شد.'); }}>
-        <label className={field}>تاریخ اثر<ErpInput required type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label>
+        <label className={field}>تاریخ اثر<HrPersianCalendar value={fromIsoDate(effectiveFrom)} onChange={(value) => setEffectiveFrom(toIsoDate(value))} disablePastDates /></label>
         <label className={field}>دلیل<ErpInput required value={reason} onChange={(event) => setReason(event.target.value)} /></label>
         <ErpButton type="submit" label={!driver ? 'تعریف راننده داخلی' : eligible ? 'تعلیق صلاحیت' : 'بازگردانی صلاحیت'} icon={!driver ? FaUserCheck : eligible ? FaPause : FaPlay} tone={eligible ? 'warning' : 'success'} disabled={dispatchTimelineStale || saving || !reason.trim()} className="sm:col-span-2" />
       </form>

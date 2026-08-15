@@ -1,10 +1,11 @@
 'use client';
+import { ErpInlineState } from "@/components/erp";
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { FaCheckCircle, FaExclamationTriangle, FaPlay, FaSync } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpLoading, ErpPage, ErpSection, ErpSheet } from '@/components/erp';
-import { apiError, HrMessage } from '@/features/hr/hrUi';
+import { apiError } from '@/features/hr/hrUi';
 import {
   migrationAttentionFlagLabel,
   migrationPrimaryStateLabel,
@@ -87,8 +88,8 @@ export default function HrMigrationPage() {
         { label: 'اجرای تطبیق کنترل‌شده', icon: FaPlay, onClick: () => setConfirmOpen(true), tone: 'success' },
       ]}
     >
-      {error && <HrMessage>{error}</HrMessage>}
-      {success && <HrMessage tone="success">{success}</HrMessage>}
+      {error && <ErpInlineState kind="error" title={error} />}
+      {success && <ErpInlineState kind="success" title={success} />}
 
       <ErpCard tone={canCutOver ? 'success' : 'warning'} className="p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">

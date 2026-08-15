@@ -633,13 +633,14 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
           <button
             key={option.value}
             type="button"
+            aria-pressed={active}
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             className={cx(
               'inline-flex min-h-[var(--sds-control-height)] flex-shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
               active
-                ? 'bg-[var(--sds-surface-raised)] text-[var(--sds-accent)] shadow-sm dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent)]'
-                : 'text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-raised)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:bg-[var(--sds-surface-raised)] dark:hover:text-[var(--sds-text-primary)]'
+                ? 'bg-[var(--sds-surface-raised)] text-[var(--sds-accent-on-soft)] shadow-sm dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent-on-soft)]'
+                : 'text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-raised)] hover:text-[var(--sds-text-primary)] dark:hover:bg-[var(--sds-surface-raised)] dark:hover:text-[var(--sds-text-primary)]'
             )}
           >
             {Icon && <Icon className="h-4 w-4" />}

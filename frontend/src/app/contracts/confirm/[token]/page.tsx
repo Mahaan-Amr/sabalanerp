@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { publicContractsAPI } from '@/lib/api';
 import ConfirmationContractView, { ConfirmationData } from '../ConfirmationContractView';
+import { ErpCard, ErpInlineState, ErpLoading } from '@/components/erp';
 
 export default function TokenContractConfirmationPage() {
   const params = useParams<{ token: string }>();
@@ -84,16 +85,16 @@ export default function TokenContractConfirmationPage() {
   };
 
   if (loading) {
-    return <main className="sds-workspace flex min-h-screen items-center justify-center text-primary">در حال بارگذاری...</main>;
+    return <main className="sds-workspace flex min-h-screen items-center justify-center text-primary"><ErpLoading /></main>;
   }
 
   if (!data) {
     return (
       <main className="sds-workspace flex min-h-screen items-center justify-center p-6 text-primary">
-        <div className="sds-workspace-surface step-content-card w-full max-w-lg p-6">
+        <ErpCard className="w-full max-w-lg p-6">
           <h1 className="mb-3 text-xl font-bold">خطا در دسترسی به قرارداد</h1>
-          <p className="text-[var(--sds-danger)]">{error || 'لینک تایید معتبر نیست'}</p>
-        </div>
+          <ErpInlineState kind="error" title={error || 'لینک تایید معتبر نیست'} />
+        </ErpCard>
       </main>
     );
   }

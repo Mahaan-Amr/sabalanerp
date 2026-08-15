@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
+import { ErpField, ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -23,6 +23,7 @@ import {
   ErpButton,
   ErpCard,
   ErpEmptyState,
+  ErpInlineState,
   ErpLoading,
   ErpPage,
   ErpSection,
@@ -568,21 +569,15 @@ export default function NewLoadingPage() {
         const active = item.id === step;
         const done = steps.findIndex((candidate) => candidate.id === step) > index;
         return (
-          <ErpPressable
+          <ErpButton
             key={item.id}
-            type="button"
+            label={item.label}
             disabled={!canEnterStep(item.id)}
             onClick={() => { void navigateToStep(item.id); }}
-            className={`min-h-12 rounded-lg border px-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-              active
-                ? 'border-[var(--sds-accent)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
-                : done
-                  ? 'border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]'
-                  : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]'
-            }`}
-          >
-            {item.label}
-          </ErpPressable>
+            tone={active ? 'primary' : done ? 'success' : 'neutral'}
+            variant={active ? 'solid' : done ? 'soft' : 'outline'}
+            className="min-h-12 text-xs"
+          />
         );
       })}
     </div>
@@ -591,13 +586,14 @@ export default function NewLoadingPage() {
   const renderCustomerStep = () => (
     <ErpSection title="انتخاب مشتری" description="فقط مشتری‌هایی نمایش داده می‌شوند که حداقل یک پروژه با مانده مثبت بارگیری دارند.">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <ErpInput
-          className={inputClass}
-          value={customerSearch}
-          onChange={(event) => setCustomerSearch(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') loadCustomers(); }}
-          placeholder="جستجوی نام، شرکت، تلفن، کد ملی، مدیر پروژه یا پروژه"
-        />
+        <ErpField label="جستجوی مشتری">
+          <ErpInput
+            className={inputClass}
+            value={customerSearch}
+            onChange={(event) => setCustomerSearch(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') loadCustomers(); }}
+          />
+        </ErpField>
         <ErpButton label="جستجو" icon={FaSearch} onClick={loadCustomers} />
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -632,9 +628,7 @@ export default function NewLoadingPage() {
   const renderProjectStep = () => (
     <ErpSection title="انتخاب پروژه" description="فقط پروژه‌هایی که مانده مثبت بارگیری دارند قابل انتخاب هستند.">
       {selectedCustomer && (
-        <div className="mb-4 rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
-          مشتری انتخاب‌شده: {selectedCustomer.customerName || selectedCustomer.companyName}
-        </div>
+        <ErpInlineState kind="success" className="mb-4" title={`مشتری انتخاب‌شده: ${selectedCustomer.customerName || selectedCustomer.companyName}`} />
       )}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {projects.map((project) => (
@@ -769,13 +763,13 @@ export default function NewLoadingPage() {
       <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
         {line.mode === 'linear' ? (
           <>
-            <label><span className={labelClass}>خط راس</span><ErpInput className={inputClass} value={line.khatRas} onChange={(event) => updateLine(line.key, { khatRas: event.target.value })} /></label>
-            <label><span className={labelClass}>تعداد</span><ErpInput className={inputClass} value={line.pieceCount} onChange={(event) => updateLine(line.key, { pieceCount: event.target.value })} /></label>
-            <label><span className={labelClass}>اضافه</span><ErpInput className={inputClass} value={line.plus} onChange={(event) => updateLine(line.key, { plus: event.target.value })} /></label>
-            <label><span className={labelClass}>کسر</span><ErpInput className={inputClass} value={line.minus} onChange={(event) => updateLine(line.key, { minus: event.target.value })} /></label>
+            <ErpField label="خط راس"><ErpInput value={line.khatRas} onChange={(event) => updateLine(line.key, { khatRas: event.target.value })} /></ErpField>
+            <ErpField label="تعداد"><ErpInput value={line.pieceCount} onChange={(event) => updateLine(line.key, { pieceCount: event.target.value })} /></ErpField>
+            <ErpField label="اضافه"><ErpInput value={line.plus} onChange={(event) => updateLine(line.key, { plus: event.target.value })} /></ErpField>
+            <ErpField label="کسر"><ErpInput value={line.minus} onChange={(event) => updateLine(line.key, { minus: event.target.value })} /></ErpField>
           </>
         ) : (
-          <label><span className={labelClass}>مقدار مستقیم</span><ErpInput className={inputClass} value={line.quantity} onChange={(event) => updateLine(line.key, { quantity: event.target.value })} /></label>
+          <ErpField label="مقدار مستقیم"><ErpInput value={line.quantity} onChange={(event) => updateLine(line.key, { quantity: event.target.value })} /></ErpField>
         )}
       </div>
       <p className="mt-2 text-xs font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
@@ -813,13 +807,13 @@ export default function NewLoadingPage() {
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
           {driverLine.mode === 'linear' ? (
             <>
-              <label><span className={labelClass}>خط راس</span><ErpInput className={inputClass} value={driverLine.khatRas} onChange={(event) => update({ khatRas: event.target.value })} /></label>
-              <label><span className={labelClass}>تعداد</span><ErpInput className={inputClass} value={driverLine.pieceCount} onChange={(event) => update({ pieceCount: event.target.value })} /></label>
-              <label><span className={labelClass}>اضافه</span><ErpInput className={inputClass} value={driverLine.plus} onChange={(event) => update({ plus: event.target.value })} /></label>
-              <label><span className={labelClass}>کسر</span><ErpInput className={inputClass} value={driverLine.minus} onChange={(event) => update({ minus: event.target.value })} /></label>
+              <ErpField label="خط راس"><ErpInput value={driverLine.khatRas} onChange={(event) => update({ khatRas: event.target.value })} /></ErpField>
+              <ErpField label="تعداد"><ErpInput value={driverLine.pieceCount} onChange={(event) => update({ pieceCount: event.target.value })} /></ErpField>
+              <ErpField label="اضافه"><ErpInput value={driverLine.plus} onChange={(event) => update({ plus: event.target.value })} /></ErpField>
+              <ErpField label="کسر"><ErpInput value={driverLine.minus} onChange={(event) => update({ minus: event.target.value })} /></ErpField>
             </>
           ) : (
-            <label><span className={labelClass}>مقدار مستقیم</span><ErpInput className={inputClass} value={driverLine.quantity} onChange={(event) => update({ quantity: event.target.value })} /></label>
+            <ErpField label="مقدار مستقیم"><ErpInput value={driverLine.quantity} onChange={(event) => update({ quantity: event.target.value })} /></ErpField>
           )}
         </div>
       </div>
@@ -874,7 +868,7 @@ export default function NewLoadingPage() {
     <ErpSection title="انتخاب رانندگان آماده بارگیری" description="فقط رانندگانی نمایش داده می‌شوند که گارد با «ورود برای بارگیری» وارد محوطه بارگیری کرده است. می‌توانید چند راننده انتخاب کنید.">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
         <ErpInput
-          className={inputClass}
+          className={`${inputClass} placeholder:text-[var(--sds-text-secondary)]`}
           value={driverSearch}
           onChange={(event) => setDriverSearch(event.target.value)}
           placeholder="جستجوی راننده، موبایل، کد ملی، پلاک یا نوع خودرو"
@@ -966,18 +960,15 @@ export default function NewLoadingPage() {
               {!groupedLines.length && <p className="text-sm text-[var(--sds-text-secondary)]">ردیفی اضافه نشده است.</p>}
             </div>
           </ErpCard>
-          <label>
-            <span className={labelClass}>یادداشت</span>
-            <ErpTextarea className={`${inputClass} min-h-28`} value={notes} onChange={(event) => setNotes(event.target.value)} />
-          </label>
+          <ErpField label="یادداشت"><ErpTextarea className="min-h-28" value={notes} onChange={(event) => setNotes(event.target.value)} /></ErpField>
         </div>
         <ErpCard className="p-4">
           <p className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">آمادگی نهایی‌سازی</p>
           <div className="mt-3 space-y-2">
             {blockers.length === 0 ? (
-              <p className="rounded-lg bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">همه موارد تکمیل است.</p>
+              <ErpInlineState kind="success" title="همه موارد تکمیل است." />
             ) : blockers.map((blocker) => (
-              <p key={blocker} className="rounded-lg bg-[var(--sds-warning-surface)] p-3 text-sm text-[var(--sds-warning)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">{blocker}</p>
+              <ErpInlineState key={blocker} kind="stale" title={blocker} />
             ))}
           </div>
           <div className="mt-4 space-y-2">
@@ -1002,8 +993,8 @@ export default function NewLoadingPage() {
       ]}
     >
       {renderStepNav()}
-      {message && <div className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">{message}</div>}
-      {error && <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">{error}</div>}
+      {message && <ErpInlineState kind="success" title={message} />}
+      {error && <ErpInlineState kind="error" title={error} />}
 
       {step === 'customer' && renderCustomerStep()}
       {step === 'project' && renderProjectStep()}

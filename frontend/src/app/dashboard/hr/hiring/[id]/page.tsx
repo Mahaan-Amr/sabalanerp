@@ -2,6 +2,8 @@
 import {
   ErpInput,
   ErpCheckbox,
+  ErpField,
+  ErpInlineState,
   ErpPressable,
   ErpSegmentedControl,
   ErpSelect,
@@ -52,7 +54,6 @@ import {
   dateFa,
   fromIsoDate,
   fromIsoDateTime,
-  HrField,
   toIsoDate,
   toIsoDateTime,
 } from "@/features/hr/hrUi";
@@ -62,8 +63,6 @@ import {
   hrDisplayLabel,
 } from "@/features/hr/hrDisplay";
 
-const field =
-  "w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]";
 const identityFields = [
   "firstName",
   "lastName",
@@ -190,6 +189,8 @@ export default function HiringCasePage() {
     file: null,
   });
   const [editingAssessmentId, setEditingAssessmentId] = useState("");
+  const [assessmentVoidTarget, setAssessmentVoidTarget] = useState<any>(null);
+  const [assessmentVoidReason, setAssessmentVoidReason] = useState("");
   const [offlineDecision, setOfflineDecision] = useState({
     decision: "ACCEPTED",
     communicationMethod: "PHONE",
@@ -516,12 +517,11 @@ export default function HiringCasePage() {
   const returnHref = validateHiringQueueReturnHref(searchParams.get("returnTo"));
   return (
     <ErpPage
-      eyebrow="منابع انسانی · پرونده استخدام"
       title={`${data.candidate.firstName} ${data.candidate.lastName}`}
       description={`${data.position.title} · ${data.candidate.mobile}`}
       backHref={returnHref}
       actions={[
-        { label: "به‌روزرسانی", icon: FaSync, onClick: load, disabled: busy },
+        { label: "به‌روزرسانی", icon: FaSync, onClick: load, disabled: busy, tone: "neutral", variant: "outline" },
         ...(data.retentionCapabilities?.canArchive ||
         data.retentionCapabilities?.canRestore
           ? [
@@ -549,21 +549,9 @@ export default function HiringCasePage() {
           : []),
       ]}
     >
-      {error && (
-        <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)]">
-          {error}
-        </p>
-      )}
-      {message && (
-        <p className="rounded-xl bg-[var(--sds-success-surface)] p-3 text-[var(--sds-success)]">
-          {message}
-        </p>
-      )}
-      {data.readOnlyArchived && (
-        <p className="rounded-xl border border-[var(--sds-warning)] bg-[var(--sds-warning-surface)] p-3 font-bold text-[var(--sds-warning)]">
-          این پرونده بایگانی شده و تا زمان بازیابی فقط قابل مشاهده است.
-        </p>
-      )}
+      {error && <ErpInlineState kind="error" title={error} />}
+      {message && <ErpInlineState kind="success" title={message} />}
+      {data.readOnlyArchived && <ErpInlineState kind="stale" title="این پرونده بایگانی شده و تا زمان بازیابی فقط قابل مشاهده است." />}
       <ApplicantCaseOverview
         applicationId={id}
         returnTo={searchParams.get("returnTo") || undefined}
@@ -605,12 +593,7 @@ export default function HiringCasePage() {
                   پرونده: {hrDisplayLabel(data.outcome || "HIRED")}
                 </p>
               </div>
-              <Link
-                className="rounded-xl bg-[var(--sds-success)] px-4 py-2 text-sm font-bold text-[var(--sds-text-inverse)]"
-                href={`/dashboard/hr/personnel?focus=${data.employmentRelationship.personnel.id}`}
-              >
-                مشاهده در پرسنل و روابط استخدامی
-              </Link>
+              <ErpButton label="مشاهده در پرسنل و روابط استخدامی" tone="success" href={`/dashboard/hr/personnel?focus=${data.employmentRelationship.personnel.id}`} />
             </ErpCard>
           </ErpSection>
         )}
@@ -727,6 +710,8 @@ export default function HiringCasePage() {
                   <ErpButton
                     label="ارسال مجدد دعوت و OTP جدید"
                     icon={FaSync}
+                    tone="neutral"
+                    variant="outline"
                     disabled={busy || data.stage === "CLOSED"}
                     onClick={() =>
                       run(
@@ -792,7 +777,6 @@ export default function HiringCasePage() {
                   {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
                     <div className="mt-3 grid gap-2 md:grid-cols-2">
                       <ErpSelect
-                        className={field}
                         value={document.category}
                         onChange={(e) =>
                           setDocument({
@@ -810,7 +794,6 @@ export default function HiringCasePage() {
                       </ErpSelect>
                       {document.category === "OTHER" && (
                         <ErpInput
-                          className={field}
                           aria-label="عنوان سند"
                           placeholder="عنوان سند"
                           value={document.customTitle}
@@ -820,7 +803,6 @@ export default function HiringCasePage() {
                         />
                       )}
                       <ErpSelect
-                        className={field}
                         value={document.inspectionSource}
                         onChange={(e) =>
                           setDocument({
@@ -834,7 +816,6 @@ export default function HiringCasePage() {
                         <option value="COPY_RECEIVED">کپی دریافت شد</option>
                       </ErpSelect>
                       <ErpInput
-                        className={field}
                         aria-label="یادداشت سند"
                         placeholder="یادداشت اختیاری"
                         value={document.note}
@@ -847,7 +828,6 @@ export default function HiringCasePage() {
                           type="file"
                           aria-label="فایل کپی سند"
                           accept=".pdf,.jpg,.jpeg,.png"
-                          className={field}
                           onChange={(e) =>
                             setDocument({
                               ...document,
@@ -909,24 +889,12 @@ export default function HiringCasePage() {
                   <h3 className="font-black">کنترل فیلد به فیلد</h3>
                   {data.formRevisions?.[0]?.correctionNotificationStatus ===
                     "FAILED" && (
-                    <div className="mt-3 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
-                      <p>
-                        {data.formRevisions[0].correctionNotificationError ||
-                          "ارسال پیامک درخواست اصلاح ناموفق بود."}
-                      </p>
-                      <ErpButton
-                        className="mt-2"
-                        label="ارسال مجدد پیامک درخواست اصلاح"
-                        disabled={busy}
-                        onClick={() =>
-                          run(
-                            () => hiringAPI.retryCorrectionNotification(id),
-                            "پیامک درخواست اصلاح ارسال شد.",
-                          )
-                        }
-                        tone="warning"
-                      />
-                    </div>
+                    <ErpInlineState
+                      className="mt-3"
+                      kind="error"
+                      title={data.formRevisions[0].correctionNotificationError || "ارسال پیامک درخواست اصلاح ناموفق بود."}
+                      action={{ label: "ارسال مجدد پیامک درخواست اصلاح", disabled: busy, onClick: () => run(() => hiringAPI.retryCorrectionNotification(id), "پیامک درخواست اصلاح ارسال شد."), tone: "warning" }}
+                    />
                   )}
                   <div className="mt-3 space-y-2">
                     {identityFields.map((key) => {
@@ -1015,12 +983,8 @@ export default function HiringCasePage() {
                     data.identityChecks.some((check: any) =>
                       ["MISMATCH", "UNREADABLE"].includes(check.status),
                     ) && (
-                      <div className="mt-4 rounded-xl border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3 dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)]">
-                        <h4 className="font-bold">درخواست اصلاح یکپارچه</h4>
-                        <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                          برای هر مورد، توضیح فارسی قابل نمایش به متقاضی را وارد
-                          کنید. با ثبت نهایی فقط یک پیامک ارسال می‌شود.
-                        </p>
+                      <ErpCard className="mt-4 p-3">
+                        <ErpInlineState kind="stale" title="درخواست اصلاح یکپارچه — برای هر مورد، توضیح فارسی قابل نمایش به متقاضی را وارد کنید. با ثبت نهایی فقط یک پیامک ارسال می‌شود." />
                         <div className="mt-3 space-y-2">
                           {data.identityChecks
                             .filter((check: any) =>
@@ -1035,7 +999,6 @@ export default function HiringCasePage() {
                                   {identityFieldLabels[check.fieldKey]}
                                 </span>
                                 <ErpInput
-                                  className={field}
                                   placeholder="توضیح مشکل و روش اصلاح"
                                   value={
                                     correctionExplanations[check.fieldKey] || ""
@@ -1089,7 +1052,7 @@ export default function HiringCasePage() {
                           }
                           tone="warning"
                         />
-                      </div>
+                      </ErpCard>
                     )}
                   {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
                     <ErpButton
@@ -1124,7 +1087,7 @@ export default function HiringCasePage() {
                       <label className="text-sm font-medium">
                         نوع ارزیابی
                         <ErpSelect
-                          className={`${field} mt-1`}
+                          className="mt-1"
                           value={assessment.assessmentType}
                           onChange={(e) =>
                             setAssessment({
@@ -1150,7 +1113,7 @@ export default function HiringCasePage() {
                           <ErpInput
                             type="text"
                             inputMode="decimal"
-                            className={`${field} mt-1`}
+                            className="mt-1"
                             value={assessment.scores[key] ?? ""}
                             onChange={(e) =>
                               setAssessment({
@@ -1177,7 +1140,7 @@ export default function HiringCasePage() {
                           <label className="text-sm font-medium">
                             عنوان ارزیابی
                             <ErpInput
-                              className={`${field} mt-1`}
+                              className="mt-1"
                               value={assessment.title}
                               onChange={(e) =>
                                 setAssessment({
@@ -1191,7 +1154,7 @@ export default function HiringCasePage() {
                           <label className="text-sm font-medium md:col-span-2">
                             نتیجه ارزیابی
                             <ErpTextarea
-                              className={`${field} mt-1`}
+                              className="mt-1"
                               value={assessment.result}
                               onChange={(e) =>
                                 setAssessment({
@@ -1207,7 +1170,7 @@ export default function HiringCasePage() {
                       <label className="text-sm font-medium md:col-span-2">
                         توضیحات تکمیلی (اختیاری)
                         <ErpTextarea
-                          className={`${field} mt-1`}
+                          className="mt-1"
                           value={assessment.notes}
                           onChange={(e) =>
                             setAssessment({
@@ -1223,7 +1186,7 @@ export default function HiringCasePage() {
                         <ErpInput
                           type="file"
                           accept=".pdf,.jpg,.jpeg,.png"
-                          className={`${field} mt-1`}
+                          className="mt-1"
                           onChange={(e) =>
                             setAssessment({
                               ...assessment,
@@ -1299,22 +1262,7 @@ export default function HiringCasePage() {
                             <ErpPressable
                               type="button"
                               className="text-xs text-[var(--sds-danger)]"
-                              onClick={() => {
-                                const reason = window.prompt(
-                                  "دلیل حذف ارزیابی را وارد کنید:",
-                                );
-                                if (reason?.trim()) {
-                                  void run(
-                                    () =>
-                                      hiringAPI.voidAssessment(
-                                        id,
-                                        item.id,
-                                        reason.trim(),
-                                      ),
-                                    "ارزیابی با حفظ سابقه باطل شد.",
-                                  );
-                                }
-                              }}
+                              onClick={() => { setAssessmentVoidReason(""); setAssessmentVoidTarget(item); }}
                             >
                               حذف با حفظ سابقه
                             </ErpPressable>
@@ -1399,7 +1347,6 @@ export default function HiringCasePage() {
                   {components.map((item, i) => (
                     <div key={i} className={`grid gap-2 ${item.category === "OTHER" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
                       <ErpSelect
-                        className={field}
                         value={item.category || ""}
                         onChange={(e) =>
                           setComponents(
@@ -1424,7 +1371,6 @@ export default function HiringCasePage() {
                       </ErpSelect>
                       {item.category === "OTHER" && (
                         <ErpInput
-                          className={field}
                           aria-label="عنوان مورد سایر"
                           placeholder="عنوان مورد سایر"
                           value={item.label}
@@ -1438,7 +1384,6 @@ export default function HiringCasePage() {
                         />
                       )}
                       <ErpInput
-                        className={field}
                         inputMode="numeric"
                         placeholder="مبلغ ریال"
                         value={item.amountRials}
@@ -1605,29 +1550,12 @@ export default function HiringCasePage() {
                       ))}
                     </div>
                     {compensation.candidateNotificationStatus === "FAILED" && (
-                      <div className="mt-3 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
-                        <p>
-                          {compensation.candidateNotificationError ||
-                            "ارسال پیامک پیشنهاد همکاری ناموفق بود."}
-                        </p>
-                        {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
-                          <ErpButton
-                            className="mt-2"
-                            label="ارسال مجدد پیامک پیشنهاد"
-                            onClick={() =>
-                              run(
-                                () =>
-                                  hiringAPI.retryOfferNotification(
-                                    id,
-                                    compensation.id,
-                                  ),
-                                "پیامک پیشنهاد همکاری ارسال شد.",
-                              )
-                            }
-                            disabled={busy}
-                          />
-                        )}
-                      </div>
+                      <ErpInlineState
+                        className="mt-3"
+                        kind="error"
+                        title={compensation.candidateNotificationError || "ارسال پیامک پیشنهاد همکاری ناموفق بود."}
+                        action={hasActionPermission("MANAGE_RECRUITMENT_CASE") ? { label: "ارسال مجدد پیامک پیشنهاد", disabled: busy, onClick: () => run(() => hiringAPI.retryOfferNotification(id, compensation.id), "پیامک پیشنهاد همکاری ارسال شد.") } : undefined}
+                      />
                     )}
                     {hasActionPermission("MANAGE_RECRUITMENT_CASE") &&
                       compensation.hrApprovedAt &&
@@ -1638,7 +1566,6 @@ export default function HiringCasePage() {
                             ثبت تصمیم آفلاین متقاضی
                           </h4>
                           <ErpSelect
-                            className={field}
                             value={offlineDecision.decision}
                             onChange={(event) =>
                               setOfflineDecision({
@@ -1651,7 +1578,6 @@ export default function HiringCasePage() {
                             <option value="DECLINED">رد پیشنهاد</option>
                           </ErpSelect>
                           <ErpSelect
-                            className={field}
                             value={offlineDecision.communicationMethod}
                             onChange={(event) =>
                               setOfflineDecision({
@@ -1665,7 +1591,7 @@ export default function HiringCasePage() {
                             <option value="VIDEO_CALL">تماس تصویری</option>
                             <option value="OTHER">روش دیگر</option>
                           </ErpSelect>
-                          <HrField label="زمان اعلام تصمیم متقاضی" required>
+                          <ErpField label="زمان اعلام تصمیم متقاضی" required>
                             <HrPersianCalendar
                               showTime
                               value={offlineDecision.communicatedAt}
@@ -1676,7 +1602,7 @@ export default function HiringCasePage() {
                                 })
                               }
                             />
-                          </HrField>
+                          </ErpField>
                           {[
                             ["offlineReason", "دلیل استفاده از مسیر آفلاین"],
                             [
@@ -1687,7 +1613,6 @@ export default function HiringCasePage() {
                           ].map(([key, placeholder]) => (
                             <ErpInput
                               key={key}
-                              className={field}
                               placeholder={placeholder}
                               value={(offlineDecision as any)[key]}
                               onChange={(event) =>
@@ -1739,7 +1664,6 @@ export default function HiringCasePage() {
             {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
               <ErpCard className="mb-4 grid gap-2 p-4 md:grid-cols-3">
                 <ErpSelect
-                  className={field}
                   value={templateId}
                   onChange={(e) => setTemplateId(e.target.value)}
                 >
@@ -1770,7 +1694,6 @@ export default function HiringCasePage() {
               {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
                 <ErpCard className="grid gap-2 p-4 md:grid-cols-2">
                   <ErpSelect
-                    className={field}
                     value={collateral.type}
                     onChange={(e) =>
                       setCollateral({ ...collateral, type: e.target.value })
@@ -1783,7 +1706,6 @@ export default function HiringCasePage() {
                     <option value="OTHER">سایر</option>
                   </ErpSelect>
                   <ErpInput
-                    className={field}
                     placeholder="مبلغ ریال"
                     value={collateral.amountRials}
                     onChange={(e) =>
@@ -1794,7 +1716,6 @@ export default function HiringCasePage() {
                     }
                   />
                   <ErpInput
-                    className={field}
                     placeholder="شناسه/سریال"
                     value={collateral.identifier}
                     onChange={(e) =>
@@ -1805,7 +1726,6 @@ export default function HiringCasePage() {
                     }
                   />
                   <ErpInput
-                    className={field}
                     placeholder="صادرکننده/ضامن"
                     value={collateral.issuerOrGuarantor}
                     onChange={(e) =>
@@ -1816,7 +1736,6 @@ export default function HiringCasePage() {
                     }
                   />
                   <ErpInput
-                    className={field}
                     placeholder="محل نگهداری اصل"
                     value={collateral.custodyLocation}
                     onChange={(e) =>
@@ -1826,7 +1745,7 @@ export default function HiringCasePage() {
                       })
                     }
                   />
-                  <HrField label="تاریخ دریافت وثیقه" required>
+                  <ErpField label="تاریخ دریافت وثیقه" required>
                     <HrPersianCalendar
                       value={collateral.receivedAt}
                       onChange={(receivedAt) =>
@@ -1836,10 +1755,9 @@ export default function HiringCasePage() {
                         })
                       }
                     />
-                  </HrField>
+                  </ErpField>
                   <ErpInput
                     type="file"
-                    className={field}
                     onChange={(e) =>
                       setCollateral({
                         ...collateral,
@@ -1863,13 +1781,11 @@ export default function HiringCasePage() {
               <ErpCard className="p-4">
                 <div className="mb-3 grid gap-2 md:grid-cols-4">
                   <ErpInput
-                    className={field}
                     placeholder="دلیل هماهنگی قلم ناقص/ردشده"
                     value={collateralIssue}
                     onChange={(e) => setCollateralIssue(e.target.value)}
                   />
                   <ErpInput
-                    className={field}
                     placeholder="تحویل‌گیرنده اصل وثیقه"
                     value={handover.returnedTo}
                     onChange={(e) =>
@@ -1877,7 +1793,6 @@ export default function HiringCasePage() {
                     }
                   />
                   <ErpInput
-                    className={field}
                     placeholder="مدرک/شرح تحویل"
                     value={handover.returnEvidenceNote}
                     onChange={(e) =>
@@ -2055,7 +1970,7 @@ export default function HiringCasePage() {
           <>
             <ErpSection title="تبدیل به پرسنل برنامه‌ریزی‌شده">
               <ErpCard className="grid gap-3 p-4 md:grid-cols-3">
-                <HrField
+                <ErpField
                   label="تاریخ برنامه‌ریزی‌شده شروع همکاری"
                   required
                   hint="این تاریخ زمان ایجاد رابطه برنامه‌ریزی‌شده است و به‌تنهایی همکاری را فعال نمی‌کند."
@@ -2069,7 +1984,7 @@ export default function HiringCasePage() {
                       })
                     }
                   />
-                </HrField>
+                </ErpField>
                 <ErpButton
                   label="تبدیل متقاضی به پرسنل"
                   disabled={
@@ -2101,13 +2016,11 @@ export default function HiringCasePage() {
           {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
             <ErpCard className="grid gap-2 p-4 md:grid-cols-4">
               <ErpInput
-                className={field}
                 placeholder="عنوان وظیفه"
                 value={task.title}
                 onChange={(e) => setTask({ ...task, title: e.target.value })}
               />
               <ErpSelect
-                className={field}
                 value={task.ownerAuthority}
                 onChange={(e) =>
                   setTask({ ...task, ownerAuthority: e.target.value })
@@ -2118,12 +2031,12 @@ export default function HiringCasePage() {
                 <option value="HR_PROCESSOR">کارشناس منابع انسانی</option>
                 <option value="FINANCE_MANAGER">مدیر مالی</option>
               </ErpSelect>
-              <HrField label="مهلت انجام وظیفه" hint="اختیاری">
+              <ErpField label="مهلت انجام وظیفه" hint="اختیاری">
                 <HrPersianCalendar
                   value={task.dueDate}
                   onChange={(dueDate) => setTask({ ...task, dueDate })}
                 />
-              </HrField>
+              </ErpField>
               <ErpButton
                 label="واگذاری وظیفه"
                 disabled={!task.title || !data.convertedAt}
@@ -2191,9 +2104,8 @@ export default function HiringCasePage() {
             <div className="grid gap-3 md:grid-cols-4">
               {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
                 <>
-                  <HrField label="شماره قرارداد" required>
+                  <ErpField label="شماره قرارداد" required>
                     <ErpInput
-                      className={field}
                       value={contract.contractNumber}
                       onChange={(e) =>
                         setContract({
@@ -2202,8 +2114,8 @@ export default function HiringCasePage() {
                         })
                       }
                     />
-                  </HrField>
-                  <HrField label="تاریخ شروع اعتبار قرارداد" required>
+                  </ErpField>
+                  <ErpField label="تاریخ شروع اعتبار قرارداد" required>
                     <HrPersianCalendar
                       value={contract.effectiveFrom}
                       onChange={(effectiveFrom) =>
@@ -2213,8 +2125,8 @@ export default function HiringCasePage() {
                         })
                       }
                     />
-                  </HrField>
-                  <HrField label="تاریخ پایان اعتبار قرارداد" required>
+                  </ErpField>
+                  <ErpField label="تاریخ پایان اعتبار قرارداد" required>
                     <HrPersianCalendar
                       value={contract.effectiveTo}
                       onChange={(effectiveTo) =>
@@ -2224,17 +2136,16 @@ export default function HiringCasePage() {
                         })
                       }
                     />
-                  </HrField>
-                  <HrField label="اسکن قرارداد امضاشده" required>
+                  </ErpField>
+                  <ErpField label="اسکن قرارداد امضاشده" required>
                     <ErpInput
                       type="file"
                       accept=".pdf,.jpg,.jpeg,.png"
-                      className={field}
                       onChange={(e) =>
                         setContract({ ...contract, file: e.target.files?.[0] })
                       }
                     />
-                  </HrField>
+                  </ErpField>
                   <ErpButton
                     label="ثبت نسخه قرارداد"
                     disabled={
@@ -2277,15 +2188,14 @@ export default function HiringCasePage() {
                       tone="success"
                     />
                   </div>
-                  <HrField label="دلیل بازگرداندن قرارداد">
+                  <ErpField label="دلیل بازگرداندن قرارداد">
                     <ErpTextarea
-                      className={field}
                       value={contractReturnReason}
                       onChange={(event) =>
                         setContractReturnReason(event.target.value)
                       }
                     />
-                  </HrField>
+                  </ErpField>
                   <ErpButton
                     label="بازگرداندن برای اصلاح"
                     disabled={busy || !contractReturnReason.trim()}
@@ -2351,13 +2261,10 @@ export default function HiringCasePage() {
                     className={`space-y-2 p-4 ${insuranceOverdue ? "ring-2 ring-[var(--sds-focus-ring)]" : ""}`}
                   >
                     {insuranceOverdue && (
-                      <p className="rounded-lg bg-[var(--sds-warning-surface)] p-2 text-sm font-bold text-[var(--sds-warning)]">
-                        مهلت پیگیری ثبت بیمه توسط شرکت گذشته است.
-                      </p>
+                      <ErpInlineState kind="stale" title="مهلت پیگیری ثبت بیمه توسط شرکت گذشته است." />
                     )}
-                    <HrField label="روش ثبت بیمه" required>
+                    <ErpField label="روش ثبت بیمه" required>
                       <ErpSelect
-                        className={field}
                         value={insurance.registrationPath}
                         onChange={(e) =>
                           setInsurance({
@@ -2371,12 +2278,11 @@ export default function HiringCasePage() {
                           درخواست ثبت مستقل توسط شخص
                         </option>
                       </ErpSelect>
-                    </HrField>
+                    </ErpField>
                     {insurance.registrationPath === "COMPANY" ? (
                       <>
-                        <HrField label="وضعیت عملیاتی بیمه" required>
+                        <ErpField label="وضعیت عملیاتی بیمه" required>
                           <ErpSelect
-                            className={field}
                             value={insurance.status}
                             onChange={(e) =>
                               setInsurance({
@@ -2390,8 +2296,8 @@ export default function HiringCasePage() {
                             <option value="ACTIVE">فعال</option>
                             <option value="EXEMPT">معاف/غیرقابل اعمال</option>
                           </ErpSelect>
-                        </HrField>
-                        <HrField
+                        </ErpField>
+                        <ErpField
                           label="تاریخ شروع پوشش بیمه"
                           required={insurance.status === "ACTIVE"}
                           hint={
@@ -2406,8 +2312,8 @@ export default function HiringCasePage() {
                               setInsurance({ ...insurance, effectiveDate })
                             }
                           />
-                        </HrField>
-                        <HrField
+                        </ErpField>
+                        <ErpField
                           label="مهلت پیگیری ثبت بیمه"
                           hint="اختیاری و غیرمسدودکننده فعال‌سازی همکاری"
                         >
@@ -2417,17 +2323,16 @@ export default function HiringCasePage() {
                               setInsurance({ ...insurance, dueDate })
                             }
                           />
-                        </HrField>
+                        </ErpField>
                       </>
                     ) : (
                       <>
-                        <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+                        <p className="text-xs text-[var(--sds-text-secondary)]">
                           با ثبت این انتخاب، پیگیری شرکت خاتمه می‌یابد و مدرک یا
                           تاریخ فعال‌سازی بعدی از شخص درخواست نمی‌شود.
                         </p>
-                        <HrField label="روش اعلام درخواست شخص" required>
+                        <ErpField label="روش اعلام درخواست شخص" required>
                           <ErpSelect
-                            className={field}
                             value={insurance.communicationMethod}
                             onChange={(e) =>
                               setInsurance({
@@ -2441,8 +2346,8 @@ export default function HiringCasePage() {
                             <option value="MESSAGE">پیام</option>
                             <option value="EMAIL">ایمیل</option>
                           </ErpSelect>
-                        </HrField>
-                        <HrField label="زمان اعلام درخواست شخص" required>
+                        </ErpField>
+                        <ErpField label="زمان اعلام درخواست شخص" required>
                           <HrPersianCalendar
                             showTime
                             value={insurance.communicatedAt}
@@ -2450,11 +2355,10 @@ export default function HiringCasePage() {
                               setInsurance({ ...insurance, communicatedAt })
                             }
                           />
-                        </HrField>
+                        </ErpField>
                       </>
                     )}
                     <ErpTextarea
-                      className={field}
                       placeholder="یادداشت"
                       value={insurance.note}
                       onChange={(e) =>
@@ -2509,7 +2413,7 @@ export default function HiringCasePage() {
                         ),
                       )}
                     </div>
-                    <HrField
+                    <ErpField
                       label="تاریخ شروع مشارکت در حقوق و دستمزد"
                       required
                       hint="به‌صورت پیش‌فرض برابر تاریخ شروع برنامه‌ریزی‌شده است."
@@ -2518,20 +2422,19 @@ export default function HiringCasePage() {
                         value={payrollDate}
                         onChange={setPayrollDate}
                       />
-                    </HrField>
+                    </ErpField>
                     {payrollDiffersFromPlanned && (
-                      <HrField
+                      <ErpField
                         label="دلیل تفاوت با تاریخ شروع برنامه‌ریزی‌شده"
                         required
                       >
                         <ErpTextarea
-                          className={field}
                           value={payrollMismatchReason}
                           onChange={(event) =>
                             setPayrollMismatchReason(event.target.value)
                           }
                         />
-                      </HrField>
+                      </ErpField>
                     )}
                     <label className="flex items-start gap-2 text-sm">
                       <ErpInput
@@ -2603,19 +2506,10 @@ export default function HiringCasePage() {
                 </p>
               </div>
               {data.activationReadiness.blockers.length > 0 && (
-                <ul className="space-y-1 rounded-xl bg-[var(--sds-warning-surface)] p-3 text-sm text-[var(--sds-warning)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
-                  {data.activationReadiness.blockers.map((blocker: any) => (
-                    <li key={blocker.id}>• {blocker.message}</li>
-                  ))}
-                </ul>
+                <ErpInlineState kind="stale" title={data.activationReadiness.blockers.map((blocker: any) => blocker.message).join("؛ ")} />
               )}
               {data.activationReadiness.activatedAt ? (
-                <p className="rounded-xl bg-[var(--sds-success-surface)] p-3 text-sm text-[var(--sds-success)]">
-                  فعال‌سازی توسط{" "}
-                  {data.activationReadiness.activatedBy || "مدیر منابع انسانی"}{" "}
-                  در {dateTimeFa(data.activationReadiness.activatedAt)} انجام
-                  شد.
-                </p>
+                <ErpInlineState kind="success" title={`فعال‌سازی توسط ${data.activationReadiness.activatedBy || "مدیر منابع انسانی"} در ${dateTimeFa(data.activationReadiness.activatedAt)} انجام شد.`} />
               ) : (
                 <ErpButton
                   label="تأیید نهایی و فعال‌سازی رابطه استخدامی"
@@ -2644,25 +2538,27 @@ export default function HiringCasePage() {
               description="اطلاعات عادی در بانک متقاضیان قابل جست‌وجو می‌ماند؛ داده‌ها و اسناد حساس فقط تحت دسترسی محدود نگهداری می‌شوند."
             >
               <ErpCard className="grid gap-3 p-4 md:grid-cols-3">
-                <ErpSelect
-                  className={field}
-                  value={closure.outcome}
-                  onChange={(e) =>
-                    setClosure({ ...closure, outcome: e.target.value })
-                  }
-                >
-                  <option value="REJECTED">رد شده</option>
-                  <option value="WITHDRAWN">انصراف متقاضی</option>
-                  <option value="REQUEST_CANCELLED">لغو درخواست</option>
-                </ErpSelect>
-                <ErpInput
-                  className={field}
-                  placeholder="دلیل الزامی"
-                  value={closure.reason}
-                  onChange={(e) =>
-                    setClosure({ ...closure, reason: e.target.value })
-                  }
-                />
+                <ErpField label="نتیجه بستن پرونده" required>
+                  <ErpSelect
+                    value={closure.outcome}
+                    onChange={(e) =>
+                      setClosure({ ...closure, outcome: e.target.value })
+                    }
+                  >
+                    <option value="REJECTED">رد شده</option>
+                    <option value="WITHDRAWN">انصراف متقاضی</option>
+                    <option value="REQUEST_CANCELLED">لغو درخواست</option>
+                  </ErpSelect>
+                </ErpField>
+                <ErpField label="دلیل بستن پرونده" required>
+                  <ErpInput
+                    placeholder="دلیل الزامی"
+                    value={closure.reason}
+                    onChange={(e) =>
+                      setClosure({ ...closure, reason: e.target.value })
+                    }
+                  />
+                </ErpField>
                 <ErpButton
                   label="بستن پرونده توسط مدیر منابع انسانی"
                   tone="danger"
@@ -2685,6 +2581,16 @@ export default function HiringCasePage() {
           run={run}
         />
       )}
+      <ErpSheet
+        open={Boolean(assessmentVoidTarget)}
+        onClose={() => { if (!busy) { setAssessmentVoidTarget(null); setAssessmentVoidReason(""); } }}
+        title="حذف ارزیابی با حفظ سابقه"
+        presentation="modal"
+        pending={busy}
+        footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => { setAssessmentVoidTarget(null); setAssessmentVoidReason(""); }} /><ErpButton label="تأیید حذف" tone="danger" variant="solid" disabled={busy || !assessmentVoidReason.trim()} onClick={() => void run(() => hiringAPI.voidAssessment(id, assessmentVoidTarget.id, assessmentVoidReason.trim()), "ارزیابی با حفظ سابقه باطل شد.").then(() => { setAssessmentVoidTarget(null); setAssessmentVoidReason(""); })} /></div>}
+      >
+        <ErpField label="دلیل حذف ارزیابی" required><ErpTextarea value={assessmentVoidReason} onChange={(event) => setAssessmentVoidReason(event.target.value)} /></ErpField>
+      </ErpSheet>
       {deletionTarget && (
         <PermanentDeletionDialog
           title="حذف دائمی پرونده متقاضی"
@@ -2791,6 +2697,8 @@ function PreIdentitySection({
   const [templates, setTemplates] = useState<any[]>([]);
   const [templateId, setTemplateId] = useState("");
   const [templateName, setTemplateName] = useState("");
+  const [preIdentityAction, setPreIdentityAction] = useState<null | { kind: "correct" | "resolve"; item: any; resolution?: string }>(null);
+  const [preIdentityActionReason, setPreIdentityActionReason] = useState("");
   const decisions = application.hiringDecisions || [];
   const latest = (kind: string) =>
     decisions
@@ -2881,7 +2789,6 @@ function PreIdentitySection({
               {hasAction(authority) && (kind !== "HR_PRELIMINARY_APPROVAL" || Boolean(latest("HR_INTERVIEW"))) && (
                 <>
                   <ErpSelect
-                    className={field}
                     value={draft.outcome}
                     onChange={(event) =>
                       setDecisionDrafts({
@@ -2894,7 +2801,6 @@ function PreIdentitySection({
                     <option value="NEGATIVE">رد</option>
                   </ErpSelect>
                   <ErpTextarea
-                    className={field}
                     placeholder={
                       kind === "COMPANY_APPROVAL" &&
                       draft.outcome === "POSITIVE"
@@ -2911,7 +2817,6 @@ function PreIdentitySection({
                   />
                   {current && (
                     <ErpInput
-                      className={field}
                       placeholder="دلیل تغییر تصمیم قبلی"
                       value={draft.changeReason}
                       onChange={(event) =>
@@ -2970,7 +2875,6 @@ function PreIdentitySection({
           <div className="space-y-3">
             <div className="grid gap-2 md:grid-cols-3">
               <ErpSelect
-                className={field}
                 value={templateId}
                 onChange={(event) => setTemplateId(event.target.value)}
               >
@@ -2998,7 +2902,6 @@ function PreIdentitySection({
               />
               <div className="flex gap-2">
                 <ErpInput
-                  className={field}
                   placeholder="نام قالب جدید"
                   value={templateName}
                   onChange={(event) => setTemplateName(event.target.value)}
@@ -3033,7 +2936,6 @@ function PreIdentitySection({
             </div>
             <div className="grid gap-2 md:grid-cols-4">
               <ErpInput
-                className={field}
                 placeholder="عنوان الزام یا ارزیابی سفارشی"
                 value={requirement.title}
                 onChange={(event) =>
@@ -3041,7 +2943,6 @@ function PreIdentitySection({
                 }
               />
               <ErpInput
-                className={field}
                 placeholder="شرح و دستور پیگیری"
                 value={requirement.instructions}
                 onChange={(event) =>
@@ -3052,7 +2953,6 @@ function PreIdentitySection({
                 }
               />
               <ErpSelect
-                className={field}
                 value={requirement.evidencePolicy}
                 onChange={(event) =>
                   setRequirement({
@@ -3066,7 +2966,7 @@ function PreIdentitySection({
                 <option value="FILE_OPTIONAL">فایل اختیاری</option>
                 <option value="NO_FILE">بدون فایل</option>
               </ErpSelect>
-              <HrField label="مهلت انجام" hint="تاریخ و ساعت شمسی">
+              <ErpField label="مهلت انجام" hint="تاریخ و ساعت شمسی">
                 <HrPersianCalendar
                   value={requirement.dueAt}
                   onChange={(dueAt) =>
@@ -3076,7 +2976,7 @@ function PreIdentitySection({
                   showTime
                   clearable
                 />
-              </HrField>
+              </ErpField>
               <ErpButton
                 label="افزودن به چک‌لیست"
                 disabled={busy || !requirement.title.trim()}
@@ -3168,7 +3068,6 @@ function PreIdentitySection({
                   !["POSITIVE", "NEGATIVE"].includes(item.status) && (
                     <div className="mt-3 grid gap-2 md:grid-cols-4">
                       <ErpSelect
-                        className={field}
                         value={draft.status}
                         onChange={(event) =>
                           setResults({
@@ -3183,7 +3082,6 @@ function PreIdentitySection({
                         <option value="NEGATIVE">منفی</option>
                       </ErpSelect>
                       <ErpInput
-                        className={field}
                         placeholder="توضیح نتیجه HR"
                         value={draft.resultExplanation}
                         onChange={(event) =>
@@ -3197,7 +3095,6 @@ function PreIdentitySection({
                         }
                       />
                       <ErpInput
-                        className={field}
                         placeholder="منبع گزارش"
                         value={draft.resultSource}
                         onChange={(event) =>
@@ -3211,7 +3108,6 @@ function PreIdentitySection({
                         }
                       />
                       <ErpInput
-                        className={field}
                         type="file"
                         onChange={(event) =>
                           setResults({
@@ -3257,21 +3153,7 @@ function PreIdentitySection({
                     <ErpPressable
                       type="button"
                       className="mt-3 rounded-lg border border-[var(--sds-warning-border)] px-3 py-2 text-xs font-bold text-[var(--sds-warning)]"
-                      onClick={() => {
-                        const reason = window.prompt(
-                          "دلیل ایجاد نسخه اصلاحی نتیجه را وارد کنید:",
-                        );
-                        if (reason?.trim())
-                          void run(
-                            () =>
-                              hiringAPI.correctPreIdentityItem(
-                                applicationId,
-                                item.id,
-                                reason.trim(),
-                              ),
-                            "نسخه اصلاحی جدید ایجاد شد.",
-                          );
-                      }}
+                      onClick={() => { setPreIdentityActionReason(""); setPreIdentityAction({ kind: "correct", item }); }}
                     >
                       ایجاد نسخه اصلاحی
                     </ErpPressable>
@@ -3285,21 +3167,7 @@ function PreIdentitySection({
                           type="submit"
                           key={resolution}
                           className="rounded-lg border px-3 py-2 text-xs font-bold"
-                          onClick={() => {
-                            const reason = window.prompt(
-                              "دلیل تصمیم مدیریت شرکت را ثبت کنید:",
-                            );
-                            if (reason?.trim())
-                              void run(
-                                () =>
-                                  hiringAPI.resolvePreIdentityNegative(
-                                    applicationId,
-                                    item.id,
-                                    { resolution, reason: reason.trim() },
-                                  ),
-                                "نتیجه منفی توسط مدیریت شرکت تعیین تکلیف شد.",
-                              );
-                          }}
+                          onClick={() => { setPreIdentityActionReason(""); setPreIdentityAction({ kind: "resolve", item, resolution }); }}
                         >
                           {resolution === "CONTINUE"
                             ? "ادامه با دلیل"
@@ -3328,6 +3196,16 @@ function PreIdentitySection({
           />
         )}
       </ErpCard>}
+      <ErpSheet
+        open={Boolean(preIdentityAction)}
+        onClose={() => { if (!busy) { setPreIdentityAction(null); setPreIdentityActionReason(""); } }}
+        title={preIdentityAction?.kind === "correct" ? "ایجاد نسخه اصلاحی نتیجه" : "تعیین تکلیف نتیجه منفی"}
+        presentation="modal"
+        pending={busy}
+        footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => { setPreIdentityAction(null); setPreIdentityActionReason(""); }} /><ErpButton label="تأیید و ثبت" tone="warning" variant="solid" disabled={busy || !preIdentityActionReason.trim()} onClick={() => { if (!preIdentityAction) return; const request = preIdentityAction.kind === "correct" ? () => hiringAPI.correctPreIdentityItem(applicationId, preIdentityAction.item.id, preIdentityActionReason.trim()) : () => hiringAPI.resolvePreIdentityNegative(applicationId, preIdentityAction.item.id, { resolution: preIdentityAction.resolution, reason: preIdentityActionReason.trim() }); void run(request, preIdentityAction.kind === "correct" ? "نسخه اصلاحی جدید ایجاد شد." : "نتیجه منفی توسط مدیریت شرکت تعیین تکلیف شد.").then(() => { setPreIdentityAction(null); setPreIdentityActionReason(""); }); }} /></div>}
+      >
+        <ErpField label="دلیل اقدام" required><ErpTextarea value={preIdentityActionReason} onChange={(event) => setPreIdentityActionReason(event.target.value)} /></ErpField>
+      </ErpSheet>
     </ErpSection>
   );
 }
@@ -3587,7 +3465,6 @@ function AssessmentDecisionPanel({
         )}
       </div>
       <ErpSelect
-        className={field}
         value={decision}
         onChange={(event) => setDecision(event.target.value)}
       >
@@ -3597,7 +3474,6 @@ function AssessmentDecisionPanel({
         <option value="REJECTED">رد نهایی</option>
       </ErpSelect>
       <ErpInput
-        className={field}
         placeholder={decision === "APPROVED" ? "توضیح اختیاری" : "دلیل الزامی"}
         value={reason}
         onChange={(event) => setReason(event.target.value)}
@@ -3654,7 +3530,6 @@ function CollateralRequirementPanel({
       </div>
       <div className="grid gap-2 md:grid-cols-4">
         <ErpSelect
-          className={field}
           value={draft.type}
           onChange={(event) => setDraft({ ...draft, type: event.target.value })}
         >
@@ -3665,7 +3540,6 @@ function CollateralRequirementPanel({
           <option value="OTHER">سایر</option>
         </ErpSelect>
         <ErpInput
-          className={field}
           placeholder="مبلغ (ریال)"
           value={draft.amountRials}
           onChange={(event) =>
@@ -3673,7 +3547,6 @@ function CollateralRequirementPanel({
           }
         />
         <ErpInput
-          className={field}
           placeholder="زمان تحویل"
           value={draft.dueTiming}
           onChange={(event) =>
@@ -3681,7 +3554,6 @@ function CollateralRequirementPanel({
           }
         />
         <ErpInput
-          className={field}
           placeholder="توضیح قابل نمایش به متقاضی"
           value={draft.candidateExplanation}
           onChange={(event) =>
@@ -3736,7 +3608,6 @@ function CaseRecoveryPanel({
             برچسب فعلی: {hrDisplayLabel(application.disposition)}
           </p>
           <ErpInput
-            className={field}
             placeholder="دلیل فعال‌سازی مجدد"
             value={reason}
             onChange={(event) => setReason(event.target.value)}
@@ -3764,7 +3635,6 @@ function CaseRecoveryPanel({
     >
       <ErpCard className="grid gap-2 p-4 md:grid-cols-3">
         <ErpInput
-          className={field}
           placeholder="دلیل بازگشایی"
           value={reason}
           onChange={(event) => setReason(event.target.value)}
@@ -3786,7 +3656,6 @@ function CaseRecoveryPanel({
           authorized && (
             <>
               <ErpSelect
-                className={field}
                 value={consent.method}
                 onChange={(event) =>
                   setConsent({ ...consent, method: event.target.value })
@@ -3797,7 +3666,6 @@ function CaseRecoveryPanel({
               </ErpSelect>
               <HrPersianCalendar value={consent.at} onChange={(at) => setConsent({ ...consent, at })} showTime />
               <ErpInput
-                className={field}
                 placeholder="شرح رضایت جدید متقاضی"
                 value={consent.note}
                 onChange={(event) =>

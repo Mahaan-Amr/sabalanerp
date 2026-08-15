@@ -1,20 +1,4 @@
-import type { ReactNode } from 'react';
 import moment from 'moment-jalaali';
-
-export const fieldClass = 'w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2.5 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]';
-
-export function HrField({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: ReactNode }) {
-  return <label className="block space-y-1.5 text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-    <span>{label}{required && <span className="mr-1 text-[var(--sds-danger)]">*</span>}</span>
-    {children}
-    {hint && <span className="block text-xs font-normal text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{hint}</span>}
-  </label>;
-}
-
-export function HrMessage({ tone = 'danger', children }: { tone?: 'danger' | 'success' | 'warning'; children: ReactNode }) {
-  const classes = tone === 'success' ? 'border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:border-[var(--sds-success-border)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]' : tone === 'warning' ? 'border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]' : 'border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]';
-  return <div className={`rounded-xl border px-4 py-3 text-sm ${classes}`}>{children}</div>;
-}
 
 export const apiError = (error: any) => error?.response?.data?.error || error?.message || 'انجام عملیات ناموفق بود.';
 const latinDigits = (value: string) => value

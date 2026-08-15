@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpSelect } from '@/components/erp';
+import { ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpSelect } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { FaCalendarAlt, FaPlus, FaSave } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection } from '@/components/erp';
@@ -7,8 +7,6 @@ import { sabalanCalendarAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 
-const inputClass = 'min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
-const labelClass = 'mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]';
 
 const eventLabels: Record<string, string> = {
   OFFICIAL_HOLIDAY: 'تعطیل رسمی',
@@ -99,39 +97,23 @@ export default function SabalanCalendarPage() {
         { label: 'روزهای تعطیل', value: new Set(entries.filter((entry) => entry.isActive && entry.isHoliday).map((entry) => new Date(entry.date).toDateString())).size.toLocaleString('fa-IR'), icon: FaCalendarAlt, tone: 'warning' },
       ]}
     >
-      {message && <div className="rounded-lg border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)]">{message}</div>}
-      {error && <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)]">{error}</div>}
+      {message && <ErpInlineState kind="success" title={message} />}
+      {error && <ErpInlineState kind="error" title={error} />}
 
       <ErpSection title={form.id ? 'ویرایش رویداد' : 'رویداد جدید'}>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-          <label>
-            <span className={labelClass}>تاریخ</span>
+          <ErpField label="تاریخ" required>
             <PersianCalendarComponent value={form.date} onChange={(date) => setForm((current) => ({ ...current, date }))} placeholder="تاریخ" />
-          </label>
-          <label>
-            <span className={labelClass}>عنوان</span>
-            <ErpInput className={inputClass} value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} />
-          </label>
-          <label>
-            <span className={labelClass}>نوع رویداد</span>
-            <ErpSelect className={inputClass} value={form.eventType} onChange={(event) => setForm((current) => ({ ...current, eventType: event.target.value }))}>
+          </ErpField>
+          <ErpField label="عنوان" required><ErpInput value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} /></ErpField>
+          <ErpField label="نوع رویداد"><ErpSelect value={form.eventType} onChange={(event) => setForm((current) => ({ ...current, eventType: event.target.value }))}>
               {Object.entries(eventLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </ErpSelect>
-          </label>
+            </ErpSelect></ErpField>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-end">
-          <label>
-            <span className={labelClass}>توضیحات</span>
-            <ErpInput className={inputClass} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
-          </label>
-          <label className="flex min-h-12 items-center gap-2 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-            <ErpInput type="checkbox" checked={form.isHoliday} onChange={(event) => setForm((current) => ({ ...current, isHoliday: event.target.checked }))} />
-            <span className="text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">تعطیل</span>
-          </label>
-          <label className="flex min-h-12 items-center gap-2 rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-            <ErpInput type="checkbox" checked={form.isActive} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
-            <span className="text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">فعال</span>
-          </label>
+          <ErpField label="توضیحات"><ErpInput value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></ErpField>
+          <ErpCheckbox label="تعطیل" checked={form.isHoliday} onChange={(event) => setForm((current) => ({ ...current, isHoliday: event.target.checked }))} />
+          <ErpCheckbox label="فعال" checked={form.isActive} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <ErpButton label={form.id ? 'ذخیره تغییرات' : 'ثبت رویداد'} icon={form.id ? FaSave : FaPlus} onClick={saveEntry} disabled={saving || !form.title.trim()} variant="solid" />

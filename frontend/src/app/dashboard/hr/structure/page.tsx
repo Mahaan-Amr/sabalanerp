@@ -1,5 +1,6 @@
 "use client";
-import { ErpInput, ErpSelect, ErpTextarea } from "@/components/erp";
+import { ErpInlineState } from "@/components/erp";
+import { ErpField, ErpInput, ErpSelect, ErpTextarea } from "@/components/erp";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
@@ -27,10 +28,7 @@ import {
 import { hrAPI } from "@/lib/api";
 import {
   apiError,
-  fieldClass,
   fromIsoDate,
-  HrField,
-  HrMessage,
   toIsoDate,
   unitTypeLabel,
 } from "@/features/hr/hrUi";
@@ -220,8 +218,8 @@ export default function HrStructurePage() {
       ]}
       backHref="/dashboard/hr"
     >
-      {error && <HrMessage>{error}</HrMessage>}
-      {success && <HrMessage tone="success">{success}</HrMessage>}
+      {error && <ErpInlineState kind="error" title={error} />}
+      {success && <ErpInlineState kind="success" title={success} />}
       {blockedDependencies.length > 0 && (
         <ErpCard className="space-y-3 p-4">
           <p className="text-sm font-semibold text-[var(--sds-text-primary)]">وابستگی‌های مانع غیرفعال‌سازی</p>
@@ -298,23 +296,23 @@ export default function HrStructurePage() {
             <ErpCard className="p-4">
               <FormTitle>تعریف واحد</FormTitle>
               <div className="space-y-3">
-                <HrField label="کد" required>
+                <ErpField label="کد" required>
                   <ErpInput
-                    className={fieldClass}
+
                     value={unit.code}
                     onChange={(e) => setUnit({ ...unit, code: e.target.value })}
                   />
-                </HrField>
-                <HrField label="نام فارسی" required>
+                </ErpField>
+                <ErpField label="نام فارسی" required>
                   <ErpInput
-                    className={fieldClass}
+
                     value={unit.name}
                     onChange={(e) => setUnit({ ...unit, name: e.target.value })}
                   />
-                </HrField>
-                <HrField label="نوع" required>
+                </ErpField>
+                <ErpField label="نوع" required>
                   <ErpSelect
-                    className={fieldClass}
+
                     value={unit.type}
                     onChange={(e) => setUnit({ ...unit, type: e.target.value })}
                   >
@@ -324,10 +322,10 @@ export default function HrStructurePage() {
                       </option>
                     ))}
                   </ErpSelect>
-                </HrField>
-                <HrField label="واحد والد">
+                </ErpField>
+                <ErpField label="واحد والد">
                   <ErpSelect
-                    className={fieldClass}
+
                     value={unit.parentId}
                     onChange={(e) =>
                       setUnit({ ...unit, parentId: e.target.value })
@@ -342,7 +340,7 @@ export default function HrStructurePage() {
                         </option>
                       ))}
                   </ErpSelect>
-                </HrField>
+                </ErpField>
                 <CreationLifecycleFields form={unit} setForm={setUnit} />
                 <ErpButton
                   label="ثبت واحد"
@@ -398,38 +396,38 @@ export default function HrStructurePage() {
             <ErpCard className="p-4">
               <FormTitle>تعریف شغل</FormTitle>
               <div className="space-y-3">
-                <HrField label="کد" required>
+                <ErpField label="کد" required>
                   <ErpInput
-                    className={fieldClass}
+
                     value={job.code}
                     onChange={(e) => setJob({ ...job, code: e.target.value })}
                   />
-                </HrField>
-                <HrField label="عنوان" required>
+                </ErpField>
+                <ErpField label="عنوان" required>
                   <ErpInput
-                    className={fieldClass}
+
                     value={job.title}
                     onChange={(e) => setJob({ ...job, title: e.target.value })}
                   />
-                </HrField>
-                <HrField label="شرح">
+                </ErpField>
+                <ErpField label="شرح">
                   <ErpTextarea
-                    className={fieldClass}
+
                     value={job.description}
                     onChange={(e) =>
                       setJob({ ...job, description: e.target.value })
                     }
                   />
-                </HrField>
-                <HrField label="مسئولیت‌ها">
+                </ErpField>
+                <ErpField label="مسئولیت‌ها">
                   <ErpTextarea
-                    className={fieldClass}
+
                     value={job.responsibilities}
                     onChange={(e) =>
                       setJob({ ...job, responsibilities: e.target.value })
                     }
                   />
-                </HrField>
+                </ErpField>
                 <CreationLifecycleFields form={job} setForm={setJob} />
                 <ErpButton
                   label="ثبت شغل"
@@ -522,27 +520,27 @@ export default function HrStructurePage() {
             <ErpCard className="p-4">
               <FormTitle>تعریف جایگاه</FormTitle>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <HrField label="کد" required>
+                <ErpField label="کد" required>
                   <ErpInput
-                    className={fieldClass}
+
                     value={position.code}
                     onChange={(e) =>
                       setPosition({ ...position, code: e.target.value })
                     }
                   />
-                </HrField>
-                <HrField label="عنوان" required>
+                </ErpField>
+                <ErpField label="عنوان" required>
                   <ErpInput
-                    className={fieldClass}
+
                     value={position.title}
                     onChange={(e) =>
                       setPosition({ ...position, title: e.target.value })
                     }
                   />
-                </HrField>
-                <HrField label="شغل" required>
+                </ErpField>
+                <ErpField label="شغل" required>
                   <ErpSelect
-                    className={fieldClass}
+
                     value={position.jobId}
                     onChange={(e) =>
                       setPosition({ ...position, jobId: e.target.value })
@@ -557,10 +555,10 @@ export default function HrStructurePage() {
                         </option>
                       ))}
                   </ErpSelect>
-                </HrField>
-                <HrField label="واحد سازمانی" required>
+                </ErpField>
+                <ErpField label="واحد سازمانی" required>
                   <ErpSelect
-                    className={fieldClass}
+
                     value={position.organizationalUnitId}
                     onChange={(e) =>
                       setPosition({
@@ -578,12 +576,12 @@ export default function HrStructurePage() {
                         </option>
                       ))}
                   </ErpSelect>
-                </HrField>
-                <HrField label="ظرفیت" required>
+                </ErpField>
+                <ErpField label="ظرفیت" required>
                   <ErpInput
                     type="number"
                     min={1}
-                    className={fieldClass}
+
                     value={position.capacity}
                     onChange={(e) =>
                       setPosition({
@@ -592,10 +590,10 @@ export default function HrStructurePage() {
                       })
                     }
                   />
-                </HrField>
-                <HrField label="جایگاه سرپرست">
+                </ErpField>
+                <ErpField label="جایگاه سرپرست">
                   <ErpSelect
-                    className={fieldClass}
+
                     value={position.supervisorPositionId}
                     onChange={(e) =>
                       setPosition({
@@ -613,10 +611,10 @@ export default function HrStructurePage() {
                         </option>
                       ))}
                   </ErpSelect>
-                </HrField>
-                <HrField label="محل کار">
+                </ErpField>
+                <ErpField label="محل کار">
                   <ErpSelect
-                    className={fieldClass}
+
                     value={position.workplaceId}
                     onChange={(e) =>
                       setPosition({ ...position, workplaceId: e.target.value })
@@ -631,10 +629,10 @@ export default function HrStructurePage() {
                         </option>
                       ))}
                   </ErpSelect>
-                </HrField>
-                <HrField label="مرکز هزینه">
+                </ErpField>
+                <ErpField label="مرکز هزینه">
                   <ErpSelect
-                    className={fieldClass}
+
                     value={position.costCenterId}
                     onChange={(e) =>
                       setPosition({ ...position, costCenterId: e.target.value })
@@ -649,7 +647,7 @@ export default function HrStructurePage() {
                         </option>
                       ))}
                   </ErpSelect>
-                </HrField>
+                </ErpField>
                 <CreationLifecycleFields form={position} setForm={setPosition} />
               </div>
               <div className="mt-4">
@@ -755,32 +753,32 @@ export default function HrStructurePage() {
       >
         {editTarget && (
           <div className="space-y-3">
-            <HrField label={editTarget.entityType === "job" || editTarget.entityType === "position" ? "عنوان" : "نام"} required>
+            <ErpField label={editTarget.entityType === "job" || editTarget.entityType === "position" ? "عنوان" : "نام"} required>
               <ErpInput value={editTarget.form.name} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, name: event.target.value } })} />
-            </HrField>
+            </ErpField>
             {editTarget.entityType === "organizational-unit" && (
               <>
-                <HrField label="نوع" required>
+                <ErpField label="نوع" required>
                   <ErpSelect value={editTarget.form.type} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, type: event.target.value } })}>
                     {Object.entries(unitTypeLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </ErpSelect>
-                </HrField>
-                <HrField label="واحد والد">
+                </ErpField>
+                <ErpField label="واحد والد">
                   <ErpSelect value={editTarget.form.parentId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, parentId: event.target.value } })}>
                     <option value="">بدون والد</option>
                     {data.organizationalUnits.filter((item: any) => item.id !== editTarget.item.id && item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}
                   </ErpSelect>
-                </HrField>
+                </ErpField>
               </>
             )}
             {editTarget.entityType === "position" && (
               <div className="grid gap-3 sm:grid-cols-2">
-                <HrField label="شغل" required><ErpSelect value={editTarget.form.jobId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, jobId: event.target.value } })}>{data.jobs.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.title}</option>)}</ErpSelect></HrField>
-                <HrField label="واحد سازمانی" required><ErpSelect value={editTarget.form.organizationalUnitId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, organizationalUnitId: event.target.value } })}>{data.organizationalUnits.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></HrField>
-                <HrField label="جایگاه سرپرست"><ErpSelect value={editTarget.form.supervisorPositionId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, supervisorPositionId: event.target.value } })}><option value="">بدون سرپرست</option>{data.positions.filter((item: any) => item.id !== editTarget.item.id && item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.title}</option>)}</ErpSelect></HrField>
-                <HrField label="محل کار"><ErpSelect value={editTarget.form.workplaceId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, workplaceId: event.target.value } })}><option value="">بدون پیش‌فرض</option>{data.workplaces.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></HrField>
-                <HrField label="مرکز هزینه"><ErpSelect value={editTarget.form.costCenterId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, costCenterId: event.target.value } })}><option value="">بدون پیش‌فرض</option>{data.costCenters.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></HrField>
-                <HrField label="ظرفیت جایگاه" required>
+                <ErpField label="شغل" required><ErpSelect value={editTarget.form.jobId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, jobId: event.target.value } })}>{data.jobs.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.title}</option>)}</ErpSelect></ErpField>
+                <ErpField label="واحد سازمانی" required><ErpSelect value={editTarget.form.organizationalUnitId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, organizationalUnitId: event.target.value } })}>{data.organizationalUnits.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></ErpField>
+                <ErpField label="جایگاه سرپرست"><ErpSelect value={editTarget.form.supervisorPositionId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, supervisorPositionId: event.target.value } })}><option value="">بدون سرپرست</option>{data.positions.filter((item: any) => item.id !== editTarget.item.id && item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.title}</option>)}</ErpSelect></ErpField>
+                <ErpField label="محل کار"><ErpSelect value={editTarget.form.workplaceId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, workplaceId: event.target.value } })}><option value="">بدون پیش‌فرض</option>{data.workplaces.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></ErpField>
+                <ErpField label="مرکز هزینه"><ErpSelect value={editTarget.form.costCenterId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, costCenterId: event.target.value } })}><option value="">بدون پیش‌فرض</option>{data.costCenters.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></ErpField>
+                <ErpField label="ظرفیت جایگاه" required>
                   <div className="flex gap-2">
                     <ErpInput type="number" min={1} step={1} value={editTarget.form.capacity} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, capacity: Number(event.target.value) } })} />
                     <ErpButton
@@ -790,17 +788,17 @@ export default function HrStructurePage() {
                       onClick={saveEditCapacity}
                     />
                   </div>
-                </HrField>
+                </ErpField>
               </div>
             )}
             {editTarget.entityType !== "position" && (
-              <HrField label="توضیح"><ErpTextarea value={editTarget.form.description} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, description: event.target.value } })} /></HrField>
+              <ErpField label="توضیح"><ErpTextarea value={editTarget.form.description} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, description: event.target.value } })} /></ErpField>
             )}
             {editTarget.entityType === "job" && (
-              <HrField label="مسئولیت‌ها"><ErpTextarea value={editTarget.form.responsibilities} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, responsibilities: event.target.value } })} /></HrField>
+              <ErpField label="مسئولیت‌ها"><ErpTextarea value={editTarget.form.responsibilities} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, responsibilities: event.target.value } })} /></ErpField>
             )}
-            <HrField label="تاریخ اثر" required><HrPersianCalendar value={fromIsoDate(editTarget.form.effectiveFrom)} onChange={(value) => setEditTarget({ ...editTarget, form: { ...editTarget.form, effectiveFrom: toIsoDate(value) } })} disablePastDates /></HrField>
-            <HrField label="دلیل تغییر" required><ErpTextarea value={editTarget.form.reason} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, reason: event.target.value } })} /></HrField>
+            <ErpField label="تاریخ اثر" required><HrPersianCalendar value={fromIsoDate(editTarget.form.effectiveFrom)} onChange={(value) => setEditTarget({ ...editTarget, form: { ...editTarget.form, effectiveFrom: toIsoDate(value) } })} disablePastDates /></ErpField>
+            <ErpField label="دلیل تغییر" required><ErpTextarea value={editTarget.form.reason} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, reason: event.target.value } })} /></ErpField>
           </div>
         )}
       </ErpSheet>
@@ -820,9 +818,9 @@ export default function HrStructurePage() {
         {deleteTarget && (
           <div className="space-y-3">
             <p className="text-sm text-[var(--sds-text-secondary)]">حذف فقط وقتی انجام می‌شود که هیچ ارجاع جاری یا تاریخی وجود نداشته باشد. کد دقیق رکورد را وارد کنید: <b>{deleteTarget.item.code}</b></p>
-            <HrField label="کد تأیید" required><ErpInput value={deleteForm.confirmationCode} onChange={(event) => setDeleteForm({ ...deleteForm, confirmationCode: event.target.value })} /></HrField>
-            <HrField label="دلیل حذف" required><ErpTextarea value={deleteForm.reason} onChange={(event) => setDeleteForm({ ...deleteForm, reason: event.target.value })} /></HrField>
-            <HrField label="رمز عبور مدیر سامانه" required><ErpInput type="password" value={deleteForm.adminPassword} onChange={(event) => setDeleteForm({ ...deleteForm, adminPassword: event.target.value })} /></HrField>
+            <ErpField label="کد تأیید" required><ErpInput value={deleteForm.confirmationCode} onChange={(event) => setDeleteForm({ ...deleteForm, confirmationCode: event.target.value })} /></ErpField>
+            <ErpField label="دلیل حذف" required><ErpTextarea value={deleteForm.reason} onChange={(event) => setDeleteForm({ ...deleteForm, reason: event.target.value })} /></ErpField>
+            <ErpField label="رمز عبور مدیر سامانه" required><ErpInput type="password" value={deleteForm.adminPassword} onChange={(event) => setDeleteForm({ ...deleteForm, adminPassword: event.target.value })} /></ErpField>
           </div>
         )}
       </ErpSheet>
@@ -840,15 +838,15 @@ function FormTitle({ children }: { children: React.ReactNode }) {
 function CreationLifecycleFields({ form, setForm }: { form: any; setForm: (value: any) => void }) {
   return (
     <>
-      <HrField label="وضعیت آغاز" required>
+      <ErpField label="وضعیت آغاز" required>
         <ErpSelect value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}>
           <option value="ACTIVE">فعال</option>
           <option value="INACTIVE">غیرفعال</option>
         </ErpSelect>
-      </HrField>
-      <HrField label={form.status === "ACTIVE" ? "تاریخ فعال‌سازی" : "تاریخ ثبت وضعیت"} required>
+      </ErpField>
+      <ErpField label={form.status === "ACTIVE" ? "تاریخ فعال‌سازی" : "تاریخ ثبت وضعیت"} required>
         <HrPersianCalendar value={fromIsoDate(form.effectiveFrom)} onChange={(value) => setForm({ ...form, effectiveFrom: toIsoDate(value) })} disablePastDates />
-      </HrField>
+      </ErpField>
     </>
   );
 }
@@ -911,30 +909,30 @@ function CatalogSection({
       <div className="space-y-3">
         <ErpCard className="p-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <HrField label="کد" required>
+            <ErpField label="کد" required>
               <ErpInput
-                className={fieldClass}
+
                 value={form.code}
                 onChange={(e) => setForm({ ...form, code: e.target.value })}
               />
-            </HrField>
-            <HrField label="نام" required>
+            </ErpField>
+            <ErpField label="نام" required>
               <ErpInput
-                className={fieldClass}
+
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
-            </HrField>
+            </ErpField>
             <div className="sm:col-span-2">
-              <HrField label="توضیح">
+              <ErpField label="توضیح">
                 <ErpInput
-                  className={fieldClass}
+
                   value={form.description}
                   onChange={(e) =>
                     setForm({ ...form, description: e.target.value })
                   }
                 />
-              </HrField>
+              </ErpField>
             </div>
             <CreationLifecycleFields form={form} setForm={setForm} />
           </div>

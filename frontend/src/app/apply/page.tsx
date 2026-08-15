@@ -1,5 +1,5 @@
 'use client';
-import { ErpButton, ErpCard, ErpInlineState, ErpInput, ErpPressable, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpPressable, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from "react";
 import { applicantHiringAPI, hiringError } from "@/lib/hiringApi";
 import { normalizeIranianMobile } from "@/lib/phoneFormat";
@@ -80,29 +80,6 @@ const blank = {
   desiredSalary: "",
   questions: snapshotAnswers([]),
 };
-
-const inputClass =
-  "w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-secondary)] outline-none focus:border-[var(--sds-success-border)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:placeholder:text-[var(--sds-text-muted)]";
-
-function Field({
-  label,
-  children,
-  required = true,
-}: {
-  label: string;
-  children: React.ReactNode;
-  required?: boolean;
-}) {
-  return (
-    <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-      <span>
-        {label}
-        {required && <b className="mr-1 text-[var(--sds-danger)]">*</b>}
-      </span>
-      <div className="mt-1">{children}</div>
-    </label>
-  );
-}
 
 export default function ApplicantFormPage() {
   const [mobile, setMobile] = useState("");
@@ -285,43 +262,36 @@ export default function ApplicantFormPage() {
           <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">
             شماره همراهی که پیامک را دریافت کرده و کد شش‌رقمی همان پیامک را وارد کنید.
           </p>
-          {error && (
-            <p className="mt-4 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)]">
-              {error}
-            </p>
-          )}
+          {error && <ErpInlineState className="mt-4" kind="error" title={error} />}
           <>
-            <label className="mt-6 block text-sm font-medium text-[var(--sds-text-primary)]">
-              شماره همراه
+            <ErpField className="mt-6" label="شماره همراه">
               <ErpInput
                 dir="ltr"
-                className={`${inputClass} mt-1 text-left`}
+                className="mt-1 text-left"
                 inputMode="tel"
                 autoComplete="tel"
                 placeholder="09123456789"
                 value={mobile}
                 onChange={(e) => setMobile(e.target.value)}
               />
-            </label>
-            <label className="mt-4 block text-sm font-medium text-[var(--sds-text-primary)]">
-              کد ورود شش‌رقمی
+            </ErpField>
+            <ErpField className="mt-4" label="کد ورود شش‌رقمی">
             <ErpInput
               dir="ltr"
-              className={`${inputClass} mt-1 text-center text-xl tracking-[.5em]`}
+              className="mt-1 text-center text-xl tracking-[.5em]"
               inputMode="numeric"
               autoComplete="one-time-code"
               maxLength={6}
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/[^0-9۰-۹٠-٩]/g, ""))}
             />
-            </label>
-            <ErpPressable type="submit"
+            </ErpField>
+            <ErpButton
+              label="تأیید و ورود"
+              className="mt-4 w-full"
               disabled={busy || !normalizeIranianMobile(mobile) || otp.length !== 6}
               onClick={verify}
-              className="mt-4 w-full rounded-xl bg-[var(--sds-success)] px-4 py-3 font-bold text-[var(--sds-text-inverse)] disabled:opacity-50"
-            >
-              تأیید و ورود
-            </ErpPressable>
+            />
             <p className="mt-4 text-xs text-[var(--sds-text-secondary)]">اگر کد شما منقضی شده است، با واحد منابع انسانی تماس بگیرید.</p>
           </>
         </section>
@@ -407,32 +377,22 @@ export default function ApplicantFormPage() {
         >
           <ErpInlineState kind="stale" title="تغییرات ذخیره‌نشده با خروج از این صفحه از بین می‌روند." />
         </ErpSheet>
-        {error && (
-          <p className="mt-4 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)]">
-            {error}
-          </p>
-        )}
-        {message && (
-          <p className="mt-4 rounded-xl bg-[var(--sds-success-surface)] p-3 text-sm text-[var(--sds-success)]">
-            {message}
-          </p>
-        )}
+        {error && <ErpInlineState className="mt-4" kind="error" title={error} />}
+        {message && <ErpInlineState className="mt-4" kind="success" title={message} />}
         {isCorrection && (
-          <section className="mt-4 rounded-xl bg-[var(--sds-warning-surface)] p-4 text-sm text-[var(--sds-warning)]">
-            فرم برای اصلاح بازگردانده شده است:{" "}
-            {application.revision.correctionReason}
+          <ErpCard className="mt-4 p-4">
+            <ErpInlineState kind="stale" title={`فرم برای اصلاح بازگردانده شده است: ${application.revision.correctionReason}`} />
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {correctionFields.map((key) => {
                 const detail = correctionDetails.find(
                   (item: any) => item.fieldKey === key,
                 );
                 return (
-                <Field
+                <ErpField
                   key={key}
                   label={`${detail?.label || "فیلد نیازمند اصلاح"}${detail?.explanation ? ` — ${detail.explanation}` : ""}`}
                 >
                   <ErpTextarea
-                    className={inputClass}
                     value={
                       typeof data[key] === "object"
                         ? JSON.stringify(data[key])
@@ -440,26 +400,15 @@ export default function ApplicantFormPage() {
                     }
                     onChange={(e) => setCorrectionValue(key, e.target.value)}
                   />
-                </Field>
+                </ErpField>
                 );
               })}
             </div>
-            <label className="mt-4 flex gap-2">
-              <ErpInput
-                type="checkbox"
-                checked={declaration}
-                onChange={(e) => setDeclaration(e.target.checked)}
-              />
-              صحت نسخه اصلاح‌شده را تأیید می‌کنم.
-            </label>
-            <ErpInput
-              className={`${inputClass} mt-3`}
-              placeholder="نام و نام خانوادگی"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-            />
+            <ErpCheckbox className="mt-4" label="صحت نسخه اصلاح‌شده را تأیید می‌کنم." checked={declaration} onChange={(e) => setDeclaration(e.target.checked)} />
+            <ErpField className="mt-3" label="نام و نام خانوادگی" required><ErpInput value={fullName} onChange={(e) => setFullName(e.target.value)} /></ErpField>
             <div className="mt-3 flex gap-2">
-              <ErpPressable type="submit"
+              <ErpButton
+                label="ذخیره اصلاحات"
                 disabled={busy}
                 onClick={() =>
                   run(
@@ -467,11 +416,10 @@ export default function ApplicantFormPage() {
                     "اصلاحات ذخیره شد.",
                   )
                 }
-                className="rounded-xl border px-4 py-2"
-              >
-                ذخیره اصلاحات
-              </ErpPressable>
-              <ErpPressable type="submit"
+                variant="outline"
+              />
+              <ErpButton
+                label="ارسال مجدد"
                 disabled={busy || !declaration || !fullName}
                 onClick={() =>
                   run(async () => {
@@ -482,12 +430,9 @@ export default function ApplicantFormPage() {
                     });
                   }, "نسخه اصلاح‌شده ارسال شد.")
                 }
-                className="rounded-xl bg-[var(--sds-success)] px-4 py-2 font-bold text-[var(--sds-text-inverse)] disabled:opacity-50"
-              >
-                ارسال مجدد
-              </ErpPressable>
+              />
             </div>
-          </section>
+          </ErpCard>
         )}
         <fieldset
           disabled={submitted || busy || isCorrection}
@@ -495,45 +440,40 @@ export default function ApplicantFormPage() {
         >
           <Section title="مشخصات فردی" emphasis="neumorphic">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <Field label="نام">
+              <ErpField label="نام">
                 <ErpInput
-                  className={inputClass}
                   value={data.firstName}
                   onChange={(e) => set("firstName", e.target.value)}
                 />
-              </Field>
-              <Field label="نام خانوادگی">
+              </ErpField>
+              <ErpField label="نام خانوادگی">
                 <ErpInput
-                  className={inputClass}
                   value={data.lastName}
                   onChange={(e) => set("lastName", e.target.value)}
                 />
-              </Field>
-              <Field label="نام مستعار یا ندارم">
+              </ErpField>
+              <ErpField label="نام مستعار یا ندارم">
                 <ErpInput
-                  className={inputClass}
                   value={data.alias}
                   onChange={(e) => set("alias", e.target.value)}
                 />
-              </Field>
-              <Field label="تاریخ تولد">
+              </ErpField>
+              <ErpField label="تاریخ تولد">
                 <PersianCalendarComponent
                   value={data.birthDate}
                   onChange={(value) => set("birthDate", value)}
                   enableYearSelection
                   minYear={1300}
                 />
-              </Field>
-              <Field label="محل تولد">
+              </ErpField>
+              <ErpField label="محل تولد">
                 <ErpInput
-                  className={inputClass}
                   value={data.birthPlace}
                   onChange={(e) => set("birthPlace", e.target.value)}
                 />
-              </Field>
-              <Field label="وضعیت نظام وظیفه">
+              </ErpField>
+              <ErpField label="وضعیت نظام وظیفه">
                 <ErpSelect
-                  className={inputClass}
                   value={data.militaryStatus}
                   onChange={(e) => set("militaryStatus", e.target.value)}
                 >
@@ -543,24 +483,21 @@ export default function ApplicantFormPage() {
                   <option>مشمول</option>
                   <option>غیرقابل اعمال</option>
                 </ErpSelect>
-              </Field>
-              <Field label="نام پدر">
+              </ErpField>
+              <ErpField label="نام پدر">
                 <ErpInput
-                  className={inputClass}
                   value={data.fatherName}
                   onChange={(e) => set("fatherName", e.target.value)}
                 />
-              </Field>
-              <Field label="شغل پدر یا وضعیت">
+              </ErpField>
+              <ErpField label="شغل پدر یا وضعیت">
                 <ErpInput
-                  className={inputClass}
                   value={data.fatherOccupation}
                   onChange={(e) => set("fatherOccupation", e.target.value)}
                 />
-              </Field>
-              <Field label="وضعیت تأهل">
+              </ErpField>
+              <ErpField label="وضعیت تأهل">
                 <ErpSelect
-                  className={inputClass}
                   value={data.maritalStatus}
                   onChange={(e) => set("maritalStatus", e.target.value)}
                 >
@@ -568,150 +505,134 @@ export default function ApplicantFormPage() {
                   <option value="SINGLE">مجرد</option>
                   <option value="MARRIED">متأهل</option>
                 </ErpSelect>
-              </Field>
+              </ErpField>
               {data.maritalStatus === "MARRIED" && (
                 <>
-                  <Field label="تعداد فرزندان">
+                  <ErpField label="تعداد فرزندان">
                     <ErpInput
                       type="number"
                       min="0"
-                      className={inputClass}
                       value={data.childrenCount}
                       onChange={(e) => set("childrenCount", e.target.value)}
                     />
-                  </Field>
-                  <Field label="شغل همسر">
+                  </ErpField>
+                  <ErpField label="شغل همسر">
                     <ErpInput
-                      className={inputClass}
                       value={data.spouseOccupation}
                       onChange={(e) => set("spouseOccupation", e.target.value)}
                     />
-                  </Field>
+                  </ErpField>
                 </>
               )}
-              <Field label="نوع هویت">
+              <ErpField label="نوع هویت">
                 <ErpSelect
-                  className={inputClass}
                   value={data.identityKind}
                   onChange={(e) => set("identityKind", e.target.value)}
                 >
                   <option value="IRANIAN">ایرانی</option>
                   <option value="FOREIGN">اتباع خارجی</option>
                 </ErpSelect>
-              </Field>
+              </ErpField>
               {data.identityKind === "IRANIAN" ? (
-                <Field label="کد ملی">
+                <ErpField label="کد ملی">
                   <ErpInput
                     inputMode="numeric"
                     maxLength={10}
-                    className={inputClass}
                     value={data.nationalCode}
                     onChange={(e) =>
                       set("nationalCode", e.target.value.replace(/\D/g, ""))
                     }
                   />
-                </Field>
+                </ErpField>
               ) : (
                 <>
-                  <Field label="نوع مدرک هویتی">
+                  <ErpField label="نوع مدرک هویتی">
                     <ErpInput
-                      className={inputClass}
                       value={data.foreignIdentityType}
                       onChange={(e) =>
                         set("foreignIdentityType", e.target.value)
                       }
                     />
-                  </Field>
-                  <Field label="شماره مدرک">
+                  </ErpField>
+                  <ErpField label="شماره مدرک">
                     <ErpInput
-                      className={inputClass}
                       value={data.foreignIdentityNumber}
                       onChange={(e) =>
                         set("foreignIdentityNumber", e.target.value)
                       }
                     />
-                  </Field>
+                  </ErpField>
                 </>
               )}
             </div>
           </Section>
           <Section title="تماس و سکونت">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <Field label="نشانی محل سکونت">
+              <ErpField label="نشانی محل سکونت">
                 <ErpTextarea
-                  className={inputClass}
                   value={data.address}
                   onChange={(e) => set("address", e.target.value)}
                 />
-              </Field>
-              <Field label="کد پستی">
+              </ErpField>
+              <ErpField label="کد پستی">
                 <ErpInput
                   inputMode="numeric"
                   maxLength={10}
-                  className={inputClass}
                   value={data.postalCode}
                   onChange={(e) =>
                     set("postalCode", e.target.value.replace(/\D/g, ""))
                   }
                 />
-              </Field>
-              <Field label="شماره همراه">
+              </ErpField>
+              <ErpField label="شماره همراه">
                 <ErpInput
-                  className={inputClass}
                   value={data.mobile}
                   onChange={(e) => set("mobile", e.target.value)}
                 />
-              </Field>
-              <Field label="تلفن منزل یا ندارم">
+              </ErpField>
+              <ErpField label="تلفن منزل یا ندارم">
                 <ErpInput
-                  className={inputClass}
                   value={data.homePhone}
                   onChange={(e) => set("homePhone", e.target.value)}
                 />
-              </Field>
-              <Field label="ایمیل" required={false}>
+              </ErpField>
+              <ErpField label="ایمیل" required={false}>
                 <ErpInput
                   type="email"
-                  className={inputClass}
                   value={data.email}
                   onChange={(e) => set("email", e.target.value)}
                 />
-              </Field>
-              <Field label="شبکه‌های اجتماعی یا ندارم">
+              </ErpField>
+              <ErpField label="شبکه‌های اجتماعی یا ندارم">
                 <ErpInput
-                  className={inputClass}
                   value={data.socialMedia}
                   onChange={(e) => set("socialMedia", e.target.value)}
                 />
-              </Field>
+              </ErpField>
             </div>
           </Section>
           <Section title="تحصیلات و بیمه">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <Field label="آخرین مقطع">
+              <ErpField label="آخرین مقطع">
                 <ErpInput
-                  className={inputClass}
                   value={data.educationLevel}
                   onChange={(e) => set("educationLevel", e.target.value)}
                 />
-              </Field>
-              <Field label="رشته تحصیلی">
+              </ErpField>
+              <ErpField label="رشته تحصیلی">
                 <ErpInput
-                  className={inputClass}
                   value={data.fieldOfStudy}
                   onChange={(e) => set("fieldOfStudy", e.target.value)}
                 />
-              </Field>
-              <Field label="سال اخذ مدرک">
+              </ErpField>
+              <ErpField label="سال اخذ مدرک">
                 <ErpInput
-                  className={inputClass}
                   value={data.graduationYear}
                   onChange={(e) => set("graduationYear", e.target.value)}
                 />
-              </Field>
-              <Field label="سابقه بیمه تأمین اجتماعی">
+              </ErpField>
+              <ErpField label="سابقه بیمه تأمین اجتماعی">
                 <ErpSelect
-                  className={inputClass}
                   value={String(data.hasSocialSecurityHistory)}
                   onChange={(e) =>
                     set("hasSocialSecurityHistory", e.target.value === "true")
@@ -721,7 +642,7 @@ export default function ApplicantFormPage() {
                   <option value="true">دارم</option>
                   <option value="false">ندارم</option>
                 </ErpSelect>
-              </Field>
+              </ErpField>
             </div>
           </Section>
           <Repeater
@@ -734,7 +655,6 @@ export default function ApplicantFormPage() {
               <div className="grid gap-3 md:grid-cols-4">
                 <ErpInput
                   placeholder="نام سازمان/شرکت"
-                  className={inputClass}
                   value={row.organization}
                   onChange={(e) =>
                     updateList("workHistory", i, "organization", e.target.value)
@@ -742,7 +662,6 @@ export default function ApplicantFormPage() {
                 />
                 <ErpInput
                   placeholder="مدت همکاری"
-                  className={inputClass}
                   value={row.duration}
                   onChange={(e) =>
                     updateList("workHistory", i, "duration", e.target.value)
@@ -750,7 +669,6 @@ export default function ApplicantFormPage() {
                 />
                 <ErpInput
                   placeholder="آخرین سمت"
-                  className={inputClass}
                   value={row.lastPosition}
                   onChange={(e) =>
                     updateList("workHistory", i, "lastPosition", e.target.value)
@@ -758,7 +676,6 @@ export default function ApplicantFormPage() {
                 />
                 <ErpInput
                   placeholder="آخرین حقوق و مزایا (ریال)"
-                  className={inputClass}
                   value={row.lastSalaryBenefits}
                   onChange={(e) =>
                     updateList(
@@ -780,7 +697,6 @@ export default function ApplicantFormPage() {
               <div className="grid gap-3 md:grid-cols-3">
                 <ErpInput
                   placeholder="نام مهارت"
-                  className={inputClass}
                   value={row.name}
                   onChange={(e) =>
                     updateList("skills", i, "name", e.target.value)
@@ -788,14 +704,12 @@ export default function ApplicantFormPage() {
                 />
                 <ErpInput
                   placeholder="مدت آشنایی"
-                  className={inputClass}
                   value={row.familiarity}
                   onChange={(e) =>
                     updateList("skills", i, "familiarity", e.target.value)
                   }
                 />
                 <ErpSelect
-                  className={inputClass}
                   value={row.proficiency}
                   onChange={(e) =>
                     updateList("skills", i, "proficiency", e.target.value)
@@ -819,14 +733,12 @@ export default function ApplicantFormPage() {
               <div className="grid gap-3 md:grid-cols-3">
                 <ErpInput
                   placeholder="نام زبان"
-                  className={inputClass}
                   value={row.name}
                   onChange={(e) =>
                     updateList("languages", i, "name", e.target.value)
                   }
                 />
                 <ErpSelect
-                  className={inputClass}
                   value={row.level}
                   onChange={(e) =>
                     updateList("languages", i, "level", e.target.value)
@@ -838,7 +750,6 @@ export default function ApplicantFormPage() {
                   <option value="ADVANCED">پیشرفته</option>
                 </ErpSelect>
                 <ErpSelect
-                  className={inputClass}
                   value={row.proficiency}
                   onChange={(e) =>
                     updateList("languages", i, "proficiency", e.target.value)
@@ -854,52 +765,47 @@ export default function ApplicantFormPage() {
           />
           <Section title="ترجیحات همکاری">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <Field label="نوع همکاری">
+              <ErpField label="نوع همکاری">
                 <ErpSelect
-                  className={inputClass}
                   value={data.cooperationType}
                   onChange={(e) => set("cooperationType", e.target.value)}
                 >
                   <option value="FULL_TIME">تمام‌وقت</option>
                   <option value="PART_TIME">پاره‌وقت</option>
                 </ErpSelect>
-              </Field>
-              <Field label="مدت همکاری">
+              </ErpField>
+              <ErpField label="مدت همکاری">
                 <ErpSelect
-                  className={inputClass}
                   value={data.cooperationDuration}
                   onChange={(e) => set("cooperationDuration", e.target.value)}
                 >
                   <option value="LONG_TERM">بلندمدت</option>
                   <option value="SHORT_TERM">کوتاه‌مدت</option>
                 </ErpSelect>
-              </Field>
-              <Field label="شغل و سمت مورد تقاضا">
+              </ErpField>
+              <ErpField label="شغل و سمت مورد تقاضا">
                 <ErpInput
-                  className={inputClass}
                   value={data.requestedPosition}
                   onChange={(e) => set("requestedPosition", e.target.value)}
                 />
-              </Field>
-              <Field label="حقوق پیشنهادی (ریال)">
+              </ErpField>
+              <ErpField label="حقوق پیشنهادی (ریال)">
                 <ErpInput
                   inputMode="numeric"
-                  className={inputClass}
                   value={data.desiredSalary}
                   onChange={(e) =>
                     set("desiredSalary", e.target.value.replace(/[^0-9۰-۹٠-٩٬,،\s]/g, ""))
                   }
                 />
-              </Field>
+              </ErpField>
             </div>
           </Section>
           <Section title="پرسش‌های مصاحبه اولیه">
             <div className="space-y-4">
               {questions.map((question, i) => (
-                <Field key={question} label={`${i + 1}. ${question}`}>
+                <ErpField key={question} label={`${i + 1}. ${question}`}>
                   <ErpTextarea
                     rows={3}
-                    className={inputClass}
                     value={data.questions[i]?.answer || ""}
                     onChange={(e) => {
                       const next = [...data.questions];
@@ -907,7 +813,7 @@ export default function ApplicantFormPage() {
                       set("questions", next);
                     }}
                   />
-                </Field>
+                </ErpField>
               ))}
             </div>
           </Section>
@@ -924,26 +830,16 @@ export default function ApplicantFormPage() {
               </span>
             </label>
             <ErpInput
-              className={`${inputClass} mt-3`}
+              className="mt-3"
               placeholder="نام و نام خانوادگی برای اظهارنامه"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
             />
             <div className="mt-4 flex flex-wrap gap-3">
-              <ErpPressable
-                type="button"
-                onClick={() =>
-                  run(
-                    saveApplicationDraft,
-                    "پیش‌نویس ذخیره شد.",
-                  )
-                }
-                className="rounded-xl border px-5 py-2 font-bold"
-              >
-                ذخیره پیش‌نویس
-              </ErpPressable>
-              <ErpPressable
-                type="button"
+              <ErpButton label="ذخیره پیش‌نویس" variant="outline" onClick={() => run(saveApplicationDraft, "پیش‌نویس ذخیره شد.")} />
+              <ErpButton
+                label="ارسال نهایی"
+                tone="success"
                 disabled={!declaration || !fullName}
                 onClick={() =>
                   run(async () => {
@@ -954,18 +850,11 @@ export default function ApplicantFormPage() {
                     });
                   }, "فرم نهایی ارسال و قفل شد.")
                 }
-                className="rounded-xl bg-[var(--sds-success)] px-5 py-2 font-bold text-[var(--sds-text-inverse)] disabled:opacity-50"
-              >
-                ارسال نهایی
-              </ErpPressable>
+              />
             </div>
           </section>
         </fieldset>
-        {submitted && (
-          <p className="mt-5 rounded-2xl bg-[var(--sds-success-surface)] p-5 text-[var(--sds-success)]">
-            فرم نهایی ثبت شده و تا زمان درخواست اصلاح منابع انسانی قفل است.
-          </p>
-        )}
+        {submitted && <ErpInlineState className="mt-5" kind="success" title="فرم نهایی ثبت شده و تا زمان درخواست اصلاح منابع انسانی قفل است." />}
         <ApplicantFormalAssessments
           assessments={application?.formalAssessments}
           busy={busy}
@@ -993,8 +882,8 @@ export default function ApplicantFormPage() {
               </div>
             </div>
             {application.compensation.collateralRequirement && (
-              <div className="mt-4 rounded-2xl border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-4 text-[var(--sds-warning)]">
-                <h3 className="font-black">شرایط وثیقه این پیشنهاد</h3>
+              <ErpCard className="mt-4 p-4">
+                <ErpInlineState kind="stale" title="شرایط وثیقه این پیشنهاد" />
                 <p className="mt-2 text-sm">
                   {application.compensation.collateralRequirement.candidateExplanation}
                 </p>
@@ -1009,7 +898,7 @@ export default function ApplicantFormPage() {
                     <span>زمان تحویل: {application.compensation.collateralRequirement.dueTiming}</span>
                   )}
                 </div>
-              </div>
+              </ErpCard>
             )}
             {!application.compensation.candidateDecision && (
               <div className="mt-4 space-y-3 border-t pt-4">
@@ -1022,7 +911,6 @@ export default function ApplicantFormPage() {
                   پیشنهاد همکاری را مطالعه کرده‌ام و می‌پذیرم.
                 </label>
                 <ErpInput
-                  className={inputClass}
                   placeholder="نام کامل برای پذیرش پیشنهاد"
                   value={offerFullName}
                   onChange={(event) => setOfferFullName(event.target.value)}
@@ -1042,7 +930,6 @@ export default function ApplicantFormPage() {
                 </ErpPressable>
                 <div className="grid gap-2 border-t pt-3 md:grid-cols-2">
                   <ErpSelect
-                    className={inputClass}
                     value={decline.category}
                     onChange={(event) =>
                       setDecline({ ...decline, category: event.target.value })
@@ -1056,7 +943,6 @@ export default function ApplicantFormPage() {
                     <option value="OTHER">سایر</option>
                   </ErpSelect>
                   <ErpInput
-                    className={inputClass}
                     placeholder="توضیح تکمیلی (اختیاری)"
                     value={decline.note}
                     onChange={(event) =>

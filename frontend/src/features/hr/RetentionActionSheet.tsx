@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ErpButton, ErpSheet, ErpTextarea } from "@/components/erp";
+import { ErpButton, ErpField, ErpSheet, ErpTextarea } from "@/components/erp";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
-import { HrField } from "@/features/hr/hrUi";
 
 export default function RetentionAction({
   title,
@@ -48,17 +47,17 @@ export default function RetentionAction({
     >
       <div className="space-y-4">
         <p className="text-sm font-bold">{targetName}</p>
-        <HrField label="دلیل" required>
+        <ErpField label="دلیل" required>
           <ErpTextarea
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             rows={3}
           />
-        </HrField>
+        </ErpField>
         {effectiveDate !== undefined && (
-          <HrField label="تاریخ اجرای بایگانی" required>
+          <ErpField label="تاریخ اجرای بایگانی" required>
             <HrPersianCalendar value={date} onChange={setDate} />
-          </HrField>
+          </ErpField>
         )}
       </div>
     </ErpSheet>

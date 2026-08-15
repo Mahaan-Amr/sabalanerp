@@ -1,4 +1,5 @@
 "use client";
+import { ErpInlineState } from "@/components/erp";
 
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -12,7 +13,7 @@ import {
   ErpPage,
   ErpProgressRingCard,
 } from "@/components/erp";
-import { apiError, HrMessage } from "@/features/hr/hrUi";
+import { apiError } from "@/features/hr/hrUi";
 import { hrAPI } from "@/lib/api";
 
 const filters = [
@@ -88,7 +89,7 @@ export default function HrPositionCapacityPage() {
         { label: "به‌روزرسانی", icon: FaSync, onClick: load, tone: "neutral" },
       ]}
     >
-      {error && <HrMessage>{error}</HrMessage>}
+      {error && <ErpInlineState kind="error" title={error} />}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
         <div className="xl:sticky xl:top-24 xl:self-start">
           <ErpProgressRingCard

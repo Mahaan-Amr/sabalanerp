@@ -583,7 +583,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 type="button"
                 aria-label="بازکردن منوی اصلی"
                 onClick={() => setSidebarOpen(true)}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
+                className="inline-flex h-12 w-12 min-h-12 min-w-12 items-center justify-center rounded-lg text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-inverse)] lg:hidden"
               >
                 <FaBars className="h-6 w-6" />
               </ErpPressable>

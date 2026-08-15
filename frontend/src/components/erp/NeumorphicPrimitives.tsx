@@ -537,7 +537,7 @@ export function ErpMobileBottomNavigation({
             href={item.href}
             aria-current={active ? "page" : undefined}
             className={cx(
-              "flex min-h-16 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-xs font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]",
+              "flex min-h-16 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-xs font-bold outline-none transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]",
               active
                 ? "bg-[var(--sds-accent-soft)] text-[var(--sds-accent-on-soft)] shadow-[var(--sds-neu-shadow-inset)]"
                 : "text-[var(--sds-text-secondary)] hover:text-[var(--sds-accent)]",

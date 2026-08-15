@@ -1,9 +1,9 @@
 'use client';
-import { ErpInput, ErpSelect, ErpTextarea } from '@/components/erp';
+import { ErpField, ErpInput, ErpSelect, ErpTextarea } from '@/components/erp';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { FaBan, FaCheck, FaEdit, FaPlus, FaPrint, FaSync, FaTrash } from 'react-icons/fa';
-import { ErpButton, ErpCard, ErpLoading, ErpPage, ErpSection, ErpSummaryGrid, ErpTwoColumn } from '@/components/erp';
+import { ErpButton, ErpCard, ErpInlineState, ErpLoading, ErpPage, ErpSection, ErpSummaryGrid, ErpTwoColumn } from '@/components/erp';
 import { logisticsAPI } from '@/lib/api';
 import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
 import { StatusBadge, dateFa, inputClass, labelClass, loadingDriversName, numberFa, unitLabels } from '../../logistics-ui';
@@ -94,7 +94,7 @@ export default function LoadingDetailPage() {
         { label: 'نهایی‌سازی', icon: FaCheck, onClick: () => runAction(() => logisticsAPI.finalizeLoading(loading.id)), disabled: dispatchTimelineStale || !canFinalize, tone: 'success', variant: 'solid' },
       ]}
     >
-      {actionError && <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">{actionError}</div>}
+      {actionError && <ErpInlineState kind="error" title={actionError} />}
 
       <ErpTwoColumn
         main={
@@ -132,9 +132,7 @@ export default function LoadingDetailPage() {
                       </p>
                     )}
                     {line.corrections?.length > 0 && (
-                      <div className="mt-3 rounded-lg bg-[var(--sds-warning-surface)] p-3 text-xs text-[var(--sds-warning)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]">
-                        اصلاحات: {line.corrections.map((item: any) => `${numberFa(item.deltaQuantity)} ${unitLabels[item.unit] || item.unit}`).join('، ')}
-                      </div>
+                      <ErpInlineState className="mt-3" kind="stale" title={`اصلاحات: ${line.corrections.map((item: any) => `${numberFa(item.deltaQuantity)} ${unitLabels[item.unit] || item.unit}`).join('، ')}`} />
                     )}
                   </ErpCard>
                 ))}
@@ -185,18 +183,17 @@ export default function LoadingDetailPage() {
             {canCorrect && (
               <ErpSection title="اصلاح مقدار">
                 <div className="space-y-3">
-                  <label>
-                    <span className={labelClass}>ردیف منبع</span>
-                    <ErpSelect className={inputClass} value={correction.sourceContractItemId} onChange={(event) => {
+                  <ErpField label="ردیف منبع" required>
+                    <ErpSelect value={correction.sourceContractItemId} onChange={(event) => {
                       const line = loading.lines.find((candidate: any) => candidate.sourceContractItemId === event.target.value);
                       setCorrection((current) => ({ ...current, sourceContractItemId: event.target.value, loadingLineId: line?.id || '' }));
                     }}>
                       <option value="">انتخاب کنید</option>
                       {loading.lines.map((line: any) => <option key={line.id} value={line.sourceContractItemId}>{line.productSnapshot?.name || line.product?.namePersian} · {line.sourceContract?.contractNumber}</option>)}
                     </ErpSelect>
-                  </label>
-                  <label><span className={labelClass}>دلتا مقدار</span><ErpInput className={inputClass} value={correction.deltaQuantity} onChange={(event) => setCorrection((current) => ({ ...current, deltaQuantity: event.target.value }))} placeholder="مثلا 0.25 یا -0.25" /></label>
-                  <label><span className={labelClass}>دلیل اصلاح</span><ErpTextarea className={`${inputClass} min-h-24`} value={correction.reason} onChange={(event) => setCorrection((current) => ({ ...current, reason: event.target.value }))} /></label>
+                  </ErpField>
+                  <ErpField label="دلتا مقدار" required><ErpInput value={correction.deltaQuantity} onChange={(event) => setCorrection((current) => ({ ...current, deltaQuantity: event.target.value }))} placeholder="مثلا 0.25 یا -0.25" /></ErpField>
+                  <ErpField label="دلیل اصلاح" required><ErpTextarea className="min-h-24" value={correction.reason} onChange={(event) => setCorrection((current) => ({ ...current, reason: event.target.value }))} /></ErpField>
                   <ErpButton
                     label="ثبت اصلاح"
                     icon={FaPlus}

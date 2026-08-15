@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpSelect } from '@/components/erp';
+import { ErpInlineState, ErpInput, ErpSelect } from '@/components/erp';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTimes, FaTrash, FaUserCheck, FaUserTimes, FaUsers } from 'react-icons/fa';
@@ -561,7 +561,7 @@ export default function UsersManagementPage() {
                 className="mt-2 w-full rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-left text-sm outline-none focus:border-[var(--sds-danger-border)] focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
               />
             </label>
-            {deleteError && <p className="mt-3 rounded-xl bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">{deleteError}</p>}
+            {deleteError && <ErpInlineState className="mt-3" kind="error" title={deleteError} />}
             <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <ErpButton label={deleting ? 'در حال حذف...' : 'حذف قطعی حساب'} onClick={confirmDeleteUser} tone="danger" variant="solid" disabled={deleting || deleteConfirmation !== userToDelete.username} />
               <ErpButton label="لغو" onClick={() => setShowDeleteModal(false)} tone="neutral" variant="outline" disabled={deleting} />

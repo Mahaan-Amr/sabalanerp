@@ -1,9 +1,9 @@
 'use client';
-import { ErpInput, ErpPressable } from '@/components/erp';
+import { ErpButton, ErpCard, ErpCheckbox, ErpField, ErpIconButton, ErpInlineState, ErpInput } from '@/components/erp';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FaEye, FaEyeSlash, FaUser, FaLock, FaArrowRight } from 'react-icons/fa';
+import { FaEye, FaEyeSlash, FaUser, FaArrowRight } from 'react-icons/fa';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { authAPI } from '@/lib/api';
 
@@ -89,112 +89,73 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="sds-workspace min-h-screen bg-gradient-to-br from-[var(--sds-surface-raised)] via-[var(--sds-surface-raised)] to-[var(--sds-surface-raised)] flex items-center justify-center p-6">
+    <main className="sds-workspace flex min-h-screen items-center justify-center bg-[var(--sds-surface-canvas)] p-6">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-4">
-            <div className="sds-workspace-surface p-4">
+            <ErpCard className="p-4">
               <FaUser className="h-12 w-12 text-[var(--sds-accent)]" />
-            </div>
+            </ErpCard>
           </div>
           <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] mb-2">ورود به حساب</h1>
           <p className="text-[var(--sds-text-muted)]">برای استفاده از سامانه ERP وارد شوید</p>
         </div>
 
         {/* Login Form */}
-        <div className="sds-workspace-surface p-8">
+        <ErpCard className="p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* General Error */}
-            {errors.general && (
-              <div className="bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)] rounded-lg p-4">
-                <p className="text-[var(--sds-danger)] text-sm">{errors.general}</p>
-              </div>
-            )}
+            {errors.general && <ErpInlineState kind="error" title={errors.general} />}
 
             {/* Login Identifier Field */}
-            <div>
-              <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">
-                ایمیل، نام کاربری یا شماره تماس
-              </label>
-              <div className="relative">
-                <FaUser className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-muted)]" />
-                <ErpInput
-                  type="text"
-                  name="identifier"
-                  value={formData.identifier}
-                  onChange={handleInputChange}
-                  className={`sds-field w-full pr-10 ${errors.identifier ? 'border-[var(--sds-danger-border)]' : ''}`}
-                  placeholder="ایمیل، نام کاربری یا شماره تماس"
-                  dir="ltr"
-                />
-              </div>
-              {errors.identifier && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.identifier}</p>}
-            </div>
+            <ErpField label="ایمیل، نام کاربری یا شماره تماس" error={errors.identifier}>
+              <ErpInput
+                type="text"
+                name="identifier"
+                value={formData.identifier}
+                onChange={handleInputChange}
+                placeholder="ایمیل، نام کاربری یا شماره تماس"
+                dir="ltr"
+              />
+            </ErpField>
 
             {/* Password Field */}
-            <div>
-              <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">
-                رمز عبور
-              </label>
-              <div className="relative">
-                <FaLock className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-muted)]" />
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+              <ErpField label="رمز عبور" error={errors.password}>
                 <ErpInput
                   type={showPassword ? 'text' : 'password'}
                   name="password"
                   value={formData.password}
                   onChange={handleInputChange}
-                  className={`sds-field w-full pr-10 pl-10 ${errors.password ? 'border-[var(--sds-danger-border)]' : ''}`}
                   placeholder="رمز عبور خود را وارد کنید"
                 />
-                <ErpPressable
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-muted)] hover:text-[var(--sds-text-muted)]"
-                >
-                  {showPassword ? <FaEyeSlash /> : <FaEye />}
-                </ErpPressable>
-              </div>
-              {errors.password && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.password}</p>}
+              </ErpField>
+              <ErpIconButton
+                label={showPassword ? 'پنهان‌کردن رمز' : 'نمایش رمز'}
+                icon={showPassword ? FaEyeSlash : FaEye}
+                onClick={() => setShowPassword(!showPassword)}
+              />
             </div>
 
             {/* Remember Me & Forgot Password */}
             <div className="flex items-center justify-between">
-              <label className="flex items-center">
-                <ErpInput
-                  type="checkbox"
-                  className="rounded border-[var(--sds-border-default)] text-[var(--sds-accent)] focus:ring-[var(--sds-focus-ring)]"
-                />
-                <span className="mr-2 text-sm text-[var(--sds-text-muted)]">مرا به خاطر بسپار</span>
-              </label>
-              <Link href="/forgot-password" className="text-sm text-[var(--sds-accent)] hover:text-[var(--sds-accent)]">
+              <ErpCheckbox label="مرا به خاطر بسپار" />
+              <Link href="/forgot-password" className="inline-flex min-h-11 items-center text-sm text-[var(--sds-accent)] hover:text-[var(--sds-accent)]">
                 فراموشی رمز عبور
               </Link>
             </div>
 
             {/* Submit Button */}
-            <ErpPressable
-              type="submit"
-              disabled={loading}
-              className="sds-action sds-tone-primary sds-action-solid w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {loading ? (
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--sds-border-default)]"></div>
-              ) : (
-                <>
-                  <span>ورود</span>
-                  <FaArrowRight />
-                </>
-              )}
-            </ErpPressable>
+            <ErpButton type="submit" label={loading ? 'در حال ورود...' : 'ورود'} icon={FaArrowRight} disabled={loading} variant="solid" className="w-full" />
           </form>
-        </div>
+        </ErpCard>
 
         {/* Register Link */}
         <div className="text-center mt-6">
-          <p className="text-[var(--sds-text-muted)]">
+          <p className="text-[var(--sds-text-secondary)]">
             حساب کاربری ندارید؟{' '}
-            <span className="text-[var(--sds-text-muted)]">ساخت حساب توسط مدیر سیستم انجام می‌شود</span>
+            <span>ساخت حساب توسط مدیر سیستم انجام می‌شود</span>
           </p>
         </div>
 

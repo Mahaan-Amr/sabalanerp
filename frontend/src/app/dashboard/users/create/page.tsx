@@ -1,17 +1,11 @@
 'use client';
-import { ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpPage, ErpPressable, ErpSection, ErpSegmentedControl, ErpSelect } from '@/components/erp';
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
   FaUserPlus,
-  FaArrowRight,
-  FaBuilding,
   FaShieldAlt,
   FaCheck,
-  FaTimes,
   FaEye,
-  FaEyeSlash
 } from 'react-icons/fa';
 import { authAPI, usersAPI, departmentsAPI, personnelAPI } from '@/lib/api';
 
@@ -180,12 +174,12 @@ const PERMISSION_PRESETS: Array<{
 ];
 
 export default function CreateUserPage() {
-  const router = useRouter();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<{ message: string; userId: string } | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
@@ -366,6 +360,7 @@ export default function CreateUserPage() {
 
     setLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
       // Create user
@@ -387,8 +382,10 @@ export default function CreateUserPage() {
       if (userResponse.data.success) {
         const createdUserId = userResponse.data.data.id;
         const permissionCount = userResponse.data.data.permissionSummary?.workspacePermissions || workspacePermissions.length;
-        alert(`کاربر با موفقیت ایجاد شد${permissionCount > 0 ? ` و ${permissionCount} دسترسی فضای کاری ثبت شد` : ''}.`);
-        router.push(`/dashboard/hr/users?createdUserId=${createdUserId}`);
+        setSuccess({
+          userId: createdUserId,
+          message: `کاربر با موفقیت ایجاد شد${permissionCount > 0 ? ` و ${permissionCount} دسترسی فضای کاری ثبت شد` : ''}.`,
+        });
       }
     } catch (error: any) {
       console.error('Error creating user:', error);
@@ -403,418 +400,47 @@ export default function CreateUserPage() {
   };
 
   return (
-    <main className="sds-workspace space-y-6">
-      {/* Header */}
-      <div className="sds-workspace-surface p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4 space-x-reverse">
-            <FaUserPlus className="h-8 w-8 text-[var(--sds-accent)]" />
-            <div>
-              <h1 className="text-2xl font-bold text-primary">ایجاد کاربر جدید</h1>
-              <p className="text-secondary">اطلاعات کاربر و نقش سازمانی را تکمیل کنید</p>
-            </div>
-          </div>
-          <Link
-            href="/dashboard/hr/users"
-            className="sds-action px-6 py-2 flex items-center space-x-2 space-x-reverse"
-          >
-            <FaArrowRight />
-            <span>بازگشت به لیست</span>
-          </Link>
-        </div>
-      </div>
-
-      {error && (
-        <div className="sds-workspace-surface p-4 bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)]">
-          <div className="flex items-center space-x-2 space-x-reverse">
-            <FaTimes className="text-[var(--sds-danger)]" />
-            <p className="text-[var(--sds-danger)]">{error}</p>
-          </div>
-        </div>
-      )}
-
+    <ErpPage title="ایجاد کاربر جدید" eyebrow="مدیریت کاربران" description="اطلاعات کاربر، نقش و دسترسی‌های سازمانی را تکمیل کنید." backHref="/dashboard/hr/users">
+      {error && <ErpInlineState kind="error" title={error} />}
+      {success && <ErpInlineState kind="success" title={success.message} action={{ label: 'بازگشت به فهرست کاربران', href: `/dashboard/hr/users?createdUserId=${success.userId}`, tone: 'neutral', variant: 'outline' }} />}
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Basic Information */}
-        <div className="sds-workspace-surface p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">اطلاعات پایه</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm text-secondary mb-2">نام *</label>
-              <ErpInput
-                type="text"
-                name="firstName"
-                value={formData.firstName}
-                onChange={handleInputChange}
-                className="sds-field w-full"
-                placeholder="نام"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-secondary mb-2">نام خانوادگی *</label>
-              <ErpInput
-                type="text"
-                name="lastName"
-                value={formData.lastName}
-                onChange={handleInputChange}
-                className="sds-field w-full"
-                placeholder="نام خانوادگی"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-secondary mb-2">ایمیل *</label>
-              <ErpInput
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                className="sds-field w-full"
-                placeholder="example@domain.com"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-secondary mb-2">نام کاربری *</label>
-              <ErpInput
-                type="text"
-                name="username"
-                value={formData.username}
-                onChange={handleInputChange}
-                className="sds-field w-full"
-                placeholder="نام کاربری"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-secondary mb-2">شماره تماس</label>
-              <ErpInput
-                type="tel"
-                name="phone"
-                value={formData.phone}
-                onChange={handleInputChange}
-                className="sds-field w-full"
-                placeholder="09123456789"
-                dir="ltr"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-secondary mb-2">رمز عبور *</label>
-              <div className="relative">
-                <ErpInput
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  value={formData.password}
-                  onChange={handleInputChange}
-                  className="sds-field w-full pr-10"
-                  placeholder="رمز عبور"
-                  required
-                />
-                <ErpPressable
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]"
-                >
-                  {showPassword ? <FaEyeSlash /> : <FaEye />}
-                </ErpPressable>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm text-secondary mb-2">تکرار رمز عبور *</label>
-              <div className="relative">
-                <ErpInput
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  name="confirmPassword"
-                  value={formData.confirmPassword}
-                  onChange={handleInputChange}
-                  className="sds-field w-full pr-10"
-                  placeholder="تکرار رمز عبور"
-                  required
-                />
-                <ErpPressable
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]"
-                >
-                  {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
-                </ErpPressable>
-              </div>
-            </div>
+        <ErpSection title="اطلاعات پایه">
+          <div className="grid gap-4 md:grid-cols-2">
+            <ErpField label="نام" required><ErpInput name="firstName" value={formData.firstName} onChange={handleInputChange} required /></ErpField>
+            <ErpField label="نام خانوادگی" required><ErpInput name="lastName" value={formData.lastName} onChange={handleInputChange} required /></ErpField>
+            <ErpField label="ایمیل" required><ErpInput type="email" name="email" value={formData.email} onChange={handleInputChange} dir="ltr" required /></ErpField>
+            <ErpField label="نام کاربری" required><ErpInput name="username" value={formData.username} onChange={handleInputChange} required /></ErpField>
+            <ErpField label="شماره تماس"><ErpInput type="tel" name="phone" value={formData.phone} onChange={handleInputChange} dir="ltr" /></ErpField>
+            <ErpField label="رمز عبور" required><div className="flex gap-2"><ErpInput aria-label="رمز عبور" type={showPassword ? 'text' : 'password'} name="password" value={formData.password} onChange={handleInputChange} required /><ErpButton label={showPassword ? 'پنهان‌کردن رمز' : 'نمایش رمز'} icon={FaEye} variant="ghost" onClick={() => setShowPassword(!showPassword)} /></div></ErpField>
+            <ErpField label="تکرار رمز عبور" required><div className="flex gap-2"><ErpInput aria-label="تکرار رمز عبور" type={showConfirmPassword ? 'text' : 'password'} name="confirmPassword" value={formData.confirmPassword} onChange={handleInputChange} required /><ErpButton label={showConfirmPassword ? 'پنهان‌کردن تکرار رمز' : 'نمایش تکرار رمز'} icon={FaEye} variant="ghost" onClick={() => setShowConfirmPassword(!showConfirmPassword)} /></div></ErpField>
           </div>
-        </div>
+        </ErpSection>
 
-        {/* Role and Department */}
-        <div className="sds-workspace-surface p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">نقش و دپارتمان</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm text-secondary mb-2">نقش</label>
-              <ErpSelect
-                name="role"
-                value={formData.role}
-                onChange={handleInputChange}
-                className="sds-field w-full"
-              >
-                <option value="USER">کاربر</option>
-                <option value="MODERATOR">ناظر</option>
-                <option value="SALES">فروش</option>
-                {currentUserRole !== 'MANAGER' && (
-                  <>
-                    <option value="MANAGER">مدیر</option>
-                    <option value="ADMIN">مدیر سیستم</option>
-                  </>
-                )}
-              </ErpSelect>
-            </div>
-
-            <div>
-              <label className="block text-sm text-secondary mb-2">دپارتمان</label>
-              <ErpSelect
-                name="departmentId"
-                value={formData.departmentId}
-                onChange={handleInputChange}
-                className="sds-field w-full"
-              >
-                <option value="">انتخاب دپارتمان</option>
-                {departments.map(dept => (
-                  <option key={dept.id} value={dept.id}>
-                    {dept.namePersian}
-                  </option>
-                ))}
-              </ErpSelect>
-            </div>
+        <ErpSection title="نقش و دپارتمان">
+          <div className="grid gap-4 md:grid-cols-2">
+            <ErpField label="نقش"><ErpSelect name="role" value={formData.role} onChange={handleInputChange}><option value="USER">کاربر</option><option value="MODERATOR">ناظر</option><option value="SALES">فروش</option>{currentUserRole !== 'MANAGER' && <><option value="MANAGER">مدیر</option><option value="ADMIN">مدیر سیستم</option></>}</ErpSelect></ErpField>
+            <ErpField label="دپارتمان"><ErpSelect name="departmentId" value={formData.departmentId} onChange={handleInputChange}><option value="">انتخاب دپارتمان</option>{departments.map((dept) => <option key={dept.id} value={dept.id}>{dept.namePersian}</option>)}</ErpSelect></ErpField>
           </div>
+          <ErpCheckbox className="mt-4" label="کاربر فعال" checked={formData.isActive} onChange={(event) => setFormData((current) => ({ ...current, isActive: event.target.checked }))} />
+        </ErpSection>
 
-          <div className="mt-4">
-            <label className="flex items-center space-x-2 space-x-reverse">
-              <ErpInput
-                type="checkbox"
-                name="isActive"
-                checked={formData.isActive}
-                onChange={handleInputChange}
-                className="rounded border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-accent)] focus:ring-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent)] dark:focus:ring-[var(--sds-focus-ring)]"
-              />
-              <span className="text-secondary">کاربر فعال</span>
-            </label>
-          </div>
-        </div>
+        <ErpSection title="دسترسی‌های فضای کاری" description="انتخاب‌ها همزمان با ایجاد کاربر ذخیره می‌شوند." actions={workspacePermissions.length ? [{ label: 'پاک‌کردن دسترسی‌ها', tone: 'neutral', variant: 'ghost', onClick: clearWorkspacePermissions }] : []}>
+          <h3 className="mb-3 text-sm font-semibold">الگوی دسترسی</h3>
+          <div className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{availablePermissionPresets.map((preset) => <ErpPressable key={preset.id} type="button" aria-pressed={selectedPresetId === preset.id} tone="neutral" variant="outline" onClick={() => applyPermissionPreset(preset.id)}>{selectedPresetId === preset.id ? 'انتخاب‌شده: ' : ''}{preset.label} · نقش {preset.recommendedRole}</ErpPressable>)}</div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Object.values(WORKSPACES).map((workspace) => { const permission = getCurrentPermission(workspace); return <ErpCard key={workspace} className="space-y-3 p-4"><h3 className="font-semibold">{WORKSPACE_LABELS[workspace as keyof typeof WORKSPACE_LABELS]}</h3><ErpSegmentedControl value={permission} onChange={(value) => handleWorkspacePermissionChange(workspace, value)} options={[{ value: 'none', label: 'بدون دسترسی' }, ...availableWorkspacePermissionEntries.map(([, value]) => ({ value, label: PERMISSION_LABELS[value as keyof typeof PERMISSION_LABELS] }))]} /><p className="text-xs text-[var(--sds-text-secondary)]">وضعیت: {permission === 'none' ? 'بدون دسترسی' : PERMISSION_LABELS[permission as keyof typeof PERMISSION_LABELS]}</p></ErpCard>; })}</div>
+        </ErpSection>
 
-        {/* Workspace Permissions */}
-        <div className="sds-workspace-surface p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">دسترسی‌های فضای کاری</h2>
-          <p className="text-secondary mb-6">
-            دسترسی‌های انتخاب‌شده همزمان با ایجاد کاربر ذخیره می‌شوند.
-          </p>
+        <ErpSection title="پرسنل مرتبط" description="حساب کاربری هویت ورود است؛ پرونده پرسنلی معنای سازمانی مستقل خود را حفظ می‌کند.">
+          <ErpSegmentedControl value={personnelMode} onChange={(value) => setPersonnelMode(value as 'none' | 'existing')} options={[{ value: 'none', label: 'بدون اتصال پرسنلی' }, { value: 'existing', label: 'اتصال به پرسنل موجود' }]} />
+          {personnelMode === 'existing' && <div className="mt-4"><ErpField label="پرسنل موجود" required><ErpSelect value={selectedPersonnelId} onChange={(event) => setSelectedPersonnelId(event.target.value)}><option value="">انتخاب پرسنل</option>{personnel.filter((person) => !person.user || person.id === selectedPersonnelId).map((person) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName} - {person.department?.namePersian || 'بدون بخش'}{person.user ? ' (متصل)' : ''}</option>)}</ErpSelect></ErpField></div>}
+        </ErpSection>
 
-          <div className="mb-6">
-            <div className="flex items-center justify-between gap-4 mb-3">
-              <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
-                <FaShieldAlt className="text-[var(--sds-accent)]" />
-                الگوی دسترسی
-              </h3>
-              {workspacePermissions.length > 0 && (
-                <ErpPressable
-                  type="button"
-                  onClick={clearWorkspacePermissions}
-                  className="sds-action px-4 py-2 text-sm"
-                >
-                  پاک کردن دسترسی‌ها
-                </ErpPressable>
-              )}
-            </div>
+        <ErpSection title="بازبینی نهایی">
+          <div className="grid gap-4 md:grid-cols-2"><ErpCard className="space-y-2 p-4"><h3 className="font-semibold">کاربر</h3><p>{formData.firstName || 'نام'} {formData.lastName || 'نام خانوادگی'}</p><p className="text-sm text-[var(--sds-text-secondary)]">{formData.email || 'ایمیل وارد نشده'} · نقش {formData.role}</p>{selectedPreset && selectedPreset.recommendedRole !== formData.role && <ErpInlineState kind="stale" title={`نقش پیشنهادی الگو: ${selectedPreset.recommendedRole}`} />}</ErpCard><ErpCard className="p-4"><h3 className="mb-3 font-semibold">دسترسی‌ها</h3>{workspacePermissions.length ? <div className="flex flex-wrap gap-2">{workspacePermissions.map((permission) => <ErpBadge key={permission.workspace} tone="info">{getWorkspacePermissionLabel(permission)}</ErpBadge>)}</div> : <ErpInlineState kind="stale" title="هیچ دسترسی فضای کاری انتخاب نشده است" />}</ErpCard></div>
+        </ErpSection>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {availablePermissionPresets.map((preset) => (
-                <ErpPressable
-                  key={preset.id}
-                  type="button"
-                  onClick={() => applyPermissionPreset(preset.id)}
-                  className={`text-right p-4 rounded-lg border transition-all duration-200 ${
-                    selectedPresetId === preset.id
-                      ? 'border-[var(--sds-accent)]/50 bg-[var(--sds-accent)]/10 text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]'
-                      : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-accent)]/40 hover:bg-[var(--sds-accent)]/5 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-inverse)] dark:hover:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-accent-surface)]'
-                  }`}
-                >
-                  <span className="block text-primary font-medium mb-1">{preset.label}</span>
-                  <span className="block text-sm text-secondary">{preset.description}</span>
-                  <span className="mt-3 block text-xs font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
-                    نقش پیشنهادی: {preset.recommendedRole}
-                  </span>
-                </ErpPressable>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {Object.entries(WORKSPACES).map(([key, workspace]) => (
-              <div key={workspace} className="sds-workspace-surface p-4">
-                <h3 className="font-medium text-primary mb-3">
-                  {WORKSPACE_LABELS[workspace as keyof typeof WORKSPACE_LABELS]}
-                </h3>
-
-                <div className="space-y-2">
-                  {availableWorkspacePermissionEntries.map(([permKey, permission]) => (
-                    <label key={permission} className="flex items-center space-x-2 space-x-reverse">
-                      <ErpInput
-                        type="radio"
-                        name={`workspace_${workspace}`}
-                        value={permission}
-                        checked={getCurrentPermission(workspace) === permission}
-                        onChange={() => handleWorkspacePermissionChange(workspace, permission)}
-                        className="text-[var(--sds-accent)] focus:ring-[var(--sds-accent)] dark:text-[var(--sds-accent)] dark:focus:ring-[var(--sds-focus-ring)]"
-                      />
-                      <span className="text-secondary text-sm">
-                        {PERMISSION_LABELS[permission as keyof typeof PERMISSION_LABELS]}
-                      </span>
-                    </label>
-                  ))}
-
-                  <label className="flex items-center space-x-2 space-x-reverse">
-                    <ErpInput
-                      type="radio"
-                      name={`workspace_${workspace}`}
-                      value="none"
-                      checked={getCurrentPermission(workspace) === 'none'}
-                      onChange={() => handleWorkspacePermissionChange(workspace, 'none')}
-                      className="text-[var(--sds-text-secondary)] focus:ring-[var(--sds-focus-ring)]"
-                    />
-                    <span className="text-sm text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">بدون دسترسی</span>
-                  </label>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Personnel Link */}
-        <div className="sds-workspace-surface p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">پرسنل مرتبط</h2>
-          <p className="text-secondary mb-4">
-            حساب کاربری برای ورود به سیستم است؛ پرسنل برای حضور و غیاب و عملیات سازمانی استفاده می‌شود.
-          </p>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className={`rounded-lg border p-4 transition ${personnelMode === 'none' ? 'border-[var(--sds-accent)]/50 bg-[var(--sds-accent)]/10 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)]' : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]'}`}>
-              <span className="flex items-center gap-2">
-                <ErpInput
-                  type="radio"
-                  checked={personnelMode === 'none'}
-                  onChange={() => setPersonnelMode('none')}
-                  className="text-[var(--sds-accent)] focus:ring-[var(--sds-accent)]"
-                />
-                <span className="font-semibold text-primary">بدون اتصال پرسنلی</span>
-              </span>
-              <span className="mt-2 block text-sm text-secondary">حساب فقط هویت دسترسی است؛ HR می‌تواند بعداً آن را به پرونده پرسنلی متصل کند.</span>
-            </label>
-            <label className={`rounded-lg border p-4 transition ${personnelMode === 'existing' ? 'border-[var(--sds-accent)]/50 bg-[var(--sds-accent)]/10 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)]' : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]'}`}>
-              <span className="flex items-center gap-2">
-                <ErpInput
-                  type="radio"
-                  checked={personnelMode === 'existing'}
-                  onChange={() => setPersonnelMode('existing')}
-                  className="text-[var(--sds-accent)] focus:ring-[var(--sds-accent)]"
-                />
-                <span className="font-semibold text-primary">اتصال به پرسنل موجود</span>
-              </span>
-              <span className="mt-2 block text-sm text-secondary">برای فردی که قبلاً در مدیریت پرسنل ثبت شده است.</span>
-            </label>
-          </div>
-          {personnelMode === 'existing' && (
-            <div className="mt-4">
-              <label className="block text-sm text-secondary mb-2">پرسنل موجود</label>
-              <ErpSelect
-                value={selectedPersonnelId}
-                  onChange={(event) => {
-                    const nextId = event.target.value;
-                    setSelectedPersonnelId(nextId);
-                  }}
-                className="sds-field w-full"
-              >
-                <option value="">انتخاب پرسنل</option>
-                {personnel.filter((person) => !person.user || person.id === selectedPersonnelId).map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.firstName} {person.lastName} - {person.department?.namePersian || 'بدون بخش'}{person.user ? ' (متصل)' : ''}
-                  </option>
-                ))}
-              </ErpSelect>
-            </div>
-          )}
-        </div>
-
-        {/* Review */}
-        <div className="sds-workspace-surface p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">بازبینی نهایی</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-              <p className="text-secondary mb-2">کاربر</p>
-              <p className="text-primary font-medium">
-                {formData.firstName || 'نام'} {formData.lastName || 'نام خانوادگی'}
-              </p>
-              <p className="text-secondary mt-1">{formData.email || 'ایمیل وارد نشده'}</p>
-              <p className="text-secondary mt-2">نقش انتخاب‌شده: {formData.role}</p>
-              <p className="text-secondary mt-2">
-                پرسنل مرتبط: {personnelMode === 'none' ? 'بدون اتصال؛ قابل تکمیل توسط HR' : personnel.find((person) => person.id === selectedPersonnelId) ? `${personnel.find((person) => person.id === selectedPersonnelId)?.firstName} ${personnel.find((person) => person.id === selectedPersonnelId)?.lastName}` : 'انتخاب نشده'}
-              </p>
-              {selectedPreset && selectedPreset.recommendedRole !== formData.role && (
-                <p className="mt-2 font-medium text-[var(--sds-warning)] dark:text-[var(--sds-warning)]">
-                  نقش پیشنهادی این الگو: {selectedPreset.recommendedRole}
-                </p>
-              )}
-            </div>
-            <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-4 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-              <p className="text-secondary mb-2">دسترسی‌ها</p>
-              {workspacePermissions.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {workspacePermissions.map((permission) => (
-                    <span
-                      key={permission.workspace}
-                      className="rounded-full border border-[var(--sds-accent)]/25 bg-[var(--sds-accent)]/10 px-3 py-1 text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]"
-                    >
-                      {getWorkspacePermissionLabel(permission)}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] p-3">
-                  <p className="font-medium text-[var(--sds-warning)] dark:text-[var(--sds-warning)]">هیچ دسترسی فضای کاری انتخاب نشده است</p>
-                  <p className="mt-1 text-[var(--sds-warning)] dark:text-[var(--sds-warning)]">
-                    کاربر ایجاد می‌شود، اما تا زمان افزودن دسترسی مستقیم یا نقش مناسب، دسترسی عملی محدودی خواهد داشت.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Submit Buttons */}
-        <div className="sds-workspace-surface p-6">
-          <div className="flex items-center justify-end space-x-4 space-x-reverse">
-            <Link
-              href="/dashboard/hr/users"
-              className="sds-action px-6 py-2"
-            >
-              انصراف
-            </Link>
-            <ErpPressable
-              type="submit"
-              disabled={loading}
-              className="sds-action sds-tone-primary sds-action-solid px-6 py-2 flex items-center space-x-2 space-x-reverse disabled:opacity-50"
-            >
-              {loading ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--sds-border-default)]"></div>
-              ) : (
-                <FaCheck />
-              )}
-              <span>{loading ? 'در حال ایجاد...' : 'ایجاد کاربر'}</span>
-            </ErpPressable>
-          </div>
-        </div>
+        <div className="flex flex-wrap justify-end gap-3"><ErpButton label="انصراف" href="/dashboard/hr/users" variant="outline" /><ErpButton type="submit" label={loading ? 'در حال ایجاد...' : 'ایجاد کاربر'} icon={FaUserPlus} disabled={loading} /></div>
       </form>
-    </main>
+    </ErpPage>
   );
 }

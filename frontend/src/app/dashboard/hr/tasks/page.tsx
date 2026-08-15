@@ -1,4 +1,5 @@
 "use client";
+import { ErpInlineState } from "@/components/erp";
 
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -17,6 +18,7 @@ import {
   ErpButton,
   ErpCard,
   ErpEmptyState,
+  ErpField,
   ErpInput,
   ErpLoading,
   ErpPage,
@@ -24,7 +26,7 @@ import {
   ErpSelect,
   ErpTextarea,
 } from "@/components/erp";
-import { dateFa, HrField, HrMessage, toIsoDate } from "@/features/hr/hrUi";
+import { dateFa, toIsoDate } from "@/features/hr/hrUi";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 
 const statusLabels: Record<string, string> = {
@@ -105,7 +107,6 @@ export default function HrTasksPage() {
     }
   };
 
-  if (loading) return <ErpLoading />;
   return (
     <ErpPage
       title="وظایف منابع انسانی"
@@ -115,8 +116,9 @@ export default function HrTasksPage() {
         { label: "به‌روزرسانی", icon: FaSync, onClick: load, tone: "neutral" },
       ]}
     >
-      {error && <HrMessage>{error}</HrMessage>}
-      {message && <HrMessage tone="success">{message}</HrMessage>}
+      {error && <ErpInlineState kind="error" title={error} />}
+      {message && <ErpInlineState kind="success" title={message} />}
+      {loading && <ErpLoading />}
 
       <div className="flex flex-wrap gap-2">
         <ErpButton
@@ -176,15 +178,15 @@ export default function HrTasksPage() {
       {canManage && (
         <ErpSection title="ایجاد وظیفه">
           <ErpCard className="grid gap-3 p-4 md:grid-cols-2">
-            <HrField label="عنوان" required>
+            <ErpField label="عنوان" required>
               <ErpInput
                 value={form.title}
                 onChange={(event) =>
                   setForm({ ...form, title: event.target.value })
                 }
               />
-            </HrField>
-            <HrField label="مسئول">
+            </ErpField>
+            <ErpField label="مسئول">
               <ErpSelect
                 value={form.assignedToUserId}
                 onChange={(event) =>
@@ -198,14 +200,14 @@ export default function HrTasksPage() {
                   </option>
                 ))}
               </ErpSelect>
-            </HrField>
-            <HrField label="مهلت" required>
+            </ErpField>
+            <ErpField label="مهلت" required>
               <PersianCalendarComponent
                 value={form.dueDate}
                 onChange={(dueDate) => setForm({ ...form, dueDate })}
               />
-            </HrField>
-            <HrField label="مقصد" required>
+            </ErpField>
+            <ErpField label="مقصد" required>
               <ErpSelect
                 value={form.destinationHref}
                 onChange={(event) =>
@@ -217,26 +219,26 @@ export default function HrTasksPage() {
                 <option value="/dashboard/hr/structure">ساختار سازمانی</option>
                 <option value="/dashboard/hr/migration">مهاجرت و تطبیق</option>
               </ErpSelect>
-            </HrField>
+            </ErpField>
             <div className="md:col-span-2">
-              <HrField label="شرح">
+              <ErpField label="شرح">
                 <ErpTextarea
                   value={form.description}
                   onChange={(event) =>
                     setForm({ ...form, description: event.target.value })
                   }
                 />
-              </HrField>
+              </ErpField>
             </div>
             <div className="md:col-span-2">
-              <HrField label="دلیل تخصیص">
+              <ErpField label="دلیل تخصیص">
                 <ErpInput
                   value={form.assignmentReason}
                   onChange={(event) =>
                     setForm({ ...form, assignmentReason: event.target.value })
                   }
                 />
-              </HrField>
+              </ErpField>
             </div>
             <div className="md:col-span-2">
               <ErpButton

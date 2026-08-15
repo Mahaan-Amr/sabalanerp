@@ -1,10 +1,11 @@
 'use client';
+import { ErpInlineState } from "@/components/erp";
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { FaDatabase } from 'react-icons/fa';
 import { ErpBadge, ErpCard, ErpLoading, ErpPage } from '@/components/erp';
-import { HrMessage, apiError } from '@/features/hr/hrUi';
+import { apiError } from '@/features/hr/hrUi';
 import { hrDisplayLabel } from '@/features/hr/hrDisplay';
 import { hrAPI } from '@/lib/api';
 
@@ -67,7 +68,7 @@ export default function HrMigrationRecordsPage() {
         tone: 'info',
       }]}
     >
-      {error && <HrMessage>{error}</HrMessage>}
+      {error && <ErpInlineState kind="error" title={error} />}
       {data && (
         <>
           <ErpCard className="hidden overflow-x-auto md:block">

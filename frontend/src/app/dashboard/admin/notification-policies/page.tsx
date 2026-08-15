@@ -10,6 +10,7 @@ import {
   ErpCheckboxControl,
   ErpEmptyState,
   ErpInput,
+  ErpInlineState,
   ErpLoading,
   ErpSelect,
   ErpSheet,
@@ -215,8 +216,8 @@ export default function NotificationPoliciesPage() {
 
   return (
     <ErpWorkspacePage title="سیاست‌های اعلان" primaryAction={{ label: 'به‌روزرسانی', onClick: load, icon: FaBell, tone: 'neutral', variant: 'outline' }}>
-      {message && <div role="status" className="rounded-xl border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] p-3 text-sm font-semibold text-[var(--sds-success)]">{message}</div>}
-      {error && <div role="alert" className="rounded-xl border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm font-semibold text-[var(--sds-danger)]">{error}</div>}
+      {message && <ErpInlineState kind="success" title={message} />}
+      {error && <ErpInlineState kind="error" title={error} />}
 
       <ErpCard className="p-3"><div className="relative max-w-xl"><FaSearch className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 sds-text-muted" /><ErpInput className="pr-10" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="جست‌وجوی رویداد اعلان" /></div></ErpCard>
       {loading ? <ErpLoading /> : visibleRows.length === 0 ? (

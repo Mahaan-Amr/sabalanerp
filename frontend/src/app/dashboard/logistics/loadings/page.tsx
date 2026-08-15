@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable } from '@/components/erp';
+import { ErpField, ErpInput, ErpPressable, ErpSheet, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import {
   FaBan,
@@ -18,6 +18,7 @@ import {
   ErpButton,
   ErpCard,
   ErpEmptyState,
+  ErpInlineState,
   ErpLoading,
   ErpPage,
   ErpPagination,
@@ -47,6 +48,8 @@ export default function LogisticsLoadingsPage() {
   const [acting, setActing] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [actionRequest, setActionRequest] = useState<null | { action: 'finalize' | 'delete' | 'cancel'; targets: any[] }>(null);
+  const [actionReason, setActionReason] = useState('');
 
   const load = async () => {
     setError('');
@@ -132,27 +135,8 @@ export default function LogisticsLoadingsPage() {
       return;
     }
 
-    if (action === 'finalize' && !confirm(`بارگیری ${row.loadingNumber} نهایی شود؟`)) return;
-    if (action === 'delete' && !confirm(`پیش‌نویس ${row.loadingNumber} حذف شود؟ این عملیات قابل بازگشت نیست.`)) return;
-
-    let reason = '';
-    if (action === 'cancel') {
-      reason = prompt(`دلیل لغو بارگیری ${row.loadingNumber} را وارد کنید:`) || '';
-      if (!reason.trim()) return;
-    }
-
-    try {
-      setActing(true);
-      if (action === 'finalize') await logisticsAPI.finalizeLoading(row.id);
-      if (action === 'delete') await logisticsAPI.deleteLoading(row.id);
-      if (action === 'cancel') await logisticsAPI.cancelLoading(row.id, reason.trim());
-      await reloadAfterAction();
-      setMessage(`${actionLabel(action)} بارگیری ${row.loadingNumber} انجام شد.`);
-    } catch (err: any) {
-      setError(err.response?.data?.error || `عملیات ${actionLabel(action)} ناموفق بود.`);
-    } finally {
-      setActing(false);
-    }
+    setActionReason('');
+    setActionRequest({ action, targets: [row] });
   };
 
   const eligibleRows = (action: 'finalize' | 'delete' | 'cancel' | 'print') => {
@@ -174,15 +158,13 @@ export default function LogisticsLoadingsPage() {
       return;
     }
 
-    if (action === 'finalize' && !confirm(`${targets.length.toLocaleString('fa-IR')} بارگیری پیش‌نویس نهایی شود؟`)) return;
-    if (action === 'delete' && !confirm(`${targets.length.toLocaleString('fa-IR')} پیش‌نویس حذف شود؟ این عملیات قابل بازگشت نیست.`)) return;
+    setActionReason('');
+    setActionRequest({ action, targets });
+  };
 
-    let reason = '';
-    if (action === 'cancel') {
-      reason = prompt(`دلیل لغو گروهی ${targets.length.toLocaleString('fa-IR')} بارگیری را وارد کنید:`) || '';
-      if (!reason.trim()) return;
-    }
-
+  const confirmRequestedAction = async () => {
+    if (!actionRequest || acting || (actionRequest.action === 'cancel' && !actionReason.trim())) return;
+    const { action, targets } = actionRequest;
     const failures: string[] = [];
     try {
       setActing(true);
@@ -190,7 +172,7 @@ export default function LogisticsLoadingsPage() {
         try {
           if (action === 'finalize') await logisticsAPI.finalizeLoading(row.id);
           if (action === 'delete') await logisticsAPI.deleteLoading(row.id);
-          if (action === 'cancel') await logisticsAPI.cancelLoading(row.id, reason.trim());
+          if (action === 'cancel') await logisticsAPI.cancelLoading(row.id, actionReason.trim());
         } catch (err: any) {
           failures.push(`${row.loadingNumber}: ${err.response?.data?.error || 'ناموفق'}`);
         }
@@ -199,10 +181,12 @@ export default function LogisticsLoadingsPage() {
       if (failures.length) {
         setError(`برخی عملیات‌ها ناموفق بود: ${failures.join(' | ')}`);
       } else {
-        setMessage(`${actionLabel(action)} گروهی برای ${targets.length.toLocaleString('fa-IR')} بارگیری انجام شد.`);
+        setMessage(targets.length === 1 ? `${actionLabel(action)} بارگیری ${targets[0].loadingNumber} انجام شد.` : `${actionLabel(action)} گروهی برای ${targets.length.toLocaleString('fa-IR')} بارگیری انجام شد.`);
       }
     } finally {
       setActing(false);
+      setActionRequest(null);
+      setActionReason('');
     }
   };
 
@@ -216,8 +200,8 @@ export default function LogisticsLoadingsPage() {
         { label: 'به‌روزرسانی', onClick: () => { void load(); }, icon: FaSync, tone: 'neutral' },
       ]}
     >
-      {message && <div className="rounded-xl border border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] px-4 py-3 text-sm text-[var(--sds-success)]">{message}</div>}
-      {error && <div className="rounded-xl border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-4 py-3 text-sm text-[var(--sds-danger)]">{error}</div>}
+      {message && <ErpInlineState kind="success" title={message} />}
+      {error && <ErpInlineState kind="error" title={error} />}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
@@ -360,6 +344,19 @@ export default function LogisticsLoadingsPage() {
         itemsPerPage={filteredRows.length || 1}
         itemLabel="بارگیری"
       />
+      <ErpSheet
+        open={Boolean(actionRequest)}
+        onClose={() => { if (!acting) { setActionRequest(null); setActionReason(''); } }}
+        title={`${actionRequest ? actionLabel(actionRequest.action) : ''} ${actionRequest?.targets.length === 1 ? `بارگیری ${actionRequest.targets[0].loadingNumber}` : `${actionRequest?.targets.length.toLocaleString('fa-IR')} بارگیری`}`}
+        presentation="modal"
+        pending={acting}
+        footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={acting} onClick={() => { setActionRequest(null); setActionReason(''); }} /><ErpButton label="تأیید و اجرا" tone={actionRequest?.action === 'finalize' ? 'success' : 'danger'} variant="solid" disabled={acting || (actionRequest?.action === 'cancel' && !actionReason.trim())} onClick={() => void confirmRequestedAction()} /></div>}
+      >
+        <div className="space-y-4">
+          <ErpInlineState kind={actionRequest?.action === 'delete' ? 'error' : 'stale'} title={actionRequest?.action === 'delete' ? 'حذف پیش‌نویس قابل بازگشت نیست.' : 'پیش از اجرا، تعداد و نوع عملیات را بازبینی کنید.'} />
+          {actionRequest?.action === 'cancel' && <ErpField label="دلیل لغو" required><ErpTextarea value={actionReason} onChange={(event) => setActionReason(event.target.value)} /></ErpField>}
+        </div>
+      </ErpSheet>
     </ErpPage>
   );
 }

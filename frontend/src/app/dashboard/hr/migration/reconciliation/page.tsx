@@ -1,10 +1,11 @@
 'use client';
+import { ErpInlineState } from "@/components/erp";
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { FaClipboardCheck, FaExclamationTriangle } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
-import { apiError, HrMessage } from '@/features/hr/hrUi';
+import { apiError } from '@/features/hr/hrUi';
 import {
   allowedReviewOutcomes,
   migrationAttentionFlagLabel,
@@ -106,7 +107,7 @@ export default function HrMigrationReconciliationPage() {
       backHref={backHref}
       metrics={[{ label: 'تعداد دقیق', value: Number(data?.matchingCount || 0).toLocaleString('fa-IR'), icon: FaClipboardCheck, tone: filters.cutoverBlocker ? 'warning' : 'info' }]}
     >
-      {error && <HrMessage>{error}</HrMessage>}
+      {error && <ErpInlineState kind="error" title={error} />}
       <div className="space-y-3">
         {data?.records.map((record) => {
           const actions = allowedReviewOutcomes(record.attentionFlags, record.primaryState);

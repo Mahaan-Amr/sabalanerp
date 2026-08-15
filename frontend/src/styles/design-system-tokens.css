@@ -76,7 +76,7 @@
   --sds-surface-overlay: rgb(0 0 0 / 72%);
   --sds-text-primary: #f4f8f8;
   --sds-text-secondary: #c1cece;
-  --sds-text-muted: #91a4a4;
+  --sds-text-muted: #c1cece;
   --sds-text-inverse: #071313;
   --sds-border-subtle: #203838;
   --sds-border-default: #2d4949;
@@ -123,8 +123,8 @@
   --sds-text-muted: #7c8996;
   --sds-border-subtle: rgb(70 88 105 / 8%);
   --sds-border-default: rgb(70 88 105 / 12%);
-  --sds-accent: #18a98f;
-  --sds-accent-hover: #138b76;
+  --sds-accent: #087864;
+  --sds-accent-hover: #066553;
   --sds-accent-soft: rgb(24 184 159 / 12%);
   --sds-accent-on-soft: #087864;
   --sds-focus-ring: #0f8f7a;
@@ -143,7 +143,7 @@
   --sds-surface-overlay: rgb(0 0 0 / 42%);
   --sds-text-primary: #f4f7f8;
   --sds-text-secondary: #b9c2cb;
-  --sds-text-muted: #7f8b97;
+  --sds-text-muted: #b9c2cb;
   --sds-border-subtle: rgb(255 255 255 / 5%);
   --sds-border-default: rgb(255 255 255 / 8%);
   --sds-border-strong: rgb(255 255 255 / 13%);
@@ -570,7 +570,8 @@
 }
 
 .sds-field::placeholder {
-    color: var(--sds-text-muted);
+    color: var(--sds-text-secondary);
+    opacity: 1;
 }
 
 .sds-text-primary {

@@ -1,65 +1,37 @@
 'use client';
 
-import { ErpPressable } from '@/components/erp';
+import { ErpButton, ErpPressable, ErpSegmentedControl, ErpSheet } from '@/components/erp';
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { FaChevronDown, FaClock } from 'react-icons/fa';
+import {
+  formatTime12,
+  parseTimeSelection,
+  to24HourTime,
+  type PersianTimeSelection,
+} from './persianTimeState';
 
-interface PersianTimePickerProps { value?: string; onChange: (value: string) => void; placeholder?: string; disabled?: boolean; className?: string }
+interface PersianTimePickerProps { value?: string; onChange: (value: string) => void; placeholder?: string; disabled?: boolean; className?: string; ariaLabel?: string }
 
-const parseTime = (value?: string) => {
-  const match = String(value || '').match(/^([01]\d|2[0-3]):([0-5]\d)$/);
-  const hour24 = match ? Number(match[1]) : 8;
-  return { hour: hour24 % 12 || 12, minute: match ? Number(match[2]) : 0, period: hour24 >= 12 ? 'PM' as const : 'AM' as const };
-};
+export { formatTime12 } from './persianTimeState';
 
-const to24Hour = (hour: number, minute: number, period: 'AM' | 'PM') => {
-  const hour24 = period === 'AM' ? hour % 12 : (hour % 12) + 12;
-  return `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-};
-
-export const formatTime12 = (value?: string | null) => {
-  if (!value) return '';
-  const parsed = parseTime(value);
-  return `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')} ${parsed.period}`;
-};
-
-export default function PersianTimePicker({ value, onChange, placeholder = 'انتخاب ساعت', disabled = false, className = '' }: PersianTimePickerProps) {
+export default function PersianTimePicker({ value, onChange, placeholder = 'انتخاب ساعت', disabled = false, className = '', ariaLabel }: PersianTimePickerProps) {
   const [open, setOpen] = useState(false);
-  const [selection, setSelection] = useState(() => parseTime(value));
+  const [selection, setSelection] = useState(() => parseTimeSelection(value));
   const anchorRef = useRef<HTMLButtonElement>(null);
-  const [position, setPosition] = useState({ top: 0, left: 0, width: 320 });
 
-  useEffect(() => setSelection(parseTime(value)), [value]);
-  const updatePosition = () => {
-    const rect = anchorRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const width = Math.min(340, window.innerWidth - 32);
-    const left = Math.max(16, Math.min(rect.right - width, window.innerWidth - width - 16));
-    const top = rect.bottom + 330 > window.innerHeight ? Math.max(16, rect.top - 338) : rect.bottom + 8;
-    setPosition({ top, left, width });
-  };
-  useEffect(() => {
-    if (!open) return;
-    updatePosition();
-    const close = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (!anchorRef.current?.contains(target) && !document.querySelector('.persian-time-picker-portal')?.contains(target)) setOpen(false);
-    };
-    window.addEventListener('resize', updatePosition); window.addEventListener('scroll', updatePosition); document.addEventListener('mousedown', close);
-    return () => { window.removeEventListener('resize', updatePosition); window.removeEventListener('scroll', updatePosition); document.removeEventListener('mousedown', close); };
-  }, [open]);
-  const commit = (next: typeof selection) => { setSelection(next); onChange(to24Hour(next.hour, next.minute, next.period)); };
+  useEffect(() => setSelection(parseTimeSelection(value)), [value]);
+  const commit = (next: PersianTimeSelection) => { setSelection(next); onChange(to24HourTime(next)); };
 
   return <div className={className} dir="ltr">
-    <ErpPressable ref={anchorRef} type="button" disabled={disabled} onClick={(event) => { event.stopPropagation(); setOpen((current) => !current); }} className="sds-field flex min-h-12 w-full items-center justify-between gap-3 text-left disabled:cursor-not-allowed disabled:opacity-50">
+    <ErpPressable ref={anchorRef} type="button" disabled={disabled} aria-label={ariaLabel || placeholder} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((current) => !current)} variant="outline" className="flex min-h-12 w-full items-center justify-between gap-3 text-left disabled:cursor-not-allowed disabled:opacity-50">
       <span className="flex items-center gap-2"><FaClock className="text-[var(--sds-accent)]" /><span>{value ? formatTime12(value) : placeholder}</span></span><FaChevronDown className={`text-xs sds-text-muted transition ${open ? 'rotate-180' : ''}`} />
     </ErpPressable>
-    {open && typeof window !== 'undefined' && createPortal(<div data-persian-calendar-owned-overlay="true" className="persian-time-picker-portal sds-workspace-surface fixed z-[99999] border border-[var(--sds-border-default)] p-4 shadow-[var(--sds-shadow-raised)]" style={{ top: position.top, left: position.left, width: position.width }} dir="rtl">
-      <div className="mb-4 flex items-center justify-between gap-3"><div><p className="font-bold sds-text-primary">انتخاب ساعت</p><p className="text-xs sds-text-secondary">{formatTime12(to24Hour(selection.hour, selection.minute, selection.period))} · {selection.period === 'AM' ? 'قبل‌ازظهر' : 'بعدازظهر'}</p></div><div className="flex rounded-lg border border-[var(--sds-border-default)] p-1" dir="ltr">{(['AM', 'PM'] as const).map((period) => <ErpPressable key={period} type="button" onClick={() => commit({ ...selection, period })} tone={selection.period === period ? 'primary' : 'neutral'} variant={selection.period === period ? 'solid' : 'ghost'} className="px-3 font-bold">{period}<span className="mr-1 text-[10px] font-normal">{period === 'AM' ? 'قبل‌ازظهر' : 'بعدازظهر'}</span></ErpPressable>)}</div></div>
-      <p className="mb-2 text-xs font-semibold sds-text-secondary">ساعت</p><div className="grid grid-cols-6 gap-1" dir="ltr">{Array.from({ length: 12 }, (_, index) => index + 1).map((hour) => <ErpPressable key={hour} type="button" onClick={() => commit({ ...selection, hour })} className={`rounded-lg py-2 text-sm ${selection.hour === hour ? 'bg-[var(--sds-accent)] text-[var(--sds-on-accent)]' : 'hover:bg-[var(--sds-surface-subtle)]'}`}>{hour}</ErpPressable>)}</div>
-      <p className="mb-2 mt-4 text-xs font-semibold sds-text-secondary">دقیقه</p><div className="grid max-h-24 grid-cols-10 gap-1 overflow-y-auto" dir="ltr">{Array.from({ length: 60 }, (_, minute) => minute).map((minute) => <ErpPressable key={minute} type="button" onClick={() => commit({ ...selection, minute })} className={`rounded-md py-1.5 text-xs ${selection.minute === minute ? 'bg-[var(--sds-accent)] text-[var(--sds-on-accent)]' : 'hover:bg-[var(--sds-surface-subtle)]'}`}>{String(minute).padStart(2, '0')}</ErpPressable>)}</div>
-      <div className="mt-4 flex justify-between border-t border-[var(--sds-border-subtle)] pt-3"><ErpPressable type="button" onClick={() => { onChange(''); setOpen(false); }} className="px-3">پاک‌کردن</ErpPressable><ErpPressable type="button" onClick={() => setOpen(false)} tone="primary" variant="solid" className="px-4">تأیید</ErpPressable></div>
-    </div>, document.body)}
+    <ErpSheet open={open} onClose={() => setOpen(false)} title="انتخاب ساعت" presentation="modal" returnFocusElement={anchorRef.current} footer={<div className="flex justify-between"><ErpButton label="پاک‌کردن" tone="neutral" variant="ghost" onClick={() => { onChange(''); setOpen(false); }} /><ErpButton label="تأیید ساعت" variant="solid" onClick={() => setOpen(false)} /></div>}>
+      <div dir="rtl">
+      <div className="mb-4 flex flex-col items-start justify-between gap-3 sm:flex-row"><div><p className="text-xs sds-text-secondary">{formatTime12(to24HourTime(selection))} · {selection.period === 'AM' ? 'قبل‌ازظهر' : 'بعدازظهر'}</p></div><div className="w-full sm:min-w-40 sm:w-auto" dir="ltr"><ErpSegmentedControl value={selection.period} onChange={(period) => commit({ ...selection, period })} options={[{ value: 'AM', label: 'AM · قبل‌ازظهر' }, { value: 'PM', label: 'PM · بعدازظهر' }]} /></div></div>
+      <p className="mb-2 text-xs font-semibold sds-text-secondary">ساعت</p><div className="grid grid-cols-6 gap-1" dir="ltr">{Array.from({ length: 12 }, (_, index) => index + 1).map((hour) => <ErpPressable key={hour} type="button" aria-label={`ساعت ${hour}`} aria-pressed={selection.hour === hour} onClick={() => commit({ ...selection, hour })} tone={selection.hour === hour ? 'primary' : 'neutral'} variant={selection.hour === hour ? 'solid' : 'ghost'} className="min-h-11 text-sm">{hour}</ErpPressable>)}</div>
+      <p className="mb-2 mt-4 text-xs font-semibold sds-text-secondary">دقیقه</p><div className="grid max-h-32 grid-cols-6 gap-1 overflow-y-auto sm:grid-cols-10" dir="ltr">{Array.from({ length: 60 }, (_, minute) => minute).map((minute) => <ErpPressable key={minute} type="button" aria-label={`دقیقه ${minute}`} aria-pressed={selection.minute === minute} onClick={() => commit({ ...selection, minute })} tone={selection.minute === minute ? 'primary' : 'neutral'} variant={selection.minute === minute ? 'solid' : 'ghost'} className="min-h-11 text-xs">{String(minute).padStart(2, '0')}</ErpPressable>)}</div>
+      </div>
+    </ErpSheet>
   </div>;
 }

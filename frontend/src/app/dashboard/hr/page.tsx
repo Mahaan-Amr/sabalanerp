@@ -1,4 +1,5 @@
 "use client";
+import { ErpInlineState } from "@/components/erp";
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -19,7 +20,7 @@ import {
   ErpProgressRingCard,
   ErpWorkList,
 } from "@/components/erp";
-import { apiError, HrMessage } from "@/features/hr/hrUi";
+import { apiError } from "@/features/hr/hrUi";
 import { authAPI, hrAPI, hrAuthorizationAPI } from "@/lib/api";
 import { hiringAPI } from "@/lib/hiringApi";
 
@@ -46,12 +47,9 @@ export default function HrDashboardPage() {
       setData(dashboard.data.data);
       setCurrentUser(currentUserResponse.data.data);
       setCanAdministerAuthority(Boolean(authorizationResponse.data.data.canAdministerAuthorityResponsibility));
-      try {
-        const work = await hiringAPI.workItemSummary();
-        setWorkSummary(work.data.data);
-      } catch {
-        setWorkSummary({ progress: { completed: 0, remaining: 0, total: 0, percentage: null }, items: [] });
-      }
+      void hiringAPI.workItemSummary()
+        .then((work) => setWorkSummary(work.data.data))
+        .catch(() => setWorkSummary({ progress: { completed: 0, remaining: 0, total: 0, percentage: null }, items: [] }));
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -93,7 +91,7 @@ export default function HrDashboardPage() {
         />
       </header>
 
-      {error && <HrMessage>{error}</HrMessage>}
+      {error && <ErpInlineState kind="error" title={error} />}
 
       <ErpNeumorphicMetricGrid
         items={[

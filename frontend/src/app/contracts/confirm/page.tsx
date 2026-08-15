@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable } from '@/components/erp';
+import { ErpButton, ErpCard, ErpField, ErpInlineState, ErpInput } from '@/components/erp';
 import { useState } from 'react';
 import { publicContractsAPI } from '@/lib/api';
 import ConfirmationContractView, { ConfirmationData } from './ConfirmationContractView';
@@ -113,43 +113,39 @@ export default function ManualContractConfirmationPage() {
 
   return (
     <main className="sds-workspace flex min-h-screen items-center justify-center px-4 py-10 text-primary">
-      <div className="sds-workspace-surface step-content-card w-full max-w-xl p-6">
+      <ErpCard className="w-full max-w-xl p-6">
         <h1 className="mb-2 text-2xl font-bold">تایید قرارداد سبلان ERP</h1>
         <p className="mb-6 text-sm text-secondary">
           برای مشاهده قرارداد، شماره قرارداد و شماره تماس دریافت‌کننده پیامک را وارد کنید.
         </p>
 
         <div className="space-y-4">
-          <div>
-            <label className="mb-2 block text-sm text-secondary">شماره قرارداد</label>
+          <ErpField label="شماره قرارداد">
             <ErpInput
               value={contractNumber}
               onChange={(event) => setContractNumber(event.target.value)}
-              className="sds-field"
               placeholder="مثلا SAL-000001"
             />
-          </div>
-          <div>
-            <label className="mb-2 block text-sm text-secondary">شماره تماس</label>
+          </ErpField>
+          <ErpField label="شماره تماس">
             <ErpInput
               value={phoneNumber}
               onChange={(event) => setPhoneNumber(event.target.value)}
-              className="sds-field"
               inputMode="tel"
               placeholder="09xxxxxxxxx"
             />
-          </div>
-          <ErpPressable type="submit"
+          </ErpField>
+          <ErpButton
+            label={loading ? 'در حال بررسی...' : 'مشاهده قرارداد'}
             disabled={loading}
             onClick={() => lookupContract()}
-            className="sds-action sds-tone-primary sds-action-solid w-full px-6 py-3 disabled:opacity-50"
-          >
-            {loading ? 'در حال بررسی...' : 'مشاهده قرارداد'}
-          </ErpPressable>
-          {error && <p className="text-sm text-[var(--sds-danger)]">{error}</p>}
-          {success && <p className="text-sm text-[var(--sds-success)]">{success}</p>}
+            variant="solid"
+            className="w-full"
+          />
+          {error && <ErpInlineState kind="error" title={error} />}
+          {success && <ErpInlineState kind="success" title={success} />}
         </div>
-      </div>
+      </ErpCard>
     </main>
   );
 }

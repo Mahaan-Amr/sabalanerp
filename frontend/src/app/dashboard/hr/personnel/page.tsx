@@ -1,7 +1,9 @@
 "use client";
+import { ErpInlineState } from "@/components/erp";
 import {
   ErpInput,
   ErpCheckbox,
+  ErpField,
   ErpPressable,
   ErpSelect,
   ErpSheet,
@@ -64,9 +66,6 @@ import {
   dateFa,
   dateTimeFa,
   employmentStatusLabel,
-  fieldClass,
-  HrField,
-  HrMessage,
   toIsoDate,
 } from "@/features/hr/hrUi";
 
@@ -580,8 +579,8 @@ export default function HrPersonnelPage() {
         { label: "به‌روزرسانی", icon: FaSync, onClick: load, tone: "neutral" },
       ]}
     >
-      {error && <HrMessage>{error}</HrMessage>}
-      {success && <HrMessage tone="success">{success}</HrMessage>}
+      {error && <ErpInlineState kind="error" title={error} />}
+      {success && <ErpInlineState kind="success" title={success} />}
 
       {canCreateExceptionalPersonnel ? (
         <ErpSheet
@@ -596,64 +595,64 @@ export default function HrPersonnelPage() {
           </p>
           <ErpCard className="p-4 sm:p-5">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <HrField label="نام" required>
+              <ErpField label="نام" required>
                 <ErpInput
-                  className={fieldClass}
+
                   value={form.firstName}
                   onChange={(e) =>
                     setForm({ ...form, firstName: e.target.value })
                   }
                 />
-              </HrField>
-              <HrField label="نام خانوادگی" required>
+              </ErpField>
+              <ErpField label="نام خانوادگی" required>
                 <ErpInput
-                  className={fieldClass}
+
                   value={form.lastName}
                   onChange={(e) =>
                     setForm({ ...form, lastName: e.target.value })
                   }
                 />
-              </HrField>
-              <HrField label="کد ملی" hint="در ثبت اولیه می‌تواند خالی بماند.">
+              </ErpField>
+              <ErpField label="کد ملی" hint="در ثبت اولیه می‌تواند خالی بماند.">
                 <ErpInput
-                  className={fieldClass}
+
                   inputMode="numeric"
                   value={form.nationalCode}
                   onChange={(e) =>
                     setForm({ ...form, nationalCode: e.target.value })
                   }
                 />
-              </HrField>
-              <HrField label="شماره پرسنلی">
+              </ErpField>
+              <ErpField label="شماره پرسنلی">
                 <ErpInput
-                  className={fieldClass}
+
                   value={form.employeeNumber}
                   onChange={(e) =>
                     setForm({ ...form, employeeNumber: e.target.value })
                   }
                 />
-              </HrField>
-              <HrField label="وضعیت شروع" required>
+              </ErpField>
+              <ErpField label="وضعیت شروع" required>
                 <ErpSelect
-                  className={fieldClass}
+
                   value={form.status}
                   onChange={(e) => setForm({ ...form, status: e.target.value })}
                 >
                   <option value="ACTIVE">فعال</option>
                   <option value="PLANNED">برنامه‌ریزی‌شده</option>
                 </ErpSelect>
-              </HrField>
-              <HrField label="تاریخ شروع" required>
+              </ErpField>
+              <ErpField label="تاریخ شروع" required>
                 <HrPersianCalendar
                   value={form.effectiveFrom}
                   onChange={(effectiveFrom) =>
                     setForm({ ...form, effectiveFrom })
                   }
                 />
-              </HrField>
-              <HrField label="جایگاه اصلی" required>
+              </ErpField>
+              <ErpField label="جایگاه اصلی" required>
                 <ErpSelect
-                  className={fieldClass}
+
                   value={form.positionId}
                   onChange={(e) =>
                     setForm({
@@ -673,13 +672,13 @@ export default function HrPersonnelPage() {
                       </option>
                     ))}
                 </ErpSelect>
-              </HrField>
-              <HrField
+              </ErpField>
+              <ErpField
                 label="کاربر سامانه"
                 hint="اختیاری؛ تنها برای دسترسی ERP."
               >
                 <ErpSelect
-                  className={fieldClass}
+
                   value={form.userId}
                   onChange={(e) => setForm({ ...form, userId: e.target.value })}
                 >
@@ -690,16 +689,16 @@ export default function HrPersonnelPage() {
                     </option>
                   ))}
                 </ErpSelect>
-              </HrField>
+              </ErpField>
               {supervisors.length > 1 && (
                 <div className="md:col-span-2">
-                  <HrField
+                  <ErpField
                     label="سرپرست مسئول"
                     required
                     hint="جایگاه سرپرست چند متصدی دارد؛ یک فرد را صریح انتخاب کنید."
                   >
                     <ErpSelect
-                      className={fieldClass}
+
                       value={form.responsibleSupervisorAssignmentId}
                       onChange={(e) =>
                         setForm({
@@ -715,7 +714,7 @@ export default function HrPersonnelPage() {
                         </option>
                       ))}
                     </ErpSelect>
-                  </HrField>
+                  </ErpField>
                 </div>
               )}
               <ErpCheckbox
@@ -726,9 +725,9 @@ export default function HrPersonnelPage() {
                     setForm({ ...form, confirmDuplicate: e.target.checked })
                   }
               />
-              <HrField label="منبع ثبت استثنایی" required>
+              <ErpField label="منبع ثبت استثنایی" required>
                 <ErpSelect
-                  className={fieldClass}
+
                   value={form.sourceCategory}
                   onChange={(e) =>
                     setForm({ ...form, sourceCategory: e.target.value })
@@ -741,22 +740,22 @@ export default function HrPersonnelPage() {
                     انتقال سازمانی
                   </option>
                 </ErpSelect>
-              </HrField>
+              </ErpField>
               <div className="md:col-span-2 xl:col-span-3">
-                <HrField
+                <ErpField
                   label="دلیل ثبت استثنایی"
                   required
                   hint="این توضیح به‌صورت دائمی در رویداد ممیزی نگهداری می‌شود."
                 >
                   <ErpTextarea
-                    className={fieldClass}
+
                     rows={2}
                     value={form.reason}
                     onChange={(e) =>
                       setForm({ ...form, reason: e.target.value })
                     }
                   />
-                </HrField>
+                </ErpField>
               </div>
             </div>
             <div className="mt-4">
@@ -805,7 +804,7 @@ export default function HrPersonnelPage() {
           description="مسیر عادی ایجاد پرسنل از پرونده جذب و پس از تکمیل کنترل‌های استخدام انجام می‌شود."
         >
           <ErpCard className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+            <p className="text-sm text-[var(--sds-text-secondary)]">
               برای نیروی جدید، ابتدا پرونده متقاضی را ایجاد و چرخه جذب را کامل
               کنید.
             </p>
@@ -847,7 +846,7 @@ export default function HrPersonnelPage() {
         <div className="mb-4">
           <ErpInput
             aria-label="جستجوی پرسنل"
-            className={fieldClass}
+
             value={searchDraft}
             onChange={(e) => {
               setSearchDraft(e.target.value);
@@ -1330,7 +1329,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange, userId }:
           <WorkScheduleEditor value={value} onChange={setValue} />
           <div className="grid gap-2 md:grid-cols-[1fr_auto]">
             <ErpInput
-              className={fieldClass}
+
               placeholder="دلیل پیشنهاد سرپرست مسئول"
               value={proposalNote}
               onChange={(event) => setProposalNote(event.target.value)}
@@ -1393,7 +1392,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange, userId }:
         (capabilities.canApprove || capabilities.canReturn) && (
           <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_auto]">
             <ErpInput
-              className={fieldClass}
+
               placeholder="دلیل بازگرداندن برای اصلاح"
               value={returnReason}
               onChange={(event) => setReturnReason(event.target.value)}
@@ -1473,9 +1472,9 @@ function AssignmentForm({
     <ErpCard tone="primary" className="mt-4 p-4">
       <p className="mb-3 font-bold">تخصیص ثانویه یا سرپرستی موقت</p>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <HrField label="نوع" required>
+        <ErpField label="نوع" required>
           <ErpSelect
-            className={fieldClass}
+
             value={assignment.type}
             onChange={(e) =>
               setAssignment({ ...assignment, type: e.target.value })
@@ -1487,10 +1486,10 @@ function AssignmentForm({
             <option value="SECONDARY">ثانویه (مصرف ظرفیت)</option>
             <option value="ACTING">سرپرستی موقت (بدون مصرف ظرفیت)</option>
           </ErpSelect>
-        </HrField>
-        <HrField label="جایگاه" required>
+        </ErpField>
+        <ErpField label="جایگاه" required>
           <ErpSelect
-            className={fieldClass}
+
             value={assignment.positionId}
             onChange={(e) =>
               setAssignment({
@@ -1513,27 +1512,27 @@ function AssignmentForm({
                 </option>
               ))}
           </ErpSelect>
-        </HrField>
-        <HrField label="شروع" required>
+        </ErpField>
+        <ErpField label="شروع" required>
           <HrPersianCalendar
             value={assignment.effectiveFrom}
             onChange={(effectiveFrom) =>
               setAssignment({ ...assignment, effectiveFrom })
             }
           />
-        </HrField>
-        <HrField label="پایان">
+        </ErpField>
+        <ErpField label="پایان">
           <HrPersianCalendar
             value={assignment.effectiveTo}
             onChange={(effectiveTo) =>
               setAssignment({ ...assignment, effectiveTo })
             }
           />
-        </HrField>
+        </ErpField>
         {supervisors.length > 1 && (
-          <HrField label="سرپرست مسئول" required>
+          <ErpField label="سرپرست مسئول" required>
             <ErpSelect
-              className={fieldClass}
+
               value={assignment.responsibleSupervisorAssignmentId}
               onChange={(e) =>
                 setAssignment({
@@ -1549,7 +1548,7 @@ function AssignmentForm({
                 </option>
               ))}
             </ErpSelect>
-          </HrField>
+          </ErpField>
         )}
         <label className="flex items-center gap-2 self-end rounded-xl border border-[var(--sds-border-default)] px-3 py-2.5 text-sm dark:border-[var(--sds-border-strong)]">
           <ErpInput

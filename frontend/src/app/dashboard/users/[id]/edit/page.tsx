@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
+import { ErpInlineState, ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaCheck, FaTimes, FaUserEdit } from 'react-icons/fa';
@@ -174,11 +174,7 @@ export default function EditUserPage({ params }: { params: { id: string } }) {
         />
       ) : (
         <form onSubmit={handleSubmit} className="space-y-5">
-          {error && (
-            <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-4 text-sm font-medium text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
-              {error}
-            </div>
-          )}
+          {error && <ErpInlineState kind="error" title={error} />}
 
           <ErpSection title="اطلاعات پایه">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

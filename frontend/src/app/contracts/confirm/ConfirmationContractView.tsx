@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable } from '@/components/erp';
+import { ErpButton, ErpCard, ErpInlineState, ErpInput } from '@/components/erp';
 import { formatPriceWithRial, toFiniteNumber } from '@/lib/numberFormat';
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
 
@@ -80,14 +80,14 @@ export default function ConfirmationContractView({
   return (
     <main className="sds-workspace min-h-screen px-4 py-10 text-primary">
       <div className="mx-auto max-w-5xl space-y-6">
-        <section className="sds-workspace-surface step-content-card p-6">
+        <ErpCard className="p-6">
           <h1 className="mb-2 text-2xl font-bold">تایید دیجیتال قرارداد</h1>
           <p className="text-secondary">
             لطفا اطلاعات قرارداد را بررسی کنید. ثبت کد پیامک شده به منزله تایید نهایی قرارداد و شرایط درج شده در آن است.
           </p>
-        </section>
+        </ErpCard>
 
-        <section className="sds-workspace-surface step-content-card p-6">
+        <ErpCard className="p-6">
           <h2 className="mb-4 text-xl font-semibold">اطلاعات قرارداد</h2>
           <div className="grid gap-3 text-sm sm:grid-cols-2">
             <p>شماره قرارداد: <span className="font-semibold">{data.contract.contractNumber}</span></p>
@@ -97,10 +97,10 @@ export default function ConfirmationContractView({
             <p>تعداد اقلام: <span className="font-semibold">{displayItems.length}</span></p>
             <p>وضعیت: <span className="font-semibold">{statusLabel(data.contractStatus)}</span></p>
           </div>
-        </section>
+        </ErpCard>
 
         {displayItems.length > 0 && (
-          <section className="sds-workspace-surface step-content-card p-6">
+          <ErpCard className="p-6">
             <h2 className="mb-4 text-xl font-semibold">اقلام قرارداد</h2>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm">
@@ -132,11 +132,11 @@ export default function ConfirmationContractView({
                 </tbody>
               </table>
             </div>
-          </section>
+          </ErpCard>
         )}
 
         {!isApproved ? (
-          <section className="sds-workspace-surface step-content-card p-6">
+          <ErpCard className="p-6">
             <h2 className="mb-3 text-xl font-semibold">ثبت کد تایید</h2>
             <p className="mb-4 text-sm text-secondary">
               بعد از بررسی قرارداد، کد ارسال شده به شماره مشتری را وارد کنید.
@@ -144,26 +144,20 @@ export default function ConfirmationContractView({
             <ErpInput
               value={code}
               onChange={(event) => onCodeChange(event.target.value)}
-              className="sds-field max-w-sm text-center"
+              className="max-w-sm text-center"
               inputMode="numeric"
               maxLength={8}
               placeholder="کد تایید"
             />
             <div className="mt-4 flex flex-wrap gap-3">
-              <ErpPressable type="submit" disabled={submitting} onClick={onVerify} className="sds-action sds-tone-primary sds-action-solid px-6 py-3 disabled:opacity-50">
-                تایید قرارداد
-              </ErpPressable>
-              <ErpPressable type="submit" disabled={submitting} onClick={onResend} className="sds-action disabled:opacity-50">
-                ارسال مجدد کد
-              </ErpPressable>
+              <ErpButton label="تایید قرارداد" disabled={submitting} onClick={onVerify} variant="solid" />
+              <ErpButton label="ارسال مجدد کد" disabled={submitting} onClick={onResend} variant="outline" tone="neutral" />
             </div>
-            {error && <p className="mt-4 text-sm text-[var(--sds-danger)]">{error}</p>}
-            {success && <p className="mt-4 text-sm text-[var(--sds-success)]">{success}</p>}
-          </section>
+            {error && <ErpInlineState kind="error" title={error} className="mt-4" />}
+            {success && <ErpInlineState kind="success" title={success} className="mt-4" />}
+          </ErpCard>
         ) : (
-          <section className="sds-workspace-surface step-content-card border-[var(--sds-success-border)] p-6 text-[var(--sds-success)]">
-            {verifiedDate ? `تایید شده در تاریخ ${verifiedDate}` : 'تایید شده'}
-          </section>
+          <ErpInlineState kind="success" title={verifiedDate ? `تایید شده در تاریخ ${verifiedDate}` : 'تایید شده'} />
         )}
       </div>
     </main>

@@ -20,7 +20,7 @@ const statusStyle: Record<HiringLifecycleStatus, string> = {
   COMPLETED:
     "sds-hiring-phase-completed border-[var(--sds-success-border)] bg-[var(--sds-success-surface)] text-[var(--sds-success)]",
   ACTION_REQUIRED:
-    "border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]",
+    "border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] text-[var(--sds-accent-on-soft)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent-on-soft)]",
   WAITING:
     "border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] text-[var(--sds-warning)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]",
   BLOCKED:
@@ -28,9 +28,9 @@ const statusStyle: Record<HiringLifecycleStatus, string> = {
   PAUSED:
     "border-[var(--sds-info-border)] bg-[var(--sds-info-surface)] text-[var(--sds-info)] dark:bg-[var(--sds-info-surface)] dark:text-[var(--sds-info)]",
   UPCOMING:
-    "border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]",
+    "border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]",
   ENDED:
-    "border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-muted)]",
+    "border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] text-[var(--sds-text-secondary)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]",
 };
 
 const statusIcon: Record<
@@ -107,7 +107,7 @@ export function HiringLifecycle({
           >
             مسیر جذب و شروع همکاری
           </p>
-          <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+          <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
             مرحله {projection.currentPhaseNumber.toLocaleString("fa-IR")} از{" "}
             {projection.totalPhases.toLocaleString("fa-IR")}
           </p>
@@ -162,21 +162,21 @@ export function HiringLifecycle({
           <h2 className="font-black text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
             {focused.title}
           </h2>
-          <span className="text-xs font-bold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+          <span className="text-xs font-bold text-[var(--sds-text-secondary)]">
             {focused.requiredComplete.toLocaleString("fa-IR")} از{" "}
             {focused.requiredTotal.toLocaleString("fa-IR")} مورد الزامی
           </span>
         </div>
-        <p className="mt-2 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+        <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">
           {focused.guidance}
         </p>
         {focused.responsibleFunction && (
-          <p className="mt-2 text-xs font-bold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+          <p className="mt-2 text-xs font-bold text-[var(--sds-text-secondary)]">
             مسئول ادامه: {focused.responsibleFunction}
           </p>
         )}
         {focused.primaryAction && (
-          <p className="mt-3 rounded-xl border border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
+          <p className="mt-3 rounded-xl border border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-accent-on-soft)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent-on-soft)]">
             گام بعدی: {focused.primaryAction.label}
           </p>
         )}

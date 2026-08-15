@@ -257,8 +257,11 @@ export const systemRecoveryAPI = {
 
 // Users API
 export const usersAPI = {
-  getUsers: (page = 1, limit = 10) =>
-    api.get(`/users?page=${page}&limit=${limit}`),
+  getUsers: (page = 1, limit = 10, filters: { search?: string; departmentId?: string; role?: string; status?: string } = {}) => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+    return api.get(`/users?${params.toString()}`);
+  },
   
   getUser: (id: string) => api.get(`/users/${id}`),
   
@@ -1289,10 +1292,21 @@ export const sabalanCalendarAPI = {
 export const hrAuthorizationAPI = {
   getMe: () => api.get('/hr/authorization/me'),
   getContext: () => api.get('/hr/authorization/context'),
+  saveUserAccess: (userId: string, data: {
+    role: string;
+    workspaceLevels: Record<string, string | null>;
+    features: Array<{ key: string; level: string }>;
+    expiresAt?: string;
+    reason: string;
+  }) => api.post(`/hr/authorization/user-access/${userId}`, data),
   grantWorkspace: (data: { userId: string; level: 'VIEW' | 'EDIT' | 'ADMIN'; reason: string }) =>
     api.post('/hr/authorization/workspace-grants', data),
+  revokeWorkspace: (id: string, reason: string) =>
+    api.post(`/hr/authorization/workspace-grants/${id}/revoke`, { reason }),
   grantFeature: (data: { userId: string; featureCode: string; level: 'VIEW' | 'EDIT' | 'ADMIN'; reason: string }) =>
     api.post('/hr/authorization/feature-grants', data),
+  revokeFeature: (id: string, reason: string) =>
+    api.post(`/hr/authorization/feature-grants/${id}/revoke`, { reason }),
   grantAuthority: (data: { userId: string; authorityCode: string; reason: string }) =>
     api.post('/hr/authorization/business-authorities', data),
   revokeAuthority: (id: string, reason: string) =>

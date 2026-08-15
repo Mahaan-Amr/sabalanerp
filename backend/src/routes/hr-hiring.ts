@@ -90,6 +90,7 @@ import {
 } from '../services/hrFormalAssessmentPolicy';
 import { DEFAULT_INTERVIEW_CRITERIA, normalizeInterviewCriteriaPublication } from '../services/hrInterviewCriteriaPolicy';
 import { nextEvaluationOccurrenceNumber, normalizeCompanyEvaluationPlanItem, validateCompanyEvaluationResult } from '../services/hrCompanyEvaluationPolicy';
+import { buildHiringCandidateSearchConditions } from '../services/hrHiringSearch';
 
 const router = express.Router();
 const ACCESS_TTL_DAYS = 7;
@@ -1485,12 +1486,7 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
       disposition: req.query.disposition ? req.query.disposition as any : undefined,
       positionId: req.query.positionId ? String(req.query.positionId) : undefined,
       position: req.query.jobId ? { jobId: String(req.query.jobId) } : undefined,
-      AND: search ? [{ OR: [
-        { candidate: { firstName: { contains: search, mode: 'insensitive' } } },
-        { candidate: { lastName: { contains: search, mode: 'insensitive' } } },
-        ...(canSeeFullMobile ? [{ candidate: { mobile: { contains: search } } }] : []),
-        ...(canSeeFullMobile ? [{ candidate: { nationalCode: { contains: search } } }] : [])
-      ] }] : undefined
+      AND: search ? buildHiringCandidateSearchConditions(search, canSeeFullMobile) : undefined
     },
     include: {
       candidate: { select: { id: true, firstName: true, lastName: true, mobile: true, talentBankSearchable: true, linkedPersonnelId: true, createdAt: true, updatedAt: true } },

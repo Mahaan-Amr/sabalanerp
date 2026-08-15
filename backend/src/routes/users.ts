@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prisma';
 import express, { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient, UserRole } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
@@ -11,6 +11,7 @@ import { newOpaqueToken, revokeSessions, serializeSession } from '../services/id
 import { selectionVersionHash } from '../services/personnelBulkPolicy';
 import { resolveExistingPersonnelLink } from '../services/hrPersonnelBoundary';
 import { assertUserCanBeDeleted, collectUserDeletionBlockers, UserDeletionPolicyError } from '../services/userDeletionPolicy';
+import { canAssignSystemRole } from '../services/userRoleAdministrationPolicy';
 
 const router = express.Router();
 const CUID_REGEX = /^c[a-z0-9]{24}$/;
@@ -77,9 +78,28 @@ router.get('/', protect, authorize('ADMIN', 'MANAGER'), async (req: AuthRequest,
     const limit = parseInt(req.query.limit as string) || 10;
     const skip = (page - 1) * limit;
 
-    const whereClause = req.user?.role === 'MANAGER'
-      ? { role: { not: 'ADMIN' as const }, erasedAt: null }
-      : { erasedAt: null };
+    const search = String(req.query.search || '').trim();
+    const departmentId = String(req.query.departmentId || '').trim();
+    const requestedRole = String(req.query.role || '').trim();
+    const role = Object.values(UserRole).includes(requestedRole as UserRole) ? requestedRole as UserRole : undefined;
+    const status = String(req.query.status || '').trim();
+    const roleFilters: Prisma.UserWhereInput[] = [];
+    if (req.user?.role === 'MANAGER') roleFilters.push({ role: { not: 'ADMIN' } });
+    if (role) roleFilters.push({ role });
+    const whereClause: Prisma.UserWhereInput = {
+      erasedAt: null,
+      ...(roleFilters.length ? { AND: roleFilters } : {}),
+      ...(departmentId ? { departmentId } : {}),
+      ...(status === 'active' ? { isActive: true } : status === 'inactive' ? { isActive: false } : {}),
+      ...(search ? {
+        OR: [
+          { firstName: { contains: search, mode: 'insensitive' } },
+          { lastName: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+          { username: { contains: search, mode: 'insensitive' } },
+        ],
+      } : {}),
+    };
 
     const users = await prisma.user.findMany({
       where: whereClause,
@@ -275,10 +295,14 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
       }
     }
 
-    if (req.user?.role === 'MANAGER' && ['ADMIN', 'MANAGER'].includes(role)) {
+    if (role && !canAssignSystemRole({
+      actorRole: req.user!.role,
+      targetRole: 'USER',
+      requestedRole: role,
+    })) {
       return res.status(403).json({
         success: false,
-        error: 'Managers cannot create admin or manager users'
+        error: 'Managers may create users with non-admin roles but cannot create administrator accounts'
       });
     }
 
@@ -670,10 +694,14 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
-    if (req.user!.role === 'MANAGER' && role) {
+    if (role && !canAssignSystemRole({
+      actorRole: req.user!.role,
+      targetRole: existingUser.role,
+      requestedRole: role,
+    })) {
       return res.status(403).json({
         success: false,
-        error: 'Only administrators can change roles'
+        error: 'Managers may assign non-admin roles but cannot create or modify administrator accounts'
       });
     }
 

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ErpBadge, ErpButton, ErpCard, ErpInput, ErpInlineState, ErpLoading, ErpPage, ErpSection, ErpSelect, ErpSheet, ErpTextarea } from "@/components/erp";
+import { FaArrowDown, FaArrowUp, FaChevronDown, FaChevronUp } from "react-icons/fa";
+import { ErpBadge, ErpButton, ErpCard, ErpIconButton, ErpInput, ErpInlineState, ErpLoading, ErpPage, ErpSection, ErpSelect, ErpSheet, ErpTextarea } from "@/components/erp";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 
 type Criterion = { stableId: string; title: string; description: string | null; answerType: string; isActive: boolean; allowUnassessed?: boolean };
@@ -19,6 +20,7 @@ export default function InterviewCriteriaPage() {
   const [reviewing, setReviewing] = useState(false);
   const [error, setError] = useState("");
   const [dragged, setDragged] = useState<number | null>(null);
+  const [expandedCriteria, setExpandedCriteria] = useState<Set<string>>(() => new Set());
   const [canManage, setCanManage] = useState(false);
   const [pendingHref, setPendingHref] = useState("");
   const dirty = useMemo(() => published && JSON.stringify(published) !== JSON.stringify(draft), [draft, published]);
@@ -48,17 +50,29 @@ export default function InterviewCriteriaPage() {
     try { const { data } = await hiringAPI.publishInterviewCriteria(draft); setVersion(data.data.version); setPublished(draft); setReviewing(false); }
     catch (cause) { setError(hiringError(cause)); }
   };
-  return <ErpPage eyebrow="منابع انسانی" title="معیارهای مصاحبه اولیه" description={`نسخه منتشرشده ${version.toLocaleString("fa-IR")}`} backHref="/dashboard/hr">
+  return <ErpPage eyebrow="منابع انسانی · جذب" title="معیارهای مصاحبه اولیه" description={`نسخه منتشرشده ${version.toLocaleString("fa-IR")}`} backHref="/dashboard/hr/hiring">
     {error && <ErpInlineState kind="error" title={error} />}
     <ErpSection title="نسخه در حال ویرایش" description="تغییرات تا زمان انتشار فقط در این صفحه باقی می‌مانند.">
       <div className="space-y-3">
-        {draft.map((criterion, index) => <div key={criterion.stableId} draggable={canManage} onDragStart={() => setDragged(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (dragged !== null) move(dragged, index); setDragged(null); }}><ErpCard className="p-4">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem_auto]">
-            <div className="space-y-2"><ErpInput disabled={!canManage} aria-label="عنوان معیار" value={criterion.title} onChange={(event) => update(index, { title: event.target.value })} /><ErpTextarea disabled={!canManage} aria-label="توضیح معیار" value={criterion.description || ""} onChange={(event) => update(index, { description: event.target.value || null })} placeholder="توضیح یا راهنمای اختیاری" /></div>
-            <ErpSelect disabled={!canManage} aria-label="نوع پاسخ" value={criterion.answerType} onChange={(event) => update(index, { answerType: event.target.value })}>{answerTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</ErpSelect>
-            <div className="flex flex-wrap gap-2"><ErpButton label="بالا" variant="ghost" disabled={!canManage || index === 0} onClick={() => move(index, index - 1)} /><ErpButton label="پایین" variant="ghost" disabled={!canManage || index === draft.length - 1} onClick={() => move(index, index + 1)} /><ErpButton label={criterion.isActive ? "غیرفعال‌سازی" : "فعال‌سازی"} disabled={!canManage} tone={criterion.isActive ? "warning" : "success"} onClick={() => update(index, { isActive: !criterion.isActive })} /></div>
-          </div>
-        </ErpCard></div>)}
+        {draft.map((criterion, index) => {
+          const detailsOpen = expandedCriteria.has(criterion.stableId);
+          return <div key={criterion.stableId} draggable={canManage} onDragStart={() => setDragged(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => { if (dragged !== null) move(dragged, index); setDragged(null); }}><ErpCard className="p-3">
+            <div className="grid gap-3 lg:grid-cols-[auto_minmax(14rem,1fr)_13rem_auto] lg:items-center">
+              <div className="flex items-center gap-2">
+                <ErpBadge tone={criterion.isActive ? "success" : "neutral"}>معیار {(index + 1).toLocaleString("fa-IR")}</ErpBadge>
+              </div>
+              <ErpInput disabled={!canManage} aria-label={`عنوان معیار ${(index + 1).toLocaleString("fa-IR")}`} value={criterion.title} onChange={(event) => update(index, { title: event.target.value })} />
+              <ErpSelect disabled={!canManage} aria-label={`نوع پاسخ معیار ${(index + 1).toLocaleString("fa-IR")}`} value={criterion.answerType} onChange={(event) => update(index, { answerType: event.target.value })}>{answerTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</ErpSelect>
+              <div className="flex flex-wrap items-center justify-end gap-1">
+                <ErpIconButton label="انتقال به بالا" title="انتقال به بالا" icon={FaArrowUp} disabled={!canManage || index === 0} onClick={() => move(index, index - 1)} />
+                <ErpIconButton label="انتقال به پایین" title="انتقال به پایین" icon={FaArrowDown} disabled={!canManage || index === draft.length - 1} onClick={() => move(index, index + 1)} />
+                <ErpIconButton label={detailsOpen ? "بستن جزئیات" : "نمایش جزئیات"} title={detailsOpen ? "بستن جزئیات" : "نمایش جزئیات"} icon={detailsOpen ? FaChevronUp : FaChevronDown} onClick={() => setExpandedCriteria((current) => { const next = new Set(current); if (next.has(criterion.stableId)) next.delete(criterion.stableId); else next.add(criterion.stableId); return next; })} />
+                <ErpButton label={criterion.isActive ? "غیرفعال‌سازی" : "فعال‌سازی"} disabled={!canManage} tone={criterion.isActive ? "warning" : "success"} variant="ghost" onClick={() => update(index, { isActive: !criterion.isActive })} />
+              </div>
+            </div>
+            {detailsOpen && <div className="mt-3 border-t border-[var(--sds-border-subtle)] pt-3"><ErpTextarea className="min-h-20" disabled={!canManage} aria-label={`توضیح معیار ${(index + 1).toLocaleString("fa-IR")}`} value={criterion.description || ""} onChange={(event) => update(index, { description: event.target.value || null })} placeholder="توضیح یا راهنمای اختیاری" /></div>}
+          </ErpCard></div>;
+        })}
       </div>
       {canManage && <div className="mt-4 flex flex-wrap justify-between gap-2"><ErpButton label="افزودن معیار" onClick={() => setDraft((rows) => [...rows, { stableId: crypto.randomUUID(), title: "", description: null, answerType: "TEXT", isActive: true, allowUnassessed: false }])} /><ErpButton label="انتشار نسخه جدید" variant="solid" disabled={!dirty || draft.some((item) => !item.title.trim())} onClick={() => setReviewing(true)} /></div>}
     </ErpSection>

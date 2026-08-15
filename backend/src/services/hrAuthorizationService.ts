@@ -19,8 +19,8 @@ export const loadHrAuthorizationSnapshot = async (
   client: HrAuthorizationClient,
   userId: string,
 ): Promise<HrAuthorizationSnapshot> => {
-  const [user, workspaceGrants, featureGrants, duties] = await Promise.all([
-    client.user.findUnique({ where: { id: userId }, select: { id: true, role: true, isActive: true } }),
+  const user = await client.user.findUnique({ where: { id: userId }, select: { id: true, role: true, isActive: true } });
+  const [workspaceGrants, featureGrants, roleWorkspaceGrants, roleFeatureGrants, duties] = await Promise.all([
     client.hrWorkspaceAccessGrant.findMany({
       where: { userId, workspaceCode: 'HUMAN_RESOURCES' },
       select: { workspaceCode: true, level: true, status: true, effectiveFrom: true, effectiveTo: true, reason: true },
@@ -29,6 +29,14 @@ export const loadHrAuthorizationSnapshot = async (
       where: { userId },
       select: { featureCode: true, level: true, status: true, effectiveFrom: true, effectiveTo: true, reason: true },
     }),
+    client.roleWorkspacePermission.findMany({
+      where: { role: user?.role ?? 'USER', workspace: 'hr', isActive: true },
+      select: { permissionLevel: true },
+    }),
+    client.roleFeaturePermission.findMany({
+      where: { role: user?.role ?? 'USER', workspace: 'hr', isActive: true },
+      select: { feature: true, permissionLevel: true },
+    }),
     client.hrDuty.findMany({
       where: { currentAssigneeUserId: userId, status: 'OPEN' },
       select: { id: true },
@@ -36,8 +44,20 @@ export const loadHrAuthorizationSnapshot = async (
   ]);
   return {
     user: user ?? { id: userId, role: 'USER', isActive: false },
-    workspaceGrants: workspaceGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
-    featureGrants: featureGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
+    workspaceGrants: [
+      ...workspaceGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
+      ...roleWorkspaceGrants.map((grant) => ({
+        workspaceCode: 'HUMAN_RESOURCES', level: grant.permissionLevel.toUpperCase() as 'VIEW' | 'EDIT' | 'ADMIN',
+        status: 'ACTIVE' as const, effectiveFrom: new Date(0), effectiveTo: null,
+      })),
+    ],
+    featureGrants: [
+      ...featureGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
+      ...roleFeatureGrants.map((grant) => ({
+        featureCode: grant.feature, level: grant.permissionLevel.toUpperCase() as 'VIEW' | 'EDIT' | 'ADMIN',
+        status: 'ACTIVE' as const, effectiveFrom: new Date(0), effectiveTo: null,
+      })),
+    ],
     // Legacy business-authority rows are retained as history but are not authorization input.
     authorityGrants: [],
     assignedDutyIds: duties.map(({ id }) => id),

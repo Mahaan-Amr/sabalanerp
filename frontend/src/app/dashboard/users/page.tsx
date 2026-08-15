@@ -1,6 +1,6 @@
 'use client';
 import { ErpInput, ErpSelect } from '@/components/erp';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTimes, FaTrash, FaUserCheck, FaUserTimes, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpListPage, ErpLoading, ErpSection, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
@@ -93,10 +93,13 @@ export default function UsersManagementPage() {
   const [permissions, setPermissions] = useState<WorkspacePermission[]>([]);
   const [rolePermissions, setRolePermissions] = useState<RoleWorkspacePermission[]>([]);
   const [loading, setLoading] = useState(true);
+  const [resultsLoading, setResultsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [searchDraft, setSearchDraft] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchRevision, setSearchRevision] = useState(0);
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [selectedRole, setSelectedRole] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
@@ -113,10 +116,20 @@ export default function UsersManagementPage() {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [deleteError, setDeleteError] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const referenceDataLoaded = useRef(false);
+  const requestSequence = useRef(0);
 
   useEffect(() => {
     fetchData();
-  }, [currentPage, searchTerm, selectedDepartment, selectedRole, selectedStatus]);
+  }, [currentPage, searchTerm, searchRevision, selectedDepartment, selectedRole, selectedStatus]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setCurrentPage(1);
+      setSearchTerm(searchDraft.trim());
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [searchDraft]);
 
   useEffect(() => {
     fetchCurrentUser();
@@ -135,38 +148,45 @@ export default function UsersManagementPage() {
   };
 
   const fetchData = async () => {
+    const sequence = ++requestSequence.current;
     try {
-      setLoading(true);
+      if (!referenceDataLoaded.current) setLoading(true);
+      setResultsLoading(true);
       setError(null);
 
       const [usersResponse, departmentsResponse, permissionsResponse, rolePermissionsResponse] = await Promise.all([
-        usersAPI.getUsers(currentPage, 10),
-        departmentsAPI.getDepartments(),
-        workspacePermissionsAPI.getUserPermissions({ page: 1, limit: 1000 }),
-        workspacePermissionsAPI.getRolePermissions(),
+        usersAPI.getUsers(currentPage, 10, { search: searchTerm, departmentId: selectedDepartment, role: selectedRole, status: selectedStatus }),
+        referenceDataLoaded.current ? Promise.resolve(null) : departmentsAPI.getDepartments(),
+        referenceDataLoaded.current ? Promise.resolve(null) : workspacePermissionsAPI.getUserPermissions({ page: 1, limit: 1000 }),
+        referenceDataLoaded.current ? Promise.resolve(null) : workspacePermissionsAPI.getRolePermissions(),
       ]);
+
+      if (sequence !== requestSequence.current) return;
 
       if (usersResponse.data.success) {
         setUsers(usersResponse.data.data);
         setTotalPages(usersResponse.data.pagination.pages);
       }
 
-      if (departmentsResponse.data.success) {
+      if (departmentsResponse?.data.success) {
         setDepartments(departmentsResponse.data.data);
       }
 
-      if (permissionsResponse.data.success) {
+      if (permissionsResponse?.data.success) {
         setPermissions(permissionsResponse.data.data);
       }
 
-      if (rolePermissionsResponse.data.success) {
+      if (rolePermissionsResponse?.data.success) {
         setRolePermissions(rolePermissionsResponse.data.data);
       }
+      referenceDataLoaded.current = true;
     } catch (error: any) {
       console.error('Error fetching users data:', error);
       setError(error.response?.data?.error || 'خطا در ارتباط با سرور');
     } finally {
+      if (sequence !== requestSequence.current) return;
       setLoading(false);
+      setResultsLoading(false);
     }
   };
 
@@ -292,25 +312,6 @@ export default function UsersManagementPage() {
     }
   };
 
-  const filteredUsers = useMemo(() => {
-    return users.filter((user) => {
-      const matchesSearch =
-        user.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.username.toLowerCase().includes(searchTerm.toLowerCase());
-
-      const matchesDepartment = !selectedDepartment || user.department?.id === selectedDepartment;
-      const matchesRole = !selectedRole || user.role === selectedRole;
-      const matchesStatus =
-        !selectedStatus ||
-        (selectedStatus === 'active' && user.isActive) ||
-        (selectedStatus === 'inactive' && !user.isActive);
-
-      return matchesSearch && matchesDepartment && matchesRole && matchesStatus;
-    });
-  }, [users, searchTerm, selectedDepartment, selectedRole, selectedStatus]);
-
   const createdUser = createdUserId ? users.find((user) => user.id === createdUserId) : null;
 
   const metrics: ErpMetric[] = [
@@ -323,7 +324,7 @@ export default function UsersManagementPage() {
   const columns: ErpColumn<User>[] = [
     {
       id: 'selection',
-      header: <ErpInput aria-label="انتخاب همه کاربران" type="checkbox" checked={filteredUsers.length > 0 && filteredUsers.every((item) => selectedIds.includes(item.id))} onChange={(event) => setSelectedIds(event.target.checked ? filteredUsers.map((item) => item.id) : [])} />,
+      header: <ErpInput aria-label="انتخاب همه کاربران" type="checkbox" checked={users.length > 0 && users.every((item) => selectedIds.includes(item.id))} onChange={(event) => setSelectedIds(event.target.checked ? users.map((item) => item.id) : [])} />,
       priority: 'secondary',
       cell: (user) => <ErpInput aria-label={`انتخاب ${user.firstName} ${user.lastName}`} type="checkbox" checked={selectedIds.includes(user.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? Array.from(new Set([...current, user.id])) : current.filter((id) => id !== user.id))} />,
     },
@@ -405,7 +406,7 @@ export default function UsersManagementPage() {
     return <ErpLoading />;
   }
 
-  if (error) {
+  if (error && !referenceDataLoaded.current) {
     return (
       <ErpEmptyState
         icon={FaUsers}
@@ -432,16 +433,21 @@ export default function UsersManagementPage() {
             id: 'search',
             label: 'جستجو',
             type: 'search',
-            value: searchTerm,
+            value: searchDraft,
             placeholder: 'جستجو در نام، ایمیل یا نام کاربری...',
-            onChange: setSearchTerm,
+            onChange: setSearchDraft,
+            onSubmit: () => {
+              setCurrentPage(1);
+              setSearchTerm(searchDraft.trim());
+              setSearchRevision((current) => current + 1);
+            },
           },
           {
             id: 'department',
             label: 'بخش',
             type: 'select',
             value: selectedDepartment,
-            onChange: setSelectedDepartment,
+            onChange: (value) => { setCurrentPage(1); setSelectedDepartment(value); },
             options: [
               { label: 'همه بخش‌ها', value: '' },
               ...departments.map((department) => ({ label: department.namePersian, value: department.id })),
@@ -452,7 +458,7 @@ export default function UsersManagementPage() {
             label: 'نقش',
             type: 'select',
             value: selectedRole,
-            onChange: setSelectedRole,
+            onChange: (value) => { setCurrentPage(1); setSelectedRole(value); },
             options: [
               { label: 'همه نقش‌ها', value: '' },
               { label: 'مدیر', value: 'ADMIN' },
@@ -467,7 +473,7 @@ export default function UsersManagementPage() {
             label: 'وضعیت',
             type: 'select',
             value: selectedStatus,
-            onChange: setSelectedStatus,
+            onChange: (value) => { setCurrentPage(1); setSelectedStatus(value); },
             options: [
               { label: 'همه وضعیت‌ها', value: '' },
               { label: 'فعال', value: 'active' },
@@ -475,9 +481,10 @@ export default function UsersManagementPage() {
             ],
           },
         ]}
-        rows={filteredUsers}
+        rows={users}
         rowKey={(user) => user.id}
         columns={columns}
+        isLoading={resultsLoading}
         rowActions={(user) => {
           const disableAdminActions = currentUserRole === 'MANAGER' && user.role === 'ADMIN';
           const disableDelete = currentUserRole !== 'ADMIN' || user.id === currentUserId;

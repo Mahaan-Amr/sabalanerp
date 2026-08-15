@@ -3603,12 +3603,7 @@ function AssessmentDecisionPanel({
         onChange={(event) => setReason(event.target.value)}
       />
       {decision === "REPEAT_REQUIRED" && (
-        <ErpInput
-          className={field}
-          type="datetime-local"
-          value={dueAt}
-          onChange={(event) => setDueAt(event.target.value)}
-        />
+        <HrPersianCalendar value={dueAt} onChange={setDueAt} showTime disablePastDates />
       )}
       <ErpButton
         label="ثبت تصمیم ارزیابی"
@@ -3620,7 +3615,7 @@ function AssessmentDecisionPanel({
               hiringAPI.decideAssessment(applicationId, {
                 decision,
                 reason,
-                dueAt: dueAt || undefined,
+                dueAt: dueAt ? toIsoDateTime(dueAt) : undefined,
               }),
             "تصمیم مدیریت شرکت درباره ارزیابی ثبت شد.",
           )
@@ -3800,14 +3795,7 @@ function CaseRecoveryPanel({
                 <option value="PHONE">رضایت تلفنی</option>
                 <option value="IN_PERSON">رضایت حضوری</option>
               </ErpSelect>
-              <ErpInput
-                className={field}
-                type="datetime-local"
-                value={consent.at}
-                onChange={(event) =>
-                  setConsent({ ...consent, at: event.target.value })
-                }
-              />
+              <HrPersianCalendar value={consent.at} onChange={(at) => setConsent({ ...consent, at })} showTime />
               <ErpInput
                 className={field}
                 placeholder="شرح رضایت جدید متقاضی"
@@ -3839,7 +3827,7 @@ function CaseRecoveryPanel({
                         : undefined,
                     candidateConsentedAt:
                       application.outcome === "WITHDRAWN"
-                        ? consent.at
+                        ? toIsoDateTime(consent.at)
                         : undefined,
                     candidateConsentNote:
                       application.outcome === "WITHDRAWN"

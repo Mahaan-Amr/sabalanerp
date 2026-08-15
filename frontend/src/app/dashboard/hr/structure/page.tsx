@@ -28,10 +28,13 @@ import { hrAPI } from "@/lib/api";
 import {
   apiError,
   fieldClass,
+  fromIsoDate,
   HrField,
   HrMessage,
+  toIsoDate,
   unitTypeLabel,
 } from "@/features/hr/hrUi";
+import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 
 type Tab = "units" | "jobs" | "positions" | "contexts";
 type BlockedDependency = { kind: string; count: number; href: string };
@@ -148,6 +151,7 @@ export default function HrStructurePage() {
       workplaceId: item.workplaceId || "",
       costCenterId: item.costCenterId || "",
       supervisorPositionId: item.supervisorPositionId || "",
+      capacity: item.capacity ?? 1,
       effectiveFrom: new Date().toISOString().slice(0, 10),
       reason: "اصلاح از مدیریت ساختار",
       expectedUpdatedAt: item.updatedAt,
@@ -161,11 +165,29 @@ export default function HrStructurePage() {
       : entityType === "job"
         ? () => hrAPI.updateJob(item.id, { ...form, title: form.name })
         : entityType === "position"
-          ? () => hrAPI.updatePosition(item.id, { ...form, title: form.name })
+          ? () => {
+              const { capacity: _capacity, ...structuralForm } = form;
+              return hrAPI.updatePosition(item.id, { ...structuralForm, title: form.name });
+            }
           : entityType === "workplace"
             ? () => hrAPI.updateWorkplace(item.id, { ...form, name: form.name })
             : () => hrAPI.updateCostCenter(item.id, { ...form, name: form.name });
     return run(action, "اطلاعات سازمانی به‌روزرسانی شد.", () => setEditTarget(null));
+  };
+  const saveEditCapacity = () => {
+    if (!editTarget || editTarget.entityType !== "position") return Promise.resolve();
+    const { item, form } = editTarget;
+    return run(
+      () => hrAPI.changePositionCapacity(item.id, {
+        newCapacity: Number(form.capacity),
+        effectiveAt: form.effectiveFrom,
+        reason: form.reason,
+        expectedUpdatedAt: item.updatedAt,
+        idempotencyKey: crypto.randomUUID(),
+      }),
+      "تغییر ظرفیت جایگاه ثبت شد.",
+      () => setEditTarget(null),
+    );
   };
   const permanentlyDelete = () => {
     if (!deleteTarget) return Promise.resolve();
@@ -758,6 +780,17 @@ export default function HrStructurePage() {
                 <HrField label="جایگاه سرپرست"><ErpSelect value={editTarget.form.supervisorPositionId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, supervisorPositionId: event.target.value } })}><option value="">بدون سرپرست</option>{data.positions.filter((item: any) => item.id !== editTarget.item.id && item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.title}</option>)}</ErpSelect></HrField>
                 <HrField label="محل کار"><ErpSelect value={editTarget.form.workplaceId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, workplaceId: event.target.value } })}><option value="">بدون پیش‌فرض</option>{data.workplaces.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></HrField>
                 <HrField label="مرکز هزینه"><ErpSelect value={editTarget.form.costCenterId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, costCenterId: event.target.value } })}><option value="">بدون پیش‌فرض</option>{data.costCenters.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></HrField>
+                <HrField label="ظرفیت جایگاه" required>
+                  <div className="flex gap-2">
+                    <ErpInput type="number" min={1} step={1} value={editTarget.form.capacity} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, capacity: Number(event.target.value) } })} />
+                    <ErpButton
+                      label="ثبت ظرفیت"
+                      variant="outline"
+                      disabled={saving || !Number.isInteger(Number(editTarget.form.capacity)) || Number(editTarget.form.capacity) < 1 || Number(editTarget.form.capacity) === Number(editTarget.item.capacity) || !editTarget.form.reason.trim()}
+                      onClick={saveEditCapacity}
+                    />
+                  </div>
+                </HrField>
               </div>
             )}
             {editTarget.entityType !== "position" && (
@@ -766,7 +799,7 @@ export default function HrStructurePage() {
             {editTarget.entityType === "job" && (
               <HrField label="مسئولیت‌ها"><ErpTextarea value={editTarget.form.responsibilities} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, responsibilities: event.target.value } })} /></HrField>
             )}
-            <HrField label="تاریخ اثر" required><ErpInput type="date" value={editTarget.form.effectiveFrom} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, effectiveFrom: event.target.value } })} /></HrField>
+            <HrField label="تاریخ اثر" required><HrPersianCalendar value={fromIsoDate(editTarget.form.effectiveFrom)} onChange={(value) => setEditTarget({ ...editTarget, form: { ...editTarget.form, effectiveFrom: toIsoDate(value) } })} disablePastDates /></HrField>
             <HrField label="دلیل تغییر" required><ErpTextarea value={editTarget.form.reason} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, reason: event.target.value } })} /></HrField>
           </div>
         )}
@@ -814,7 +847,7 @@ function CreationLifecycleFields({ form, setForm }: { form: any; setForm: (value
         </ErpSelect>
       </HrField>
       <HrField label={form.status === "ACTIVE" ? "تاریخ فعال‌سازی" : "تاریخ ثبت وضعیت"} required>
-        <ErpInput type="date" min={new Date().toISOString().slice(0, 10)} value={form.effectiveFrom} onChange={(event) => setForm({ ...form, effectiveFrom: event.target.value })} />
+        <HrPersianCalendar value={fromIsoDate(form.effectiveFrom)} onChange={(value) => setForm({ ...form, effectiveFrom: toIsoDate(value) })} disablePastDates />
       </HrField>
     </>
   );

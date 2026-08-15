@@ -4,6 +4,8 @@ import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize } from '../middleware/auth';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES, FEATURE_LABELS, FEATURE_WORKSPACE_MAP } from '../middleware/feature';
+import { expandFeaturePrerequisites, featurePrerequisites } from '../services/featurePermissionPrerequisites';
+import { expandHrActionPermissionSelection, getHrActionPermissionDefinition } from '../services/hrActionPermissionCatalog';
 
 const router = express.Router();
 
@@ -16,6 +18,7 @@ const FEATURE_EXCEPTION_PERMISSION_LEVELS = [
 ];
 
 const getFeatureWorkspace = (feature: string): string | null => {
+  if (getHrActionPermissionDefinition(feature)) return 'hr';
   if (!Object.values(FEATURES).includes(feature as any)) {
     return null;
   }
@@ -40,10 +43,12 @@ const validateFeatureWorkspacePair = (feature: string, workspace: string): strin
 // @access  Private/Admin
 router.get('/features/definitions', protect, authorize('ADMIN', 'MANAGER'), async (req: any, res: Response) => {
   try {
+    const availableFeatures = Object.values(FEATURES);
     const data = Object.values(FEATURES).map((feature) => ({
       key: feature,
       label: FEATURE_LABELS[feature] || feature,
-      workspace: FEATURE_WORKSPACE_MAP[feature]
+      workspace: FEATURE_WORKSPACE_MAP[feature],
+      prerequisites: featurePrerequisites(feature, availableFeatures),
     }));
 
     data.sort((a, b) => {
@@ -288,16 +293,21 @@ router.post('/features', protect, authorize('ADMIN', 'MANAGER'), [
       });
     }
 
-    const permission = await prisma.featurePermission.create({
-      data: {
-        userId,
-        workspace,
-        feature,
-        permissionLevel,
-        grantedBy: req.user.id,
-        expiresAt: expiresAt ? new Date(expiresAt) : null
-      },
-      include: {
+    const availableFeatures = Object.values(FEATURES);
+    const expandedFeatures = expandFeaturePrerequisites([feature], availableFeatures);
+    const permission = await prisma.$transaction(async (tx) => {
+      for (const prerequisite of expandedFeatures.filter((candidate) => candidate !== feature)) {
+        const prerequisiteWorkspace = FEATURE_WORKSPACE_MAP[prerequisite as keyof typeof FEATURE_WORKSPACE_MAP];
+        await tx.featurePermission.upsert({
+          where: { userId_workspace_feature: { userId, workspace: prerequisiteWorkspace, feature: prerequisite } },
+          create: { userId, workspace: prerequisiteWorkspace, feature: prerequisite, permissionLevel: 'view', grantedBy: req.user.id, expiresAt: expiresAt ? new Date(expiresAt) : null },
+          update: { isActive: true, grantedBy: req.user.id, grantedAt: new Date(), expiresAt: expiresAt ? new Date(expiresAt) : null },
+        });
+      }
+      return tx.featurePermission.create({ data: {
+        userId, workspace, feature, permissionLevel, grantedBy: req.user.id,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+      }, include: {
         user: {
           select: {
             id: true,
@@ -315,7 +325,7 @@ router.post('/features', protect, authorize('ADMIN', 'MANAGER'), [
             email: true
           }
         }
-      }
+      } });
     });
 
     console.info('[permissions] feature permission created', {
@@ -402,31 +412,36 @@ router.post('/features/bulk', protect, authorize('ADMIN', 'MANAGER'), [
       }
     }
 
+    const requestedByFeature = new Map(normalizedPermissions.map((permission) => [permission.feature, permission]));
+    const expandedFeatures = expandFeaturePrerequisites([...requestedByFeature.keys()], Object.values(FEATURES));
     const upsertedPermissions = await prisma.$transaction(
-      normalizedPermissions.map((permission) => prisma.featurePermission.upsert({
+      expandedFeatures.map((feature) => {
+        const permission = requestedByFeature.get(feature) as any;
+        const workspace = permission?.workspace || FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP];
+        return prisma.featurePermission.upsert({
         where: {
           userId_workspace_feature: {
             userId,
-            workspace: permission.workspace,
-            feature: permission.feature
+            workspace,
+            feature
           }
         },
         create: {
           userId,
-          workspace: permission.workspace,
-          feature: permission.feature,
-          permissionLevel: permission.permissionLevel,
+          workspace,
+          feature,
+          permissionLevel: permission?.permissionLevel || 'view',
           grantedBy: req.user.id,
-          expiresAt: permission.expiresAt ? new Date(permission.expiresAt) : null
+          expiresAt: permission?.expiresAt ? new Date(permission.expiresAt) : null
         },
         update: {
-          permissionLevel: permission.permissionLevel,
+          permissionLevel: permission?.permissionLevel || 'view',
           grantedBy: req.user.id,
           grantedAt: new Date(),
-          expiresAt: permission.expiresAt ? new Date(permission.expiresAt) : null,
+          expiresAt: permission?.expiresAt ? new Date(permission.expiresAt) : null,
           isActive: true
         }
-      }))
+      }); })
     );
 
     console.info('[permissions] feature permissions bulk upserted', {
@@ -610,6 +625,10 @@ router.delete('/features/:id', protect, authorize('ADMIN', 'MANAGER'), async (re
       });
     }
 
+    const siblingPermissions = await prisma.featurePermission.findMany({ where: { userId: permission.userId, isActive: true, id: { not: permission.id } }, select: { feature: true } });
+    const requiredBy = siblingPermissions.find(({ feature }) => expandFeaturePrerequisites([feature], Object.values(FEATURES)).includes(permission.feature));
+    if (requiredBy) return res.status(409).json({ success: false, error: `Permission is required by ${requiredBy.feature}` });
+
     await prisma.featurePermission.delete({
       where: { id }
     });
@@ -752,13 +771,19 @@ router.post('/role-features', protect, authorize('ADMIN'), [
       });
     }
 
-    const permission = await prisma.roleFeaturePermission.create({
-      data: {
-        role,
-        workspace,
-        feature,
-        permissionLevel
+    const permission = await prisma.$transaction(async (tx) => {
+      const prerequisites = getHrActionPermissionDefinition(feature)
+        ? expandHrActionPermissionSelection([feature])
+        : expandFeaturePrerequisites([feature], Object.values(FEATURES));
+      for (const prerequisite of prerequisites.filter((candidate) => candidate !== feature)) {
+        const prerequisiteWorkspace = getFeatureWorkspace(prerequisite)!;
+        await tx.roleFeaturePermission.upsert({
+          where: { role_workspace_feature: { role, workspace: prerequisiteWorkspace, feature: prerequisite } },
+          create: { role, workspace: prerequisiteWorkspace, feature: prerequisite, permissionLevel: 'view' },
+          update: { isActive: true },
+        });
       }
+      return tx.roleFeaturePermission.create({ data: { role, workspace, feature, permissionLevel } });
     });
 
     console.info('[permissions] role feature permission created', {
@@ -888,6 +913,10 @@ router.delete('/role-features/:id', protect, authorize('ADMIN'), async (req: any
         error: 'Managers cannot modify admin role permissions'
       });
     }
+
+    const siblingPermissions = await prisma.roleFeaturePermission.findMany({ where: { role: permission.role, isActive: true, id: { not: permission.id } }, select: { feature: true } });
+    const requiredBy = siblingPermissions.find(({ feature }) => expandFeaturePrerequisites([feature], Object.values(FEATURES)).includes(permission.feature));
+    if (requiredBy) return res.status(409).json({ success: false, error: `Permission is required by ${requiredBy.feature}` });
 
     await prisma.roleFeaturePermission.delete({
       where: { id }

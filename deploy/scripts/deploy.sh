@@ -47,7 +47,7 @@ start_release_services() {
 
 run_backend() {
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
@@ -76,7 +76,7 @@ run_backend_timed() {
     DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
     BACKEND_DB_CONNECTION_LIMIT=2 \
     DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \

@@ -16,6 +16,16 @@ assert.match(
   /run_backend_timed_with_heartbeat "\$\{checkpoint_timeout\}" node dist\/scripts\/deployment-checkpoint\.js/,
   'the coordinated checkpoint must run through the heartbeat-aware wrapper',
 );
+assert.match(
+  deployScript,
+  /run_backend\(\)[\s\S]*docker compose[^\n]* run -T --rm --no-deps/,
+  'deployment control jobs must disable Compose TTY allocation',
+);
+assert.match(
+  deployScript,
+  /run_backend_timed\(\)[\s\S]*docker compose[^\n]* run -T --rm --no-deps/,
+  'timed deployment jobs must disable Compose TTY allocation so background timeout jobs cannot be stopped by SIGTTIN',
+);
 assert.doesNotMatch(
   checkpointScript,
   /validateRecoveryPackage\(\{ sourcePath: uploaded\.objectPath/,

@@ -1,10 +1,10 @@
 'use client';
-import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
+import { ErpCheckbox, ErpInput, ErpTextarea } from '@/components/erp';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FaSave, FaArrowRight, FaTimes } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
+import { InventoryMasterDataActions, InventoryMasterDataEntry, InventoryMasterDataPage } from '@/features/inventory/master-data/InventoryMasterDataUi';
 
 const CreateServicePage: React.FC = () => {
   const router = useRouter();
@@ -55,121 +55,47 @@ const CreateServicePage: React.FC = () => {
   };
 
   return (
-    <main className="sds-workspace min-h-screen bg-gradient-to-br from-[var(--sds-surface-subtle)] to-[var(--sds-surface-subtle)] dark:from-[var(--sds-surface-raised)] dark:to-[var(--sds-surface-raised)]">
-      <div className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-2">
-                ایجاد خدمت جدید
-              </h1>
-              <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                تعریف خدمت اصلی برای دسته‌بندی خدمات سنگ
-              </p>
-            </div>
-            <ErpPressable type="submit"
-              onClick={handleCancel}
-              className="p-2 text-[var(--sds-text-secondary)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-            >
-              <FaTimes className="w-6 h-6" />
-            </ErpPressable>
-          </div>
-        </div>
-
-        {/* Form */}
-        <div className="max-w-2xl mx-auto">
-          <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-xl border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] shadow-lg p-6">
-            <form onSubmit={handleSubmit} className="space-y-6">
+    <InventoryMasterDataPage title="ایجاد خدمت جدید" description="تعریف خدمت اصلی برای دسته‌بندی خدمات سنگ" backHref="/dashboard/inventory/services" error={errors.general}>
+      <form onSubmit={handleSubmit} className="space-y-6">
               {/* Code */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-
-
-
-                  کد خدمت *
-
-
-
-                </label>
+              <InventoryMasterDataEntry id="service-code" label="کد خدمت" error={errors.code} required>
                 <ErpInput
                   type="text"
                   value={formData.code}
                   onChange={(e) => setFormData(prev => ({ ...prev, code: e.target.value }))}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] ${
-                    errors.code ? 'border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
-                  }`}
                   placeholder="مثال: CUT001"
                 />
-                {errors.code && (
-                  <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.code}</p>
-                )}
-              </div>
+              </InventoryMasterDataEntry>
 
               {/* Persian Name */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-
-
-
-                  نام فارسی خدمت *
-
-
-
-                </label>
+              <InventoryMasterDataEntry id="service-name-persian" label="نام فارسی خدمت" error={errors.namePersian} required>
                 <ErpInput
                   type="text"
                   value={formData.namePersian}
                   onChange={(e) => setFormData(prev => ({ ...prev, namePersian: e.target.value }))}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] ${
-                    errors.namePersian ? 'border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
-                  }`}
                   placeholder="مثال: برش سنگ"
                 />
-                {errors.namePersian && (
-                  <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.namePersian}</p>
-                )}
-              </div>
+              </InventoryMasterDataEntry>
 
               {/* English Name */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-
-
-
-                  نام انگلیسی
-
-
-
-                </label>
+              <InventoryMasterDataEntry id="service-name" label="نام انگلیسی">
                 <ErpInput
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
                   placeholder="مثال: Stone Cutting"
                 />
-              </div>
+              </InventoryMasterDataEntry>
 
               {/* Description */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-
-
-
-                  توضیحات
-
-
-
-                </label>
+              <InventoryMasterDataEntry id="service-description" label="توضیحات">
                 <ErpTextarea
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   rows={3}
-                  className="w-full px-3 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]"
                   placeholder="توضیحات خدمت..."
                 />
-              </div>
+              </InventoryMasterDataEntry>
 
               <CatalogImagePicker
                 images={formData.images}
@@ -177,52 +103,12 @@ const CreateServicePage: React.FC = () => {
               />
 
               {/* Status */}
-              <div>
-                <label className="flex items-center space-x-3 space-x-reverse">
-                  <ErpInput
-                    type="checkbox"
-                    checked={formData.isActive}
-                    onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
-                    className="w-4 h-4 text-[var(--sds-accent)] bg-[var(--sds-surface-subtle)] border-[var(--sds-border-default)] rounded focus:ring-[var(--sds-focus-ring)] dark:focus:ring-[var(--sds-focus-ring)] dark:ring-offset-gray-800 focus:ring-2 dark:bg-[var(--sds-surface-raised)] dark:border-[var(--sds-border-strong)]"
-                  />
-                  <span className="text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">فعال</span>
-                </label>
-              </div>
+              <ErpCheckbox label="فعال" checked={formData.isActive} onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))} />
 
-              {/* General Error */}
-              {errors.general && (
-                <div className="bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)] rounded-lg p-4">
-                  <p className="text-[var(--sds-danger)] dark:text-[var(--sds-danger)] text-sm">{errors.general}</p>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex items-center justify-end space-x-4 space-x-reverse pt-6 border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                <ErpPressable
-                  type="button"
-                  onClick={handleCancel}
-                  className="px-6 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] rounded-lg hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-raised)] transition-colors"
-                >انصراف</ErpPressable>
-                <ErpPressable
-                  type="submit"
-                  disabled={loading}
-                  className="px-6 py-2 bg-[var(--sds-accent)] hover:bg-[var(--sds-accent)] disabled:bg-[var(--sds-accent-surface)] text-[var(--sds-text-inverse)] rounded-lg transition-colors flex items-center space-x-2 space-x-reverse"
-                >
-                  {loading ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--sds-border-default)]"></div>
-                  ) : (
-                    <FaSave className="w-4 h-4" />
-                  )}
-                  <span>{loading ? 'در حال ذخیره...' : 'ایجاد خدمت'}</span>
-                </ErpPressable>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-    </main>
+        <InventoryMasterDataActions pending={loading} submitLabel="ایجاد خدمت" onCancel={handleCancel} />
+      </form>
+    </InventoryMasterDataPage>
   );
 };
 
 export default CreateServicePage;
-

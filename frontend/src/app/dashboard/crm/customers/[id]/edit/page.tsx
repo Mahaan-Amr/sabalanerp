@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
+import { ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -19,6 +19,7 @@ import {
 import { crmAPI, dashboardAPI } from '@/lib/api';
 import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
+import { CustomerWorkflowPage, CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { InlineFieldError, getBackendErrorMessage, mapBackendValidationErrors } from '@/lib/formErrors';
 import {
@@ -162,6 +163,7 @@ export default function EditCustomerPage() {
   const [contacts, setContacts] = useState<EditableContact[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -273,12 +275,14 @@ export default function EditCustomerPage() {
           ? normalizePhoneDigits(value)
           : value;
     setFormData((prev) => ({ ...prev, [field]: nextValue }));
+    setDirty(true);
     setErrors((prev) => ({ ...prev, [field]: '' }));
   };
 
   const updateProject = (index: number, field: keyof EditableProject, value: any) => {
     const nextValue = field === 'projectManagerNumber' || field === 'marketerPhoneNumber' ? normalizeIranianMobile(value) : value;
     setProjects((prev) => prev.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: nextValue } : item));
+    setDirty(true);
   };
 
   const updatePhone = (index: number, field: keyof EditablePhone, value: any) => {
@@ -289,6 +293,7 @@ export default function EditCustomerPage() {
       }
       return itemIndex === index ? { ...item, [field]: nextValue } : item;
     }));
+    setDirty(true);
   };
 
   const updateContact = (index: number, field: keyof EditableContact, value: any) => {
@@ -304,6 +309,7 @@ export default function EditCustomerPage() {
       }
       return itemIndex === index ? { ...item, [field]: nextValue } : item;
     }));
+    setDirty(true);
   };
 
   const removeProject = (index: number) => {
@@ -312,6 +318,7 @@ export default function EditCustomerPage() {
       return;
     }
     setProjects((prev) => prev.map((project, itemIndex) => itemIndex === index ? { ...project, isActive: false } : project));
+    setDirty(true);
   };
 
   const removePhone = (index: number) => {
@@ -321,10 +328,12 @@ export default function EditCustomerPage() {
       return;
     }
     setPhones((prev) => prev.map((phone, itemIndex) => itemIndex === index ? { ...phone, isActive: false, isPrimary: false } : phone));
+    setDirty(true);
   };
 
   const removeContact = (index: number) => {
     setContacts((prev) => prev.map((contact, itemIndex) => itemIndex === index ? { ...contact, isActive: false, isPrimary: false } : contact));
+    setDirty(true);
   };
 
   const validate = () => {
@@ -469,84 +478,48 @@ export default function EditCustomerPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--sds-border-strong)]"></div>
-      </div>
-    );
-  }
+  if (loading) return <ErpLoading />;
 
   if (error && !formData.firstName) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="sds-workspace-surface p-6 text-center">
-          <FaExclamationTriangle className="mx-auto text-4xl text-[var(--sds-danger)] mb-4" />
-          <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-2">خطا در دریافت اطلاعات</h2>
-          <p className="text-[var(--sds-text-muted)] mb-4">{error}</p>
-          <Link href="/dashboard/crm/customers" className="sds-action sds-tone-primary sds-action-solid px-6 py-2">
-            بازگشت به لیست
-          </Link>
-        </div>
-      </div>
+      <CustomerWorkflowPage title="ویرایش مشتری" backHref="/dashboard/crm/customers">
+        <ErpInlineState kind="error" title={error} action={{ label: 'بازگشت به لیست', href: '/dashboard/crm/customers' }} />
+      </CustomerWorkflowPage>
     );
   }
 
   if (!permissions.canEditCustomers) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="sds-workspace-surface p-6 text-center">
-          <FaExclamationTriangle className="mx-auto text-4xl text-[var(--sds-danger)] mb-4" />
-          <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-2">عدم دسترسی</h2>
-          <p className="text-[var(--sds-text-muted)]">شما دسترسی لازم برای ویرایش مشتری را ندارید</p>
-        </div>
-      </div>
+      <CustomerWorkflowPage title="ویرایش مشتری" backHref="/dashboard/crm/customers">
+        <ErpInlineState kind="permission" title="شما دسترسی لازم برای ویرایش مشتری را ندارید" />
+      </CustomerWorkflowPage>
     );
   }
 
   return (
-    <main className="sds-workspace space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] mb-2">ویرایش مشتری</h1>
-          <p className="text-[var(--sds-text-muted)]">{formData.firstName} {formData.lastName}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <ErpPressable type="submit" onClick={() => router.push(returnPath)} className="sds-action px-6 py-3">
-            بازگشت
-          </ErpPressable>
-          <ErpPressable type="submit"
-            onClick={handleSave}
-            disabled={saving}
-            className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-6 py-3 disabled:opacity-50"
-          >
-            <FaSave className="text-lg" />
-            {saving ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
-          </ErpPressable>
-        </div>
-      </div>
+    <CustomerWorkflowPage
+      title="ویرایش مشتری"
+      description={`${formData.firstName} ${formData.lastName}`.trim()}
+      backHref={returnPath}
+      actions={[{ label: saving ? 'در حال ذخیره…' : 'ذخیره تغییرات', icon: FaSave, onClick: handleSave, disabled: saving }]}
+      feedback={error ? { kind: 'error', title: error } : dirty ? { kind: 'stale', title: 'تغییرات ذخیره‌نشده دارید.' } : undefined}
+    >
 
-      {error && (
-        <div className="sds-workspace-surface p-4 border border-[var(--sds-danger-border)] text-[var(--sds-danger)]">
-          {error}
-        </div>
-      )}
-
-      <section className="sds-workspace-surface p-6">
+      <CustomerWorkflowSection>
         <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-6 flex items-center gap-2">
           <FaUser className="text-[var(--sds-accent)]" />
           اطلاعات پایه
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <label className={labelClass}>نام *</label>
-            <ErpInput className={inputClass} value={formData.firstName} onChange={(e) => updateField('firstName', e.target.value)} />
-            {errors.firstName && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.firstName}</p>}
+            <label htmlFor="customer-firstName" className={labelClass}>نام *</label>
+            <ErpInput id="customer-firstName" aria-invalid={Boolean(errors.firstName)} aria-describedby={errors.firstName ? 'customer-firstName-error' : undefined} className={inputClass} value={formData.firstName} onChange={(e) => updateField('firstName', e.target.value)} />
+            {errors.firstName && <p id="customer-firstName-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.firstName}</p>}
           </div>
           <div>
-            <label className={labelClass}>نام خانوادگی *</label>
-            <ErpInput className={inputClass} value={formData.lastName} onChange={(e) => updateField('lastName', e.target.value)} />
-            {errors.lastName && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.lastName}</p>}
+            <label htmlFor="customer-lastName" className={labelClass}>نام خانوادگی *</label>
+            <ErpInput id="customer-lastName" aria-invalid={Boolean(errors.lastName)} aria-describedby={errors.lastName ? 'customer-lastName-error' : undefined} className={inputClass} value={formData.lastName} onChange={(e) => updateField('lastName', e.target.value)} />
+            {errors.lastName && <p id="customer-lastName-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.lastName}</p>}
           </div>
           <div>
             <label className={labelClass}>نوع مشتری</label>
@@ -577,18 +550,18 @@ export default function EditCustomerPage() {
             />
           </div>
           <div>
-            <label className={labelClass}>کد ملی</label>
-            <ErpInput className={inputClass} value={formData.nationalCode} maxLength={10} onChange={(e) => updateField('nationalCode', e.target.value)} />
-            {errors.nationalCode && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.nationalCode}</p>}
+            <label htmlFor="customer-nationalCode" className={labelClass}>کد ملی</label>
+            <ErpInput id="customer-nationalCode" aria-invalid={Boolean(errors.nationalCode)} aria-describedby={errors.nationalCode ? 'customer-nationalCode-error' : undefined} className={inputClass} value={formData.nationalCode} maxLength={10} onChange={(e) => updateField('nationalCode', e.target.value)} />
+            {errors.nationalCode && <p id="customer-nationalCode-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.nationalCode}</p>}
           </div>
           <div>
             <label className={labelClass}>صنعت</label>
             <ErpInput className={inputClass} value={formData.industry} onChange={(e) => updateField('industry', e.target.value)} />
           </div>
         </div>
-      </section>
+      </CustomerWorkflowSection>
 
-      <section className="sds-workspace-surface p-6">
+      <CustomerWorkflowSection>
         <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-6 flex items-center gap-2">
           <FaBuilding className="text-[var(--sds-info)]" />
           اطلاعات تکمیلی
@@ -627,9 +600,9 @@ export default function EditCustomerPage() {
             <ErpInput className={inputClass} value={formData.projectManagerName} onChange={(e) => updateField('projectManagerName', e.target.value)} />
           </div>
           <div>
-            <label className={labelClass}>شماره تماس مدیر پروژه</label>
-            <ErpInput className={inputClass} value={formData.projectManagerNumber} onChange={(e) => updateField('projectManagerNumber', e.target.value)} />
-            <InlineFieldError message={errors.projectManagerNumber} />
+            <label htmlFor="customer-projectManagerNumber" className={labelClass}>شماره تماس مدیر پروژه</label>
+            <ErpInput id="customer-projectManagerNumber" aria-invalid={Boolean(errors.projectManagerNumber)} aria-describedby={errors.projectManagerNumber ? 'customer-projectManagerNumber-error' : undefined} className={inputClass} value={formData.projectManagerNumber} onChange={(e) => updateField('projectManagerNumber', e.target.value)} />
+            <InlineFieldError id="customer-projectManagerNumber-error" message={errors.projectManagerNumber} />
           </div>
           <div>
             <label className={labelClass}>نام معرف</label>
@@ -640,20 +613,20 @@ export default function EditCustomerPage() {
             <ErpInput className={inputClass} value={formData.referrerLastName} onChange={(e) => updateField('referrerLastName', e.target.value)} />
           </div>
           <div className="md:col-span-2">
-            <label className={labelClass}>شماره تماس معرف</label>
-            <ErpInput className={inputClass} value={formData.referrerPhoneNumber} onChange={(e) => updateField('referrerPhoneNumber', e.target.value)} />
-            <InlineFieldError message={errors.referrerPhoneNumber} />
+            <label htmlFor="customer-referrerPhoneNumber" className={labelClass}>شماره تماس معرف</label>
+            <ErpInput id="customer-referrerPhoneNumber" aria-invalid={Boolean(errors.referrerPhoneNumber)} aria-describedby={errors.referrerPhoneNumber ? 'customer-referrerPhoneNumber-error' : undefined} className={inputClass} value={formData.referrerPhoneNumber} onChange={(e) => updateField('referrerPhoneNumber', e.target.value)} />
+            <InlineFieldError id="customer-referrerPhoneNumber-error" message={errors.referrerPhoneNumber} />
           </div>
         </div>
-      </section>
+      </CustomerWorkflowSection>
 
-      <section className="sds-workspace-surface p-6">
+      <CustomerWorkflowSection>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] flex items-center gap-2">
             <FaMapMarkerAlt className="text-[var(--sds-warning)]" />
             پروژه‌ها
           </h2>
-          <ErpPressable type="submit" onClick={() => setProjects((prev) => [...prev, emptyProject()])} className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-4 py-2">
+          <ErpPressable type="button" onClick={() => setProjects((prev) => [...prev, emptyProject()])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
             <FaPlus />
             افزودن پروژه
           </ErpPressable>
@@ -683,7 +656,7 @@ export default function EditCustomerPage() {
                   <ErpInput className={inputClass} placeholder="شماره تماس بازاریاب" value={project.marketerPhoneNumber} onChange={(e) => updateProject(index, 'marketerPhoneNumber', e.target.value)} />
                   <ErpTextarea className={`${inputClass} md:col-span-2`} rows={2} placeholder="آدرس پروژه *" value={project.address} onChange={(e) => updateProject(index, 'address', e.target.value)} />
                 </div>
-                <ErpPressable type="submit" onClick={() => removeProject(index)} className="mt-3 text-[var(--sds-danger)] hover:text-[var(--sds-danger)] inline-flex items-center gap-2">
+                <ErpPressable type="button" onClick={() => removeProject(index)} tone="danger" variant="ghost" className="mt-3 inline-flex items-center gap-2">
                   <FaTrash />
                   حذف پروژه {visibleIndex + 1}
                 </ErpPressable>
@@ -694,12 +667,12 @@ export default function EditCustomerPage() {
             <p className="text-[var(--sds-text-muted)]">هیچ پروژه فعالی برای این مشتری ثبت نشده است.</p>
           )}
         </div>
-      </section>
+      </CustomerWorkflowSection>
 
-      <section className="sds-workspace-surface p-6">
+      <CustomerWorkflowSection>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-semibold text-[var(--sds-text-primary)]">شماره‌های تماس</h2>
-          <ErpPressable type="submit" onClick={() => setPhones((prev) => [...prev, emptyPhone(prev.filter((phone) => phone.isActive).length === 0)])} className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-4 py-2">
+          <ErpPressable type="button" onClick={() => setPhones((prev) => [...prev, emptyPhone(prev.filter((phone) => phone.isActive).length === 0)])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
             <FaPlus />
             افزودن شماره
           </ErpPressable>
@@ -726,7 +699,7 @@ export default function EditCustomerPage() {
                   <ErpInput type="checkbox" checked={phone.isPrimary} onChange={(e) => updatePhone(index, 'isPrimary', e.target.checked)} />
                   شماره اصلی
                 </label>
-                <ErpPressable type="submit" onClick={() => removePhone(index)} className="text-[var(--sds-danger)] hover:text-[var(--sds-danger)] inline-flex items-center gap-2">
+                <ErpPressable type="button" onClick={() => removePhone(index)} tone="danger" variant="ghost" className="inline-flex items-center gap-2">
                   <FaTrash />
                   حذف شماره {visibleIndex + 1}
                 </ErpPressable>
@@ -734,12 +707,12 @@ export default function EditCustomerPage() {
             );
           })}
         </div>
-      </section>
+      </CustomerWorkflowSection>
 
-      <section className="sds-workspace-surface p-6">
+      <CustomerWorkflowSection>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-semibold text-[var(--sds-text-primary)]">مخاطبین</h2>
-          <ErpPressable type="submit" onClick={() => setContacts((prev) => [...prev, emptyContact()])} className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-4 py-2">
+          <ErpPressable type="button" onClick={() => setContacts((prev) => [...prev, emptyContact()])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
             <FaPlus />
             افزودن مخاطب
           </ErpPressable>
@@ -763,7 +736,7 @@ export default function EditCustomerPage() {
                     <ErpInput type="checkbox" checked={contact.isPrimary} onChange={(e) => updateContact(index, 'isPrimary', e.target.checked)} />
                     مخاطب اصلی
                   </label>
-                  <ErpPressable type="submit" onClick={() => removeContact(index)} className="text-[var(--sds-danger)] hover:text-[var(--sds-danger)] inline-flex items-center gap-2">
+                  <ErpPressable type="button" onClick={() => removeContact(index)} tone="danger" variant="ghost" className="inline-flex items-center gap-2">
                     <FaTrash />
                     حذف مخاطب {visibleIndex + 1}
                   </ErpPressable>
@@ -775,19 +748,19 @@ export default function EditCustomerPage() {
             <p className="text-[var(--sds-text-muted)]">مخاطبی برای این مشتری ثبت نشده است.</p>
           )}
         </div>
-      </section>
+      </CustomerWorkflowSection>
 
-      <section className="sds-workspace-surface p-6">
+      <CustomerWorkflowSection>
         <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-6">کنترل دسترسی</h2>
         <div className="flex flex-wrap gap-4">
-          <ErpPressable type="submit"
+          <ErpPressable type="button"
             onClick={() => updateField('isBlacklisted', !formData.isBlacklisted)}
             className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${formData.isBlacklisted ? 'bg-[var(--sds-danger-surface)] text-[var(--sds-danger)]' : 'bg-[var(--sds-surface-raised)] text-[var(--sds-text-muted)]'}`}
           >
             {formData.isBlacklisted ? <FaBan /> : <FaCheckCircle />}
             {formData.isBlacklisted ? 'در لیست سیاه' : 'خارج از لیست سیاه'}
           </ErpPressable>
-          <ErpPressable type="submit"
+          <ErpPressable type="button"
             onClick={() => updateField('isLocked', !formData.isLocked)}
             className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${formData.isLocked ? 'bg-[var(--sds-warning-surface)] text-[var(--sds-warning)]' : 'bg-[var(--sds-surface-raised)] text-[var(--sds-text-muted)]'}`}
           >
@@ -795,22 +768,24 @@ export default function EditCustomerPage() {
             {formData.isLocked ? 'قفل‌شده' : 'باز'}
           </ErpPressable>
         </div>
-      </section>
+      </CustomerWorkflowSection>
 
       <div className="flex items-center justify-between pb-8">
-        <ErpPressable type="submit" onClick={() => router.push(returnPath)} className="sds-action inline-flex items-center gap-2 px-6 py-3">
+        <ErpPressable type="button" onClick={() => router.push(returnPath)} variant="ghost" className="inline-flex items-center gap-2 px-6 py-3">
           <FaArrowRight />
           انصراف
         </ErpPressable>
-        <ErpPressable type="submit"
+        <ErpPressable type="button"
           onClick={handleSave}
           disabled={saving}
-          className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-6 py-3 disabled:opacity-50"
+          tone="primary"
+          variant="solid"
+          className="inline-flex items-center gap-2 px-6 py-3 disabled:opacity-50"
         >
           <FaSave />
           {saving ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
         </ErpPressable>
       </div>
-    </main>
+    </CustomerWorkflowPage>
   );
 }

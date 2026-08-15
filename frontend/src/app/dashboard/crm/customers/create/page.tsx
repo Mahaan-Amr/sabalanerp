@@ -1,5 +1,6 @@
 'use client';
-import { ErpInput, ErpPressable } from '@/components/erp';import { useState, useEffect } from 'react';
+import { ErpBadge, ErpButton, ErpCard, ErpInput, ErpPressable } from '@/components/erp';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -29,6 +30,7 @@ import {
   validateOptionalIranianMobile,
   validateRequiredIranianMobile
 } from '@/lib/phoneFormat';
+import { CustomerWorkflowPage, CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 
 interface ProjectAddress {
   id?: string;
@@ -686,27 +688,33 @@ export default function CreateCustomerPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس اول *</label>
+                <label htmlFor="customer-phoneNumber1" className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس اول *</label>
                 <ErpInput
                   type="text"
                   value={formData.phoneNumber1}
                   onChange={(e) => handleInputChange('phoneNumber1', e.target.value)}
                   className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="شماره تماس اول"
+                  id="customer-phoneNumber1"
+                  aria-invalid={Boolean(errors.phoneNumber1)}
+                  aria-describedby={errors.phoneNumber1 ? 'customer-phoneNumber1-error' : undefined}
                 />
-                {errors.phoneNumber1 && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.phoneNumber1}</p>}
+                {errors.phoneNumber1 && <p id="customer-phoneNumber1-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.phoneNumber1}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس دوم</label>
+                <label htmlFor="customer-phoneNumber2" className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس دوم</label>
                 <ErpInput
                   type="text"
                   value={formData.phoneNumber2}
                   onChange={(e) => handleInputChange('phoneNumber2', e.target.value)}
                   className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="شماره تماس دوم"
+                  id="customer-phoneNumber2"
+                  aria-invalid={Boolean(errors.phoneNumber2)}
+                  aria-describedby={errors.phoneNumber2 ? 'customer-phoneNumber2-error' : undefined}
                 />
-                <InlineFieldError message={errors.phoneNumber2} />
+                <InlineFieldError id="customer-phoneNumber2-error" message={errors.phoneNumber2} />
               </div>
 
               <div>
@@ -806,15 +814,18 @@ export default function CreateCustomerPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره واتساپ</label>
+                      <label htmlFor="customer-whatsappNumber" className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره واتساپ</label>
                       <ErpInput
                         type="text"
                         value={formData.whatsappNumber}
                         onChange={(e) => handleInputChange('whatsappNumber', e.target.value)}
                         className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره واتساپ"
+                        id="customer-whatsappNumber"
+                        aria-invalid={Boolean(errors.whatsappNumber)}
+                        aria-describedby={errors.whatsappNumber ? 'customer-whatsappNumber-error' : undefined}
                       />
-                      <InlineFieldError message={errors.whatsappNumber} />
+                      <InlineFieldError id="customer-whatsappNumber-error" message={errors.whatsappNumber} />
                     </div>
 
                     <div>
@@ -864,15 +875,18 @@ export default function CreateCustomerPage() {
                     </div>
 
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس معرف</label>
+                      <label htmlFor="customer-referrerPhoneNumber" className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس معرف</label>
                       <ErpInput
                         type="text"
                         value={formData.referrerPhoneNumber}
                         onChange={(e) => handleInputChange('referrerPhoneNumber', e.target.value)}
                         className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره تماس معرف"
+                        id="customer-referrerPhoneNumber"
+                        aria-invalid={Boolean(errors.referrerPhoneNumber)}
+                        aria-describedby={errors.referrerPhoneNumber ? 'customer-referrerPhoneNumber-error' : undefined}
                       />
-                      <InlineFieldError message={errors.referrerPhoneNumber} />
+                      <InlineFieldError id="customer-referrerPhoneNumber-error" message={errors.referrerPhoneNumber} />
                     </div>
                   </div>
                 </div>
@@ -963,15 +977,18 @@ export default function CreateCustomerPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس مدیر پروژه</label>
+                      <label htmlFor="customer-projectManagerNumber" className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس مدیر پروژه</label>
                       <ErpInput
                         type="text"
                         value={formData.projectManagerNumber}
                         onChange={(e) => handleInputChange('projectManagerNumber', e.target.value)}
                         className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره تماس مدیر پروژه"
+                        id="customer-projectManagerNumber"
+                        aria-invalid={Boolean(errors.projectManagerNumber)}
+                        aria-describedby={errors.projectManagerNumber ? 'customer-projectManagerNumber-error' : undefined}
                       />
-                      <InlineFieldError message={errors.projectManagerNumber} />
+                      <InlineFieldError id="customer-projectManagerNumber-error" message={errors.projectManagerNumber} />
                     </div>
                   </div>
                 </div>
@@ -988,13 +1005,7 @@ export default function CreateCustomerPage() {
 
   if (!crmPermissions.canCreateCustomers) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="sds-workspace-surface p-6 text-center">
-          <FaExclamationTriangle className="mx-auto text-4xl text-[var(--sds-danger)] mb-4" />
-          <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-2">عدم دسترسی</h2>
-          <p className="text-[var(--sds-text-muted)]">شما دسترسی لازم برای ایجاد مشتری را ندارید</p>
-        </div>
-      </div>
+      <CustomerWorkflowPage title="ایجاد مشتری جدید" backHref="/dashboard/crm/customers" feedback={{ kind: 'permission', title: 'شما دسترسی لازم برای ایجاد مشتری را ندارید.' }} />
     );
   }
 
@@ -1002,84 +1013,39 @@ export default function CreateCustomerPage() {
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('returnTo') === 'contract';
 
+  const returnToContract = () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const requestedStep = urlParams.get('step');
+    const savedState = localStorage.getItem('contractWizardState');
+    if (savedState) {
+      const { currentStep } = JSON.parse(savedState);
+      router.push(getContractReturnUrl(currentStep));
+      return;
+    }
+    router.push(getContractReturnUrl(requestedStep || undefined));
+  };
+
   return (
-    <main className="sds-workspace min-h-screen space-y-5 p-3 sm:p-6 lg:p-8">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-[var(--sds-text-primary)] sm:text-3xl">ایجاد مشتری جدید</h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Cancel button - return to contract wizard */}
-          {(() => {
-            const urlParams = new URLSearchParams(window.location.search);
-            const returnTo = urlParams.get('returnTo');
-            const step = urlParams.get('step');
-
-            if (returnTo === 'contract' && step) {
-              return (
-                <ErpPressable type="submit"
-                  onClick={() => {
-                    // Restore contract wizard state from localStorage
-                    const savedState = localStorage.getItem('contractWizardState');
-                    if (savedState) {
-                      const { currentStep } = JSON.parse(savedState);
-                      // Navigate back to contract wizard with restored state
-                      router.push(getContractReturnUrl(currentStep));
-                    } else {
-                      // Fallback to contract creation
-                      router.push(getContractReturnUrl(step));
-                    }
-                  }}
-                  className="sds-action border-[var(--sds-danger-border)] bg-[var(--sds-danger)] px-6 py-3 text-[var(--sds-text-inverse)] hover:bg-[var(--sds-danger)]"
-                >
-                  <FaTimes className="inline-block ml-2" />
-                  بازگشت به مشتریان
-                </ErpPressable>
-              );
-            }
-            return null;
-          })()}
-
-          <Link
-            href="/dashboard/crm/customers"
-            className="sds-action px-6 py-3"
-          >
-            مرحله بعد
-          </Link>
-        </div>
-      </div>
-
-      {/* Progress Bar */}
-      <div className="sds-workspace-surface p-6">
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-sm text-[var(--sds-text-muted)]">مرحله {step + 1} از {steps.length}</span>
-          <span className="text-sm text-[var(--sds-text-muted)]">{Math.round(((step + 1) / steps.length) * 100)}%</span>
-        </div>
-        <div className="w-full bg-[var(--sds-surface-raised)] rounded-full h-2">
-          <div
-            className="bg-[var(--sds-accent)] h-2 rounded-full transition-all duration-300"
-            style={{ width: `${((step + 1) / steps.length) * 100}%` }}
-          ></div>
-        </div>
-        <div className="mt-2">
-          <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">{steps[step].label}</h3>
-        </div>
-      </div>
+    <CustomerWorkflowPage
+      title="ایجاد مشتری جدید"
+      description="اطلاعات مشتری را مرحله‌به‌مرحله ثبت کنید."
+      backHref="/dashboard/crm/customers"
+      actions={isReturningToContract ? [{ label: 'لغو و بازگشت به قرارداد', icon: FaTimes, tone: 'danger', variant: 'outline', onClick: returnToContract }] : []}
+      progress={{ current: step + 1, total: steps.length, label: steps[step].label }}
+      feedback={errors.submit
+        ? { kind: 'error', title: errors.submit }
+        : step > 0 || Object.entries(formData).some(([key, value]) => !['customerType', 'status'].includes(key) && (Array.isArray(value) ? value.length > 0 : Boolean(value)))
+          ? { kind: 'stale', title: 'اطلاعات واردشده تا زمان ثبت نهایی ذخیره نمی‌شوند.' }
+          : undefined}
+    >
 
       {/* Form Content */}
-      <div className="sds-workspace-surface p-6">
+      <CustomerWorkflowSection title={steps[step].label}>
         {renderStepContent()}
-      </div>
+      </CustomerWorkflowSection>
 
       {duplicateCustomers.length > 0 && (
-        <div className="sds-workspace-surface p-6 border border-[var(--sds-warning-border)]">
-          <div className="mb-4">
-            <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">مشتری مشابه پیدا شد</h3>
-            <p className="mt-1 text-sm text-[var(--sds-text-muted)]">
-              ایجاد مشتری تکراری مجاز نیست. مشتری موجود را انتخاب کنید یا اطلاعات وارد شده را اصلاح کنید.
-            </p>
-          </div>
+        <CustomerWorkflowSection title="مشتری مشابه پیدا شد" description="ایجاد مشتری تکراری مجاز نیست. مشتری موجود را انتخاب کنید یا اطلاعات وارد شده را اصلاح کنید.">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {duplicateCustomers.map((customer) => {
               const primaryPhone =
@@ -1087,7 +1053,7 @@ export default function CreateCustomerPage() {
                 customer.phoneNumbers?.[0]?.number;
 
               return (
-                <div key={customer.id} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-4">
+                <ErpCard key={customer.id} className="p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h4 className="font-semibold text-[var(--sds-text-primary)]">
@@ -1095,9 +1061,7 @@ export default function CreateCustomerPage() {
                       </h4>
                       {customer.companyName && <p className="mt-1 text-sm text-[var(--sds-text-muted)]">{customer.companyName}</p>}
                     </div>
-                    <span className="rounded-full bg-[var(--sds-warning-surface)] px-3 py-1 text-xs font-semibold text-[var(--sds-warning)]">
-                      تکراری
-                    </span>
+                    <ErpBadge tone="warning">تکراری</ErpBadge>
                   </div>
                   <div className="mt-3 space-y-1 text-sm text-[var(--sds-text-muted)]">
                     {primaryPhone && <p>شماره تماس: {primaryPhone}</p>}
@@ -1105,41 +1069,34 @@ export default function CreateCustomerPage() {
                     <p>مسئول فروش: {getOwnerLabel(customer)}</p>
                   </div>
                   {isReturningToContract && (
-                    <ErpPressable
-                      type="button"
-                      onClick={() => selectDuplicateForContract(customer)}
-                      className="mt-4 w-full rounded-lg bg-[var(--sds-accent)] px-4 py-2 text-sm font-semibold text-[var(--sds-text-inverse)] transition hover:bg-[var(--sds-accent)]"
-                    >
-                      انتخاب این مشتری و ادامه قرارداد
-                    </ErpPressable>
+                    <ErpButton label="انتخاب این مشتری و ادامه قرارداد" onClick={() => selectDuplicateForContract(customer)} className="mt-4 w-full" />
                   )}
-                </div>
+                </ErpCard>
               );
             })}
           </div>
-        </div>
+        </CustomerWorkflowSection>
       )}
 
       {/* Navigation */}
       <div className="flex items-center justify-between">
-        <ErpPressable type="submit"
+        <ErpPressable type="button"
           onClick={handlePrevious}
           disabled={step === 0}
-          className="sds-action px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+          variant="ghost"
+          className="px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           قبلی
         </ErpPressable>
 
         <div className="flex items-center gap-4">
-          {errors.submit && (
-            <p className="text-[var(--sds-danger)] text-sm">{errors.submit}</p>
-          )}
-
           {step === steps.length - 1 ? (
-            <ErpPressable type="submit"
+            <ErpPressable type="button"
               onClick={handleSubmit}
               disabled={loading}
-              className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-6 py-3 disabled:opacity-50"
+              tone="primary"
+              variant="solid"
+              className="inline-flex items-center gap-2 px-6 py-3 disabled:opacity-50"
             >
               {loading ? (
                 <>
@@ -1154,9 +1111,11 @@ export default function CreateCustomerPage() {
               )}
             </ErpPressable>
           ) : (
-            <ErpPressable type="submit"
+            <ErpPressable type="button"
               onClick={handleNext}
-              className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-6 py-3"
+              tone="primary"
+              variant="solid"
+              className="inline-flex items-center gap-2 px-6 py-3"
             >
               بعدی
               <FaArrowRight className="text-lg" />
@@ -1164,6 +1123,6 @@ export default function CreateCustomerPage() {
           )}
         </div>
       </div>
-    </main>
+    </CustomerWorkflowPage>
   );
 }

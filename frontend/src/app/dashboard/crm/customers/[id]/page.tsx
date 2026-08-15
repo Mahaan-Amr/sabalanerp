@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSheet, ErpTextarea } from '@/components/erp';
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -30,6 +30,7 @@ import { formatPrice } from '@/lib/numberFormat';
 import { getCrmPermissions } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
+import { CustomerWorkflowPage, CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 
 interface CrmCustomer {
   id: string;
@@ -478,46 +479,24 @@ export default function CustomerDetailPage() {
     return PersianCalendar.formatForDisplay(dateString);
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--sds-border-strong)]"></div>
-      </div>
-    );
-  }
+  if (loading) return <ErpLoading />;
 
   if (error || !customer) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="sds-workspace-surface p-6 text-center">
-          <FaExclamationTriangle className="mx-auto text-4xl text-[var(--sds-danger)] mb-4" />
-          <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-2">خطا در دریافت اطلاعات</h2>
-          <p className="text-[var(--sds-text-muted)] mb-4">{error || 'مشتری یافت نشد'}</p>
-          <Link
-            href="/dashboard/crm/customers"
-            className="sds-action sds-tone-primary sds-action-solid px-6 py-2"
-          >
-            بازگشت به لیست
-          </Link>
-        </div>
-      </div>
+      <CustomerWorkflowPage title="جزئیات مشتری" backHref="/dashboard/crm/customers">
+        <ErpInlineState kind="error" title={error || 'مشتری یافت نشد'} action={{ label: 'بازگشت به لیست', href: '/dashboard/crm/customers' }} />
+      </CustomerWorkflowPage>
     );
   }
 
   return (
-    <main className="sds-workspace space-y-5">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="break-words text-2xl font-bold text-[var(--sds-text-primary)] sm:text-3xl">
-            {customer.firstName} {customer.lastName}
-          </h1>
-          <p className="text-[var(--sds-text-muted)]">
-            {customer.companyName && `${customer.companyName} • `}
-            {getCustomerTypeLabel(customer.customerType)}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
+    <CustomerWorkflowPage
+      title={`${customer.firstName} ${customer.lastName}`}
+      description={<>{customer.companyName && `${customer.companyName} • `}{getCustomerTypeLabel(customer.customerType)}</>}
+      backHref="/dashboard/crm/customers"
+      actions={hasPermission('crm' as any, 'edit' as any) ? [{ label: 'ویرایش', icon: FaEdit, href: `/dashboard/crm/customers/${customer.id}/edit` }] : []}
+    >
+      <div className="flex flex-wrap items-center gap-3">
           {/* Cancel button - return to contract wizard */}
           {(() => {
             const urlParams = new URLSearchParams(window.location.search);
@@ -527,7 +506,7 @@ export default function CustomerDetailPage() {
 
             if (returnTo === 'contract' && step && action === 'addProject') {
               return (
-                <ErpPressable type="submit"
+                <ErpPressable type="button"
                   onClick={() => {
                     // Restore contract wizard state from localStorage
                     const savedState = localStorage.getItem('contractWizardState');
@@ -540,7 +519,9 @@ export default function CustomerDetailPage() {
                       router.push('/dashboard/sales/contracts/create');
                     }
                   }}
-                  className="sds-action border-[var(--sds-danger-border)] bg-[var(--sds-danger)] px-6 py-3 text-[var(--sds-text-inverse)] hover:bg-[var(--sds-danger)]"
+                  tone="danger"
+                  variant="outline"
+                  className="px-6 py-3"
                 >
                   <FaTimes className="inline-block ml-2" />
                   لغو و بازگشت به قرارداد
@@ -550,71 +531,40 @@ export default function CustomerDetailPage() {
             return null;
           })()}
 
-          {hasPermission('crm' as any, 'edit' as any) && (
-            <Link
-              href={`/dashboard/crm/customers/${customer.id}/edit`}
-              className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-6 py-3"
-            >
-              <FaEdit className="text-lg" />
-              ویرایش
-            </Link>
-          )}
-          <Link
-            href="/dashboard/crm/customers"
-            className="sds-action px-6 py-3"
-          >
-            بازگشت به لیست
-          </Link>
-        </div>
       </div>
 
       {/* Status Indicators */}
       <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-        <span className={`px-4 py-2 rounded-full text-sm font-medium ${getStatusColor(customer.status)}`}>
-          {getStatusLabel(customer.status)}
-        </span>
+        <ErpBadge tone={customer.status === 'Active' ? 'success' : customer.status === 'Inactive' ? 'neutral' : customer.status === 'Lead' ? 'warning' : 'info'}>{getStatusLabel(customer.status)}</ErpBadge>
 
         {customer.isBlacklisted && (
-          <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium bg-[var(--sds-danger-surface)] text-[var(--sds-danger)]">
+          <ErpBadge tone="danger">
             <FaBan className="h-4 w-4" />
             لیست سیاه
-          </span>
+          </ErpBadge>
         )}
 
         {customer.isLocked && (
-          <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium bg-[var(--sds-warning-surface)] text-[var(--sds-warning)]">
+          <ErpBadge tone="warning">
             <FaLock className="h-4 w-4" />
             قفل شده
-          </span>
+          </ErpBadge>
         )}
       </div>
 
       {/* Tabs */}
-      <div className="sds-workspace-surface">
-        <div className="border-b border-[var(--sds-border-default)]">
-          <nav className="flex gap-6 overflow-x-auto px-4 sm:px-6">
-            {[
-              { key: 'overview', label: 'نمای کلی', icon: FaUser },
-              { key: 'projects', label: 'پروژه‌ها', icon: FaMapMarkerAlt },
-              { key: 'contacts', label: 'مخاطبین', icon: FaPhone },
-              { key: 'leads', label: 'سرنخ‌ها', icon: FaHistory },
-              { key: 'contracts', label: 'قراردادها', icon: FaFileContract }
-            ].map((tab) => (
-              <ErpPressable type="submit"
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key as any)}
-                className={`flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                  activeTab === tab.key
-                    ? 'border-[var(--sds-border-strong)] text-[var(--sds-accent)]'
-                    : 'border-transparent text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] hover:border-[var(--sds-border-default)]'
-                }`}
-              >
-                <tab.icon className="h-4 w-4" />
-                {tab.label}
-              </ErpPressable>
-            ))}
-          </nav>
-        </div>
+      <ErpCard>
+        <ErpSegmentedControl
+          value={activeTab}
+          onChange={setActiveTab}
+          options={[
+            { value: 'overview', label: 'نمای کلی', icon: FaUser },
+            { value: 'projects', label: 'پروژه‌ها', icon: FaMapMarkerAlt },
+            { value: 'contacts', label: 'مخاطبین', icon: FaPhone },
+            { value: 'leads', label: 'سرنخ‌ها', icon: FaHistory },
+            { value: 'contracts', label: 'قراردادها', icon: FaFileContract },
+          ]}
+        />
 
         <div className="p-4 sm:p-6">
           {activeTab === 'overview' && (
@@ -775,9 +725,11 @@ export default function CustomerDetailPage() {
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">آدرس‌های پروژه</h3>
                 {hasPermission('crm' as any, 'edit' as any) && (
-                  <ErpPressable type="submit"
+                  <ErpPressable type="button"
                     onClick={handleAddProject}
-                    className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-4 py-2"
+                    tone="primary"
+                    variant="solid"
+                    className="inline-flex items-center gap-2 px-4 py-2"
                   >
                     <FaPlus className="h-4 w-4" />
                     افزودن آدرس
@@ -793,7 +745,7 @@ export default function CustomerDetailPage() {
               ) : (
                 <div className="space-y-4">
                   {customer.projectAddresses.map((address) => (
-                    <div key={address.id} className="sds-workspace-surface p-4">
+                    <ErpCard key={address.id} className="p-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
@@ -860,15 +812,20 @@ export default function CustomerDetailPage() {
                         <div className="flex items-center gap-2">
                           {hasPermission('crm' as any, 'edit' as any) && (
                             <>
-                              <ErpPressable type="submit"
+                              <ErpPressable type="button"
                                 onClick={() => handleEditProject(address)}
-                                className="sds-action p-2 hover:bg-[var(--sds-surface-raised)]"
+                                aria-label="ویرایش آدرس پروژه"
+                                variant="ghost"
+                                className="p-2"
                               >
                                 <FaEdit className="h-4 w-4" />
                               </ErpPressable>
-                              <ErpPressable type="submit"
+                              <ErpPressable type="button"
                                 onClick={() => handleDeleteProject(address.id)}
-                                className="sds-action p-2 hover:bg-[var(--sds-surface-raised)] text-[var(--sds-danger)]"
+                                aria-label="حذف آدرس پروژه"
+                                tone="danger"
+                                variant="ghost"
+                                className="p-2"
                               >
                                 <FaTrash className="h-4 w-4" />
                               </ErpPressable>
@@ -876,7 +833,7 @@ export default function CustomerDetailPage() {
                           )}
                         </div>
                       </div>
-                    </div>
+                    </ErpCard>
                   ))}
                 </div>
               )}
@@ -888,9 +845,11 @@ export default function CustomerDetailPage() {
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">مخاطبین</h3>
                 {hasPermission('crm' as any, 'edit' as any) && (
-                  <ErpPressable type="submit"
+                  <ErpPressable type="button"
                     onClick={handleAddContact}
-                    className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-4 py-2"
+                    tone="primary"
+                    variant="solid"
+                    className="inline-flex items-center gap-2 px-4 py-2"
                   >
                     <FaPlus className="h-4 w-4" />
                     افزودن مخاطب
@@ -906,7 +865,7 @@ export default function CustomerDetailPage() {
               ) : (
                 <div className="space-y-4">
                   {customer.contacts.map((contact) => (
-                    <div key={contact.id} className="sds-workspace-surface p-4">
+                    <ErpCard key={contact.id} className="p-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
@@ -941,15 +900,20 @@ export default function CustomerDetailPage() {
                         <div className="flex items-center gap-2">
                           {hasPermission('crm' as any, 'edit' as any) && (
                             <>
-                              <ErpPressable type="submit"
+                              <ErpPressable type="button"
                                 onClick={() => handleEditContact(contact)}
-                                className="sds-action p-2 hover:bg-[var(--sds-surface-raised)]"
+                                aria-label="ویرایش مخاطب"
+                                variant="ghost"
+                                className="p-2"
                               >
                                 <FaEdit className="h-4 w-4" />
                               </ErpPressable>
-                              <ErpPressable type="submit"
+                              <ErpPressable type="button"
                                 onClick={() => handleDeleteContact(contact.id)}
-                                className="sds-action p-2 hover:bg-[var(--sds-surface-raised)] text-[var(--sds-danger)]"
+                                aria-label="حذف مخاطب"
+                                tone="danger"
+                                variant="ghost"
+                                className="p-2"
                               >
                                 <FaTrash className="h-4 w-4" />
                               </ErpPressable>
@@ -957,7 +921,7 @@ export default function CustomerDetailPage() {
                           )}
                         </div>
                       </div>
-                    </div>
+                    </ErpCard>
                   ))}
                 </div>
               )}
@@ -976,7 +940,7 @@ export default function CustomerDetailPage() {
               ) : (
                 <div className="space-y-4">
                   {customer.leads.map((lead) => (
-                    <div key={lead.id} className="sds-workspace-surface p-4">
+                    <ErpCard key={lead.id} className="p-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <h4 className="text-[var(--sds-text-primary)] font-medium mb-1">{lead.companyName}</h4>
@@ -987,11 +951,9 @@ export default function CustomerDetailPage() {
                             <span>تاریخ: {formatDate(lead.createdAt)}</span>
                           </div>
                         </div>
-                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(lead.status)}`}>
-                          {getStatusLabel(lead.status)}
-                        </span>
+                        <ErpBadge tone={lead.status === 'Active' ? 'success' : lead.status === 'Lead' ? 'warning' : 'neutral'}>{getStatusLabel(lead.status)}</ErpBadge>
                       </div>
-                    </div>
+                    </ErpCard>
                   ))}
                 </div>
               )}
@@ -1010,7 +972,7 @@ export default function CustomerDetailPage() {
               ) : (
                 <div className="space-y-4">
                   {customer.salesContracts.map((contract) => (
-                    <div key={contract.id} className="sds-workspace-surface p-4">
+                    <ErpCard key={contract.id} className="p-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <h4 className="text-[var(--sds-text-primary)] font-medium mb-1">قرارداد شماره {contract.contractNumber}</h4>
@@ -1020,76 +982,52 @@ export default function CustomerDetailPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <Link
-                            href={`/dashboard/sales/contracts/${contract.id}`}
-                            className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-3 py-2 text-sm"
-                          >
-                            <FaEye className="h-4 w-4" />
-                            مشاهده
-                          </Link>
-                          <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(contract.status)}`}>
-                            {getStatusLabel(contract.status)}
-                          </span>
+                          <ErpButton label="مشاهده" icon={FaEye} href={`/dashboard/sales/contracts/${contract.id}`} variant="solid" />
+                          <ErpBadge tone={contract.status === 'Active' ? 'success' : contract.status === 'Lead' ? 'warning' : 'neutral'}>{getStatusLabel(contract.status)}</ErpBadge>
                         </div>
                       </div>
-                    </div>
+                    </ErpCard>
                   ))}
                 </div>
               )}
             </div>
           )}
         </div>
-      </div>
+      </ErpCard>
 
       {/* Admin Actions */}
       {hasPermission('crm' as any, 'admin' as any) && (
-        <div className="sds-workspace-surface p-6">
-          <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">عملیات مدیریتی</h3>
+        <CustomerWorkflowSection title="عملیات مدیریتی">
           <div className="flex items-center gap-4">
-            <ErpPressable type="submit"
+            <ErpPressable type="button"
               onClick={handleToggleBlacklist}
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ${
-                customer.isBlacklisted
-                  ? 'bg-[var(--sds-success)] text-[var(--sds-text-inverse)] hover:bg-[var(--sds-success)]'
-                  : 'bg-[var(--sds-danger)] text-[var(--sds-text-inverse)] hover:bg-[var(--sds-danger)]'
-              }`}
+              tone={customer.isBlacklisted ? 'success' : 'danger'}
+              variant="solid"
             >
               {customer.isBlacklisted ? <FaCheckCircle className="h-4 w-4" /> : <FaBan className="h-4 w-4" />}
               {customer.isBlacklisted ? 'حذف از لیست سیاه' : 'افزودن به لیست سیاه'}
             </ErpPressable>
 
-            <ErpPressable type="submit"
+            <ErpPressable type="button"
               onClick={handleToggleLock}
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ${
-                customer.isLocked
-                  ? 'bg-[var(--sds-success)] text-[var(--sds-text-inverse)] hover:bg-[var(--sds-success)]'
-                  : 'bg-[var(--sds-warning)] text-[var(--sds-text-inverse)] hover:bg-[var(--sds-warning)]'
-              }`}
+              tone={customer.isLocked ? 'success' : 'warning'}
+              variant="solid"
             >
               {customer.isLocked ? <FaCheckCircle className="h-4 w-4" /> : <FaLock className="h-4 w-4" />}
               {customer.isLocked ? 'باز کردن قفل' : 'قفل کردن'}
             </ErpPressable>
           </div>
-        </div>
+        </CustomerWorkflowSection>
       )}
 
       {/* Add/Edit Project Address Modal */}
-      {showAddProjectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-overlay)] p-4">
-          <div className="sds-workspace-surface flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden">
-            <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--sds-border-default)] p-4 sm:p-6">
-              <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">
-                {editingProject ? 'ویرایش آدرس پروژه' : 'افزودن آدرس پروژه'}
-              </h3>
-              <ErpPressable type="submit"
-                onClick={() => setShowAddProjectModal(false)}
-                className="sds-action p-2 hover:bg-[var(--sds-surface-raised)]"
-              >
-                <FaTimes className="h-4 w-4" />
-              </ErpPressable>
-            </div>
-
-            <form onSubmit={handleSubmitProject} className="space-y-4 overflow-y-auto p-4 sm:p-6">
+      <ErpSheet
+        open={showAddProjectModal}
+        onClose={() => setShowAddProjectModal(false)}
+        title={editingProject ? 'ویرایش آدرس پروژه' : 'افزودن آدرس پروژه'}
+        presentation="modal"
+      >
+            <form onSubmit={handleSubmitProject} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام پروژه</label>
                 <ErpInput
@@ -1217,7 +1155,9 @@ export default function CustomerDetailPage() {
               <div className="flex items-center gap-4 pt-4">
                 <ErpPressable
                   type="submit"
-                  className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-6 py-3"
+                  tone="primary"
+                  variant="solid"
+                  className="inline-flex items-center gap-2 px-6 py-3"
                 >
                   <FaSave className="h-4 w-4" />
                   {editingProject ? 'بروزرسانی' : 'افزودن'}
@@ -1225,32 +1165,22 @@ export default function CustomerDetailPage() {
                 <ErpPressable
                   type="button"
                   onClick={() => setShowAddProjectModal(false)}
-                  className="sds-action px-6 py-3"
+                  variant="ghost"
+                  className="px-6 py-3"
                 >
                   انصراف
                 </ErpPressable>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </ErpSheet>
 
       {/* Add/Edit Contact Modal */}
-      {showAddContactModal && (
-        <div className="fixed inset-0 bg-[var(--sds-surface-overlay)] flex items-center justify-center z-50">
-          <div className="sds-workspace-surface p-6 w-full max-w-md mx-4">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold text-[var(--sds-text-primary)]">
-                {editingContact ? 'ویرایش مخاطب' : 'افزودن مخاطب'}
-              </h3>
-              <ErpPressable type="submit"
-                onClick={() => setShowAddContactModal(false)}
-                className="sds-action p-2 hover:bg-[var(--sds-surface-raised)]"
-              >
-                <FaTimes className="h-4 w-4" />
-              </ErpPressable>
-            </div>
-
+      <ErpSheet
+        open={showAddContactModal}
+        onClose={() => setShowAddContactModal(false)}
+        title={editingContact ? 'ویرایش مخاطب' : 'افزودن مخاطب'}
+        presentation="modal"
+      >
             <form onSubmit={handleSubmitContact} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1326,7 +1256,9 @@ export default function CustomerDetailPage() {
               <div className="flex items-center gap-4 pt-4">
                 <ErpPressable
                   type="submit"
-                  className="sds-action sds-tone-primary sds-action-solid inline-flex items-center gap-2 px-6 py-3"
+                  tone="primary"
+                  variant="solid"
+                  className="inline-flex items-center gap-2 px-6 py-3"
                 >
                   <FaSave className="h-4 w-4" />
                   {editingContact ? 'بروزرسانی' : 'افزودن'}
@@ -1334,15 +1266,14 @@ export default function CustomerDetailPage() {
                 <ErpPressable
                   type="button"
                   onClick={() => setShowAddContactModal(false)}
-                  className="sds-action px-6 py-3"
+                  variant="ghost"
+                  className="px-6 py-3"
                 >
                   انصراف
                 </ErpPressable>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-    </main>
+      </ErpSheet>
+    </CustomerWorkflowPage>
   );
 }

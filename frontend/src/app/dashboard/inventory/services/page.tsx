@@ -4,9 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaTools, FaCut, FaLayerGroup, FaRuler, FaShapes, FaPaintBrush, FaFileExcel } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
-import { ErpButton, ErpLoading, ErpPage, ErpQuickFilters, ErpSection } from '@/components/erp';
+import { ErpButton, ErpInlineState, ErpLoading, ErpPage, ErpQuickFilters, ErpSection } from '@/components/erp';
 import CatalogExcelSyncModal from '@/components/CatalogExcelSyncModal';
 import { formatPrice } from '@/lib/numberFormat';
+import { InventoryMasterDataEntry } from '@/features/inventory/master-data/InventoryMasterDataUi';
 
 interface Service {
   id: string;
@@ -120,6 +121,7 @@ const ServicesPage: React.FC = () => {
   const [editingLayerTypeId, setEditingLayerTypeId] = useState<string | null>(null);
   const [savingLayerType, setSavingLayerType] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [showExcelModal, setShowExcelModal] = useState(false);
 
@@ -130,6 +132,7 @@ const ServicesPage: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
+      setLoadError('');
       const [
         servicesResponse,
         cuttingTypesResponse,
@@ -171,6 +174,7 @@ const ServicesPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading data:', error);
+      setLoadError('دریافت فهرست داده‌های پایه ناموفق بود.');
     } finally {
       setLoading(false);
     }
@@ -441,21 +445,21 @@ const ServicesPage: React.FC = () => {
         { label: 'فرآوری سنگ', value: stoneFinishings.length.toLocaleString('fa-IR'), icon: FaPaintBrush, tone: 'neutral' },
       ]}
     >
+      {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: loadData }} />}
       <ErpSection title="بخش خدمات">
         <ErpQuickFilters value={activeTab} onChange={(value) => setActiveTab(value as ActiveTab)} items={tabOptions} />
       </ErpSection>
 
       <ErpSection title={`فیلتر ${tabLabels[activeTab]}`}>
         <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="min-w-0 flex-1">
+          <InventoryMasterDataEntry id="inventory-master-data-search" label="جست‌وجو">
             <ErpInput
               type="text"
               placeholder={searchPlaceholder}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="min-h-12 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-3 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:placeholder:text-[var(--sds-text-muted)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]"
             />
-          </div>
+          </InventoryMasterDataEntry>
           <ErpButton
             label="وارد/صادر کردن"
             onClick={() => setShowExcelModal(true)}

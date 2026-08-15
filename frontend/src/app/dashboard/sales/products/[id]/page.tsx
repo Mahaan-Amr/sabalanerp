@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
+import { ErpBadge, ErpCard, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Product } from '@/types/product';
@@ -7,6 +7,7 @@ import { resolveBackendAssetUrl, salesAPI } from '@/lib/api';
 import { formatPrice } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
+import { SalesAuthoringPage, SalesAuthoringSection } from '@/features/sales/authoring/SalesAuthoringUi';
 
 // Product name generation utilities
 const generateFullProductName = (product: Product): string => {
@@ -30,7 +31,11 @@ const ProductDetailPage: React.FC = () => {
 
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; title: string }>();
   const [editing, setEditing] = useState(false);
+  const [savedFormSnapshot, setSavedFormSnapshot] = useState('');
   const [formData, setFormData] = useState({
     basePrice: '',
     motherLengthValue: '',
@@ -49,26 +54,28 @@ const ProductDetailPage: React.FC = () => {
   const fetchProduct = async () => {
     try {
       setLoading(true);
+      setLoadError('');
       const response = await salesAPI.getProduct(productId);
 
       if (response.data.success) {
         const data = response.data;
         setProduct(data.data);
-        setFormData({
+        const nextFormData = {
           basePrice: data.data.basePrice?.toString() || '',
           motherLengthValue: data.data.motherLengthValue?.toString() || '',
           isAvailable: data.data.isAvailable,
           leadTime: data.data.leadTime?.toString() || '',
           description: data.data.description || '',
           images: data.data.images || [],
-        });
+        };
+        setFormData(nextFormData);
+        setSavedFormSnapshot(JSON.stringify(nextFormData));
       } else {
-        console.error('Failed to fetch product');
-        router.push('/dashboard/sales/products');
+        setLoadError('دریافت اطلاعات محصول ناموفق بود. دوباره تلاش کنید.');
       }
     } catch (error) {
       console.error('Error fetching product:', error);
-      router.push('/dashboard/sales/products');
+      setLoadError('دریافت اطلاعات محصول ناموفق بود. دوباره تلاش کنید.');
     } finally {
       setLoading(false);
     }
@@ -76,6 +83,8 @@ const ProductDetailPage: React.FC = () => {
 
   const handleSave = async () => {
     try {
+      setSaving(true);
+      setFeedback(undefined);
       const response = await salesAPI.updateProduct(productId, {
         basePrice: formData.basePrice ? parseFloat(formData.basePrice) : null,
         motherLengthValue: formData.motherLengthValue
@@ -89,15 +98,17 @@ const ProductDetailPage: React.FC = () => {
 
       if (response.data.success) {
         setProduct(response.data.data);
+        setSavedFormSnapshot(JSON.stringify(formData));
         setEditing(false);
-        alert('محصول با موفقیت به‌روزرسانی شد');
+        setFeedback({ kind: 'success', title: 'محصول با موفقیت به‌روزرسانی شد.' });
       } else {
-        console.error('Failed to update product');
-        alert('خطا در به‌روزرسانی محصول');
+        setFeedback({ kind: 'error', title: 'به‌روزرسانی محصول ناموفق بود.' });
       }
     } catch (error) {
       console.error('Error updating product:', error);
-      alert('خطا در به‌روزرسانی محصول');
+      setFeedback({ kind: 'error', title: 'به‌روزرسانی محصول ناموفق بود.' });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -106,72 +117,45 @@ const ProductDetailPage: React.FC = () => {
     return new Intl.NumberFormat('fa-IR').format(price) + ' ریال';
   };
 
-  if (loading) {
+  if (loading) return <ErpLoading />;
+
+  if (loadError) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[var(--sds-surface-subtle)] to-[var(--sds-surface-subtle)] dark:from-[var(--sds-surface-raised)] dark:to-[var(--sds-surface-raised)] p-6">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--sds-border-strong)]"></div>
-          </div>
-        </div>
-      </div>
+      <SalesAuthoringPage title="جزئیات محصول" backHref="/dashboard/sales/products">
+        <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش دوباره', onClick: fetchProduct }} />
+      </SalesAuthoringPage>
     );
   }
 
   if (!product) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[var(--sds-surface-subtle)] to-[var(--sds-surface-subtle)] dark:from-[var(--sds-surface-raised)] dark:to-[var(--sds-surface-raised)] p-6">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
-              محصول یافت نشد
-            </h1>
-            <ErpPressable type="submit"
-              onClick={() => router.push('/dashboard/sales/products')}
-              className="px-6 py-3 bg-[var(--sds-accent)] text-[var(--sds-text-inverse)] rounded-lg hover:bg-[var(--sds-accent)] transition-colors"
-            >
-              بازگشت به لیست محصولات
-            </ErpPressable>
-          </div>
-        </div>
-      </div>
+      <SalesAuthoringPage title="جزئیات محصول" backHref="/dashboard/sales/products">
+        <ErpInlineState kind="empty" title="محصول یافت نشد" action={{ label: 'بازگشت به لیست محصولات', href: '/dashboard/sales/products' }} />
+      </SalesAuthoringPage>
     );
   }
 
   return (
-    <main className="sds-workspace min-h-screen">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-2">
-                جزئیات محصول
-              </h1>
-              <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                مشاهده و ویرایش اطلاعات محصول
-              </p>
-            </div>
-            <ErpPressable type="submit"
-              onClick={() => router.push('/dashboard/sales/products')}
-              className="px-4 py-2 bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] rounded-lg hover:bg-[var(--sds-surface-subtle)] transition-colors"
-            >
-              بازگشت
-            </ErpPressable>
-          </div>
-        </div>
-
+    <SalesAuthoringPage
+      title="جزئیات محصول"
+      description="مشاهده و ویرایش اطلاعات محصول"
+      backHref="/dashboard/sales/products"
+      feedback={feedback ?? (editing && JSON.stringify(formData) !== savedFormSnapshot ? { kind: 'stale', title: 'تغییرات این فرم تا زمان ذخیره نهایی نشده‌اند.' } : undefined)}
+    >
+      <SalesAuthoringSection title="مشخصات و قیمت‌گذاری محصول">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Product Information */}
           <div className="lg:col-span-2">
-            <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+            <div className="space-y-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                   اطلاعات محصول
                 </h2>
-                <ErpPressable type="submit"
+                <ErpPressable type="button"
                   onClick={() => setEditing(!editing)}
-                  className="px-4 py-2 bg-[var(--sds-accent)] text-[var(--sds-text-inverse)] rounded-lg hover:bg-[var(--sds-accent)] transition-colors"
+                  tone="primary"
+                  variant="solid"
+                  className="px-4 py-2"
                 >
                   {editing ? 'لغو ویرایش' : 'ویرایش'}
                 </ErpPressable>
@@ -308,7 +292,7 @@ const ProductDetailPage: React.FC = () => {
           {/* Pricing and Management */}
           <div className="space-y-6">
             {/* Pricing */}
-            <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+            <ErpCard className="p-5">
               <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
                 قیمت‌گذاری
               </h3>
@@ -364,10 +348,10 @@ const ProductDetailPage: React.FC = () => {
                   )}
                 </div>
               </div>
-            </div>
+            </ErpCard>
 
             {/* Status */}
-            <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+            <ErpCard className="p-5">
               <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
                 وضعیت
               </h3>
@@ -388,15 +372,7 @@ const ProductDetailPage: React.FC = () => {
                       <option value="false">ناموجود</option>
                     </ErpSelect>
                   ) : (
-                    <div className="flex items-center space-x-2">
-                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        product.isAvailable
-                          ? 'bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]'
-                          : 'bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]'
-                      }`}>
-                        {product.isAvailable ? 'موجود' : 'ناموجود'}
-                      </span>
-                    </div>
+                    <ErpBadge tone={product.isAvailable ? 'success' : 'danger'}>{product.isAvailable ? 'موجود' : 'ناموجود'}</ErpBadge>
                   )}
                 </div>
 
@@ -405,21 +381,13 @@ const ProductDetailPage: React.FC = () => {
                   <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
                     وضعیت فعال
                   </label>
-                  <div className="flex items-center space-x-2">
-                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                      product.isActive
-                        ? 'bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]'
-                        : 'bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]'
-                    }`}>
-                      {product.isActive ? 'فعال' : 'غیرفعال'}
-                    </span>
-                  </div>
+                  <ErpBadge tone={product.isActive ? 'success' : 'danger'}>{product.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>
                 </div>
               </div>
-            </div>
+            </ErpCard>
 
             {/* Description */}
-            <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+            <ErpCard className="p-5">
               <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
                 توضیحات
               </h3>
@@ -437,9 +405,9 @@ const ProductDetailPage: React.FC = () => {
                   {product.description || 'توضیحی وارد نشده است'}
                 </div>
               )}
-            </div>
+            </ErpCard>
 
-            <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-6 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+            <ErpCard className="p-5">
               {editing ? (
                 <CatalogImagePicker
                   images={formData.images}
@@ -459,20 +427,24 @@ const ProductDetailPage: React.FC = () => {
                   )}
                 </>
               )}
-            </div>
+            </ErpCard>
 
             {/* Save Button */}
             {editing && (
               <div className="flex space-x-3">
-                <ErpPressable type="submit"
+                <ErpPressable type="button"
                   onClick={handleSave}
-                  className="flex-1 px-6 py-3 bg-[var(--sds-accent)] text-[var(--sds-text-inverse)] rounded-lg hover:bg-[var(--sds-accent)] transition-colors"
+                  disabled={saving}
+                  tone="primary"
+                  variant="solid"
+                  className="flex-1 px-6 py-3"
                 >
-                  ذخیره تغییرات
+                  {saving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}
                 </ErpPressable>
-                <ErpPressable type="submit"
+                <ErpPressable type="button"
                   onClick={() => setEditing(false)}
-                  className="flex-1 px-6 py-3 bg-[var(--sds-surface-subtle)] text-[var(--sds-text-primary)] rounded-lg hover:bg-[var(--sds-surface-subtle)] transition-colors"
+                  variant="ghost"
+                  className="flex-1 px-6 py-3"
                 >
                   لغو
                 </ErpPressable>
@@ -480,8 +452,8 @@ const ProductDetailPage: React.FC = () => {
             )}
           </div>
         </div>
-      </div>
-    </main>
+      </SalesAuthoringSection>
+    </SalesAuthoringPage>
   );
 };
 

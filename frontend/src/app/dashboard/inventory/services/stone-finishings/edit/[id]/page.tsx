@@ -1,10 +1,11 @@
 'use client';
-import { ErpInput, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
+import { ErpInput, ErpLoading, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { FaSave, FaTimes, FaTrash } from 'react-icons/fa';
 import { servicesAPI } from '@/lib/api';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
+import { InventoryMasterDataActions, InventoryMasterDataPage } from '@/features/inventory/master-data/InventoryMasterDataUi';
 
 const EditStoneFinishingPage: React.FC = () => {
   const router = useRouter();
@@ -113,41 +114,16 @@ const EditStoneFinishingPage: React.FC = () => {
     router.push('/dashboard/inventory/services');
   };
 
-  if (initialLoading) {
-    return (
-      <main className="sds-workspace min-h-screen flex items-center justify-center bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--sds-border-strong)]"></div>
-      </main>
-    );
-  }
+  if (initialLoading) return <ErpLoading />;
 
   return (
-    <main className="sds-workspace min-h-screen bg-gradient-to-br from-[var(--sds-surface-subtle)] to-[var(--sds-surface-subtle)] dark:from-[var(--sds-surface-raised)] dark:to-[var(--sds-surface-raised)]">
+    <InventoryMasterDataPage title="ویرایش فرآوری سنگ" description="اطلاعات فرآوری سنگ، قیمت و وضعیت آن را به‌روزرسانی کنید" backHref="/dashboard/inventory/services" error={errors.general}>
       <div className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-2">
-                ویرایش فرآوری سنگ
-              </h1>
-              <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                اطلاعات فرآوری سنگ، قیمت و وضعیت آن را به‌روزرسانی کنید
-              </p>
-            </div>
-            <ErpPressable type="submit"
-              onClick={handleCancel}
-              className="p-2 text-[var(--sds-text-secondary)] hover:text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-            >
-              <FaTimes className="w-6 h-6" />
-            </ErpPressable>
-          </div>
-        </div>
-
         <div className="max-w-2xl mx-auto">
-          <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-xl border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] shadow-lg p-6">
+          <div>
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
+                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2" htmlFor="inventory-code">
                   کد فرآوری سنگ *
                 </label>
                 <ErpInput
@@ -158,14 +134,14 @@ const EditStoneFinishingPage: React.FC = () => {
                     errors.code ? 'border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
                   }`}
                   placeholder="مثال: SF-001"
-                />
+                 id="inventory-code" aria-invalid={Boolean(errors.code)} aria-describedby={errors.code ? 'inventory-code-error' : undefined} />
                 {errors.code && (
-                  <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.code}</p>
+                  <p id="inventory-code-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.code}</p>
                 )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
+                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2" htmlFor="inventory-namePersian">
 
 
 
@@ -182,9 +158,9 @@ const EditStoneFinishingPage: React.FC = () => {
                     errors.namePersian ? 'border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
                   }`}
                   placeholder="مثال: ساب نهایی"
-                />
+                 id="inventory-namePersian" aria-invalid={Boolean(errors.namePersian)} aria-describedby={errors.namePersian ? 'inventory-namePersian-error' : undefined} />
                 {errors.namePersian && (
-                  <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.namePersian}</p>
+                  <p id="inventory-namePersian-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.namePersian}</p>
                 )}
               </div>
 
@@ -249,7 +225,7 @@ const EditStoneFinishingPage: React.FC = () => {
               />
 
               <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
+                <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2" htmlFor="inventory-unitPrice">
                   {formData.calculationBase === 'length' ? 'قیمت هر متر طول (تومان)' : 'قیمت هر متر مربع (تومان)'}
                 </label>
                 <ErpInput
@@ -259,15 +235,15 @@ const EditStoneFinishingPage: React.FC = () => {
                   value={formData.pricePerSquareMeter}
                   onChange={(e) => setFormData(prev => ({ ...prev, pricePerSquareMeter: e.target.value }))}
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] ${
-                    errors.pricePerSquareMeter ? 'border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]'
+                    errors.pricePerSquareMeter ? 'border-[var(--sds-danger-border)]' : 'border-[var(--sds-border-default)] dark:border-[var(-<p id="inventory-pricePerSquareMeter-error" role="alert"ds-border-strong)]'
                   }`}
                   placeholder="مثال: 50000"
-                />
+                 id="inventory-unitPrice" aria-invalid={Boolean(errors.unitPrice)} aria-describedby={errors.unitPrice ? 'inventory-unitPrice-error' : undefined} />
                 {errors.pricePerSquareMeter && (
                   <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.pricePerSquareMeter}</p>
                 )}
                 {errors.unitPrice && (
-                  <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.unitPrice}</p>
+                  <p id="inventory-unitPrice-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.unitPrice}</p>
                 )}
                 <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mt-1">
                   {formData.calculationBase === 'length'
@@ -295,43 +271,13 @@ const EditStoneFinishingPage: React.FC = () => {
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-6 border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                <ErpPressable
-                  type="button"
-                  onClick={handleDelete}
-                  className="px-4 py-2 flex items-center gap-2 text-[var(--sds-danger)] hover:text-[var(--sds-danger)] dark:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors"
-                >
-                  <FaTrash className="w-4 h-4" />
-                  <span>فعال</span>
-                </ErpPressable>
-                <div className="flex items-center gap-3">
-                  <ErpPressable
-                    type="button"
-                    onClick={handleCancel}
-                    className="px-6 py-2 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] rounded-lg hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-raised)] transition-colors"
-                  >انصراف</ErpPressable>
-                  <ErpPressable
-                    type="submit"
-                    disabled={loading}
-                    className="px-6 py-2 bg-[var(--sds-accent)] hover:bg-[var(--sds-accent)] disabled:bg-[var(--sds-accent-surface)] text-[var(--sds-text-inverse)] rounded-lg transition-colors flex items-center space-x-2 space-x-reverse"
-                  >
-                    {loading ? (
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--sds-border-default)]"></div>
-                    ) : (
-                      <FaSave className="w-4 h-4" />
-                    )}
-                    <span>{loading ? 'در حال ذخیره...' : 'ذخیره فرآوری سنگ'}</span>
-                  </ErpPressable>
-                </div>
-              </div>
+              <InventoryMasterDataActions pending={loading} submitLabel="ذخیره فرآوری سنگ" onCancel={handleCancel} deleteAction={{ label: 'حذف فرآوری سنگ', onClick: handleDelete }} />
             </form>
           </div>
         </div>
       </div>
-    </main>
+    </InventoryMasterDataPage>
   );
 };
 
 export default EditStoneFinishingPage;
-
-

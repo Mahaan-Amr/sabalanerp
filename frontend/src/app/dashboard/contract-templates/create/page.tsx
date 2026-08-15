@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpInput, ErpPressable, ErpSegmentedControl, ErpSelect, ErpTextarea } from '@/components/erp';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -15,6 +15,7 @@ import {
   FaCalculator
 } from 'react-icons/fa';
 import { contractTemplatesAPI } from '@/lib/api';
+import { SalesAuthoringPage, SalesAuthoringSection } from '@/features/sales/authoring/SalesAuthoringUi';
 
 interface TemplateVariable {
   key: string;
@@ -200,82 +201,59 @@ export default function CreateContractTemplatePage() {
   ];
 
   return (
-    <main className="sds-workspace space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--sds-text-primary)]">ایجاد قالب قرارداد جدید</h1>
-          <p className="text-[var(--sds-text-muted)] mt-1">قالب جدید برای قراردادهای فروش</p>
-        </div>
-        <Link
-          href="/dashboard/contract-templates"
-          className="sds-action px-6 py-3 flex items-center gap-2"
-        >
-          <FaArrowRight className="h-5 w-5" />
-          <span>بازگشت</span>
-        </Link>
-      </div>
-
-      {/* Error Display */}
-      {errors.general && (
-        <div className="sds-workspace-surface p-4 bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)]">
-          <p className="text-[var(--sds-danger)]">{errors.general}</p>
-        </div>
-      )}
+    <SalesAuthoringPage
+      title="ایجاد قالب قرارداد جدید"
+      description="قالب جدید برای قراردادهای فروش"
+      backHref="/dashboard/contract-templates"
+      feedback={errors.general
+        ? { kind: 'error', title: errors.general }
+        : (formData.name || formData.namePersian || formData.description || formData.content || Object.keys(formData.variables).length > 0 || Object.keys(formData.structure).length > 0 || Object.keys(formData.calculations).length > 0)
+          ? { kind: 'stale', title: 'تغییرات قالب تا ثبت نهایی ذخیره نمی‌شوند.' }
+          : undefined}
+      progress={{ current: tabs.findIndex((tab) => tab.id === activeTab) + 1, total: tabs.length, label: tabs.find((tab) => tab.id === activeTab)?.label || '' }}
+    >
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Tab Navigation */}
-        <div className="sds-workspace-surface p-2">
-          <div className="flex flex-wrap gap-2">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <ErpPressable
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ${
-                    activeTab === tab.id
-                      ? 'sds-action sds-tone-primary sds-action-solid'
-                      : 'sds-action'
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span>{tab.label}</span>
-                </ErpPressable>
-              );
-            })}
-          </div>
-        </div>
+        <ErpSegmentedControl
+          value={activeTab}
+          onChange={setActiveTab}
+          options={tabs.map((tab) => ({ value: tab.id as typeof activeTab, label: tab.label, icon: tab.icon }))}
+        />
 
         {/* Basic Information Tab */}
         {activeTab === 'basic' && (
-          <div className="sds-workspace-surface p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات پایه</h2>
+          <SalesAuthoringSection title="اطلاعات پایه" className="space-y-6">
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-[var(--sds-text-primary)] font-medium mb-2">نام قالب (انگلیسی)</label>
+                <label htmlFor="template-name" className="block text-[var(--sds-text-primary)] font-medium mb-2">نام قالب (انگلیسی)</label>
                 <ErpInput
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="sds-field w-full"
+                  className="w-full"
                   placeholder="Sales Contract Template"
+                  id="template-name"
+                  aria-invalid={Boolean(errors.name)}
+                  aria-describedby={errors.name ? 'template-name-error' : undefined}
                 />
-                {errors.name && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.name}</p>}
+                {errors.name && <p id="template-name-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.name}</p>}
               </div>
 
               <div>
-                <label className="block text-[var(--sds-text-primary)] font-medium mb-2">نام قالب (فارسی)</label>
+                <label htmlFor="template-namePersian" className="block text-[var(--sds-text-primary)] font-medium mb-2">نام قالب (فارسی)</label>
                 <ErpInput
                   type="text"
                   value={formData.namePersian}
                   onChange={(e) => setFormData({ ...formData, namePersian: e.target.value })}
-                  className="sds-field w-full"
+                  className="w-full"
                   placeholder="قالب قرارداد فروش"
+                  id="template-namePersian"
+                  aria-invalid={Boolean(errors.namePersian)}
+                  aria-describedby={errors.namePersian ? 'template-namePersian-error' : undefined}
                 />
-                {errors.namePersian && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.namePersian}</p>}
+                {errors.namePersian && <p id="template-namePersian-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.namePersian}</p>}
               </div>
 
               <div>
@@ -283,7 +261,7 @@ export default function CreateContractTemplatePage() {
                 <ErpSelect
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  className="sds-field w-full"
+                  className="w-full"
                 >
                   {categories.map(cat => (
                     <option key={cat.value} value={cat.value}>{cat.label}</option>
@@ -296,28 +274,30 @@ export default function CreateContractTemplatePage() {
                 <ErpTextarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="sds-field w-full h-24"
+                  className="w-full h-24"
                   placeholder="توضیحات کوتاه درباره قالب..."
                 />
               </div>
             </div>
-          </div>
+          </SalesAuthoringSection>
         )}
 
         {/* Content Tab */}
         {activeTab === 'content' && (
-          <div className="sds-workspace-surface p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">محتوای قالب</h2>
+          <SalesAuthoringSection title="محتوای قالب" className="space-y-6">
 
             <div>
-              <label className="block text-[var(--sds-text-primary)] font-medium mb-2">محتوای HTML قالب</label>
+              <label htmlFor="template-content" className="block text-[var(--sds-text-primary)] font-medium mb-2">محتوای HTML قالب</label>
               <ErpTextarea
                 value={formData.content}
                 onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                className="sds-field w-full h-96 font-mono text-sm"
+                className="w-full h-96 font-mono text-sm"
                 placeholder="محتوای HTML قالب با متغیرهای {{variableName}}..."
+                id="template-content"
+                aria-invalid={Boolean(errors.content)}
+                aria-describedby={errors.content ? 'template-content-error' : undefined}
               />
-              {errors.content && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.content}</p>}
+              {errors.content && <p id="template-content-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.content}</p>}
             </div>
 
             <div className="bg-[var(--sds-surface-raised)] p-4 rounded-lg">
@@ -329,17 +309,15 @@ export default function CreateContractTemplatePage() {
                 <li>• جهت RTL و فونت فارسی را در نظر بگیرید</li>
               </ul>
             </div>
-          </div>
+          </SalesAuthoringSection>
         )}
 
         {/* Variables Tab */}
         {activeTab === 'variables' && (
-          <div className="sds-workspace-surface p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">متغیرهای قالب</h2>
+          <SalesAuthoringSection title="متغیرهای قالب" className="space-y-6">
 
             {/* Add New Variable */}
-            <div className="sds-workspace-surface p-4">
-              <h3 className="text-[var(--sds-text-primary)] font-medium mb-4">افزودن متغیر جدید</h3>
+            <SalesAuthoringSection title="افزودن متغیر جدید">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-[var(--sds-text-primary)] text-sm mb-1">کلید متغیر</label>
@@ -347,7 +325,7 @@ export default function CreateContractTemplatePage() {
                     type="text"
                     value={newVariable.key}
                     onChange={(e) => setNewVariable({ ...newVariable, key: e.target.value })}
-                    className="sds-field w-full"
+                    className="w-full"
                     placeholder="buyerName"
                   />
                 </div>
@@ -357,7 +335,7 @@ export default function CreateContractTemplatePage() {
                     type="text"
                     value={newVariable.label}
                     onChange={(e) => setNewVariable({ ...newVariable, label: e.target.value })}
-                    className="sds-field w-full"
+                    className="w-full"
                     placeholder="نام خریدار"
                   />
                 </div>
@@ -366,7 +344,7 @@ export default function CreateContractTemplatePage() {
                   <ErpSelect
                     value={newVariable.type}
                     onChange={(e) => setNewVariable({ ...newVariable, type: e.target.value as any })}
-                    className="sds-field w-full"
+                    className="w-full"
                   >
                     {variableTypes.map(type => (
                       <option key={type.value} value={type.value}>{type.label}</option>
@@ -377,7 +355,9 @@ export default function CreateContractTemplatePage() {
                   <ErpPressable
                     type="button"
                     onClick={addVariable}
-                    className="sds-action sds-tone-primary sds-action-solid px-4 py-2 w-full flex items-center justify-center gap-2"
+                    tone="primary"
+                    variant="solid"
+                    className="px-4 py-2 w-full flex items-center justify-center gap-2"
                   >
                     <FaPlus className="h-4 w-4" />
                     <span>افزودن</span>
@@ -416,7 +396,7 @@ export default function CreateContractTemplatePage() {
               </div>
 
               {errors.variable && <p className="text-[var(--sds-danger)] text-sm mt-2">{errors.variable}</p>}
-            </div>
+            </SalesAuthoringSection>
 
             {/* Existing Variables */}
             <div>
@@ -449,13 +429,12 @@ export default function CreateContractTemplatePage() {
                 </div>
               )}
             </div>
-          </div>
+          </SalesAuthoringSection>
         )}
 
         {/* Structure Tab */}
         {activeTab === 'structure' && (
-          <div className="sds-workspace-surface p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">ساختار قالب</h2>
+          <SalesAuthoringSection title="ساختار قالب" className="space-y-6">
 
             <div>
               <label className="block text-[var(--sds-text-primary)] font-medium mb-2">بخش‌های قالب</label>
@@ -492,18 +471,17 @@ export default function CreateContractTemplatePage() {
                   ...formData.structure.tableConfig,
                   maxRows: parseInt(e.target.value)
                 })}
-                className="sds-field w-32"
+                className="w-32"
                 min="1"
                 max="20"
               />
             </div>
-          </div>
+          </SalesAuthoringSection>
         )}
 
         {/* Calculations Tab */}
         {activeTab === 'calculations' && (
-          <div className="sds-workspace-surface p-6 space-y-6">
-            <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-4">فرمول‌های محاسباتی</h2>
+          <SalesAuthoringSection title="فرمول‌های محاسباتی" className="space-y-6">
 
             <div>
               <label className="block text-[var(--sds-text-primary)] font-medium mb-2">فرمول‌های محاسباتی</label>
@@ -517,7 +495,7 @@ export default function CreateContractTemplatePage() {
                       ...formData.calculations.formulas,
                       squareMeter: e.target.value
                     })}
-                    className="sds-field w-full"
+                    className="w-full"
                     placeholder="length * width"
                   />
                 </div>
@@ -530,7 +508,7 @@ export default function CreateContractTemplatePage() {
                       ...formData.calculations.formulas,
                       totalPrice: e.target.value
                     })}
-                    className="sds-field w-full"
+                    className="w-full"
                     placeholder="squareMeter * unitPrice"
                   />
                 </div>
@@ -543,7 +521,7 @@ export default function CreateContractTemplatePage() {
                       ...formData.calculations.formulas,
                       totalAmount: e.target.value
                     })}
-                    className="sds-field w-full"
+                    className="w-full"
                     placeholder="SUM(totalPrice)"
                   />
                 </div>
@@ -561,21 +539,18 @@ export default function CreateContractTemplatePage() {
                 تبدیل اعداد به فارسی
               </label>
             </div>
-          </div>
+          </SalesAuthoringSection>
         )}
 
         {/* Submit Button */}
         <div className="flex items-center justify-end gap-4">
-          <Link
-            href="/dashboard/contract-templates"
-            className="sds-action px-6 py-3"
-          >
-            انصراف
-          </Link>
+          <ErpButton label="انصراف" href="/dashboard/contract-templates" variant="ghost" tone="neutral" />
           <ErpPressable
             type="submit"
             disabled={loading}
-            className="sds-action sds-tone-primary sds-action-solid px-8 py-3 flex items-center gap-2 disabled:opacity-50"
+            tone="primary"
+            variant="solid"
+            className="px-8 py-3 flex items-center gap-2 disabled:opacity-50"
           >
             {loading ? (
               <>
@@ -591,6 +566,6 @@ export default function CreateContractTemplatePage() {
           </ErpPressable>
         </div>
       </form>
-    </main>
+    </SalesAuthoringPage>
   );
 }

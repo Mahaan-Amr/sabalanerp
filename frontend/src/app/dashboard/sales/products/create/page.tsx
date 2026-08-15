@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable } from '@/components/erp';
+import { ErpCard, ErpCheckbox, ErpInput, ErpPressable } from '@/components/erp';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -18,6 +18,7 @@ import { salesAPI, inventoryAPI } from '@/lib/api';
 import SuccessModal from '@/components/SuccessModal';
 import ErrorModal from '@/components/ErrorModal';
 import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
+import { SalesAuthoringPage, SalesAuthoringSection } from '@/features/sales/authoring/SalesAuthoringUi';
 
 // Stone type definitions
 const STONE_TYPES = [
@@ -179,11 +180,14 @@ const SearchableDropdown = ({
           <FaSearch className="h-5 w-5 text-[var(--sds-text-muted)]" />
         </div>
         <ErpInput
+          id={`${type}-search`}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${type}-search-error` : undefined}
           type="text"
           placeholder={placeholder}
           value={searchTerm}
           onChange={(e) => onSearchChange(type, e.target.value)}
-          className="w-full pr-10 pl-4 py-3 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] dark:placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent"
+          className="w-full pr-10"
         />
       </div>
 
@@ -200,11 +204,10 @@ const SearchableDropdown = ({
               type="button"
               key={item.id}
               onClick={() => onSelect(type, item)}
-              className={`block w-full p-4 text-right border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] cursor-pointer transition-all ${
-                selectedItem?.id === item.id
-                  ? 'bg-[var(--sds-accent-surface)] dark:bg-[var(--sds-accent-surface)] border-[var(--sds-border-strong)] dark:border-[var(--sds-border-strong)]'
-                  : 'hover:bg-[var(--sds-surface-subtle)] dark:hover:bg-[var(--sds-surface-raised)]'
-              }`}
+              tone={selectedItem?.id === item.id ? 'primary' : 'neutral'}
+              variant={selectedItem?.id === item.id ? 'soft' : 'ghost'}
+              aria-pressed={selectedItem?.id === item.id}
+              className="block w-full border-b p-4 text-right"
             >
               <div className="flex justify-between items-start">
                 <div>
@@ -230,11 +233,11 @@ const SearchableDropdown = ({
         )}
       </div>
 
-      {error && <p className="text-[var(--sds-danger)] text-sm mt-1">{error}</p>}
+      {error && <p id={`${type}-search-error`} role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{error}</p>}
     </div>
 
     {selectedItem && (
-      <div className="p-4 bg-[var(--sds-accent-surface)] dark:bg-[var(--sds-accent-surface)] rounded-lg border border-[var(--sds-border-strong)] dark:border-[var(--sds-border-strong)]">
+      <ErpCard tone="primary" className="p-4">
         <h4 className="font-medium text-[var(--sds-accent)] dark:text-[var(--sds-accent)] mb-2">انتخاب شده:</h4>
         <p className="text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
           <strong>{selectedItem.namePersian}</strong> ({selectedItem.code})
@@ -245,7 +248,7 @@ const SearchableDropdown = ({
             {selectedItem.description}
           </p>
         )}
-      </div>
+      </ErpCard>
     )}
   </div>
 );
@@ -784,7 +787,7 @@ export default function CreateStoneProductWizard() {
                 value={wizardData.motherLengthValue}
                 onChange={(event) => updateWizardData('motherLengthValue', event.target.value)}
                 inputMode="decimal"
-                className="h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-border-strong)] dark:border-[var(--sds-border-strong)]"
+                className="w-full text-sm"
               />
               {errors.motherLengthValue && (
                 <p className="mt-1 text-sm text-[var(--sds-danger)]">{errors.motherLengthValue}</p>
@@ -812,25 +815,13 @@ export default function CreateStoneProductWizard() {
                 {CONTRACT_VISIBILITY_OPTIONS.map(option => {
                   const checked = wizardData.contractVisibility[option.id];
                   return (
-                    <label
+                    <ErpCheckbox
                       key={option.id}
-                      className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                        checked
-                          ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] dark:bg-[var(--sds-accent-surface)]'
-                          : 'border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] hover:border-[var(--sds-border-strong)]'
-                      }`}
-                    >
-                      <ErpInput
-                        type="checkbox"
-                        className="mt-1 h-4 w-4 text-[var(--sds-accent)] rounded border-[var(--sds-border-default)] focus:ring-[var(--sds-focus-ring)]"
-                        checked={checked}
-                        onChange={() => toggleContractVisibility(option.id)}
-                      />
-                      <div>
-                        <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{option.label}</p>
-                        <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{option.description}</p>
-                      </div>
-                    </label>
+                      checked={checked}
+                      onChange={() => toggleContractVisibility(option.id)}
+                      label={<span><span className="block font-medium">{option.label}</span><span className="sds-text-muted block text-xs">{option.description}</span></span>}
+                      className="items-start p-3"
+                    />
                   );
                 })}
               </div>
@@ -846,114 +837,29 @@ export default function CreateStoneProductWizard() {
     }
   };
 
+  const returnToContract = () => {
+    const savedState = localStorage.getItem('contractWizardState');
+    if (savedState) {
+      const { currentStep: contractStep } = JSON.parse(savedState);
+      router.push(`/dashboard/sales/contracts/create?returnTo=contract&step=${contractStep}`);
+      return;
+    }
+    router.push('/dashboard/sales/contracts/create');
+  };
+  const isReturningToContract = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('returnTo') === 'contract';
+
   return (
-    <main className="sds-workspace min-h-screen">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                ایجاد محصول سنگ
-              </h1>
-              <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mt-2">
-                مشخصات و ساختار محصول را تکمیل کنید.
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              {/* Cancel button - return to contract wizard */}
-              {(() => {
-                const urlParams = new URLSearchParams(window.location.search);
-                const returnTo = urlParams.get('returnTo');
-                const step = urlParams.get('step');
-
-                if (returnTo === 'contract' && step) {
-                  return (
-                    <ErpPressable type="submit"
-                      onClick={() => {
-                        // Restore contract wizard state from localStorage
-                        const savedState = localStorage.getItem('contractWizardState');
-                        if (savedState) {
-                          const { currentStep, wizardData } = JSON.parse(savedState);
-                          // Navigate back to contract wizard with restored state
-                          router.push(`/dashboard/sales/contracts/create?returnTo=contract&step=${currentStep}`);
-                        } else {
-                          // Fallback to contract creation
-                          router.push('/dashboard/sales/contracts/create');
-                        }
-                      }}
-                      className="flex items-center gap-2 px-4 py-2 text-[var(--sds-danger)] dark:text-[var(--sds-danger)] hover:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] rounded-lg border border-[var(--sds-danger-border)] dark:border-[var(--sds-danger-border)]"
-                    >
-                      <FaTimes className="text-lg" />
-                      لغو و بازگشت به قرارداد
-                    </ErpPressable>
-                  );
-                }
-                return null;
-              })()}
-
-              <ErpPressable type="submit"
-                onClick={() => router.push('/dashboard/sales/products')}
-                className="flex items-center gap-2 px-4 py-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-              >
-                <FaTimes className="text-lg" />
-                لغو
-              </ErpPressable>
-            </div>
-          </div>
-        </div>
-
-        {/* Progress Steps */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            {WIZARD_STEPS.map((step, index) => {
-              const isActive = currentStep === step.id;
-              const isCompleted = currentStep > step.id;
-              const Icon = step.icon;
-
-              return (
-                <div key={step.id} className="flex flex-col items-center">
-                  <div className={`
-                    w-12 h-12 rounded-full flex items-center justify-center mb-2 transition-all duration-200
-                    ${isActive
-                      ? 'bg-[var(--sds-accent)] text-[var(--sds-text-inverse)] shadow-lg'
-                      : isCompleted
-                        ? 'bg-[var(--sds-success)] text-[var(--sds-text-inverse)]'
-                        : 'bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]'
-                    }
-                  `}>
-                    {isCompleted ? <FaCheck className="text-lg" /> : <Icon className="text-lg" />}
-                  </div>
-                  <div className="text-center">
-                    <p className={`text-sm font-medium ${isActive ? 'text-[var(--sds-accent)] dark:text-[var(--sds-accent)]' : 'text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]'}`}>
-                      {step.title}
-                    </p>
-                    <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mt-1">
-                      مرحله {step.id}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Step Content */}
-        <div className="bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] backdrop-blur-sm rounded-2xl p-8 border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center gap-3 mb-4">
-              {React.createElement(WIZARD_STEPS[currentStep - 1].icon, { className: "text-2xl text-[var(--sds-accent)]" })}
-              <h2 className="text-2xl font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                {WIZARD_STEPS[currentStep - 1].title}
-              </h2>
-            </div>
-            <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-              {WIZARD_STEPS[currentStep - 1].description}
-            </p>
-          </div>
-
-          {renderStepContent()}
-        </div>
+    <SalesAuthoringPage
+      title="ایجاد محصول سنگ"
+      description="مشخصات و ساختار محصول را تکمیل کنید."
+      backHref="/dashboard/sales/products"
+      actions={isReturningToContract ? [{ label: 'لغو و بازگشت به قرارداد', icon: FaTimes, tone: 'danger', variant: 'outline', onClick: returnToContract }] : []}
+      progress={{ current: currentStep, total: WIZARD_STEPS.length, label: WIZARD_STEPS[currentStep - 1].title }}
+      feedback={currentStep > 1 || Boolean(wizardData.cutTypeId) ? { kind: 'stale', title: 'اطلاعات این محصول تا ثبت نهایی ذخیره نمی‌شوند.' } : undefined}
+    >
+      <SalesAuthoringSection title={WIZARD_STEPS[currentStep - 1].title} description={WIZARD_STEPS[currentStep - 1].description}>
+        {renderStepContent()}
+      </SalesAuthoringSection>
 
         {/* Navigation */}
         <div className="mt-8">
@@ -974,8 +880,6 @@ export default function CreateStoneProductWizard() {
             }}
           />
         </div>
-      </div>
-
       {/* Success Modal */}
       <SuccessModal
         isOpen={showSuccessModal}
@@ -996,6 +900,6 @@ export default function CreateStoneProductWizard() {
         details={modalDetails}
         buttonText="باشه"
       />
-    </main>
+    </SalesAuthoringPage>
   );
 }

@@ -97,7 +97,7 @@ run_backend_timed() {
 run_backend_timed_with_heartbeat() {
   duration="$1"
   shift
-  run_backend_timed "${duration}" "$@" &
+  run_backend_timed "${duration}" "$@" </dev/null &
   timed_pid=$!
   heartbeat_elapsed=0
   while kill -0 "${timed_pid}" 2>/dev/null; do

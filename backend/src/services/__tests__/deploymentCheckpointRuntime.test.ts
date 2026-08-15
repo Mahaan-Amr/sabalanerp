@@ -8,7 +8,7 @@ const checkpointScript = fs.readFileSync(path.join(process.cwd(), 'src', 'script
 
 assert.match(
   deployScript,
-  /run_backend_timed_with_heartbeat\(\)[\s\S]*if ! control heartbeat[\s\S]*kill -TERM "\$\{timed_pid\}"[\s\S]*wait "\$\{timed_pid\}"/,
+  /run_backend_timed_with_heartbeat\(\)[\s\S]*run_backend_timed "\$\{duration\}" "\$@" <\/dev\/null &[\s\S]*if ! control heartbeat[\s\S]*kill -TERM "\$\{timed_pid\}"[\s\S]*wait "\$\{timed_pid\}"/,
   'long checkpoint work must renew the durable deployment lease until the child exits',
 );
 assert.match(

@@ -1,6 +1,6 @@
 'use client';
 
-import { ErpPressable, ErpSelect } from '@/components/erp';
+import { ErpPressable, ErpSelect, useErpOverlayPortalContainer } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -11,6 +11,9 @@ import PersianTimePicker from './PersianTimePicker';
 import { isCalendarOwnedInteraction } from './calendarOverlayPolicy';
 
 export interface PersianCalendarProps {
+  id?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean | 'true' | 'false';
   value?: string;
   onChange: (date: string) => void;
   placeholder?: string;
@@ -33,6 +36,9 @@ const splitDateTime = (raw?: string) => {
 const dateOnly = (year: number, month: number, day: number) => `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
 
 export default function PersianCalendarComponent({
+  id,
+  'aria-describedby': ariaDescribedBy,
+  'aria-invalid': ariaInvalid,
   value,
   onChange,
   placeholder = 'انتخاب تاریخ',
@@ -45,6 +51,7 @@ export default function PersianCalendarComponent({
   disablePastDates = false,
   clearable = false,
 }: PersianCalendarProps) {
+  const overlayPortalContainer = useErpOverlayPortalContainer();
   const initial = splitDateTime(value);
   const [open, setOpen] = useState(false);
   const [draftDate, setDraftDate] = useState(initial.date);
@@ -157,6 +164,7 @@ export default function PersianCalendarComponent({
 
   const panel = (
     <motion.div
+      data-erp-overlay-root
       ref={panelRef}
       className="persian-calendar-portal fixed z-[99999] overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] shadow-[var(--sds-shadow-raised)]"
       style={mobile ? { inset: 'auto 0 0 0', maxHeight: '92dvh' } : { top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight }}
@@ -253,11 +261,11 @@ export default function PersianCalendarComponent({
 
   return (
     <div className={`relative ${className}`}>
-      <ErpPressable ref={triggerRef} type="button" disabled={disabled} onClick={openCalendar} aria-haspopup="dialog" aria-expanded={open} className="sds-field flex min-h-12 w-full items-center justify-between gap-3 px-3 text-right">
+      <ErpPressable id={id} ref={triggerRef} type="button" disabled={disabled} onClick={openCalendar} aria-haspopup="dialog" aria-expanded={open} aria-describedby={ariaDescribedBy} aria-invalid={ariaInvalid} className="sds-field flex min-h-12 w-full items-center justify-between gap-3 px-3 text-right">
         <span className="flex min-w-0 items-center gap-2"><FaCalendarAlt className="h-4 w-4 flex-shrink-0 text-[var(--sds-accent)] " /><span className={`truncate ${draftDate ? 'font-semibold sds-text-primary ' : 'sds-text-muted'}`}>{draftDate ? displayValue : placeholder}</span></span>
         <FaChevronLeft className={`h-3.5 w-3.5 flex-shrink-0 sds-text-muted transition-transform ${open ? '-rotate-90' : ''}`} />
       </ErpPressable>
-      {typeof document !== 'undefined' && createPortal(<AnimatePresence>{open && panel}</AnimatePresence>, document.body)}
+      {typeof document !== 'undefined' && createPortal(<AnimatePresence>{open && panel}</AnimatePresence>, overlayPortalContainer?.current || document.body)}
     </div>
   );
 }

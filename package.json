@@ -56,6 +56,7 @@
     "test:design-system-adoption": "node --test tests/design-system-adoption/design-system-adoption.spec.mjs",
     "test:design-system-foundation": "node --test tests/design-system-foundation/semantic-foundation.spec.mjs",
     "test:design-system:e2e": "node scripts/run-design-system-e2e.mjs",
+    "test:design-system:e2e:infrastructure": "node --test tests/design-system-e2e-infrastructure/infrastructure.spec.mjs",
     "test:accounting-dispatch-documents:e2e:real": "npx tsx --test tests/accounting-dispatch-documents-real/qa-identities.test.ts && playwright test --config=playwright.accounting-dispatch-documents.config.ts",
     "test:support-notifications:e2e": "playwright test --config=playwright.support-notifications.config.ts",
     "test:hr-hiring:e2e": "node scripts/run-hr-hiring-e2e.mjs",
@@ -75,9 +76,9 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.61.1",
     "concurrently": "^8.2.2",
-    "embedded-postgres": "^18.4.0-beta.17",
     "pg": "^8.11.3"
   },
   "dependencies": {

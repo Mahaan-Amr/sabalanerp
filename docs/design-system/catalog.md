@@ -10,11 +10,11 @@ Import from `@/components/erp`. Prefer a workflow-sized composition over rebuild
 | --- | --- |
 | Workspace frame and hierarchy | `ErpWorkspacePage`, `ErpPage`, `ErpSection`, `ErpTwoColumn` |
 | Actions | `ErpButton`, `ErpPressable`, `ErpIconButton`, `ErpActionMenu`, `ErpActionGrid` |
-| Fields | `ErpInput`, `ErpSelect`, `ErpTextarea`, `ErpCheckbox`, `ErpCheckboxControl` |
+| Fields | `ErpField`, `ErpInput`, `ErpSelect`, `ErpTextarea`, `ErpCheckbox`, `ErpCheckboxControl` |
 | Choice | `ErpSegmentedControl`; focused product compositions may use `CompactSegmentedControl`, `CompactSwitch`, and `CompactUnitSwitch` |
 | Data and summaries | `ErpListPage`, `ErpCard`, `ErpMetricGrid`, `ErpSummaryGrid`, `ErpFieldView`, `ErpStatusSummary` |
 | Feedback | `ErpInlineState`, `ErpEmptyState`, `ErpLoading`, `ErpSkeleton`, `ErpStatus`, `ErpBadge` |
-| Focused work | `ErpSheet`; product configuration uses `CentralProductModalShell` |
+| Focused work | `ErpSheet` with `presentation="modal"` for dialogs and `pending` for protected actions; product configuration uses `CentralProductModalShell` |
 
 If a canonical interface owns behavior, do not reproduce that behavior locally. Add a generic capability to the canonical module when it benefits multiple domains. Keep domain compositions close to their feature.
 
@@ -71,5 +71,7 @@ npm run build:frontend
 ```
 
 Run `npm run test:design-system:e2e` when a reference surface, shell, shared interaction, responsive behavior, or focused overlay changes. Update `migration-manifest.json` and regenerate the baseline only after an accepted migration removes debt or an approved exception changes evidence.
+
+The browser command requires the existing `sabalanerp-local` Compose project to be healthy. It never starts services or creates another database. Start the approved project with `npm run docker:local:up`, verify it with `npm run docker:verify`, and then run the suite. Domain lanes add isolated specs and namespaced snapshots under `tests/design-system-e2e`; CI retains traces and failure images and does not accept missing or changed baselines automatically.
 
 The exception schema and evidence requirements are in `docs/design-system/README.md`.

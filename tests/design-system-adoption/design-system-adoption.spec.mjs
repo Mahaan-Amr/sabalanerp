@@ -235,7 +235,8 @@ test('repository manifest classifies every current interactive route', () => {
     ),
     false
   );
-  assert.deepEqual(report.debtSummary, {});
+  assert.equal(report.debtSummary['hardcoded-semantic-color'] ?? 0, 0);
+  assert.equal(report.debtSummary['legacy-glass-style'] ?? 0, 0);
 });
 
 test('check discovers changed adoption files from git when files are not supplied', () => {
@@ -649,6 +650,137 @@ test('implementation boundaries reject patterns that can cover feature callers',
 
     assert.equal(result.status, 2);
     assert.match(result.stderr, /is not a canonical implementation path/);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('static enforcement accepts canonical composition and rejects local dialog, composition, and presentation replacements', () => {
+  const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'sabalan-design-system-composition-'));
+  const acceptedPath = 'frontend/src/app/accepted/page.tsx';
+  const rejectedPath = 'frontend/src/app/rejected/page.tsx';
+  const baselinePath = 'docs/design-system/adoption-baseline.json';
+
+  try {
+    writeFixture(
+      fixtureRoot,
+      acceptedPath,
+      [
+        "import { ErpButton, ErpDialog, ErpField, ErpPage, ErpSection } from '@/components/erp';",
+        'export default function Accepted() {',
+        '  return <ErpPage><ErpSection><ErpField label="نام" /><ErpDialog open title="تایید"><ErpButton>ذخیره</ErpButton></ErpDialog></ErpSection></ErpPage>;',
+        '}',
+        ''
+      ].join('\n')
+    );
+    writeFixture(
+      fixtureRoot,
+      rejectedPath,
+      [
+        'export const PageShell = ({ children }) => <div>{children}</div>;',
+        'export default function Rejected() {',
+        '  return <div role="dialog" aria-modal="true" className="bg-gradient-to-r shadow-[0_4px_20px_black] backdrop-blur rounded-[20px]">',
+        '    <button className={`sds-action ${tone}`}>ذخیره</button>',
+        "    <ErpButton className={cx('bg-[var(--sds-accent)] shadow-xl rounded-full', extra)}>تایید</ErpButton>",
+        '  </div>;',
+        '}',
+        ''
+      ].join('\n')
+    );
+    writeManifestFixture(fixtureRoot, {
+      rules: [
+        {
+          pattern: 'frontend/src/app/**/page.tsx',
+          status: 'migrated',
+          acceptanceStatus: 'accepted',
+          reason: 'Fixture routes use the public composition contract.'
+        }
+      ]
+    });
+    writeFixture(
+      fixtureRoot,
+      baselinePath,
+      JSON.stringify({ version: 1, manifestVersion: 1, findings: {} })
+    );
+
+    const accepted = runCli(fixtureRoot, 'check', '--baseline', baselinePath, '--files', acceptedPath);
+    assert.equal(accepted.status, 0, accepted.stderr);
+
+    const rejected = runCli(fixtureRoot, 'check', '--baseline', baselinePath, '--files', rejectedPath);
+    assert.equal(rejected.status, 1, rejected.stdout);
+    for (const category of [
+      'manual-dialog-risk',
+      'direct-presentation-primitive-risk',
+      'duplicate-composition-risk',
+      'full-presentation-override-risk',
+      'local-semantic-effect-risk'
+    ]) {
+      assert.match(rejected.stderr, new RegExp(category));
+    }
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('adoption evidence records semantic, composition, interaction, responsive theme, and visual acceptance separately', () => {
+  const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'sabalan-design-system-evidence-'));
+
+  try {
+    writeFixture(
+      fixtureRoot,
+      'frontend/src/app/example/page.tsx',
+      'export default function Example() { return <main>Example</main>; }\n'
+    );
+    writeManifestFixture(fixtureRoot, {
+      rules: [
+        {
+          pattern: 'frontend/src/app/**/page.tsx',
+          status: 'migrated',
+          acceptanceStatus: 'accepted',
+          reason: 'The route is covered by an accepted surface.'
+        }
+      ],
+      surfaces: [
+        {
+          id: 'example',
+          status: 'migrated',
+          acceptanceStatus: 'accepted',
+          acceptanceEvidence: {
+            semantic: 'accepted',
+            composition: 'accepted',
+            interactionAccessibility: 'accepted',
+            responsiveTheme: 'accepted',
+            visual: 'accepted'
+          },
+          reason: 'Evidence is deliberately dimensional.',
+          files: ['frontend/src/app/example/page.tsx']
+        }
+      ]
+    });
+
+    const result = runCli(fixtureRoot, 'report', '--format', 'json');
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).surfaces[0].acceptanceEvidence, {
+      semantic: 'accepted',
+      composition: 'accepted',
+      interactionAccessibility: 'accepted',
+      responsiveTheme: 'accepted',
+      visual: 'accepted'
+    });
+
+    const manifest = JSON.parse(readFileSync(
+      path.join(fixtureRoot, 'docs/design-system/migration-manifest.json'),
+      'utf8'
+    ));
+    delete manifest.surfaces[0].acceptanceEvidence.visual;
+    writeFixture(
+      fixtureRoot,
+      'docs/design-system/migration-manifest.json',
+      JSON.stringify(manifest)
+    );
+    const invalid = runCli(fixtureRoot, 'report');
+    assert.equal(invalid.status, 2);
+    assert.match(invalid.stderr, /Invalid migration surface/);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }

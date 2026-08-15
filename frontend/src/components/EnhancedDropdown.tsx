@@ -1,6 +1,6 @@
 'use client';
 
-import { ErpInput, ErpPressable } from '@/components/erp';
+import { ErpInput, ErpPressable, useErpOverlayPortalContainer } from '@/components/erp';
 import { useState, useRef, useEffect, useMemo, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { FaChevronDown, FaSearch, FaCheck } from 'react-icons/fa';
@@ -13,6 +13,9 @@ export interface DropdownOption {
 }
 
 interface EnhancedDropdownProps {
+  id?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean | 'true' | 'false';
   options: DropdownOption[];
   value: string;
   onChange: (value: string) => void;
@@ -30,6 +33,9 @@ interface EnhancedDropdownProps {
 }
 
 export default function EnhancedDropdown({
+  id,
+  'aria-describedby': ariaDescribedBy,
+  'aria-invalid': ariaInvalid,
   options,
   value,
   onChange,
@@ -45,6 +51,7 @@ export default function EnhancedDropdown({
   noOptionsText = 'No options found',
   loading = false
 }: EnhancedDropdownProps) {
+  const overlayPortalContainer = useErpOverlayPortalContainer();
   const [isOpen, setIsOpen] = useState(false);
   const listboxId = useId();
   const [searchTerm, setSearchTerm] = useState('');
@@ -224,6 +231,7 @@ export default function EnhancedDropdown({
         setIsOpen(false);
         setSearchTerm('');
         setHighlightedIndex(-1);
+        window.requestAnimationFrame(() => dropdownRef.current?.focus());
         break;
       default:
         break;
@@ -330,6 +338,7 @@ export default function EnhancedDropdown({
       )}
 
       <ErpPressable
+        id={id}
         ref={dropdownRef}
         className={`sds-field flex min-h-11 w-full cursor-pointer items-center justify-between px-3 ${
           disabled
@@ -345,6 +354,8 @@ export default function EnhancedDropdown({
         aria-expanded={isOpen}
         aria-controls={listboxId}
         aria-haspopup="listbox"
+        aria-describedby={ariaDescribedBy}
+        aria-invalid={ariaInvalid}
         aria-label={label || placeholder}
       >
         <div className="flex items-center space-x-2 space-x-reverse flex-1 min-w-0">
@@ -375,6 +386,8 @@ export default function EnhancedDropdown({
         createPortal(
           <div
             ref={portalRef}
+            data-erp-overlay-root
+            onKeyDown={handleKeyDown}
             id={listboxId}
             role="listbox"
             className="enhanced-dropdown-portal fixed z-[99999] overflow-hidden rounded-[var(--sds-radius-dialog)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] p-1 shadow-[var(--sds-shadow-raised)]"
@@ -410,7 +423,7 @@ export default function EnhancedDropdown({
               {renderOptions()}
             </div>
           </div>,
-          document.body
+          overlayPortalContainer?.current || document.body
         )}
     </div>
   );

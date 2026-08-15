@@ -7,6 +7,13 @@ const DEFAULT_MANIFEST = 'docs/design-system/migration-manifest.json';
 const DEFAULT_BASELINE = 'docs/design-system/adoption-baseline.json';
 const ROUTE_STATUSES = new Set(['reference', 'migrated', 'legacy', 'exempt']);
 const ADOPTION_EXTENSIONS = new Set(['.css', '.js', '.jsx', '.ts', '.tsx']);
+const ACCEPTANCE_EVIDENCE_DIMENSIONS = [
+  'semantic',
+  'composition',
+  'interactionAccessibility',
+  'responsiveTheme',
+  'visual'
+];
 const FINDING_PATTERNS = [
   {
     category: 'hardcoded-semantic-color',
@@ -42,6 +49,41 @@ const FINDING_PATTERNS = [
     category: 'inaccessible-control-risk',
     expression: /<(div|span|li)\b[^>]*\bonClick\s*=/g,
     signature: (match) => `<${match[1]} onClick`
+  },
+  {
+    category: 'manual-dialog-risk',
+    expression: /\brole\s*=\s*["']dialog["']/g,
+    signature: () => 'role="dialog"'
+  },
+  {
+    category: 'direct-presentation-primitive-risk',
+    expression: /\bclassName\s*=\s*["'][^"']*\bsds-(workspace(?:-surface)?|action|field)\b[^"']*["']/g,
+    signature: (match) => `sds-${match[1]}`
+  },
+  {
+    category: 'direct-presentation-primitive-risk',
+    expression: /\bclassName\s*=\s*\{[^}]*\bsds-(workspace(?:-surface)?|action|field)\b[^}]*\}/g,
+    signature: (match) => `sds-${match[1]}`
+  },
+  {
+    category: 'duplicate-composition-risk',
+    expression: /\b(?:export\s+)?(?:function|const)\s+((?:[A-Z][\w]*)?(?:PageShell|FormSection|TabList|WizardShell|StatusPanel|FieldGroup))\b/g,
+    signature: (match) => match[1]
+  },
+  {
+    category: 'full-presentation-override-risk',
+    expression: /<Erp[A-Z][\w]*\b[^>]*\bclassName\s*=\s*["'][^"']*\b(?:bg-|border-|shadow-|rounded-|backdrop-blur)[^"']*["'][^>]*>/g,
+    signature: (match) => match[0].match(/<Erp[A-Z][\w]*/)?.[0] ?? '<Erp* className'
+  },
+  {
+    category: 'full-presentation-override-risk',
+    expression: /<Erp[A-Z][\w]*\b[^>]*\bclassName\s*=\s*\{[^}]*\b(?:bg-|border-|shadow-|rounded-|backdrop-blur)[^}]*\}[^>]*>/g,
+    signature: (match) => match[0].match(/<Erp[A-Z][\w]*/)?.[0] ?? '<Erp* className'
+  },
+  {
+    category: 'local-semantic-effect-risk',
+    expression: /\b(?:bg-gradient-to-[\w-]+|shadow-\[[^\]]+\]|backdrop-blur(?:-[\w[\].-]+)?|rounded-\[[^\]]+\])\b|\b(?:background-image\s*:\s*(?:linear|radial)-gradient|box-shadow\s*:|backdrop-filter\s*:|border-radius\s*:)/g,
+    signature: (match) => match[0].toLowerCase()
   }
 ];
 const SHARED_CONSUMER_PATTERNS = [
@@ -215,6 +257,20 @@ const loadManifest = (root, manifestPath) => {
       || !surface.acceptanceStatus.trim()
       || typeof surface.reason !== 'string'
       || !surface.reason.trim()
+      || (
+        surface.acceptanceEvidence !== undefined
+        && (
+          typeof surface.acceptanceEvidence !== 'object'
+          || surface.acceptanceEvidence === null
+          || ACCEPTANCE_EVIDENCE_DIMENSIONS.some(
+            (dimension) => typeof surface.acceptanceEvidence[dimension] !== 'string'
+              || !surface.acceptanceEvidence[dimension].trim()
+          )
+          || Object.keys(surface.acceptanceEvidence).some(
+            (dimension) => !ACCEPTANCE_EVIDENCE_DIMENSIONS.includes(dimension)
+          )
+        )
+      )
       || !Array.isArray(surface.files)
       || surface.files.length === 0
       || surface.files.some((pattern) => typeof pattern !== 'string' || !pattern.trim())
@@ -337,6 +393,7 @@ const buildReport = ({ root, manifestPath }) => {
   const adoptionFiles = walkFiles(
     path.join(root, 'frontend', 'src'),
     (file) => ADOPTION_EXTENSIONS.has(path.extname(file))
+      && !/\.(?:test|spec)\.(?:js|jsx|ts|tsx)$/.test(file)
   );
   const findings = Object.fromEntries(adoptionFiles.map((absoluteFile) => {
     const file = normalizePath(path.relative(root, absoluteFile));
@@ -374,6 +431,7 @@ const buildReport = ({ root, manifestPath }) => {
     routes,
     unclassifiedRoutes: routes.filter((route) => route.status === 'unclassified'),
     surfaces: manifest.surfaces ?? [],
+    acceptanceEvidenceDimensions: ACCEPTANCE_EVIDENCE_DIMENSIONS,
     consumerInventory,
     exceptions: Array.isArray(manifest.exceptions) ? manifest.exceptions : [],
     findings,
@@ -444,12 +502,19 @@ const exceptionAllowance = (file, category, signature, exceptions) => exceptions
   ))
   .reduce((total, exception) => total + exception.allowance, 0);
 
-const checkFiles = ({ root, baseline, files, manifest }) => {
+const findingsAtGitRef = ({ root, ref, file, manifest }) => {
+  const result = spawnSync('git', ['show', `${ref}:${file}`], { cwd: root, encoding: 'utf8' });
+  if (result.status !== 0) return {};
+  return auditSource(result.stdout, allowedCategoriesForFile(manifest, file));
+};
+
+const checkFiles = ({ root, baseline, files, manifest, base }) => {
   const violations = [];
 
   for (const requestedFile of files) {
     const file = normalizePath(requestedFile);
     if (!file.startsWith('frontend/src/')) continue;
+    if (/\.(?:test|spec)\.(?:js|jsx|ts|tsx)$/.test(file)) continue;
     const absoluteFile = path.resolve(root, requestedFile);
     if (!absoluteFile.startsWith(`${root}${path.sep}`) || !fs.existsSync(absoluteFile)) continue;
     if (!ADOPTION_EXTENSIONS.has(path.extname(absoluteFile))) continue;
@@ -458,11 +523,15 @@ const checkFiles = ({ root, baseline, files, manifest }) => {
       allowedCategoriesForFile(manifest, file)
     );
     const previous = baseline.findings?.[file] ?? {};
+    const previousWithNewRules = {
+      ...findingsAtGitRef({ root, ref: base || 'HEAD', file, manifest }),
+      ...previous
+    };
 
     for (const [category, signatures] of Object.entries(current)) {
       for (const [signature, count] of Object.entries(signatures)) {
         const allowedCount = Math.max(
-          previous[category]?.[signature] ?? 0,
+          previousWithNewRules[category]?.[signature] ?? 0,
           exceptionAllowance(file, category, signature, manifest.exceptions ?? [])
         );
         if (count > allowedCount) {
@@ -581,7 +650,7 @@ try {
       throw new Error('The check command requires --changed or at least one path after --files.');
     }
     const baseline = readBaseline(root, baselinePath, base);
-    const violations = checkFiles({ root, baseline, files, manifest });
+    const violations = checkFiles({ root, baseline, files, manifest, base });
     if (violations.length === 0) {
       console.log('No new Sabalan Design System adoption violations.');
     } else {

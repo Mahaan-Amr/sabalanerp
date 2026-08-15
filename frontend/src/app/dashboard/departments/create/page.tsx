@@ -1,20 +1,28 @@
 'use client';
-import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
-  FaBuilding,
-  FaArrowRight,
-  FaCheck,
-  FaTimes
-} from 'react-icons/fa';
+  ErpButton,
+  ErpCheckbox,
+  ErpField,
+  ErpInlineState,
+  ErpInput,
+  ErpPage,
+  ErpSection,
+  ErpTextarea
+} from '@/components/erp';
+import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { FaCheck } from 'react-icons/fa';
 import { departmentsAPI } from '@/lib/api';
+import ErrorModal from '@/components/ErrorModal';
+import SuccessModal from '@/components/SuccessModal';
 
 export default function CreateDepartmentPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const submitFocusRef = useRef<HTMLElement | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -49,6 +57,7 @@ export default function CreateDepartmentPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    submitFocusRef.current = (e.nativeEvent as SubmitEvent).submitter as HTMLElement | null;
 
     if (!validateForm()) {
       return;
@@ -56,136 +65,103 @@ export default function CreateDepartmentPage() {
 
     setLoading(true);
     setError(null);
+    setOperationError(null);
 
     try {
       const response = await departmentsAPI.createDepartment(formData);
 
       if (response.data.success) {
-        alert('دپارتمان با موفقیت ایجاد شد');
-        router.push('/dashboard/departments');
+        setSuccess('دپارتمان با موفقیت ایجاد شد');
       }
     } catch (error: any) {
       console.error('Error creating department:', error);
-      setError(error.response?.data?.error || 'خطا در ایجاد دپارتمان');
+      setOperationError(error.response?.data?.error || 'خطا در ایجاد دپارتمان');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main className="sds-workspace space-y-6">
-      {/* Header */}
-      <div className="sds-workspace-surface p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4 space-x-reverse">
-            <FaBuilding className="h-8 w-8 text-[var(--sds-accent)]" />
-            <div>
-              <h1 className="text-2xl font-bold text-primary">ایجاد دپارتمان جدید</h1>
-              <p className="text-secondary">تعریف دپارتمان و واحد سازمانی جدید</p>
-            </div>
-          </div>
-          <Link
-            href="/dashboard/departments"
-            className="sds-action px-6 py-2 flex items-center space-x-2 space-x-reverse"
-          >
-            <FaArrowRight />
-            <span>بازگشت به لیست</span>
-          </Link>
-        </div>
-      </div>
-
-      {error && (
-        <div className="sds-workspace-surface p-4 bg-[var(--sds-danger-surface)] border border-[var(--sds-danger-border)]">
-          <div className="flex items-center space-x-2 space-x-reverse">
-            <FaTimes className="text-[var(--sds-danger)]" />
-            <p className="text-[var(--sds-danger)]">{error}</p>
-          </div>
-        </div>
-      )}
+    <ErpPage
+      title="ایجاد دپارتمان جدید"
+      description="تعریف دپارتمان و واحد سازمانی جدید"
+      backHref="/dashboard/departments"
+    >
+      {error ? <ErpInlineState kind="error" title={error} /> : null}
+      {success ? <ErpInlineState kind="success" title={success} /> : null}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Department Information */}
-        <div className="sds-workspace-surface p-6">
-          <h2 className="text-xl font-bold text-primary mb-4">اطلاعات دپارتمان</h2>
+        <ErpSection title="اطلاعات دپارتمان">
           <div className="space-y-6">
-            <div>
-              <label className="block text-sm text-secondary mb-2">نام انگلیسی *</label>
+            <ErpField label="نام انگلیسی" required>
               <ErpInput
                 type="text"
                 name="name"
                 value={formData.name}
                 onChange={handleInputChange}
-                className="sds-field w-full"
                 placeholder="Department Name"
                 required
               />
-            </div>
+            </ErpField>
 
-            <div>
-              <label className="block text-sm text-secondary mb-2">نام فارسی *</label>
+            <ErpField label="نام فارسی" required>
               <ErpInput
                 type="text"
                 name="namePersian"
                 value={formData.namePersian}
                 onChange={handleInputChange}
-                className="sds-field w-full"
                 placeholder="نام دپارتمان"
                 required
               />
-            </div>
+            </ErpField>
 
-            <div>
-              <label className="block text-sm text-secondary mb-2">توضیحات *</label>
+            <ErpField label="توضیحات" required>
               <ErpTextarea
                 name="description"
                 value={formData.description}
                 onChange={handleInputChange}
-                className="sds-field w-full h-24 resize-none"
                 placeholder="توضیح کوتاه درباره دپارتمان..."
                 required
               />
-            </div>
+            </ErpField>
 
-            <div>
-              <label className="flex items-center space-x-2 space-x-reverse">
-                <ErpInput
-                  type="checkbox"
-                  name="isActive"
-                  checked={formData.isActive}
-                  onChange={handleInputChange}
-                  className="rounded border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-accent)] focus:ring-[var(--sds-accent)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent)] dark:focus:ring-[var(--sds-focus-ring)]"
-                />
-                <span className="text-secondary">فعال باشد</span>
-              </label>
-            </div>
+            <ErpCheckbox
+              label="فعال باشد"
+              name="isActive"
+              checked={formData.isActive}
+              onChange={handleInputChange}
+            />
           </div>
-        </div>
+        </ErpSection>
 
-        {/* Submit Buttons */}
-        <div className="sds-workspace-surface p-6">
-          <div className="flex items-center justify-end space-x-4 space-x-reverse">
-            <Link
-              href="/dashboard/departments"
-              className="sds-action px-6 py-2"
-            >
-              انصراف
-            </Link>
-            <ErpPressable
+        <ErpSection>
+          <div className="flex flex-wrap justify-end gap-3">
+            <ErpButton label="انصراف" href="/dashboard/departments" tone="neutral" variant="outline" />
+            <ErpButton
               type="submit"
-              disabled={loading}
-              className="sds-action sds-tone-primary sds-action-solid px-6 py-2 flex items-center space-x-2 space-x-reverse disabled:opacity-50"
-            >
-              {loading ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--sds-border-default)]"></div>
-              ) : (
-                <FaCheck />
-              )}
-              <span>{loading ? 'در حال ذخیره...' : 'ایجاد دپارتمان'}</span>
-            </ErpPressable>
+              label={loading ? 'در حال ذخیره...' : 'ایجاد دپارتمان'}
+              icon={FaCheck}
+              disabled={loading || Boolean(success)}
+              tone="primary"
+              variant="solid"
+            />
           </div>
-        </div>
+        </ErpSection>
       </form>
-    </main>
+      <SuccessModal
+        isOpen={Boolean(success)}
+        message={success || ''}
+        onClose={() => router.push('/dashboard/departments')}
+        autoClose
+        autoCloseDelay={2000}
+      />
+      <ErrorModal
+        isOpen={Boolean(operationError)}
+        message="ایجاد دپارتمان انجام نشد"
+        details={operationError || undefined}
+        onClose={() => setOperationError(null)}
+        returnFocusElement={submitFocusRef.current}
+      />
+    </ErpPage>
   );
 }
-

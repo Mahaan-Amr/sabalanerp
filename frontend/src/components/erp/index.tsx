@@ -294,6 +294,50 @@ export const ErpTextarea = React.forwardRef<
   return <textarea ref={ref} className={cx(erpFieldClassName, 'min-h-24 resize-y', className)} {...props} />;
 });
 
+export function ErpField({
+  label,
+  hint,
+  error,
+  required = false,
+  className,
+  children,
+}: {
+  label: React.ReactNode;
+  hint?: React.ReactNode;
+  error?: React.ReactNode;
+  required?: boolean;
+  className?: string;
+  children: React.ReactElement<{
+    id?: string;
+    'aria-describedby'?: string;
+    'aria-invalid'?: boolean | 'true' | 'false';
+  }>;
+}) {
+  const generatedId = React.useId();
+  const fieldId = children.props.id || generatedId;
+  const hintId = hint ? `${fieldId}-hint` : undefined;
+  const errorId = error ? `${fieldId}-error` : undefined;
+  const describedBy = [children.props['aria-describedby'], hintId, errorId]
+    .filter(Boolean)
+    .join(' ') || undefined;
+
+  return (
+    <div className={cx('space-y-2', className)}>
+      <label htmlFor={fieldId} className={erpFieldLabelClassName}>
+        {label}
+        {required ? <span aria-hidden="true"> *</span> : null}
+      </label>
+      {React.cloneElement(children, {
+        id: fieldId,
+        'aria-describedby': describedBy,
+        'aria-invalid': error ? true : children.props['aria-invalid'],
+      })}
+      {hint ? <p id={hintId} className="sds-text-muted text-xs leading-5">{hint}</p> : null}
+      {error ? <p id={errorId} className="text-sm text-[var(--sds-danger)]" role="alert">{error}</p> : null}
+    </div>
+  );
+}
+
 export const ErpCheckboxControl = React.forwardRef<
   HTMLInputElement,
   Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>
@@ -381,7 +425,7 @@ export function ErpSection({ title, description, actions, children, className }:
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             {title && <h2 className="sds-text-primary text-base font-semibold">{title}</h2>}
-            {description && <p className="sds-text-muted mt-1 text-sm leading-6">{description}</p>}
+            {description && <p className="sds-text-secondary mt-1 text-sm leading-6">{description}</p>}
           </div>
           {actions?.length ? (
             <div className="flex flex-wrap gap-2">
@@ -406,9 +450,9 @@ export function ErpMetricGrid({ items }: { items: ErpMetric[] }) {
           <ErpCard key={item.label} tone={tone} className="p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="sds-text-muted text-xs">{item.label}</p>
+                <p className="sds-text-secondary text-xs">{item.label}</p>
                 <p className="sds-text-primary mt-1 truncate text-lg font-semibold">{item.value}</p>
-                {item.hint && <p className="sds-text-muted mt-1 text-xs">{item.hint}</p>}
+                {item.hint && <p className="sds-text-secondary mt-1 text-xs">{item.hint}</p>}
               </div>
               {Icon && (
                 <span className={cx('inline-flex h-9 w-9 items-center justify-center rounded-lg', toneClasses[tone].icon)}>
@@ -1397,25 +1441,46 @@ export function ErpActionMenu({ label, actions }: { label: string; actions: ErpA
   );
 }
 
-export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet', size = 'default', dismissible = true }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal'; size?: 'default' | 'wide'; dismissible?: boolean }) {
+const ErpOverlayPortalContext = React.createContext<React.RefObject<HTMLElement | null> | null>(null);
+
+export function useErpOverlayPortalContainer() {
+  return React.useContext(ErpOverlayPortalContext);
+}
+
+export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet', size = 'default', dismissible = true, pending = false, returnFocusElement = null }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal'; size?: 'default' | 'wide'; dismissible?: boolean; pending?: boolean; returnFocusElement?: HTMLElement | null }) {
   const [mounted, setMounted] = React.useState(false);
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
   const dialogRef = React.useRef<HTMLDivElement>(null);
+  const overlayRootRef = React.useRef<HTMLDivElement>(null);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
   const onCloseRef = React.useRef(onClose);
+  const dismissibleRef = React.useRef(dismissible && !pending);
+  const returnFocusElementRef = React.useRef(returnFocusElement);
   const titleId = React.useId();
   const reduceMotion = useReducedMotion();
   const isModal = presentation === 'modal';
+  const effectiveDismissible = dismissible && !pending;
   React.useEffect(() => setMounted(true), []);
   React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  dismissibleRef.current = effectiveDismissible;
+  returnFocusElementRef.current = returnFocusElement;
   React.useEffect(() => {
     if (!open) return;
-    restoreFocusRef.current = document.activeElement as HTMLElement;
+    restoreFocusRef.current = returnFocusElementRef.current || document.activeElement as HTMLElement;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+    window.setTimeout(() => {
+      const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])');
+      firstFocusable?.focus();
+    }, 0);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && dismissible) onCloseRef.current();
+      const overlayRoots = document.querySelectorAll<HTMLElement>('[data-erp-overlay-root]');
+      if (event.key === 'Escape') {
+        if (overlayRoots.item(overlayRoots.length - 1) === overlayRootRef.current && dismissibleRef.current) onCloseRef.current();
+        return;
+      }
+      const sheetRoots = document.querySelectorAll<HTMLElement>('[data-erp-sheet-root]');
+      if (sheetRoots.item(sheetRoots.length - 1) !== overlayRootRef.current) return;
       if (event.key !== 'Tab' || !dialogRef.current) return;
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'));
       if (!focusable.length) return;
@@ -1429,17 +1494,18 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
       window.removeEventListener('keydown', onKeyDown);
       restoreFocusRef.current?.focus();
     };
-  }, [dismissible, open]);
+  }, [open]);
   const sheet = (
     <AnimatePresence>
       {open && (
-        <div className={isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"} role="presentation">
-          <motion.button type="button" aria-label="بستن" disabled={!dismissible} onClick={onClose} className="absolute inset-0 bg-[var(--sds-surface-overlay)] backdrop-blur-sm disabled:cursor-wait" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
+        <div ref={overlayRootRef} data-erp-overlay-root data-erp-sheet-root className={isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"} role="presentation">
+          <motion.button type="button" aria-label="بستن" disabled={!effectiveDismissible} onClick={onClose} className="absolute inset-0 bg-[var(--sds-surface-overlay)] backdrop-blur-sm disabled:cursor-wait" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
           <motion.div
             ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby={titleId}
+            aria-busy={pending || undefined}
             initial={reduceMotion ? false : isModal ? { opacity: 0, scale: 0.96, y: 12 } : { opacity: 0, y: 32 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={isModal ? { opacity: 0, scale: 0.97, y: 8 } : { opacity: 0, y: 24 }}
@@ -1448,12 +1514,14 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
               ? `relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-2xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:max-h-[calc(100dvh-2rem)] ${size === 'wide' ? 'max-w-6xl' : 'max-w-xl'}`
               : "relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:mr-auto sm:h-full sm:max-h-none sm:max-w-lg sm:rounded-none sm:rounded-r-3xl"}
           >
+            <ErpOverlayPortalContext.Provider value={dialogRef}>
             <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-[var(--sds-border-default)] px-4 dark:border-[var(--sds-border-strong)]">
               <h2 id={titleId} className="text-base font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2>
-              <button ref={closeButtonRef} type="button" disabled={!dismissible} onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-[var(--sds-text-secondary)] outline-none transition hover:bg-[var(--sds-surface-subtle)] focus-visible:ring-2 focus-visible:ring-[var(--sds-accent)] disabled:cursor-wait disabled:opacity-50 dark:hover:bg-[var(--sds-surface-raised)]" aria-label="بستن"><FaTimes /></button>
+              <button ref={closeButtonRef} type="button" disabled={!effectiveDismissible} onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-[var(--sds-text-secondary)] outline-none transition hover:bg-[var(--sds-surface-subtle)] focus-visible:ring-2 focus-visible:ring-[var(--sds-accent)] disabled:cursor-wait disabled:opacity-50 dark:hover:bg-[var(--sds-surface-raised)]" aria-label="بستن"><FaTimes /></button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
             {footer && <footer className="shrink-0 border-t border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-strong)]">{footer}</footer>}
+            </ErpOverlayPortalContext.Provider>
           </motion.div>
         </div>
       )}

@@ -28,7 +28,7 @@ once. Bypassing a local hook does not bypass pull-request enforcement.
 - `legacy`: a supported route waiting for its migration ticket.
 - `exempt`: a route deliberately outside ordinary migration, with accountable justification.
 
-Every rule also records its acceptance status. The first matching rule wins. Keep narrow rules before the final legacy fallback. A new route is not complete until its intended state is explicit and `npm run design-system:report` reports zero unclassified routes.
+Every rule also records its acceptance status. Accepted surfaces may record `acceptanceEvidence` separately for `semantic`, `composition`, `interactionAccessibility`, `responsiveTheme`, and `visual`; one migration flag must not stand in for these distinct gates. The first matching rule wins. Keep narrow rules before the final legacy fallback. A new route is not complete until its intended state is explicit and `npm run design-system:report` reports zero unclassified routes.
 
 Reference behavior that occupies only part of a legacy route belongs in `surfaces`, not in a route rule. Contract Product Selection is recorded this way because the surrounding Contract Creation workflow has not migrated.
 

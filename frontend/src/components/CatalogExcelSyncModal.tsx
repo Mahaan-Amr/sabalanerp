@@ -1,7 +1,7 @@
 'use client';
-import { ErpPressable } from '@/components/erp';
+import { ErpButton, ErpInlineState, ErpSegmentedControl, ErpSheet } from '@/components/erp';
 import React, { useState } from 'react';
-import { FaDownload, FaExclamationTriangle, FaFileExcel, FaSpinner, FaTimes, FaUpload } from 'react-icons/fa';
+import { FaDownload, FaExclamationTriangle, FaFileExcel, FaUpload } from 'react-icons/fa';
 import ExcelFileUpload from './ExcelFileUpload';
 
 interface CatalogSyncPlan {
@@ -160,25 +160,25 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-overlay)] p-4">
-      <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-lg bg-[var(--sds-surface-raised)] shadow-xl dark:bg-[var(--sds-surface-raised)]">
-        <div className="flex items-center justify-between border-b border-[var(--sds-border-default)] p-5 dark:border-[var(--sds-border-strong)]">
-          <h2 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2>
-          <ErpPressable type="submit" onClick={close} className="rounded p-2 text-[var(--sds-text-muted)] hover:text-[var(--sds-text-secondary)] dark:hover:text-[var(--sds-text-primary)]">
-            <FaTimes />
-          </ErpPressable>
-        </div>
+    <ErpSheet
+      open={isOpen}
+      onClose={close}
+      title={title}
+      presentation="modal"
+      size="wide"
+      pending={loading}
+      footer={<div className="flex justify-end"><ErpButton label="بستن" onClick={close} tone="neutral" variant="outline" disabled={loading} /></div>}
+    >
+        <ErpSegmentedControl
+          value={activeTab}
+          onChange={setActiveTab}
+          options={[
+            { value: 'import', label: 'ورود اطلاعات', icon: FaUpload },
+            { value: 'export', label: 'خروج اطلاعات', icon: FaDownload }
+          ]}
+        />
 
-        <div className="flex border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-          <ErpPressable type="submit" onClick={() => setActiveTab('import')} className={`flex-1 px-4 py-3 text-sm font-medium ${activeTab === 'import' ? 'border-b-2 border-[var(--sds-border-strong)] text-[var(--sds-accent)]' : 'text-[var(--sds-text-secondary)]'}`}>
-            <FaUpload className="ml-2 inline" /> ورود اطلاعات
-          </ErpPressable>
-          <ErpPressable type="submit" onClick={() => setActiveTab('export')} className={`flex-1 px-4 py-3 text-sm font-medium ${activeTab === 'export' ? 'border-b-2 border-[var(--sds-border-strong)] text-[var(--sds-accent)]' : 'text-[var(--sds-text-secondary)]'}`}>
-            <FaDownload className="ml-2 inline" /> خروج اطلاعات
-          </ErpPressable>
-        </div>
-
-        <div className="max-h-[65vh] overflow-y-auto p-5">
+        <div className="mt-5">
           {activeTab === 'import' ? (
             <div className="space-y-5">
               <div className="rounded-lg border border-[var(--sds-info-border)] bg-[var(--sds-info-surface)] p-4 dark:border-[var(--sds-info-border)] dark:bg-[var(--sds-info-surface)]">
@@ -187,9 +187,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
                   <div className="flex-1">
                     <div className="font-medium text-[var(--sds-info)] dark:text-[var(--sds-info)]">قالب اختصاصی اکسل</div>
                     <p className="mt-1 text-sm text-[var(--sds-info)] dark:text-[var(--sds-info)]">ابتدا قالب همین کاتالوگ را دانلود کنید یا خروجی فعلی را ویرایش و دوباره بارگذاری کنید.</p>
-                    <ErpPressable type="submit" onClick={handleTemplate} disabled={loading} className="mt-3 rounded-md bg-[var(--sds-info-surface)] px-3 py-2 text-sm font-medium text-[var(--sds-info)] hover:bg-[var(--sds-info-surface)] disabled:opacity-50">
-                      دانلود قالب
-                    </ErpPressable>
+                    <div className="mt-3"><ErpButton label="دانلود قالب" onClick={handleTemplate} disabled={loading} tone="info" variant="outline" /></div>
                   </div>
                 </div>
               </div>
@@ -202,10 +200,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
               />
 
               <div className="flex justify-end">
-                <ErpPressable type="submit" onClick={handlePreview} disabled={loading || !selectedFile} className="inline-flex items-center rounded-md bg-[var(--sds-accent)] px-5 py-2.5 text-sm font-medium text-[var(--sds-text-inverse)] hover:bg-[var(--sds-accent)] disabled:opacity-50">
-                  {loading ? <FaSpinner className="ml-2 animate-spin" /> : <FaUpload className="ml-2" />}
-                  بررسی و پیش‌نمایش
-                </ErpPressable>
+                <ErpButton label={loading ? 'در حال بررسی...' : 'بررسی و پیش‌نمایش'} icon={FaUpload} onClick={handlePreview} disabled={loading || !selectedFile} tone="primary" variant="solid" />
               </div>
 
               {plan && (
@@ -235,10 +230,7 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
                   )}
 
                   <div className="flex justify-end">
-                    <ErpPressable type="submit" onClick={handleApply} disabled={loading || !plan.canApply} className="inline-flex items-center rounded-md bg-[var(--sds-success)] px-5 py-2.5 text-sm font-medium text-[var(--sds-text-inverse)] hover:bg-[var(--sds-success)] disabled:opacity-50">
-                      {loading ? <FaSpinner className="ml-2 animate-spin" /> : null}
-                      تأیید و اعمال تغییرات
-                    </ErpPressable>
+                    <ErpButton label={loading ? 'در حال اعمال...' : 'تأیید و اعمال تغییرات'} onClick={handleApply} disabled={loading || !plan.canApply} tone="success" variant="solid" />
                   </div>
                 </div>
               )}
@@ -249,28 +241,14 @@ const CatalogExcelSyncModal: React.FC<CatalogExcelSyncModalProps> = ({
                 خروجی فعلی همین کاتالوگ دانلود می‌شود و بعد از ویرایش قابل ورود دوباره است.
               </div>
               <div className="flex justify-end">
-                <ErpPressable type="submit" onClick={handleExport} disabled={loading} className="inline-flex items-center rounded-md bg-[var(--sds-accent)] px-5 py-2.5 text-sm font-medium text-[var(--sds-text-inverse)] hover:bg-[var(--sds-accent)] disabled:opacity-50">
-                  {loading ? <FaSpinner className="ml-2 animate-spin" /> : <FaDownload className="ml-2" />}
-                  دانلود خروجی
-                </ErpPressable>
+                <ErpButton label={loading ? 'در حال آماده‌سازی...' : 'دانلود خروجی'} icon={FaDownload} onClick={handleExport} disabled={loading} tone="primary" variant="solid" />
               </div>
             </div>
           )}
 
-          {error && (
-            <div className="mt-4 rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] p-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
-              {error}
-            </div>
-          )}
+          {error ? <ErpInlineState kind="error" title={error} className="mt-4" /> : null}
         </div>
-
-        <div className="flex justify-end border-t border-[var(--sds-border-default)] p-4 dark:border-[var(--sds-border-strong)]">
-          <ErpPressable type="submit" onClick={close} className="rounded-md bg-[var(--sds-surface-subtle)] px-4 py-2 text-sm font-medium text-[var(--sds-text-primary)] hover:bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:hover:bg-[var(--sds-surface-subtle)]">
-            بستن
-          </ErpPressable>
-        </div>
-      </div>
-    </div>
+    </ErpSheet>
   );
 };
 

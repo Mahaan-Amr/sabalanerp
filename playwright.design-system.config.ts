@@ -1,64 +1,31 @@
 import { defineConfig, devices } from '@playwright/test';
-import path from 'node:path';
-
-const repositoryRoot = __dirname;
-const backendRoot = path.join(repositoryRoot, 'backend');
-const frontendRoot = path.join(repositoryRoot, 'frontend');
-const externalBaseUrl = process.env.DESIGN_SYSTEM_E2E_BASE_URL;
-
-process.env.JWT_SECRET ??= 'design-system-e2e-secret-with-at-least-32-characters';
-process.env.FRONTEND_URL ??= 'http://127.0.0.1:3101';
-process.env.PUBLIC_APP_URL ??= 'http://127.0.0.1:3101';
-process.env.NEXT_PUBLIC_API_URL ??= '/api';
-process.env.BACKEND_API_ORIGIN ??= 'http://127.0.0.1:5101';
-process.env.NEXT_PUBLIC_SOCKET_URL ??= 'http://127.0.0.1:5101';
-process.env.SMS_IR_ENVIRONMENT ??= 'sandbox';
 
 export default defineConfig({
   testDir: './tests/design-system-e2e',
+  outputDir: './test-results/design-system',
+  snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{projectName}/{arg}{ext}',
   timeout: 60_000,
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [['github']] : 'list',
+  forbidOnly: Boolean(process.env.CI),
+  updateSnapshots: 'none',
+  reporter: process.env.CI
+    ? [['github'], ['html', { outputFolder: 'test-results/design-system-report', open: 'never' }]]
+    : 'list',
   use: {
-    baseURL: externalBaseUrl || 'http://127.0.0.1:3101',
+    baseURL: process.env.DESIGN_SYSTEM_E2E_BASE_URL || 'http://127.0.0.1:3000',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',
     locale: 'fa-IR',
-    timezoneId: 'Asia/Tehran'
+    timezoneId: 'Asia/Tehran',
+    reducedMotion: 'reduce'
   },
   projects: [
     {
-      name: 'chromium',
+      name: 'desktop-chromium',
       use: { ...devices['Desktop Chrome'], channel: 'chrome' }
-    }
-  ],
-  webServer: externalBaseUrl ? undefined : [
-    {
-      command: 'npx prisma generate && npx prisma migrate deploy && npm run db:seed && npm run dev',
-      cwd: backendRoot,
-      url: 'http://127.0.0.1:5101/api/ready',
-      env: {
-        ...process.env,
-        PORT: '5101',
-        NODE_ENV: 'test'
-      },
-      reuseExistingServer: false,
-      timeout: 120_000
-    },
-    {
-      command: 'npm run dev -- --port 3101',
-      cwd: frontendRoot,
-      url: 'http://127.0.0.1:3101/login',
-      env: {
-        ...process.env,
-        NODE_ENV: 'test',
-        BACKEND_API_ORIGIN: 'http://127.0.0.1:5101'
-      },
-      reuseExistingServer: false,
-      timeout: 120_000
     }
   ]
 });

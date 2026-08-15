@@ -1,7 +1,6 @@
 'use client';
-import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
+import { ErpField, ErpInlineState, ErpInput, ErpSheet, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
-import { FaTimes } from 'react-icons/fa';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
@@ -100,33 +99,31 @@ export default function AccountingActionModal({
     }`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--sds-surface-raised)] p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-xl rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-5 shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-bold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{title}</h2>
-            {description && <p className="mt-1 text-sm leading-6 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{description}</p>}
-          </div>
-          <ErpPressable
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--sds-border-default)] text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:text-[var(--sds-text-muted)] dark:hover:bg-[var(--sds-surface-raised)]"
-            aria-label="بستن"
-          >
-            <FaTimes className="h-4 w-4" />
-          </ErpPressable>
+    <ErpSheet
+      open={open}
+      onClose={onClose}
+      title={title}
+      presentation="modal"
+      pending={busy}
+      footer={(
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={onClose} disabled={busy} />
+          <ErpButton label={submitLabel} tone="primary" variant="solid" onClick={submit} disabled={busy} />
         </div>
-
-        <div className="mt-5 space-y-4">
+      )}
+    >
+      <div className="space-y-4">
+        {description ? <p className="sds-text-secondary text-sm leading-6">{description}</p> : null}
           {fields.map((field) => {
             const invalid = Boolean(touched[field.id] && missingFields.some((item) => item.id === field.id));
             const value = values[field.id] ?? '';
             return (
-              <label key={field.id} className="block">
-                <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                  {field.label}
-                  {field.required && <span className="text-[var(--sds-danger)]"> *</span>}
-                </span>
+              <ErpField
+                key={field.id}
+                label={field.label}
+                required={field.required}
+                error={invalid ? 'این فیلد الزامی است.' : undefined}
+              >
                 {field.type === 'textarea' ? (
                   <ErpTextarea
                     value={String(value)}
@@ -137,9 +134,11 @@ export default function AccountingActionModal({
                     className={fieldClass(invalid)}
                   />
                 ) : field.type === 'date' ? (
-                  <div className={fieldClass(invalid)}>
-                    <PersianCalendarComponent value={String(value)} onChange={(next) => setValue(field.id, next)} placeholder={field.placeholder || field.label} />
-                  </div>
+                  <PersianCalendarComponent
+                    value={String(value)}
+                    onChange={(next) => setValue(field.id, next)}
+                    placeholder={field.placeholder || field.label}
+                  />
                 ) : field.type === 'number' ? (
                   <FormattedNumberInput
                     value={toFiniteNumber(value)}
@@ -156,7 +155,6 @@ export default function AccountingActionModal({
                     placeholder={field.placeholder || field.label}
                     searchable
                     required={field.required}
-                    error={invalid ? 'این فیلد الزامی است.' : undefined}
                   />
                 ) : (
                   <ErpInput
@@ -167,19 +165,11 @@ export default function AccountingActionModal({
                     className={fieldClass(invalid)}
                   />
                 )}
-                {invalid && <p className="mt-1 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]">این فیلد الزامی است.</p>}
-              </label>
+              </ErpField>
             );
           })}
-        </div>
-
-        {error && <p className="mt-4 rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-3 py-2 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">{error}</p>}
-
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <ErpButton label="انصراف" tone="neutral" variant="outline" onClick={onClose} disabled={busy} />
-          <ErpButton label={submitLabel} tone="primary" onClick={submit} disabled={busy} />
-        </div>
+        {error ? <ErpInlineState kind="error" title={error} /> : null}
       </div>
-    </div>
+    </ErpSheet>
   );
 }

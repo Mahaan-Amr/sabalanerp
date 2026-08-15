@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  readInteractiveSources,
+  validateSemanticTokenContract
+} from '../../scripts/design-system-token-contract.mjs';
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 
 const tokenSource = read('frontend/src/styles/design-system-tokens.css');
 const sharedModuleSource = read('frontend/src/components/erp/index.tsx');
+const enhancedDropdownSource = read('frontend/src/components/EnhancedDropdown.tsx');
+const persianCalendarSource = read('frontend/src/components/PersianCalendar.tsx');
 const hrRetentionDialogSources = [
   read('frontend/src/features/hr/RetentionActionSheet.tsx'),
   read('frontend/src/features/hr/PermanentDeletionDialog.tsx')
@@ -212,6 +222,13 @@ const finalSurfaceSources = [
   ['PublicMotion.tsx', read('frontend/src/components/public/PublicMotion.tsx')]
 ];
 const globalStylesSource = read('frontend/src/app/globals.css');
+const departmentCreationSource = read('frontend/src/app/dashboard/departments/create/page.tsx');
+const sharedOverlaySources = [
+  ['SuccessModal.tsx', read('frontend/src/components/SuccessModal.tsx')],
+  ['ErrorModal.tsx', read('frontend/src/components/ErrorModal.tsx')],
+  ['CatalogExcelSyncModal.tsx', read('frontend/src/components/CatalogExcelSyncModal.tsx')],
+  ['AccountingActionModal.tsx', read('frontend/src/features/accounting/AccountingActionModal.tsx')]
+];
 
 const variablesIn = (source) =>
   new Set(Array.from(source.matchAll(/--(sds-[\w-]+)\s*:/g), (match) => match[1]));
@@ -244,6 +261,42 @@ const contrast = (first, second) => {
 
 const lightAdapter = tokenSource.match(/:root,\s*\[data-theme="light"\]\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
 const darkAdapter = tokenSource.match(/\[data-theme="dark"\]\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+
+test('every interactive semantic token reference resolves through a valid light and dark contract', () => {
+  const diagnostics = validateSemanticTokenContract({
+    tokenSource,
+    sources: readInteractiveSources(repositoryRoot)
+  });
+
+  assert.deepEqual(diagnostics, []);
+});
+
+test('semantic token validation rejects undefined references, missing theme counterparts, and invalid aliases', () => {
+  const fixture = [
+    ':root,',
+    '[data-theme="light"] {',
+    '  --sds-text-primary: #111111;',
+    '  --sds-accent: var(--sds-accent-missing);',
+    '}',
+    '[data-theme="dark"] {',
+    '  --sds-text-primary: #eeeeee;',
+    '}',
+    ''
+  ].join('\n');
+  const diagnostics = validateSemanticTokenContract({
+    tokenSource: fixture,
+    sources: [['frontend/src/example.tsx', 'const style = "var(--sds-unknown)";']]
+  });
+
+  assert.deepEqual(
+    diagnostics.map(({ kind, token }) => [kind, token]),
+    [
+      ['undefined-reference', 'sds-unknown'],
+      ['invalid-alias', 'sds-accent'],
+      ['missing-theme-counterpart', 'sds-accent']
+    ]
+  );
+});
 
 test('light and dark adapters expose the same required semantic color meanings', () => {
   const requiredThemeTokens = [
@@ -331,6 +384,49 @@ test('the canonical module hides semantic styling behind its shared interface', 
   assert.match(sharedModuleSource, /sds-action-solid/);
   assert.match(sharedModuleSource, /sds-tone-surface/);
   assert.match(sharedModuleSource, /motion-reduce:animate-none/);
+});
+
+test('Department Creation composes the canonical page, section, field, feedback, and action interfaces', () => {
+  assert.match(departmentCreationSource, /<ErpPage/);
+  assert.match(departmentCreationSource, /<ErpSection/);
+  assert.match(departmentCreationSource, /<ErpField/);
+  assert.match(departmentCreationSource, /<ErpCheckbox/);
+  assert.match(departmentCreationSource, /<ErpInlineState/);
+  assert.match(departmentCreationSource, /<ErpButton/);
+  assert.doesNotMatch(departmentCreationSource, /\balert\(/);
+  assert.doesNotMatch(departmentCreationSource, /\bsds-(?:workspace|workspace-surface|action|field)\b/);
+  assert.match(sharedModuleSource, /export function ErpField\(/);
+  assert.match(sharedModuleSource, /aria-describedby/);
+  assert.match(sharedModuleSource, /aria-invalid/);
+});
+
+test('shared feedback, catalog sync, and Accounting actions compose the canonical pending-safe overlay', () => {
+  for (const [file, source] of sharedOverlaySources) {
+    assert.match(source, /<ErpSheet/, `${file} must use the canonical overlay`);
+    assert.doesNotMatch(source, /\brole="dialog"/, `${file} must not implement a local dialog`);
+    assert.doesNotMatch(source, /fixed inset-0/, `${file} must not implement a local backdrop`);
+  }
+  const catalog = sharedOverlaySources.find(([file]) => file === 'CatalogExcelSyncModal.tsx')[1];
+  const accounting = sharedOverlaySources.find(([file]) => file === 'AccountingActionModal.tsx')[1];
+  assert.match(catalog, /pending=\{loading\}/);
+  assert.match(catalog, /<ErpSegmentedControl/);
+  assert.match(catalog, /<ErpInlineState/);
+  assert.match(accounting, /pending=\{busy\}/);
+  assert.match(accounting, /<ErpField/);
+  assert.match(sharedModuleSource, /pending = false/);
+  assert.match(sharedModuleSource, /aria-busy=\{pending \|\| undefined\}/);
+  assert.match(sharedModuleSource, /event\.key === 'Escape'/);
+  assert.match(sharedModuleSource, /dismissibleRef\.current/);
+  assert.match(sharedModuleSource, /querySelectorAll<HTMLElement>\('\[data-erp-sheet-root\]'\)/);
+  assert.match(sharedModuleSource, /\}, \[open\]\);/);
+  assert.match(sharedModuleSource, /data-erp-overlay-root/);
+  assert.match(sharedModuleSource, /overlayRoots\.item\(overlayRoots\.length - 1\)/);
+  assert.match(enhancedDropdownSource, /aria-describedby=\{ariaDescribedBy\}/);
+  assert.match(enhancedDropdownSource, /overlayPortalContainer\?\.current \|\| document\.body/);
+  assert.match(enhancedDropdownSource, /onKeyDown=\{handleKeyDown\}/);
+  assert.match(enhancedDropdownSource, /requestAnimationFrame\(\(\) => dropdownRef\.current\?\.focus\(\)\)/);
+  assert.match(persianCalendarSource, /aria-describedby=\{ariaDescribedBy\}/);
+  assert.match(persianCalendarSource, /overlayPortalContainer\?\.current \|\| document\.body/);
 });
 
 test('Guard and Product Selection both cross the shared interface seam', () => {

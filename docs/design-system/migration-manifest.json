@@ -256,6 +256,13 @@
       "id": "sales-workspace",
       "status": "migrated",
       "acceptanceStatus": "accepted",
+      "acceptanceEvidence": {
+        "semantic": "test:design-system-foundation",
+        "composition": "design-system:check",
+        "interactionAccessibility": "test:design-system:e2e",
+        "responsiveTheme": "test:design-system:e2e",
+        "visual": "tests/design-system-e2e/__screenshots__"
+      },
       "reason": "Contract lists and details, product management, operational reporting, and interactive template authoring share canonical responsive controls without changing sales-domain behavior.",
       "files": [
         "frontend/src/app/dashboard/sales/**",
@@ -269,6 +276,13 @@
       "id": "inventory-and-logistics",
       "status": "migrated",
       "acceptanceStatus": "accepted",
+      "acceptanceEvidence": {
+        "semantic": "test:design-system-foundation",
+        "composition": "design-system:check",
+        "interactionAccessibility": "tests/design-system-e2e/shared-operational-overlays.spec.ts",
+        "responsiveTheme": "tests/design-system-e2e/shared-operational-overlays.spec.ts",
+        "visual": "tests/design-system-e2e/shared-operational-overlays.spec.ts assertSemanticSurfaceVisuals"
+      },
       "reason": "Inventory master data and service catalogs now share one visual and interaction foundation with downstream loading operations.",
       "files": [
         "frontend/src/app/dashboard/inventory/**",
@@ -280,6 +294,13 @@
       "id": "accounting-workspace",
       "status": "migrated",
       "acceptanceStatus": "accepted",
+      "acceptanceEvidence": {
+        "semantic": "test:design-system-foundation",
+        "composition": "design-system:check",
+        "interactionAccessibility": "tests/design-system-e2e/shared-operational-overlays.spec.ts",
+        "responsiveTheme": "tests/design-system-e2e/shared-operational-overlays.spec.ts",
+        "visual": "tests/design-system-e2e/shared-operational-overlays.spec.ts assertSemanticSurfaceVisuals"
+      },
       "reason": "Accounting review and entry surfaces share consistent information hierarchy and consequential-action controls without changing calculations, permissions, or history.",
       "files": [
         "frontend/src/app/dashboard/accounting/**",
@@ -290,6 +311,13 @@
       "id": "people-and-administration",
       "status": "migrated",
       "acceptanceStatus": "accepted",
+      "acceptanceEvidence": {
+        "semantic": "test:design-system-foundation",
+        "composition": "design-system:check",
+        "interactionAccessibility": "test:design-system:e2e",
+        "responsiveTheme": "test:design-system:e2e",
+        "visual": "tests/design-system-e2e/__screenshots__/department-creation-pilot.spec.ts"
+      },
       "reason": "Applicant intake, Hiring, HR, Users, Departments, Permissions, and Admin now share one focused interaction and visual foundation.",
       "files": [
         "frontend/src/app/apply/**",
@@ -339,7 +367,12 @@
       "allowedCategories": [
         "hardcoded-semantic-color",
         "duplicate-primitive-risk",
-        "raw-control-risk"
+        "raw-control-risk",
+        "manual-dialog-risk",
+        "direct-presentation-primitive-risk",
+        "duplicate-composition-risk",
+        "full-presentation-override-risk",
+        "local-semantic-effect-risk"
       ],
       "reason": "Canonical ERP modules implement semantic interfaces and accessible native behavior for feature consumers.",
       "owner": "Sabalan Design System"
@@ -350,7 +383,8 @@
         "frontend/src/styles/design-system-tokens.css"
       ],
       "allowedCategories": [
-        "hardcoded-semantic-color"
+        "hardcoded-semantic-color",
+        "local-semantic-effect-risk"
       ],
       "reason": "The dedicated adapter defines raw palette values behind the shared semantic token interface.",
       "owner": "Sabalan Design System"

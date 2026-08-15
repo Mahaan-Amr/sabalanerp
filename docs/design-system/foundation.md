@@ -42,4 +42,4 @@ npm run design-system:check
 npm run build:frontend
 ```
 
-The browser suite starts an isolated embedded PostgreSQL database, applies production migrations, seeds ordinary application data, authenticates through the real login flow, and verifies Guard and Product Selection in the real frontend/backend seam. It does not read or modify a developer or production database.
+The browser suite preflights and uses the existing `sabalanerp-local` Compose project, authenticates through the real login flow, and verifies the real frontend/backend seam. It never starts an embedded database, a second Compose project, or replacement services. The runner fails with recovery instructions when the approved local services are unavailable. Specs isolate mutable state through namespaced fixtures or route projections and must remain safe to repeat.

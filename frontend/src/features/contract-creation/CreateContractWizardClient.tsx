@@ -176,6 +176,7 @@ import {
   mergeEditedRemainingStoneState,
   removeStairLayerConfiguration,
   resolveExistingCalibrationCutEnabled,
+  resolveLongitudinalDraftForSave,
   resolveLongitudinalOptimizerEditOwnership,
   resolveLongitudinalQuantityOptimizationFailure,
   resolveLongitudinalWidth,
@@ -4983,6 +4984,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     // LONGITUDINAL STONE VALIDATION AND CALCULATION (existing logic)
+    const canonicalLongitudinalDraft = resolveLongitudinalDraftForSave(productConfig);
+    if (!canonicalLongitudinalDraft.ok) {
+      setErrors({ products: canonicalLongitudinalDraft.message });
+      return;
+    }
+    Object.assign(productConfig, canonicalLongitudinalDraft.draft);
+
     const widthResolvedProductConfig = resolveLongitudinalWidth(
       productConfig,
       selectedProduct,
@@ -5004,7 +5012,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       enteredQuantity: enteredLongitudinalQuantity,
       inheritedDerivedQuantity: productConfig.smartCutDerivedQuantity,
       inheritedDerivedDimension: productConfig.smartCutDerivedDimension,
-      touchedFields
+      touchedFields,
+      previousPolicyInput: previousLongitudinalProduct?.longitudinalPolicyInput,
+      currentPolicyInput: productConfig.longitudinalPolicyInput
     });
     const preserveDerivedQuantity = optimizerEditOwnership.preserveDerivedQuantity;
     const longitudinalQuantityOptimizerIntent =

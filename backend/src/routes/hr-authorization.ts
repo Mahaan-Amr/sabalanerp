@@ -103,15 +103,17 @@ router.get('/me', asyncHandler(async (req, res) => {
 }));
 
 router.get('/context', administer, asyncHandler(async (req, res) => {
-  const [users, workspaceCatalog, featureCatalog, authorityCatalog, responsibilityTypes, workspaceGrants,
-    featureGrants, authorityGrants, responsibilities, destinations, constraints, audit] = await Promise.all([
+  const [users, workspaceCatalog, featureCatalog, authorityCatalog, responsibilityTypes, recentWorkspaceGrants,
+    activeWorkspaceGrants, recentFeatureGrants, activeFeatureGrants, authorityGrants, responsibilities, destinations, constraints, audit] = await Promise.all([
     prisma.user.findMany({ where: { isActive: true, ...(req.user!.role === 'MANAGER' ? { role: { not: 'ADMIN' } } : {}) }, select: { id: true, username: true, firstName: true, lastName: true, role: true }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
     prisma.hrWorkspaceCatalog.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
     prisma.hrFeatureCatalog.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
     prisma.hrAuthorityCatalog.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
     prisma.hrResponsibilityTypeCatalog.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
     prisma.hrWorkspaceAccessGrant.findMany({ orderBy: { createdAt: 'desc' }, take: 500 }),
+    prisma.hrWorkspaceAccessGrant.findMany({ where: { status: 'ACTIVE' }, orderBy: { createdAt: 'desc' } }),
     prisma.hrFeatureAccessGrant.findMany({ orderBy: { createdAt: 'desc' }, take: 1000 }),
+    prisma.hrFeatureAccessGrant.findMany({ where: { status: 'ACTIVE' }, orderBy: { createdAt: 'desc' } }),
     prisma.hrBusinessAuthorityGrant.findMany({ orderBy: { createdAt: 'desc' }, take: 1000 }),
     prisma.hrNamedResponsibility.findMany({ orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }], take: 500 }),
     prisma.hrResponsibilityDestination.findMany({ orderBy: { createdAt: 'desc' }, take: 500 }),
@@ -122,6 +124,13 @@ router.get('/context', administer, asyncHandler(async (req, res) => {
   const visibleToActor = <T extends { userId: string }>(rows: T[]) => (
     req.user!.role === 'ADMIN' ? rows : rows.filter(({ userId }) => visibleUserIds.has(userId))
   );
+  const mergeById = <T extends { id: string }>(primary: T[], history: T[]) => {
+    const rows = new Map(primary.map((row) => [row.id, row]));
+    history.forEach((row) => { if (!rows.has(row.id)) rows.set(row.id, row); });
+    return [...rows.values()];
+  };
+  const workspaceGrants = mergeById(activeWorkspaceGrants, recentWorkspaceGrants);
+  const featureGrants = mergeById(activeFeatureGrants, recentFeatureGrants);
   res.json({ success: true, data: {
     users, workspaceCatalog, featureCatalog, actionPermissionGroups: HR_ACTION_PERMISSION_GROUPS,
     authorityCatalog, responsibilityTypes,
@@ -173,11 +182,26 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
     }
 
     const hrCatalogRows = await tx.hrFeatureCatalog.findMany({ where: { isActive: true }, select: { code: true } });
+    const contractHrFeatureSet = new Set(HR_REDESIGN_CATALOG.workspaceFeatures.map(({ code }) => code));
+    const persistedHrFeatureSet = new Set(hrCatalogRows.map(({ code }) => code));
     const validHrFeatures = new Set([
-      ...hrCatalogRows.map(({ code }) => code),
+      ...contractHrFeatureSet,
+      ...persistedHrFeatureSet,
       ...HR_ACTION_PERMISSION_GROUPS.flatMap(({ permissions }) => permissions.map(({ code }) => code)),
     ]);
     if (desiredHr.some((feature) => !validHrFeatures.has(feature))) throw badRequest('یک یا چند مجوز منابع انسانی معتبر نیست.');
+    for (const featureCode of desiredHr.filter((feature) => contractHrFeatureSet.has(feature as never) && !persistedHrFeatureSet.has(feature))) {
+      await tx.hrFeatureCatalog.upsert({
+        where: { code: featureCode },
+        update: { workspaceCode: HR_REDESIGN_CATALOG.workspaceCode, version: HR_REDESIGN_CATALOG.contractVersion, isActive: true },
+        create: {
+          code: featureCode,
+          workspaceCode: HR_REDESIGN_CATALOG.workspaceCode,
+          version: HR_REDESIGN_CATALOG.contractVersion,
+          displayName: getHrActionPermissionDefinition(featureCode)?.labelFa ?? featureCode,
+        },
+      });
+    }
 
     if (requestedRole !== target.role) await tx.user.update({ where: { id: targetUserId }, data: { role: requestedRole as never } });
 

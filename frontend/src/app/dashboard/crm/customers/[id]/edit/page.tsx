@@ -1,5 +1,5 @@
 'use client';
-import { ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpTextarea } from '@/components/erp';
+import { ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -21,7 +21,7 @@ import { getCrmPermissions, User as PermissionUser } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 import { CustomerWorkflowPage, CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
-import { InlineFieldError, getBackendErrorMessage, mapBackendValidationErrors } from '@/lib/formErrors';
+import { getBackendErrorMessage, mapBackendValidationErrors } from '@/lib/formErrors';
 import {
   normalizeIranianMobile,
   normalizePhoneDigits,
@@ -123,8 +123,6 @@ const emptyContact = (): EditableContact => ({
   isActive: true
 });
 
-const inputClass = 'w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]';
-const labelClass = 'block text-sm font-medium text-[var(--sds-text-muted)] mb-2';
 const normalizePhoneTypeValue = (value: unknown): PhoneType => {
   const normalized = String(value || '').toLowerCase();
   return ['mobile', 'home', 'work', 'other'].includes(normalized) ? normalized as PhoneType : 'mobile';
@@ -505,25 +503,13 @@ export default function EditCustomerPage() {
       feedback={error ? { kind: 'error', title: error } : dirty ? { kind: 'stale', title: 'تغییرات ذخیره‌نشده دارید.' } : undefined}
     >
 
-      <CustomerWorkflowSection>
-        <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-6 flex items-center gap-2">
-          <FaUser className="text-[var(--sds-accent)]" />
-          اطلاعات پایه
-        </h2>
+      <CustomerWorkflowSection title="اطلاعات پایه">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <CustomerWorkflowField label="نام" error={errors.firstName} required><ErpInput value={formData.firstName} onChange={(e) => updateField('firstName', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="نام خانوادگی" error={errors.lastName} required><ErpInput value={formData.lastName} onChange={(e) => updateField('lastName', e.target.value)} /></CustomerWorkflowField>
           <div>
-            <label htmlFor="customer-firstName" className={labelClass}>نام *</label>
-            <ErpInput id="customer-firstName" aria-invalid={Boolean(errors.firstName)} aria-describedby={errors.firstName ? 'customer-firstName-error' : undefined} className={inputClass} value={formData.firstName} onChange={(e) => updateField('firstName', e.target.value)} />
-            {errors.firstName && <p id="customer-firstName-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.firstName}</p>}
-          </div>
-          <div>
-            <label htmlFor="customer-lastName" className={labelClass}>نام خانوادگی *</label>
-            <ErpInput id="customer-lastName" aria-invalid={Boolean(errors.lastName)} aria-describedby={errors.lastName ? 'customer-lastName-error' : undefined} className={inputClass} value={formData.lastName} onChange={(e) => updateField('lastName', e.target.value)} />
-            {errors.lastName && <p id="customer-lastName-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.lastName}</p>}
-          </div>
-          <div>
-            <label className={labelClass}>نوع مشتری</label>
             <EnhancedDropdown
+              label="نوع مشتری"
               value={formData.customerType}
               onChange={(value) => updateField('customerType', value as CustomerType)}
               options={[
@@ -536,8 +522,8 @@ export default function EditCustomerPage() {
             />
           </div>
           <div>
-            <label className={labelClass}>وضعیت</label>
             <EnhancedDropdown
+              label="وضعیت"
               value={formData.status}
               onChange={(value) => updateField('status', value as CustomerStatus)}
               options={[
@@ -549,97 +535,44 @@ export default function EditCustomerPage() {
               searchable
             />
           </div>
-          <div>
-            <label htmlFor="customer-nationalCode" className={labelClass}>کد ملی</label>
-            <ErpInput id="customer-nationalCode" aria-invalid={Boolean(errors.nationalCode)} aria-describedby={errors.nationalCode ? 'customer-nationalCode-error' : undefined} className={inputClass} value={formData.nationalCode} maxLength={10} onChange={(e) => updateField('nationalCode', e.target.value)} />
-            {errors.nationalCode && <p id="customer-nationalCode-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.nationalCode}</p>}
-          </div>
-          <div>
-            <label className={labelClass}>صنعت</label>
-            <ErpInput className={inputClass} value={formData.industry} onChange={(e) => updateField('industry', e.target.value)} />
-          </div>
+          <CustomerWorkflowField label="کد ملی" error={errors.nationalCode}><ErpInput value={formData.nationalCode} maxLength={10} onChange={(e) => updateField('nationalCode', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="صنعت"><ErpInput value={formData.industry} onChange={(e) => updateField('industry', e.target.value)} /></CustomerWorkflowField>
         </div>
       </CustomerWorkflowSection>
 
-      <CustomerWorkflowSection>
-        <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-6 flex items-center gap-2">
-          <FaBuilding className="text-[var(--sds-info)]" />
-          اطلاعات تکمیلی
-        </h2>
+      <CustomerWorkflowSection title="اطلاعات تکمیلی">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className={labelClass}>نام شرکت / سازمان</label>
-            <ErpInput className={inputClass} value={formData.companyName} onChange={(e) => updateField('companyName', e.target.value)} />
-          </div>
-          <div>
-            <label className={labelClass}>نام برند</label>
-            <ErpInput className={inputClass} value={formData.brandName} onChange={(e) => updateField('brandName', e.target.value)} />
-          </div>
-          <div className="md:col-span-2">
-            <label className={labelClass}>توضیحات برند</label>
-            <ErpTextarea className={inputClass} rows={3} value={formData.brandNameDescription} onChange={(e) => updateField('brandNameDescription', e.target.value)} />
-          </div>
-          <div>
-            <label className={labelClass}>آدرس منزل</label>
-            <ErpInput className={inputClass} value={formData.homeAddress} onChange={(e) => updateField('homeAddress', e.target.value)} />
-          </div>
-          <div>
-            <label className={labelClass}>شماره منزل</label>
-            <ErpInput className={inputClass} value={formData.homeNumber} onChange={(e) => updateField('homeNumber', e.target.value)} />
-          </div>
-          <div>
-            <label className={labelClass}>آدرس محل کار</label>
-            <ErpInput className={inputClass} value={formData.workAddress} onChange={(e) => updateField('workAddress', e.target.value)} />
-          </div>
-          <div>
-            <label className={labelClass}>شماره محل کار</label>
-            <ErpInput className={inputClass} value={formData.workNumber} onChange={(e) => updateField('workNumber', e.target.value)} />
-          </div>
-          <div>
-            <label className={labelClass}>نام مدیر پروژه</label>
-            <ErpInput className={inputClass} value={formData.projectManagerName} onChange={(e) => updateField('projectManagerName', e.target.value)} />
-          </div>
-          <div>
-            <label htmlFor="customer-projectManagerNumber" className={labelClass}>شماره تماس مدیر پروژه</label>
-            <ErpInput id="customer-projectManagerNumber" aria-invalid={Boolean(errors.projectManagerNumber)} aria-describedby={errors.projectManagerNumber ? 'customer-projectManagerNumber-error' : undefined} className={inputClass} value={formData.projectManagerNumber} onChange={(e) => updateField('projectManagerNumber', e.target.value)} />
-            <InlineFieldError id="customer-projectManagerNumber-error" message={errors.projectManagerNumber} />
-          </div>
-          <div>
-            <label className={labelClass}>نام معرف</label>
-            <ErpInput className={inputClass} value={formData.referrerFirstName} onChange={(e) => updateField('referrerFirstName', e.target.value)} />
-          </div>
-          <div>
-            <label className={labelClass}>نام خانوادگی معرف</label>
-            <ErpInput className={inputClass} value={formData.referrerLastName} onChange={(e) => updateField('referrerLastName', e.target.value)} />
-          </div>
-          <div className="md:col-span-2">
-            <label htmlFor="customer-referrerPhoneNumber" className={labelClass}>شماره تماس معرف</label>
-            <ErpInput id="customer-referrerPhoneNumber" aria-invalid={Boolean(errors.referrerPhoneNumber)} aria-describedby={errors.referrerPhoneNumber ? 'customer-referrerPhoneNumber-error' : undefined} className={inputClass} value={formData.referrerPhoneNumber} onChange={(e) => updateField('referrerPhoneNumber', e.target.value)} />
-            <InlineFieldError id="customer-referrerPhoneNumber-error" message={errors.referrerPhoneNumber} />
-          </div>
+          <CustomerWorkflowField label="نام شرکت / سازمان"><ErpInput value={formData.companyName} onChange={(e) => updateField('companyName', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="نام برند"><ErpInput value={formData.brandName} onChange={(e) => updateField('brandName', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="توضیحات برند" className="md:col-span-2"><ErpTextarea rows={3} value={formData.brandNameDescription} onChange={(e) => updateField('brandNameDescription', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="آدرس منزل"><ErpInput value={formData.homeAddress} onChange={(e) => updateField('homeAddress', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="شماره منزل"><ErpInput value={formData.homeNumber} onChange={(e) => updateField('homeNumber', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="آدرس محل کار"><ErpInput value={formData.workAddress} onChange={(e) => updateField('workAddress', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="شماره محل کار"><ErpInput value={formData.workNumber} onChange={(e) => updateField('workNumber', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="نام مدیر پروژه"><ErpInput value={formData.projectManagerName} onChange={(e) => updateField('projectManagerName', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="شماره تماس مدیر پروژه" error={errors.projectManagerNumber}><ErpInput value={formData.projectManagerNumber} onChange={(e) => updateField('projectManagerNumber', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="نام معرف"><ErpInput value={formData.referrerFirstName} onChange={(e) => updateField('referrerFirstName', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="نام خانوادگی معرف"><ErpInput value={formData.referrerLastName} onChange={(e) => updateField('referrerLastName', e.target.value)} /></CustomerWorkflowField>
+          <CustomerWorkflowField label="شماره تماس معرف" error={errors.referrerPhoneNumber} className="md:col-span-2"><ErpInput value={formData.referrerPhoneNumber} onChange={(e) => updateField('referrerPhoneNumber', e.target.value)} /></CustomerWorkflowField>
         </div>
       </CustomerWorkflowSection>
 
-      <CustomerWorkflowSection>
+      <CustomerWorkflowSection title="پروژه‌ها">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] flex items-center gap-2">
-            <FaMapMarkerAlt className="text-[var(--sds-warning)]" />
-            پروژه‌ها
-          </h2>
           <ErpPressable type="button" onClick={() => setProjects((prev) => [...prev, emptyProject()])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
             <FaPlus />
             افزودن پروژه
           </ErpPressable>
         </div>
-        {errors.projects && <p className="text-[var(--sds-danger)] text-sm mb-4">{errors.projects}</p>}
+        {errors.projects && <div id="customer-projects-error"><ErpInlineState kind="error" title={errors.projects} className="mb-4" /></div>}
         <div className="space-y-4">
           {projects.filter((project) => project.isActive).map((project, visibleIndex) => {
             const index = projects.findIndex((item) => item === project);
             return (
-              <div key={project.id || index} className="p-4 rounded-lg bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)]">
+              <ErpCard key={project.id || index} className="p-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <ErpInput className={inputClass} placeholder="نام پروژه" value={project.projectName} onChange={(e) => updateProject(index, 'projectName', e.target.value)} />
-                  <ErpInput className={inputClass} placeholder="شهر" value={project.city} onChange={(e) => updateProject(index, 'city', e.target.value)} />
+                  <ErpInput aria-label={`نام پروژه ${visibleIndex + 1}`} placeholder="نام پروژه" value={project.projectName} onChange={(e) => updateProject(index, 'projectName', e.target.value)} />
+                  <ErpInput aria-label={`شهر پروژه ${visibleIndex + 1}`} placeholder="شهر" value={project.city} onChange={(e) => updateProject(index, 'city', e.target.value)} />
                   <EnhancedDropdown
                     value={project.projectType}
                     onChange={(value) => updateProject(index, 'projectType', value)}
@@ -649,18 +582,18 @@ export default function EditCustomerPage() {
                     clearable
                     noOptionsText="نوع پروژه‌ای پیدا نشد"
                   />
-                  <ErpInput className={inputClass} placeholder="نام مدیر پروژه" value={project.projectManagerName} onChange={(e) => updateProject(index, 'projectManagerName', e.target.value)} />
-                  <ErpInput className={inputClass} placeholder="شماره مدیر پروژه" value={project.projectManagerNumber} onChange={(e) => updateProject(index, 'projectManagerNumber', e.target.value)} />
-                  <ErpInput className={inputClass} placeholder="نام بازاریاب" value={project.marketerFirstName} onChange={(e) => updateProject(index, 'marketerFirstName', e.target.value)} />
-                  <ErpInput className={inputClass} placeholder="نام خانوادگی بازاریاب" value={project.marketerLastName} onChange={(e) => updateProject(index, 'marketerLastName', e.target.value)} />
-                  <ErpInput className={inputClass} placeholder="شماره تماس بازاریاب" value={project.marketerPhoneNumber} onChange={(e) => updateProject(index, 'marketerPhoneNumber', e.target.value)} />
-                  <ErpTextarea className={`${inputClass} md:col-span-2`} rows={2} placeholder="آدرس پروژه *" value={project.address} onChange={(e) => updateProject(index, 'address', e.target.value)} />
+                  <ErpInput aria-label={`نام مدیر پروژه ${visibleIndex + 1}`} placeholder="نام مدیر پروژه" value={project.projectManagerName} onChange={(e) => updateProject(index, 'projectManagerName', e.target.value)} />
+                  <ErpInput aria-label={`شماره مدیر پروژه ${visibleIndex + 1}`} aria-invalid={!!errors.projects && !!validateOptionalIranianMobile(project.projectManagerNumber)} aria-describedby={errors.projects && validateOptionalIranianMobile(project.projectManagerNumber) ? 'customer-projects-error' : undefined} placeholder="شماره مدیر پروژه" value={project.projectManagerNumber} onChange={(e) => updateProject(index, 'projectManagerNumber', e.target.value)} />
+                  <ErpInput aria-label={`نام بازاریاب پروژه ${visibleIndex + 1}`} placeholder="نام بازاریاب" value={project.marketerFirstName} onChange={(e) => updateProject(index, 'marketerFirstName', e.target.value)} />
+                  <ErpInput aria-label={`نام خانوادگی بازاریاب پروژه ${visibleIndex + 1}`} placeholder="نام خانوادگی بازاریاب" value={project.marketerLastName} onChange={(e) => updateProject(index, 'marketerLastName', e.target.value)} />
+                  <ErpInput aria-label={`شماره بازاریاب پروژه ${visibleIndex + 1}`} aria-invalid={!!errors.projects && !!validateOptionalIranianMobile(project.marketerPhoneNumber)} aria-describedby={errors.projects && validateOptionalIranianMobile(project.marketerPhoneNumber) ? 'customer-projects-error' : undefined} placeholder="شماره تماس بازاریاب" value={project.marketerPhoneNumber} onChange={(e) => updateProject(index, 'marketerPhoneNumber', e.target.value)} />
+                  <ErpTextarea aria-label={`آدرس پروژه ${visibleIndex + 1}`} aria-invalid={!!errors.projects && !project.address.trim()} aria-describedby={errors.projects && !project.address.trim() ? 'customer-projects-error' : undefined} className="md:col-span-2" rows={2} placeholder="آدرس پروژه *" value={project.address} onChange={(e) => updateProject(index, 'address', e.target.value)} />
                 </div>
                 <ErpPressable type="button" onClick={() => removeProject(index)} tone="danger" variant="ghost" className="mt-3 inline-flex items-center gap-2">
                   <FaTrash />
                   حذف پروژه {visibleIndex + 1}
                 </ErpPressable>
-              </div>
+              </ErpCard>
             );
           })}
           {projects.filter((project) => project.isActive).length === 0 && (
@@ -669,21 +602,20 @@ export default function EditCustomerPage() {
         </div>
       </CustomerWorkflowSection>
 
-      <CustomerWorkflowSection>
+      <CustomerWorkflowSection title="شماره‌های تماس">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold text-[var(--sds-text-primary)]">شماره‌های تماس</h2>
           <ErpPressable type="button" onClick={() => setPhones((prev) => [...prev, emptyPhone(prev.filter((phone) => phone.isActive).length === 0)])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
             <FaPlus />
             افزودن شماره
           </ErpPressable>
         </div>
-        {errors.phones && <p className="text-[var(--sds-danger)] text-sm mb-4">{errors.phones}</p>}
+        {errors.phones && <div id="customer-phones-error"><ErpInlineState kind="error" title={errors.phones} className="mb-4" /></div>}
         <div className="space-y-4">
           {phones.filter((phone) => phone.isActive).map((phone, visibleIndex) => {
             const index = phones.findIndex((item) => item === phone);
             return (
-              <div key={phone.id || index} className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 rounded-lg bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)]">
-                <ErpInput className={inputClass} placeholder="شماره تماس *" value={phone.number} onChange={(e) => updatePhone(index, 'number', e.target.value)} />
+              <ErpCard key={phone.id || index} className="grid grid-cols-1 gap-4 p-4 md:grid-cols-4">
+                <ErpInput aria-label={`شماره تماس ${visibleIndex + 1}`} aria-invalid={!!errors.phones && !!validateRequiredIranianMobile(phone.number)} aria-describedby={errors.phones && validateRequiredIranianMobile(phone.number) ? 'customer-phones-error' : undefined} placeholder="شماره تماس *" value={phone.number} onChange={(e) => updatePhone(index, 'number', e.target.value)} />
                 <EnhancedDropdown
                   value={phone.type}
                   onChange={(value) => updatePhone(index, 'type', value as PhoneType)}
@@ -695,53 +627,46 @@ export default function EditCustomerPage() {
                   ]}
                   searchable
                 />
-                <label className="flex items-center gap-2 text-[var(--sds-text-muted)]">
-                  <ErpInput type="checkbox" checked={phone.isPrimary} onChange={(e) => updatePhone(index, 'isPrimary', e.target.checked)} />
-                  شماره اصلی
-                </label>
+                <ErpCheckbox label="شماره اصلی" checked={phone.isPrimary} onChange={(e) => updatePhone(index, 'isPrimary', e.target.checked)} />
                 <ErpPressable type="button" onClick={() => removePhone(index)} tone="danger" variant="ghost" className="inline-flex items-center gap-2">
                   <FaTrash />
                   حذف شماره {visibleIndex + 1}
                 </ErpPressable>
-              </div>
+              </ErpCard>
             );
           })}
         </div>
       </CustomerWorkflowSection>
 
-      <CustomerWorkflowSection>
+      <CustomerWorkflowSection title="مخاطبین">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold text-[var(--sds-text-primary)]">مخاطبین</h2>
           <ErpPressable type="button" onClick={() => setContacts((prev) => [...prev, emptyContact()])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
             <FaPlus />
             افزودن مخاطب
           </ErpPressable>
         </div>
-        {errors.contacts && <p className="text-[var(--sds-danger)] text-sm mb-4">{errors.contacts}</p>}
+        {errors.contacts && <div id="customer-contacts-error"><ErpInlineState kind="error" title={errors.contacts} className="mb-4" /></div>}
         <div className="space-y-4">
           {contacts.filter((contact) => contact.isActive).map((contact, visibleIndex) => {
             const index = contacts.findIndex((item) => item === contact);
             return (
-              <div key={contact.id || index} className="p-4 rounded-lg bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)]">
+              <ErpCard key={contact.id || index} className="p-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <ErpInput className={inputClass} placeholder="نام *" value={contact.firstName} onChange={(e) => updateContact(index, 'firstName', e.target.value)} />
-                  <ErpInput className={inputClass} placeholder="نام خانوادگی *" value={contact.lastName} onChange={(e) => updateContact(index, 'lastName', e.target.value)} />
-                  <ErpInput className={inputClass} placeholder="سمت" value={contact.position} onChange={(e) => updateContact(index, 'position', e.target.value)} />
-                  <ErpInput className={inputClass} placeholder="ایمیل" value={contact.email} onChange={(e) => updateContact(index, 'email', e.target.value)} />
-                  <ErpInput className={inputClass} placeholder="تلفن" value={contact.phone} onChange={(e) => updateContact(index, 'phone', e.target.value)} />
-                  <ErpInput className={inputClass} placeholder="موبایل" value={contact.mobile} onChange={(e) => updateContact(index, 'mobile', e.target.value)} />
+                  <ErpInput aria-label={`نام مخاطب ${visibleIndex + 1}`} aria-invalid={!!errors.contacts && !contact.firstName.trim()} aria-describedby={errors.contacts && !contact.firstName.trim() ? 'customer-contacts-error' : undefined} placeholder="نام *" value={contact.firstName} onChange={(e) => updateContact(index, 'firstName', e.target.value)} />
+                  <ErpInput aria-label={`نام خانوادگی مخاطب ${visibleIndex + 1}`} aria-invalid={!!errors.contacts && !contact.lastName.trim()} aria-describedby={errors.contacts && !contact.lastName.trim() ? 'customer-contacts-error' : undefined} placeholder="نام خانوادگی *" value={contact.lastName} onChange={(e) => updateContact(index, 'lastName', e.target.value)} />
+                  <ErpInput aria-label={`سمت مخاطب ${visibleIndex + 1}`} placeholder="سمت" value={contact.position} onChange={(e) => updateContact(index, 'position', e.target.value)} />
+                  <ErpInput aria-label={`ایمیل مخاطب ${visibleIndex + 1}`} placeholder="ایمیل" value={contact.email} onChange={(e) => updateContact(index, 'email', e.target.value)} />
+                  <ErpInput aria-label={`تلفن مخاطب ${visibleIndex + 1}`} placeholder="تلفن" value={contact.phone} onChange={(e) => updateContact(index, 'phone', e.target.value)} />
+                  <ErpInput aria-label={`موبایل مخاطب ${visibleIndex + 1}`} aria-invalid={!!errors.contacts && !!validateOptionalIranianMobile(contact.mobile)} aria-describedby={errors.contacts && validateOptionalIranianMobile(contact.mobile) ? 'customer-contacts-error' : undefined} placeholder="موبایل" value={contact.mobile} onChange={(e) => updateContact(index, 'mobile', e.target.value)} />
                 </div>
                 <div className="mt-3 flex items-center gap-6">
-                  <label className="flex items-center gap-2 text-[var(--sds-text-muted)]">
-                    <ErpInput type="checkbox" checked={contact.isPrimary} onChange={(e) => updateContact(index, 'isPrimary', e.target.checked)} />
-                    مخاطب اصلی
-                  </label>
+                  <ErpCheckbox label="مخاطب اصلی" checked={contact.isPrimary} onChange={(e) => updateContact(index, 'isPrimary', e.target.checked)} />
                   <ErpPressable type="button" onClick={() => removeContact(index)} tone="danger" variant="ghost" className="inline-flex items-center gap-2">
                     <FaTrash />
                     حذف مخاطب {visibleIndex + 1}
                   </ErpPressable>
                 </div>
-              </div>
+              </ErpCard>
             );
           })}
           {contacts.filter((contact) => contact.isActive).length === 0 && (
@@ -750,19 +675,22 @@ export default function EditCustomerPage() {
         </div>
       </CustomerWorkflowSection>
 
-      <CustomerWorkflowSection>
-        <h2 className="text-xl font-semibold text-[var(--sds-text-primary)] mb-6">کنترل دسترسی</h2>
+      <CustomerWorkflowSection title="کنترل دسترسی">
         <div className="flex flex-wrap gap-4">
           <ErpPressable type="button"
             onClick={() => updateField('isBlacklisted', !formData.isBlacklisted)}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${formData.isBlacklisted ? 'bg-[var(--sds-danger-surface)] text-[var(--sds-danger)]' : 'bg-[var(--sds-surface-raised)] text-[var(--sds-text-muted)]'}`}
+            tone={formData.isBlacklisted ? 'danger' : 'neutral'}
+            variant={formData.isBlacklisted ? 'soft' : 'outline'}
+            aria-pressed={formData.isBlacklisted}
           >
             {formData.isBlacklisted ? <FaBan /> : <FaCheckCircle />}
             {formData.isBlacklisted ? 'در لیست سیاه' : 'خارج از لیست سیاه'}
           </ErpPressable>
           <ErpPressable type="button"
             onClick={() => updateField('isLocked', !formData.isLocked)}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${formData.isLocked ? 'bg-[var(--sds-warning-surface)] text-[var(--sds-warning)]' : 'bg-[var(--sds-surface-raised)] text-[var(--sds-text-muted)]'}`}
+            tone={formData.isLocked ? 'warning' : 'neutral'}
+            variant={formData.isLocked ? 'soft' : 'outline'}
+            aria-pressed={formData.isLocked}
           >
             <FaLock />
             {formData.isLocked ? 'قفل‌شده' : 'باز'}

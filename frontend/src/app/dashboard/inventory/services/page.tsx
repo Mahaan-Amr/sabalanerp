@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
+import { ErpBadge, ErpField, ErpIconButton, ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaTools, FaCut, FaLayerGroup, FaRuler, FaShapes, FaPaintBrush, FaFileExcel } from 'react-icons/fa';
@@ -7,7 +7,6 @@ import { servicesAPI } from '@/lib/api';
 import { ErpButton, ErpInlineState, ErpLoading, ErpPage, ErpQuickFilters, ErpSection } from '@/components/erp';
 import CatalogExcelSyncModal from '@/components/CatalogExcelSyncModal';
 import { formatPrice } from '@/lib/numberFormat';
-import { InventoryMasterDataEntry } from '@/features/inventory/master-data/InventoryMasterDataUi';
 
 interface Service {
   id: string;
@@ -452,14 +451,15 @@ const ServicesPage: React.FC = () => {
 
       <ErpSection title={`فیلتر ${tabLabels[activeTab]}`}>
         <div className="flex flex-col gap-3 sm:flex-row">
-          <InventoryMasterDataEntry id="inventory-master-data-search" label="جست‌وجو">
+          <ErpField label="جست‌وجو">
             <ErpInput
+              id="inventory-master-data-search"
               type="text"
               placeholder={searchPlaceholder}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
-          </InventoryMasterDataEntry>
+          </ErpField>
           <ErpButton
             label="وارد/صادر کردن"
             onClick={() => setShowExcelModal(true)}
@@ -528,42 +528,12 @@ const ServicesPage: React.FC = () => {
                           <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                             {service.description || '-'}
                           </td>
+                          <td className="py-3 px-4"><ErpBadge tone={service.isActive ? 'success' : 'danger'}>{service.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
                           <td className="py-3 px-4">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              service.isActive
-                                ? 'bg-[var(--sds-success-surface)] dark:bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:text-[var(--sds-success)]'
-                                : 'bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:text-[var(--sds-danger)]'
-                            }`}>
-                              {service.isActive ? 'فعال' : 'غیرفعال'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center space-x-2 space-x-reverse">
-                              <ErpPressable type="submit"
-                                onClick={() => handleToggleStatus('service', service.id)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-                                title={service.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
-                              >
-                                {service.isActive ? (
-                                  <FaToggleOn className="w-4 h-4 text-[var(--sds-success)]" />
-                                ) : (
-                                  <FaToggleOff className="w-4 h-4 text-[var(--sds-danger)]" />
-                                )}
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => router.push(`/dashboard/inventory/services/services/edit/${service.id}`)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-info)] dark:hover:text-[var(--sds-info)] transition-colors"
-                                title="ویرایش"
-                              >
-                                <FaEdit className="w-4 h-4" />
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => handleDelete('service', service.id)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors"
-                                title="حذف"
-                              >
-                                <FaTrash className="w-4 h-4" />
-                              </ErpPressable>
+                            <div className="flex items-center gap-2">
+                              <ErpIconButton label={service.isActive ? 'غیرفعال کردن خدمت' : 'فعال کردن خدمت'} icon={service.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('service', service.id)} tone={service.isActive ? 'warning' : 'success'} />
+                              <ErpIconButton label="ویرایش خدمت" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/services/edit/${service.id}`)} />
+                              <ErpIconButton label="حذف خدمت" icon={FaTrash} onClick={() => handleDelete('service', service.id)} tone="danger" />
                             </div>
                           </td>
                         </tr>
@@ -619,42 +589,12 @@ const ServicesPage: React.FC = () => {
                               ? formatPrice(cuttingType.pricePerMeter)
                               : '-'}
                           </td>
+                          <td className="py-3 px-4"><ErpBadge tone={cuttingType.isActive ? 'success' : 'danger'}>{cuttingType.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
                           <td className="py-3 px-4">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              cuttingType.isActive
-                                ? 'bg-[var(--sds-success-surface)] dark:bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:text-[var(--sds-success)]'
-                                : 'bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:text-[var(--sds-danger)]'
-                            }`}>
-                              {cuttingType.isActive ? 'فعال' : 'غیرفعال'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center space-x-2 space-x-reverse">
-                              <ErpPressable type="submit"
-                                onClick={() => handleToggleStatus('cutting-type', cuttingType.id)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-                                title={cuttingType.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
-                              >
-                                {cuttingType.isActive ? (
-                                  <FaToggleOn className="w-4 h-4 text-[var(--sds-success)]" />
-                                ) : (
-                                  <FaToggleOff className="w-4 h-4 text-[var(--sds-danger)]" />
-                                )}
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => router.push(`/dashboard/inventory/services/cutting-types/edit/${cuttingType.id}`)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-info)] dark:hover:text-[var(--sds-info)] transition-colors"
-                                title="ویرایش"
-                              >
-                                <FaEdit className="w-4 h-4" />
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => handleDelete('cutting-type', cuttingType.id)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors"
-                                title="حذف"
-                              >
-                                <FaTrash className="w-4 h-4" />
-                              </ErpPressable>
+                            <div className="flex items-center gap-2">
+                              <ErpIconButton label={cuttingType.isActive ? 'غیرفعال کردن نوع ابزار' : 'فعال کردن نوع ابزار'} icon={cuttingType.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('cutting-type', cuttingType.id)} tone={cuttingType.isActive ? 'warning' : 'success'} />
+                              <ErpIconButton label="ویرایش نوع ابزار" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/cutting-types/edit/${cuttingType.id}`)} />
+                              <ErpIconButton label="حذف نوع ابزار" icon={FaTrash} onClick={() => handleDelete('cutting-type', cuttingType.id)} tone="danger" />
                             </div>
                           </td>
                         </tr>
@@ -713,42 +653,12 @@ const ServicesPage: React.FC = () => {
                           <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                             {subService.calculationBase === 'length' ? 'طول' : 'متر مربع'}
                           </td>
+                          <td className="py-3 px-4"><ErpBadge tone={subService.isActive ? 'success' : 'danger'}>{subService.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
                           <td className="py-3 px-4">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              subService.isActive
-                                ? 'bg-[var(--sds-success-surface)] dark:bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:text-[var(--sds-success)]'
-                                : 'bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:text-[var(--sds-danger)]'
-                            }`}>
-                              {subService.isActive ? 'فعال' : 'غیرفعال'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center space-x-2 space-x-reverse">
-                              <ErpPressable type="submit"
-                                onClick={() => handleToggleStatus('sub-service', subService.id)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-                                title={subService.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
-                              >
-                                {subService.isActive ? (
-                                  <FaToggleOn className="w-4 h-4 text-[var(--sds-success)]" />
-                                ) : (
-                                  <FaToggleOff className="w-4 h-4 text-[var(--sds-danger)]" />
-                                )}
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => router.push(`/dashboard/inventory/services/sub-services/edit/${subService.id}`)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-info)] dark:hover:text-[var(--sds-info)] transition-colors"
-                                title="ویرایش"
-                              >
-                                <FaEdit className="w-4 h-4" />
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => handleDelete('sub-service', subService.id)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors"
-                                title="حذف"
-                              >
-                                <FaTrash className="w-4 h-4" />
-                              </ErpPressable>
+                            <div className="flex items-center gap-2">
+                              <ErpIconButton label={subService.isActive ? 'غیرفعال کردن ابزار' : 'فعال کردن ابزار'} icon={subService.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('sub-service', subService.id)} tone={subService.isActive ? 'warning' : 'success'} />
+                              <ErpIconButton label="ویرایش ابزار" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/sub-services/edit/${subService.id}`)} />
+                              <ErpIconButton label="حذف ابزار" icon={FaTrash} onClick={() => handleDelete('sub-service', subService.id)} tone="danger" />
                             </div>
                           </td>
                         </tr>
@@ -1132,42 +1042,12 @@ const ServicesPage: React.FC = () => {
                           <td className="py-3 px-4 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
                             {finishing.description || '-'}
                           </td>
+                          <td className="py-3 px-4"><ErpBadge tone={finishing.isActive ? 'success' : 'danger'}>{finishing.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
                           <td className="py-3 px-4">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              finishing.isActive
-                                ? 'bg-[var(--sds-success-surface)] dark:bg-[var(--sds-success-surface)] text-[var(--sds-success)] dark:text-[var(--sds-success)]'
-                                : 'bg-[var(--sds-danger-surface)] dark:bg-[var(--sds-danger-surface)] text-[var(--sds-danger)] dark:text-[var(--sds-danger)]'
-                            }`}>
-                              {finishing.isActive ? 'فعال' : 'غیرفعال'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center space-x-2 space-x-reverse">
-                              <ErpPressable type="submit"
-                                onClick={() => handleToggleStatus('stone-finishing', finishing.id)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
-                                title={finishing.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
-                              >
-                                {finishing.isActive ? (
-                                  <FaToggleOn className="w-4 h-4 text-[var(--sds-success)]" />
-                                ) : (
-                                  <FaToggleOff className="w-4 h-4 text-[var(--sds-danger)]" />
-                                )}
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => router.push(`/dashboard/inventory/services/stone-finishings/edit/${finishing.id}`)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-info)] dark:hover:text-[var(--sds-info)] transition-colors"
-                                title="ویرایش"
-                              >
-                                <FaEdit className="w-4 h-4" />
-                              </ErpPressable>
-                              <ErpPressable type="submit"
-                                onClick={() => handleDelete('stone-finishing', finishing.id)}
-                                className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors"
-                                title="حذف"
-                              >
-                                <FaTrash className="w-4 h-4" />
-                              </ErpPressable>
+                            <div className="flex items-center gap-2">
+                              <ErpIconButton label={finishing.isActive ? 'غیرفعال کردن فرآوری' : 'فعال کردن فرآوری'} icon={finishing.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('stone-finishing', finishing.id)} tone={finishing.isActive ? 'warning' : 'success'} />
+                              <ErpIconButton label="ویرایش فرآوری" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/stone-finishings/edit/${finishing.id}`)} />
+                              <ErpIconButton label="حذف فرآوری" icon={FaTrash} onClick={() => handleDelete('stone-finishing', finishing.id)} tone="danger" />
                             </div>
                           </td>
                         </tr>

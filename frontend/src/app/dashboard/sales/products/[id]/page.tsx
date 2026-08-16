@@ -1,5 +1,5 @@
 'use client';
-import { ErpBadge, ErpCard, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
+import { ErpBadge, ErpCard, ErpField as SalesAuthoringField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Product } from '@/types/product';
@@ -7,7 +7,7 @@ import { resolveBackendAssetUrl, salesAPI } from '@/lib/api';
 import { formatPrice } from '@/lib/numberFormat';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
-import { SalesAuthoringPage, SalesAuthoringSection } from '@/features/sales/authoring/SalesAuthoringUi';
+import { SalesAuthoringPage, SalesAuthoringSection, hasSalesDraftChanged } from '@/features/sales/authoring/SalesAuthoringUi';
 
 // Product name generation utilities
 const generateFullProductName = (product: Product): string => {
@@ -24,6 +24,15 @@ const generateFullProductName = (product: Product): string => {
   return parts.join(' - ');
 };
 
+type ProductEditValues = {
+  basePrice: string;
+  motherLengthValue: string;
+  isAvailable: boolean;
+  leadTime: string;
+  description: string;
+  images: string[];
+};
+
 const ProductDetailPage: React.FC = () => {
   const router = useRouter();
   const params = useParams();
@@ -35,8 +44,8 @@ const ProductDetailPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; title: string }>();
   const [editing, setEditing] = useState(false);
-  const [savedFormSnapshot, setSavedFormSnapshot] = useState('');
-  const [formData, setFormData] = useState({
+  const [savedFormSnapshot, setSavedFormSnapshot] = useState<ProductEditValues | null>(null);
+  const [formData, setFormData] = useState<ProductEditValues>({
     basePrice: '',
     motherLengthValue: '',
     isAvailable: true,
@@ -57,7 +66,7 @@ const ProductDetailPage: React.FC = () => {
       setLoadError('');
       const response = await salesAPI.getProduct(productId);
 
-      if (response.data.success) {
+      if (response.data.success && response.data.data) {
         const data = response.data;
         setProduct(data.data);
         const nextFormData = {
@@ -69,7 +78,10 @@ const ProductDetailPage: React.FC = () => {
           images: data.data.images || [],
         };
         setFormData(nextFormData);
-        setSavedFormSnapshot(JSON.stringify(nextFormData));
+        setSavedFormSnapshot(nextFormData);
+      } else if (response.data.success) {
+        setProduct(null);
+        setSavedFormSnapshot(null);
       } else {
         setLoadError('دریافت اطلاعات محصول ناموفق بود. دوباره تلاش کنید.');
       }
@@ -98,7 +110,7 @@ const ProductDetailPage: React.FC = () => {
 
       if (response.data.success) {
         setProduct(response.data.data);
-        setSavedFormSnapshot(JSON.stringify(formData));
+        setSavedFormSnapshot(formData);
         setEditing(false);
         setFeedback({ kind: 'success', title: 'محصول با موفقیت به‌روزرسانی شد.' });
       } else {
@@ -140,7 +152,7 @@ const ProductDetailPage: React.FC = () => {
       title="جزئیات محصول"
       description="مشاهده و ویرایش اطلاعات محصول"
       backHref="/dashboard/sales/products"
-      feedback={feedback ?? (editing && JSON.stringify(formData) !== savedFormSnapshot ? { kind: 'stale', title: 'تغییرات این فرم تا زمان ذخیره نهایی نشده‌اند.' } : undefined)}
+      feedback={feedback ?? (editing && savedFormSnapshot && hasSalesDraftChanged(formData, savedFormSnapshot) ? { kind: 'stale', title: 'تغییرات این فرم تا زمان ذخیره نهایی نشده‌اند.' } : undefined)}
     >
       <SalesAuthoringSection title="مشخصات و قیمت‌گذاری محصول">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -163,61 +175,23 @@ const ProductDetailPage: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Full Product Name */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    نام کامل محصول
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg text-sm font-medium leading-relaxed">
-                    {generateFullProductName(product)}
-                  </div>
-                </div>
+                <ErpFieldView label="نام کامل محصول" value={<>{generateFullProductName(product)}</>} />
 
                 {/* Product Name Persian */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    نام فارسی
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                    {product.namePersian}
-                  </div>
-                </div>
+                <ErpFieldView label="نام فارسی" value={<>{product.namePersian}</>} />
 
                 {/* Product Name English */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    نام انگلیسی
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                    {product.name}
-                  </div>
-                </div>
+                <ErpFieldView label="نام انگلیسی" value={<>{product.name}</>} />
 
                 {/* Stone Type */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    نوع سنگ
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                    {product.stoneTypeNamePersian}
-                  </div>
-                </div>
+                <ErpFieldView label="نوع سنگ" value={<>{product.stoneTypeNamePersian}</>} />
 
                 {/* Dimensions */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    ابعاد
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                    {product.widthValue} × {product.thicknessValue} سانتی‌متر
-                  </div>
-                </div>
+                <ErpFieldView label="ابعاد" value={<>{product.widthValue} × {product.thicknessValue} سانتی‌متر</>} />
 
                 {/* Mine */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    طول مادر
-                  </label>
-                  {editing ? (
+                {editing ? (
+                  <SalesAuthoringField label="طول مادر">
                     <ErpInput
                       value={formData.motherLengthValue}
                       onChange={(event) => setFormData({
@@ -225,66 +199,24 @@ const ProductDetailPage: React.FC = () => {
                         motherLengthValue: event.target.value
                       })}
                       inputMode="decimal"
-                      className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4 py-2 focus:border-[var(--sds-border-strong)] focus:outline-none dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
                     />
-                  ) : (
-                    <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                      {product.motherLengthValue
-                        ? `${product.motherLengthValue} متر`
-                        : 'در موجودی ثبت نشده است'}
-                    </div>
-                  )}
-                </div>
+                  </SalesAuthoringField>
+                ) : <ErpFieldView label="طول مادر" value={product.motherLengthValue ? `${product.motherLengthValue} متر` : 'در موجودی ثبت نشده است'} />}
 
                 {/* Mine */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    معدن
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                    {product.mineNamePersian}
-                  </div>
-                </div>
+                <ErpFieldView label="معدن" value={<>{product.mineNamePersian}</>} />
 
                 {/* Finish */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    نوع پرداخت
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                    {product.finishNamePersian}
-                  </div>
-                </div>
+                <ErpFieldView label="نوع پرداخت" value={<>{product.finishNamePersian}</>} />
 
                 {/* Color */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    رنگ
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                    {product.colorNamePersian}
-                  </div>
-                </div>
+                <ErpFieldView label="رنگ" value={<>{product.colorNamePersian}</>} />
 
                 {/* Quality */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    کیفیت
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                    {product.qualityNamePersian}
-                  </div>
-                </div>
+                <ErpFieldView label="کیفیت" value={<>{product.qualityNamePersian}</>} />
 
                 {/* Cutting Dimension */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    ابعاد برش
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                    {product.cuttingDimensionNamePersian}
-                  </div>
-                </div>
+                <ErpFieldView label="ابعاد برش" value={<>{product.cuttingDimensionNamePersian}</>} />
               </div>
             </div>
           </div>
@@ -299,54 +231,31 @@ const ProductDetailPage: React.FC = () => {
 
               <div className="space-y-4">
                 {/* Base Price */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    قیمت پایه (ریال)
-                  </label>
-                  {editing ? (
+                {editing ? (
+                  <SalesAuthoringField label="قیمت پایه (ریال)">
                     <FormattedNumberInput
                       value={formData.basePrice ? parseFloat(formData.basePrice) : 0}
                       onChange={(value) => setFormData({ ...formData, basePrice: value.toString() })}
-                      className="w-full px-4 py-2 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent"
                       placeholder="قیمت را وارد کنید"
                       min={0}
                     />
-                  ) : (
-                    <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                      {formatPrice(product.basePrice)}
-                    </div>
-                  )}
-                </div>
+                  </SalesAuthoringField>
+                ) : <ErpFieldView label="قیمت پایه (ریال)" value={formatPrice(product.basePrice)} />}
 
                 {/* Currency */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    واحد پول
-                  </label>
-                  <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                    {product.currency}
-                  </div>
-                </div>
+                <ErpFieldView label="واحد پول" value={<>{product.currency}</>} />
 
                 {/* Lead Time */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    زمان تحویل (روز)
-                  </label>
-                  {editing ? (
+                {editing ? (
+                  <SalesAuthoringField label="زمان تحویل (روز)">
                     <FormattedNumberInput
                       value={formData.leadTime ? parseFloat(formData.leadTime) : 0}
                       onChange={(value) => setFormData({ ...formData, leadTime: value.toString() })}
-                      className="w-full px-4 py-2 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent"
                       placeholder="تعداد روز"
                       min={0}
                     />
-                  ) : (
-                    <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg">
-                      {product.leadTime ? `${product.leadTime} روز` : 'تعیین نشده'}
-                    </div>
-                  )}
-                </div>
+                  </SalesAuthoringField>
+                ) : <ErpFieldView label="زمان تحویل (روز)" value={product.leadTime ? `${product.leadTime} روز` : 'تعیین نشده'} />}
               </div>
             </ErpCard>
 
@@ -358,53 +267,35 @@ const ProductDetailPage: React.FC = () => {
 
               <div className="space-y-4">
                 {/* Availability */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    وضعیت موجودی
-                  </label>
-                  {editing ? (
+                {editing ? (
+                  <SalesAuthoringField label="وضعیت موجودی">
                     <ErpSelect
                       value={formData.isAvailable.toString()}
                       onChange={(e) => setFormData({ ...formData, isAvailable: e.target.value === 'true' })}
-                      className="w-full px-4 py-2 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent"
                     >
                       <option value="true">موجود</option>
                       <option value="false">ناموجود</option>
                     </ErpSelect>
-                  ) : (
-                    <ErpBadge tone={product.isAvailable ? 'success' : 'danger'}>{product.isAvailable ? 'موجود' : 'ناموجود'}</ErpBadge>
-                  )}
-                </div>
+                  </SalesAuthoringField>
+                ) : <ErpFieldView label="وضعیت موجودی" value={<ErpBadge tone={product.isAvailable ? 'success' : 'danger'}>{product.isAvailable ? 'موجود' : 'ناموجود'}</ErpBadge>} />}
 
                 {/* Active Status */}
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-                    وضعیت فعال
-                  </label>
-                  <ErpBadge tone={product.isActive ? 'success' : 'danger'}>{product.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>
-                </div>
+                <ErpFieldView label="وضعیت فعال" value={<ErpBadge tone={product.isActive ? 'success' : 'danger'}>{product.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge>} />
               </div>
             </ErpCard>
 
             {/* Description */}
             <ErpCard className="p-5">
-              <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-4">
-                توضیحات
-              </h3>
-
               {editing ? (
+                <SalesAuthoringField label="توضیحات">
                 <ErpTextarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={4}
-                  className="w-full px-4 py-2 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent"
                   placeholder="توضیحات محصول را وارد کنید"
                 />
-              ) : (
-                <div className="px-4 py-2 bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-raised)] rounded-lg min-h-[100px]">
-                  {product.description || 'توضیحی وارد نشده است'}
-                </div>
-              )}
+                </SalesAuthoringField>
+              ) : <ErpFieldView label="توضیحات" value={product.description || 'توضیحی وارد نشده است'} />}
             </ErpCard>
 
             <ErpCard className="p-5">

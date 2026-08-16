@@ -3,7 +3,7 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ErpInput } from '@/components/erp';
-import { CustomerWorkflowFeedback, CustomerWorkflowProgress, CustomerWorkflowSection } from './CustomerWorkflowUi';
+import { CustomerWorkflowFeedback, CustomerWorkflowProgress, CustomerWorkflowSection, hasCustomerDraftChanges } from './CustomerWorkflowUi';
 
 test('customer workflow exposes progress, feedback, and canonical field errors', () => {
   const html = renderToStaticMarkup(
@@ -21,4 +21,10 @@ test('customer workflow exposes progress, feedback, and canonical field errors',
   assert.match(html, /اطلاعات تماس/);
   assert.match(html, /role="alert"/);
   assert.match(html, /aria-describedby="mobile-error"/);
+});
+
+test('customer dirty state ignores defaults and detects first-step edits', () => {
+  assert.equal(hasCustomerDraftChanges({ customerType: 'Individual', status: 'Active', firstName: '' }), false);
+  assert.equal(hasCustomerDraftChanges({ customerType: 'Individual', status: 'Active', firstName: 'مینا' }), true);
+  assert.equal(hasCustomerDraftChanges({ customerType: 'Individual', status: 'Active', firstName: '' }), false);
 });

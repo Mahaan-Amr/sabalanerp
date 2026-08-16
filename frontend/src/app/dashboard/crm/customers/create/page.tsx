@@ -1,5 +1,5 @@
 'use client';
-import { ErpBadge, ErpButton, ErpCard, ErpInput, ErpPressable } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpField as CustomerWorkflowField, ErpInput, ErpPressable, ErpSegmentedControl } from '@/components/erp';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -23,14 +23,14 @@ import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
-import { InlineFieldError, mapAxiosFormErrors } from '@/lib/formErrors';
+import { mapAxiosFormErrors } from '@/lib/formErrors';
 import {
   normalizeIranianMobile,
   normalizePhoneDigits,
   validateOptionalIranianMobile,
   validateRequiredIranianMobile
 } from '@/lib/phoneFormat';
-import { CustomerWorkflowPage, CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
+import { CustomerWorkflowPage, CustomerWorkflowSection, hasCustomerDraftChanges } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 
 interface ProjectAddress {
   id?: string;
@@ -589,71 +589,16 @@ export default function CreateCustomerPage() {
               <p className="text-[var(--sds-text-muted)] mb-8">در این مرحله نوع مشتری را مشخص کنید تا فرم مناسب نمایش داده شود.</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-              <ErpPressable
-                type="button"
-                onClick={() => handleInputChange('customerType', 'Individual')}
-                className={`p-6 rounded-lg border-2 transition-all duration-200 ${
-                  formData.customerType === 'Individual'
-                    ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
-                    : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-border-default)] hover:bg-[var(--sds-surface-raised)]'
-                }`}
-              >
-                <div className="text-center">
-                  <FaUser className="mx-auto text-3xl mb-4" />
-                  <h4 className="text-lg font-semibold mb-2">حقیقی</h4>
-                  <p className="text-sm text-[var(--sds-text-muted)]">مشتری شخصی و فردی</p>
-                </div>
-              </ErpPressable>
-
-              <ErpPressable
-                type="button"
-                onClick={() => handleInputChange('customerType', 'Company')}
-                className={`p-6 rounded-lg border-2 transition-all duration-200 ${
-                  formData.customerType === 'Company'
-                    ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
-                    : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-border-default)] hover:bg-[var(--sds-surface-raised)]'
-                }`}
-              >
-                <div className="text-center">
-                  <FaBuilding className="mx-auto text-3xl mb-4" />
-                  <h4 className="text-lg font-semibold mb-2">حقوقی</h4>
-                  <p className="text-sm text-[var(--sds-text-muted)]">مشتری شرکتی یا سازمانی</p>
-                </div>
-              </ErpPressable>
-
-              <ErpPressable
-                type="button"
-                onClick={() => handleInputChange('customerType', 'Government')}
-                className={`p-6 rounded-lg border-2 transition-all duration-200 ${
-                  formData.customerType === 'Government'
-                    ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
-                    : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-border-default)] hover:bg-[var(--sds-surface-raised)]'
-                }`}
-              >
-                <div className="text-center">
-                  <FaBuilding className="mx-auto text-3xl mb-4" />
-                  <h4 className="text-lg font-semibold mb-2">دولتی</h4>
-                  <p className="text-sm text-[var(--sds-text-muted)]">مشتری دولتی یا عمومی</p>
-                </div>
-              </ErpPressable>
-
-              <ErpPressable
-                type="button"
-                onClick={() => handleInputChange('customerType', 'Collaborative')}
-                className={`p-6 rounded-lg border-2 transition-all duration-200 ${
-                  formData.customerType === 'Collaborative'
-                    ? 'border-[var(--sds-border-strong)] bg-[var(--sds-accent)] text-[var(--sds-text-inverse)]'
-                    : 'border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] hover:border-[var(--sds-border-default)] hover:bg-[var(--sds-surface-raised)]'
-                }`}
-              >
-                <div className="text-center">
-                  <FaUser className="mx-auto text-3xl mb-4" />
-                  <h4 className="text-lg font-semibold mb-2">همکاری</h4>
-                  <p className="text-sm text-[var(--sds-text-muted)]">فرد یا گروه همکار بدون پروژه</p>
-                </div>
-              </ErpPressable>
-            </div>
+            <ErpSegmentedControl
+              value={formData.customerType}
+              onChange={(value) => handleInputChange('customerType', value)}
+              options={[
+                { value: 'Individual', label: 'حقیقی', icon: FaUser },
+                { value: 'Company', label: 'حقوقی', icon: FaBuilding },
+                { value: 'Government', label: 'دولتی', icon: FaBuilding },
+                { value: 'Collaborative', label: 'همکاری', icon: FaUser },
+              ]}
+            />
 
           </div>
         );
@@ -663,72 +608,51 @@ export default function CreateCustomerPage() {
           <div className="space-y-6">
             {/* Basic Information Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام *</label>
+              <CustomerWorkflowField label="نام" error={errors.firstName} required>
                 <ErpInput
                   type="text"
                   value={formData.firstName}
                   onChange={(e) => handleInputChange('firstName', e.target.value)}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="نام"
                 />
-                {errors.firstName && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.firstName}</p>}
-              </div>
+              </CustomerWorkflowField>
 
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام خانوادگی *</label>
+              <CustomerWorkflowField label="نام خانوادگی" error={errors.lastName} required>
                 <ErpInput
                   type="text"
                   value={formData.lastName}
                   onChange={(e) => handleInputChange('lastName', e.target.value)}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="نام خانوادگی"
                 />
-                {errors.lastName && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.lastName}</p>}
-              </div>
+              </CustomerWorkflowField>
 
-              <div>
-                <label htmlFor="customer-phoneNumber1" className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس اول *</label>
+              <CustomerWorkflowField label="شماره تماس اول" error={errors.phoneNumber1} required>
                 <ErpInput
                   type="text"
                   value={formData.phoneNumber1}
                   onChange={(e) => handleInputChange('phoneNumber1', e.target.value)}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="شماره تماس اول"
-                  id="customer-phoneNumber1"
-                  aria-invalid={Boolean(errors.phoneNumber1)}
-                  aria-describedby={errors.phoneNumber1 ? 'customer-phoneNumber1-error' : undefined}
                 />
-                {errors.phoneNumber1 && <p id="customer-phoneNumber1-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.phoneNumber1}</p>}
-              </div>
+              </CustomerWorkflowField>
 
-              <div>
-                <label htmlFor="customer-phoneNumber2" className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس دوم</label>
+              <CustomerWorkflowField label="شماره تماس دوم" error={errors.phoneNumber2}>
                 <ErpInput
                   type="text"
                   value={formData.phoneNumber2}
                   onChange={(e) => handleInputChange('phoneNumber2', e.target.value)}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="شماره تماس دوم"
-                  id="customer-phoneNumber2"
-                  aria-invalid={Boolean(errors.phoneNumber2)}
-                  aria-describedby={errors.phoneNumber2 ? 'customer-phoneNumber2-error' : undefined}
                 />
-                <InlineFieldError id="customer-phoneNumber2-error" message={errors.phoneNumber2} />
-              </div>
+              </CustomerWorkflowField>
 
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">کد ملی</label>
+              <CustomerWorkflowField label="کد ملی" error={errors.nationalCode}>
                 <ErpInput
                   type="text"
                   value={formData.nationalCode}
                   onChange={(e) => handleInputChange('nationalCode', e.target.value)}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="کد ملی (10 رقم)"
                   maxLength={10}
                 />
-                {errors.nationalCode && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.nationalCode}</p>}
-              </div>
+              </CustomerWorkflowField>
             </div>
 
             {/* Collapsible Additional Information Section */}
@@ -736,7 +660,9 @@ export default function CreateCustomerPage() {
               <ErpPressable
                 type="button"
                 onClick={() => setShowAdditionalInfo(!showAdditionalInfo)}
-                className="w-full flex items-center justify-between p-4 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] hover:bg-[var(--sds-surface-raised)] transition-colors"
+                aria-expanded={showAdditionalInfo}
+                variant="outline"
+                className="w-full justify-between p-4"
               >
                 <span className="text-lg font-medium">اطلاعات تکمیلی</span>
                 <span className={`transform transition-transform ${showAdditionalInfo ? 'rotate-180' : ''}`}>
@@ -745,151 +671,117 @@ export default function CreateCustomerPage() {
               </ErpPressable>
 
               {showAdditionalInfo && (
-                <div className="mt-4 p-6 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg">
+                <ErpCard className="mt-4 p-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام شرکت / سازمان</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="نام شرکت / سازمان">
+                <ErpInput
                         type="text"
                         value={formData.companyName}
                         onChange={(e) => handleInputChange('companyName', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="نام شرکت / سازمان"
                       />
-                    </div>
+              </CustomerWorkflowField>
 
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام برند</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="نام برند">
+                <ErpInput
                         type="text"
                         value={formData.brandName}
                         onChange={(e) => handleInputChange('brandName', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="نام برند"
                       />
-                    </div>
+              </CustomerWorkflowField>
 
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">آدرس منزل</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="آدرس منزل">
+                <ErpInput
                         type="text"
                         value={formData.homeAddress}
                         onChange={(e) => handleInputChange('homeAddress', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="آدرس منزل"
                       />
-                    </div>
+              </CustomerWorkflowField>
 
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره منزل</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="شماره منزل">
+                <ErpInput
                         type="text"
                         value={formData.homeNumber}
                         onChange={(e) => handleInputChange('homeNumber', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره منزل"
                       />
-                    </div>
+              </CustomerWorkflowField>
 
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">آدرس محل کار</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="آدرس محل کار">
+                <ErpInput
                         type="text"
                         value={formData.workAddress}
                         onChange={(e) => handleInputChange('workAddress', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="آدرس محل کار"
                       />
-                    </div>
+              </CustomerWorkflowField>
 
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره محل کار</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="شماره محل کار">
+                <ErpInput
                         type="text"
                         value={formData.workNumber}
                         onChange={(e) => handleInputChange('workNumber', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره محل کار"
                       />
-                    </div>
+              </CustomerWorkflowField>
 
-                    <div>
-                      <label htmlFor="customer-whatsappNumber" className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره واتساپ</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="شماره واتساپ" error={errors.whatsappNumber}>
+                <ErpInput
                         type="text"
                         value={formData.whatsappNumber}
                         onChange={(e) => handleInputChange('whatsappNumber', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره واتساپ"
                         id="customer-whatsappNumber"
                         aria-invalid={Boolean(errors.whatsappNumber)}
                         aria-describedby={errors.whatsappNumber ? 'customer-whatsappNumber-error' : undefined}
                       />
-                      <InlineFieldError id="customer-whatsappNumber-error" message={errors.whatsappNumber} />
-                    </div>
+              </CustomerWorkflowField>
 
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">تاریخ تولد</label>
-                      <PersianCalendarComponent
-                        value={formData.birthDate}
-                        onChange={(date: string) => handleInputChange('birthDate', date)}
-                        className="w-full"
-                        enableYearSelection={true}
-                        minYear={1300}
-                        maxYear={1410}
-                        placeholder="تاریخ تولد را انتخاب کنید"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شغل اصلی</label>
+                    <CustomerWorkflowField label="تاریخ تولد">
+                      <PersianCalendarComponent value={formData.birthDate} onChange={(date: string) => handleInputChange('birthDate', date)} className="w-full" enableYearSelection minYear={1300} maxYear={1410} placeholder="تاریخ تولد را انتخاب کنید" />
+                    </CustomerWorkflowField>
+                    <CustomerWorkflowField label="شغل اصلی" className="md:col-span-2">
                       <ErpInput
                         type="text"
                         value={formData.mainJob}
                         onChange={(e) => handleInputChange('mainJob', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شغل اصلی"
                       />
-                    </div>
+                    </CustomerWorkflowField>
 
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام معرف</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="نام معرف">
+                <ErpInput
                         type="text"
                         value={formData.referrerFirstName}
                         onChange={(e) => handleInputChange('referrerFirstName', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="نام معرف"
                       />
-                    </div>
+              </CustomerWorkflowField>
 
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام خانوادگی معرف</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="نام خانوادگی معرف">
+                <ErpInput
                         type="text"
                         value={formData.referrerLastName}
                         onChange={(e) => handleInputChange('referrerLastName', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="نام خانوادگی معرف"
                       />
-                    </div>
+              </CustomerWorkflowField>
 
-                    <div className="md:col-span-2">
-                      <label htmlFor="customer-referrerPhoneNumber" className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس معرف</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="شماره تماس معرف" error={errors.referrerPhoneNumber} className="md:col-span-2">
+                <ErpInput
                         type="text"
                         value={formData.referrerPhoneNumber}
                         onChange={(e) => handleInputChange('referrerPhoneNumber', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره تماس معرف"
                         id="customer-referrerPhoneNumber"
                         aria-invalid={Boolean(errors.referrerPhoneNumber)}
                         aria-describedby={errors.referrerPhoneNumber ? 'customer-referrerPhoneNumber-error' : undefined}
                       />
-                      <InlineFieldError id="customer-referrerPhoneNumber-error" message={errors.referrerPhoneNumber} />
-                    </div>
+              </CustomerWorkflowField>
                   </div>
-                </div>
+                </ErpCard>
               )}
             </div>
           </div>
@@ -901,40 +793,32 @@ export default function CreateCustomerPage() {
           <div className="space-y-6">
             {/* Project Information Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام پروژه *</label>
+              <CustomerWorkflowField label="نام پروژه" error={errors.projectName} required>
                 <ErpInput
                   type="text"
                   value={formData.projectName}
                   onChange={(e) => handleInputChange('projectName', e.target.value)}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="نام پروژه"
                 />
-                {errors.projectName && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.projectName}</p>}
-              </div>
+              </CustomerWorkflowField>
 
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">آدرس پروژه *</label>
+              <CustomerWorkflowField label="آدرس پروژه" error={errors.projectAddress} required>
                 <ErpInput
                   type="text"
                   value={formData.projectAddress}
                   onChange={(e) => handleInputChange('projectAddress', e.target.value)}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="آدرس پروژه"
                 />
-                {errors.projectAddress && <p className="text-[var(--sds-danger)] text-sm mt-1">{errors.projectAddress}</p>}
-              </div>
+              </CustomerWorkflowField>
 
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شهر پروژه</label>
+              <CustomerWorkflowField label="شهر پروژه">
                 <ErpInput
                   type="text"
                   value={formData.projectCity}
                   onChange={(e) => handleInputChange('projectCity', e.target.value)}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="شهر پروژه"
                 />
-              </div>
+              </CustomerWorkflowField>
 
               <div className="md:col-span-2">
                 <EnhancedDropdown
@@ -954,7 +838,9 @@ export default function CreateCustomerPage() {
               <ErpPressable
                 type="button"
                 onClick={() => setShowAdditionalInfo(!showAdditionalInfo)}
-                className="w-full flex items-center justify-between p-4 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] hover:bg-[var(--sds-surface-raised)] transition-colors"
+                aria-expanded={showAdditionalInfo}
+                variant="outline"
+                className="w-full justify-between p-4"
               >
                 <span className="text-lg font-medium">مدیر پروژه</span>
                 <span className={`transform transition-transform ${showAdditionalInfo ? 'rotate-180' : ''}`}>
@@ -963,35 +849,30 @@ export default function CreateCustomerPage() {
               </ErpPressable>
 
               {showAdditionalInfo && (
-                <div className="mt-4 p-6 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg">
+                <ErpCard className="mt-4 p-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام مدیر پروژه</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="نام مدیر پروژه">
+                <ErpInput
                         type="text"
                         value={formData.projectManagerName}
                         onChange={(e) => handleInputChange('projectManagerName', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="نام مدیر پروژه"
                       />
-                    </div>
+              </CustomerWorkflowField>
 
-                    <div>
-                      <label htmlFor="customer-projectManagerNumber" className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس مدیر پروژه</label>
-                      <ErpInput
+                    <CustomerWorkflowField label="شماره تماس مدیر پروژه" error={errors.projectManagerNumber}>
+                <ErpInput
                         type="text"
                         value={formData.projectManagerNumber}
                         onChange={(e) => handleInputChange('projectManagerNumber', e.target.value)}
-                        className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                         placeholder="شماره تماس مدیر پروژه"
                         id="customer-projectManagerNumber"
                         aria-invalid={Boolean(errors.projectManagerNumber)}
                         aria-describedby={errors.projectManagerNumber ? 'customer-projectManagerNumber-error' : undefined}
                       />
-                      <InlineFieldError id="customer-projectManagerNumber-error" message={errors.projectManagerNumber} />
-                    </div>
+              </CustomerWorkflowField>
                   </div>
-                </div>
+                </ErpCard>
               )}
             </div>
           </div>
@@ -1034,7 +915,7 @@ export default function CreateCustomerPage() {
       progress={{ current: step + 1, total: steps.length, label: steps[step].label }}
       feedback={errors.submit
         ? { kind: 'error', title: errors.submit }
-        : step > 0 || Object.entries(formData).some(([key, value]) => !['customerType', 'status'].includes(key) && (Array.isArray(value) ? value.length > 0 : Boolean(value)))
+        : hasCustomerDraftChanges(formData)
           ? { kind: 'stale', title: 'اطلاعات واردشده تا زمان ثبت نهایی ذخیره نمی‌شوند.' }
           : undefined}
     >

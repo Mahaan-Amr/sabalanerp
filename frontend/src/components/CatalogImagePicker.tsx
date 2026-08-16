@@ -32,9 +32,9 @@ const CatalogImagePicker: React.FC<CatalogImagePickerProps> = ({
 
   return (
     <div>
-      <label className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
+      <p className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
         {label}
-      </label>
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         {visibleImages.map((image, index) => (
           <div key={`${image}-${index}`} className="relative h-16 w-16 overflow-hidden rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]">
@@ -42,7 +42,7 @@ const CatalogImagePicker: React.FC<CatalogImagePickerProps> = ({
             <ErpPressable
               type="button"
               onClick={() => onChange(images.filter((_, imageIndex) => imageIndex !== index))}
-              className="absolute left-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)]"
+              className="absolute left-1 top-1 inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)]"
               aria-label="حذف تصویر"
               title="حذف تصویر"
             >
@@ -57,7 +57,7 @@ const CatalogImagePicker: React.FC<CatalogImagePickerProps> = ({
         )}
         <label className="inline-flex h-16 w-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-[var(--sds-border-strong)] bg-[var(--sds-accent-surface)] text-[var(--sds-accent)] transition hover:bg-[var(--sds-accent-surface)] dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
           <FaPlus className="h-5 w-5" />
-          <ErpInput type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={handleUpload} />
+          <ErpInput aria-label={`افزودن ${label}`} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={handleUpload} />
         </label>
       </div>
     </div>

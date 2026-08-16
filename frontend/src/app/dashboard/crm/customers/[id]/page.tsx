@@ -1,5 +1,5 @@
 'use client';
-import { ErpBadge, ErpButton, ErpCard, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSheet, ErpTextarea } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSheet, ErpTextarea } from '@/components/erp';
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -437,16 +437,6 @@ export default function CustomerDetailPage() {
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Active': return 'bg-[var(--sds-success-surface)] text-[var(--sds-success)]';
-      case 'Inactive': return 'bg-[var(--sds-surface-subtle)] text-[var(--sds-text-muted)]';
-      case 'Prospect': return 'bg-[var(--sds-info-surface)] text-[var(--sds-info)]';
-      case 'Lead': return 'bg-[var(--sds-warning-surface)] text-[var(--sds-warning)]';
-      default: return 'bg-[var(--sds-surface-subtle)] text-[var(--sds-text-muted)]';
-    }
-  };
-
   const getStatusLabel = (status: string) => {
     switch (status) {
       case 'Active': return 'فعال';
@@ -573,32 +563,14 @@ export default function CustomerDetailPage() {
               <div>
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات پایه</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">نام و نام خانوادگی</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.firstName} {customer.lastName}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">نام شرکت</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.companyName || 'تعریف نشده'}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">نوع مشتری</label>
-                    <p className="text-[var(--sds-text-primary)]">{getCustomerTypeLabel(customer.customerType)}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">صنعت</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.industry || 'تعریف نشده'}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">وضعیت</label>
-                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(customer.status)}`}>
-                      {getStatusLabel(customer.status)}
-                    </span>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">مسئول فروش</label>
-                    {crmPermissions.canAssignCustomerOwner ? (
+                  <ErpFieldView label="نام و نام خانوادگی" value={<>{customer.firstName} {customer.lastName}</>} />
+                  <ErpFieldView label="نام شرکت" value={<>{customer.companyName || 'تعریف نشده'}</>} />
+                  <ErpFieldView label="نوع مشتری" value={<>{getCustomerTypeLabel(customer.customerType)}</>} />
+                  <ErpFieldView label="صنعت" value={<>{customer.industry || 'تعریف نشده'}</>} />
+                  <ErpFieldView label="وضعیت" value={<ErpBadge tone={customer.status === 'Active' ? 'success' : customer.status === 'Lead' ? 'warning' : customer.status === 'Prospect' ? 'info' : 'neutral'}>{getStatusLabel(customer.status)}</ErpBadge>} />
+                  {crmPermissions.canAssignCustomerOwner ? (
                       <EnhancedDropdown
+                        label="مسئول فروش"
                         value={customer.ownerUserId || ''}
                         onChange={handleOwnerChange}
                         disabled={ownerSaving}
@@ -614,10 +586,7 @@ export default function CustomerDetailPage() {
                         clearable
                         noOptionsText="فروشنده‌ای پیدا نشد"
                       />
-                    ) : (
-                      <p className="text-[var(--sds-text-primary)]">{getOwnerLabel(customer.ownerUser)}</p>
-                    )}
-                  </div>
+                    ) : <ErpFieldView label="مسئول فروش" value={getOwnerLabel(customer.ownerUser)} />}
                 </div>
               </div>
 
@@ -625,26 +594,11 @@ export default function CustomerDetailPage() {
               <div>
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات تماس</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">کد ملی</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.nationalCode || 'تعریف نشده'}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">آدرس منزل</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.homeAddress || 'تعریف نشده'}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">شماره منزل</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.homeNumber || 'تعریف نشده'}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">آدرس محل کار</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.workAddress || 'تعریف نشده'}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">شماره محل کار</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.workNumber || 'تعریف نشده'}</p>
-                  </div>
+                  <ErpFieldView label="کد ملی" value={<>{customer.nationalCode || 'تعریف نشده'}</>} />
+                  <ErpFieldView label="آدرس منزل" value={<>{customer.homeAddress || 'تعریف نشده'}</>} />
+                  <ErpFieldView label="شماره منزل" value={<>{customer.homeNumber || 'تعریف نشده'}</>} />
+                  <ErpFieldView label="آدرس محل کار" value={<>{customer.workAddress || 'تعریف نشده'}</>} />
+                  <ErpFieldView label="شماره محل کار" value={<>{customer.workNumber || 'تعریف نشده'}</>} />
                 </div>
               </div>
 
@@ -652,14 +606,8 @@ export default function CustomerDetailPage() {
               <div>
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">مدیریت پروژه</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">نام مدیر پروژه</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.projectManagerName || 'تعریف نشده'}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">شماره تماس مدیر پروژه</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.projectManagerNumber || 'تعریف نشده'}</p>
-                  </div>
+                  <ErpFieldView label="نام مدیر پروژه" value={<>{customer.projectManagerName || 'تعریف نشده'}</>} />
+                  <ErpFieldView label="شماره تماس مدیر پروژه" value={<>{customer.projectManagerNumber || 'تعریف نشده'}</>} />
                 </div>
               </div>
 
@@ -667,15 +615,9 @@ export default function CustomerDetailPage() {
               <div>
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات برند</h3>
                 <div className="grid grid-cols-1 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">نام برند</label>
-                    <p className="text-[var(--sds-text-primary)]">{customer.brandName || 'تعریف نشده'}</p>
-                  </div>
+                  <ErpFieldView label="نام برند" value={<>{customer.brandName || 'تعریف نشده'}</>} />
                   {customer.brandNameDescription && (
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">توضیحات برند</label>
-                      <p className="text-[var(--sds-text-primary)]">{customer.brandNameDescription}</p>
-                    </div>
+                    <ErpFieldView label="توضیحات برند" value={<>{customer.brandNameDescription}</>} />
                   )}
                 </div>
               </div>
@@ -686,18 +628,16 @@ export default function CustomerDetailPage() {
                   <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">شماره‌های تماس</h3>
                   <div className="space-y-3">
                     {customer.phoneNumbers.map((phone) => (
-                      <div key={phone.id} className="flex items-center justify-between p-3 bg-[var(--sds-surface-raised)] rounded-lg">
+                      <ErpCard key={phone.id} className="flex items-center justify-between p-3">
                         <div className="flex items-center gap-3">
                           <FaPhone className="h-4 w-4 text-[var(--sds-text-muted)]" />
                           <span className="text-[var(--sds-text-primary)]">{phone.number}</span>
                           <span className="text-[var(--sds-text-muted)] text-sm">({phone.type})</span>
                         </div>
                         {phone.isPrimary && (
-                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-[var(--sds-accent-surface)] text-[var(--sds-accent)]">
-                            اصلی
-                          </span>
+                          <ErpBadge tone="info">اصلی</ErpBadge>
                         )}
-                      </div>
+                      </ErpCard>
                     ))}
                   </div>
                 </div>
@@ -707,14 +647,8 @@ export default function CustomerDetailPage() {
               <div>
                 <h3 className="text-lg font-semibold text-[var(--sds-text-primary)] mb-4">اطلاعات سیستم</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">تاریخ ایجاد</label>
-                    <p className="text-[var(--sds-text-primary)]">{formatDate(customer.createdAt)}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-1">آخرین بروزرسانی</label>
-                    <p className="text-[var(--sds-text-primary)]">{formatDate(customer.updatedAt)}</p>
-                  </div>
+                  <ErpFieldView label="تاریخ ایجاد" value={<>{formatDate(customer.createdAt)}</>} />
+                  <ErpFieldView label="آخرین بروزرسانی" value={<>{formatDate(customer.updatedAt)}</>} />
                 </div>
               </div>
             </div>
@@ -754,9 +688,7 @@ export default function CustomerDetailPage() {
                               {address.projectName || 'پروژه بدون نام'}
                             </h4>
                             {address.projectType && (
-                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-[var(--sds-surface-subtle)] text-[var(--sds-text-muted)]">
-                                {address.projectType}
-                              </span>
+                              <ErpBadge tone="neutral">{address.projectType}</ErpBadge>
                             )}
                           </div>
                           <p className="text-[var(--sds-text-muted)] mb-1">{address.address}</p>
@@ -874,9 +806,7 @@ export default function CustomerDetailPage() {
                               {contact.firstName} {contact.lastName}
                             </h4>
                             {contact.isPrimary && (
-                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-[var(--sds-accent-surface)] text-[var(--sds-accent)]">
-                                اصلی
-                              </span>
+                              <ErpBadge tone="info">اصلی</ErpBadge>
                             )}
                           </div>
                           {contact.position && (
@@ -1028,46 +958,40 @@ export default function CustomerDetailPage() {
         presentation="modal"
       >
             <form onSubmit={handleSubmitProject} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام پروژه</label>
+              <CustomerWorkflowField label="نام پروژه" required>
                 <ErpInput
                   type="text"
                   value={projectFormData.projectName}
                   onChange={(e) => setProjectFormData(prev => ({ ...prev, projectName: e.target.value }))}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="نام پروژه"
                   required
                 />
-              </div>
+              </CustomerWorkflowField>
 
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">آدرس</label>
+              <CustomerWorkflowField label="آدرس" required>
                 <ErpTextarea
                   value={projectFormData.address}
                   onChange={(e) => setProjectFormData(prev => ({ ...prev, address: e.target.value }))}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="آدرس پروژه"
                   rows={3}
                   required
                 />
-              </div>
+              </CustomerWorkflowField>
 
               <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شهر</label>
+                <CustomerWorkflowField label="شهر">
                   <ErpInput
                     type="text"
                     value={projectFormData.city}
                     onChange={(e) => setProjectFormData(prev => ({ ...prev, city: e.target.value }))}
-                    className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                     placeholder="شهر"
                   />
-                </div>
+                </CustomerWorkflowField>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نوع پروژه</label>
                 <EnhancedDropdown
+                  label="نوع پروژه"
                   value={projectFormData.projectType}
                   onChange={(value) => setProjectFormData(prev => ({ ...prev, projectType: value }))}
                   placeholder="انتخاب نوع پروژه"
@@ -1086,27 +1010,23 @@ export default function CustomerDetailPage() {
                 </h4>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام مدیر پروژه</label>
+                  <CustomerWorkflowField label="نام مدیر پروژه">
                     <ErpInput
                       type="text"
                       value={projectFormData.projectManagerName}
                       onChange={(e) => setProjectFormData(prev => ({ ...prev, projectManagerName: e.target.value }))}
-                      className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                       placeholder="نام مدیر پروژه"
                     />
-                  </div>
+                  </CustomerWorkflowField>
 
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره مدیر پروژه</label>
+                  <CustomerWorkflowField label="شماره مدیر پروژه">
                     <ErpInput
                       type="text"
                       value={projectFormData.projectManagerNumber}
                       onChange={(e) => setProjectFormData(prev => ({ ...prev, projectManagerNumber: e.target.value }))}
-                      className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                       placeholder="شماره تماس مدیر پروژه"
                     />
-                  </div>
+                  </CustomerWorkflowField>
                 </div>
               </div>
 
@@ -1117,38 +1037,32 @@ export default function CustomerDetailPage() {
                 </h4>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام بازاریاب</label>
+                  <CustomerWorkflowField label="نام بازاریاب">
                     <ErpInput
                       type="text"
                       value={projectFormData.marketerFirstName}
                       onChange={(e) => setProjectFormData(prev => ({ ...prev, marketerFirstName: e.target.value }))}
-                      className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                       placeholder="نام بازاریاب"
                     />
-                  </div>
+                  </CustomerWorkflowField>
 
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام خانوادگی بازاریاب</label>
+                  <CustomerWorkflowField label="نام خانوادگی بازاریاب">
                     <ErpInput
                       type="text"
                       value={projectFormData.marketerLastName}
                       onChange={(e) => setProjectFormData(prev => ({ ...prev, marketerLastName: e.target.value }))}
-                      className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                       placeholder="نام خانوادگی بازاریاب"
                     />
-                  </div>
+                  </CustomerWorkflowField>
 
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس بازاریاب</label>
+                  <CustomerWorkflowField label="شماره تماس بازاریاب" className="md:col-span-2">
                     <ErpInput
                       type="text"
                       value={projectFormData.marketerPhoneNumber}
                       onChange={(e) => setProjectFormData(prev => ({ ...prev, marketerPhoneNumber: e.target.value }))}
-                      className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                       placeholder="شماره تماس بازاریاب"
                     />
-                  </div>
+                  </CustomerWorkflowField>
                 </div>
               </div>
 
@@ -1183,75 +1097,58 @@ export default function CustomerDetailPage() {
       >
             <form onSubmit={handleSubmitContact} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام</label>
+                <CustomerWorkflowField label="نام" required>
                   <ErpInput
                     type="text"
                     value={contactFormData.firstName}
                     onChange={(e) => setContactFormData(prev => ({ ...prev, firstName: e.target.value }))}
-                    className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                     placeholder="نام"
                     required
                   />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">نام خانوادگی</label>
+                </CustomerWorkflowField>
+                <CustomerWorkflowField label="نام خانوادگی" required>
                   <ErpInput
                     type="text"
                     value={contactFormData.lastName}
                     onChange={(e) => setContactFormData(prev => ({ ...prev, lastName: e.target.value }))}
-                    className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                     placeholder="نام خانوادگی"
                     required
                   />
-                </div>
+                </CustomerWorkflowField>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">سمت</label>
+              <CustomerWorkflowField label="سمت">
                 <ErpInput
                   type="text"
                   value={contactFormData.position}
                   onChange={(e) => setContactFormData(prev => ({ ...prev, position: e.target.value }))}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="سمت"
                 />
-              </div>
+              </CustomerWorkflowField>
 
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">ایمیل</label>
+              <CustomerWorkflowField label="ایمیل">
                 <ErpInput
                   type="email"
                   value={contactFormData.email}
                   onChange={(e) => setContactFormData(prev => ({ ...prev, email: e.target.value }))}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="ایمیل"
                 />
-              </div>
+              </CustomerWorkflowField>
 
-              <div>
-                <label className="block text-sm font-medium text-[var(--sds-text-muted)] mb-2">شماره تماس</label>
+              <CustomerWorkflowField label="شماره تماس">
                 <ErpInput
                   type="tel"
                   value={contactFormData.phone}
                   onChange={(e) => setContactFormData(prev => ({ ...prev, phone: e.target.value }))}
-                  className="w-full px-4 py-3 bg-[var(--sds-surface-raised)] border border-[var(--sds-border-default)] rounded-lg text-[var(--sds-text-primary)] placeholder:text-[var(--sds-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)]"
                   placeholder="شماره تماس"
                 />
-              </div>
+              </CustomerWorkflowField>
 
-              <div className="flex items-center gap-2">
-                <ErpInput
-                  type="checkbox"
-                  id="isPrimary"
+              <ErpCheckbox
                   checked={contactFormData.isPrimary}
                   onChange={(e) => setContactFormData(prev => ({ ...prev, isPrimary: e.target.checked }))}
-                  className="w-4 h-4 text-[var(--sds-accent)] bg-[var(--sds-surface-raised)] border-[var(--sds-border-default)] rounded focus:ring-[var(--sds-focus-ring)]"
+                  label="مخاطب اصلی"
                 />
-                <label htmlFor="isPrimary" className="text-sm text-[var(--sds-text-muted)]">
-                  مخاطب اصلی
-                </label>
-              </div>
 
               <div className="flex items-center gap-4 pt-4">
                 <ErpPressable

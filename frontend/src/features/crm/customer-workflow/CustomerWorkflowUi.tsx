@@ -14,6 +14,14 @@ type WorkflowProgress = {
   label: React.ReactNode;
 };
 
+export function hasCustomerDraftChanges<T extends object>(values: T) {
+  return Object.entries(values).some(([key, value]) => {
+    if (key === 'customerType' || key === 'status') return false;
+    if (Array.isArray(value)) return value.length > 0;
+    return typeof value === 'string' ? value.trim().length > 0 : Boolean(value);
+  });
+}
+
 export function CustomerWorkflowFeedback({ feedback }: { feedback: WorkflowFeedback }) {
   return <ErpInlineState kind={feedback.kind} title={feedback.title} />;
 }
@@ -22,7 +30,7 @@ export function CustomerWorkflowProgress({ current, total, label }: WorkflowProg
   const percent = Math.round((current / Math.max(total, 1)) * 100);
   return (
     <ErpCard className="p-4">
-      <div className="mb-3 flex items-center justify-between gap-3 text-sm sds-text-muted">
+      <div className="sds-text-secondary mb-3 flex items-center justify-between gap-3 text-sm">
         <span>مرحله {current.toLocaleString('fa-IR')} از {total.toLocaleString('fa-IR')}</span>
         <span>{percent.toLocaleString('fa-IR')}٪</span>
       </div>

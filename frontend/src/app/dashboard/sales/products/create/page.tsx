@@ -1,5 +1,5 @@
 'use client';
-import { ErpCard, ErpCheckbox, ErpInput, ErpPressable } from '@/components/erp';
+import { ErpCard, ErpCheckbox, ErpField as SalesAuthoringField, ErpFieldView, ErpInput, ErpPressable } from '@/components/erp';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -11,8 +11,7 @@ import {
   FaMountain,
   FaPaintBrush,
   FaPalette,
-  FaCode,
-  FaSearch
+  FaCode
 } from 'react-icons/fa';
 import { salesAPI, inventoryAPI } from '@/lib/api';
 import SuccessModal from '@/components/SuccessModal';
@@ -171,27 +170,17 @@ const SearchableDropdown = ({
 }: SearchableDropdownProps) => (
   <div className="space-y-4">
     <div>
-      <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)] mb-2">
-        {label} *
-      </label>
-
-      <div className="relative mb-4">
-        <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-          <FaSearch className="h-5 w-5 text-[var(--sds-text-muted)]" />
-        </div>
+      <SalesAuthoringField label={label} error={error} required>
         <ErpInput
           id={`${type}-search`}
-          aria-invalid={Boolean(error)}
-          aria-describedby={error ? `${type}-search-error` : undefined}
           type="text"
           placeholder={placeholder}
           value={searchTerm}
           onChange={(e) => onSearchChange(type, e.target.value)}
-          className="w-full pr-10"
         />
-      </div>
+      </SalesAuthoringField>
 
-      <div className="max-h-60 overflow-y-auto border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)] rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)]">
+      <ErpCard className="mt-4 max-h-60 overflow-y-auto p-0">
         {filteredData.length === 0 ? (
           <div className="text-center py-8">
             <p className="text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
@@ -231,9 +220,7 @@ const SearchableDropdown = ({
             </ErpPressable>
           ))
         )}
-      </div>
-
-      {error && <p id={`${type}-search-error`} role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{error}</p>}
+      </ErpCard>
     </div>
 
     {selectedItem && (
@@ -291,6 +278,7 @@ export default function CreateStoneProductWizard() {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Master data state
@@ -349,6 +337,7 @@ export default function CreateStoneProductWizard() {
   const loadMasterData = async () => {
     try {
       setLoading(true);
+      setLoadError('');
 
       // Load all master data in parallel
       const [
@@ -380,6 +369,7 @@ export default function CreateStoneProductWizard() {
       });
     } catch (error) {
       console.error('Error loading master data:', error);
+      setLoadError('دریافت داده‌های پایه محصول ناموفق بود. دوباره تلاش کنید.');
     } finally {
       setLoading(false);
     }
@@ -779,35 +769,19 @@ export default function CreateStoneProductWizard() {
               onSelect={selectMasterDataItem}
             />
 
-            <div>
-              <label className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-muted)]">
-                طول مادر (متر)
-              </label>
+            <SalesAuthoringField label="طول مادر (متر)" error={errors.motherLengthValue}>
               <ErpInput
                 value={wizardData.motherLengthValue}
                 onChange={(event) => updateWizardData('motherLengthValue', event.target.value)}
                 inputMode="decimal"
-                className="w-full text-sm"
               />
-              {errors.motherLengthValue && (
-                <p className="mt-1 text-sm text-[var(--sds-danger)]">{errors.motherLengthValue}</p>
-              )}
-            </div>
+            </SalesAuthoringField>
 
             {/* Final Code Preview */}
-            <div className="bg-[var(--sds-accent-surface)] dark:bg-[var(--sds-accent-surface)] p-4 rounded-lg border border-[var(--sds-border-strong)] dark:border-[var(--sds-border-strong)]">
-              <label className="block text-sm font-medium text-[var(--sds-accent)] dark:text-[var(--sds-accent)] mb-2">
-                کد نهایی محصول:
-              </label>
-              <div className="font-mono text-lg text-[var(--sds-accent)] dark:text-[var(--sds-accent)] bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] p-3 rounded border">
-                {generateFinalCode()}
-              </div>
-            </div>
+            <ErpFieldView label="کد نهایی محصول" value={<span className="font-mono">{generateFinalCode()}</span>} tone="primary" />
 
-            <div className="p-4 bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-raised)] rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-              <label className="block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] mb-3">
-                قراردادهای موجود
-              </label>
+            <ErpCard className="p-4">
+              <h3 className="sds-text-primary mb-3 text-sm font-medium">قراردادهای موجود</h3>
               <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] mb-4">
                 مشخص کنید این محصول در کدام فرایندهای ایجاد قرارداد نمایش داده شود.
               </p>
@@ -819,6 +793,7 @@ export default function CreateStoneProductWizard() {
                       key={option.id}
                       checked={checked}
                       onChange={() => toggleContractVisibility(option.id)}
+                      aria-describedby={errors.contractVisibility ? 'contract-visibility-error' : undefined}
                       label={<span><span className="block font-medium">{option.label}</span><span className="sds-text-muted block text-xs">{option.description}</span></span>}
                       className="items-start p-3"
                     />
@@ -826,9 +801,9 @@ export default function CreateStoneProductWizard() {
                 })}
               </div>
               {errors.contractVisibility && (
-                <p className="text-[var(--sds-danger)] text-sm mt-2">{errors.contractVisibility}</p>
+                <p id="contract-visibility-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-2">{errors.contractVisibility}</p>
               )}
-            </div>
+            </ErpCard>
           </div>
         );
 
@@ -855,7 +830,11 @@ export default function CreateStoneProductWizard() {
       backHref="/dashboard/sales/products"
       actions={isReturningToContract ? [{ label: 'لغو و بازگشت به قرارداد', icon: FaTimes, tone: 'danger', variant: 'outline', onClick: returnToContract }] : []}
       progress={{ current: currentStep, total: WIZARD_STEPS.length, label: WIZARD_STEPS[currentStep - 1].title }}
-      feedback={currentStep > 1 || Boolean(wizardData.cutTypeId) ? { kind: 'stale', title: 'اطلاعات این محصول تا ثبت نهایی ذخیره نمی‌شوند.' } : undefined}
+      feedback={loadError
+        ? { kind: 'error', title: loadError, action: { label: 'تلاش دوباره', onClick: loadMasterData } }
+        : currentStep > 1 || Boolean(wizardData.cutTypeId)
+          ? { kind: 'stale', title: 'اطلاعات این محصول تا ثبت نهایی ذخیره نمی‌شوند.' }
+          : undefined}
     >
       <SalesAuthoringSection title={WIZARD_STEPS[currentStep - 1].title} description={WIZARD_STEPS[currentStep - 1].description}>
         {renderStepContent()}

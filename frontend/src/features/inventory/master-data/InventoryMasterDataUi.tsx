@@ -1,7 +1,22 @@
 'use client';
 
 import React from 'react';
-import { ErpButton, ErpInlineState, ErpPage, ErpSection, type ErpAction } from '@/components/erp';
+import { ErpButton, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpPage, ErpSection, ErpSelect, ErpTextarea, type ErpAction } from '@/components/erp';
+import CatalogImagePicker from '@/components/CatalogImagePicker';
+
+export type InventoryMasterDataKind = 'service' | 'cuttingType' | 'stoneFinishing' | 'subService';
+
+export type InventoryMasterDataValues = {
+  code: string;
+  name: string;
+  namePersian: string;
+  description: string;
+  pricePerMeter?: string;
+  pricePerSquareMeter?: string;
+  calculationBase?: 'length' | 'squareMeters';
+  images: string[];
+  isActive: boolean;
+};
 
 export function InventoryMasterDataPage({
   title,
@@ -25,33 +40,91 @@ export function InventoryMasterDataPage({
   );
 }
 
-export function InventoryMasterDataEntry({ id, label, error, hint, required, children }: React.PropsWithChildren<{
-  id: string;
-  label: React.ReactNode;
-  error?: React.ReactNode;
-  hint?: React.ReactNode;
-  required?: boolean;
-}>) {
-  const errorId = `${id}-error`;
-  const hintId = `${id}-hint`;
-  const describedBy = [error ? errorId : null, hint ? hintId : null].filter(Boolean).join(' ') || undefined;
-  const control = React.isValidElement(children)
-    ? React.cloneElement(children as React.ReactElement<Record<string, unknown>>, {
-        id,
-        'aria-invalid': error ? true : undefined,
-        'aria-describedby': describedBy,
-      })
-    : children;
+type InventoryMasterDataConfiguration = {
+  entity: string;
+  code: string;
+  persian: string;
+  calculationBase?: boolean;
+  price?: { key: 'pricePerMeter' | 'pricePerSquareMeter'; label: string; hint: string; required?: boolean; legacyError?: string };
+};
 
+const configurations: Record<InventoryMasterDataKind, InventoryMasterDataConfiguration> = {
+  service: { entity: 'خدمت', code: 'کد خدمت', persian: 'نام فارسی خدمت' },
+  cuttingType: {
+    entity: 'نوع ابزار', code: 'کد نوع ابزار', persian: 'نام فارسی نوع ابزار',
+    price: { key: 'pricePerMeter', label: 'قیمت به ازای هر متر (تومان)', hint: 'مبلغ بدون جداکننده و به تومان وارد شود.' },
+  },
+  stoneFinishing: {
+    entity: 'فرآوری سنگ', code: 'کد فرآوری سنگ', persian: 'نام فارسی فرآوری سنگ', calculationBase: true,
+    price: { key: 'pricePerSquareMeter', label: 'قیمت پایه (تومان)', hint: 'مبلغ مبنای محاسبه هزینه فرآوری است.', legacyError: 'unitPrice' },
+  },
+  subService: {
+    entity: 'ابزار', code: 'کد ابزار', persian: 'نام فارسی ابزار', calculationBase: true,
+    price: { key: 'pricePerMeter', label: 'قیمت پایه (تومان)', hint: 'مبلغ بدون جداکننده و به تومان وارد شود.', required: true },
+  },
+};
+
+export function InventoryMasterDataForm({
+  kind,
+  values,
+  errors,
+  pending,
+  submitLabel,
+  onChange,
+  onSubmit,
+  onCancel,
+  deleteAction,
+}: {
+  kind: InventoryMasterDataKind;
+  values: InventoryMasterDataValues;
+  errors: Record<string, string>;
+  pending: boolean;
+  submitLabel: string;
+  onChange: (patch: Partial<InventoryMasterDataValues>) => void;
+  onSubmit: (event: React.FormEvent) => void;
+  onCancel: () => void;
+  deleteAction?: { label: string; onClick: () => void };
+}) {
+  const copy = configurations[kind];
+  const price = copy.price;
+  const priceValue = price?.key === 'pricePerSquareMeter' ? values.pricePerSquareMeter : values.pricePerMeter;
+  const priceError = price ? errors[price.key] || (price.legacyError ? errors[price.legacyError] : undefined) : undefined;
   return (
-    <div>
-      <label htmlFor={id} className="sds-text-secondary mb-2 block text-sm font-medium">
-        {label}{required && <span aria-hidden="true"> *</span>}
-      </label>
-      {control}
-      {hint && <p id={hintId} className="sds-text-muted mt-1 text-sm">{hint}</p>}
-      {error && <p id={errorId} className="mt-1 text-sm text-[var(--sds-danger)]">{error}</p>}
-    </div>
+    <form onSubmit={onSubmit} className="space-y-6" data-inventory-master-data-kind={kind}>
+      <ErpField label={copy.code} error={errors.code} required>
+        <ErpInput id={`${kind}-code`} value={values.code} onChange={(event) => onChange({ code: event.target.value })} placeholder="کد یکتا" />
+      </ErpField>
+      <ErpField label={copy.persian} error={errors.namePersian} required>
+        <ErpInput id={`${kind}-name-persian`} value={values.namePersian} onChange={(event) => onChange({ namePersian: event.target.value })} placeholder={copy.persian} />
+      </ErpField>
+      <ErpField label="نام انگلیسی">
+        <ErpInput id={`${kind}-name`} value={values.name} onChange={(event) => onChange({ name: event.target.value })} placeholder={`${copy.entity} (English)`} />
+      </ErpField>
+      <ErpField label="توضیحات">
+        <ErpTextarea id={`${kind}-description`} value={values.description} onChange={(event) => onChange({ description: event.target.value })} rows={3} />
+      </ErpField>
+      {price && (
+        <ErpField
+          label={price.label}
+          error={priceError}
+          hint={price.hint}
+          required={price.required}
+        >
+          <ErpInput id={`${kind}-price`} type="number" min={0} step={1000} value={priceValue || ''} onChange={(event) => onChange({ [price.key]: event.target.value })} />
+        </ErpField>
+      )}
+      {copy.calculationBase && (
+        <ErpField label="مبنای محاسبه">
+          <ErpSelect id={`${kind}-calculation-base`} value={values.calculationBase || 'length'} onChange={(event) => onChange({ calculationBase: event.target.value as 'length' | 'squareMeters' })}>
+            <option value="length">طول (متر)</option>
+            <option value="squareMeters">مساحت (متر مربع)</option>
+          </ErpSelect>
+        </ErpField>
+      )}
+      <CatalogImagePicker images={values.images} onChange={(images) => onChange({ images })} />
+      <ErpCheckbox label="فعال" checked={values.isActive} onChange={(event) => onChange({ isActive: event.target.checked })} />
+      <InventoryMasterDataActions pending={pending} submitLabel={submitLabel} onCancel={onCancel} deleteAction={deleteAction} />
+    </form>
   );
 }
 

@@ -1,5 +1,5 @@
 'use client';
-import { ErpButton, ErpInput, ErpPressable, ErpSegmentedControl, ErpSelect, ErpTextarea } from '@/components/erp';
+import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField as SalesAuthoringField, ErpIconButton, ErpInlineState, ErpInput, ErpPressable, ErpSegmentedControl, ErpSelect, ErpTextarea } from '@/components/erp';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -15,7 +15,7 @@ import {
   FaCalculator
 } from 'react-icons/fa';
 import { contractTemplatesAPI } from '@/lib/api';
-import { SalesAuthoringPage, SalesAuthoringSection } from '@/features/sales/authoring/SalesAuthoringUi';
+import { SalesAuthoringPage, SalesAuthoringSection, hasContractTemplateDraft } from '@/features/sales/authoring/SalesAuthoringUi';
 
 interface TemplateVariable {
   key: string;
@@ -207,7 +207,7 @@ export default function CreateContractTemplatePage() {
       backHref="/dashboard/contract-templates"
       feedback={errors.general
         ? { kind: 'error', title: errors.general }
-        : (formData.name || formData.namePersian || formData.description || formData.content || Object.keys(formData.variables).length > 0 || Object.keys(formData.structure).length > 0 || Object.keys(formData.calculations).length > 0)
+        : hasContractTemplateDraft(formData)
           ? { kind: 'stale', title: 'تغییرات قالب تا ثبت نهایی ذخیره نمی‌شوند.' }
           : undefined}
       progress={{ current: tabs.findIndex((tab) => tab.id === activeTab) + 1, total: tabs.length, label: tabs.find((tab) => tab.id === activeTab)?.label || '' }}
@@ -226,38 +226,25 @@ export default function CreateContractTemplatePage() {
           <SalesAuthoringSection title="اطلاعات پایه" className="space-y-6">
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="template-name" className="block text-[var(--sds-text-primary)] font-medium mb-2">نام قالب (انگلیسی)</label>
+              <SalesAuthoringField label="نام قالب (انگلیسی)" error={errors.name} required>
                 <ErpInput
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full"
                   placeholder="Sales Contract Template"
-                  id="template-name"
-                  aria-invalid={Boolean(errors.name)}
-                  aria-describedby={errors.name ? 'template-name-error' : undefined}
                 />
-                {errors.name && <p id="template-name-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.name}</p>}
-              </div>
+              </SalesAuthoringField>
 
-              <div>
-                <label htmlFor="template-namePersian" className="block text-[var(--sds-text-primary)] font-medium mb-2">نام قالب (فارسی)</label>
+              <SalesAuthoringField label="نام قالب (فارسی)" error={errors.namePersian} required>
                 <ErpInput
                   type="text"
                   value={formData.namePersian}
                   onChange={(e) => setFormData({ ...formData, namePersian: e.target.value })}
-                  className="w-full"
                   placeholder="قالب قرارداد فروش"
-                  id="template-namePersian"
-                  aria-invalid={Boolean(errors.namePersian)}
-                  aria-describedby={errors.namePersian ? 'template-namePersian-error' : undefined}
                 />
-                {errors.namePersian && <p id="template-namePersian-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.namePersian}</p>}
-              </div>
+              </SalesAuthoringField>
 
-              <div>
-                <label className="block text-[var(--sds-text-primary)] font-medium mb-2">دسته‌بندی</label>
+              <SalesAuthoringField label="دسته‌بندی">
                 <ErpSelect
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
@@ -267,17 +254,16 @@ export default function CreateContractTemplatePage() {
                     <option key={cat.value} value={cat.value}>{cat.label}</option>
                   ))}
                 </ErpSelect>
-              </div>
+              </SalesAuthoringField>
 
-              <div className="md:col-span-2">
-                <label className="block text-[var(--sds-text-primary)] font-medium mb-2">توضیحات</label>
+              <SalesAuthoringField label="توضیحات" className="md:col-span-2">
                 <ErpTextarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   className="w-full h-24"
                   placeholder="توضیحات کوتاه درباره قالب..."
                 />
-              </div>
+              </SalesAuthoringField>
             </div>
           </SalesAuthoringSection>
         )}
@@ -286,29 +272,24 @@ export default function CreateContractTemplatePage() {
         {activeTab === 'content' && (
           <SalesAuthoringSection title="محتوای قالب" className="space-y-6">
 
-            <div>
-              <label htmlFor="template-content" className="block text-[var(--sds-text-primary)] font-medium mb-2">محتوای HTML قالب</label>
+            <SalesAuthoringField label="محتوای HTML قالب" error={errors.content} required>
               <ErpTextarea
                 value={formData.content}
                 onChange={(e) => setFormData({ ...formData, content: e.target.value })}
                 className="w-full h-96 font-mono text-sm"
                 placeholder="محتوای HTML قالب با متغیرهای {{variableName}}..."
-                id="template-content"
-                aria-invalid={Boolean(errors.content)}
-                aria-describedby={errors.content ? 'template-content-error' : undefined}
               />
-              {errors.content && <p id="template-content-error" role="alert" className="text-[var(--sds-danger)] text-sm mt-1">{errors.content}</p>}
-            </div>
+            </SalesAuthoringField>
 
-            <div className="bg-[var(--sds-surface-raised)] p-4 rounded-lg">
+            <ErpCard className="p-4">
               <h3 className="text-[var(--sds-text-primary)] font-medium mb-2">راهنمای متغیرها:</h3>
-              <ul className="text-[var(--sds-text-muted)] text-sm space-y-1">
+              <ul className="sds-text-secondary space-y-1 text-sm">
                 <li>• از {'{{variableName}}'} برای متغیرها استفاده کنید</li>
                 <li>• از {'{{tableRows}}'} برای ردیف‌های جدول استفاده کنید</li>
                 <li>• از CSS inline برای استایل‌دهی استفاده کنید</li>
                 <li>• جهت RTL و فونت فارسی را در نظر بگیرید</li>
               </ul>
-            </div>
+            </ErpCard>
           </SalesAuthoringSection>
         )}
 
@@ -319,8 +300,7 @@ export default function CreateContractTemplatePage() {
             {/* Add New Variable */}
             <SalesAuthoringSection title="افزودن متغیر جدید">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">کلید متغیر</label>
+                <SalesAuthoringField label="کلید متغیر" error={errors.variable && (!newVariable.key.trim() || !!formData.variables[newVariable.key]) ? errors.variable : undefined}>
                   <ErpInput
                     type="text"
                     value={newVariable.key}
@@ -328,9 +308,8 @@ export default function CreateContractTemplatePage() {
                     className="w-full"
                     placeholder="buyerName"
                   />
-                </div>
-                <div>
-                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">برچسب</label>
+                </SalesAuthoringField>
+                <SalesAuthoringField label="برچسب" error={errors.variable && !newVariable.label.trim() ? errors.variable : undefined}>
                   <ErpInput
                     type="text"
                     value={newVariable.label}
@@ -338,10 +317,9 @@ export default function CreateContractTemplatePage() {
                     className="w-full"
                     placeholder="نام خریدار"
                   />
-                </div>
-                <div>
-                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">نوع</label>
-                  <ErpSelect
+                </SalesAuthoringField>
+                <SalesAuthoringField label="نوع">
+                <ErpSelect
                     value={newVariable.type}
                     onChange={(e) => setNewVariable({ ...newVariable, type: e.target.value as any })}
                     className="w-full"
@@ -350,7 +328,7 @@ export default function CreateContractTemplatePage() {
                       <option key={type.value} value={type.value}>{type.label}</option>
                     ))}
                   </ErpSelect>
-                </div>
+              </SalesAuthoringField>
                 <div className="flex items-end">
                   <ErpPressable
                     type="button"
@@ -366,65 +344,48 @@ export default function CreateContractTemplatePage() {
               </div>
 
               <div className="flex items-center gap-4 mt-4">
-                <label className="flex items-center gap-2 text-[var(--sds-text-primary)] text-sm">
-                  <ErpInput
-                    type="checkbox"
+                <ErpCheckbox label="الزامی"
                     checked={newVariable.required}
                     onChange={(e) => setNewVariable({ ...newVariable, required: e.target.checked })}
-                    className="rounded"
                   />
-                  الزامی
-                </label>
-                <label className="flex items-center gap-2 text-[var(--sds-text-primary)] text-sm">
-                  <ErpInput
-                    type="checkbox"
+                <ErpCheckbox label="تولید خودکار"
                     checked={newVariable.autoGenerated}
                     onChange={(e) => setNewVariable({ ...newVariable, autoGenerated: e.target.checked })}
-                    className="rounded"
                   />
-                  تولید خودکار
-                </label>
-                <label className="flex items-center gap-2 text-[var(--sds-text-primary)] text-sm">
-                  <ErpInput
-                    type="checkbox"
+                <ErpCheckbox label="محاسبه‌شده"
                     checked={newVariable.calculated}
                     onChange={(e) => setNewVariable({ ...newVariable, calculated: e.target.checked })}
-                    className="rounded"
                   />
-                  محاسبه‌شده
-                </label>
               </div>
 
-              {errors.variable && <p className="text-[var(--sds-danger)] text-sm mt-2">{errors.variable}</p>}
             </SalesAuthoringSection>
 
             {/* Existing Variables */}
             <div>
               <h3 className="text-[var(--sds-text-primary)] font-medium mb-4">متغیرهای موجود</h3>
               {Object.keys(formData.variables).length === 0 ? (
-                <p className="text-[var(--sds-text-muted)] text-center py-8">هنوز متغیری اضافه نشده است</p>
+                <ErpInlineState kind="empty" title="هنوز متغیری اضافه نشده است" />
               ) : (
                 <div className="space-y-2">
                   {Object.entries(formData.variables).map(([key, variable]) => (
-                    <div key={key} className="flex items-center justify-between p-3 bg-[var(--sds-surface-raised)] rounded-lg">
+                    <ErpCard key={key} className="flex items-center justify-between p-3">
                       <div className="flex items-center gap-4">
                         <div>
                           <span className="text-[var(--sds-text-primary)] font-medium">{variable.label}</span>
                           <span className="text-[var(--sds-text-muted)] text-sm mr-2">({key})</span>
                         </div>
                         <span className="text-[var(--sds-text-secondary)] text-sm">{variableTypes.find(t => t.value === variable.type)?.label}</span>
-                        {variable.required && <span className="text-[var(--sds-danger)] text-xs">الزامی</span>}
-                        {variable.autoGenerated && <span className="text-[var(--sds-info)] text-xs">خودکار</span>}
-                        {variable.calculated && <span className="text-[var(--sds-success)] text-xs">محاسبه‌شده</span>}
+                        {variable.required && <ErpBadge tone="danger">الزامی</ErpBadge>}
+                        {variable.autoGenerated && <ErpBadge tone="info">خودکار</ErpBadge>}
+                        {variable.calculated && <ErpBadge tone="success">محاسبه‌شده</ErpBadge>}
                       </div>
-                      <ErpPressable
-                        type="button"
+                      <ErpIconButton
+                        label={`حذف متغیر ${variable.label}`}
+                        icon={FaTrash}
                         onClick={() => removeVariable(key)}
-                        className="text-[var(--sds-danger)] hover:text-[var(--sds-danger)] p-1"
-                      >
-                        <FaTrash className="h-4 w-4" />
-                      </ErpPressable>
-                    </div>
+                        tone="danger"
+                      />
+                    </ErpCard>
                   ))}
                 </div>
               )}
@@ -436,13 +397,11 @@ export default function CreateContractTemplatePage() {
         {activeTab === 'structure' && (
           <SalesAuthoringSection title="ساختار قالب" className="space-y-6">
 
-            <div>
-              <label className="block text-[var(--sds-text-primary)] font-medium mb-2">بخش‌های قالب</label>
+            <fieldset>
+              <legend className="sds-text-primary mb-2 font-medium">بخش‌های قالب</legend>
               <div className="flex flex-wrap gap-2">
                 {['header', 'table', 'footer'].map(section => (
-                  <label key={section} className="flex items-center gap-2 text-[var(--sds-text-primary)] text-sm">
-                    <ErpInput
-                      type="checkbox"
+                  <ErpCheckbox key={section} label={section === 'header' ? 'سربرگ' : section === 'table' ? 'جدول' : 'پابرگ'}
                       checked={formData.structure.sections?.includes(section) || false}
                       onChange={(e) => {
                         const sections = formData.structure.sections || [];
@@ -452,19 +411,13 @@ export default function CreateContractTemplatePage() {
                           updateStructure('sections', sections.filter(s => s !== section));
                         }
                       }}
-                      className="rounded"
                     />
-                    {section === 'header' && 'سربرگ'}
-                    {section === 'table' && 'جدول'}
-                    {section === 'footer' && 'پاورقی'}
-                  </label>
                 ))}
               </div>
-            </div>
+            </fieldset>
 
-            <div>
-              <label className="block text-[var(--sds-text-primary)] font-medium mb-2">حداکثر ردیف جدول</label>
-              <ErpInput
+            <SalesAuthoringField label="حداکثر ردیف جدول">
+                <ErpInput
                 type="number"
                 value={formData.structure.tableConfig?.maxRows || 9}
                 onChange={(e) => updateStructure('tableConfig', {
@@ -475,7 +428,7 @@ export default function CreateContractTemplatePage() {
                 min="1"
                 max="20"
               />
-            </div>
+              </SalesAuthoringField>
           </SalesAuthoringSection>
         )}
 
@@ -483,12 +436,11 @@ export default function CreateContractTemplatePage() {
         {activeTab === 'calculations' && (
           <SalesAuthoringSection title="فرمول‌های محاسباتی" className="space-y-6">
 
-            <div>
-              <label className="block text-[var(--sds-text-primary)] font-medium mb-2">فرمول‌های محاسباتی</label>
+            <fieldset>
+              <legend className="sds-text-primary mb-2 font-medium">فرمول‌های محاسباتی</legend>
               <div className="space-y-4">
-                <div>
-                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">محاسبه متر مربع</label>
-                  <ErpInput
+                <SalesAuthoringField label="محاسبه متر مربع">
+                <ErpInput
                     type="text"
                     value={formData.calculations.formulas?.squareMeter || ''}
                     onChange={(e) => updateCalculations('formulas', {
@@ -498,10 +450,9 @@ export default function CreateContractTemplatePage() {
                     className="w-full"
                     placeholder="length * width"
                   />
-                </div>
-                <div>
-                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">محاسبه قیمت کل</label>
-                  <ErpInput
+              </SalesAuthoringField>
+                <SalesAuthoringField label="محاسبه قیمت کل">
+                <ErpInput
                     type="text"
                     value={formData.calculations.formulas?.totalPrice || ''}
                     onChange={(e) => updateCalculations('formulas', {
@@ -511,10 +462,9 @@ export default function CreateContractTemplatePage() {
                     className="w-full"
                     placeholder="squareMeter * unitPrice"
                   />
-                </div>
-                <div>
-                  <label className="block text-[var(--sds-text-primary)] text-sm mb-1">محاسبه مجموع کل</label>
-                  <ErpInput
+              </SalesAuthoringField>
+                <SalesAuthoringField label="محاسبه مجموع کل">
+                <ErpInput
                     type="text"
                     value={formData.calculations.formulas?.totalAmount || ''}
                     onChange={(e) => updateCalculations('formulas', {
@@ -524,20 +474,15 @@ export default function CreateContractTemplatePage() {
                     className="w-full"
                     placeholder="SUM(totalPrice)"
                   />
-                </div>
+              </SalesAuthoringField>
               </div>
-            </div>
+            </fieldset>
 
             <div>
-              <label className="flex items-center gap-2 text-[var(--sds-text-primary)]">
-                <ErpInput
-                  type="checkbox"
+              <ErpCheckbox label="تبدیل اعداد به فارسی"
                   checked={formData.calculations.persianNumberConversion || false}
                   onChange={(e) => updateCalculations('persianNumberConversion', e.target.checked)}
-                  className="rounded"
                 />
-                تبدیل اعداد به فارسی
-              </label>
             </div>
           </SalesAuthoringSection>
         )}

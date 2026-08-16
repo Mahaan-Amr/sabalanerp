@@ -1,10 +1,8 @@
 'use client';
-import { ErpCheckbox, ErpInput, ErpTextarea } from '@/components/erp';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { servicesAPI } from '@/lib/api';
-import CatalogImagePicker from '@/components/CatalogImagePicker';
-import { InventoryMasterDataActions, InventoryMasterDataEntry, InventoryMasterDataPage } from '@/features/inventory/master-data/InventoryMasterDataUi';
+import { InventoryMasterDataForm, InventoryMasterDataPage } from '@/features/inventory/master-data/InventoryMasterDataUi';
 
 const CreateServicePage: React.FC = () => {
   const router = useRouter();
@@ -56,57 +54,16 @@ const CreateServicePage: React.FC = () => {
 
   return (
     <InventoryMasterDataPage title="ایجاد خدمت جدید" description="تعریف خدمت اصلی برای دسته‌بندی خدمات سنگ" backHref="/dashboard/inventory/services" error={errors.general}>
-      <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Code */}
-              <InventoryMasterDataEntry id="service-code" label="کد خدمت" error={errors.code} required>
-                <ErpInput
-                  type="text"
-                  value={formData.code}
-                  onChange={(e) => setFormData(prev => ({ ...prev, code: e.target.value }))}
-                  placeholder="مثال: CUT001"
-                />
-              </InventoryMasterDataEntry>
-
-              {/* Persian Name */}
-              <InventoryMasterDataEntry id="service-name-persian" label="نام فارسی خدمت" error={errors.namePersian} required>
-                <ErpInput
-                  type="text"
-                  value={formData.namePersian}
-                  onChange={(e) => setFormData(prev => ({ ...prev, namePersian: e.target.value }))}
-                  placeholder="مثال: برش سنگ"
-                />
-              </InventoryMasterDataEntry>
-
-              {/* English Name */}
-              <InventoryMasterDataEntry id="service-name" label="نام انگلیسی">
-                <ErpInput
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="مثال: Stone Cutting"
-                />
-              </InventoryMasterDataEntry>
-
-              {/* Description */}
-              <InventoryMasterDataEntry id="service-description" label="توضیحات">
-                <ErpTextarea
-                  value={formData.description}
-                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                  rows={3}
-                  placeholder="توضیحات خدمت..."
-                />
-              </InventoryMasterDataEntry>
-
-              <CatalogImagePicker
-                images={formData.images}
-                onChange={(images) => setFormData(prev => ({ ...prev, images }))}
-              />
-
-              {/* Status */}
-              <ErpCheckbox label="فعال" checked={formData.isActive} onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))} />
-
-        <InventoryMasterDataActions pending={loading} submitLabel="ایجاد خدمت" onCancel={handleCancel} />
-      </form>
+      <InventoryMasterDataForm
+        kind="service"
+        values={formData}
+        errors={errors}
+        pending={loading}
+        submitLabel="ایجاد خدمت"
+        onChange={(patch) => setFormData((previous) => ({ ...previous, ...patch }))}
+        onSubmit={handleSubmit}
+        onCancel={handleCancel}
+      />
     </InventoryMasterDataPage>
   );
 };

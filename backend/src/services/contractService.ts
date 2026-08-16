@@ -19,6 +19,10 @@ import {
 } from './contractProductGraphMigration';
 import { repairContractDataOperationIdentities } from './contractOperationIdentityRepair';
 import { repairContractDataProductSemantics } from './contractProductSemanticRepair';
+import {
+  contractDiscountEligibleBase,
+  isExplicitZeroDiscountInput,
+} from './contractDiscountEvidence';
 
 
 // Contract writes intentionally reload the built canonical graph package so
@@ -171,6 +175,58 @@ const productRecordsFrom = (contractData: unknown): Readonly<Record<string, unkn
     ? products.filter((product): product is Readonly<Record<string, unknown>> =>
         Boolean(product) && typeof product === 'object' && !Array.isArray(product))
     : [];
+};
+
+const normalizeNewContractNoDiscountEvidence = (
+  contractData: unknown,
+  currency: string,
+  totalAmount: Prisma.Decimal | number | string | null,
+) => {
+  if (!contractData || typeof contractData !== 'object' || Array.isArray(contractData)) return contractData;
+  const data = contractData as Record<string, unknown>;
+  const submittedDiscount = data.discount;
+  if (submittedDiscount !== null && submittedDiscount !== undefined) {
+    if (typeof submittedDiscount !== 'object' || Array.isArray(submittedDiscount)) {
+      throw new Error('New contract discount evidence is malformed');
+    }
+    const enabled = (submittedDiscount as Record<string, unknown>).enabled;
+    if (enabled !== true && !isExplicitZeroDiscountInput(submittedDiscount)) {
+      throw new Error('New contract zero-discount evidence is malformed or conflicting');
+    }
+  }
+  const shouldNormalize = submittedDiscount === null || submittedDiscount === undefined ||
+    isExplicitZeroDiscountInput(submittedDiscount);
+  if (!shouldNormalize) return contractData;
+  const plan = buildLegacyContractMigrationPlan({
+    id: 'new-contract-discount-evidence',
+    totalAmount,
+    contractData,
+  }, 1);
+  if (!plan.ok) return contractData;
+  const projection = projectCanonicalProductGraph(plan.graph, 'accounting');
+  const productByRowId = new Map(productRecordsFrom(contractData).map(product => [
+    String(product.rowId ?? product.productRowId ?? ''),
+    product,
+  ]));
+  const baseSubtotal = contractDiscountEligibleBase(productByRowId, projection.products);
+  const payment = data.payment && typeof data.payment === 'object' && !Array.isArray(data.payment)
+    ? data.payment as Record<string, unknown>
+    : null;
+  return {
+    ...data,
+    discount: {
+      ...(submittedDiscount && typeof submittedDiscount === 'object' && !Array.isArray(submittedDiscount)
+        ? submittedDiscount as Record<string, unknown>
+        : {}),
+      enabled: false,
+      baseSubtotal: baseSubtotal.toString(),
+      percent: 0,
+      amount: 0,
+      currency: typeof payment?.currency === 'string' && payment.currency.trim()
+        ? payment.currency.trim()
+        : currency,
+    },
+  };
 };
 
 const productIndexForConflict = (
@@ -389,6 +445,10 @@ export interface CreateContractData {
   _relations?: UpdateContractData['_relations'];
 }
 
+export interface ContractTransactionRunner {
+  $transaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+}
+
 export interface UpdateContractData {
   title?: string;
   titlePersian?: string;
@@ -467,10 +527,11 @@ export async function createContract(
   data: CreateContractData,
   userId: string,
   onCreated?: (tx: Prisma.TransactionClient, contract: any) => Promise<void>,
+  client: ContractTransactionRunner = prisma,
 ) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await prisma.$transaction(async (tx) => {
+      return await client.$transaction(async (tx) => {
         const { contractNumber, creatorSequenceNumber } = await generateContractNumberAssignment(userId, tx);
         const potentialProject = data.potentialProjectId
           ? await tx.crmPotentialProject.findUnique({
@@ -498,7 +559,11 @@ export async function createContract(
           `new-contract:${contractNumber}`,
           0
         );
-        const contractData = productSemanticRepair.contractData as any;
+        const contractData = normalizeNewContractNoDiscountEvidence(
+          productSemanticRepair.contractData,
+          data.currency || 'تومان',
+          data.totalAmount ?? null,
+        ) as any;
         assertNoAmbiguousOperationIdentityRepair(
           operationIdentityRepair.blockedProductRowIds,
           contractData

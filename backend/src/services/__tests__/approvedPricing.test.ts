@@ -75,6 +75,135 @@ test('accepts explicit no-discount evidence without deriving a default', () => {
   assert.equal(version.netAmount, version.grossAmount);
 });
 
+test('normalizes legacy explicit-null no-discount evidence at financial approval', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  data.discount = null;
+  delete data.products[0].meta.isLayer;
+  source.leaf.amount = '12500';
+
+  const version = buildApprovedPricingVersion(source, 1, 'legacy-null-no-discount-version');
+
+  assert.equal(version.discountAmount, '0.000000000000');
+  assert.equal(version.netAmount, version.grossAmount);
+  assert.deepEqual(version.sourceEvidence.discount, {
+    enabled: false,
+    baseSubtotal: '1000.000000000000',
+    percent: '0.000000000000',
+    amount: '0.000000000000',
+    currency: 'تومان',
+    evidenceOrigin: 'LEGACY_WIZARD_NULL',
+    selectedBasis: '1000.000000000000',
+    selectedAmount: '0.000000000000',
+  });
+  assert.deepEqual(version.sourceEvidence.discountEligibility, {
+    evidenceOrigin: 'LEGACY_WIZARD_MISSING_IS_LAYER_AS_FALSE',
+    normalizedNonLayerProductRowIds: ['row-1'],
+  });
+});
+
+test('keeps malformed legacy discount eligibility fail-closed', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  data.discount = null;
+  data.products[0].meta.isLayer = 'false';
+  source.leaf.amount = '12500';
+
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 1, 'legacy-malformed-eligibility-version'),
+    /discount eligibility evidence is missing/,
+  );
+});
+
+test('normalizes an absent legacy discount field only when frozen totals reconcile', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  delete data.discount;
+  data.payment.totalContractAmount = '1250';
+  source.leaf.amount = '12500';
+
+  const version = buildApprovedPricingVersion(source, 1, 'legacy-absent-no-discount-version');
+
+  assert.equal(version.discountAmount, '0.000000000000');
+  assert.deepEqual(version.sourceEvidence.discount, {
+    enabled: false,
+    baseSubtotal: '1000.000000000000',
+    percent: '0.000000000000',
+    amount: '0.000000000000',
+    currency: 'تومان',
+    evidenceOrigin: 'LEGACY_WIZARD_ABSENT_RECONCILED',
+    reconciledPayableTotal: '1250.000000000000',
+    reconciledGrossTotal: '1250.000000000000',
+    selectedBasis: '1000.000000000000',
+    selectedAmount: '0.000000000000',
+  });
+});
+
+test('keeps an unreconciled absent legacy discount field fail-closed', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  delete data.discount;
+  data.payment.totalContractAmount = '1249';
+  source.leaf.amount = '12500';
+
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 1, 'legacy-absent-conflict-version'),
+    /without discount evidence does not reconcile to zero discount/,
+  );
+});
+
+test('keeps equal legacy totals fail-closed when non-product adjustments could hide a discount', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  delete data.discount;
+  data.payment.totalContractAmount = '1250';
+  data.serviceRows = [{ serviceRowId: 'service-1', totalPrice: '100' }];
+  data.discountAmount = '100';
+  source.leaf.amount = '12500';
+
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 1, 'legacy-absent-hidden-discount-version'),
+    /conflicting discount or non-product adjustment evidence/,
+  );
+});
+
+test('keeps malformed legacy adjustment evidence fail-closed', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  delete data.discount;
+  data.payment.totalContractAmount = '1250';
+  data.discountAmount = 'unknown';
+  source.leaf.amount = '12500';
+
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 1, 'legacy-absent-malformed-adjustment-version'),
+    /conflicting discount or non-product adjustment evidence/,
+  );
+});
+
+test('keeps malformed legacy service-row containers and entries fail-closed', () => {
+  for (const serviceRows of [
+    { totalPrice: '0' },
+    [null],
+    [{}],
+    [{ totalPrice: null }],
+    [{ amount: undefined }],
+    [{ totalPrice: '' }],
+  ]) {
+    const source = approvedPricingSourceFixture();
+    const data = source.contract.contractData as any;
+    delete data.discount;
+    data.payment.totalContractAmount = '1250';
+    data.serviceRows = serviceRows;
+    source.leaf.amount = '12500';
+
+    assert.throws(
+      () => buildApprovedPricingVersion(source, 1, 'legacy-malformed-service-row-version'),
+      /conflicting discount or non-product adjustment evidence/,
+    );
+  }
+});
+
 test('freezes a zero discount basis for a non-eligible row', () => {
   const source = approvedPricingSourceFixture();
   (source.contract.contractData as any).products[0].meta.isLayer = true;
@@ -201,10 +330,10 @@ test('invalid leaf fails before any repository mutation', async () => {
   assert.equal(repository.versions.length, 0);
 });
 
-test('missing, null, and conflicting evidence fail closed', () => {
+test('missing and conflicting evidence fail closed', () => {
   const missingDiscount = approvedPricingSourceFixture();
-  (missingDiscount.contract.contractData as any).discount = null;
-  assert.throws(() => buildApprovedPricingVersion(missingDiscount, 1, 'v1'), /discount evidence.*missing or null/);
+  delete (missingDiscount.contract.contractData as any).discount;
+  assert.throws(() => buildApprovedPricingVersion(missingDiscount, 1, 'v1'), /Legacy contract payable total.*valid decimal/);
 
   const missingDestination = approvedPricingSourceFixture();
   (missingDestination.contract.contractData as any).project.address = null;

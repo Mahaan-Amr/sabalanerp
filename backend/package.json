@@ -71,6 +71,7 @@
     "test:approved-pricing": "tsx src/services/__tests__/approvedPricing.test.ts",
     "test:approved-pricing:db": "tsx src/services/__tests__/approvedPricingPrisma.test.ts",
     "test:approved-pricing:concurrency": "tsx src/services/__tests__/approvedPricingConcurrency.test.ts",
+    "test:contract-creation-discount:db": "tsx src/services/__tests__/contractCreationDiscountEvidence.integration.test.ts",
     "test:priced-allocation-ledger": "tsx src/services/__tests__/pricedAllocationLedger.test.ts && tsx src/services/__tests__/allocationPricingBinding.test.ts && tsx src/services/__tests__/allocationPricingReadModel.test.ts && tsx src/services/__tests__/dispatchAllocationRetry.test.ts",
     "test:priced-allocation-ledger:db": "tsx src/services/__tests__/allocationPricingPrisma.test.ts",
     "test:dispatch-documents": "tsx src/services/__tests__/dispatchArtifactStorageLock.test.ts && tsx src/services/__tests__/dispatchDocuments.test.ts && tsx src/services/__tests__/dispatchDocumentsDelegation.test.ts && tsx src/services/__tests__/dispatchDocumentsPrismaBehavior.test.ts && tsx src/services/__tests__/dispatchDocumentsTemporaryDatabase.test.ts",

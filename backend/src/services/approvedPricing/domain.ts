@@ -2,6 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { isValidFinanciallyApprovedInvoice } from '../accountingStatus';
 import {
+  contractDiscountEligibilityEvidence,
+  hasConflictingDiscountOrNonProductAdjustmentEvidence,
+  isContractRowDiscountEligible,
+  LEGACY_DISCOUNT_ELIGIBILITY_EVIDENCE_ORIGIN,
+  LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN,
+} from '../contractDiscountEvidence';
+import {
   APPROVED_PRICING_SCHEMA_VERSION,
   type ApprovedPricingRepository,
   type ApprovedPricingGraphRowSource,
@@ -191,12 +198,6 @@ const invoiceCurrencyFactor = (contractCurrency: string, invoiceCurrency: string
   throw new Error('Invoice currency cannot be reconciled with contract pricing currency');
 };
 
-const explicitDiscountEligibility = (snapshot: Record<string, unknown>, base: string, productRowId: string) => {
-  const meta = record(snapshot.meta, `Product ${productRowId} discount metadata`);
-  if (typeof meta.isLayer !== 'boolean') throw new Error(`Product ${productRowId} discount eligibility evidence is missing`);
-  return meta.isLayer === false && new Prisma.Decimal(base).gt(0);
-};
-
 const destinationEvidence = (data: Record<string, unknown>) => {
   const contractKind = requiredString(data.contractKind, 'Contract kind');
   if (contractKind === 'collaboration') {
@@ -233,6 +234,7 @@ const projectApprovedPricingRows = (input: {
   contractId: string;
   sourceFinancialRecordId: string;
   versionNumber: number;
+  normalizedLegacyNonLayerProductRowIds: ReadonlySet<string>;
 }) => {
   let selectedEligibleBase = new Prisma.Decimal(0);
   let gross = new Prisma.Decimal(0);
@@ -268,7 +270,15 @@ const projectApprovedPricingRows = (input: {
     }
     const componentTotal = Object.values(components).reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0));
     if (!componentTotal.eq(total)) throw new Error(`Product ${graphRow.productRowId} attached component evidence conflicts with all-in amount`);
-    const discountEligible = explicitDiscountEligibility(snapshot, base, graphRow.productRowId);
+    const normalizeMissingNonLayer = input.normalizedLegacyNonLayerProductRowIds.has(graphRow.productRowId)
+      ? () => undefined
+      : undefined;
+    const discountEligible = isContractRowDiscountEligible(
+      snapshot,
+      new Prisma.Decimal(base),
+      graphRow.productRowId,
+      normalizeMissingNonLayer,
+    );
     components.discountBasis = discountEligible ? base : money(0, 'Non-eligible discount basis');
     if (discountEligible) selectedEligibleBase = selectedEligibleBase.plus(base);
     gross = gross.plus(total);
@@ -319,7 +329,8 @@ const validateApprovalEnvelope = (source: ApprovedPricingSource, versionNumber: 
 
 const validateContractPricingContext = (source: ApprovedPricingSource, currency: string) => {
   const { data, products } = productRows(source.contract.contractData);
-  if (requiredString(record(data.payment, 'Contract payment evidence').currency, 'Contract payment currency') !== currency) {
+  const payment = record(data.payment, 'Contract payment evidence');
+  if (requiredString(payment.currency, 'Contract payment currency') !== currency) {
     throw new Error('Contract payment currency conflicts with contract currency');
   }
   const snapshotCustomerId = requiredString(data.customerId, 'Contract snapshot customer identity');
@@ -328,7 +339,52 @@ const validateContractPricingContext = (source: ApprovedPricingSource, currency:
     throw new Error('Contract customer identities conflict');
   }
   const destination = destinationEvidence(data);
-  const discount = record(data.discount, 'Contract discount evidence');
+  return { data, products, customer, destination, payment };
+};
+
+const validateContractDiscountEvidence = (
+  data: Record<string, unknown>,
+  payment: Record<string, unknown>,
+  currency: string,
+  contractEligibleBase: Prisma.Decimal,
+  completeGrossTotal: string,
+) => {
+  const hasDiscountField = Object.prototype.hasOwnProperty.call(data, 'discount');
+  const isLegacyWizardNull = hasDiscountField && data.discount === null;
+  const isLegacyWizardAbsent = !hasDiscountField;
+  const reconciledPayableTotal = isLegacyWizardAbsent
+    ? money(payment.totalContractAmount, 'Legacy contract payable total')
+    : null;
+  const reconciledGrossTotal = isLegacyWizardAbsent
+    ? money(completeGrossTotal, 'Legacy contract gross total')
+    : null;
+  if (reconciledPayableTotal !== null && reconciledPayableTotal !== reconciledGrossTotal) {
+    throw new Error('Legacy contract without discount evidence does not reconcile to zero discount');
+  }
+  if (isLegacyWizardAbsent && hasConflictingDiscountOrNonProductAdjustmentEvidence(data)) {
+    throw new Error('Legacy contract contains conflicting discount or non-product adjustment evidence');
+  }
+  const discount = isLegacyWizardNull
+    ? {
+        enabled: false,
+        baseSubtotal: contractEligibleBase.toString(),
+        percent: '0',
+        amount: '0',
+        currency,
+        evidenceOrigin: LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN.EXPLICIT_NULL,
+      }
+    : isLegacyWizardAbsent
+      ? {
+          enabled: false,
+          baseSubtotal: contractEligibleBase.toString(),
+          percent: '0',
+          amount: '0',
+          currency,
+          evidenceOrigin: LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN.ABSENT_RECONCILED,
+          reconciledPayableTotal,
+          reconciledGrossTotal,
+        }
+    : record(data.discount, 'Contract discount evidence');
   if (typeof discount.enabled !== 'boolean') throw new Error('Contract discount enabled evidence is missing');
   if (requiredString(discount.currency, 'Contract discount currency') !== currency) throw new Error('Contract discount currency conflicts with contract currency');
   const discountBase = money(discount.baseSubtotal, 'Contract discount base subtotal');
@@ -351,7 +407,7 @@ const validateContractPricingContext = (source: ApprovedPricingSource, currency:
       throw new Error('Contract discount amount conflicts with base subtotal and percent');
     }
   }
-  return { products, customer, destination, discount, discountBase, discountPercent, contractDiscountAmount, discountValue };
+  return { discount, discountBase, discountPercent, contractDiscountAmount, discountValue };
 };
 
 export const buildApprovedPricingVersion = (
@@ -361,7 +417,7 @@ export const buildApprovedPricingVersion = (
 ): ApprovedPricingVersionInsert => {
   const { contractId, approvedAt, approvedBy, currency, invoiceCurrency, currencyFactor, mode, graph } =
     validateApprovalEnvelope(source, versionNumber);
-  const { products, customer, destination, discount, discountBase, discountPercent, contractDiscountAmount, discountValue } =
+  const { data, products, customer, destination, payment } =
     validateContractPricingContext(source, currency);
 
   if (graph.rows.length !== source.contract.items.length || products.length !== graph.rows.length) {
@@ -408,13 +464,15 @@ export const buildApprovedPricingVersion = (
   });
   if (selectedGraphRows.length !== selectedContractItemIds.size) throw new Error('Approved invoice subset cannot be reconciled to canonical product rows');
 
-  let contractEligibleBase = new Prisma.Decimal(0);
-  for (const graphRow of graph.rows) {
-    const snapshot = snapshotByRow.get(graphRow.productRowId);
-    if (!snapshot) throw new Error(`Canonical row ${graphRow.productRowId} has no product snapshot`);
-    const base = money(graphRow.baseAmountToman, `Product ${graphRow.productRowId} base amount`);
-    if (explicitDiscountEligibility(snapshot, base, graphRow.productRowId)) contractEligibleBase = contractEligibleBase.plus(base);
-  }
+  const hasDiscountField = Object.prototype.hasOwnProperty.call(data, 'discount');
+  const isLegacyNoDiscountShape = !hasDiscountField || data.discount === null;
+  const discountEligibility = contractDiscountEligibilityEvidence(snapshotByRow, graph.rows.map(row => ({
+    productRowId: row.productRowId,
+    baseAmountToman: money(row.baseAmountToman, `Product ${row.productRowId} base amount`),
+  })), { allowLegacyMissingNonLayer: isLegacyNoDiscountShape });
+  const contractEligibleBase = discountEligibility.eligibleBase;
+  const { discount, discountBase, discountPercent, contractDiscountAmount, discountValue } =
+    validateContractDiscountEvidence(data, payment, currency, contractEligibleBase, graph.totalAmountToman);
   if (!contractEligibleBase.eq(discountBase)) throw new Error('Contract discount base subtotal conflicts with canonical eligible rows');
   if (discountValue.gt(contractEligibleBase)) throw new Error('Contract discount exceeds eligible pricing');
 
@@ -426,6 +484,7 @@ export const buildApprovedPricingVersion = (
     contractId,
     sourceFinancialRecordId: source.leaf.id,
     versionNumber,
+    normalizedLegacyNonLayerProductRowIds: new Set(discountEligibility.normalizedNonLayerProductRowIds),
   });
 
   const grossAmount = money(gross, 'Approved pricing gross amount');
@@ -474,6 +533,14 @@ export const buildApprovedPricingVersion = (
       selectedBasis: money(selectedEligibleBase, 'Selected discount basis'),
       selectedAmount: discountAmount,
     }),
+    ...(discountEligibility.normalizedNonLayerProductRowIds.length > 0
+      ? {
+          discountEligibility: {
+            evidenceOrigin: LEGACY_DISCOUNT_ELIGIBILITY_EVIDENCE_ORIGIN,
+            normalizedNonLayerProductRowIds: discountEligibility.normalizedNonLayerProductRowIds,
+          },
+        }
+      : {}),
     financialApproval: {
       financialRecordId: source.leaf.id,
       mode,

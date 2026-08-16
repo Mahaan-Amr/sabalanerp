@@ -1024,6 +1024,14 @@ _Avoid_: applying تخفیف to the full contract total including add-ons, or se
 The saved contract discount snapshot shown in PDF and print output, including the applied percentage and amount. Existing contracts keep their saved discount details even when discount ranges change later.
 _Avoid_: recalculating old contract discounts from current بازه تخفیف rules
 
+**Legacy No-Discount Evidence**:
+An explicit null discount snapshot from the legacy Sales wizard is affirmative historical evidence that no discount was applied; an older absent discount field has the same meaning only when its frozen payable total exactly reconciles with its frozen gross product total and no positive-discount evidence exists. Qualifying evidence may be normalized during financial approval to auditable explicit zero-discount evidence from the Contract's frozen commercial values without reopening the Contract, while any mismatch remains blocked for human review.
+_Avoid_: normalizing unreconciled absence, reopening or resaving the Contract, inventing a positive discount, recalculating from current بازه تخفیف rules, changing the payable total, or weakening fail-closed review for conflicting evidence
+
+**Legacy Discount Eligibility Evidence**:
+For a Product snapshot attached to Legacy No-Discount Evidence, explicit `isLayer: true` means the row is a non-discountable layer, while an omitted `isLayer` means the legacy wizard treated it as a non-layer; normalization records every row for which that historical omission is made explicit. A non-boolean value or contradictory layer evidence remains blocked for human review.
+_Avoid_: treating omission as non-layer outside the legacy no-discount boundary, discounting an explicit layer, normalizing malformed eligibility, or reopening the Contract to manufacture current evidence
+
 **بازه تخفیف**:
 A manager-defined تومان range over the contract base stone subtotal that caps the allowed تخفیف قرارداد percentage. Ranges are non-overlapping, include their lower bound, exclude their upper bound, and allow no discount when no range matches.
 _Avoid_: overlapping ranges or fallback discount caps when no range matches

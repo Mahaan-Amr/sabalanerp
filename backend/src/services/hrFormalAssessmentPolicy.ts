@@ -74,9 +74,12 @@ export const normalizeFormalAssessmentPlanCommand = (
     throw new Error("An explicit decision is required: select assessments or confirm no assessment.");
   }
   const packageMethods = new Set(selections.map(({ executionMethod }) => executionMethod));
+  if (packageMethods.size > 1) {
+    throw new Error("All selected formal assessments must use the same execution method.");
+  }
   const executionMethod = explicitlyNoAssessment
     ? null
-    : packageMethods.size === 1 ? selections[0]?.executionMethod ?? null : null;
+    : selections[0]?.executionMethod ?? null;
   const repeatKinds = [...new Set(
     (Array.isArray(input.repeatKinds) ? input.repeatKinds : []).filter(isKind),
   )];

@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { advanceGuidedCriterion, guidedInterviewSummary } from "./guidedInterviewState";
+import {
+  advanceGuidedCriterion,
+  guidedInterviewSummary,
+  interviewCompletionFocusTarget,
+  shouldShowNextCriterion,
+} from "./guidedInterviewState";
 import { createInitialInterviewState, criterionIsComplete, interviewCriteria } from "./prototype/interviewPrototypeData";
 
 const criteria = ["appearance", "teamwork", "companion"];
@@ -16,6 +21,23 @@ assert.deepEqual(guidedInterviewSummary(criteria, {
   finalCriterionId: "companion",
   finalCriterionValue: 5,
 });
+assert.equal(shouldShowNextCriterion(1, 3), true);
+assert.equal(shouldShowNextCriterion(2, 3), false, "the next button is absent on the final criterion");
+assert.equal(interviewCompletionFocusTarget({
+  criteriaComplete: true,
+  customCriteriaComplete: true,
+  summaryComplete: false,
+}), "summary");
+assert.equal(interviewCompletionFocusTarget({
+  criteriaComplete: true,
+  customCriteriaComplete: false,
+  summaryComplete: true,
+}), "custom-criterion");
+assert.equal(interviewCompletionFocusTarget({
+  criteriaComplete: true,
+  customCriteriaComplete: true,
+  summaryComplete: true,
+}), "completion");
 
 const stability = interviewCriteria.find((criterion) => criterion.id === "stability")!;
 const stabilityAnswer = createInitialInterviewState().answers.stability;

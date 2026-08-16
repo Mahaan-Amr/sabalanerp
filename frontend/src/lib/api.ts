@@ -1,6 +1,7 @@
 ﻿import axios from 'axios';
 
 import type { InternalAxiosRequestConfig } from 'axios';
+import { createClientRequestId } from './requestIdentity';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
@@ -99,13 +100,13 @@ api.interceptors.request.use(async (config) => {
   const method = String(config.method || 'get').toUpperCase();
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   if (isMutation && !config.headers.has('x-correlation-id')) {
-    config.headers['x-correlation-id'] = crypto.randomUUID();
+    config.headers['x-correlation-id'] = createClientRequestId();
   }
   if (isMutation && !config.headers['x-idempotency-key']) {
     loadRetryKeys();
     const fingerprint = await mutationFingerprint(config);
     const cached = retryKeys.get(fingerprint);
-    const key = cached && cached.expiresAt > Date.now() ? cached.key : crypto.randomUUID();
+    const key = cached && cached.expiresAt > Date.now() ? cached.key : createClientRequestId();
     retryKeys.set(fingerprint, { key, expiresAt: Date.now() + 24 * 60 * 60 * 1_000 });
     persistRetryKeys();
     config.headers['x-idempotency-key'] = key;

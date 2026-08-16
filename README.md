@@ -123,6 +123,10 @@ The frontend is available at `http://localhost:3000`, the inquiry app at
 on ports `55432` and `56379`, respectively. Persistent database and upload volumes
 are preserved when stopping the stack with `npm run docker:local:down`.
 
+If Windows reserves either default web port, set `LOCAL_FRONTEND_HOST_PORT` and
+`LOCAL_INQUIRY_HOST_PORT` in the ignored root `.env` file. The containers continue
+to use ports 3000 and 3001 internally.
+
 Use `npm run docker:local:logs` to follow logs and `npm run docker:local:ps` to check
 container health.
 

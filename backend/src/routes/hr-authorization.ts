@@ -194,6 +194,9 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
         update: { permissionLevel: level, grantedBy: actorId(req), grantedAt: now, expiresAt: nextExpiry, isActive: true },
       });
     }
+    // Human Resources authorization is owned by the audited HR grant ledger.
+    // Remove any legacy direct row so older readers cannot contradict it.
+    await tx.workspacePermission.deleteMany({ where: { userId: targetUserId, workspace: 'hr' } });
 
     const managedLegacyFeatures = legacyFeatures.filter((feature) => FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP] !== 'hr');
     const managedLegacyFeatureSet = new Set<string>(managedLegacyFeatures);

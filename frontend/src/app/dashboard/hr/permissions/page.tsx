@@ -141,8 +141,8 @@ export default function PermissionsPage() {
 
   useEffect(() => { void loadBase(); }, [loadBase]);
 
-  const loadUser = useCallback(async (userId: string) => {
-    if (!userId || !hrContext) return;
+  const loadUser = useCallback(async (userId: string, authorizationContext = hrContext) => {
+    if (!userId || !authorizationContext) return;
     setLoadingUser(true);
     setFeedback(undefined);
     try {
@@ -153,8 +153,8 @@ export default function PermissionsPage() {
       ]);
       const workspaces = (workspaceResponse.data.data || []).filter(activeNow);
       const features = (featureResponse.data.data || []).filter(activeNow);
-      const activeHrWorkspaces = (hrContext.workspaceGrants || []).filter((grant: HrGrant) => grant.userId === userId && activeNow(grant));
-      const activeHrFeatures = (hrContext.featureGrants || []).filter((grant: HrGrant) => grant.userId === userId && activeNow(grant));
+      const activeHrWorkspaces = (authorizationContext.workspaceGrants || []).filter((grant: HrGrant) => grant.userId === userId && activeNow(grant));
+      const activeHrFeatures = (authorizationContext.featureGrants || []).filter((grant: HrGrant) => grant.userId === userId && activeNow(grant));
       const levels = Object.fromEntries(WORKSPACES.map(({ key }) => [key, workspaces.find((permission: DirectPermission) => permission.workspace === key)?.permissionLevel || null])) as Record<string, AccessLevel | null>;
       const newestHrWorkspace = activeHrWorkspaces[0];
       if (newestHrWorkspace) levels.hr = FROM_HR_LEVEL[newestHrWorkspace.level as 'VIEW' | 'EDIT' | 'ADMIN'];
@@ -200,11 +200,18 @@ export default function PermissionsPage() {
         expiresAt: expiresAt ? toIsoDateTime(expiresAt) : undefined,
         reason: reason.trim(),
       });
-      setFeedback({ kind: 'success', title: `دسترسی‌های ${userName(selectedUser)} ذخیره شد.`, description: 'هیچ کاربر دیگری تغییر نکرد.' });
-      await loadBase();
+      const contextResponse = await hrAuthorizationAPI.getContext();
+      const refreshedContext = contextResponse.data.data;
+      setHrContext(refreshedContext);
+      await loadUser(selectedUser.id, refreshedContext);
+      setReason('');
+      setFeedback({ kind: 'success', title: `دسترسی‌های ${userName(selectedUser)} ذخیره شد.`, description: 'تغییرات در سرور ثبت شد و هیچ کاربر دیگری تغییر نکرد.' });
     } catch (error: any) {
-      setFeedback({ kind: 'error', title: error.response?.data?.error || 'ذخیره دسترسی‌ها ناموفق بود.', description: 'تغییرات انجام‌شده را بازبینی و دوباره ذخیره کنید.' });
-      await loadBase();
+      setFeedback({
+        kind: 'error',
+        title: error.response?.data?.error || error.message || 'ذخیره دسترسی‌ها ناموفق بود.',
+        description: 'انتخاب‌ها حفظ شده‌اند؛ پس از رفع خطا دوباره ذخیره کنید.',
+      });
     } finally { setSaving(false); }
   };
 

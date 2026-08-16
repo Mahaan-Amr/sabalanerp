@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTimes, FaTrash, FaUserCheck, FaUserTimes, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpListPage, ErpLoading, ErpSection, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
-import { authAPI, departmentsAPI, usersAPI, workspacePermissionsAPI } from '@/lib/api';
+import { authAPI, departmentsAPI, hrAuthorizationAPI, usersAPI, workspacePermissionsAPI } from '@/lib/api';
 import { WORKSPACE_CONFIG } from '@/contexts/WorkspaceContext';
+import { projectUserWorkspaceAccess, type CanonicalHrWorkspaceGrant, type ProjectedWorkspaceAccess } from '@/features/access-management/userWorkspaceProjection';
 
 interface User {
   id: string;
@@ -63,13 +64,6 @@ interface RoleWorkspacePermission {
   isActive: boolean;
 }
 
-interface EffectiveWorkspacePermission {
-  key: string;
-  workspace: string;
-  permissionLevel: string;
-  source: 'direct' | 'role' | 'admin';
-}
-
 interface Department {
   id: string;
   name: string;
@@ -92,6 +86,7 @@ export default function UsersManagementPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [permissions, setPermissions] = useState<WorkspacePermission[]>([]);
   const [rolePermissions, setRolePermissions] = useState<RoleWorkspacePermission[]>([]);
+  const [hrWorkspaceGrants, setHrWorkspaceGrants] = useState<CanonicalHrWorkspaceGrant[]>([]);
   const [loading, setLoading] = useState(true);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,11 +149,12 @@ export default function UsersManagementPage() {
       setResultsLoading(true);
       setError(null);
 
-      const [usersResponse, departmentsResponse, permissionsResponse, rolePermissionsResponse] = await Promise.all([
+      const [usersResponse, departmentsResponse, permissionsResponse, rolePermissionsResponse, hrContextResponse] = await Promise.all([
         usersAPI.getUsers(currentPage, 10, { search: searchTerm, departmentId: selectedDepartment, role: selectedRole, status: selectedStatus }),
         referenceDataLoaded.current ? Promise.resolve(null) : departmentsAPI.getDepartments(),
         referenceDataLoaded.current ? Promise.resolve(null) : workspacePermissionsAPI.getUserPermissions({ page: 1, limit: 1000 }),
         referenceDataLoaded.current ? Promise.resolve(null) : workspacePermissionsAPI.getRolePermissions(),
+        referenceDataLoaded.current ? Promise.resolve(null) : hrAuthorizationAPI.getContext(),
       ]);
 
       if (sequence !== requestSequence.current) return;
@@ -178,6 +174,9 @@ export default function UsersManagementPage() {
 
       if (rolePermissionsResponse?.data.success) {
         setRolePermissions(rolePermissionsResponse.data.data);
+      }
+      if (hrContextResponse?.data.success) {
+        setHrWorkspaceGrants(hrContextResponse.data.data.workspaceGrants || []);
       }
       referenceDataLoaded.current = true;
     } catch (error: any) {
@@ -217,37 +216,12 @@ export default function UsersManagementPage() {
 
   const getUserWorkspacePermissions = (userId: string) => permissions.filter((permission) => permission.userId === userId && permission.isActive);
 
-  const getEffectiveWorkspacePermissions = (user: User): EffectiveWorkspacePermission[] => {
-    if (user.role === 'ADMIN') {
-      return ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security', 'bi', 'logistics'].map((workspace) => ({
-        key: `admin-${workspace}`,
-        workspace,
-        permissionLevel: 'admin',
-        source: 'admin',
-      }));
-    }
-
-    const directPermissions = getUserWorkspacePermissions(user.id);
-    const roleDefaults = rolePermissions.filter((permission) => permission.role === user.role && permission.isActive);
-    const directWorkspaces = new Set(directPermissions.map((permission) => permission.workspace));
-
-    return [
-      ...directPermissions.map((permission) => ({
-        key: permission.id,
-        workspace: permission.workspace,
-        permissionLevel: permission.permissionLevel,
-        source: 'direct' as const,
-      })),
-      ...roleDefaults
-        .filter((permission) => !directWorkspaces.has(permission.workspace))
-        .map((permission) => ({
-          key: permission.id,
-          workspace: permission.workspace,
-          permissionLevel: permission.permissionLevel,
-          source: 'role' as const,
-        })),
-    ];
-  };
+  const getEffectiveWorkspacePermissions = (user: User) => projectUserWorkspaceAccess({
+    role: user.role,
+    directPermissions: getUserWorkspacePermissions(user.id),
+    roleDefaults: rolePermissions.filter((permission) => permission.role === user.role),
+    canonicalHrGrants: hrWorkspaceGrants.filter((grant) => grant.userId === user.id),
+  });
 
   const getRoleLabel = (role: string) => {
     switch (role) {
@@ -294,7 +268,7 @@ export default function UsersManagementPage() {
     }
   };
 
-  const getPermissionSourceLabel = (source: EffectiveWorkspacePermission['source']) => {
+  const getPermissionSourceLabel = (source: ProjectedWorkspaceAccess['source']) => {
     switch (source) {
       case 'direct': return 'مستقیم';
       case 'role': return 'از نقش';
@@ -303,7 +277,7 @@ export default function UsersManagementPage() {
     }
   };
 
-  const getPermissionSourceTone = (source: EffectiveWorkspacePermission['source']): ErpTone => {
+  const getPermissionSourceTone = (source: ProjectedWorkspaceAccess['source']): ErpTone => {
     switch (source) {
       case 'direct': return 'primary';
       case 'role': return 'info';

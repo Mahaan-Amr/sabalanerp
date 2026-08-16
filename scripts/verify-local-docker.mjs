@@ -15,6 +15,22 @@ function runDocker(args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+function publishedUrl(service, containerPort, path = '') {
+  const result = spawnSync('docker', [...compose, 'port', service, String(containerPort)], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    shell: process.platform === 'win32',
+  });
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+
+  const publishedPort = result.stdout.trim().match(/:(\d+)$/)?.[1];
+  if (!publishedPort) throw new Error(`Could not resolve the published port for ${service}:${containerPort}`);
+
+  return `http://127.0.0.1:${publishedPort}${path}`;
+}
+
 async function expectJson(url, validate, label) {
   let lastError;
 
@@ -55,18 +71,21 @@ async function expectPage(url, expectedText, label) {
 console.log('Building and starting the production-like local Docker stack...');
 runDocker([...compose, 'up', '--build', '-d', '--wait']);
 
+const frontendUrl = publishedUrl('frontend', 3000);
+const inquiryUrl = publishedUrl('inquiry', 3001);
+
 await expectJson(
   'http://127.0.0.1:5000/api/health',
   (body) => body.status === 'OK' && body.database === 'OK',
   'backend and database health',
 );
 await expectJson(
-  'http://127.0.0.1:3000/api/health',
+  `${frontendUrl}/api/health`,
   (body) => body.status === 'OK' && body.database === 'OK',
   'frontend API proxy',
 );
-await expectPage('http://127.0.0.1:3000', 'Sabalan ERP', 'frontend page');
-await expectPage('http://127.0.0.1:3001', 'استعلام قیمت سبلان', 'inquiry page');
+await expectPage(frontendUrl, 'Sabalan ERP', 'frontend page');
+await expectPage(inquiryUrl, 'استعلام قیمت سبلان', 'inquiry page');
 
 runDocker([...compose, 'ps']);
 console.log('✓ Local Docker verification passed');

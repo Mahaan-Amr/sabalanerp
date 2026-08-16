@@ -42,6 +42,7 @@ import {
   normalizePersianFullName,
   validateOfflineOfferDecision
 } from '../services/hrOfferDecision';
+import { candidateIdentityMatches } from '../services/hrCandidateIdentityPolicy';
 import {
   assertPaperContractDraft,
   assertPaperContractReviewable,
@@ -181,6 +182,46 @@ const createApplicantInvitation = async (
     }
   }
   throw new Error('تولید کد ورود یکتا ناموفق بود؛ دوباره تلاش کنید.');
+};
+
+const automaticallySendApplicantInvitation = async (
+  applicationId: string,
+  mobile: string,
+  createdBy: string,
+) => {
+  const { invitation, otp } = await createApplicantInvitation(applicationId, mobile, createdBy);
+  try {
+    const sms = await hrHiringSmsGateway.sendInvitation({ phoneNumber: mobile, code: otp });
+    if (!sms.success) {
+      await prisma.hrCandidateInvitation.update({ where: { id: invitation.id }, data: { revokedAt: new Date() } });
+      return { status: 'FAILED' as const, invitationId: invitation.id, error: sms.error || 'ارسال پیامک دعوت ناموفق بود.' };
+    }
+    const overlapExpiresAt = new Date(Date.now() + 30 * 60_000);
+    await prisma.$transaction([
+      prisma.hrCandidateInvitation.update({ where: { id: invitation.id }, data: {
+        providerMessageId: sms.messageId ? String(sms.messageId) : null,
+        providerDeliveryState: sms.messageId ? 'ACCEPTED' : 'UNKNOWN',
+        providerLastCheckedAt: new Date(),
+      } }),
+      prisma.hrCandidateInvitation.updateMany({
+        where: { applicationId, id: { not: invitation.id }, revokedAt: null, expiresAt: { gt: new Date() } },
+        data: { overlapExpiresAt },
+      }),
+      prisma.hrCandidateAccessThrottle.deleteMany({
+        where: { subjectKind: 'PHONE', subjectHash: applicantSubjectHash('PHONE', mobile) },
+      }),
+    ]);
+    return {
+      status: sms.messageId ? 'SENT' as const : 'UNKNOWN' as const,
+      invitationId: invitation.id,
+      expiresAt: invitation.expiresAt,
+      providerMessageId: sms.messageId ? String(sms.messageId) : null,
+      overlapExpiresAt,
+      debugOtp: process.env.SMS_IR_ENVIRONMENT === 'sandbox' ? otp : undefined,
+    };
+  } catch (error) {
+    return { status: 'UNKNOWN' as const, invitationId: invitation.id, error: error instanceof Error ? error.message : 'نتیجه ارسال پیامک مشخص نیست.' };
+  }
 };
 
 const resolveOfferAccessCode = async (
@@ -1817,14 +1858,34 @@ router.post('/applications', requireActionPermission('MANAGE_RECRUITMENT_CASE'),
   if (!firstName || !lastName) throw new Error('نام و نام خانوادگی متقاضی الزامی است.');
   const nationalCode = String(req.body.nationalCode || '').trim() || null;
   if (nationalCode && !isValidIranianNationalCode(nationalCode)) throw new Error('کد ملی معتبر نیست.');
-  const candidate = nationalCode ? await prisma.hrCandidate.findUnique({ where: { nationalCode } }) : null;
-  const resolvedCandidate = candidate || await prisma.hrCandidate.create({ data: {
-    firstName, lastName, mobile,
-    nationalCode
-  }});
-  const duplicateApplication = await prisma.hrJobApplication.findFirst({ where: { candidateId: resolvedCandidate.id, positionId: position.id, stage: { not: 'CLOSED' } } });
-  if (duplicateApplication) return res.status(409).json({ success: false, error: 'برای این متقاضی و جایگاه پرونده باز وجود دارد.', data: { applicationId: duplicateApplication.id } });
-  const row = await prisma.$transaction(async (tx) => {
+  const canManageFormalAssessmentPlan = (await authorizeHrUser(prisma, actorId(req), {
+    actionPermissionCodes: ['MANAGE_COMPANY_EVALUATION_PLAN'],
+  })).allowed;
+  const submittedFormalAssessmentPlan = req.body?.formalAssessmentPlan;
+  if (canManageFormalAssessmentPlan && !submittedFormalAssessmentPlan) {
+    throw new Error('تصمیم صریح برنامه ارزیابی رسمی هنگام ساخت پرونده الزامی است.');
+  }
+  if (!canManageFormalAssessmentPlan && submittedFormalAssessmentPlan) {
+    throw Object.assign(new Error('مجوز مدیریت برنامه ارزیابی رسمی برای ثبت این تصمیم لازم است.'), { statusCode: 403 });
+  }
+  const formalAssessmentCommand = submittedFormalAssessmentPlan
+    ? normalizeFormalAssessmentPlanCommand(submittedFormalAssessmentPlan, false)
+    : null;
+
+  const transactionResult = await prisma.$transaction(async (tx) => {
+    const candidate = nationalCode ? await tx.hrCandidate.findUnique({ where: { nationalCode } }) : null;
+    if (candidate && !candidateIdentityMatches(candidate, { firstName, lastName, mobile })) {
+      throw Object.assign(new Error('کد ملی واردشده قبلاً با نام یا شماره همراه دیگری ثبت شده است. پرونده متقاضی موجود را باز کنید یا کد ملی را اصلاح کنید.'), { statusCode: 409 });
+    }
+    const resolvedCandidate = candidate || await tx.hrCandidate.create({ data: {
+      firstName, lastName, mobile,
+      nationalCode
+    }});
+    const duplicateApplication = await tx.hrJobApplication.findFirst({
+      where: { candidateId: resolvedCandidate.id, positionId: position.id, stage: { not: 'CLOSED' } },
+      select: { id: true },
+    });
+    if (duplicateApplication) return { duplicateApplication, application: null, candidateId: resolvedCandidate.id, planId: null };
     const application = await tx.hrJobApplication.create({ data: { candidateId: resolvedCandidate.id, positionId: position.id, createdBy: actorId(req) } });
     const template = await tx.hrRecruitmentChecklistTemplate.findFirst({
       where: { isActive: true, scopeType: 'POSITION', scopeId: position.id }, include: { items: { orderBy: { sortOrder: 'asc' } } }, orderBy: { version: 'desc' }
@@ -1837,10 +1898,63 @@ router.post('/applications', requireActionPermission('MANAGE_RECRUITMENT_CASE'),
         instructions: item.instructions, evidencePolicy: item.evidencePolicy, createdBy: actorId(req)
       })) });
     }
-    return tx.hrJobApplication.findUniqueOrThrow({ where: { id: application.id }, include: applicationInclude });
-  });
-  await audit(row.id, 'APPLICATION_CREATED', req, { candidateId: resolvedCandidate.id, positionId: position.id });
-  res.status(201).json({ success: true, data: row });
+    let planId: string | null = null;
+    if (formalAssessmentCommand) {
+      const plan = await tx.hrFormalAssessmentPlan.create({
+        data: {
+          stableKey: `formal-assessment-plan:${application.id}:1`,
+          applicationId: application.id,
+          version: 1,
+          explicitlyNoAssessment: formalAssessmentCommand.explicitlyNoAssessment,
+          executionMethod: formalAssessmentCommand.executionMethod,
+          finalizedByUserId: actorId(req),
+          reason: formalAssessmentCommand.reason || null,
+          selections: { create: FORMAL_ASSESSMENT_KINDS.map((assessmentKind) => {
+            const selected = formalAssessmentCommand.selections.find((item) => item.assessmentKind === assessmentKind);
+            return { assessmentKind, selected: Boolean(selected), executionMethod: selected?.executionMethod ?? null };
+          }) },
+        },
+        include: { selections: true },
+      });
+      planId = plan.id;
+      for (const selection of plan.selections.filter((item) => item.selected)) {
+        await tx.hrFormalAssessmentResult.create({ data: {
+          stableKey: `formal-assessment-result:${application.id}:${selection.assessmentKind}:1`,
+          applicationId: application.id,
+          planId: plan.id,
+          planSelectionId: selection.id,
+          assessmentKind: selection.assessmentKind,
+          resultVersion: 1,
+          status: 'PENDING',
+        } });
+      }
+    }
+    return {
+      duplicateApplication: null,
+      application: await tx.hrJobApplication.findUniqueOrThrow({ where: { id: application.id }, include: applicationInclude }),
+      candidateId: resolvedCandidate.id,
+      planId,
+    };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  if (transactionResult.duplicateApplication) {
+    return res.status(409).json({ success: false, error: 'برای این متقاضی و جایگاه پرونده باز وجود دارد.', data: { applicationId: transactionResult.duplicateApplication.id } });
+  }
+  const row = transactionResult.application!;
+  await audit(row.id, 'APPLICATION_CREATED', req, { candidateId: transactionResult.candidateId, positionId: position.id });
+  if (transactionResult.planId) {
+    await audit(row.id, 'FORMAL_ASSESSMENT_PLAN_FINALIZED', req, {
+      planId: transactionResult.planId,
+      version: 1,
+      explicitlyNoAssessment: formalAssessmentCommand!.explicitlyNoAssessment,
+    });
+  }
+  const invitationDelivery = transactionResult.planId
+    ? await automaticallySendApplicantInvitation(row.id, mobile, actorId(req))
+    : { status: 'NOT_REQUESTED' as const };
+  if (transactionResult.planId) {
+    await audit(row.id, `CANDIDATE_INVITATION_${invitationDelivery.status}`, req, invitationDelivery);
+  }
+  res.status(201).json({ success: true, data: { ...row, invitationDelivery } });
 }));
 
 router.post('/applications/:id/invitations', requireActionPermission('MANAGE_RECRUITMENT_CASE'), asyncHandler(async (req: AuthRequest, res: Response) => {

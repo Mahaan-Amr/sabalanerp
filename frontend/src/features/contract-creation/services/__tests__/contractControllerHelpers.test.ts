@@ -24,13 +24,21 @@ import {
   mergeEditedRemainingStoneState,
   removeStairLayerConfiguration,
   resolveExistingCalibrationCutEnabled,
+  resolveLongitudinalDraftForSave,
   resolveLongitudinalOptimizerEditOwnership,
   resolveLongitudinalQuantityOptimizationFailure,
   resolveLongitudinalWidth,
   selectStairLayerConfiguration
 } from '../../utils/productConfigurationController';
-import { calculateProductOperations } from '@sabalanerp/contract-product-graph';
-import { calculateSmartLongitudinalCutPlan } from '../remainingStoneService';
+import {
+  calculateProductOperations,
+  parseCanonicalDecimal,
+  parseStableIdentity
+} from '@sabalanerp/contract-product-graph';
+import {
+  calculateLongitudinalMaterialPricing,
+  calculateSmartLongitudinalCutPlan
+} from '../remainingStoneService';
 import { handleSmartCalculation } from '../../utils/productCalculations';
 import {
   isValidIranianMobile,
@@ -203,10 +211,134 @@ assert.deepEqual(resolveLongitudinalOptimizerEditOwnership({
   preserveDerivedLength: false,
   preserveDerivedWidth: true
 });
+
+{
+  const previousPolicyInput = {
+    calculationPolicyVersion: 'calculation-v1',
+    packingPolicyVersion: 'packing-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v1',
+    sourceBatchId: parseStableIdentity('source-batch', 'optimizer-edit-source'),
+    motherWidthMeters: parseCanonicalDecimal('0.4'),
+    lengthMeters: parseCanonicalDecimal('50'),
+    widthMeters: parseCanonicalDecimal('0.4'),
+    requestedAreaSquareMeters: parseCanonicalDecimal('20'),
+    lastManualField: 'length' as const,
+    lastManualDimension: 'length' as const,
+    lengthDisplayUnit: 'm' as const,
+    widthDisplayUnit: 'cm' as const,
+    baseRateToman: parseCanonicalDecimal('1000000'),
+    mandatoryEnabled: false,
+    mandatoryPercentage: parseCanonicalDecimal('20'),
+    rememberedMandatoryPercentage: parseCanonicalDecimal('20'),
+    sawKerfEnabled: false,
+    sawKerfMeters: parseCanonicalDecimal('0.003'),
+    calibrationEnabled: false,
+    calibrationSelection: 'manual' as const
+  };
+  const editedPolicyInput = {
+    ...previousPolicyInput,
+    lengthMeters: parseCanonicalDecimal('150'),
+    requestedAreaSquareMeters: parseCanonicalDecimal('60')
+  };
+
+  const ownership = resolveLongitudinalOptimizerEditOwnership({
+    enteredQuantity: 0,
+    inheritedDerivedQuantity: true,
+    inheritedDerivedDimension: 'length',
+    touchedFields: new Set(),
+    previousPolicyInput,
+    currentPolicyInput: editedPolicyInput
+  });
+  assert.deepEqual(ownership, {
+    preserveDerivedQuantity: false,
+    preserveDerivedLength: false,
+    preserveDerivedWidth: false
+  });
+
+  const optimizerTotalLength = ownership.preserveDerivedQuantity ? 50 : 0;
+  const editedPlan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 40,
+    enteredWidthUnit: 'cm',
+    enteredLength: optimizerTotalLength > 0 ? optimizerTotalLength : 150,
+    enteredLengthUnit: 'm',
+    quantity: 0,
+    requestedAreaSqm: 60,
+    longitudinalRatePerMeter: 0,
+    calibrationCutEnabled: false
+  });
+  const editedPricing = calculateLongitudinalMaterialPricing({
+    plan: editedPlan,
+    fallbackPricingSquareMeters: 60,
+    pricePerSquareMeter: 1000000,
+    isMandatory: false,
+    mandatoryPercentage: 20
+  });
+  assert.equal(editedPlan.totalRequestedLengthM, 150);
+  assert.equal(editedPlan.requestedAreaSqm, 60);
+  assert.equal(editedPricing.totalPrice, 60000000);
+}
 assert.deepEqual(getFreshContractProductDefaults('longitudinal'), {
   quantity: 0,
   calibrationCutEnabled: false
 });
+
+{
+  const staleFlatDraft = makeContractProduct({
+    length: 10,
+    width: 15,
+    quantity: 0,
+    squareMeters: 1.5,
+    pricePerSquareMeter: 7000000,
+    lengthUnit: 'm',
+    widthUnit: 'cm',
+    isMandatory: false,
+    mandatoryPercentage: 20,
+    sawKerfEnabled: false,
+    calibrationCutEnabled: false,
+    longitudinalPolicyInput: {
+      calculationPolicyVersion: 'calculation-v1',
+      packingPolicyVersion: 'packing-v1',
+      pricingPolicyVersion: 'pricing-v1',
+      roundingPolicyVersion: 'rounding-v1',
+      sourceBatchId: parseStableIdentity('source-batch', 'edit-source'),
+      motherWidthMeters: parseCanonicalDecimal('0.4'),
+      lengthMeters: parseCanonicalDecimal('150'),
+      widthMeters: parseCanonicalDecimal('0.25'),
+      requestedAreaSquareMeters: parseCanonicalDecimal('37.5'),
+      lastManualField: 'length',
+      lastManualDimension: 'length',
+      lengthDisplayUnit: 'm',
+      widthDisplayUnit: 'cm',
+      baseRateToman: parseCanonicalDecimal('1700000'),
+      mandatoryEnabled: true,
+      mandatoryPercentage: parseCanonicalDecimal('25'),
+      rememberedMandatoryPercentage: parseCanonicalDecimal('25'),
+      sawKerfEnabled: true,
+      sawKerfMeters: parseCanonicalDecimal('0.003'),
+      calibrationEnabled: true,
+      calibrationSelection: 'manual',
+      longitudinalCutRateToman: parseCanonicalDecimal('200000'),
+      calibrationCutRateToman: parseCanonicalDecimal('200000')
+    }
+  });
+
+  const resolved = resolveLongitudinalDraftForSave(staleFlatDraft);
+  assert.equal(resolved.ok, true);
+  if (resolved.ok) {
+    assert.equal(resolved.draft.length, 150);
+    assert.equal(resolved.draft.width, 25);
+    assert.equal(resolved.draft.quantity, 0);
+    assert.equal(resolved.draft.squareMeters, 37.5);
+    assert.equal(resolved.draft.pricePerSquareMeter, 1700000);
+    assert.equal(resolved.draft.isMandatory, true);
+    assert.equal(resolved.draft.mandatoryPercentage, 25);
+    assert.equal(resolved.draft.sawKerfEnabled, true);
+    assert.equal(resolved.draft.sawKerfCm, 0.3);
+    assert.equal(resolved.draft.calibrationCutEnabled, true);
+  }
+}
 assert.deepEqual(getFreshContractProductDefaults('stair'), {
   quantity: 1,
   calibrationCutEnabled: false

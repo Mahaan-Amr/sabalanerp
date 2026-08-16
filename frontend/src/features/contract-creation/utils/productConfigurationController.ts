@@ -10,8 +10,11 @@ import type {
   SmartLongitudinalCutPlan
 } from '../types/contract.types';
 import {
+  calculateLongitudinalProduct,
   parseCanonicalDecimal,
   parseStableIdentity,
+  type LongitudinalProductCalculation,
+  type LongitudinalProductInput,
   type OperationEdge,
   type ProductOperationsInput
 } from '@sabalanerp/contract-product-graph';
@@ -48,6 +51,75 @@ export const getFreshContractProductDefaults = (
 
 export const resolveExistingCalibrationCutEnabled = (value: boolean | null | undefined): boolean =>
   value ?? true;
+
+export type LongitudinalDraftForSaveResolution =
+  | {
+      ok: true;
+      draft: Partial<ContractProduct>;
+      calculation: Extract<LongitudinalProductCalculation, { ok: true }>;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
+/**
+ * Materializes the canonical longitudinal editor input at the commit boundary.
+ *
+ * The calculation worker updates legacy flat fields asynchronously for preview
+ * compatibility. Save must not depend on that timing: the policy input is the
+ * canonical owner of every editable longitudinal fact.
+ */
+export const resolveLongitudinalDraftForSave = (
+  draft: Partial<ContractProduct>
+): LongitudinalDraftForSaveResolution => {
+  const input = draft.longitudinalPolicyInput;
+  if (!input) {
+    return {
+      ok: false,
+      message: 'اطلاعات ویرایش محصول طولی کامل نیست.'
+    };
+  }
+
+  const calculation = calculateLongitudinalProduct(input);
+  if (!calculation.ok) {
+    return {
+      ok: false,
+      message: calculation.conflicts.map(conflict => conflict.message).join(' | ')
+    };
+  }
+
+  const result = calculation.result;
+  const length = Number(result.lengthMeters) *
+    (input.lengthDisplayUnit === 'cm' ? 100 : 1);
+  const width = Number(result.widthMeters) *
+    (input.widthDisplayUnit === 'cm' ? 100 : 1);
+
+  return {
+    ok: true,
+    calculation,
+    draft: {
+      ...draft,
+      length,
+      width,
+      quantity: result.quantity ?? 0,
+      squareMeters: Number(result.requestedAreaSquareMeters),
+      pricePerSquareMeter: input.baseRateToman === undefined
+        ? undefined
+        : Number(input.baseRateToman),
+      lengthUnit: input.lengthDisplayUnit,
+      widthUnit: input.widthDisplayUnit,
+      isMandatory: input.mandatoryEnabled,
+      mandatoryPercentage: Number(input.mandatoryPercentage),
+      sawKerfEnabled: input.sawKerfEnabled,
+      sawKerfCm: input.sawKerfEnabled ? Number(input.sawKerfMeters) * 100 : null,
+      calibrationCutEnabled: result.calibrationEnabled,
+      cuttingCostPerMeter: input.longitudinalCutRateToman === undefined
+        ? draft.cuttingCostPerMeter
+        : Number(input.longitudinalCutRateToman)
+    }
+  };
+};
 
 export const createFreshStairPartDraft = (part: StairStepperPart): StairPartDraftV2 => ({
   layerConfigurations: [],
@@ -388,21 +460,47 @@ export const resolveLongitudinalOptimizerEditOwnership = ({
   enteredQuantity,
   inheritedDerivedQuantity,
   inheritedDerivedDimension,
-  touchedFields
+  touchedFields,
+  previousPolicyInput,
+  currentPolicyInput
 }: {
   enteredQuantity: number | null | undefined;
   inheritedDerivedQuantity: boolean | null | undefined;
   inheritedDerivedDimension: 'length' | 'width' | null | undefined;
   touchedFields: ReadonlySet<string>;
+  previousPolicyInput?: LongitudinalProductInput | null;
+  currentPolicyInput?: LongitudinalProductInput | null;
 }) => {
+  const effectiveTouchedFields = new Set(touchedFields);
+  if (previousPolicyInput && currentPolicyInput) {
+    if (previousPolicyInput.lengthMeters !== currentPolicyInput.lengthMeters) {
+      effectiveTouchedFields.add('length');
+    }
+    if (previousPolicyInput.widthMeters !== currentPolicyInput.widthMeters) {
+      effectiveTouchedFields.add('width');
+    }
+    if (
+      previousPolicyInput.requestedAreaSquareMeters !==
+      currentPolicyInput.requestedAreaSquareMeters
+    ) {
+      effectiveTouchedFields.add('squareMeters');
+    }
+    if (previousPolicyInput.quantity !== currentPolicyInput.quantity) {
+      effectiveTouchedFields.add('quantity');
+    }
+  }
   const explicitPieceCount = Math.max(0, Number(enteredQuantity) || 0) > 0;
   return {
     preserveDerivedQuantity: !explicitPieceCount && !!inheritedDerivedQuantity &&
-      !touchedFields.has('quantity') && !touchedFields.has('length'),
+      !effectiveTouchedFields.has('quantity') &&
+      !effectiveTouchedFields.has('length') &&
+      !effectiveTouchedFields.has('squareMeters'),
     preserveDerivedLength: !explicitPieceCount && inheritedDerivedDimension === 'length' &&
-      !touchedFields.has('length'),
+      !effectiveTouchedFields.has('length') &&
+      !effectiveTouchedFields.has('squareMeters'),
     preserveDerivedWidth: !explicitPieceCount && inheritedDerivedDimension === 'width' &&
-      !touchedFields.has('width')
+      !effectiveTouchedFields.has('width') &&
+      !effectiveTouchedFields.has('squareMeters')
   };
 };
 

@@ -22,6 +22,22 @@ function runDocker(args, options = {}) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+function publishedUrl(service, containerPort, path = '') {
+  const result = spawnSync('docker', [...compose, 'port', service, String(containerPort)], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    shell: process.platform === 'win32',
+  });
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+
+  const publishedPort = result.stdout.trim().match(/:(\d+)$/)?.[1];
+  if (!publishedPort) throw new Error(`Could not resolve the published port for ${service}:${containerPort}`);
+
+  return `http://127.0.0.1:${publishedPort}${path}`;
+}
+
 function waitFor(url, label, timeoutMs = 120_000) {
   const deadline = Date.now() + timeoutMs;
 
@@ -85,8 +101,8 @@ for (const [source, destination] of copies) {
 
 runDocker([...compose, 'restart', 'backend', 'frontend', 'inquiry']);
 waitFor('http://127.0.0.1:5000/api/ready', 'backend development server');
-waitFor('http://127.0.0.1:3000', 'frontend development server');
-waitFor('http://127.0.0.1:3001', 'inquiry development server');
+waitFor(publishedUrl('frontend', 3000), 'frontend development server');
+waitFor(publishedUrl('inquiry', 3001), 'inquiry development server');
 
 console.log('Watching for changes. Press Ctrl+C to stop watching; containers stay running.');
 let activeWatcher;

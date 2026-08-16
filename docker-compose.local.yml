@@ -51,8 +51,8 @@ services:
       PORT: 5000
       DATABASE_URL: postgresql://postgres:${LOCAL_POSTGRES_PASSWORD:-sabalanerp-local-only}@postgres:5432/sabalanerp?schema=public&connection_limit=${BACKEND_DB_CONNECTION_LIMIT:-10}&pool_timeout=${BACKEND_DB_POOL_TIMEOUT_SECONDS:-10}&application_name=${DATABASE_APPLICATION_NAME:-sabalanerp-backend-local}
       JWT_SECRET: local-docker-jwt-secret-at-least-32-characters
-      FRONTEND_URL: http://localhost:3000
-      PUBLIC_APP_URL: http://localhost:3000
+      FRONTEND_URL: http://localhost:${LOCAL_FRONTEND_HOST_PORT:-3000}
+      PUBLIC_APP_URL: http://localhost:${LOCAL_FRONTEND_HOST_PORT:-3000}
       SMS_IR_ENVIRONMENT: sandbox
       SMS_IR_DISPATCH_EXIT_TEMPLATE_ID: "0"
       BIOMETRIC_TEMPLATE_KEY_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
@@ -113,7 +113,7 @@ services:
       SESSION_SECRET: local-inquiry-session-secret-at-least-32-characters
       RECOVERY_COORDINATION_DIR: /app/recovery-coordination
     ports:
-      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:${LOCAL_INQUIRY_HOST_PORT:-3001}:3001"
     volumes:
       - inquiry_data:/data
       - recovery_coordination:/app/recovery-coordination
@@ -148,7 +148,7 @@ services:
       BACKEND_API_ORIGIN: http://backend:5000
       NEXT_PUBLIC_ENABLE_PROTOTYPES: "1"
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${LOCAL_FRONTEND_HOST_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy

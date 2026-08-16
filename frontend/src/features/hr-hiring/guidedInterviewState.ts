@@ -23,3 +23,22 @@ export const guidedInterviewSummary = (
     finalCriterionValue: answers[finalCriterionId] ?? null,
   };
 };
+
+export const shouldShowNextCriterion = (activeIndex: number, criterionCount: number) => (
+  activeIndex >= 0 && activeIndex < criterionCount - 1
+);
+
+export const interviewCompletionFocusTarget = ({
+  criteriaComplete,
+  customCriteriaComplete,
+  summaryComplete,
+}: {
+  criteriaComplete: boolean;
+  customCriteriaComplete: boolean;
+  summaryComplete: boolean;
+}) => {
+  if (!criteriaComplete) return 'criterion' as const;
+  if (!customCriteriaComplete) return 'custom-criterion' as const;
+  if (!summaryComplete) return 'summary' as const;
+  return 'completion' as const;
+};

@@ -2833,6 +2833,14 @@ function PreIdentitySection({
             const response = await hiringAPI.saveInitialInterviewDraft(applicationId, payload, expectedVersion);
             return response.data.data;
           }}
+          onReloadDraft={async () => {
+            const response = await hiringAPI.getInitialInterview(applicationId);
+            const draft = response.data.data.draft;
+            return {
+              payload: draft.dataJson as ProductionInterviewPayload,
+              version: draft.version as number,
+            };
+          }}
           onComplete={(payload) => run(
             () => hiringAPI.recordDecision(applicationId, "HR_INTERVIEW", {
               outcome: payload.state.decision,
@@ -3378,11 +3386,10 @@ function FormalAssessmentPlanPanel({
       return [kind, Boolean(current?.selected)];
     })),
   );
-  const [executionMethods, setExecutionMethods] = useState<Record<string, "APPLICANT" | "COMPANY">>(() =>
-    Object.fromEntries(["DISC", "EQ", "BIG_FIVE"].map((kind) => {
-      const current = activePlan?.selections?.find((item: any) => item.assessmentKind === kind);
-      return [kind, current?.executionMethod || "COMPANY"];
-    })),
+  const [executionMethod, setExecutionMethod] = useState<"APPLICANT" | "COMPANY">(
+    activePlan?.executionMethod
+      || activePlan?.selections?.find((item: any) => item.selected)?.executionMethod
+      || "COMPANY",
   );
   const [repeatKinds, setRepeatKinds] = useState<string[]>([]);
   const [reason, setReason] = useState("");
@@ -3409,7 +3416,19 @@ function FormalAssessmentPlanPanel({
             label="برای این پرونده ارزیابی رسمی لازم نیست"
           />
           {!explicitlyNoAssessment && (
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="space-y-4">
+              <div>
+                <p className="mb-2 text-sm font-semibold text-[var(--sds-text-primary)]">روش اجرای مشترک برای همهٔ آزمون‌های انتخاب‌شده</p>
+                <ErpSegmentedControl
+                  value={executionMethod}
+                  onChange={setExecutionMethod}
+                  options={[
+                    { value: "APPLICANT", label: "تکمیل توسط متقاضی در /apply" },
+                    { value: "COMPANY", label: "اجرا در شرکت" },
+                  ]}
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
               {Object.entries(selections).map(([kind, isSelected]) => (
                 <ErpCard key={kind} className="space-y-3 p-3">
                   <ErpCheckbox
@@ -3417,19 +3436,6 @@ function FormalAssessmentPlanPanel({
                     onChange={(event) => setSelections({ ...selections, [kind]: event.target.checked })}
                     label={formalAssessmentLabels[kind]}
                   />
-                  {isSelected && (
-                    <ErpSegmentedControl
-                      value={executionMethods[kind]}
-                      onChange={(value) => setExecutionMethods({
-                        ...executionMethods,
-                        [kind]: value as "APPLICANT" | "COMPANY",
-                      })}
-                      options={[
-                        { value: "APPLICANT", label: "تکمیل توسط متقاضی" },
-                        { value: "COMPANY", label: "اجرا در شرکت" },
-                      ]}
-                    />
-                  )}
                   {activePlan && isSelected && (
                     <ErpCheckbox
                       checked={repeatKinds.includes(kind)}
@@ -3439,6 +3445,7 @@ function FormalAssessmentPlanPanel({
                   )}
                 </ErpCard>
               ))}
+              </div>
             </div>
           )}
           <ErpTextarea
@@ -3452,10 +3459,10 @@ function FormalAssessmentPlanPanel({
             disabled={busy || (!explicitlyNoAssessment && selected.length === 0) || Boolean(activePlan && !reason.trim())}
             onClick={() => run(() => hiringAPI.createFormalAssessmentPlan(applicationId, {
               explicitlyNoAssessment,
-              executionMethod: null,
+              executionMethod,
               selections: selected.map(([assessmentKind]) => ({
                 assessmentKind,
-                executionMethod: executionMethods[assessmentKind],
+                executionMethod,
               })),
               repeatKinds,
               reason,

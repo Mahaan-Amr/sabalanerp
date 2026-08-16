@@ -1,5 +1,5 @@
 "use client";
-import { ErpInput, ErpPressable, ErpSelect } from "@/components/erp";
+import { ErpCheckbox, ErpInput, ErpPressable, ErpSegmentedControl, ErpSelect } from "@/components/erp";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -47,6 +47,15 @@ type HiringCreateForm = {
   nationalCode: string;
   positionId: string;
 };
+type FormalAssessmentKind = "DISC" | "EQ" | "BIG_FIVE";
+type FormalAssessmentDecision = "" | "SELECT" | "NONE";
+type FormalAssessmentExecutionMethod = "APPLICANT" | "COMPANY";
+type CreateOutcome = { kind: "success" | "error" | "stale"; title: string } | null;
+const formalAssessmentOptions: Array<{ value: FormalAssessmentKind; label: string }> = [
+  { value: "DISC", label: "DISC (ارزیابی الگوی رفتاری دیسک)" },
+  { value: "EQ", label: "EQ (ارزیابی هوش هیجانی)" },
+  { value: "BIG_FIVE", label: "BIG FIVE (ارزیابی پنج عامل بزرگ شخصیت)" },
+];
 const blank: HiringCreateForm = {
   firstName: "",
   lastName: "",
@@ -91,7 +100,11 @@ export default function HiringCasesPage() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [createOutcome, setCreateOutcome] = useState<CreateOutcome>(null);
+  const [actionPermissions, setActionPermissions] = useState<string[]>([]);
+  const [assessmentDecision, setAssessmentDecision] = useState<FormalAssessmentDecision>("");
+  const [assessmentKinds, setAssessmentKinds] = useState<FormalAssessmentKind[]>([]);
+  const [assessmentExecutionMethod, setAssessmentExecutionMethod] = useState<FormalAssessmentExecutionMethod>("APPLICANT");
   const [meta, setMeta] = useState({ page: 1, totalPages: 1, total: 0 });
   const [decisionDetail, setDecisionDetail] = useState<any>(null);
   const [archiveView, setArchiveView] = useState(initialContext.archived);
@@ -102,7 +115,8 @@ export default function HiringCasesPage() {
   const requestSequence = useRef(0);
   const foundationLoaded = useRef(false);
   const programmaticHref = useRef("");
-  const createDirty = Boolean(form.firstName || form.lastName || form.mobile || form.nationalCode || form.positionId);
+  const canManageFormalAssessmentPlan = actionPermissions.includes("MANAGE_COMPANY_EVALUATION_PLAN");
+  const createDirty = Boolean(form.firstName || form.lastName || form.mobile || form.nationalCode || form.positionId || assessmentDecision || assessmentKinds.length);
 
   const load = async (nextFilters: HiringQueueFilters = filters, nextArchiveView = archiveView) => {
     const sequence = ++requestSequence.current;
@@ -110,13 +124,14 @@ export default function HiringCasesPage() {
     try {
       setLoading(true);
       setError("");
-      const [cases, foundation] = await Promise.all([
+      const [cases, foundation, permissions] = await Promise.all([
         hiringAPI.list({
           ...buildHiringQueueParams(nextFilters),
           archived: String(nextArchiveView),
           ...(representedView ? { view: representedView } : {}),
         }),
         needsFoundation ? hrAPI.getFoundation() : Promise.resolve(null),
+        needsFoundation ? hiringAPI.myActionPermissions() : Promise.resolve(null),
       ]);
       if (sequence !== requestSequence.current) return;
       setRows(cases.data.data);
@@ -129,6 +144,7 @@ export default function HiringCasesPage() {
       );
       if (foundation) {
         setPositions(foundation.data.data.positions || []);
+        setActionPermissions(permissions?.data?.data || []);
         foundationLoaded.current = true;
       }
     } catch (cause) {
@@ -194,10 +210,33 @@ export default function HiringCasesPage() {
       setBusy(true);
       setError("");
       setCreateError("");
-      const response = await hiringAPI.create(form);
+      const response = await hiringAPI.create({
+        ...form,
+        ...(canManageFormalAssessmentPlan ? {
+          formalAssessmentPlan: {
+            explicitlyNoAssessment: assessmentDecision === "NONE",
+            executionMethod: assessmentDecision === "SELECT" ? assessmentExecutionMethod : null,
+            selections: assessmentDecision === "SELECT"
+              ? assessmentKinds.map((assessmentKind) => ({ assessmentKind, executionMethod: assessmentExecutionMethod }))
+              : [],
+          },
+        } : {}),
+      });
       const createdCandidate = response.data.data.candidate;
-      setMessage(`پرونده ${createdCandidate.firstName} ${createdCandidate.lastName} ساخته شد. کاربر دارای مجوز مدیریت برنامه ارزیابی شرکت باید پرونده را باز کند و برنامه را نهایی کند؛ سپس دعوت‌نامه ارسال می‌شود.`);
+      const delivery = response.data.data.invitationDelivery;
+      if (delivery?.status === "SENT") {
+        setCreateOutcome({ kind: "success", title: `پرونده ${createdCandidate.firstName} ${createdCandidate.lastName} ساخته شد و پیامک دعوت با موفقیت ارسال شد.${delivery.debugOtp ? ` کد محیط آزمایشی: ${delivery.debugOtp}` : ""}` });
+      } else if (delivery?.status === "FAILED") {
+        setCreateOutcome({ kind: "error", title: `پرونده و برنامه ارزیابی ثبت شد، اما ارسال پیامک ناموفق بود. از داخل پرونده دوباره ارسال کنید.${delivery.error ? ` ${delivery.error}` : ""}` });
+      } else if (delivery?.status === "UNKNOWN") {
+        setCreateOutcome({ kind: "stale", title: "پرونده و برنامه ارزیابی ثبت شد، اما نتیجه ارسال پیامک مشخص نیست. وضعیت ارسال را بررسی کنید و پیش از ارسال مجدد از تحویل نشدن آن مطمئن شوید." });
+      } else {
+        setCreateOutcome({ kind: "success", title: `پرونده ${createdCandidate.firstName} ${createdCandidate.lastName} ساخته شد. کاربر دارای مجوز مدیریت برنامه ارزیابی باید برنامه را نهایی کند تا دعوت ارسال شود.` });
+      }
       setForm(blank);
+      setAssessmentDecision("");
+      setAssessmentKinds([]);
+      setAssessmentExecutionMethod("APPLICANT");
       setCreateOpen(false);
       await load();
     } catch (cause) {
@@ -211,9 +250,7 @@ export default function HiringCasesPage() {
     try {
       setBusy(true);
       const result = await hiringAPI.invite(id);
-      setMessage(
-        `دعوت‌نامه ارسال شد.${result.data.data.debugOtp ? ` کد محیط آزمایشی: ${result.data.data.debugOtp}` : ""}`,
-      );
+      setCreateOutcome({ kind: "success", title: `دعوت‌نامه ارسال شد.${result.data.data.debugOtp ? ` کد محیط آزمایشی: ${result.data.data.debugOtp}` : ""}` });
       return true;
     } catch (cause) {
       setError(hiringError(cause));
@@ -264,11 +301,7 @@ export default function HiringCasesPage() {
           {error}
         </p>
       )}
-      {message && (
-        <p className="rounded-xl bg-[var(--sds-success-surface)] p-3 text-[var(--sds-success)] dark:bg-[var(--sds-success-surface)] dark:text-[var(--sds-success)]">
-          {message}
-        </p>
-      )}
+      {createOutcome && <ErpInlineState kind={createOutcome.kind} title={createOutcome.title} />}
 
       <ErpSheet
         open={createOpen}
@@ -330,6 +363,53 @@ export default function HiringCasesPage() {
                 </option>
               ))}
           </ErpSelect>
+          {canManageFormalAssessmentPlan && (
+            <ErpCard className="grid gap-4 p-4 sm:col-span-2">
+              <div>
+                <p className="font-semibold text-[var(--sds-text-primary)]">تصمیم ارزیابی رسمی شرکت</p>
+                <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">پیش از ساخت پرونده باید آزمون‌ها یا گزینهٔ «بدون ارزیابی رسمی» را صریحاً تعیین کنید.</p>
+              </div>
+              <ErpSegmentedControl
+                value={assessmentDecision}
+                onChange={(value) => {
+                  setAssessmentDecision(value);
+                  if (value === "NONE") setAssessmentKinds([]);
+                }}
+                options={[
+                  { value: "", label: "هنوز تصمیم نگرفته‌ام" },
+                  { value: "SELECT", label: "انتخاب آزمون‌ها" },
+                  { value: "NONE", label: "بدون ارزیابی رسمی" },
+                ]}
+              />
+              {assessmentDecision === "SELECT" && (
+                <div className="grid gap-3">
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {formalAssessmentOptions.map((option) => (
+                      <ErpCheckbox
+                        key={option.value}
+                        label={option.label}
+                        checked={assessmentKinds.includes(option.value)}
+                        onChange={(event) => setAssessmentKinds((current) => event.target.checked
+                          ? [...current, option.value]
+                          : current.filter((kind) => kind !== option.value))}
+                      />
+                    ))}
+                  </div>
+                  <div>
+                    <p className="mb-2 text-sm font-semibold text-[var(--sds-text-primary)]">روش اجرای مشترک برای همهٔ آزمون‌های انتخاب‌شده</p>
+                    <ErpSegmentedControl
+                      value={assessmentExecutionMethod}
+                      onChange={setAssessmentExecutionMethod}
+                      options={[
+                        { value: "APPLICANT", label: "توسط متقاضی در فرم /apply" },
+                        { value: "COMPANY", label: "حضوری در شرکت" },
+                      ]}
+                    />
+                  </div>
+                </div>
+              )}
+            </ErpCard>
+          )}
           <div className="sm:col-span-2">
             <ErpButton
               label="ساخت پرونده"
@@ -339,7 +419,11 @@ export default function HiringCasesPage() {
                 !form.firstName ||
                 !form.lastName ||
                 !form.mobile ||
-                !form.positionId
+                !form.positionId ||
+                (canManageFormalAssessmentPlan && (
+                  !assessmentDecision ||
+                  (assessmentDecision === "SELECT" && assessmentKinds.length === 0)
+                ))
               }
               onClick={create}
               tone="success"
@@ -362,6 +446,9 @@ export default function HiringCasesPage() {
               disabled={busy}
               onClick={() => {
                 setForm(blank);
+                setAssessmentDecision("");
+                setAssessmentKinds([]);
+                setAssessmentExecutionMethod("APPLICANT");
                 setCreateDiscardOpen(false);
                 setCreateOpen(false);
               }}

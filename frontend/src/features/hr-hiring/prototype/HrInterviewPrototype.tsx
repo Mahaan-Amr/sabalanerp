@@ -6,6 +6,7 @@ import {
   ErpCard,
   ErpCheckbox,
   ErpInput,
+  ErpInlineState,
   ErpPage,
   ErpPressable,
   ErpSelect,
@@ -14,7 +15,7 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { useTheme } from "@/contexts/ThemeContext";
-import { hiringAPI } from "@/lib/hiringApi";
+import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -41,6 +42,8 @@ import {
   type NumericScore,
   type Score,
 } from "./interviewPrototypeData";
+import { interviewCompletionFocusTarget, shouldShowNextCriterion } from "../guidedInterviewState";
+import { InterviewDraftSaveCoordinator, type InterviewDraftSaveSnapshot } from "../interviewDraftSaveCoordinator";
 
 type Variant = "A" | "B" | "C";
 type Surface = "interview" | "checklist" | "defaults" | "history";
@@ -397,9 +400,11 @@ function CriterionEditor({
 function DecisionEditor({
   state,
   onChange,
+  onReasonBlur,
 }: {
   state: InterviewState;
   onChange: (state: InterviewState) => void;
+  onReasonBlur?: () => void;
 }) {
   return (
     <div className="space-y-4">
@@ -428,6 +433,8 @@ function DecisionEditor({
           onChange={(event) =>
             onChange({ ...state, decisionReason: event.target.value })
           }
+          onBlur={onReasonBlur}
+          aria-label="دلیل تصمیم"
           placeholder="دلیل نتیجه مثبت یا منفی را ثبت کنید"
         />
       </div>
@@ -469,13 +476,36 @@ function GuidedVariant({
   state,
   onChange,
   criteria = interviewCriteria,
+  summaryRef,
+  summaryHighlighted = false,
+  onFinalCriterionComplete,
+  onSummaryReasonBlur,
+  focusCriterionRequest,
 }: {
   state: InterviewState;
   onChange: (state: InterviewState) => void;
   criteria?: InterviewCriterion[];
+  summaryRef?: React.RefObject<HTMLDivElement>;
+  summaryHighlighted?: boolean;
+  onFinalCriterionComplete?: () => void;
+  onSummaryReasonBlur?: () => void;
+  focusCriterionRequest?: { index: number; key: number } | null;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [criterionHighlighted, setCriterionHighlighted] = useState(false);
+  const criterionRef = useRef<HTMLDivElement>(null);
   const criterion = criteria[Math.min(activeIndex, criteria.length - 1)];
+  useEffect(() => {
+    if (!focusCriterionRequest) return;
+    setActiveIndex(focusCriterionRequest.index);
+    setCriterionHighlighted(true);
+    const highlightTimer = window.setTimeout(() => setCriterionHighlighted(false), 2_000);
+    window.setTimeout(() => {
+      criterionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      criterionRef.current?.querySelector<HTMLElement>("button, input, textarea, select")?.focus();
+    }, 0);
+    return () => window.clearTimeout(highlightTimer);
+  }, [focusCriterionRequest]);
   return (
     <div className="grid gap-4 xl:grid-cols-[15rem_minmax(0,1fr)_18rem]">
       <ErpSection
@@ -508,23 +538,26 @@ function GuidedVariant({
         </div>
       </ErpSection>
 
-      <ErpSection
-        title={`${criterion.order.toLocaleString("fa-IR")}. ${criterion.title}`}
-      >
+      <div ref={criterionRef} className={`rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${criterionHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"}`}>
+      <ErpSection title={`${criterion.order.toLocaleString("fa-IR")}. ${criterion.title}`}>
         <CriterionEditor
           criterion={criterion}
           answer={state.answers[criterion.id]}
-          onChange={(answer) =>
-            onChange({
+          onChange={(answer) => {
+            const wasComplete = criterionIsComplete(criterion, state.answers[criterion.id]);
+            const nextState = {
               ...state,
               answers: { ...state.answers, [criterion.id]: answer },
-            })
-          }
-          onScoreChange={() =>
-            setActiveIndex((value) =>
-              Math.min(value + 1, criteria.length - 1),
-            )
-          }
+            };
+            onChange(nextState);
+            const isFinal = activeIndex === criteria.length - 1;
+            if (isFinal && !wasComplete && criterionIsComplete(criterion, answer)) {
+              onFinalCriterionComplete?.();
+            }
+          }}
+          onScoreChange={() => {
+            if (activeIndex < criteria.length - 1) setActiveIndex((value) => value + 1);
+          }}
         />
         <div className="mt-6 flex items-center justify-between gap-2 border-t border-[var(--sds-border-default)] pt-4">
           <ErpButton
@@ -545,19 +578,20 @@ function GuidedVariant({
               ? "تکمیل شده"
               : "نیازمند تکمیل"}
           </ErpBadge>
-          <ErpButton
-            label="معیار بعدی"
-            icon={FaArrowLeft}
-            disabled={activeIndex === criteria.length - 1}
-            onClick={() => setActiveIndex((value) => value + 1)}
-          />
+          {shouldShowNextCriterion(activeIndex, criteria.length) ? (
+            <ErpButton label="معیار بعدی" icon={FaArrowLeft} onClick={() => setActiveIndex((value) => value + 1)} />
+          ) : <span aria-hidden="true" />}
         </div>
       </ErpSection>
+      </div>
 
-      <div className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+      <div
+        ref={summaryRef}
+        className={`space-y-4 rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${summaryHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"} xl:sticky xl:top-4 xl:self-start`}
+      >
         <ProgressSummary state={state} criteria={criteria} />
         <ErpSection title="جمع‌بندی مصاحبه">
-          <DecisionEditor state={state} onChange={onChange} />
+          <DecisionEditor state={state} onChange={onChange} onReasonBlur={onSummaryReasonBlur} />
         </ErpSection>
       </div>
     </div>
@@ -825,8 +859,8 @@ function CaseSpecificCriteria({
 
       {criteria.length ? (
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {criteria.map((criterion) => (
-            <ErpCard key={criterion.id} className="space-y-3 p-4">
+          {criteria.map((criterion, index) => (
+            <ErpCard key={criterion.id} className="space-y-3 p-4" data-custom-criterion-index={index}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="font-semibold text-[var(--sds-text-primary)]">
@@ -1257,6 +1291,7 @@ export function ProductionHrInterview({
   busy,
   onSaveDraft,
   onComplete,
+  onReloadDraft,
 }: {
   initialPayload?: ProductionInterviewPayload | null;
   initialVersion?: number;
@@ -1264,24 +1299,96 @@ export function ProductionHrInterview({
   busy: boolean;
   onSaveDraft: (payload: ProductionInterviewPayload, expectedVersion: number) => Promise<{ version: number }>;
   onComplete: (payload: ProductionInterviewPayload) => Promise<void>;
+  onReloadDraft?: () => Promise<{ payload: ProductionInterviewPayload; version: number }>;
 }) {
   const [criteriaSnapshot, setCriteriaSnapshot] = useState<PublishedInterviewCriterion[] | undefined>(() => initialPayload?.criteriaSnapshot);
   const [criteriaTemplateVersion, setCriteriaTemplateVersion] = useState(initialPayload?.criteriaTemplateVersion ?? 0);
   const [criteria, setCriteria] = useState<InterviewCriterion[]>(() => publishedCriteriaForInterview(initialPayload?.criteriaSnapshot));
   const [state, setState] = useState<InterviewState>(() => hydrateInterviewState(initialPayload?.state, publishedCriteriaForInterview(initialPayload?.criteriaSnapshot)));
   const [customCriteria, setCustomCriteria] = useState<CustomCriterion[]>(() => initialPayload?.customCriteria || []);
-  const [version, setVersion] = useState(initialVersion);
-  const versionRef = useRef(initialVersion);
   const saveDraftRef = useRef(onSaveDraft);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveSnapshot, setSaveSnapshot] = useState<InterviewDraftSaveSnapshot>({ status: initialVersion ? "saved" : "idle", version: initialVersion });
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [summaryHighlighted, setSummaryHighlighted] = useState(false);
+  const [customHighlighted, setCustomHighlighted] = useState(false);
+  const [completionHighlighted, setCompletionHighlighted] = useState(false);
+  const [focusCriterionRequest, setFocusCriterionRequest] = useState<{ index: number; key: number } | null>(null);
   const initialRender = useRef(true);
+  const suppressNextAutosave = useRef(false);
+  const completionGuided = useRef(false);
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const customCriteriaRef = useRef<HTMLDivElement>(null);
+  const completionRef = useRef<HTMLDivElement>(null);
+  const attentionTimer = useRef<number | null>(null);
   const payload = useMemo<ProductionInterviewPayload>(() => ({ schemaVersion: 2, state, customCriteria, criteriaTemplateVersion, criteriaSnapshot }), [criteriaSnapshot, criteriaTemplateVersion, customCriteria, state]);
-  const canComplete = criteria.every((criterion) => criterionIsComplete(criterion, state.answers[criterion.id]))
-    && customCriteria.every(customCriterionIsComplete)
-    && state.decision !== null
-    && state.decisionReason.trim().length > 0;
+  const criteriaComplete = criteria.every((criterion) => criterionIsComplete(criterion, state.answers[criterion.id]));
+  const customCriteriaComplete = customCriteria.every(customCriterionIsComplete);
+  const summaryComplete = state.decision !== null && state.decisionReason.trim().length > 0;
+  const canComplete = criteriaComplete && customCriteriaComplete && summaryComplete;
+  const coordinatorRef = useRef<InterviewDraftSaveCoordinator<ProductionInterviewPayload> | null>(null);
+  if (!coordinatorRef.current) {
+    coordinatorRef.current = new InterviewDraftSaveCoordinator({
+      initialVersion,
+      save: (nextPayload, expectedVersion) => saveDraftRef.current(nextPayload, expectedVersion),
+      onChange: setSaveSnapshot,
+    });
+  }
   useEffect(() => { saveDraftRef.current = onSaveDraft; }, [onSaveDraft]);
+  useEffect(() => () => {
+    coordinatorRef.current?.dispose();
+    if (attentionTimer.current) window.clearTimeout(attentionTimer.current);
+  }, []);
+  useEffect(() => {
+    if (!canComplete) completionGuided.current = false;
+  }, [canComplete]);
+
+  const highlight = useCallback((target: "summary" | "custom" | "completion") => {
+    setSummaryHighlighted(target === "summary");
+    setCustomHighlighted(target === "custom");
+    setCompletionHighlighted(target === "completion");
+    if (attentionTimer.current) window.clearTimeout(attentionTimer.current);
+    attentionTimer.current = window.setTimeout(() => {
+      setSummaryHighlighted(false);
+      setCustomHighlighted(false);
+      setCompletionHighlighted(false);
+    }, 2_000);
+  }, []);
+
+  const focusSummary = useCallback(() => {
+    highlight("summary");
+    summaryRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => {
+      const selector = state.decision === null ? "button" : 'textarea[aria-label="دلیل تصمیم"]';
+      summaryRef.current?.querySelector<HTMLElement>(selector)?.focus();
+    }, 0);
+  }, [highlight, state.decision]);
+
+  const guideAfterSummary = useCallback(() => {
+    const target = interviewCompletionFocusTarget({ criteriaComplete, customCriteriaComplete, summaryComplete });
+    if (target === "criterion") {
+      const index = criteria.findIndex((criterion) => !criterionIsComplete(criterion, state.answers[criterion.id]));
+      if (index >= 0) setFocusCriterionRequest({ index, key: Date.now() });
+      return;
+    }
+    if (target === "custom-criterion") {
+      const index = customCriteria.findIndex((criterion) => !customCriterionIsComplete(criterion));
+      highlight("custom");
+      const card = customCriteriaRef.current?.querySelector<HTMLElement>(`[data-custom-criterion-index="${index}"]`);
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => card?.querySelector<HTMLElement>("button, input, textarea, select")?.focus(), 0);
+      return;
+    }
+    if (target === "summary") {
+      focusSummary();
+      return;
+    }
+    if (completionGuided.current) return;
+    completionGuided.current = true;
+    highlight("completion");
+    completionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => completionRef.current?.querySelector<HTMLButtonElement>("button")?.focus(), 0);
+  }, [criteria, criteriaComplete, customCriteria, customCriteriaComplete, focusSummary, highlight, state.answers, summaryComplete]);
 
   useEffect(() => {
     if (initialPayload?.criteriaSnapshot?.length) return;
@@ -1294,7 +1401,7 @@ export function ProductionHrInterview({
       setCriteriaTemplateVersion(Number(data.data.version || 0));
       setCriteria(nextCriteria);
       setState((current) => hydrateInterviewState(current, nextCriteria));
-    }).catch(() => setSaveStatus("error"));
+    }).catch((error) => setSaveSnapshot((current) => ({ ...current, status: "error", error })));
     return () => { active = false; };
   }, [initialPayload?.criteriaSnapshot]);
 
@@ -1303,16 +1410,12 @@ export function ProductionHrInterview({
       initialRender.current = false;
       return;
     }
+    if (suppressNextAutosave.current) {
+      suppressNextAutosave.current = false;
+      return;
+    }
     const timer = window.setTimeout(async () => {
-      try {
-        setSaveStatus("saving");
-        const saved = await saveDraftRef.current(payload, versionRef.current);
-        versionRef.current = saved.version;
-        setVersion(saved.version);
-        setSaveStatus("saved");
-      } catch {
-        setSaveStatus("error");
-      }
+      coordinatorRef.current?.queue(payload);
     }, 700);
     return () => window.clearTimeout(timer);
   }, [payload]);
@@ -1320,13 +1423,52 @@ export function ProductionHrInterview({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <ErpBadge tone={saveStatus === "error" ? "danger" : saveStatus === "saving" ? "warning" : "success"}>
-          {saveStatus === "error" ? "ذخیره پیش‌نویس ناموفق" : saveStatus === "saving" ? "در حال ذخیره…" : version ? `پیش‌نویس نسخه ${version.toLocaleString("fa-IR")}` : "پیش‌نویس جدید"}
+        <ErpBadge tone={["error", "conflict"].includes(saveSnapshot.status) ? "danger" : saveSnapshot.status === "saving" ? "warning" : "success"}>
+          {saveSnapshot.status === "conflict" ? "تعارض نسخه پیش‌نویس" : saveSnapshot.status === "error" ? "ذخیره پیش‌نویس ناموفق" : saveSnapshot.status === "saving" ? "در حال ذخیره…" : saveSnapshot.version ? `پیش‌نویس نسخه ${saveSnapshot.version.toLocaleString("fa-IR")}` : "پیش‌نویس جدید"}
         </ErpBadge>
         <span className="text-xs text-[var(--sds-text-muted)]">تغییرها به‌صورت خودکار ذخیره می‌شوند.</span>
       </div>
-      <GuidedVariant state={state} onChange={setState} criteria={criteria} />
-      <CaseSpecificCriteria criteria={customCriteria} onChange={setCustomCriteria} />
+      {saveSnapshot.status === "error" && (
+        <ErpInlineState
+          kind="error"
+          title={<span>ذخیره خودکار ناموفق بود. <span className="font-normal">{hiringError(saveSnapshot.error)}</span></span>}
+          action={{ label: "تلاش مجدد", onClick: () => { coordinatorRef.current?.retry(); } }}
+        />
+      )}
+      {saveSnapshot.status === "conflict" && (
+        <ErpInlineState
+          kind="error"
+          title="پیش‌نویس توسط کاربر دیگری تغییر کرده است. تغییرات فعلی شما حفظ شده‌اند؛ نسخه جدید سرور را بارگذاری کنید یا یک نسخه از تغییرات محلی بردارید."
+        />
+      )}
+      {saveSnapshot.status === "conflict" && (
+        <ErpCard className="flex flex-wrap gap-2 p-3"><ErpButton label="کپی تغییرات من" variant="outline" onClick={() => void navigator.clipboard.writeText(JSON.stringify(payload, null, 2))} /><ErpButton label="بارگذاری نسخه جدید سرور" tone="warning" onClick={async () => {
+            if (!onReloadDraft) return;
+            const latest = await onReloadDraft();
+            suppressNextAutosave.current = true;
+            const nextCriteria = publishedCriteriaForInterview(latest.payload.criteriaSnapshot);
+            setCriteriaSnapshot(latest.payload.criteriaSnapshot);
+            setCriteriaTemplateVersion(latest.payload.criteriaTemplateVersion || 0);
+            setCriteria(nextCriteria);
+            setState(hydrateInterviewState(latest.payload.state, nextCriteria));
+            setCustomCriteria(latest.payload.customCriteria || []);
+            coordinatorRef.current?.reset(latest.version);
+          }} /></ErpCard>
+      )}
+      <GuidedVariant
+        state={state}
+        onChange={setState}
+        criteria={criteria}
+        summaryRef={summaryRef}
+        summaryHighlighted={summaryHighlighted}
+        onFinalCriterionComplete={focusSummary}
+        onSummaryReasonBlur={guideAfterSummary}
+        focusCriterionRequest={focusCriterionRequest}
+      />
+      <div ref={customCriteriaRef} className={`rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${customHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"}`}>
+        <CaseSpecificCriteria criteria={customCriteria} onChange={(next) => { completionGuided.current = false; setCustomCriteria(next); }} />
+      </div>
+      <div ref={completionRef} className={`rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${completionHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"}`}>
       <ErpSection title="تکمیل مصاحبه">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <ErpBadge tone={canComplete ? "info" : "warning"}>{canComplete ? "آماده تکمیل" : "اطلاعات ناقص"}</ErpBadge>
@@ -1334,11 +1476,22 @@ export function ProductionHrInterview({
             label="ثبت و تکمیل مصاحبه"
             icon={FaCheck}
             tone="success"
-            disabled={busy || !canComplete || saveStatus === "saving"}
-            onClick={() => onComplete(payload)}
+            disabled={busy || completing || !canComplete}
+            onClick={async () => {
+              try {
+                setCompleting(true);
+                await coordinatorRef.current?.flush(payload);
+                await onComplete(payload);
+              } catch {
+                // The coordinator publishes the actionable save/conflict state above.
+              } finally {
+                setCompleting(false);
+              }
+            }}
           />
         </div>
       </ErpSection>
+      </div>
       {history.length > 0 && (
         <ErpSection title="تاریخچه نسخه‌ها">
           <ErpButton label={historyOpen ? "بستن تاریخچه" : "نمایش نسخه‌های قبلی"} variant="ghost" onClick={() => setHistoryOpen((open) => !open)} />

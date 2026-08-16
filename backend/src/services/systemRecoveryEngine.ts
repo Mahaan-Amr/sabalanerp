@@ -268,6 +268,14 @@ const copyComponent = async (
   }
 };
 
+const shouldExcludeSupportTicketCheckpointFile = (
+  relativePath: string,
+  referencedStorageNames: ReadonlySet<string>,
+) => {
+  const storageName = path.basename(relativePath);
+  return storageName.startsWith('staged-') && !referencedStorageNames.has(storageName);
+};
+
 const backupInquiry = async (destinationDirectory: string, sanitized: boolean) => {
   await fs.promises.mkdir(destinationDirectory, { recursive: true });
   const source = path.join(INQUIRY_SOURCE_DIR, 'inquiry.db');
@@ -345,6 +353,16 @@ export const createRecoveryPackage = async (input: {
       await dumpDatabase(process.env.DATABASE_URL || '', databaseDump);
     }
     await input.onProgress(35);
+    const referencedSupportTicketStorageNames = new Set(
+      (
+        await input.prisma.supportTicketAttachment.findMany({
+          where: { storageName: { not: null } },
+          select: { storageName: true },
+        })
+      )
+        .map((attachment) => path.basename(String(attachment.storageName || '')))
+        .filter(Boolean),
+    );
     await Promise.all([
       copyComponent(path.join(process.cwd(), 'storage', 'contracts'), path.join(payloadRoot, 'files', 'contracts'), sanitized),
       copyComponent(path.join(process.cwd(), 'storage', 'hr-hiring'), path.join(payloadRoot, 'files', 'hr-hiring'), sanitized),
@@ -354,7 +372,7 @@ export const createRecoveryPackage = async (input: {
         path.join(process.cwd(), 'storage', 'support-tickets'),
         path.join(payloadRoot, 'files', 'support-tickets'),
         sanitized,
-        (relative) => path.basename(relative).startsWith('staged-'),
+        (relative) => shouldExcludeSupportTicketCheckpointFile(relative, referencedSupportTicketStorageNames),
       ),
       copyComponent(path.join(process.cwd(), 'uploads'), path.join(payloadRoot, 'files', 'uploads'), sanitized),
       backupInquiry(path.join(payloadRoot, 'inquiry'), sanitized),
@@ -981,4 +999,5 @@ export const recoveryEngineInternals = {
   dispatchDocumentStorageDirectory: DISPATCH_DOCUMENT_STORAGE_DIR,
   validateStoredFileReferences,
   liveStoredFileReferenceCandidates,
+  shouldExcludeSupportTicketCheckpointFile,
 };

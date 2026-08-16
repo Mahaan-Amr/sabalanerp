@@ -29,6 +29,32 @@ assert.deepEqual(
   [path.join(applicationRoot, 'storage', 'support-tickets', 'evidence.pdf')],
 );
 
+const referencedStagedAttachments = new Set(['staged-referenced-evidence.jpg']);
+assert.equal(
+  recoveryEngineInternals.shouldExcludeSupportTicketCheckpointFile(
+    'staged-referenced-evidence.jpg',
+    referencedStagedAttachments,
+  ),
+  false,
+  'a staged attachment referenced by the database must be included in the checkpoint',
+);
+assert.equal(
+  recoveryEngineInternals.shouldExcludeSupportTicketCheckpointFile(
+    'staged-abandoned-upload.jpg',
+    referencedStagedAttachments,
+  ),
+  true,
+  'an abandoned staged upload must remain excluded from the checkpoint',
+);
+assert.equal(
+  recoveryEngineInternals.shouldExcludeSupportTicketCheckpointFile(
+    'permanent-evidence.jpg',
+    referencedStagedAttachments,
+  ),
+  false,
+  'permanent support attachments must remain included in the checkpoint',
+);
+
 const main = async () => {
   let discoverySql = '';
   const fakeClient = {

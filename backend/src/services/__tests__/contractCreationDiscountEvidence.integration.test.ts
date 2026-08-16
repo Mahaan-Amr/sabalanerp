@@ -45,12 +45,27 @@ const run = async () => {
   });
   assert(source, 'local QA database must contain one fully priced legacy wizard contract with explicit-null discount evidence');
 
-  const createFromSource = (label: string, discount: unknown) => {
+  const createFromSource = (
+    label: string,
+    discount: unknown,
+    eligibilityShape: 'explicit' | 'current-draft-omitted' = 'explicit',
+  ) => {
     const contractData = JSON.parse(JSON.stringify(source.contractData));
-    contractData.products = contractData.products.map((product: any) => ({
-      ...product,
-      meta: { ...(product.meta || {}), isLayer: product.meta?.isLayer === true },
-    }));
+    contractData.products = contractData.products.map((product: any) => {
+      const meta = { ...(product.meta || {}) };
+      if (eligibilityShape === 'explicit' || product.meta?.isLayer === true) {
+        meta.isLayer = product.meta?.isLayer === true;
+      } else {
+        delete meta.isLayer;
+      }
+      return {
+        ...product,
+        ...(eligibilityShape === 'current-draft-omitted'
+          ? { layerTypeId: null, layerTypeName: null, layerTypePrice: null }
+          : {}),
+        meta,
+      };
+    });
     contractData.discount = discount;
     return createContract({
       title: `${source.title} QA ${label}`,
@@ -79,6 +94,17 @@ const run = async () => {
       },
     }, source.createdBy, undefined, transactionHarness);
   };
+
+  const createdFromCurrentDraft = await createFromSource(
+    'current-draft-omitted-layer-evidence',
+    null,
+    'current-draft-omitted',
+  );
+  const currentDraftProducts = (createdFromCurrentDraft.contractData as any).products;
+  assert(
+    currentDraftProducts.every((product: any) => typeof product.meta?.isLayer === 'boolean'),
+    'new contract snapshots must persist explicit layer eligibility for every product row',
+  );
 
   for (const [label, discount] of [
       ['null', null],

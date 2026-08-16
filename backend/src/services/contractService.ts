@@ -177,6 +177,36 @@ const productRecordsFrom = (contractData: unknown): Readonly<Record<string, unkn
     : [];
 };
 
+const hasCurrentLayerEvidence = (
+  product: Readonly<Record<string, unknown>>,
+  meta: Readonly<Record<string, unknown>>,
+) => meta.stairStepperV2 === true ||
+  meta.layerInfo != null ||
+  meta.layerType != null ||
+  product.layerTypeId != null ||
+  product.layerTypeName != null ||
+  product.layerTypePrice != null;
+
+const normalizeNewContractDiscountEligibilityEvidence = (contractData: unknown) => {
+  if (!contractData || typeof contractData !== 'object' || Array.isArray(contractData)) return contractData;
+  const data = contractData as Record<string, unknown>;
+  if (!Array.isArray(data.products)) return contractData;
+  let changed = false;
+  const products = data.products.map(product => {
+    if (!product || typeof product !== 'object' || Array.isArray(product)) return product;
+    const record = product as Record<string, unknown>;
+    if (record.meta !== undefined && (
+      !record.meta || typeof record.meta !== 'object' || Array.isArray(record.meta)
+    )) return product;
+    const meta = (record.meta || {}) as Record<string, unknown>;
+    if (typeof meta.isLayer === 'boolean' || meta.isLayer !== undefined) return product;
+    if (hasCurrentLayerEvidence(record, meta)) return product;
+    changed = true;
+    return { ...record, meta: { ...meta, isLayer: false } };
+  });
+  return changed ? { ...data, products } : contractData;
+};
+
 const normalizeNewContractNoDiscountEvidence = (
   contractData: unknown,
   currency: string,
@@ -559,8 +589,10 @@ export async function createContract(
           `new-contract:${contractNumber}`,
           0
         );
+        const contractDataWithDiscountEligibility =
+          normalizeNewContractDiscountEligibilityEvidence(productSemanticRepair.contractData);
         const contractData = normalizeNewContractNoDiscountEvidence(
-          productSemanticRepair.contractData,
+          contractDataWithDiscountEligibility,
           data.currency || 'تومان',
           data.totalAmount ?? null,
         ) as any;

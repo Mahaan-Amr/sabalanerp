@@ -22,6 +22,29 @@ const run = async () => {
     await fs.promises.writeFile(partialPath, 'verified');
     const uploaded = await store.uploadVerified(source, 'release-1/deployment-1.sabrec');
     assert.equal(await fs.promises.readFile(uploaded.objectPath, 'utf8'), 'verified-checkpoint');
+
+    let transientCopyAttempts = 0;
+    const transientStore = new FilesystemRemoteCheckpointStore(root, {
+      retryDelayMs: 1,
+      copyRange: async (sourcePath, temporaryPath, start) => {
+        transientCopyAttempts += 1;
+        const sourceBytes = await fs.promises.readFile(sourcePath);
+        if (transientCopyAttempts === 1) {
+          await fs.promises.writeFile(temporaryPath, sourceBytes.subarray(start, start + 8), {
+            flag: start ? 'a' : 'wx',
+            mode: 0o600,
+          });
+          throw Object.assign(new Error('simulated SSHFS disconnect'), { code: 'EIO' });
+        }
+        await fs.promises.writeFile(temporaryPath, sourceBytes.subarray(start), {
+          flag: start ? 'a' : 'wx',
+          mode: 0o600,
+        });
+      },
+    });
+    const transientUpload = await transientStore.uploadVerified(source, 'release-transient/deployment-transient.sabrec');
+    assert.equal(await fs.promises.readFile(transientUpload.objectPath, 'utf8'), 'verified-checkpoint');
+    assert.equal(transientCopyAttempts, 2, 'a transient remote write must resume inside the same deployment attempt');
     assert.deepEqual(await assertRemoteCheckpointFingerprint(uploaded.objectPath, uploaded.fingerprint), uploaded.fingerprint);
     await fs.promises.appendFile(uploaded.objectPath, '-changed');
     await assert.rejects(

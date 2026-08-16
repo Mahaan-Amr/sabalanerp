@@ -29,6 +29,24 @@ export interface RemoteCheckpointStore {
 
 export type RemoteCheckpointFingerprint = { size: number; mtimeMs: number };
 
+type CheckpointRangeCopier = (sourcePath: string, temporaryPath: string, start: number) => Promise<void>;
+
+type FilesystemRemoteCheckpointStoreOptions = {
+  maxTransientUploadRetries?: number;
+  retryDelayMs?: number;
+  copyRange?: CheckpointRangeCopier;
+};
+
+const transientRemoteStorageCodes = new Set(['EIO', 'ESTALE', 'ENOTCONN', 'ECONNRESET', 'ETIMEDOUT']);
+
+const defaultCopyRange: CheckpointRangeCopier = async (sourcePath, temporaryPath, start) => {
+  const { pipeline } = await import('node:stream/promises');
+  await pipeline(
+    fs.createReadStream(sourcePath, { start }),
+    fs.createWriteStream(temporaryPath, { flags: start ? 'a' : 'wx', mode: 0o600 }),
+  );
+};
+
 export const readRemoteCheckpointFingerprint = async (remotePath: string): Promise<RemoteCheckpointFingerprint> => {
   const stat = await fs.promises.stat(remotePath);
   if (!stat.isFile()) throw Object.assign(new Error('Remote checkpoint is not a regular file.'), { code: 'DEPLOYMENT_REMOTE_OBJECT_INVALID' });
@@ -60,7 +78,10 @@ const safeObjectKey = (value: string) => {
 };
 
 export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
-  constructor(private readonly root: string) {}
+  constructor(
+    private readonly root: string,
+    private readonly options: FilesystemRemoteCheckpointStoreOptions = {},
+  ) {}
 
   async assertAvailable(requiredBytes: number) {
     await fs.promises.access(this.root, fs.constants.R_OK | fs.constants.W_OK);
@@ -96,17 +117,27 @@ export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
     await fs.promises.mkdir(path.dirname(destination), { recursive: true });
     const temporary = `${destination}.uploading`;
     const sourceStat = await fs.promises.stat(sourcePath);
-    let uploadedBytes = await fs.promises.stat(temporary).then((stat) => stat.size).catch(() => 0);
-    if (uploadedBytes > sourceStat.size) {
-      await fs.promises.rm(temporary, { force: true });
-      uploadedBytes = 0;
-    }
-    if (uploadedBytes < sourceStat.size) {
-      const { pipeline } = await import('node:stream/promises');
-      await pipeline(
-        fs.createReadStream(sourcePath, { start: uploadedBytes }),
-        fs.createWriteStream(temporary, { flags: uploadedBytes ? 'a' : 'wx', mode: 0o600 }),
-      );
+    const maxTransientUploadRetries = this.options.maxTransientUploadRetries ?? 20;
+    const retryDelayMs = this.options.retryDelayMs ?? 3_000;
+    const copyRange = this.options.copyRange ?? defaultCopyRange;
+    let transientUploadRetries = 0;
+    while (true) {
+      try {
+        let uploadedBytes = await fs.promises.stat(temporary).then((stat) => stat.size).catch((error: any) => {
+          if (error?.code === 'ENOENT') return 0;
+          throw error;
+        });
+        if (uploadedBytes > sourceStat.size) {
+          await fs.promises.rm(temporary, { force: true });
+          uploadedBytes = 0;
+        }
+        if (uploadedBytes >= sourceStat.size) break;
+        await copyRange(sourcePath, temporary, uploadedBytes);
+      } catch (error: any) {
+        if (!transientRemoteStorageCodes.has(error?.code) || transientUploadRetries >= maxTransientUploadRetries) throw error;
+        transientUploadRetries += 1;
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      }
     }
     const [sourceChecksum, uploadedChecksum, stat] = await Promise.all([
       expectedChecksum ? Promise.resolve(expectedChecksum) : sha256File(sourcePath),

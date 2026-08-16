@@ -94,7 +94,8 @@ test('dashboard navigation stays contained and aligned across desktop and mobile
   expect(topbarBox!.width).toBe(1440);
   expect(desktopSidebarBox!.y).toBe(topbarBox!.y + topbarBox!.height + 8);
   expect(await backgroundAlpha(sidebar)).toBeLessThanOrEqual(0.05);
-  expect(await backgroundAlpha(sidebar.locator('.sds-dashboard-rail'))).toBeGreaterThan(0.95);
+  const desktopRail = sidebar.locator('.sds-dashboard-rail');
+  expect(await backgroundAlpha(desktopRail)).toBeLessThanOrEqual(0.05);
   const railSections = sidebar.locator('.sds-dashboard-rail > [data-sidebar-section]');
   expect(await railSections.count()).toBeGreaterThanOrEqual(3);
   expect(await railSections.evaluateAll((sections) => {
@@ -148,6 +149,7 @@ test('dashboard navigation stays contained and aligned across desktop and mobile
 
   await sidebar.getByRole('button', { name: 'بازکردن منو' }).click();
   await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(256);
+  expect(await backgroundAlpha(desktopRail)).toBeGreaterThan(0.95);
   const expandedThemeBox = await sidebar.getByRole('button', { name: /فعال‌کردن حالت/ }).boundingBox();
   const expandedLogoutBox = await sidebar.getByRole('button', { name: 'خروج' }).boundingBox();
   expect(expandedThemeBox).not.toBeNull();
@@ -286,6 +288,7 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
     ['ایجاد مشتری', '/dashboard/crm/customers/create'],
     ['ایجاد محصول', '/dashboard/sales/products/create'],
     ['گزارش فروش', '/dashboard/sales/reports'],
+    ['ثبت حسابداری فروشندگان', '/dashboard/sales/reports?view=accounting-registered&period=month'],
   ] as const;
 
   for (const [name, href] of destinations) {
@@ -293,7 +296,7 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
   }
 
   const cards = main.locator('.sds-neumorphic-card');
-  await expect(cards).toHaveCount(5);
+  await expect(cards).toHaveCount(destinations.length);
   const cardPresentation = await cards.evaluateAll((elements) =>
     elements.map((element) => {
       const style = getComputedStyle(element);
@@ -334,7 +337,7 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
   await expect(mobileNavigation).toBeVisible();
   expect(
     await contrastAgainst(
-      finalCard.getByText('گزارش فروش', { exact: true }),
+      cards.filter({ hasText: 'گزارش فروش' }).getByText('گزارش فروش', { exact: true }),
       '.sds-neumorphic-card',
     ),
   ).toBeGreaterThanOrEqual(4.5);

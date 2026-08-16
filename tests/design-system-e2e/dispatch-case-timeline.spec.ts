@@ -1,12 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-
-const login = async (page: Page) => {
-  await page.goto('/login');
-  await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('admin');
-  await page.getByRole('textbox', { name: 'رمز عبور خود را وارد کنید' }).fill('admin123');
-  await page.getByRole('button', { name: 'ورود', exact: true }).click();
-  await expect(page).toHaveURL(/\/dashboard/);
-};
+import { expect, test } from '@playwright/test';
+import { loginAsAdmin as login } from './support/design-system';
 
 test('role-aware dispatch timeline preserves authorized LSV and clears it on denial', async ({ page }) => {
   let responseMode: 'success' | 'transient' | 'denied' = 'success';

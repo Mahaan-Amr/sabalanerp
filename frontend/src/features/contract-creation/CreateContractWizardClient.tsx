@@ -6153,9 +6153,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         </ErpNeumorphicDialog>
 
         <div
-          aria-disabled={editRecovery.blocked}
-          {...(editRecovery.blocked ? ({ inert: '' } as any) : {})}
-          className={editRecovery.blocked ? 'pointer-events-none select-none opacity-70' : ''}
+          aria-disabled={editRecovery.blocked && !isContractCreationComplete}
+          {...(editRecovery.blocked && !isContractCreationComplete ? ({ inert: '' } as any) : {})}
+          className={editRecovery.blocked && !isContractCreationComplete ? 'pointer-events-none select-none opacity-70' : ''}
         >
 
         {/* Progress Bar */}

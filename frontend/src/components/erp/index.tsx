@@ -639,8 +639,8 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
             className={cx(
               'inline-flex min-h-[var(--sds-control-height)] flex-shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
               active
-                ? 'bg-[var(--sds-surface-raised)] text-[var(--sds-accent-on-soft)] shadow-sm dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-accent-on-soft)]'
-                : 'text-[var(--sds-text-secondary)] hover:bg-[var(--sds-surface-raised)] hover:text-[var(--sds-text-primary)] dark:hover:bg-[var(--sds-surface-raised)] dark:hover:text-[var(--sds-text-primary)]'
+                ? 'bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] shadow-sm dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]'
+                : 'text-[var(--sds-text-primary)] hover:bg-[var(--sds-surface-raised)] dark:hover:bg-[var(--sds-surface-raised)]'
             )}
           >
             {Icon && <Icon className="h-4 w-4" />}
@@ -1471,7 +1471,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     window.setTimeout(() => {
-      const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])');
+      const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button:not([disabled]):not([tabindex="-1"]),a[href]:not([tabindex="-1"]),input:not([disabled]):not([tabindex="-1"]),select:not([disabled]):not([tabindex="-1"]),textarea:not([disabled]):not([tabindex="-1"]),[tabindex]:not([tabindex="-1"])');
       firstFocusable?.focus();
     }, 0);
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1483,7 +1483,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
       const sheetRoots = document.querySelectorAll<HTMLElement>('[data-erp-sheet-root]');
       if (sheetRoots.item(sheetRoots.length - 1) !== overlayRootRef.current) return;
       if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'));
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"]),a[href]:not([tabindex="-1"]),input:not([disabled]):not([tabindex="-1"]),select:not([disabled]):not([tabindex="-1"]),textarea:not([disabled]):not([tabindex="-1"]),[tabindex]:not([tabindex="-1"])'));
       if (!focusable.length) return;
       const first = focusable[0]; const last = focusable[focusable.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }

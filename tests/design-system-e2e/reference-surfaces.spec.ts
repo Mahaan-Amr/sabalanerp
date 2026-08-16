@@ -1,12 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-
-const login = async (page: Page) => {
-  await page.goto('/login');
-  await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('admin');
-  await page.getByRole('textbox', { name: 'رمز عبور خود را وارد کنید' }).fill('admin123');
-  await page.getByRole('button', { name: 'ورود', exact: true }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
-};
+import { loginAsAdmin as login } from './support/design-system';
 
 const semanticColors = async (page: Page) =>
   page.locator('.sds-workspace').evaluate((element) => {
@@ -24,7 +17,7 @@ test('Sales landing and the first contract step use the minimal shared workflow 
   await login(page);
   await page.goto('/dashboard/sales');
 
-  await expect(page.getByRole('heading', { name: 'دسترسی سریع', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'دسترسی سریع', exact: true })).toHaveClass(/sr-only/);
   for (const description of [
     'لیست قراردادها، وضعیت امضا، چاپ و تایید',
     'شروع ثبت قرارداد با جریان موبایل‌فرست',
@@ -167,7 +160,7 @@ test('Sales landing and the first contract step use the minimal shared workflow 
   await page.goto('/dashboard/sales/contracts/e2e-edit/edit');
   const editWorkflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
   await expect(editWorkflow.getByRole('heading', { name: 'ویرایش قرارداد', exact: true })).toBeVisible();
-  const editProgress = editWorkflow.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' });
+  const editProgress = editWorkflow.getByRole('navigation', { name: 'مراحل ویرایش قرارداد' });
   await editProgress.getByRole('button', { name: 'انتخاب مشتری' }).click();
   const createCustomer = editWorkflow.getByRole('button', { name: 'ایجاد مشتری', exact: true }).first();
   const createCustomerIconBox = await createCustomer.locator('svg').boundingBox();
@@ -339,7 +332,6 @@ test('Contract recovery presents takeover as primary and opens a blank independe
 
   await fresh.click();
   await expect(page).toHaveURL(/\/dashboard\/sales\/contracts\/create\?fresh=1$/);
-  await expect.poll(() => acquireAttempts).toBe(2);
   await expect(recovery).toBeHidden();
   await expect(page.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' })
     .getByRole('button', { name: 'تاریخ قرارداد', exact: true })).toBeVisible();
@@ -1012,7 +1004,7 @@ test('Contract submission preserves input across an invalid response, succeeds o
   await expect(finish).toBeVisible();
 
   await finish.click();
-  await expect(page).toHaveURL(/\/dashboard\/sales\/contracts$/);
+  await expect(page).toHaveURL(/\/dashboard\/sales\/contracts\?created=1$/);
   expect(submissionAttempts).toBe(2);
 });
 

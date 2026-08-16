@@ -228,6 +228,7 @@ export default function EnhancedDropdown({
         break;
       case 'Escape':
         e.preventDefault();
+        e.stopPropagation();
         setIsOpen(false);
         setSearchTerm('');
         setHighlightedIndex(-1);

@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { assertHttpReady, inspectLocalComposeProject } from './design-system-e2e-preflight.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
-const baseUrl = process.env.DESIGN_SYSTEM_E2E_BASE_URL || 'http://127.0.0.1:3000';
+const baseUrl = process.env.DESIGN_SYSTEM_E2E_BASE_URL || 'http://localhost:3000';
 
 inspectLocalComposeProject(repositoryRoot);
 await assertHttpReady('http://127.0.0.1:5000/api/ready', 'sabalanerp-local backend');

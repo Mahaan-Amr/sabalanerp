@@ -17,7 +17,7 @@ test('the design-system runner only targets the existing sabalanerp-local projec
   assert.match(`${runner}\n${preflight}`, /sabalanerp-local/);
   assert.doesNotMatch(`${runner}\n${preflight}`, /embedded-postgres|initdb|pg_ctl|DROP DATABASE|CREATE DATABASE/);
   assert.doesNotMatch(config, /webServer/);
-  assert.match(config, /127\.0\.0\.1:3000/);
+  assert.match(config, /localhost:3000/);
   assert.match(config, /trace: 'retain-on-failure'/);
   assert.match(config, /screenshot: 'only-on-failure'/);
   assert.match(config, /updateSnapshots: 'none'/);

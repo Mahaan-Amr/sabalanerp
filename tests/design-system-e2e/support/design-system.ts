@@ -30,6 +30,9 @@ export const setTheme = async (page: Page, theme: 'light' | 'dark') => {
     localStorage.setItem('theme', nextTheme);
   }, theme);
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+  // Tailwind utility transitions do not consume the zero-duration SDS motion
+  // tokens, so let their color interpolation settle before sampling contrast.
+  await page.waitForTimeout(200);
 };
 
 export const setViewportAndZoom = async (page: Page, viewport: { width: number; height: number }, zoom = 1) => {

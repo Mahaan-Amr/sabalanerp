@@ -605,7 +605,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                       )?.namePersian || "داشبورد اصلی"
                     : "داشبورد اصلی"}
                 </h1>
-                <p className="text-sm text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
+                <p className="sds-text-secondary text-sm">
                   {currentWorkspace
                     ? accessibleWorkspaces.find(
                         (w) => w.id === currentWorkspace,

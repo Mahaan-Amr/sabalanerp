@@ -158,7 +158,7 @@ services:
       timeout: 5s
       retries: 20
       start_period: 20s
-    mem_limit: 2g
+    mem_limit: 4g
     cpus: 2
     restart: unless-stopped
 

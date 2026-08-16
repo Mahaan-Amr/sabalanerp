@@ -424,6 +424,7 @@ test('shared feedback, catalog sync, and Accounting actions compose the canonica
   assert.match(enhancedDropdownSource, /aria-describedby=\{ariaDescribedBy\}/);
   assert.match(enhancedDropdownSource, /overlayPortalContainer\?\.current \|\| document\.body/);
   assert.match(enhancedDropdownSource, /onKeyDown=\{handleKeyDown\}/);
+  assert.match(enhancedDropdownSource, /case 'Escape':[\s\S]*?stopPropagation\(\)/);
   assert.match(enhancedDropdownSource, /requestAnimationFrame\(\(\) => dropdownRef\.current\?\.focus\(\)\)/);
   assert.match(persianCalendarSource, /aria-describedby=\{ariaDescribedBy\}/);
   assert.match(persianCalendarSource, /overlayPortalContainer\?\.current \|\| document\.body/);

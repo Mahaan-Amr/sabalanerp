@@ -11,17 +11,20 @@ const record = (value: unknown): Record<string, any> => value && typeof value ==
   ? value as Record<string, any> : {};
 
 export const createProductionApprovedPricingFixture = async (prisma: PrismaClient, input: {
-  runId: string; quantity?: string; amount?: string;
+  runId: string; quantity?: string; amount?: string; optimizerDerivedSentinel?: boolean;
 }) => {
   const quantity = input.quantity || '1';
   const amount = input.amount || '100';
+  const optimizerDerivedSentinel = input.optimizerDerivedSentinel === true;
   const candidates = await prisma.salesContract.findMany({ where: { productGraphState: { isNot: null },
     items: { some: { productRowId: { not: null } } } }, include: { customer: true, productGraphState: true, items: true },
   orderBy: { createdAt: 'asc' }, take: 100 });
   const template = candidates.map(candidate => {
     if (!candidate.productGraphState) return null;
     const graph = parseCanonicalProductGraph(candidate.productGraphState.graph);
-    const row = graph.rows[0];
+    const row = optimizerDerivedSentinel
+      ? graph.rows.find(value => value.productType === 'longitudinal')
+      : graph.rows[0];
     const item = row && candidate.items.find(value => value.productRowId === row.productRowId
       && value.productId === row.catalogProductId && value.productType === row.productType);
     return row && item ? { candidate, graph, row, item } : null;
@@ -30,16 +33,29 @@ export const createProductionApprovedPricingFixture = async (prisma: PrismaClien
   const contractId = randomUUID();
   const itemId = randomUUID();
   const productRowId = `contract-row-${randomUUID()}`;
-  const itemBillingQuantity = ['longitudinal', 'slab'].includes(template.row.productType) ? '1' : quantity;
-  const unitPrice = new Prisma.Decimal(amount).dividedBy(itemBillingQuantity).toFixed(12);
+  if (optimizerDerivedSentinel && template.row.productType !== 'longitudinal') {
+    throw new Error('BLOCKED: optimizer-derived sentinel fixture requires a longitudinal template row');
+  }
+  const itemBillingQuantity = optimizerDerivedSentinel ? '0'
+    : ['longitudinal', 'slab'].includes(template.row.productType) ? '1' : quantity;
+  const unitPrice = new Prisma.Decimal(amount).dividedBy(optimizerDerivedSentinel ? quantity : itemBillingQuantity).toFixed(12);
   const authoredQuantity = template.row.productType === 'longitudinal' ? { length: quantity, lengthUnit: 'm' }
     : template.row.productType === 'slab' ? { squareMeters: quantity }
       : template.row.productType === 'prepared' ? { preparedQuantity: quantity, preparedUnit: 'count', unit: 'count' } : {};
   const canonicalQuantity = template.row.productType === 'longitudinal'
-    ? { requestedLengthMeters: quantity, requestedQuantity: itemBillingQuantity }
+    ? { requestedLengthMeters: quantity, requestedQuantity: optimizerDerivedSentinel ? '1' : itemBillingQuantity }
     : template.row.productType === 'slab' ? { requestedAreaSquareMeters: quantity } : { requestedQuantity: quantity };
   const productSnapshot = { rowId: productRowId, productRowId, productId: template.item.productId,
     productType: template.row.productType, name: template.row.contractualTitle, quantity: itemBillingQuantity, ...authoredQuantity,
+    ...(optimizerDerivedSentinel ? {
+      smartCutDerivedQuantity: true,
+      smartCutPlan: {
+        derivedQuantity: true,
+        requestedQuantity: '1',
+        totalRequestedLengthM: quantity,
+        productionPieces: [{ lengthM: quantity, quantity: '1' }],
+      },
+    } : {}),
     meta: { isLayer: false } };
   const graph = parseCanonicalProductGraph({ ...template.graph, revision: 1,
     catalogSnapshots: template.graph.catalogSnapshots.filter(snapshot => snapshot.catalogProductId === template.row.catalogProductId
@@ -49,7 +65,9 @@ export const createProductionApprovedPricingFixture = async (prisma: PrismaClien
     stairSystems: [], layerConfigurations: [], sourceBatches: [], remainingStones: [], allocations: [], operationGroups: [],
     toolSelections: [], finishingSelections: [] });
   const quantityPolicy = productQuantityPolicy(template.row.productType, `Product ${productRowId}`);
-  const snapshotQuantity = quantityPolicy.snapshot(productSnapshot, `Product ${productRowId}`);
+  const snapshotQuantity = optimizerDerivedSentinel
+    ? { unit: 'meter', quantity: new Prisma.Decimal(quantity).toFixed(3) }
+    : quantityPolicy.snapshot(productSnapshot, `Product ${productRowId}`);
   const projectedRow = projectCanonicalProductGraph(graph, 'accounting').products[0];
   const canonicalProjectedQuantity = quantityPolicy.canonical({ productRowId: projectedRow.productRowId,
     catalogProductId: graph.rows[0].catalogProductId, contractualTitle: projectedRow.contractualTitle,
@@ -72,6 +90,8 @@ export const createProductionApprovedPricingFixture = async (prisma: PrismaClien
       lastName: template.candidate.customer.lastName, companyName: template.candidate.customer.companyName },
     projectId: project.id, project: { id: project.id, address: project.address, projectName: project.projectName },
     payment: { currency: template.candidate.currency }, products: [productSnapshot],
+    ...(optimizerDerivedSentinel ? { deliveries: [{ products: [{ productRowId, productId: template.item.productId,
+      unit: 'meter', quantity }] }] } : {}),
     discount: { enabled: false, baseSubtotal: amount, percent: '0', amount: '0', currency: template.candidate.currency } };
   const contract = await prisma.salesContract.create({ data: { id: contractId, contractNumber: `ISSUE260-${randomUUID()}`,
     title: 'Issue 260 concurrency fixture', titlePersian: 'Issue 260', content: '', status: 'APPROVED',
@@ -81,6 +101,9 @@ export const createProductionApprovedPricingFixture = async (prisma: PrismaClien
     items: { create: { id: itemId, productId: template.item.productId, productRowId,
       productType: template.row.productType, quantity: new Prisma.Decimal(itemBillingQuantity), unitPrice: new Prisma.Decimal(unitPrice),
       totalPrice: new Prisma.Decimal(amount), description: template.row.contractualTitle } },
+    ...(optimizerDerivedSentinel ? { deliveries: { create: { deliveryDate: new Date(), deliveryAddress: 'QA delivery',
+      status: 'SCHEDULED', products: { create: { productId: template.item.productId, productRowId,
+        quantity: new Prisma.Decimal(quantity) } } } } } : {}),
     productGraphState: { create: { schemaVersion: graph.schemaVersion, revision: graph.revision, graph: json(graph),
       policySnapshot: json(graph.calculationPolicy), inputHash: graphHash, resultHash: graphHash,
       totalAmountToman: new Prisma.Decimal(amount) } } }, include: { customer: true, items: true } });
@@ -114,6 +137,13 @@ export const createProductionApprovedPricingFixture = async (prisma: PrismaClien
     || economics.actual.versionGrossAmount !== economics.authored.amount
     || economics.actual.contractedQuantity !== economics.authored.quantity) {
     throw new Error(`Production approval changed the authored quantity or exact row/version economics: ${JSON.stringify(economics)}`);
+  }
+  if (optimizerDerivedSentinel) {
+    const evidence = record(head.currentVersion.sourceEvidence);
+    const normalizations = Array.isArray(evidence.quantityNormalizations) ? evidence.quantityNormalizations : [];
+    if (normalizations.length !== 1 || record(normalizations[0]).sealedQuantity !== economics.authored.quantity) {
+      throw new Error(`Production approval omitted optimizer-derived normalization evidence: ${JSON.stringify(normalizations)}`);
+    }
   }
   return { contract, project, item: contract.items.find(item => item.id === itemId)!, productRowId,
     productId: template.item.productId, actor, invoice, approvalBase, head, pricingRow, readiness, graphHash,

@@ -1857,6 +1857,18 @@ model SalesContractEditSession {
   @@map("sales_contract_edit_sessions")
 }
 
+model SalesContractDraftAudit {
+  id          String   @id @default(cuid())
+  draftId     String
+  ownerUserId String
+  action      String
+  createdAt   DateTime @default(now())
+
+  @@index([draftId, createdAt])
+  @@index([ownerUserId, createdAt])
+  @@map("sales_contract_draft_audits")
+}
+
 model SalesContractSellerAudit {
   id               String        @id @default(cuid())
   contractId       String

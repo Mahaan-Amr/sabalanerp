@@ -14,6 +14,7 @@ export interface ContractAutosaveDraft {
   version: number;
   updatedAt: number;
   currentStep: number;
+  contractDateChanged?: boolean;
   wizardData: ContractWizardData;
   searches?: {
     customerSearchTerm?: string;

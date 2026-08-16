@@ -13,9 +13,12 @@ import {
   getContractEditRecoveryMessage,
   type ContractEditRecoveryBlockReason
 } from '../utils/contractEditRecoveryConflictPolicy';
+import { shouldRotateUnavailableCreationDraft } from '../services/contractCreationDraftPolicy';
 
 const BROWSER_SESSION_STORAGE_KEY = 'sabalan-contract-browser-session-id';
 const CHECKPOINT_DELAY_MS = 250;
+const HEARTBEAT_INTERVAL_MS = 25_000;
+let activeDocumentBrowserSessionId: string | null = null;
 
 const createStableClientId = (prefix: string): string => {
   const randomId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -27,8 +30,22 @@ const createStableClientId = (prefix: string): string => {
 const activeDraftStorageKey = (userId: string) =>
   `sabalan-contract-active-draft:${userId}`;
 
+export const decideContractRecoveryDelivery = ({
+  mode,
+  recoveryKey,
+  lastRestoredKey,
+}: {
+  mode: 'offer' | 'restore';
+  recoveryKey: string;
+  lastRestoredKey: string | null;
+}): 'offer' | 'restore' | 'skip' => {
+  if (mode === 'offer') return 'offer';
+  return lastRestoredKey === recoveryKey ? 'skip' : 'restore';
+};
+
 export const getOrCreateContractBrowserSessionId = (): string => {
   if (typeof window === 'undefined') return 'server-render';
+  if (activeDocumentBrowserSessionId) return activeDocumentBrowserSessionId;
   const existing = window.sessionStorage.getItem(BROWSER_SESSION_STORAGE_KEY);
   const navigation = typeof performance !== 'undefined'
     ? performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
@@ -37,11 +54,13 @@ export const getOrCreateContractBrowserSessionId = (): string => {
   // browsers also copy it when a tab is duplicated. A duplicated/new navigation
   // must receive a new editor identity so it cannot share the original lease.
   if (existing && (navigation?.type === 'reload' || navigation?.type === 'back_forward')) {
-    return existing;
+    activeDocumentBrowserSessionId = existing;
+    return activeDocumentBrowserSessionId;
   }
   const created = createStableClientId('browser');
   window.sessionStorage.setItem(BROWSER_SESSION_STORAGE_KEY, created);
-  return created;
+  activeDocumentBrowserSessionId = created;
+  return activeDocumentBrowserSessionId;
 };
 
 export const getOrCreateContractDraftId = (
@@ -53,15 +72,19 @@ export const getOrCreateContractDraftId = (
   const key = activeDraftStorageKey(userId);
   const existing = window.localStorage.getItem(key);
   if (existing) return existing;
-  const created = createStableClientId('draft');
-  window.localStorage.setItem(key, created);
-  return created;
+  return createStableClientId('draft');
+};
+
+export const activateContractDraftId = (userId: string, draftId: string): void => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(activeDraftStorageKey(userId), draftId);
+  }
 };
 
 export const createFreshContractDraftId = (userId: string): string => {
   const created = createStableClientId('draft');
   if (typeof window !== 'undefined') {
-    window.localStorage.setItem(activeDraftStorageKey(userId), created);
+    window.localStorage.removeItem(activeDraftStorageKey(userId));
   }
   return created;
 };
@@ -69,12 +92,22 @@ export const createFreshContractDraftId = (userId: string): string => {
 interface UseContractEditRecoveryInput<Payload> {
   scope: ContractRecoveryScope | null;
   contractId?: string | null;
+  enabled?: boolean;
+  discoverCreationDraft?: boolean;
+  onDraftDiscovered?: (draftId: string) => void;
+  onCreationDraftUnavailable?: () => void;
+  onRecoveryAvailable?: (payload: Payload) => void;
   onRestore: (payload: Payload) => void;
 }
 
 export const useContractEditRecovery = <Payload>({
   scope,
   contractId,
+  enabled = true,
+  discoverCreationDraft = false,
+  onDraftDiscovered,
+  onCreationDraftUnavailable,
+  onRecoveryAvailable,
   onRestore
 }: UseContractEditRecoveryInput<Payload>) => {
   const [browserSessionId] = useState(getOrCreateContractBrowserSessionId);
@@ -88,6 +121,9 @@ export const useContractEditRecovery = <Payload>({
   const checkpointTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoredScopeRef = useRef<string | null>(null);
   const onRestoreRef = useRef(onRestore);
+  const onRecoveryAvailableRef = useRef(onRecoveryAvailable);
+  const onDraftDiscoveredRef = useRef(onDraftDiscovered);
+  const onCreationDraftUnavailableRef = useRef(onCreationDraftUnavailable);
   const deactivatedRef = useRef(false);
   const blocked = blockReason !== null;
 
@@ -95,23 +131,46 @@ export const useContractEditRecovery = <Payload>({
     onRestoreRef.current = onRestore;
   }, [onRestore]);
 
+  useEffect(() => {
+    onRecoveryAvailableRef.current = onRecoveryAvailable;
+  }, [onRecoveryAvailable]);
+
+  useEffect(() => {
+    onDraftDiscoveredRef.current = onDraftDiscovered;
+  }, [onDraftDiscovered]);
+
+  useEffect(() => {
+    onCreationDraftUnavailableRef.current = onCreationDraftUnavailable;
+  }, [onCreationDraftUnavailable]);
+
   const scopeKey = scope ? getContractRecoveryStorageKey(scope) : null;
 
   const applyNewestRecovery = useCallback((
     local: ContractRecoveryEnvelope<Payload> | null,
-    serverValue: unknown
+    serverValue: unknown,
+    mode: 'offer' | 'restore' = 'restore',
+    targetScope: ContractRecoveryScope | null = scope,
   ) => {
-    if (!scope) return;
+    if (!targetScope) return;
     const server = serverValue && typeof serverValue === 'object'
-      ? parseContractRecoveryEnvelope<Payload>(JSON.stringify(serverValue), scope)
+      ? parseContractRecoveryEnvelope<Payload>(JSON.stringify(serverValue), targetScope)
       : null;
     const newest = selectNewestContractRecovery(local, server);
     if (!newest) return;
     sequenceRef.current = Math.max(sequenceRef.current, newest.sequence);
-    const restoreKey = `${scopeKey}:${newest.sequence}:${newest.updatedAt}`;
-    if (restoredScopeRef.current === restoreKey) return;
-    restoredScopeRef.current = restoreKey;
-    onRestoreRef.current(newest.payload);
+    const restoreKey = `${getContractRecoveryStorageKey(targetScope)}:${newest.sequence}:${newest.updatedAt}`;
+    const delivery = decideContractRecoveryDelivery({
+      mode,
+      recoveryKey: restoreKey,
+      lastRestoredKey: restoredScopeRef.current,
+    });
+    if (delivery === 'skip') return;
+    if (delivery === 'offer' && onRecoveryAvailableRef.current) {
+      onRecoveryAvailableRef.current(newest.payload);
+    } else {
+      restoredScopeRef.current = restoreKey;
+      onRestoreRef.current(newest.payload);
+    }
   }, [scope, scopeKey]);
 
   const acquire = useCallback(async (takeover: boolean): Promise<boolean> => {
@@ -130,7 +189,7 @@ export const useContractEditRecovery = <Payload>({
         takeover
       });
       const result = response.data.data;
-      applyNewestRecovery(local, result.recovery);
+      applyNewestRecovery(local, result.recovery, 'restore');
       setLeaseToken(result.session.leaseToken);
       setBlockReason(null);
       setCheckpointError(false);
@@ -139,6 +198,20 @@ export const useContractEditRecovery = <Payload>({
     } catch (error: any) {
       const status = error?.response?.status;
       const conflict = error?.response?.data?.data;
+      if (shouldRotateUnavailableCreationDraft({
+        status,
+        code: conflict?.code,
+        contractId,
+        takeover,
+      })) {
+        window.localStorage.removeItem(scopeKey);
+        pendingRef.current = null;
+        setLeaseToken(null);
+        setBlockReason(null);
+        setReady(true);
+        onCreationDraftUnavailableRef.current?.();
+        return false;
+      }
       if (status === 409 || status === 403 || takeover) {
         const failure = classifyContractEditRecoveryFailure({
           status,
@@ -169,15 +242,50 @@ export const useContractEditRecovery = <Payload>({
     setReady(false);
     setLeaseToken(null);
     setBlockReason(null);
-    // Restore the local journal synchronously before waiting for the network.
-    // The lease response can still replace it with a newer server checkpoint.
     const local = parseContractRecoveryEnvelope<Payload>(
       window.localStorage.getItem(scopeKey),
       scope
     );
-    applyNewestRecovery(local, null);
+    if (!enabled) {
+      applyNewestRecovery(local, null, 'offer');
+      if (!discoverCreationDraft) {
+        setReady(true);
+        return;
+      }
+      void salesAPI.discoverContractCreationDraft(browserSessionId)
+        .then(response => {
+          const discovered = response.data.data;
+          if (!discovered?.draftId || !discovered.recovery) return;
+          const discoveredScope: ContractRecoveryScope = {
+            ...scope,
+            draftId: discovered.draftId
+          };
+          onDraftDiscoveredRef.current?.(discovered.draftId);
+          const discoveredKey = getContractRecoveryStorageKey(discoveredScope);
+          const discoveredLocal = parseContractRecoveryEnvelope<Payload>(
+            window.localStorage.getItem(discoveredKey),
+            discoveredScope
+          );
+          applyNewestRecovery(discoveredLocal, discovered.recovery, 'offer', discoveredScope);
+          setBlockReason(discovered.activeElsewhere ? 'owned-elsewhere' : null);
+        })
+        .catch(() => {
+          setCheckpointError(true);
+        })
+        .finally(() => setReady(true));
+      return;
+    }
+    applyNewestRecovery(local, null, 'restore');
     void acquire(false);
-  }, [acquire, applyNewestRecovery, scope, scopeKey]);
+  }, [
+    acquire,
+    applyNewestRecovery,
+    browserSessionId,
+    discoverCreationDraft,
+    enabled,
+    scope,
+    scopeKey
+  ]);
 
   const flushCheckpoint = useCallback(async () => {
     if (!scope || !leaseToken || blocked || !pendingRef.current) return;
@@ -237,6 +345,27 @@ export const useContractEditRecovery = <Payload>({
     return () => window.removeEventListener('online', handleOnline);
   }, [acquire, flushCheckpoint, leaseToken]);
 
+  useEffect(() => {
+    if (!scope || !leaseToken || blocked) return;
+    const heartbeat = () => {
+      void salesAPI.heartbeatContractEditSession(scope.draftId, {
+        browserSessionId,
+        leaseToken,
+        baseRevision: scope.baseRevision
+      }).catch((error: any) => {
+        if (error?.response?.status !== 409) {
+          setCheckpointError(true);
+          return;
+        }
+        setLeaseToken(null);
+        setBlockReason('ownership-lost');
+        setReady(true);
+      });
+    };
+    const timer = window.setInterval(heartbeat, HEARTBEAT_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [blocked, browserSessionId, leaseToken, scope]);
+
   useEffect(() => () => {
     if (checkpointTimerRef.current) clearTimeout(checkpointTimerRef.current);
   }, []);
@@ -244,6 +373,8 @@ export const useContractEditRecovery = <Payload>({
   const takeover = useCallback(async () => {
     return acquire(true);
   }, [acquire]);
+
+  const activate = useCallback(async () => acquire(false), [acquire]);
 
   const clearLocalRecovery = useCallback(() => {
     if (scopeKey) window.localStorage.removeItem(scopeKey);
@@ -270,6 +401,27 @@ export const useContractEditRecovery = <Payload>({
       setBlockReason(null);
     }
   }, [browserSessionId, clearLocalRecovery, leaseToken, scope]);
+
+  const discard = useCallback(async () => {
+    deactivatedRef.current = true;
+    if (!scope) return false;
+    try {
+      await salesAPI.discardContractCreationDraft(scope.draftId);
+      clearLocalRecovery();
+      setLeaseToken(null);
+      setBlockReason(null);
+      return true;
+    } catch (error: any) {
+      if (error?.response?.status === 404) {
+        clearLocalRecovery();
+        setLeaseToken(null);
+        setBlockReason(null);
+        return true;
+      }
+      setCheckpointError(true);
+      return false;
+    }
+  }, [clearLocalRecovery, scope]);
 
   const reloadLatestRevision = useCallback(() => {
     clearLocalRecovery();
@@ -299,11 +451,13 @@ export const useContractEditRecovery = <Payload>({
     takeoverPending,
     browserSessionId,
     leaseToken,
+    activate,
     takeover,
     reloadLatestRevision,
     reportMutationFailure,
     queueRecovery,
     clearLocalRecovery,
+    discard,
     release
   };
 };

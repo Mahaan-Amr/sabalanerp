@@ -2,6 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { isValidFinanciallyApprovedInvoice } from '../accountingStatus';
 import {
+  reconcileOptimizerDerivedLongitudinalQuantity,
+  type OptimizerDerivedQuantityEvidence,
+} from '../optimizerDerivedQuantityEvidence';
+import {
   contractDiscountEligibilityEvidence,
   hasConflictingDiscountOrNonProductAdjustmentEvidence,
   isContractRowDiscountEligible,
@@ -235,6 +239,7 @@ const projectApprovedPricingRows = (input: {
   sourceFinancialRecordId: string;
   versionNumber: number;
   normalizedLegacyNonLayerProductRowIds: ReadonlySet<string>;
+  quantityEvidenceByRow: ReadonlyMap<string, OptimizerDerivedQuantityEvidence>;
 }) => {
   let selectedEligibleBase = new Prisma.Decimal(0);
   let gross = new Prisma.Decimal(0);
@@ -247,14 +252,19 @@ const projectApprovedPricingRows = (input: {
     }
     const snapshotType = requiredString(snapshot.productType, `Product ${graphRow.productRowId} type`);
     if (snapshotType !== graphRow.productType || item.productType !== graphRow.productType) throw new Error(`Canonical row ${graphRow.productRowId} types conflict`);
-    const quantityPolicy = productQuantityPolicy(graphRow.productType, `Product ${graphRow.productRowId}`);
-    const contracted = quantityPolicy.snapshot(snapshot, `Product ${graphRow.productRowId}`);
+    const quantityEvidence = input.quantityEvidenceByRow.get(graphRow.productRowId);
+    const quantityPolicy = quantityEvidence
+      ? null
+      : productQuantityPolicy(graphRow.productType, `Product ${graphRow.productRowId}`);
+    const contracted = quantityEvidence
+      ? { unit: quantityEvidence.unit, quantity: quantityEvidence.sealedQuantity }
+      : quantityPolicy!.snapshot(snapshot, `Product ${graphRow.productRowId}`);
     if (!new Prisma.Decimal(contracted.quantity).gt(0)) throw new Error(`Product ${graphRow.productRowId} quantity must be positive`);
     const snapshotItemQuantity = graphRow.productType === 'prepared' ? snapshot.preparedQuantity ?? snapshot.quantity : snapshot.quantity;
     if (quantity(snapshotItemQuantity, `Product ${graphRow.productRowId} item quantity`) !== quantity(item.quantity, `Contract item ${item.id} quantity`)) {
       throw new Error(`Product ${graphRow.productRowId} contract item quantity conflicts with snapshot`);
     }
-    if (quantityPolicy.canonical(graphRow, `Canonical row ${graphRow.productRowId}`) !== contracted.quantity) {
+    if (quantityPolicy && quantityPolicy.canonical(graphRow, `Canonical row ${graphRow.productRowId}`) !== contracted.quantity) {
       throw new Error(`Product ${graphRow.productRowId} canonical quantity conflicts with contract snapshot`);
     }
     const base = money(graphRow.baseAmountToman, `Product ${graphRow.productRowId} base amount`);
@@ -464,6 +474,28 @@ export const buildApprovedPricingVersion = (
   });
   if (selectedGraphRows.length !== selectedContractItemIds.size) throw new Error('Approved invoice subset cannot be reconciled to canonical product rows');
 
+  const financialSnapshot = record(source.leaf.sourceSnapshot, 'Invoice candidate source snapshot');
+  const quantityNormalizations: OptimizerDerivedQuantityEvidence[] = [];
+  for (const graphRow of selectedGraphRows) {
+    const sourceItem = itemByRow.get(graphRow.productRowId);
+    const snapshot = snapshotByRow.get(graphRow.productRowId);
+    const invoiceItem = sourceItem ? invoiceByContractItem.get(sourceItem.id) : null;
+    if (!sourceItem || !snapshot || !invoiceItem) throw new Error(`Product ${graphRow.productRowId} quantity sources are incomplete`);
+    const evidence = reconcileOptimizerDerivedLongitudinalQuantity({
+      productRowId: graphRow.productRowId,
+      productId: sourceItem.productId,
+      productType: graphRow.productType,
+      rawContractItemQuantity: sourceItem.quantity,
+      rawInvoiceItemQuantity: invoiceItem.quantity,
+      productSnapshot: snapshot,
+      graphRequestedLengthMeters: graphRow.requestedLengthMeters,
+      persistedDeliveries: financialSnapshot.deliveries,
+      wizardDeliveries: data.deliveries,
+    });
+    if (evidence) quantityNormalizations.push(evidence);
+  }
+  const quantityEvidenceByRow = new Map(quantityNormalizations.map(item => [item.productRowId, item]));
+
   const hasDiscountField = Object.prototype.hasOwnProperty.call(data, 'discount');
   const isLegacyNoDiscountShape = !hasDiscountField || data.discount === null;
   const discountEligibility = contractDiscountEligibilityEvidence(snapshotByRow, graph.rows.map(row => ({
@@ -485,6 +517,7 @@ export const buildApprovedPricingVersion = (
     sourceFinancialRecordId: source.leaf.id,
     versionNumber,
     normalizedLegacyNonLayerProductRowIds: new Set(discountEligibility.normalizedNonLayerProductRowIds),
+    quantityEvidenceByRow,
   });
 
   const grossAmount = money(gross, 'Approved pricing gross amount');
@@ -505,7 +538,8 @@ export const buildApprovedPricingVersion = (
     const sourceItem = source.contract.items.find(item => item.id === invoiceItem.contractItemId);
     const pricingRow = rowByItem.get(invoiceItem.contractItemId ?? '');
     if (!sourceItem || !pricingRow) throw new Error('Approved invoice item has no sealed pricing row');
-    if (quantity(invoiceItem.quantity, `Invoice item ${invoiceItem.id} quantity`) !== quantity(sourceItem.quantity, `Contract item ${sourceItem.id} quantity`)) {
+    if (!quantityEvidenceByRow.has(pricingRow.productRowId) &&
+      quantity(invoiceItem.quantity, `Invoice item ${invoiceItem.id} quantity`) !== quantity(sourceItem.quantity, `Contract item ${sourceItem.id} quantity`)) {
       throw new Error('Approved invoice item quantity conflicts with source snapshot');
     }
     if (!new Prisma.Decimal(money(sourceItem.totalPrice, `Contract item ${sourceItem.id} total`)).eq(pricingRow.canonicalAllInTotal)) {
@@ -541,6 +575,7 @@ export const buildApprovedPricingVersion = (
           },
         }
       : {}),
+    ...(quantityNormalizations.length > 0 ? { quantityNormalizations } : {}),
     financialApproval: {
       financialRecordId: source.leaf.id,
       mode,

@@ -109,10 +109,15 @@ import { useProductFiltering } from '@/features/contract-creation/hooks/useProdu
 import { useContractProductCartController } from '@/features/contract-creation/hooks/useContractProductCartController';
 import { useSellerProductHistory } from '@/features/contract-creation/hooks/useSellerProductHistory';
 import {
+  activateContractDraftId,
   createFreshContractDraftId,
   getOrCreateContractDraftId,
   useContractEditRecovery
 } from '@/features/contract-creation/hooks/useContractEditRecovery';
+import {
+  contractCreationRecoverySurface,
+  hasMeaningfulContractCreationProgress
+} from '@/features/contract-creation/services/contractCreationDraftPolicy';
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
 
@@ -753,6 +758,9 @@ export default function CreateContractWizard({
   const [autosaveHydrated, setAutosaveHydrated] = useState(false);
   const [recoverableDraftOffer, setRecoverableDraftOffer] = useState<ContractAutosaveDraft | null>(null);
   const [confirmDiscardDraft, setConfirmDiscardDraft] = useState(false);
+  const [contractDateChanged, setContractDateChanged] = useState(false);
+  const [draftRecoveryActivated, setDraftRecoveryActivated] = useState(false);
+  const initialContractDateRef = useRef(wizardData.contractDate);
   const [discountRanges, setDiscountRanges] = useState<DiscountRange[]>([]);
   const [discountPercentInput, setDiscountPercentInput] = useState<number>(0);
   const [serviceSearchTerm, setServiceSearchTerm] = useState('');
@@ -2466,6 +2474,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       ...normalizedWizardData,
       products: identityNormalization.products
     });
+    setContractDateChanged(
+      draft.contractDateChanged === true ||
+      normalizedWizardData.contractDate !== initialContractDateRef.current
+    );
     setCustomerSearchTerm(draft.searches?.customerSearchTerm || '');
     setProductSearchTerm(draft.searches?.productSearchTerm || '');
     setTreadProductSearchTerm(draft.searches?.treadProductSearchTerm || '');
@@ -2574,11 +2586,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     (initialWizardData as any)?.canonicalRevision ??
     0
   );
+  const hasMeaningfulDraftProgress = !isContractEditMode &&
+    hasMeaningfulContractCreationProgress({ wizardData, contractDateChanged });
+  const [discoveredRecoveryDraftId, setDiscoveredRecoveryDraftId] = useState<string | null>(null);
   const recoveryDraftId = useMemo(
     () => recoveryUserId
-      ? getOrCreateContractDraftId(recoveryUserId, isContractEditMode ? contractId : null)
+      ? discoveredRecoveryDraftId ??
+        getOrCreateContractDraftId(recoveryUserId, isContractEditMode ? contractId : null)
       : null,
-    [contractId, isContractEditMode, recoveryUserId]
+    [contractId, discoveredRecoveryDraftId, isContractEditMode, recoveryUserId]
   );
   const recoveryScope = useMemo<ContractRecoveryScope | null>(
     () => recoveryUserId && recoveryDraftId
@@ -2597,19 +2613,44 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   );
   const handleRecoveredDraft = useCallback((draft: ContractAutosaveDraft) => {
     if (freshEntryRequestedRef.current && !isContractEditMode) return;
-    if (isContractEditMode) {
-      applyContractAutosaveDraft(draft);
-      return;
-    }
-    setRecoverableDraftOffer(draft);
+    applyContractAutosaveDraft(draft);
+    setRecoverableDraftOffer(null);
+    setDraftRecoveryActivated(true);
   }, [applyContractAutosaveDraft, isContractEditMode]);
+  const handleRecoveryAvailable = useCallback((draft: ContractAutosaveDraft) => {
+    if (freshEntryRequestedRef.current || isContractEditMode) return;
+    setRecoverableDraftOffer(draft);
+  }, [isContractEditMode]);
+  const handleDraftDiscovered = useCallback((draftId: string) => {
+    setDiscoveredRecoveryDraftId(draftId);
+    if (recoveryUserId) activateContractDraftId(recoveryUserId, draftId);
+  }, [recoveryUserId]);
+  const handleCreationDraftUnavailable = useCallback(() => {
+    if (!recoveryUserId) return;
+    const freshDraftId = createFreshContractDraftId(recoveryUserId);
+    activateContractDraftId(recoveryUserId, freshDraftId);
+    setDiscoveredRecoveryDraftId(freshDraftId);
+  }, [recoveryUserId]);
   const editRecovery = useContractEditRecovery({
     scope: recoveryScope,
     contractId: isContractEditMode ? contractId : null,
+    enabled: isContractEditMode || hasMeaningfulDraftProgress || draftRecoveryActivated,
+    discoverCreationDraft: !isContractEditMode && !freshEntryRequestedRef.current,
+    onDraftDiscovered: handleDraftDiscovered,
+    onCreationDraftUnavailable: handleCreationDraftUnavailable,
+    onRecoveryAvailable: handleRecoveryAvailable,
     onRestore: handleRecoveredDraft
+  });
+  const creationRecoverySurface = contractCreationRecoverySurface({
+    blockReason: editRecovery.blockReason,
+    hasRecoverableDraft: Boolean(recoverableDraftOffer)
   });
   const editRecoveryBlocked = editRecovery.blocked;
   const takeoverEditRecovery = editRecovery.takeover;
+  useEffect(() => {
+    if (!hasMeaningfulDraftProgress || !recoveryUserId || !recoveryDraftId) return;
+    activateContractDraftId(recoveryUserId, recoveryDraftId);
+  }, [hasMeaningfulDraftProgress, recoveryDraftId, recoveryUserId]);
   const [editRecoverySuccessMessage, setEditRecoverySuccessMessage] = useState<string | null>(null);
   useEffect(() => {
     if (!editRecoverySuccessMessage) return;
@@ -2639,25 +2680,28 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     showProductModal
   ]);
   const handleEditRecoveryTakeover = useCallback(async () => {
-    const stepBeforeTakeover = currentStep;
-    const scrollPositionBeforeTakeover = typeof window !== 'undefined' ? window.scrollY : 0;
     closeProductModal();
     returnToProductModalAfterRemainderRef.current = false;
     const transferred = await takeoverEditRecovery();
     closeProductModal();
     returnToProductModalAfterRemainderRef.current = false;
     if (transferred) {
-      setCurrentStep(stepBeforeTakeover);
       setEditRecoverySuccessMessage('اختیار ویرایش به این صفحه منتقل شد');
       window.requestAnimationFrame(() => {
-        window.scrollTo({ top: scrollPositionBeforeTakeover, behavior: 'auto' });
+        window.scrollTo({ top: 0, behavior: 'auto' });
       });
     }
-  }, [closeProductModal, currentStep, setCurrentStep, takeoverEditRecovery]);
+  }, [closeProductModal, takeoverEditRecovery]);
   const handleCreateFreshContract = useCallback(async () => {
     closeProductModal();
     returnToProductModalAfterRemainderRef.current = false;
-    await editRecovery.release();
+    const cleared = isContractEditMode
+      ? (await editRecovery.release(), true)
+      : await editRecovery.discard();
+    if (!cleared) {
+      setErrors({ general: 'کنار گذاشتن پیش‌نویس انجام نشد؛ دوباره تلاش کنید' });
+      return;
+    }
     if (typeof window !== 'undefined') {
       localStorage.removeItem(contractDraftStorageKey);
       localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
@@ -2667,7 +2711,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       createFreshContractDraftId(recoveryUserId);
     }
     window.location.assign('/dashboard/sales/contracts/create?fresh=1');
-  }, [closeProductModal, contractDraftStorageKey, editRecovery, recoveryUserId]);
+  }, [closeProductModal, contractDraftStorageKey, editRecovery, isContractEditMode, recoveryUserId]);
 
   // Product filtering hook provides all filtered lists
   const productFiltering = useProductFiltering({
@@ -2737,30 +2781,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   ]);
 
   const buildContractAutosaveDraft = useCallback(() => {
-    const hasMeaningfulDraftProgress =
-      currentStep > 1 ||
-      Boolean(wizardData.customerId) ||
-      Boolean(wizardData.projectId) ||
-      wizardData.products.length > 0 ||
-      wizardData.deliveries.length > 0 ||
-      wizardData.payment.payments.length > 0 ||
-      Boolean(customerSearchTerm.trim()) ||
-      Boolean(productSearchTerm.trim()) ||
-      Boolean(treadProductSearchTerm.trim()) ||
-      Boolean(riserProductSearchTerm.trim()) ||
-      Boolean(landingProductSearchTerm.trim()) ||
-      Boolean(stairSystemV2.stoneSearchTerm.trim()) ||
-      Boolean(selectedProduct) ||
-      remainingStoneModal.showRemainingStoneModal ||
-      paymentHandlers.showPaymentEntryModal ||
-      stairSystemV2.stairSessionItems.length > 0;
-
     if (!hasMeaningfulDraftProgress) {
       return null;
     }
 
     return createContractAutosaveDraft({
       currentStep,
+      contractDateChanged,
       wizardData,
       searches: {
         customerSearchTerm,
@@ -2811,6 +2838,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     });
   }, [
     currentStep,
+    contractDateChanged,
+    hasMeaningfulDraftProgress,
     wizardData,
     customerSearchTerm,
     productSearchTerm,
@@ -5642,13 +5671,20 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setErrors({});
   };
 
+  const updateContractDateWizardData = useCallback((updates: Partial<ContractWizardData>) => {
+    if (Object.prototype.hasOwnProperty.call(updates, 'contractDate')) {
+      setContractDateChanged(updates.contractDate !== initialContractDateRef.current);
+    }
+    updateWizardData(updates);
+  }, [updateWizardData]);
+
   const renderStepContent = () => {
     switch (currentStep) {
       case 1:
         return (
           <Step1ContractDate
             wizardData={wizardData}
-            updateWizardData={updateWizardData}
+            updateWizardData={updateContractDateWizardData}
             errors={errors}
             currentUser={currentUser || undefined}
           />
@@ -6107,7 +6143,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           />
         )}
 
-        {!isContractEditMode && recoverableDraftOffer && (
+        {!isContractEditMode && creationRecoverySurface === 'DRAFT' && recoverableDraftOffer && (
           <ErpInlineState
             kind="stale"
             title="یک پیش‌نویس ناتمام برای این قرارداد پیدا شد"
@@ -6115,8 +6151,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             action={{
               label: 'ادامه پیش‌نویس قبلی',
               onClick: () => {
-                applyContractAutosaveDraft(recoverableDraftOffer);
-                setRecoverableDraftOffer(null);
+                const offeredDraft = recoverableDraftOffer;
+                setDraftRecoveryActivated(true);
+                void editRecovery.activate().then(activated => {
+                  if (!activated) {
+                    setDraftRecoveryActivated(false);
+                    return;
+                  }
+                  applyContractAutosaveDraft(offeredDraft);
+                  setRecoverableDraftOffer(null);
+                });
               },
               tone: 'primary',
               variant: 'solid'

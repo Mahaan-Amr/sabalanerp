@@ -534,6 +534,15 @@ export const salesAPI = {
     baseRevision: number;
     takeover?: boolean;
   }) => api.post(`/sales/contract-edit-sessions/${encodeURIComponent(draftId)}/acquire`, data),
+  discoverContractCreationDraft: (browserSessionId: string) =>
+    api.post('/sales/contract-edit-sessions/creation-draft/discover', { browserSessionId }),
+  heartbeatContractEditSession: (draftId: string, data: {
+    browserSessionId: string;
+    leaseToken: string;
+    baseRevision: number;
+  }) => api.post(`/sales/contract-edit-sessions/${encodeURIComponent(draftId)}/heartbeat`, data),
+  discardContractCreationDraft: (draftId: string) =>
+    api.post(`/sales/contract-edit-sessions/${encodeURIComponent(draftId)}/discard`),
   checkpointContractRecovery: (draftId: string, data: {
     browserSessionId: string;
     leaseToken: string;

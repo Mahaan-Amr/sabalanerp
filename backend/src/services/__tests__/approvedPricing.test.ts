@@ -16,6 +16,7 @@ import type {
   ApprovedPricingVersionInsert,
   ApprovedPricingVersionRecord,
 } from '../approvedPricing/types';
+import { canonicalOptimizerDerivedLengthWitness } from '../optimizerDerivedQuantityEvidence';
 
 class MemoryRepository implements ApprovedPricingRepository {
   readonly versions: ApprovedPricingVersionRecord[] = [];
@@ -73,6 +74,150 @@ test('accepts explicit no-discount evidence without deriving a default', () => {
   const version = buildApprovedPricingVersion(source, 1, 'no-discount-version');
   assert.equal(version.discountAmount, '0.000000000000');
   assert.equal(version.netAmount, version.grossAmount);
+});
+
+const optimizerDerivedSourceFixture = () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as any;
+  data.products[0] = {
+    ...data.products[0],
+    quantity: 0,
+    length: 40,
+    lengthUnit: 'm',
+    smartCutDerivedQuantity: true,
+    smartCutPlan: {
+      derivedQuantity: true,
+      requestedQuantity: 1,
+      totalRequestedLengthM: 40,
+      productionPieces: [{ lengthM: 40, quantity: 1 }],
+    },
+  };
+  data.deliveries = [{
+    products: [{ productRowId: 'row-1', productId: 'product-1', unit: 'meter', quantity: 40 }],
+  }];
+  (source.contract.items as any)[0] = { ...source.contract.items[0], quantity: '0' };
+  (source.contract.currentItems as any)[0] = { ...source.contract.currentItems[0], quantity: '0' };
+  (source.contract.productGraph!.rows as any)[0] = {
+    ...source.contract.productGraph!.rows[0],
+    requestedQuantity: '1',
+    requestedLengthMeters: '40',
+    requestedAreaSquareMeters: '16',
+  };
+  source.leaf.sourceSnapshot = {
+    id: 'contract-1',
+    deliveries: [{
+      id: 'delivery-1',
+      status: 'SCHEDULED',
+      products: [{
+        id: 'delivery-product-1', deliveryId: 'delivery-1', productRowId: 'row-1',
+        productId: 'product-1', quantity: '40',
+      }],
+    }],
+  };
+  (source.leaf.invoiceItems as any)[0] = { ...source.leaf.invoiceItems[0], quantity: '0' };
+  return source;
+};
+
+test('reads the optimizer meter witness from an immutable legacy canonical graph row', () => {
+  assert.equal(canonicalOptimizerDerivedLengthWitness({
+    productRowId: 'row-1',
+    productType: 'longitudinal',
+    commercial: {
+      legacySnapshot: {
+        smartCutDerivedQuantity: true,
+        smartCutPlan: { derivedQuantity: true, totalRequestedLengthM: '40' },
+      },
+    },
+  }, undefined), '40');
+});
+
+test('seals an optimizer-derived longitudinal zero sentinel from agreeing frozen witnesses', () => {
+  const source = optimizerDerivedSourceFixture();
+
+  const version = buildApprovedPricingVersion(source, 1, 'optimizer-derived-quantity-version');
+
+  assert.equal(version.rows[0]?.contractedQuantity, '40.000');
+  assert.equal(version.rows[0]?.unit, 'meter');
+  assert.deepEqual(version.sourceEvidence.quantityNormalizations, [{
+    evidenceOrigin: 'OPTIMIZER_DERIVED_LONGITUDINAL_ZERO_SENTINEL',
+    productRowId: 'row-1',
+    rawContractItemQuantity: '0.000',
+    rawInvoiceItemQuantity: '0.000',
+    sealedQuantity: '40.000',
+    unit: 'meter',
+    optimizerPlan: {
+      totalRequestedLengthMeters: '40.000',
+      productionQuantity: '40.000',
+    },
+    canonicalGraph: { requestedLengthMeters: '40.000' },
+    persistedDeliveries: {
+      rows: [{ deliveryId: 'delivery-1', deliveryProductId: 'delivery-product-1', quantity: '40.000' }],
+      totalQuantity: '40.000',
+    },
+    wizardDelivery: { present: true, totalQuantity: '40.000' },
+  }]);
+});
+
+test('keeps incomplete or conflicting optimizer-derived quantity evidence fail-closed', () => {
+  const cases: readonly [string, (source: ApprovedPricingSource) => void, RegExp][] = [
+    ['missing persisted Delivery', source => {
+      (source.leaf.sourceSnapshot as any).deliveries = [];
+    }, /persisted Delivery evidence is missing/],
+    ['partial persisted Delivery', source => {
+      (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '39.999';
+    }, /persisted Delivery quantity conflicts/],
+    ['duplicate persisted Delivery row', source => {
+      const products = (source.leaf.sourceSnapshot as any).deliveries[0].products;
+      products.push({ ...products[0], id: 'delivery-product-duplicate' });
+    }, /persisted Delivery row is duplicated/],
+    ['conflicting wizard copy', source => {
+      (source.contract.contractData as any).deliveries[0].products[0].quantity = 39;
+    }, /wizard Delivery quantity conflicts/],
+    ['incompatible wizard unit', source => {
+      (source.contract.contractData as any).deliveries[0].products[0].unit = 'count';
+    }, /wizard Delivery identity or unit conflicts/],
+    ['conflicting positive invoice quantity', source => {
+      (source.leaf.invoiceItems as any)[0] = { ...source.leaf.invoiceItems[0], quantity: '39' };
+    }, /invoice quantity conflicts with sealed meters/],
+    ['conflicting canonical graph', source => {
+      (source.contract.productGraph!.rows as any)[0] = {
+        ...source.contract.productGraph!.rows[0], requestedLengthMeters: '41',
+      };
+    }, /canonical graph quantity conflicts with optimizer plan/],
+    ['more than scale-three precision', source => {
+      (source.contract.contractData as any).products[0].smartCutPlan.totalRequestedLengthM = '40.0001';
+    }, /must use scale-three precision/],
+  ];
+
+  for (const [label, mutate, expected] of cases) {
+    const source = optimizerDerivedSourceFixture();
+    mutate(source);
+    assert.throws(
+      () => buildApprovedPricingVersion(source, 1, `optimizer-derived-conflict-${label}`),
+      expected,
+      label,
+    );
+  }
+});
+
+test('accepts a missing redundant wizard Delivery copy when persisted evidence is complete', () => {
+  const source = optimizerDerivedSourceFixture();
+  delete (source.contract.contractData as any).deliveries;
+
+  const version = buildApprovedPricingVersion(source, 1, 'optimizer-derived-no-wizard-copy');
+
+  assert.equal(version.rows[0]?.contractedQuantity, '40.000');
+  assert.deepEqual((version.sourceEvidence.quantityNormalizations as any[])[0]?.wizardDelivery, { present: false });
+});
+
+test('treats an empty legacy wizard Delivery collection as an absent redundant copy', () => {
+  const source = optimizerDerivedSourceFixture();
+  (source.contract.contractData as any).deliveries = [];
+
+  const version = buildApprovedPricingVersion(source, 1, 'optimizer-derived-empty-wizard-copy');
+
+  assert.equal(version.rows[0]?.contractedQuantity, '40.000');
+  assert.deepEqual((version.sourceEvidence.quantityNormalizations as any[])[0]?.wizardDelivery, { present: false });
 });
 
 test('normalizes legacy explicit-null no-discount evidence at financial approval', () => {

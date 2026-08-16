@@ -52,6 +52,9 @@ import {
   acquireSalesContractEditSession,
   assertSalesContractEditOwnership,
   checkpointSalesContractRecovery,
+  discoverRecoverableSalesContractCreationDraft,
+  discardSalesContractCreationDraft,
+  heartbeatSalesContractEditSession,
   releaseSalesContractEditSession
 } from '../services/contractEditSessionService';
 import salesReportsRouter from './salesReports';
@@ -392,6 +395,28 @@ router.get('/contracts/product-history', protect, requireWorkspaceAccess(WORKSPA
 });
 
 router.post(
+  '/contract-edit-sessions/creation-draft/discover',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  async (req: any, res: Response) => {
+    try {
+      const browserSessionId = String(req.body.browserSessionId || '').trim();
+      if (!browserSessionId) {
+        return res.status(400).json({ success: false, error: 'Invalid draft discovery request' });
+      }
+      const draft = await discoverRecoverableSalesContractCreationDraft({
+        userId: req.user.id,
+        browserSessionId
+      });
+      return res.json({ success: true, data: draft });
+    } catch (error) {
+      console.error('Discover contract creation draft error:', error);
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
+  }
+);
+
+router.post(
   '/contract-edit-sessions/:draftId/acquire',
   protect,
   requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
@@ -448,11 +473,62 @@ router.post(
         takeover: req.body.takeover === true
       });
       if (!result.ok) {
+        if (result.code === 'draft-owner-mismatch') {
+          return res.status(404).json({
+            success: false,
+            data: { code: result.code, recovery: null }
+          });
+        }
         return res.status(409).json({ success: false, data: result });
       }
       return res.json({ success: true, data: result });
     } catch (error) {
       console.error('Acquire contract edit session error:', error);
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
+  }
+);
+
+router.post(
+  '/contract-edit-sessions/:draftId/heartbeat',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  async (req: any, res: Response) => {
+    try {
+      const result = await heartbeatSalesContractEditSession({
+        draftId: String(req.params.draftId || '').trim(),
+        userId: req.user.id,
+        browserSessionId: String(req.body.browserSessionId || '').trim(),
+        leaseToken: String(req.body.leaseToken || '').trim(),
+        baseRevision: Number(req.body.baseRevision)
+      });
+      if (!result.ok) {
+        return res.status(409).json({ success: false, data: result });
+      }
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('Heartbeat contract edit session error:', error);
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
+  }
+);
+
+router.post(
+  '/contract-edit-sessions/:draftId/discard',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  async (req: any, res: Response) => {
+    try {
+      const discarded = await discardSalesContractCreationDraft({
+        draftId: String(req.params.draftId || '').trim(),
+        userId: req.user.id
+      });
+      if (!discarded) {
+        return res.status(404).json({ success: false, error: 'Contract creation draft not found' });
+      }
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('Discard contract creation draft error:', error);
       return res.status(500).json({ success: false, error: 'Server error' });
     }
   }

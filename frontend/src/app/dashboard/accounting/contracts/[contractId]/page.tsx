@@ -799,7 +799,11 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     key={item.id}
                     icon={FaFileInvoice}
                     title={item.productName}
-                    meta={`مقدار: ${item.quantity} · قیمت واحد: ${money(item.unitPrice)}`}
+                    meta={`مقدار: ${item.quantityPresentation?.status === 'RECONCILED'
+                      ? `${item.quantityPresentation.quantity} متر`
+                      : item.quantityPresentation?.status === 'REVIEW_REQUIRED'
+                        ? 'نیازمند بررسی مقدار'
+                        : item.quantity} · قیمت واحد: ${money(item.unitPrice)}`}
                     amount={money(item.totalPrice)}
                   />
                 ))}

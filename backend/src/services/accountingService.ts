@@ -23,6 +23,11 @@ import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprov
 import { lockFinancialApprovalRecord, publishCurrentApprovedPricingReadinessWithinTransaction,
   sealApprovedPricingAtFinancialApproval } from './approvedPricing';
 import { captureContractQuantityVersionAtFinancialApproval } from './shipmentQuantityProjectionStore';
+import { parseCanonicalProductGraph, projectCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
+import {
+  canonicalOptimizerDerivedLengthWitness,
+  reconcileOptimizerDerivedLongitudinalQuantity,
+} from './optimizerDerivedQuantityEvidence';
 import {
   buildAccountingFinancialTrend,
   buildOutstandingContractSnapshots,
@@ -717,6 +722,72 @@ const getAccountingInclude = () => ({
   payments: { include: { installments: true } }
 });
 
+type AccountingQuantityPresentation = {
+  status: 'RECONCILED' | 'REVIEW_REQUIRED';
+  quantity?: string;
+  unit?: 'meter';
+  evidenceOrigin?: string;
+};
+
+const buildAccountingQuantityPresentations = (contract: any) => {
+  const presentations = new Map<string, AccountingQuantityPresentation>();
+  const data = contract.contractData && typeof contract.contractData === 'object' && !Array.isArray(contract.contractData)
+    ? contract.contractData as Record<string, unknown>
+    : {};
+  const products = Array.isArray(data.products) ? data.products : [];
+  let graphRows: readonly { raw: any; projected: any }[] = [];
+  try {
+    if (contract.productGraphState?.graph) {
+      const graph = parseCanonicalProductGraph(contract.productGraphState.graph);
+      const projectedRows = projectCanonicalProductGraph(graph, 'accounting').products;
+      graphRows = graph.rows.map(raw => ({
+        raw,
+        projected: projectedRows.find(row => row.productRowId === raw.productRowId),
+      }));
+    }
+  } catch {
+    graphRows = [];
+  }
+
+  for (const item of contract.items || []) {
+    if (String(item.productType || '').toLowerCase() !== 'longitudinal' || !new Prisma.Decimal(item.quantity).eq(0)) continue;
+    const product = products.find((candidate: any) =>
+      candidate && typeof candidate === 'object' && !Array.isArray(candidate) &&
+      String(candidate.rowId ?? candidate.productRowId ?? '') === item.productRowId);
+    const graphRow = graphRows.find(row => row.raw.productRowId === item.productRowId);
+    if (!product || !graphRow?.projected || !item.productRowId) {
+      presentations.set(item.id, { status: 'REVIEW_REQUIRED' });
+      continue;
+    }
+    try {
+      const evidence = reconcileOptimizerDerivedLongitudinalQuantity({
+        productRowId: item.productRowId,
+        productId: item.productId,
+        productType: item.productType,
+        rawContractItemQuantity: item.quantity,
+        productSnapshot: product as Record<string, unknown>,
+        graphRequestedLengthMeters: canonicalOptimizerDerivedLengthWitness(
+          graphRow.raw,
+          graphRow.projected.lengthMeters,
+        ),
+        persistedDeliveries: contract.deliveries,
+        wizardDeliveries: data.deliveries,
+      });
+      presentations.set(item.id, evidence
+        ? {
+            status: 'RECONCILED',
+            quantity: evidence.sealedQuantity,
+            unit: evidence.unit,
+            evidenceOrigin: evidence.evidenceOrigin,
+          }
+        : { status: 'REVIEW_REQUIRED' });
+    } catch {
+      presentations.set(item.id, { status: 'REVIEW_REQUIRED' });
+    }
+  }
+  return presentations;
+};
+
 const attachAccountingCollections = async (contracts: any[]) => {
   const contractIds = contracts.map((contract) => contract.id);
   if (!contractIds.length) return contracts;
@@ -1059,6 +1130,7 @@ export const getAccountingContractDetail = async (contractId: string) => {
   });
 
   if (!contract) throw new Error('Contract not found');
+  const quantityPresentations = buildAccountingQuantityPresentations(contract);
   const [enriched] = await attachAccountingCollections([contract]);
   const row = await buildContractRow(enriched, settings);
   const [financialRecords, receivables, paymentEvents, tax, auditTrail, correctionRequests, flags, lifecycleRequests] = await Promise.all([
@@ -1093,6 +1165,7 @@ export const getAccountingContractDetail = async (contractId: string) => {
         productId: item.productId,
         productName: item.product?.namePersian || item.product?.name || item.description || 'قلم قرارداد',
         quantity: decimalToString(item.quantity),
+        quantityPresentation: quantityPresentations.get(item.id) ?? null,
         unitPrice: decimalToString(toRialDecimal(item.unitPrice, contract.currency)),
         totalPrice: decimalToString(toRialDecimal(item.totalPrice, contract.currency))
       })),

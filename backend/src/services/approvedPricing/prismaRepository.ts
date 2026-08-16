@@ -6,6 +6,7 @@ import {
   parseCanonicalProductGraph,
   projectCanonicalProductGraph,
 } from '@sabalanerp/contract-product-graph';
+import { canonicalOptimizerDerivedLengthWitness } from '../optimizerDerivedQuantityEvidence';
 import type {
   ApprovalLeaf,
   ApprovedPricingPersistenceContext,
@@ -163,7 +164,10 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
           baseAmountToman: row.baseAmountToman ?? null,
           totalAmountToman: row.totalAmountToman ?? null,
           requestedQuantity: row.quantity ?? null,
-          requestedLengthMeters: row.lengthMeters ?? null,
+          requestedLengthMeters: canonicalOptimizerDerivedLengthWitness(
+            graph.rows.find(item => item.productRowId === row.productRowId),
+            row.lengthMeters,
+          ) ?? null,
           requestedAreaSquareMeters: row.areaSquareMeters ?? null,
           operations: row.operations.map(operation => ({
             id: operation.id,

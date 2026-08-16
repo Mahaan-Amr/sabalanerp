@@ -42,6 +42,7 @@ import {
   normalizePersianFullName,
   validateOfflineOfferDecision
 } from '../services/hrOfferDecision';
+import { candidateIdentityMatches } from '../services/hrCandidateIdentityPolicy';
 import {
   assertPaperContractDraft,
   assertPaperContractReviewable,
@@ -1818,6 +1819,9 @@ router.post('/applications', requireActionPermission('MANAGE_RECRUITMENT_CASE'),
   const nationalCode = String(req.body.nationalCode || '').trim() || null;
   if (nationalCode && !isValidIranianNationalCode(nationalCode)) throw new Error('کد ملی معتبر نیست.');
   const candidate = nationalCode ? await prisma.hrCandidate.findUnique({ where: { nationalCode } }) : null;
+  if (candidate && !candidateIdentityMatches(candidate, { firstName, lastName, mobile })) {
+    throw Object.assign(new Error('کد ملی واردشده قبلاً با نام یا شماره همراه دیگری ثبت شده است. پرونده متقاضی موجود را باز کنید یا کد ملی را اصلاح کنید.'), { statusCode: 409 });
+  }
   const resolvedCandidate = candidate || await prisma.hrCandidate.create({ data: {
     firstName, lastName, mobile,
     nationalCode

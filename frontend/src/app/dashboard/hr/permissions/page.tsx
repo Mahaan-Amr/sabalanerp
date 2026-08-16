@@ -200,11 +200,14 @@ export default function PermissionsPage() {
         expiresAt: expiresAt ? toIsoDateTime(expiresAt) : undefined,
         reason: reason.trim(),
       });
-      setFeedback({ kind: 'success', title: `دسترسی‌های ${userName(selectedUser)} ذخیره شد.`, description: 'هیچ کاربر دیگری تغییر نکرد.' });
-      await loadBase();
+      setReason('');
+      setFeedback({ kind: 'success', title: `دسترسی‌های ${userName(selectedUser)} ذخیره شد.`, description: 'تغییرات در سرور ثبت شد و هیچ کاربر دیگری تغییر نکرد.' });
     } catch (error: any) {
-      setFeedback({ kind: 'error', title: error.response?.data?.error || 'ذخیره دسترسی‌ها ناموفق بود.', description: 'تغییرات انجام‌شده را بازبینی و دوباره ذخیره کنید.' });
-      await loadBase();
+      setFeedback({
+        kind: 'error',
+        title: error.response?.data?.error || error.message || 'ذخیره دسترسی‌ها ناموفق بود.',
+        description: 'انتخاب‌ها حفظ شده‌اند؛ پس از رفع خطا دوباره ذخیره کنید.',
+      });
     } finally { setSaving(false); }
   };
 

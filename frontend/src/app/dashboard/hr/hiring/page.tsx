@@ -96,6 +96,7 @@ export default function HiringCasesPage() {
   const [decisionDetail, setDecisionDetail] = useState<any>(null);
   const [archiveView, setArchiveView] = useState(initialContext.archived);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createError, setCreateError] = useState("");
   const [createDiscardOpen, setCreateDiscardOpen] = useState(false);
   const [inviteTarget, setInviteTarget] = useState<any>(null);
   const requestSequence = useRef(0);
@@ -192,13 +193,15 @@ export default function HiringCasesPage() {
     try {
       setBusy(true);
       setError("");
-      await hiringAPI.create(form);
-      setMessage("پرونده ساخته شد. مدیر شرکت باید برنامه ارزیابی را تعیین کند؛ سپس دعوت‌نامه ارسال می‌شود.");
+      setCreateError("");
+      const response = await hiringAPI.create(form);
+      const createdCandidate = response.data.data.candidate;
+      setMessage(`پرونده ${createdCandidate.firstName} ${createdCandidate.lastName} ساخته شد. کاربر دارای مجوز مدیریت برنامه ارزیابی شرکت باید پرونده را باز کند و برنامه را نهایی کند؛ سپس دعوت‌نامه ارسال می‌شود.`);
       setForm(blank);
       setCreateOpen(false);
       await load();
     } catch (cause) {
-      setError(hiringError(cause));
+      setCreateError(hiringError(cause));
     } finally {
       setBusy(false);
     }
@@ -237,7 +240,10 @@ export default function HiringCasesPage() {
         {
           label: "ایجاد متقاضی",
           icon: FaPlus,
-          onClick: () => setCreateOpen(true),
+          onClick: () => {
+            setCreateError("");
+            setCreateOpen(true);
+          },
           tone: "success",
         },
         {
@@ -275,6 +281,7 @@ export default function HiringCasesPage() {
         dismissible={!busy}
       >
         <ErpCard className="grid gap-3 p-4 sm:grid-cols-2">
+          {createError && <div className="sm:col-span-2"><ErpInlineState kind="error" title={createError} /></div>}
           <ErpInput
             className={field}
             placeholder="نام"

@@ -265,36 +265,62 @@ test('Sales landing and the first contract step use the minimal shared workflow 
 });
 
 test('Contract recovery presents takeover as primary and opens a blank independent contract', async ({ page }) => {
-  let acquireAttempts = 0;
-  await page.route('**/sales/contract-edit-sessions/*/acquire', async (route) => {
-    acquireAttempts += 1;
-    if (acquireAttempts > 1) {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          data: {
-            session: { leaseToken: 'e2e-fresh-contract-lease' },
-            recovery: null,
-          },
-        }),
-      });
-      return;
-    }
+  await login(page);
+  const currentUser = await page.evaluate(async () => {
+    const response = await fetch('/api/auth/me');
+    return (await response.json()).data;
+  });
+  const draftId = 'e2e-owned-creation-draft';
+  const recoveryPayload = {
+    version: 1,
+    updatedAt: Date.now(),
+    currentStep: 2,
+    contractDateChanged: false,
+    wizardData: {
+      contractKind: 'standard',
+      contractDate: '1405/05/05',
+      contractNumber: '',
+      creatorSequenceNumber: null,
+      customerId: 'e2e-customer',
+      customer: null,
+      projectId: '',
+      project: null,
+      selectedProductTypeForAddition: null,
+      products: [],
+      serviceRows: [],
+      deliveries: [],
+      payment: { payments: [], currency: 'تومان', totalContractAmount: 0 },
+      discount: null,
+      signature: null,
+    },
+  };
+  await page.route('**/sales/contract-edit-sessions/creation-draft/discover', async (route) => {
     await route.fulfill({
-      status: 409,
+      status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        success: false,
+        success: true,
         data: {
-          code: 'edit-session-owned-elsewhere',
-          recovery: null,
+          draftId,
+          activeElsewhere: true,
+          updatedAt: new Date().toISOString(),
+          recovery: {
+            scope: { userId: currentUser.id, draftId, schemaVersion: 2, baseRevision: 0 },
+            sequence: 1,
+            updatedAt: Date.now(),
+            payload: recoveryPayload,
+          },
         },
       }),
     });
   });
-  await login(page);
+  await page.route(`**/sales/contract-edit-sessions/${draftId}/discard`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true }),
+    });
+  });
   await page.evaluate(() => {
     localStorage.removeItem('contractWizardState');
     for (const key of Object.keys(localStorage)) {
@@ -337,8 +363,7 @@ test('Contract recovery presents takeover as primary and opens a blank independe
     .getByRole('button', { name: 'تاریخ قرارداد', exact: true })).toBeVisible();
   const freshDraftId = await page.evaluate(() => Object.entries(localStorage)
     .find(([key]) => key.startsWith('sabalan-contract-active-draft:'))?.[1]);
-  expect(freshDraftId).toBeTruthy();
-  expect(freshDraftId).not.toBe(lockedDraftId);
+  expect(freshDraftId).toBeUndefined();
 });
 
 test('Guard renders through the semantic interface in both themes and mobile width', async ({ page }) => {
@@ -935,6 +960,35 @@ test('Contract Creation keeps early and consequential steps accessible and respo
 
 test('Contract submission preserves input across an invalid response, succeeds on retry, and exits without resubmitting', async ({ page }) => {
   let submissionAttempts = 0;
+  await page.route('**/sales/contract-edit-sessions/**', async (route) => {
+    const request = route.request();
+    if (request.method() === 'POST' && request.url().endsWith('/acquire')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            session: { leaseToken: 'e2e-submission-lease' },
+            recovery: null,
+          },
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true }),
+    });
+  });
+  await page.route('**/sales/contract-edit-sessions/creation-draft/discover', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: null })
+    });
+  });
   await page.route('**/sales/contracts', async (route) => {
     if (route.request().method() !== 'POST') {
       await route.continue();
@@ -966,6 +1020,11 @@ test('Contract submission preserves input across an invalid response, succeeds o
 
   await login(page);
   await page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('sabalan-contract-active-draft:') || key.startsWith('contract-recovery:')) {
+        localStorage.removeItem(key);
+      }
+    }
     localStorage.setItem('contractWizardState', JSON.stringify({
       currentStep: 8,
       wizardData: {
@@ -973,7 +1032,7 @@ test('Contract submission preserves input across an invalid response, succeeds o
         contractDate: '1405/05/05',
         contractNumber: 'E2E-DRAFT',
         creatorSequenceNumber: null,
-        customerId: '',
+        customerId: 'e2e-customer',
         customer: null,
         projectId: '',
         project: null,

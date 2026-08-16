@@ -1052,6 +1052,10 @@ _Avoid_: normalizing unreconciled absence, reopening or resaving the Contract, i
 For a Product snapshot attached to Legacy No-Discount Evidence, explicit `isLayer: true` means the row is a non-discountable layer, while an omitted `isLayer` means the legacy wizard treated it as a non-layer; normalization records every row for which that historical omission is made explicit. A non-boolean value or contradictory layer evidence remains blocked for human review.
 _Avoid_: treating omission as non-layer outside the legacy no-discount boundary, discounting an explicit layer, normalizing malformed eligibility, or reopening the Contract to manufacture current evidence
 
+**Current Contract Discount Eligibility Evidence**:
+Every Product snapshot in a newly saved Contract explicitly identifies whether it is a layer: `isLayer: true` is non-discountable and `isLayer: false` is an ordinary row whose eligible base stone amount may receive a Contract Discount. An in-progress Contract Creation Draft from the prior wizard shape may upgrade an omitted flag to explicit `false`, while preserving explicit layers and blocking non-boolean or contradictory evidence.
+_Avoid_: persisting omission in a new Contract, changing an explicit layer into an ordinary row, losing an in-progress Draft solely because its ordinary rows predate explicit evidence, discounting add-ons or layers, or accepting malformed eligibility evidence
+
 **بازه تخفیف**:
 A manager-defined تومان range over the contract base stone subtotal that caps the allowed تخفیف قرارداد percentage. Ranges are non-overlapping, include their lower bound, exclude their upper bound, and allow no discount when no range matches.
 _Avoid_: overlapping ranges or fallback discount caps when no range matches

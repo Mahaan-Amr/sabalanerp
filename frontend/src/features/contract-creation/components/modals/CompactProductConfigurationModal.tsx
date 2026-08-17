@@ -22,6 +22,7 @@ import type {
   SubService
 } from '../../types/contract.types';
 import { productSupportsContractType } from '../../utils/productUtils';
+import { resolveProductConfigurationSourceWidthCm } from '../../utils/productConfigurationController';
 import {
   AutoGrowingDescription,
   CentralProductModalShell,
@@ -226,6 +227,41 @@ export function CompactProductConfigurationModal({
       ? productConfig.slabPolicyInput
       : undefined
   );
+  const materialAlreadyPaid = Boolean(
+    productConfig.parentProductRowId || productConfig.meta?.remainingSource
+  );
+
+  React.useEffect(() => {
+    if (
+      currentProductType !== 'longitudinal' ||
+      !materialAlreadyPaid ||
+      !productConfig.longitudinalPolicyInput ||
+      (
+        productConfig.longitudinalPolicyInput.baseMaterialPricing === 'paid-source-zero' &&
+        Number(productConfig.longitudinalPolicyInput.baseRateToman) === 0 &&
+        !productConfig.longitudinalPolicyInput.mandatoryEnabled
+      )
+    ) {
+      return;
+    }
+
+    setProductConfig(previous => ({
+      ...previous,
+      longitudinalPolicyInput: previous.longitudinalPolicyInput
+        ? {
+            ...previous.longitudinalPolicyInput,
+            baseMaterialPricing: 'paid-source-zero',
+            baseRateToman: parseCanonicalDecimal('0'),
+            mandatoryEnabled: false
+          }
+        : previous.longitudinalPolicyInput
+    }));
+  }, [
+    currentProductType,
+    materialAlreadyPaid,
+    productConfig.longitudinalPolicyInput,
+    setProductConfig
+  ]);
 
   React.useEffect(() => {
     if (
@@ -236,12 +272,21 @@ export function CompactProductConfigurationModal({
       const empty = createNewLongitudinalProductInput({
         ...POLICY_VERSION,
         sourceBatchId: sourceBatchId(selectedProduct.id),
-        motherWidthMeters: centimetersToMeters(Number(selectedProduct.widthValue) || 0),
+        motherWidthMeters: centimetersToMeters(
+          resolveProductConfigurationSourceWidthCm(productConfig, selectedProduct)
+        ),
         defaultMandatoryPercentage: parseCanonicalDecimal(
           String(productConfig.mandatoryPercentage || 20)
         ),
         sawKerfMeters: parseCanonicalDecimal('0.003'),
-        ...longitudinalCutRateSnapshot(longitudinalCutRate)
+        ...longitudinalCutRateSnapshot(longitudinalCutRate),
+        ...(materialAlreadyPaid
+          ? {
+              baseMaterialPricing: 'paid-source-zero' as const,
+              baseRateToman: parseCanonicalDecimal('0'),
+              mandatoryEnabled: false
+            }
+          : {})
       });
       const existingLengthMeters = Number(productConfig.length) > 0
         ? parseCanonicalDecimal(String(
@@ -422,6 +467,7 @@ export function CompactProductConfigurationModal({
     productConfig.calibrationCutEnabled,
     productConfig.slabCuttingMode,
     productConfig.slabCuttingPricePerSquareMeter,
+    materialAlreadyPaid,
     isEditMode,
     selectedProduct.id,
     selectedProduct.widthValue,

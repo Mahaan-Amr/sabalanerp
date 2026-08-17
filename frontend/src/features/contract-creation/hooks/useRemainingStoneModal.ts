@@ -375,7 +375,7 @@ export const useRemainingStoneModal = (options: UseRemainingStoneModalOptions) =
         rowId: childRowIds[index],
         productId: sourceProduct.productId,
         product: sourceProduct.product,
-        productType: sourceProduct.productType,
+        productType: remainingStoneConfig.productType || 'longitudinal',
         stoneCode: `${sourceProduct.stoneCode}-R${selectedRemainingStone.id.slice(-4)}-${index + 1}`,
         stoneName:
           remainingStoneConfig.stoneName ||

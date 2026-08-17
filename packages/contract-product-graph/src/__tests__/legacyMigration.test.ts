@@ -859,4 +859,168 @@ const longitudinalPolicyInput = ({
   }
 }
 
+{
+  const remainingChild = ({
+    rowId,
+    lengthMeters,
+    cuttingCost,
+    toolAmount
+  }: {
+    rowId: string;
+    lengthMeters: string;
+    cuttingCost: number;
+    toolAmount: number;
+  }) => ({
+    rowId,
+    productRowId: rowId,
+    productId: 'catalog-marble',
+    productType: 'longitudinal',
+    parentProductRowId: 'source-stair-row',
+    stoneName: 'مرمریت (از باقی‌مانده)',
+    originalTotalPrice: 0,
+    cuttingCost,
+    totalSubServiceCost: toolAmount,
+    totalPrice: cuttingCost + toolAmount,
+    operationPolicyInput: {
+      policyVersion: policy.calculation,
+      pricingPolicyVersion: policy.pricing,
+      roundingPolicyVersion: policy.rounding,
+      productRowId: rowId,
+      lengthMeters,
+      widthMeters: '0.05',
+      quantity: 1,
+      groups: [{ operationGroupId: `${rowId}:group`, scope: '1' }],
+      tools: [{
+        toolSelectionId: `${rowId}:tool`,
+        operationGroupId: `${rowId}:group`,
+        catalogItemId: 'tool-half-round',
+        catalogSnapshotVersion: 'catalog-v1',
+        name: 'نیم لول',
+        unit: 'meter',
+        rateToman: '50000',
+        edges: ['front', 'back']
+      }],
+      finishings: []
+    }
+  });
+  const result = planLegacyProductGraphMigration({
+    contractId: 'remaining-stone-child-tools',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      rowId: 'source-stair-row',
+      productRowId: 'source-stair-row',
+      productId: 'catalog-marble',
+      productType: 'stair',
+      stoneName: 'مرمریت منبع',
+      totalPrice: 0
+    }, remainingChild({
+      rowId: 'remaining-child-1',
+      lengthMeters: '1.2',
+      cuttingCost: 24000,
+      toolAmount: 120000
+    }), remainingChild({
+      rowId: 'remaining-child-2',
+      lengthMeters: '0.54',
+      cuttingCost: 11800,
+      toolAmount: 54000
+    })]
+  });
+
+  assert.equal(
+    result.ok,
+    true,
+    result.ok ? undefined : JSON.stringify(result.conflicts)
+  );
+  if (result.ok) {
+    assert.equal(result.reconciliation.canonicalTotalAmountToman, '209800');
+    assert.deepEqual(
+      result.graph.rows.slice(1).map(row => row.commercial.totalAmountToman),
+      ['144000', '65800']
+    );
+    assert.deepEqual(
+      result.graph.rows.slice(1).map(row => row.parentProductRowId),
+      ['source-stair-row', 'source-stair-row']
+    );
+  }
+
+  const canonicalInput = {
+    ...longitudinalPolicyInput({
+      sourceBatchId: 'remaining-child-canonical-source',
+      lengthMeters: '1',
+      widthMeters: '0.2'
+    }),
+    baseMaterialPricing: 'paid-source-zero' as const,
+    baseRateToman: '0',
+    mandatoryEnabled: false
+  };
+  const canonicalCalculation = calculateLongitudinalProduct(canonicalInput);
+  assert.equal(
+    canonicalCalculation.ok,
+    true,
+    canonicalCalculation.ok
+      ? undefined
+      : JSON.stringify(canonicalCalculation.conflicts)
+  );
+  if (!canonicalCalculation.ok) {
+    throw new Error('expected canonical remaining-child calculation');
+  }
+  const canonicalAmount = new Decimal(
+    canonicalCalculation.result.totalAmountToman
+  ).plus('50000').toFixed();
+  const canonicalChildResult = planLegacyProductGraphMigration({
+    contractId: 'remaining-child-canonical-policy',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      rowId: 'canonical-parent',
+      productId: 'catalog-marble',
+      productType: 'stair',
+      totalPrice: 0
+    }, {
+      rowId: 'canonical-child',
+      productId: 'catalog-marble',
+      productType: 'longitudinal',
+      parentProductRowId: 'canonical-parent',
+      cuttingCost: 999,
+      totalPrice: Number(canonicalAmount),
+      longitudinalPolicyInput: canonicalInput,
+      operationPolicyInput: {
+        policyVersion: policy.calculation,
+        pricingPolicyVersion: policy.pricing,
+        roundingPolicyVersion: policy.rounding,
+        productRowId: 'canonical-child',
+        lengthMeters: '1',
+        widthMeters: '0.2',
+        quantity: 1,
+        groups: [{ operationGroupId: 'canonical-child-group', scope: '1' }],
+        tools: [{
+          toolSelectionId: 'canonical-child-tool',
+          operationGroupId: 'canonical-child-group',
+          catalogItemId: 'tool-half-round',
+          catalogSnapshotVersion: 'catalog-v1',
+          name: 'نیم لول',
+          unit: 'meter',
+          rateToman: '50000',
+          edges: ['front']
+        }],
+        finishings: []
+      }
+    }]
+  });
+  assert.equal(
+    canonicalChildResult.ok,
+    true,
+    canonicalChildResult.ok
+      ? undefined
+      : JSON.stringify(canonicalChildResult.conflicts)
+  );
+  if (canonicalChildResult.ok) {
+    assert.equal(
+      canonicalChildResult.graph.rows[1]?.commercial.totalAmountToman,
+      canonicalAmount
+    );
+  }
+}
+
 console.log('legacy migration tests passed');

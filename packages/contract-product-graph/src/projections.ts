@@ -28,6 +28,14 @@ export interface CanonicalProjectedOperation {
   readonly amountToman: string;
 }
 
+export interface CanonicalProjectedPricingComponent {
+  readonly id: string;
+  readonly kind: string;
+  readonly quantity: string;
+  readonly rateToman: string;
+  readonly amountToman: string;
+}
+
 export interface CanonicalProjectedProduct {
   readonly productRowId: string;
   readonly parentProductRowId?: string;
@@ -41,6 +49,7 @@ export interface CanonicalProjectedProduct {
   readonly areaSquareMeters?: string;
   readonly baseAmountToman?: string;
   readonly totalAmountToman: string;
+  readonly pricingComponents: readonly CanonicalProjectedPricingComponent[];
   readonly operations: readonly CanonicalProjectedOperation[];
   readonly childRowIds: readonly string[];
   readonly layerConfigurationIds: readonly string[];
@@ -90,11 +99,96 @@ const operationsFor = (
   ].filter((item): item is CanonicalProjectedOperation => item !== null);
 };
 
+const canonicalPricingComponentsFor = (
+  row: CanonicalProductRow,
+  operations: readonly CanonicalProjectedOperation[]
+): CanonicalProjectedPricingComponent[] => {
+  const snapshot = row.commercial.calculationSnapshot;
+  const rawPricingLines = snapshot && Array.isArray(snapshot.pricingLines)
+    ? snapshot.pricingLines
+    : [];
+  let intrinsic = rawPricingLines.flatMap((value): CanonicalProjectedPricingComponent[] => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const line = value as Record<string, unknown>;
+    if (
+      typeof line.lineId !== 'string' ||
+      typeof line.quantity !== 'string' ||
+      typeof line.rateToman !== 'string' ||
+      typeof line.amountToman !== 'string'
+    ) return [];
+    return [{
+      id: line.lineId,
+      kind: line.lineId,
+      quantity: line.quantity,
+      rateToman: line.rateToman,
+      amountToman: line.amountToman
+    }];
+  });
+  const materialPricing = snapshot?.materialPricing;
+  const materialWasPaidInSource = Boolean(
+    materialPricing &&
+    typeof materialPricing === 'object' &&
+    !Array.isArray(materialPricing) &&
+    (materialPricing as Record<string, unknown>).reason === 'paid-in-source-product'
+  );
+  if (materialWasPaidInSource) {
+    intrinsic = intrinsic.map(component =>
+      component.kind === 'base-material' || component.kind === 'slab-material'
+        ? { ...component, rateToman: '0', amountToman: '0' }
+        : component
+    );
+    const remainderCutting = snapshot?.remainderCutting;
+    if (remainderCutting && typeof remainderCutting === 'object' && !Array.isArray(remainderCutting)) {
+      const remainder = remainderCutting as Record<string, unknown>;
+      if (typeof remainder.allocationId === 'string' && typeof remainder.amountToman === 'string') {
+        intrinsic = [
+          ...intrinsic.filter(component =>
+            component.kind === 'base-material' || component.kind === 'slab-material'
+          ),
+          {
+            id: `remainder-cutting:${remainder.allocationId}`,
+            kind: 'remainder-cutting',
+            quantity: remainder.amountToman,
+            rateToman: '1',
+            amountToman: remainder.amountToman
+          }
+        ];
+      }
+    }
+  }
+  const hasProjectedBase = intrinsic.some(component =>
+    component.kind === 'base-material' || component.kind === 'slab-material'
+  );
+  if (!hasProjectedBase && row.commercial.baseAmountToman !== undefined) {
+    const pricingQuantity = row.commercial.requestedAreaSquareMeters ??
+      row.commercial.requestedQuantity ??
+      row.commercial.requestedLengthMeters ??
+      '1';
+    intrinsic.unshift({
+      id: 'base-material',
+      kind: 'base-material',
+      quantity: pricingQuantity,
+      rateToman: row.commercial.baseRateToman ?? row.commercial.baseAmountToman,
+      amountToman: row.commercial.baseAmountToman
+    });
+  }
+  const attached = operations.map(operation => ({
+    id: operation.id,
+    kind: operation.kind,
+    quantity: operation.quantity,
+    rateToman: operation.rateToman,
+    amountToman: operation.amountToman
+  }));
+  return [...intrinsic, ...attached];
+};
+
 export const projectCanonicalProductGraph = (
   graph: CanonicalProductGraph,
   audience: CanonicalProjectionAudience
 ): CanonicalContractProjection => {
-  const products = graph.rows.map(row => ({
+  const products = graph.rows.map(row => {
+    const operations = operationsFor(row, graph.operationGroups, graph.toolSelections, graph.finishingSelections);
+    return {
     productRowId: row.productRowId,
     ...(row.parentProductRowId ? { parentProductRowId: row.parentProductRowId } : {}),
     ...(row.sourceProductRowId ? { sourceProductRowId: row.sourceProductRowId } : {}),
@@ -112,7 +206,8 @@ export const projectCanonicalProductGraph = (
     ...(row.commercial.baseAmountToman !== undefined
       ? { baseAmountToman: row.commercial.baseAmountToman } : {}),
     totalAmountToman: row.commercial.totalAmountToman ?? '0',
-    operations: operationsFor(row, graph.operationGroups, graph.toolSelections, graph.finishingSelections),
+    pricingComponents: canonicalPricingComponentsFor(row, operations),
+    operations,
     childRowIds: graph.rows
       .filter(candidate => candidate.parentProductRowId === row.productRowId ||
         candidate.sourceProductRowId === row.productRowId)
@@ -123,7 +218,8 @@ export const projectCanonicalProductGraph = (
     remainingStoneIds: graph.remainingStones
       .filter(stone => stone.ownerProductRowId === row.productRowId)
       .map(stone => stone.remainingStoneId)
-  }));
+    };
+  });
   const totalAmountToman = graph.rows.reduce(
     (sum, row) => sum + BigInt(row.commercial.totalAmountToman ?? '0'),
     0n

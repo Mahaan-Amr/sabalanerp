@@ -270,13 +270,43 @@ const projectApprovedPricingRows = (input: {
     const base = money(graphRow.baseAmountToman, `Product ${graphRow.productRowId} base amount`);
     const total = money(graphRow.totalAmountToman, `Product ${graphRow.productRowId} all-in amount`);
     if (new Prisma.Decimal(base).lt(0) || new Prisma.Decimal(total).lt(0)) throw new Error(`Product ${graphRow.productRowId} pricing cannot be negative`);
-    const components: Record<string, string> = { base };
-    for (const operation of [...graphRow.operations].sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`))) {
-      const key = `${operation.kind}:${requiredString(operation.id, 'Attached component identity')}`;
-      if (components[key]) throw new Error(`Product ${graphRow.productRowId} attached component identities are duplicated`);
-      const amount = money(operation.amountToman, 'Attached component amount');
-      if (new Prisma.Decimal(amount).lt(0)) throw new Error('Attached component amount cannot be negative');
-      components[key] = amount;
+    const components: Record<string, string> = {};
+    if (graphRow.pricingComponents && graphRow.pricingComponents.length > 0) {
+      for (const component of [...graphRow.pricingComponents]
+        .sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`))) {
+        const kind = requiredString(component.kind, 'Pricing component kind');
+        const id = requiredString(component.id, 'Pricing component identity');
+        const key = `${kind}:${id}`;
+        if (components[key]) throw new Error(`Product ${graphRow.productRowId} pricing component identities are duplicated`);
+        const componentQuantity = new Prisma.Decimal(exact(component.quantity, 12, `Pricing component ${key} quantity`));
+        const rate = new Prisma.Decimal(money(component.rateToman, `Pricing component ${key} rate`));
+        const amount = money(component.amountToman, `Pricing component ${key} amount`);
+        if (componentQuantity.lt(0) || rate.lt(0) || new Prisma.Decimal(amount).lt(0)) {
+          throw new Error('Pricing component quantity, rate, and amount cannot be negative');
+        }
+        components[key] = amount;
+      }
+      const baseComponents = Object.entries(components)
+        .filter(([key]) => key.startsWith('base-material:') || key.startsWith('slab-material:'));
+      if (baseComponents.length !== 1 || baseComponents[0]?.[1] !== base) {
+        throw new Error(`Product ${graphRow.productRowId} canonical base component conflicts with base amount`);
+      }
+      for (const operation of graphRow.operations) {
+        const key = `${operation.kind}:${requiredString(operation.id, 'Attached component identity')}`;
+        const amount = money(operation.amountToman, 'Attached component amount');
+        if (components[key] !== amount) {
+          throw new Error(`Product ${graphRow.productRowId} attached component evidence conflicts with pricing components`);
+        }
+      }
+    } else {
+      components.base = base;
+      for (const operation of [...graphRow.operations].sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`))) {
+        const key = `${operation.kind}:${requiredString(operation.id, 'Attached component identity')}`;
+        if (components[key]) throw new Error(`Product ${graphRow.productRowId} attached component identities are duplicated`);
+        const amount = money(operation.amountToman, 'Attached component amount');
+        if (new Prisma.Decimal(amount).lt(0)) throw new Error('Attached component amount cannot be negative');
+        components[key] = amount;
+      }
     }
     const componentTotal = Object.values(components).reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0));
     if (!componentTotal.eq(total)) throw new Error(`Product ${graphRow.productRowId} attached component evidence conflicts with all-in amount`);

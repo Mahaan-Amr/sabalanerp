@@ -169,6 +169,7 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
             row.lengthMeters,
           ) ?? null,
           requestedAreaSquareMeters: row.areaSquareMeters ?? null,
+          pricingComponents: row.pricingComponents,
           operations: row.operations.map(operation => ({
             id: operation.id,
             kind: operation.kind,

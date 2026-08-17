@@ -65,6 +65,48 @@ test('freezes scale-three quantity, all-in attached costs, discount, context, an
   });
 });
 
+test('seals an existing longitudinal contract from complete canonical pricing components without repricing it', () => {
+  const source = approvedPricingSourceFixture();
+  (source.contract.contractData as any).discount = {
+    enabled: false, baseSubtotal: '5700000', percent: '0', amount: '0', currency: 'تومان',
+  };
+  source.leaf.amount = '67500000';
+  source.leaf.invoiceItems = [{
+    ...source.leaf.invoiceItems[0]!, totalPrice: '67500000',
+  }];
+  source.contract.items = [{ ...source.contract.items[0]!, totalPrice: '6750000' }];
+  source.contract.currentItems = [{ ...source.contract.currentItems[0]!, totalPrice: '6750000' }];
+  source.contract.productGraph = {
+    ...source.contract.productGraph!,
+    totalAmountToman: '6750000',
+    rows: [{
+      ...source.contract.productGraph!.rows[0]!,
+      baseAmountToman: '5700000',
+      totalAmountToman: '6750000',
+      operations: [{ id: 'tool-1', kind: 'tool', amountToman: '750000' }],
+      pricingComponents: [{
+        id: 'base-material', kind: 'base-material', quantity: '6',
+        rateToman: '950000', amountToman: '5700000',
+      }, {
+        id: 'longitudinal-cut', kind: 'longitudinal-cut', quantity: '15',
+        rateToman: '20000', amountToman: '300000',
+      }, {
+        id: 'tool-1', kind: 'tool', quantity: '15',
+        rateToman: '50000', amountToman: '750000',
+      }],
+    } as any],
+  };
+
+  const version = buildApprovedPricingVersion(source, 1, 'existing-contract-version');
+  assert.equal(version.grossAmount, '6750000.000000000000');
+  assert.deepEqual(version.rows[0]?.componentEvidence, {
+    'base-material:base-material': '5700000.000000000000',
+    discountBasis: '5700000.000000000000',
+    'longitudinal-cut:longitudinal-cut': '300000.000000000000',
+    'tool:tool-1': '750000.000000000000',
+  });
+});
+
 test('accepts explicit no-discount evidence without deriving a default', () => {
   const source = approvedPricingSourceFixture();
   (source.contract.contractData as any).discount = {
@@ -501,6 +543,28 @@ test('missing and conflicting evidence fail closed', () => {
     rows: [{ ...conflictingComponents.contract.productGraph!.rows[0]!, totalAmountToman: '1251' }],
   };
   assert.throws(() => buildApprovedPricingVersion(conflictingComponents, 1, 'v1'), /component evidence conflicts/);
+
+  const conflictingProjectedOperation = approvedPricingSourceFixture();
+  conflictingProjectedOperation.contract.productGraph = {
+    ...conflictingProjectedOperation.contract.productGraph!,
+    rows: [{
+      ...conflictingProjectedOperation.contract.productGraph!.rows[0]!,
+      pricingComponents: [{
+        id: 'base-material', kind: 'base-material', quantity: '1',
+        rateToman: '1000', amountToman: '1000',
+      }, {
+        id: 'tool-1', kind: 'tool', quantity: '1',
+        rateToman: '149', amountToman: '149',
+      }, {
+        id: 'finish-1', kind: 'finishing', quantity: '1',
+        rateToman: '100', amountToman: '100',
+      }],
+    } as any],
+  };
+  assert.throws(
+    () => buildApprovedPricingVersion(conflictingProjectedOperation, 1, 'projected-operation-conflict'),
+    /attached component evidence conflicts with pricing components/
+  );
 
   const conflictingGraphTotal = approvedPricingSourceFixture();
   conflictingGraphTotal.contract.productGraph = {

@@ -339,6 +339,55 @@ assert.deepEqual(getFreshContractProductDefaults('longitudinal'), {
     assert.equal(resolved.draft.calibrationCutEnabled, true);
   }
 }
+
+{
+  const automaticCalibrationDraft = makeContractProduct({
+    length: 10,
+    width: 20,
+    quantity: 2,
+    squareMeters: 4,
+    pricePerSquareMeter: 1000000,
+    lengthUnit: 'm',
+    widthUnit: 'cm',
+    calibrationCutEnabled: false,
+    longitudinalPolicyInput: {
+      calculationPolicyVersion: 'calculation-v1',
+      packingPolicyVersion: 'packing-v1',
+      pricingPolicyVersion: 'pricing-v1',
+      roundingPolicyVersion: 'rounding-v1',
+      sourceBatchId: parseStableIdentity('source-batch', 'automatic-calibration-source'),
+      motherWidthMeters: parseCanonicalDecimal('0.4'),
+      lengthMeters: parseCanonicalDecimal('10'),
+      widthMeters: parseCanonicalDecimal('0.2'),
+      requestedAreaSquareMeters: parseCanonicalDecimal('4'),
+      quantity: 2,
+      lastManualField: 'quantity',
+      lastManualDimension: 'width',
+      lengthDisplayUnit: 'm',
+      widthDisplayUnit: 'cm',
+      baseRateToman: parseCanonicalDecimal('1000000'),
+      mandatoryEnabled: false,
+      mandatoryPercentage: parseCanonicalDecimal('20'),
+      rememberedMandatoryPercentage: parseCanonicalDecimal('20'),
+      sawKerfEnabled: false,
+      sawKerfMeters: parseCanonicalDecimal('0.003'),
+      calibrationEnabled: false,
+      calibrationSelection: 'automatic',
+      longitudinalCutRateToman: parseCanonicalDecimal('20000'),
+      calibrationCutRateToman: parseCanonicalDecimal('20000')
+    }
+  });
+
+  const resolved = resolveLongitudinalDraftForSave(automaticCalibrationDraft);
+  assert.equal(resolved.ok, true);
+  if (resolved.ok) {
+    assert.equal(resolved.draft.calibrationCutEnabled, true);
+    assert.equal(resolved.calculation.result.calibrationSelection, 'automatic');
+    assert.equal(resolved.calculation.result.packingPlan.longitudinalCutMeters, '10');
+    assert.equal(resolved.calculation.result.packingPlan.calibrationMeters, '10');
+    assert.equal(resolved.calculation.result.totalAmountToman, '4400000');
+  }
+}
 assert.deepEqual(getFreshContractProductDefaults('stair'), {
   quantity: 1,
   calibrationCutEnabled: false

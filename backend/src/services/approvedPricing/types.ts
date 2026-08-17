@@ -29,6 +29,14 @@ export type ApprovedPricingOperationSource = {
   amountToman: string;
 };
 
+export type ApprovedPricingComponentSource = {
+  id: string;
+  kind: string;
+  quantity: string;
+  rateToman: string;
+  amountToman: string;
+};
+
 export type ApprovedPricingGraphRowSource = {
   productRowId: string;
   catalogProductId: string;
@@ -39,6 +47,7 @@ export type ApprovedPricingGraphRowSource = {
   requestedQuantity: string | null;
   requestedLengthMeters: string | null;
   requestedAreaSquareMeters: string | null;
+  pricingComponents?: readonly ApprovedPricingComponentSource[];
   operations: readonly ApprovedPricingOperationSource[];
 };
 

@@ -443,6 +443,10 @@ _Avoid_: merging the source catalogs just because contract rows share one shape
 The customer-facing confirmation and print summary show the non-service product subtotal separately from billable cutting, tools, finishing, and standalone service rows, while the persisted product `totalPrice` remains the canonical all-in product amount. The final payable total counts every billable fact exactly once.
 _Avoid_: omitting a priced operation from the final payable amount, adding a displayed dependent service on top of an already all-in product total, presenting non-billable حکمی cross-cutting as a customer charge, or silently rewriting a finalized historical contract
 
+**شواهد اجزای قیمت برای تأیید مالی**:
+The accounting projection carries the saved canonical base material, mandatory, cutting, calibration, tool, and finishing price components exactly once. Financial approval verifies those persisted components against the unchanged all-in product amount; it never re-runs product configuration or lets accounting repair the amount. A graphless historical contract may proceed only through the reviewed and audited legacy seal path that preserves its stored final amount.
+_Avoid_: projecting only attached tools and finishing while dropping intrinsic cutting lines, changing a seller's saved price during financial approval, blocking a valid graphless legacy contract forever, allowing an accountant to edit a mismatch away, or accepting a genuine component-versus-total conflict
+
 **توضیحات ردیف خدمات قرارداد**:
 A per-contract note attached to a selected standalone service row, prefilled from the catalog description when available but editable without changing the catalog.
 _Avoid_: editing the catalog service description when the user only means the current contract row

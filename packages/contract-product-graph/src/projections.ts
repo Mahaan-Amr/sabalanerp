@@ -146,12 +146,26 @@ const canonicalPricingComponentsFor = (
   };
   let intrinsic = rawPricingLines.map(value => componentFromLine(value));
   const materialPricing = snapshot?.materialPricing;
-  const materialWasPaidInSource = Boolean(
+  let materialWasPaidInSource = false;
+  if (
     materialPricing &&
     typeof materialPricing === 'object' &&
     !Array.isArray(materialPricing) &&
     (materialPricing as Record<string, unknown>).reason === 'paid-in-source-product'
-  );
+  ) {
+    const material = materialPricing as Record<string, unknown>;
+    try {
+      if (
+        typeof material.amountToman !== 'string' ||
+        parseCanonicalDecimal(material.amountToman) !== '0'
+      ) {
+        throw new TypeError('Paid source material amount must be zero.');
+      }
+    } catch {
+      throw new Error(`Product ${row.productRowId} material pricing evidence is malformed`);
+    }
+    materialWasPaidInSource = true;
+  }
   if (materialWasPaidInSource) {
     intrinsic = intrinsic.map(component =>
       component.kind === 'base-material' || component.kind === 'slab-material'
@@ -251,7 +265,9 @@ export const projectCanonicalProductGraph = (
     ...(row.commercial.baseAmountToman !== undefined
       ? { baseAmountToman: row.commercial.baseAmountToman } : {}),
     totalAmountToman: row.commercial.totalAmountToman ?? '0',
-    pricingComponents: canonicalPricingComponentsFor(row, operations, graph.layerConfigurations),
+    pricingComponents: audience === 'accounting'
+      ? canonicalPricingComponentsFor(row, operations, graph.layerConfigurations)
+      : [],
     operations,
     childRowIds: graph.rows
       .filter(candidate => candidate.parentProductRowId === row.productRowId ||

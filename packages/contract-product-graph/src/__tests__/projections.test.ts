@@ -120,6 +120,24 @@ assert.deepEqual(paidSourceProjection.products[0]?.pricingComponents, [{
   amountToman: '300000'
 }]);
 
+const conflictingPaidMaterialGraph = {
+  ...paidSourceRemainderGraph,
+  rows: [{
+    ...paidSourceRemainderGraph.rows[0]!,
+    commercial: {
+      ...paidSourceRemainderGraph.rows[0]!.commercial,
+      calculationSnapshot: {
+        ...paidSourceRemainderGraph.rows[0]!.commercial.calculationSnapshot,
+        materialPricing: { amountToman: '999', reason: 'paid-in-source-product' }
+      }
+    }
+  }]
+} as unknown as CanonicalProductGraph;
+assert.throws(
+  () => projectCanonicalProductGraph(conflictingPaidMaterialGraph, 'accounting'),
+  /material pricing evidence is malformed/
+);
+
 const reallocatedPaidSourceGraph = parseCanonicalProductGraph({
   ...paidSourceRemainderGraph,
   rows: [{
@@ -272,5 +290,10 @@ const malformedPricingGraph = parseCanonicalProductGraph({
 assert.throws(
   () => projectCanonicalProductGraph(malformedPricingGraph, 'accounting'),
   /pricing component is malformed/
+);
+assert.doesNotThrow(() => projectCanonicalProductGraph(malformedPricingGraph, 'step5'));
+assert.deepEqual(
+  projectCanonicalProductGraph(malformedPricingGraph, 'step5').products[0]?.pricingComponents,
+  []
 );
 console.log('canonical projection tests passed');

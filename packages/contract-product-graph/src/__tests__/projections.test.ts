@@ -84,14 +84,10 @@ const accountingPricingProjection = projectCanonicalProductGraph(pricedLongitudi
 assert.deepEqual(accountingPricingProjection.products[0]?.pricingComponents, [{
   id: 'base-material',
   kind: 'base-material',
-  quantity: '6',
-  rateToman: '950000',
   amountToman: '5700000'
 }, {
   id: 'longitudinal-cut',
   kind: 'longitudinal-cut',
-  quantity: '15',
-  rateToman: '20000',
   amountToman: '300000'
 }]);
 
@@ -116,14 +112,10 @@ const paidSourceProjection = projectCanonicalProductGraph(paidSourceRemainderGra
 assert.deepEqual(paidSourceProjection.products[0]?.pricingComponents, [{
   id: 'base-material',
   kind: 'base-material',
-  quantity: '6',
-  rateToman: '0',
   amountToman: '0'
 }, {
   id: 'longitudinal-cut',
   kind: 'longitudinal-cut',
-  quantity: '15',
-  rateToman: '20000',
   amountToman: '300000'
 }]);
 
@@ -147,10 +139,54 @@ const reallocatedPaidSourceGraph = parseCanonicalProductGraph({
 });
 const reallocatedProjection = projectCanonicalProductGraph(reallocatedPaidSourceGraph, 'accounting');
 assert.deepEqual(reallocatedProjection.products[0]?.pricingComponents, [{
-  id: 'base-material', kind: 'base-material', quantity: '6',
-  rateToman: '0', amountToman: '0'
+  id: 'base-material', kind: 'base-material', amountToman: '0'
 }, {
   id: 'remainder-cutting:reallocated-remainder', kind: 'remainder-cutting',
-  quantity: '250000', rateToman: '1', amountToman: '250000'
+  amountToman: '250000'
 }]);
+
+const pricedSlabGraph = parseCanonicalProductGraph({
+  ...pricedLongitudinalGraph,
+  rows: [{
+    ...pricedLongitudinalGraph.rows[0],
+    productRowId: 'priced-slab-row', productType: 'slab',
+    commercial: {
+      baseAmountToman: '5000000', totalAmountToman: '5350000',
+      calculationSnapshot: {
+        materialPricingLine: {
+          lineId: 'slab-material', quantity: '5', rateToman: '1000000', amountToman: '5000000'
+        },
+        cuttingPricingLines: [{
+          lineId: 'slab-cut-longitudinal', quantity: '10', rateToman: '20000', amountToman: '200000'
+        }],
+        verticalCutPricingLine: {
+          lineId: 'slab-cut-vertical', quantity: '5', rateToman: '30000', amountToman: '150000'
+        }
+      }
+    }
+  }]
+});
+const slabProjection = projectCanonicalProductGraph(pricedSlabGraph, 'accounting');
+assert.deepEqual(slabProjection.products[0]?.pricingComponents, [{
+  id: 'slab-material', kind: 'slab-material', amountToman: '5000000'
+}, {
+  id: 'slab-cut-longitudinal', kind: 'slab-cut-longitudinal', amountToman: '200000'
+}, {
+  id: 'slab-cut-vertical', kind: 'slab-cut-vertical', amountToman: '150000'
+}]);
+
+const malformedPricingGraph = parseCanonicalProductGraph({
+  ...pricedLongitudinalGraph,
+  rows: [{
+    ...pricedLongitudinalGraph.rows[0],
+    commercial: {
+      ...pricedLongitudinalGraph.rows[0]!.commercial,
+      calculationSnapshot: { pricingLines: [{ lineId: 'base-material' }] }
+    }
+  }]
+});
+assert.throws(
+  () => projectCanonicalProductGraph(malformedPricingGraph, 'accounting'),
+  /pricing component is malformed/
+);
 console.log('canonical projection tests passed');

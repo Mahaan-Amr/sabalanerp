@@ -32,8 +32,6 @@ export type ApprovedPricingOperationSource = {
 export type ApprovedPricingComponentSource = {
   id: string;
   kind: string;
-  quantity: string;
-  rateToman: string;
   amountToman: string;
 };
 

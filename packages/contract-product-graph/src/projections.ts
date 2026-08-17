@@ -31,8 +31,6 @@ export interface CanonicalProjectedOperation {
 export interface CanonicalProjectedPricingComponent {
   readonly id: string;
   readonly kind: string;
-  readonly quantity: string;
-  readonly rateToman: string;
   readonly amountToman: string;
 }
 
@@ -104,25 +102,37 @@ const canonicalPricingComponentsFor = (
   operations: readonly CanonicalProjectedOperation[]
 ): CanonicalProjectedPricingComponent[] => {
   const snapshot = row.commercial.calculationSnapshot;
-  const rawPricingLines = snapshot && Array.isArray(snapshot.pricingLines)
-    ? snapshot.pricingLines
-    : [];
-  let intrinsic = rawPricingLines.flatMap((value): CanonicalProjectedPricingComponent[] => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const rawPricingLines: unknown[] = [];
+  if (snapshot) {
+    if (row.productType === 'slab') {
+      if (snapshot.materialPricingLine !== undefined) rawPricingLines.push(snapshot.materialPricingLine);
+      if (snapshot.cuttingPricingLines !== undefined) {
+        if (!Array.isArray(snapshot.cuttingPricingLines)) {
+          throw new Error(`Product ${row.productRowId} slab cutting pricing lines are malformed`);
+        }
+        rawPricingLines.push(...snapshot.cuttingPricingLines);
+      }
+      if (snapshot.verticalCutPricingLine !== undefined) rawPricingLines.push(snapshot.verticalCutPricingLine);
+    } else if (snapshot.pricingLines !== undefined) {
+      if (!Array.isArray(snapshot.pricingLines)) {
+        throw new Error(`Product ${row.productRowId} pricing lines are malformed`);
+      }
+      rawPricingLines.push(...snapshot.pricingLines);
+    }
+  }
+  let intrinsic = rawPricingLines.map((value): CanonicalProjectedPricingComponent => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`Product ${row.productRowId} pricing component is malformed`);
+    }
     const line = value as Record<string, unknown>;
-    if (
-      typeof line.lineId !== 'string' ||
-      typeof line.quantity !== 'string' ||
-      typeof line.rateToman !== 'string' ||
-      typeof line.amountToman !== 'string'
-    ) return [];
-    return [{
+    if (typeof line.lineId !== 'string' || typeof line.amountToman !== 'string') {
+      throw new Error(`Product ${row.productRowId} pricing component is malformed`);
+    }
+    return {
       id: line.lineId,
       kind: line.lineId,
-      quantity: line.quantity,
-      rateToman: line.rateToman,
       amountToman: line.amountToman
-    }];
+    };
   });
   const materialPricing = snapshot?.materialPricing;
   const materialWasPaidInSource = Boolean(
@@ -134,49 +144,41 @@ const canonicalPricingComponentsFor = (
   if (materialWasPaidInSource) {
     intrinsic = intrinsic.map(component =>
       component.kind === 'base-material' || component.kind === 'slab-material'
-        ? { ...component, rateToman: '0', amountToman: '0' }
+        ? { ...component, amountToman: '0' }
         : component
     );
     const remainderCutting = snapshot?.remainderCutting;
     if (remainderCutting && typeof remainderCutting === 'object' && !Array.isArray(remainderCutting)) {
       const remainder = remainderCutting as Record<string, unknown>;
-      if (typeof remainder.allocationId === 'string' && typeof remainder.amountToman === 'string') {
-        intrinsic = [
-          ...intrinsic.filter(component =>
-            component.kind === 'base-material' || component.kind === 'slab-material'
-          ),
-          {
-            id: `remainder-cutting:${remainder.allocationId}`,
-            kind: 'remainder-cutting',
-            quantity: remainder.amountToman,
-            rateToman: '1',
-            amountToman: remainder.amountToman
-          }
-        ];
+      if (typeof remainder.allocationId !== 'string' || typeof remainder.amountToman !== 'string') {
+        throw new Error(`Product ${row.productRowId} remainder cutting evidence is malformed`);
       }
+      intrinsic = [
+        ...intrinsic.filter(component =>
+          component.kind === 'base-material' || component.kind === 'slab-material'
+        ),
+        {
+          id: `remainder-cutting:${remainder.allocationId}`,
+          kind: 'remainder-cutting',
+          amountToman: remainder.amountToman
+        }
+      ];
     }
   }
   const hasProjectedBase = intrinsic.some(component =>
     component.kind === 'base-material' || component.kind === 'slab-material'
   );
   if (!hasProjectedBase && row.commercial.baseAmountToman !== undefined) {
-    const pricingQuantity = row.commercial.requestedAreaSquareMeters ??
-      row.commercial.requestedQuantity ??
-      row.commercial.requestedLengthMeters ??
-      '1';
+    const baseKind = row.productType === 'slab' ? 'slab-material' : 'base-material';
     intrinsic.unshift({
-      id: 'base-material',
-      kind: 'base-material',
-      quantity: pricingQuantity,
-      rateToman: row.commercial.baseRateToman ?? row.commercial.baseAmountToman,
+      id: baseKind,
+      kind: baseKind,
       amountToman: row.commercial.baseAmountToman
     });
   }
   const attached = operations.map(operation => ({
     id: operation.id,
     kind: operation.kind,
-    quantity: operation.quantity,
-    rateToman: operation.rateToman,
     amountToman: operation.amountToman
   }));
   return [...intrinsic, ...attached];

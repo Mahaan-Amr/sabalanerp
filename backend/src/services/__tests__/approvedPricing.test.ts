@@ -85,14 +85,11 @@ test('seals an existing longitudinal contract from complete canonical pricing co
       totalAmountToman: '6750000',
       operations: [{ id: 'tool-1', kind: 'tool', amountToman: '750000' }],
       pricingComponents: [{
-        id: 'base-material', kind: 'base-material', quantity: '6',
-        rateToman: '950000', amountToman: '5700000',
+        id: 'base-material', kind: 'base-material', amountToman: '5700000',
       }, {
-        id: 'longitudinal-cut', kind: 'longitudinal-cut', quantity: '15',
-        rateToman: '20000', amountToman: '300000',
+        id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '300000',
       }, {
-        id: 'tool-1', kind: 'tool', quantity: '15',
-        rateToman: '50000', amountToman: '750000',
+        id: 'tool-1', kind: 'tool', amountToman: '750000',
       }],
     } as any],
   };
@@ -105,6 +102,35 @@ test('seals an existing longitudinal contract from complete canonical pricing co
     'longitudinal-cut:longitudinal-cut': '300000.000000000000',
     'tool:tool-1': '750000.000000000000',
   });
+});
+
+test('seals canonical slab material and cutting components without dropping vertical cuts', () => {
+  const source = approvedPricingSourceFixture();
+  (source.contract.contractData as any).discount = {
+    enabled: false, baseSubtotal: '5000000', percent: '0', amount: '0', currency: 'تومان',
+  };
+  source.leaf.amount = '53500000';
+  source.leaf.invoiceItems = [{ ...source.leaf.invoiceItems[0]!, totalPrice: '53500000' }];
+  source.contract.items = [{ ...source.contract.items[0]!, totalPrice: '5350000' }];
+  source.contract.currentItems = [{ ...source.contract.currentItems[0]!, totalPrice: '5350000' }];
+  source.contract.productGraph = {
+    ...source.contract.productGraph!, totalAmountToman: '5350000',
+    rows: [{
+      ...source.contract.productGraph!.rows[0]!,
+      baseAmountToman: '5000000', totalAmountToman: '5350000', operations: [],
+      pricingComponents: [{
+        id: 'slab-material', kind: 'slab-material', amountToman: '5000000',
+      }, {
+        id: 'slab-cut-longitudinal', kind: 'slab-cut-longitudinal', amountToman: '200000',
+      }, {
+        id: 'slab-cut-vertical', kind: 'slab-cut-vertical', amountToman: '150000',
+      }],
+    }],
+  };
+
+  const version = buildApprovedPricingVersion(source, 1, 'existing-slab-version');
+  assert.equal(version.grossAmount, '5350000.000000000000');
+  assert.equal(version.rows[0]?.componentEvidence['slab-cut-vertical:slab-cut-vertical'], '150000.000000000000');
 });
 
 test('accepts explicit no-discount evidence without deriving a default', () => {
@@ -550,20 +576,36 @@ test('missing and conflicting evidence fail closed', () => {
     rows: [{
       ...conflictingProjectedOperation.contract.productGraph!.rows[0]!,
       pricingComponents: [{
-        id: 'base-material', kind: 'base-material', quantity: '1',
-        rateToman: '1000', amountToman: '1000',
+        id: 'base-material', kind: 'base-material', amountToman: '1000',
       }, {
-        id: 'tool-1', kind: 'tool', quantity: '1',
-        rateToman: '149', amountToman: '149',
+        id: 'tool-1', kind: 'tool', amountToman: '149',
       }, {
-        id: 'finish-1', kind: 'finishing', quantity: '1',
-        rateToman: '100', amountToman: '100',
+        id: 'finish-1', kind: 'finishing', amountToman: '100',
       }],
     } as any],
   };
   assert.throws(
     () => buildApprovedPricingVersion(conflictingProjectedOperation, 1, 'projected-operation-conflict'),
     /attached component evidence conflicts with pricing components/
+  );
+
+  const disguisedBase = approvedPricingSourceFixture();
+  disguisedBase.contract.productGraph = {
+    ...disguisedBase.contract.productGraph!,
+    rows: [{
+      ...disguisedBase.contract.productGraph!.rows[0]!,
+      pricingComponents: [{
+        id: 'corrupt-base', kind: 'base-material', amountToman: '1000',
+      }, {
+        id: 'tool-1', kind: 'tool', amountToman: '150',
+      }, {
+        id: 'finish-1', kind: 'finishing', amountToman: '100',
+      }],
+    }],
+  };
+  assert.throws(
+    () => buildApprovedPricingVersion(disguisedBase, 1, 'disguised-base'),
+    /canonical base component conflicts/
   );
 
   const conflictingGraphTotal = approvedPricingSourceFixture();

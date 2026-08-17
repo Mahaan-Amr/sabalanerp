@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { buildAccountingContractSourceSnapshot } from './contractSnapshotBoundary';
 import {
   AccountingFlagCategory,
   AccountingFlagSeverity,
@@ -1305,7 +1306,7 @@ const createInvoiceCandidate = async (command: AccountingActionRequest, actor: A
         periodId,
         amount,
         currency: DEFAULT_CURRENCY,
-        sourceSnapshot: toJsonValue(contract),
+        sourceSnapshot: toJsonValue(buildAccountingContractSourceSnapshot(contract)),
         metadata: {
           mode: command.mode || 'FROM_CONTRACT_TOTAL',
           issueDate: command.issueDate || new Date().toISOString(),
@@ -1419,7 +1420,7 @@ const createReplacementInvoiceCandidate = async (command: AccountingActionReques
         periodId,
         amount,
         currency: DEFAULT_CURRENCY,
-        sourceSnapshot: toJsonValue(contract),
+        sourceSnapshot: toJsonValue(buildAccountingContractSourceSnapshot(contract)),
         metadata: {
           mode: 'REPLACEMENT_AFTER_CORRECTION',
           correctionRequestId: correction.id,
@@ -1660,7 +1661,7 @@ const createReceivable = async (command: AccountingActionRequest, actor: Actor, 
         periodId,
         amount,
         currency: DEFAULT_CURRENCY,
-        sourceSnapshot: toJsonValue(contract),
+        sourceSnapshot: toJsonValue(buildAccountingContractSourceSnapshot(contract)),
         metadata: { invoiceRecordId: sourceInvoice?.id, dueDate: dueDate.toISOString() },
         idempotencyKey,
         createdBy: actor.userId

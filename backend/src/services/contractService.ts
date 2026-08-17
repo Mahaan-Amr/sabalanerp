@@ -23,6 +23,7 @@ import {
   contractDiscountEligibleBase,
   isExplicitZeroDiscountInput,
 } from './contractDiscountEvidence';
+import { sanitizeContractDataCustomerSnapshot } from './contractSnapshotBoundary';
 
 
 // Contract writes intentionally reload the built canonical graph package so
@@ -591,10 +592,12 @@ export async function createContract(
         );
         const contractDataWithDiscountEligibility =
           normalizeNewContractDiscountEligibilityEvidence(productSemanticRepair.contractData);
-        const contractData = normalizeNewContractNoDiscountEvidence(
-          contractDataWithDiscountEligibility,
-          data.currency || 'تومان',
-          data.totalAmount ?? null,
+        const contractData = sanitizeContractDataCustomerSnapshot(
+          normalizeNewContractNoDiscountEvidence(
+            contractDataWithDiscountEligibility,
+            data.currency || 'تومان',
+            data.totalAmount ?? null,
+          )
         ) as any;
         assertNoAmbiguousOperationIdentityRepair(
           operationIdentityRepair.blockedProductRowIds,
@@ -831,7 +834,9 @@ export async function updateContract(
       contractId,
       (existingGraph?.revision ?? 0) + 1
     );
-    const nextContractData = productSemanticRepair.contractData as any;
+    const nextContractData = sanitizeContractDataCustomerSnapshot(
+      productSemanticRepair.contractData
+    ) as any;
     assertNoAmbiguousOperationIdentityRepair(
       operationIdentityRepair.blockedProductRowIds,
       nextContractData

@@ -4,6 +4,8 @@
   "description": "ERP system with Next.js frontend and Express.js backend",
   "main": "index.js",
   "scripts": {
+    "duty:baseline": "node scripts/run-duty-baseline-local.mjs",
+    "duty:reconcile:sales-contract-corrections": "node scripts/run-sales-contract-correction-duty-reconciliation-local.mjs",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && npm run dev",

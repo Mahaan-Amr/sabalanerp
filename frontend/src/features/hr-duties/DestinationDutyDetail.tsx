@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useState } from 'react';
-import { FaCheck, FaQuestionCircle, FaReply, FaSync, FaTimes } from 'react-icons/fa';
+import { FaCheck, FaForward, FaQuestionCircle, FaReply, FaSync, FaTimes } from 'react-icons/fa';
 import {
   ErpBadge,
   ErpButton,
@@ -9,18 +9,24 @@ import {
   ErpInlineState,
   ErpPage,
   ErpSection,
+  ErpSelect,
   ErpSkeleton,
   ErpSummaryGrid,
   ErpTextarea,
 } from '@/components/erp';
 import { hrDutyApi, type DestinationDuty } from './hrDutyApi';
 import { initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
+import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-duties/crossWorkspaceDutyApi';
 
 const actionPresentation: Record<string, { label: string; icon: typeof FaCheck; tone: 'success' | 'danger' | 'warning' | 'info' }> = {
   APPROVE: { label: 'تأیید', icon: FaCheck, tone: 'success' },
   REJECT: { label: 'رد', icon: FaTimes, tone: 'danger' },
   RETURN: { label: 'بازگرداندن', icon: FaReply, tone: 'warning' },
   REQUEST_CLARIFICATION: { label: 'درخواست توضیح', icon: FaQuestionCircle, tone: 'info' },
+  FORWARD_TO_MANAGER: { label: 'ارسال برای تصمیم مدیر', icon: FaForward, tone: 'info' },
+  RETURN_TO_SELLER: { label: 'بازگرداندن', icon: FaReply, tone: 'warning' },
+  DECLINE: { label: 'رد درخواست', icon: FaTimes, tone: 'danger' },
+  VERIFY: { label: 'تأیید اصلاح', icon: FaCheck, tone: 'success' },
 };
 const fieldLabel: Record<string, string> = { title: 'عنوان', description: 'خلاصه لازم', dueAt: 'مهلت' };
 const evidenceLabel: Record<string, string> = {
@@ -60,11 +66,20 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reasonError, setReasonError] = useState<string | null>(null);
+  const [eligibleAssignees, setEligibleAssignees] = useState<Array<{ id: string; displayName: string; username: string }>>([]);
+  const [reassignmentTarget, setReassignmentTarget] = useState('');
+  const [reassignmentReason, setReassignmentReason] = useState('');
   const load = useCallback(async () => {
     dispatch({ type: 'start' });
     try {
       const response = await hrDutyApi.detail(workspace, dutyId);
       dispatch({ type: 'success', data: response.data.data });
+      if (response.data.data.canReassign) {
+        const eligible = await hrDutyApi.eligibleAssignees(workspace, dutyId);
+        setEligibleAssignees(eligible.data.data);
+      } else {
+        setEligibleAssignees([]);
+      }
     } catch (error) {
       dispatch({ type: 'failure', message: failureMessage(error) });
     }
@@ -73,7 +88,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
 
   const respond = async (actionCode: string) => {
     if (!state.data || pendingAction) return;
-    if (actionCode !== 'APPROVE' && reason.trim().length < 3) {
+    if (!['APPROVE', 'FORWARD_TO_MANAGER'].includes(actionCode) && reason.trim().length < 3) {
       setReasonError('برای این اقدام، دلیل کوتاه و روشن وارد کنید.');
       return;
     }
@@ -82,6 +97,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
     setReasonError(null);
     try {
       await hrDutyApi.respond(state.data, actionCode, reason.trim() || null);
+      announceCrossWorkspaceDutyChanged();
       setReason('');
       await load();
     } catch (error) {
@@ -92,12 +108,34 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
     }
   };
 
+  const reassign = async () => {
+    if (!state.data || pendingAction) return;
+    if (!reassignmentTarget || reassignmentReason.trim().length < 3) {
+      setActionError('کاربر مقصد و دلیل واگذاری مجدد را مشخص کنید.');
+      return;
+    }
+    setPendingAction('REASSIGN');
+    setActionError(null);
+    try {
+      await hrDutyApi.reassign(state.data, reassignmentTarget, reassignmentReason.trim());
+      announceCrossWorkspaceDutyChanged();
+      setReassignmentTarget('');
+      setReassignmentReason('');
+      await load();
+    } catch (error) {
+      setActionError(failureMessage(error));
+      await load();
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
   if (!state.data && state.loading) {
-    return <ErpPage title="وظیفه منابع انسانی" backHref={`/dashboard/${workspace}/duties`}><ErpSkeleton lines={6} /></ErpPage>;
+    return <ErpPage title="وظیفه بین‌واحدی" backHref={`/dashboard/${workspace}/duties`}><ErpSkeleton lines={6} /></ErpPage>;
   }
   if (!state.data) {
     return (
-      <ErpPage title="وظیفه منابع انسانی" backHref={`/dashboard/${workspace}/duties`}>
+      <ErpPage title="وظیفه بین‌واحدی" backHref={`/dashboard/${workspace}/duties`}>
         <ErpInlineState kind={state.error?.includes('دسترسی') || state.error?.includes('محول') ? 'permission' : 'error'} title={state.error || 'وظیفه در دسترس نیست.'} actions={[
           { label: 'بازگشت به فهرست', href: `/dashboard/${workspace}/duties` },
           { label: 'تلاش دوباره', icon: FaSync, onClick: load },
@@ -110,8 +148,8 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
   return (
     <ErpPage
       eyebrow="دسترسی محدود به همین وظیفه"
-      title={duty.fields.title || 'وظیفه منابع انسانی'}
-      description="این صفحه دسترسی عمومی به پرونده منابع انسانی ایجاد نمی‌کند."
+      title={duty.fields.title || 'وظیفه بین‌واحدی'}
+      description="این صفحه فقط اطلاعات مجاز و لازم برای همین اقدام را نمایش می‌دهد."
       backHref={`/dashboard/${workspace}/duties`}
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: load, disabled: state.loading || Boolean(pendingAction) }]}
     >
@@ -170,6 +208,42 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
               );
             })}
           </div>
+        </ErpSection>
+      )}
+      {duty.canReassign && (
+        <ErpSection title="واگذاری مجدد" description="مهلت و نسخه پرونده تغییر نمی‌کند و این اقدام در تاریخچه ثبت می‌شود.">
+          {eligibleAssignees.length > 0 ? (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div>
+                <label className="sds-text-secondary mb-2 block text-sm font-semibold" htmlFor="duty-reassignment-target">مسئول جدید</label>
+                <ErpSelect
+                  id="duty-reassignment-target"
+                  value={reassignmentTarget}
+                  onChange={(event) => setReassignmentTarget(event.target.value)}
+                  disabled={Boolean(pendingAction)}
+                >
+                  <option value="">انتخاب کنید</option>
+                  {eligibleAssignees.map((user) => <option key={user.id} value={user.id}>{user.displayName} · @{user.username}</option>)}
+                </ErpSelect>
+              </div>
+              <div>
+                <label className="sds-text-secondary mb-2 block text-sm font-semibold" htmlFor="duty-reassignment-reason">دلیل واگذاری</label>
+                <ErpTextarea
+                  id="duty-reassignment-reason"
+                  value={reassignmentReason}
+                  onChange={(event) => setReassignmentReason(event.target.value)}
+                  disabled={Boolean(pendingAction)}
+                />
+              </div>
+              <ErpButton
+                label={pendingAction === 'REASSIGN' ? 'در حال واگذاری…' : 'واگذاری مجدد'}
+                tone="warning"
+                variant="solid"
+                disabled={Boolean(pendingAction)}
+                onClick={() => void reassign()}
+              />
+            </div>
+          ) : <ErpInlineState kind="empty" title="کاربر واجد شرایط دیگری وجود ندارد" />}
         </ErpSection>
       )}
       {duty.history.length > 0 && (

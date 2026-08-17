@@ -41,7 +41,7 @@ import logisticsRoutes from "./routes/logistics";
 import hrRoutes from "./routes/hr";
 import hrHiringRoutes from "./routes/hr-hiring";
 import hrApplicantExperienceRoutes from "./routes/hr-applicant-experience";
-import hrDutyRoutes from "./routes/hr-duties";
+import crossWorkspaceDutyRoutes from "./routes/hr-duties";
 import workspacePermissionsRoutes from "./routes/workspace-permissions";
 import permissionsRoutes from "./routes/permissions";
 import productsRoutes from "./routes/products";
@@ -83,7 +83,7 @@ import {
 import { startNotificationOutboxDelivery } from "./services/notificationService";
 import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
 import { startDispatchBuyerSmsDelivery } from "./services/dispatchBuyerSmsWorker";
-import { startHrDutyDeadlineMaintenance } from "./services/hrDutyEngine";
+import { startCrossWorkspaceDutyDeadlineMaintenance } from "./services/crossWorkspaceDutyModule";
 import { verifyHrRedesignCutover } from "./services/hrRedesignCutover";
 import { resolveHrRedesignCutoverStartup } from "./services/hrRedesignCutoverStartup";
 
@@ -258,7 +258,8 @@ app.use("/api/accounting", accountingRoutes);
 app.use("/api/bi", biRoutes);
 app.use("/api/logistics", logisticsRoutes);
 app.use("/api/hr", hrRoutes);
-app.use("/api/hr-duties", hrDutyRoutes);
+app.use("/api/hr-duties", crossWorkspaceDutyRoutes);
+app.use("/api/duties", crossWorkspaceDutyRoutes);
 app.use("/api/hr-hiring", hrApplicantExperienceRoutes);
 app.use("/api/hr-hiring", hrHiringRoutes);
 app.use("/api/workspace-permissions", workspacePermissionsRoutes);
@@ -422,7 +423,7 @@ initializeSystemRecovery(prisma).then(async () => {
     });
     startSupportTicketMaintenance(prisma);
     startDispatchBuyerSmsDelivery(prisma);
-    startHrDutyDeadlineMaintenance(prisma);
+    startCrossWorkspaceDutyDeadlineMaintenance(prisma);
   }
   server.listen(PORT, () => {
     console.log(`? Server running on port ${PORT}`);

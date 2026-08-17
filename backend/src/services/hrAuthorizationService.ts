@@ -37,7 +37,7 @@ export const loadHrAuthorizationSnapshot = async (
       where: { role: user?.role ?? 'USER', workspace: 'hr', isActive: true },
       select: { feature: true, permissionLevel: true },
     }),
-    client.hrDuty.findMany({
+    client.crossWorkspaceDuty.findMany({
       where: { currentAssigneeUserId: userId, status: 'OPEN' },
       select: { id: true },
     }),

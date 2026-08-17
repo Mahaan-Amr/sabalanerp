@@ -6,7 +6,7 @@ import { FaBuilding, FaCog, FaDownload, FaEdit, FaEye, FaPlus, FaShieldAlt, FaTi
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpListPage, ErpLoading, ErpSection, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
 import { authAPI, departmentsAPI, hrAuthorizationAPI, usersAPI, workspacePermissionsAPI } from '@/lib/api';
 import { WORKSPACE_CONFIG } from '@/contexts/WorkspaceContext';
-import { projectUserWorkspaceAccess, type CanonicalHrWorkspaceGrant, type ProjectedWorkspaceAccess } from '@/features/access-management/userWorkspaceProjection';
+import { projectUserWorkspaceAccess, type CanonicalHrWorkspaceSnapshot, type ProjectedWorkspaceAccess } from '@/features/access-management/userWorkspaceProjection';
 
 interface User {
   id: string;
@@ -72,6 +72,11 @@ interface Department {
   isActive: boolean;
 }
 
+const EMPTY_HR_WORKSPACE_SNAPSHOT: CanonicalHrWorkspaceSnapshot = {
+  grants: [],
+  evaluatedAt: '1970-01-01T00:00:00.000Z',
+};
+
 export default function UsersManagementPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -86,8 +91,7 @@ export default function UsersManagementPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [permissions, setPermissions] = useState<WorkspacePermission[]>([]);
   const [rolePermissions, setRolePermissions] = useState<RoleWorkspacePermission[]>([]);
-  const [hrWorkspaceGrants, setHrWorkspaceGrants] = useState<CanonicalHrWorkspaceGrant[]>([]);
-  const [hrContextGeneratedAt, setHrContextGeneratedAt] = useState<string>();
+  const [hrWorkspaceSnapshot, setHrWorkspaceSnapshot] = useState<CanonicalHrWorkspaceSnapshot>();
   const [loading, setLoading] = useState(true);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +123,16 @@ export default function UsersManagementPage() {
     if (!['/dashboard/users', '/dashboard/hr/users'].includes(pathname)) return;
     fetchData();
   }, [pathname, currentPage, searchTerm, searchRevision, selectedDepartment, selectedRole, selectedStatus]);
+
+  useEffect(() => {
+    const invalidateRestoredAccessSummary = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      referenceDataLoaded.current = false;
+      setSearchRevision((current) => current + 1);
+    };
+    window.addEventListener('pageshow', invalidateRestoredAccessSummary);
+    return () => window.removeEventListener('pageshow', invalidateRestoredAccessSummary);
+  }, []);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -178,8 +192,11 @@ export default function UsersManagementPage() {
         setRolePermissions(rolePermissionsResponse.data.data);
       }
       if (hrContextResponse?.data.success) {
-        setHrWorkspaceGrants(hrContextResponse.data.data.workspaceGrants || []);
-        setHrContextGeneratedAt(hrContextResponse.data.data.generatedAt);
+        const evaluatedAt = hrContextResponse.data.data.evaluatedAt;
+        if (typeof evaluatedAt !== 'string' || !Number.isFinite(new Date(evaluatedAt).getTime())) {
+          throw new Error('پاسخ سرور فاقد زمان مرجع معتبر برای دسترسی منابع انسانی است.');
+        }
+        setHrWorkspaceSnapshot({ grants: hrContextResponse.data.data.workspaceGrants || [], evaluatedAt });
       }
       referenceDataLoaded.current = true;
     } catch (error: any) {
@@ -223,8 +240,10 @@ export default function UsersManagementPage() {
     role: user.role,
     directPermissions: getUserWorkspacePermissions(user.id),
     roleDefaults: rolePermissions.filter((permission) => permission.role === user.role),
-    canonicalHrGrants: hrWorkspaceGrants.filter((grant) => grant.userId === user.id),
-    evaluatedAt: hrContextGeneratedAt,
+    canonicalHrSnapshot: {
+      ...(hrWorkspaceSnapshot || EMPTY_HR_WORKSPACE_SNAPSHOT),
+      grants: (hrWorkspaceSnapshot?.grants || []).filter((grant) => grant.userId === user.id),
+    },
   });
 
   const getRoleLabel = (role: string) => {

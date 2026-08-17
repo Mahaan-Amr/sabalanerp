@@ -1292,7 +1292,10 @@ export const sabalanCalendarAPI = {
 
 export const hrAuthorizationAPI = {
   getMe: () => api.get('/hr/authorization/me'),
-  getContext: () => api.get('/hr/authorization/context'),
+  getContext: () => api.get('/hr/authorization/context', {
+    params: { _fresh: Date.now() },
+    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+  }),
   saveUserAccess: (userId: string, data: {
     role: string;
     workspaceLevels: Record<string, string | null>;

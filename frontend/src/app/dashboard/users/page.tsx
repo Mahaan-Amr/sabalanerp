@@ -115,8 +115,9 @@ export default function UsersManagementPage() {
   const requestSequence = useRef(0);
 
   useEffect(() => {
+    if (!['/dashboard/users', '/dashboard/hr/users'].includes(pathname)) return;
     fetchData();
-  }, [currentPage, searchTerm, searchRevision, selectedDepartment, selectedRole, selectedStatus]);
+  }, [pathname, currentPage, searchTerm, searchRevision, selectedDepartment, selectedRole, selectedStatus]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -154,7 +155,7 @@ export default function UsersManagementPage() {
         referenceDataLoaded.current ? Promise.resolve(null) : departmentsAPI.getDepartments(),
         referenceDataLoaded.current ? Promise.resolve(null) : workspacePermissionsAPI.getUserPermissions({ page: 1, limit: 1000 }),
         referenceDataLoaded.current ? Promise.resolve(null) : workspacePermissionsAPI.getRolePermissions(),
-        referenceDataLoaded.current ? Promise.resolve(null) : hrAuthorizationAPI.getContext(),
+        hrAuthorizationAPI.getContext(),
       ]);
 
       if (sequence !== requestSequence.current) return;

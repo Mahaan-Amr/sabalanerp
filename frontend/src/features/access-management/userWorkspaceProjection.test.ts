@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { projectUserWorkspaceAccess } from './userWorkspaceProjection';
 
 const projected = projectUserWorkspaceAccess({
@@ -33,5 +35,23 @@ const inheritedHr = projectUserWorkspaceAccess({
   }],
 });
 assert.deepEqual(inheritedHr, [{ key: 'role-hr-view', workspace: 'hr', permissionLevel: 'view', source: 'role' }]);
+
+const usersPageSource = readFileSync(path.resolve(__dirname, '../../app/dashboard/users/page.tsx'), 'utf8');
+const apiSource = readFileSync(path.resolve(__dirname, '../../lib/api.ts'), 'utf8');
+assert.doesNotMatch(
+  usersPageSource,
+  /referenceDataLoaded\.current\s*\?\s*Promise\.resolve\(null\)\s*:\s*hrAuthorizationAPI\.getContext\(\)/,
+  'HR authorization context must refresh with user-list results instead of remaining stale behind the reference-data cache',
+);
+assert.match(
+  usersPageSource,
+  /useEffect\(\(\) => \{\s*if \(!\['\/dashboard\/users', '\/dashboard\/hr\/users'\]\.includes\(pathname\)\) return;\s*fetchData\(\);\s*\}, \[pathname, currentPage,/,
+  'returning to a router-cached user list must immediately refresh its HR authorization context',
+);
+assert.match(
+  apiSource,
+  /getContext:\s*\(\)\s*=>\s*api\.get\('\/hr\/authorization\/context',\s*\{\s*params:\s*\{\s*_fresh:\s*Date\.now\(\)\s*\}/,
+  'HR authorization context reads must bypass browser and intermediary response caches',
+);
 
 console.log('User workspace projection tests passed.');

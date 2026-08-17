@@ -24,6 +24,7 @@ import {
   isExplicitZeroDiscountInput,
 } from './contractDiscountEvidence';
 import { sanitizeContractDataCustomerSnapshot } from './contractSnapshotBoundary';
+import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDuty';
 
 
 // Contract writes intentionally reload the built canonical graph package so
@@ -936,29 +937,11 @@ export async function updateContract(
     }
 
     if (approvedSalesCorrection) {
-      const updatedCorrection = await tx.accountingCorrectionRequest.update({
-        where: { id: approvedSalesCorrection.id },
-        data: {
-          status: CorrectionRequestStatus.SALES_EDITED,
-          resolutionNote: [
-            approvedSalesCorrection.resolutionNote,
-            data.notes ? `Sales correction save note: ${data.notes}` : null
-          ].filter(Boolean).join('\n')
-        }
-      });
-
-      await tx.accountingAuditLog.create({
-        data: {
-          action: 'SALES_CORRECTION_SAVED',
-          actorId: userId,
-          contractId,
-          recordId: updatedCorrection.recordId,
-          entityType: 'AccountingCorrectionRequest',
-          entityId: updatedCorrection.id,
-          beforeState: toJsonValue(approvedSalesCorrection),
-          afterState: toJsonValue(updatedCorrection),
-          note: data.notes || null
-        }
+      await completeSalesContractCorrectionEdit(tx, {
+        contractId,
+        actorUserId: userId,
+        note: data.notes ? `Sales correction save note: ${data.notes}` : null,
+        policyVersion: 1,
       });
     }
 

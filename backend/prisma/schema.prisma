@@ -4286,6 +4286,8 @@ model AccountingCorrectionRequest {
   priority         CorrectionRequestPriority @default(MEDIUM)
   status           CorrectionRequestStatus   @default(OPEN)
   assignedToUserId String?
+  requestIdempotencyKey String?                   @unique
+  dutySourceVersion Int                         @default(1)
   accountantNote   String
   resolutionNote   String?
   createdBy        String
@@ -6378,8 +6380,8 @@ model HrNamedResponsibility {
   provenanceVersion         Int                            @default(1)
   createdAt                 DateTime                       @default(now())
   updatedAt                 DateTime                       @updatedAt
-  duties                    HrDuty[]
-  dutyAssignmentHistory     HrDutyAssignmentHistory[]
+  duties                    CrossWorkspaceDuty[]
+  dutyAssignmentHistory     CrossWorkspaceDutyAssignmentHistory[]
   responsibilityType        HrResponsibilityTypeCatalog    @relation(fields: [responsibilityTypeCode], references: [code], onDelete: Restrict)
   principal                 HrNamedResponsibility?         @relation("HrResponsibilityDelegates", fields: [principalResponsibilityId], references: [id], onDelete: Restrict)
   delegates                 HrNamedResponsibility[]        @relation("HrResponsibilityDelegates")
@@ -6443,7 +6445,7 @@ model HrAuthorizationAuditEvent {
   @@map("hr_authorization_audit_events")
 }
 
-model HrDutyEnvelope {
+model CrossWorkspaceDutyEnvelope {
   id                       String   @id @default(cuid())
   code                     String
   version                  Int
@@ -6456,13 +6458,13 @@ model HrDutyEnvelope {
   isActive                 Boolean  @default(true)
   createdByUserId          String
   createdAt                DateTime @default(now())
-  duties                   HrDuty[]
+  duties                   CrossWorkspaceDuty[]
 
   @@unique([code, version])
   @@map("hr_duty_envelopes")
 }
 
-model HrDuty {
+model CrossWorkspaceDuty {
   id                            String                       @id @default(cuid())
   stableKey                     String                       @unique
   sourceType                    String
@@ -6488,13 +6490,13 @@ model HrDuty {
   createdByUserId               String
   createdAt                     DateTime                     @default(now())
   updatedAt                     DateTime                     @updatedAt
-  envelope                      HrDutyEnvelope               @relation(fields: [envelopeCode, envelopeVersion], references: [code, version], onDelete: Restrict)
+  envelope                      CrossWorkspaceDutyEnvelope   @relation(fields: [envelopeCode, envelopeVersion], references: [code, version], onDelete: Restrict)
   responsibility                HrNamedResponsibility?       @relation(fields: [responsibilityId], references: [id], onDelete: Restrict)
-  predecessor                   HrDuty?                      @relation("HrDutySuccessors", fields: [predecessorDutyId], references: [id], onDelete: Restrict)
-  successors                    HrDuty[]                     @relation("HrDutySuccessors")
-  assignmentHistory             HrDutyAssignmentHistory[]
-  auditVersions                 HrDutyAuditVersion[]
-  notificationIdentities        HrDutyNotificationIdentity[]
+  predecessor                   CrossWorkspaceDuty?         @relation("CrossWorkspaceDutySuccessors", fields: [predecessorDutyId], references: [id], onDelete: Restrict)
+  successors                    CrossWorkspaceDuty[]        @relation("CrossWorkspaceDutySuccessors")
+  assignmentHistory             CrossWorkspaceDutyAssignmentHistory[]
+  auditVersions                 CrossWorkspaceDutyAuditVersion[]
+  notificationIdentities        CrossWorkspaceDutyNotificationIdentity[]
 
   @@unique([sourceType, sourceId, sourceActionCode, sourceVersion])
   @@index([currentAssigneeUserId, status, dueAt])
@@ -6503,7 +6505,7 @@ model HrDuty {
   @@map("hr_duties")
 }
 
-model HrDutyAssignmentHistory {
+model CrossWorkspaceDutyAssignmentHistory {
   id                       String                     @id @default(cuid())
   dutyId                   String
   sequence                 Int
@@ -6517,7 +6519,7 @@ model HrDutyAssignmentHistory {
   changedByUserId          String?
   policyVersion            Int
   createdAt                DateTime                   @default(now())
-  duty                     HrDuty                     @relation(fields: [dutyId], references: [id], onDelete: Restrict)
+  duty                     CrossWorkspaceDuty         @relation(fields: [dutyId], references: [id], onDelete: Restrict)
   responsibility           HrNamedResponsibility?     @relation(fields: [responsibilityId], references: [id], onDelete: Restrict)
 
   @@unique([dutyId, sequence])
@@ -6525,7 +6527,7 @@ model HrDutyAssignmentHistory {
   @@map("hr_duty_assignment_history")
 }
 
-model HrDutyAuditVersion {
+model CrossWorkspaceDutyAuditVersion {
   id                     String                       @id @default(cuid())
   dutyId                 String
   version                Int
@@ -6538,15 +6540,15 @@ model HrDutyAuditVersion {
   afterJson              Json?
   reason                 String?
   createdAt              DateTime                     @default(now())
-  duty                   HrDuty                       @relation(fields: [dutyId], references: [id], onDelete: Restrict)
-  notificationIdentities HrDutyNotificationIdentity[] @relation("HrDutyAuditNotifications")
+  duty                   CrossWorkspaceDuty                       @relation(fields: [dutyId], references: [id], onDelete: Restrict)
+  notificationIdentities CrossWorkspaceDutyNotificationIdentity[] @relation("CrossWorkspaceDutyAuditNotifications")
 
   @@unique([dutyId, version])
   @@index([dutyId, createdAt])
   @@map("hr_duty_audit_versions")
 }
 
-model HrDutyNotificationIdentity {
+model CrossWorkspaceDutyNotificationIdentity {
   id               String             @id @default(cuid())
   stableKey        String             @unique
   dutyId           String
@@ -6557,8 +6559,8 @@ model HrDutyNotificationIdentity {
   safePayloadJson  Json
   providerIdentity String?
   createdAt        DateTime           @default(now())
-  duty             HrDuty             @relation(fields: [dutyId], references: [id], onDelete: Restrict)
-  dutyAudit        HrDutyAuditVersion @relation("HrDutyAuditNotifications", fields: [dutyId, dutyAuditVersion], references: [dutyId, version], onDelete: Restrict)
+  duty             CrossWorkspaceDuty             @relation(fields: [dutyId], references: [id], onDelete: Restrict)
+  dutyAudit        CrossWorkspaceDutyAuditVersion @relation("CrossWorkspaceDutyAuditNotifications", fields: [dutyId, dutyAuditVersion], references: [dutyId, version], onDelete: Restrict)
 
   @@unique([dutyId, dutyAuditVersion, recipientUserId, channelCode])
   @@map("hr_duty_notification_identities")

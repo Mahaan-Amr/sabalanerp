@@ -12,6 +12,7 @@ import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { createContractItem } from '../services/contractItemService';
+import { requestSalesContractCorrection } from '../services/salesContractCorrectionDuty';
 import { createDelivery, getDeliveries } from '../services/deliveryService';
 import { createPayment, getPayments, validatePaymentData } from '../services/paymentService';
 import {
@@ -1171,6 +1172,46 @@ router.post(
       });
     }
   }
+);
+
+router.post(
+  '/contracts/:id/correction-requests',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.SALES_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT),
+  [
+    body('reason').isString().trim().isLength({ min: 3 }),
+    body('category').optional().isIn([
+      'CUSTOMER_IDENTITY', 'AMOUNT_PRICING', 'PAYMENT_PLAN', 'DELIVERY_SCHEDULE',
+      'TAX_INFO', 'DOCUMENT_SIGNATURE', 'OTHER',
+    ]),
+    body('priority').optional().isIn(['LOW', 'MEDIUM', 'HIGH', 'URGENT']),
+  ],
+  async (req: any, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
+    try {
+      const data = await requestSalesContractCorrection(prisma, {
+        contractId: req.params.id,
+        actorUserId: req.user.id,
+        category: req.body.category || 'OTHER',
+        priority: req.body.priority || 'MEDIUM',
+        reason: String(req.body.reason),
+        idempotencyKey: String(
+          req.get('X-Idempotency-Key') || req.get('Idempotency-Key') || req.body.idempotencyKey || '',
+        ),
+      });
+      return res.status(data.replayed ? 200 : 201).json({ success: true, data });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'DUTY_REQUEST_FAILED';
+      const status = /NOT_RESPONSIBLE_SELLER|ASSIGNEE_INELIGIBLE|SEPARATION_OF_DUTIES/.test(message)
+        ? 403
+        : /ACTIVE_CHAIN_CONFLICT|IDEMPOTENCY_CONFLICT/.test(message)
+          ? 409
+          : /CONTRACT_NOT_FOUND/.test(message) ? 404 : 400;
+      return res.status(status).json({ success: false, error: message });
+    }
+  },
 );
 
 // @desc    Update sales contract

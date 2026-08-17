@@ -212,7 +212,7 @@ router.get('/dispatch-evidence-exceptions', accountingDispatchView, async (_req:
 });
 
 router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthRequest, res: Response) => {
-  try {
+    try {
     const manage = await resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role,
       workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
       requiredPermission: FEATURE_PERMISSIONS.EDIT });
@@ -816,7 +816,10 @@ export const createAccountingActionHandler = (
 ) => async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
     if (handleValidation(req, res)) return;
 
-    try {
+  try {
+      if (req.body.kind === 'REQUEST_CORRECTION') {
+        return res.status(410).json({ success: false, error: 'DUTY_LEGACY_ACCOUNTING_CORRECTION_WRITER_RETIRED' });
+      }
       if (
         managerReviewActions.has(req.body.kind) &&
         req.user!.role !== 'ADMIN' &&
@@ -861,7 +864,7 @@ export const createAccountingActionHandler = (
       res.json({ success: true, data: result });
     } catch (error: any) {
       console.error('Accounting action error:', error);
-      res.status(400).json({
+      res.status(error.message === 'DUTY_LEGACY_ACCOUNTING_CORRECTION_WRITER_RETIRED' ? 410 : 400).json({
         success: false,
         error: error.message || 'Accounting action failed'
       });

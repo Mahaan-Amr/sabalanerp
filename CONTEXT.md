@@ -139,8 +139,8 @@ The stable feature permissions granted through `افزودن مجوز جدید` 
 _Avoid_: assigning organizational titles as permissions, requiring a second authority record, granting an action without the evidence access needed to use it, hiding automatically included prerequisites, bundling unrelated sensitive actions under one vague feature, or deriving action permission from a person's job title
 
 **Company Compensation Proposal**:
-The initial itemized whole-Rial offer created through the company-compensation proposal action permission, then prepared through the payroll-preparation permission, approved through the payroll-approval permission, approved financially through the finance-approval permission, and finally accepted or rejected by the Applicant. Each step records its actual actor, while only a Human Resources Broad-Manager Override may collapse preparation and approval into one actor.
-_Avoid_: a position-bound Hiring Manager role, deriving proposal rights from a title, requiring a parallel authority or responsibility assignment, hiding the actual actor, or allowing an ordinary User to approve their own preparation
+The initial itemized whole-Rial offer created through the company-compensation proposal action permission, then prepared through the payroll-preparation permission, approved through the payroll-approval permission, approved financially through the finance-approval permission, and finally accepted or rejected by the Applicant. Each step records its actual actor. An authorized General Manager or ADMIN may perform both preparation and approval on the same case, but must execute each stage as a separate explicit action whose audit record identifies the self-approval override; no later action is completed implicitly.
+_Avoid_: a position-bound Hiring Manager role, deriving proposal rights from a title, requiring a parallel authority or responsibility assignment, hiding the actual actor, allowing an ordinary User to approve their own preparation, or auto-completing the second stage for an override actor
 
 **Cross-Workspace Duty Envelope**:
 The code-registered, versioned, minimum-necessary contract that carries common duty metadata, a safe source reference and summary, explicitly permitted fields or evidence, allowed action codes, and a structured response between any source-workspace action and its assigned destination-workspace task view. Its assignment-time snapshot remains auditable while every action revalidates current source state; an incompatible source change cancels the old duty and creates a linked replacement without granting search or general access to the source workspace.
@@ -158,25 +158,57 @@ _Avoid_: source-selected recipients, title-derived authority, duplicating one du
 The Seller-originated, contract-scoped request for Accounting to review whether a locked sales Contract requires correction. An authorized Accounting processor either rejects it with a reason or submits it for an Accounting manager decision; one User may perform both Accounting actions when independently granted both action permissions, but the requesting Seller may perform neither action on their own request regardless of other grants, and each action and permission use is recorded separately.
 _Avoid_: relying on a verbal handoff, letting a Seller review, approve, or directly unlock their own request, deriving either Accounting action from a title, treating one permission as authority for both actions, or losing rejected and approved request evidence
 
+**Active Sales Contract Correction Chain**:
+The single unresolved sequence of correction request, Accounting decisions, Sales opportunities, and Accounting verifications permitted for one Contract. A newly discovered issue may join the request before its manager decision; after an opportunity or verification begins, it waits as a linked successor until the active chain closes rather than creating parallel editable truth.
+_Avoid_: parallel active correction requests for one Contract, concurrent edit opportunities, merging a late issue into an already approved scope, discarding a queued successor, or allowing two Contract versions to compete
+
 **Sales Contract Correction Opportunity**:
 The manager-approved, three-working-day assignment allowing the requesting Seller exactly one successful save through the full-step Contract editor, with the approved category and reason visible and the complete before/after difference recorded; an authorized Sales manager may reassign it only to another edit-authorized Seller. Expiry relocks the Contract without erasing history, while a successful save immediately relocks it and creates an Accounting Correction Verification; an extension requires a new Seller request and Accounting manager decision, and locked financial evidence remains unchanged.
 _Avoid_: opening correction to every Seller, reassigning to a User without Sales edit authority, field-locking a coupled Contract graph, permitting multiple correction saves, leaving the Contract editable after save, silently extending an expired opportunity, editing an approved financial record in place, or losing expired and completed opportunity evidence
 
 **Accounting Correction Verification**:
-The required Accounting review of the complete before/after difference after a Seller uses a Sales Contract Correction Opportunity, assigned first to the prior Accounting processor and returned to the permission-based shared queue if that User is inactive, unauthorized, or unavailable; an authorized Accounting manager may reassign it. The review ends the request only when Accounting accepts the corrected Contract, while return for further correction is a structured result rather than completion and never leaves the Contract silently editable.
-_Avoid_: completing the request automatically on Seller save, assigning verification permanently to an unavailable processor, reviewing without the recorded difference, treating return as a technical failure, or leaving the Contract unlocked during Accounting review
+The required Accounting review of the complete before/after difference after a Seller uses a Sales Contract Correction Opportunity, assigned first to the prior Accounting processor and returned to the permission-based shared queue if that User is inactive, unauthorized, or unavailable; an authorized Accounting manager may reassign it. The review ends the request only when Accounting accepts the corrected Contract; return for further correction is a structured result that requires a new Accounting manager decision and a distinct three-working-day opportunity, even when one User performs both recorded actions through separate permissions.
+_Avoid_: completing the request automatically on Seller save, assigning verification permanently to an unavailable processor, reviewing without the recorded difference, treating return as a technical failure, reopening Sales from return alone, silently reusing a prior opportunity, or leaving the Contract unlocked during Accounting review
+
+**Accounting-Ready Sales Contract**:
+An active Sales Contract that has reached Approved, Signed, or Printed status and therefore requires accountable Accounting processing. Reaching this eligibility creates the Accounting duty exactly once for the current eligible version; Draft creation and visibility alone create no duty, and later ineligibility cancels stale open work rather than leaving it actionable.
+_Avoid_: creating an Accounting duty for every Draft, using the contract-created notification as duty truth, duplicating the duty for repeated reads, processing an inactive Contract, or retaining an actionable duty after eligibility is lost
+
+**Accounting Contract Registration Duties**:
+The two sequential one-working-day duties created from an Accounting-Ready Sales Contract: an invoice-candidate preparation duty for Users with candidate-management permission, followed only after successful preparation by a financial-approval duty for Users with record approval/void permission. One User may perform both when independently granted both permissions, but each action remains an explicit, separately timed and audited result rather than automatic approval; a return ends the prior version's deadline and a corrected version starts a fresh preparation deadline, while priority changes require a reason and audit history.
+_Avoid_: one ambiguous duty spanning preparation and approval, creating approval before a candidate exists, requiring different actors without a workflow-specific rule, inferring approval authority from preparation permission, automatically approving after preparation, silently carrying a stale deadline across versions, or changing priority without evidence
+
+**Pre-Financial Accounting Return**:
+The Accounting processor's structured return of an Accounting-Ready Sales Contract to its Responsible Seller with a required category and reason before locked financial evidence exists. It needs no Accounting manager approval, creates no financial-approval duty, and a successful Seller correction creates a new version-scoped preparation duty; manager approval remains mandatory only for reopening a Contract after financial evidence is locked.
+_Avoid_: treating pre-financial return as a manager-approved locked correction, returning without a reason, assigning every Seller, approving an unrevised version, or creating parallel preparation duties
 
 **Cross-Workspace Duty Notification Policy**:
 The mandatory, privacy-safe Unified Notification Center record for assignment, near-due reminder, overdue state, unassigned triage, reassignment, and structured result, with one escalation to the destination manager after twenty-four overdue hours and optional safe Web Push delivery. Event identity combines duty, event kind, and envelope or response-attempt version so delivery retries never duplicate the durable notification.
 _Avoid_: sensitive lock-screen content, treating Web Push as the source of truth, allowing accountability notifications to be muted, daily default escalation spam, notifying every authority holder, or duplicating one lifecycle event during delivery retries
 
 **Destination Workspace Duty Surface**:
-The Persian-first, task-scoped list and detail experience that projects a Cross-Workspace Duty only into its assigned operational workspace, with a personal open/due summary, an authorized manager triage view, and preserved history separate from notifications and support work. A direct link always reauthorizes the current assignee, envelope version, and duty state, while managers see only bounded destination-scope triage information rather than the complete source record.
-_Avoid_: duplicating one duty across every workspace, redirecting a destination actor into the source workspace, combining task and notification lifecycles, exposing the complete source record to a destination manager, or relying on a stale deep link for authorization
+The Persian-first unified `وظایف بین‌واحدی` list and detail experience that projects duties from every registered source only into their assigned operational workspace, with a personal open/due summary, source and action filters, an authorized manager triage view, and preserved history separate from notifications and support work. Each row identifies its source workspace, required action, deadline, and state; a direct link reauthorizes the current assignee, envelope version, and duty state, while managers see only bounded destination-scope triage information rather than the complete source record.
+_Avoid_: an HR-specific page title, separate pages per source workspace, duplicating one duty across every workspace, redirecting a destination actor into the source workspace, combining task and notification lifecycles, exposing the complete source record to a destination manager, or relying on a stale deep link for authorization
+
+**Cross-Workspace Duty Attention Badge**:
+The red numeric marker on the current workspace's Cross-Workspace Duty navigation control, visible beside the expanded label and on the collapsed icon, counting the signed-in User's currently Open assigned duties in that workspace and displaying `99+` above ninety-nine. Viewing the queue never clears it; completion, waiver, cancellation, or reassignment changes it from authoritative duty state, while unassigned triage work and read-notification state do not contribute.
+_Avoid_: unread-notification count, clearing on page view, counting another workspace or User, including unassigned triage work, separate expanded and collapsed counts, or displaying an unbounded large number
+
+**Operational Queue Exclusion**:
+The rule that ordinary Guard admission, driver availability, Logistics reservation, loading finalization, driver confirmation, authorization readiness, and Guard physical exit remain states of their authoritative operational queues rather than Cross-Workspace Duties or badge counts. Only an exception that waits for a structured action from another workspace, such as Manual Outage Exit approval or returned-goods Accounting reconciliation, creates a duty.
+_Avoid_: duplicating queue rows as duties, counting routine physical operations in the duty badge, assigning normal exit to a person through the duty engine, or hiding a genuine cross-workspace exception inside queue state
+
+**Cross-Workspace Duty Creation Boundary**:
+The rule that a duty exists only when a source transition leaves a concrete, structured action waiting for an authorized actor in another operational destination. Shared data, read-only visibility, notifications, reports, automatic state propagation, and work completed atomically by the initiating actor create no redundant duty. Inventory-to-Sales catalog visibility is data unless a specific correction is requested; BI remains read-only and refers discrepancies to the authoritative source; Support and System Recovery retain their own lifecycles and queues rather than becoming Cross-Workspace Duties.
+_Avoid_: converting every event or notification into a task, creating a duty after the required action already completed in the initiating transaction, letting BI mutate source workflows, duplicating Inventory data as Sales work, or absorbing Support and Recovery queues into the duty engine
 
 **Organizational Responsibility Destination**:
 The explicit operational workspace configured for a task source or manually assigned duty and used as the sole destination for its task-scoped presentation. Human Resources actions and the Company Compensation Proposal target Human Resources, Finance actions target Accounting, and position-bound supervisor duties use their recorded organizational assignment; a missing or unauthorized destination blocks routing rather than being inferred from names or broad roles.
 _Avoid_: requiring a named HR responsibility assignment to route a permission-scoped action, guessing a workspace from a username or job title, granting ordinary destination-workspace access through a duty, or duplicating a duty into multiple workspaces
+
+**System Administration Duty Destination**:
+The first-class, permission-scoped operational destination for Cross-Workspace Duties that require User provisioning, access activation, access revocation, or another governed system-administration action. It need not be exposed as a complete commercial workspace: only Users with the required administration permission see its queue and task-scoped evidence. Hiring and Offboarding route their distinct owner approvals and administrative fulfillment here without automatically creating access from employment state or delaying the truthful employment end until every administrative obligation completes.
+_Avoid_: treating Administration as an unrouteable side channel, exposing its queue to ordinary Users, creating default access from a Position, combining workspace-owner approval with fulfillment implicitly, deleting a User during Offboarding, or keeping Employment active because access revocation is overdue
 
 **Personal HR Work Progress**:
 The signed-in user's completion rate for assigned HR Work Items, calculated as items completed during the current Persian month divided by those completed during that month plus every currently open assigned item, including older overdue work. Waived or cancelled items do not count as completed, and an empty workload has no percentage.
@@ -264,8 +296,8 @@ The independently reported freshness, availability, authorization, and coverage 
 _Avoid_: failing the full BI snapshot because one evidence layer fails, turning missing data into zero, or issuing cross-workspace conclusions without sufficient evidence
 
 **تطبیق هوش تجاری**:
-The evidence view for missing links or contradictory states between authoritative workspaces, such as a delivery promise without a Logistics record, a finalized loading without a Guard exit, or a won CRM project without its linked Sales Contract.
-_Avoid_: treating an unavailable source as a mismatch, blaming a seller for Accounting or delivery ownership without an explicit Sales responsibility, or inventing a BI-side correction workflow
+The read-only evidence view for missing links or contradictory states between authoritative workspaces, such as a delivery promise without a Logistics record, a finalized loading without a Guard exit, or a won CRM project without its linked Sales Contract. BI may deep-link or refer the discrepancy to its authoritative source but never creates, owns, completes, or mutates Cross-Workspace Duties.
+_Avoid_: treating an unavailable source as a mismatch, blaming a seller for Accounting or delivery ownership without an explicit Sales responsibility, inventing a BI-side correction workflow, or turning a BI finding into a second source of duty truth
 
 **فروش همکاری**:
 A sales contract kind for selling products or services to a collaborative individual or group, reusing contract pricing and payment behavior while not requiring a normal project/address selection.
@@ -316,8 +348,8 @@ A potential project becomes برنده شده only when a Sales Contract is crea
 _Avoid_: marking projects as won without a linked sales contract, marking projects lost without a reason, or treating راکد as the same as از دست رفته.
 
 **تبدیل پروژه احتمالی به قرارداد فروش**:
-When a potential project reaches آماده قرارداد, the responsible seller may create a draft Sales Contract from it. Approval remains in the existing Sales and Accounting contract workflow rather than adding a separate CRM approval gate.
-_Avoid_: requiring CRM-manager approval just to start a draft contract, or bypassing the normal Sales and Accounting approval controls after the draft exists.
+When a potential project reaches آماده قرارداد, the responsible seller may create a draft Sales Contract from it. If another actor records readiness and conversion remains outstanding, one structured Sales duty is created for the responsible seller; if that seller converts the project atomically in the same action, no redundant duty is created. Approval remains in the existing Sales and Accounting contract workflow rather than adding a separate CRM approval gate.
+_Avoid_: requiring CRM-manager approval just to start a draft contract, creating a duty after conversion already completed, duplicating one conversion duty, or bypassing the normal Sales and Accounting approval controls after the draft exists.
 
 **فروشنده مسئول پروژه احتمالی**:
 The seller responsible for following up one specific potential project. The same CRM contact can have multiple potential projects with different responsible sellers, and one seller can follow multiple projects for the same contact.
@@ -1280,9 +1312,9 @@ _Avoid_: linking an operational metric to an unfiltered register, disabling zero
 An accounting financial record may be physically deleted only while it is still a draft and has not been financially approved, while keeping an audit trail of the deletion. Issued, posted, financially approved, or otherwise submitted records are not deleted; they are voided or corrected through accounting workflows.
 _Avoid_: deleting financially approved accounting records, or keeping undeletable draft clutter when a new draft should be regenerated
 
-**درخواست اصلاح حسابداری**:
-A correction request created by accounting when a sales contract or related accounting data needs correction. It moves from manager review, to an approved sales correction window when allowed, to accounting review of the corrected contract, and finally to resolution or cancellation.
-_Avoid_: accounting silently editing the commercial contract, or treating a requested correction as permission for sales to edit before manager approval
+**Legacy Accounting-Originated Correction Request**:
+A historical correction request created by Accounting before the Seller-originated Cross-Workspace Duty cutover. Existing active rows may finish through their preserved lifecycle, but no new row may be created through the retired Accounting writer; they are explicitly reported as grandfathered rather than assigned inferred Seller or Accounting actors.
+_Avoid_: creating new Accounting-originated requests, migrating an unknown historical actor by inference, accounting silently editing the commercial Contract, or treating a request as permission for Sales to edit before manager approval
 
 **پرچم حسابداری**:
 An internal accounting risk or review marker attached to a sales contract. An open blocker flag prevents financial approval but permits preparatory and read-only accounting work; an authorized accounting user closes a flag with a mandatory resolution note, and may cancel an open mistaken flag with a mandatory cancellation reason.
@@ -2083,8 +2115,8 @@ The controlled lifecycle for changing a submitted or approved Leave Request with
 _Avoid_: editing an approved request in place, deleting approved leave or its operational consequences, employee self-cancellation after leave starts, retaining a balance reservation after withdrawal, accepting overlapping active leave
 
 **Security Leave Consequence**:
-The operational staffing and attendance effect that Security derives from an approved Leave Request, such as identifying a shift that needs replacement coverage.
-_Avoid_: letting Security own the Leave Request or its HR approval policy
+The operational staffing and attendance effect that Security derives automatically from an approved Leave Request. The approved result is shared data, not itself a Cross-Workspace Duty; only a concrete coverage gap creates a structured Security duty to arrange replacement coverage.
+_Avoid_: letting Security own the Leave Request or its HR approval policy, creating a duty for every approved leave, or leaving a real coverage gap without an accountable action
 
 **Attendance Exception**:
 An operational discrepancy or correction concerning recorded presence, such as a missing entry, late arrival, early departure, or absence correction. It is distinct from a Leave Request even when approved leave explains the discrepancy.
@@ -2219,12 +2251,12 @@ The non-overlapping intervals added by an explicitly Schedule-Contributing secon
 _Avoid_: classifying one interval as both mandatory attendance and automatic overtime, ignoring absence from additive expected hours, deriving responsibility compensation solely from clock time
 
 **Overtime Candidate**:
-System-calculated extra presence outside the Combined Expected Schedule, based on immutable actual entry and exit evidence. It is not payable overtime until the responsible supervisor explicitly confirms that the work was authorized and performed.
-_Avoid_: paying from clock presence alone, letting Security determine compensation entitlement, deleting raw attendance when the candidate is rejected or corrected
+System-calculated extra presence outside the Combined Expected Schedule, based on immutable actual entry and exit evidence. Security's attendance evidence is operational data rather than a duty. A candidate creates a structured confirmation duty for the Responsible Supervisor and is not payable overtime until that supervisor explicitly confirms that the work was authorized and performed.
+_Avoid_: paying from clock presence alone, creating duties for raw attendance events, letting Security determine compensation entitlement, or deleting raw attendance when the candidate is rejected or corrected
 
 **Approved Overtime**:
-An Overtime Candidate confirmed by the responsible supervisor and available for Human Resources review and Payroll consumption. Human Resources may correct attendance or classification while preserving the raw entry/exit evidence and the approval audit trail.
-_Avoid_: sending pending or rejected candidates to Payroll, modifying raw attendance to force a payment result, losing who approved or corrected the classification
+An Overtime Candidate confirmed by the Responsible Supervisor and available for Human Resources review and Payroll consumption. Supervisor confirmation closes its duty; a separate Human Resources duty is created only when policy or discrepancy requires human review. Human Resources may correct attendance or classification while preserving the raw entry/exit evidence and the approval audit trail.
+_Avoid_: creating routine HR duties when no review is required, sending pending or rejected candidates to Payroll, modifying raw attendance to force a payment result, or losing who approved or corrected the classification
 
 **Responsible Supervisor**:
 The one accountable Personnel selected for an Employment Assignment from active occupants of its supervising Position. A sole eligible occupant is suggested or selected automatically; when several are eligible, saving the subordinate assignment requires an explicit selection whose effective period is fully covered by the supervisor's active assignment. Supervisor changes are effective-dated and preserve earlier responsibility.
@@ -2467,8 +2499,8 @@ The itemized ریال-denominated snapshot of proposed base salary and each recu
 _Avoid_: entering compensation only after signing, a manually typed total without components, renaming predefined compensation components, saving سایر without a title, different offer and contract values, editing the accepted snapshot for a later raise
 
 **Offer Compensation Approval**:
-The sequential authorization in which the single responsible Company Manager proposes the package, an HR/Payroll Processor classifies its components, the designated HR/Payroll Manager approves payroll and policy correctness, and the Finance Manager approves the financial commitment before Candidate presentation. Each pending step identifies its responsible business role; after completion, it identifies the actual participant and timestamp. The displayed chain applies only to the latest offer version. A participant cannot approve their own preparation, and Finance later compares the signed contract with this snapshot without editing it.
-_Avoid_: Candidate presentation before all approvals, implying a pending step belongs to a named person when it remains role-owned, hiding the actual completed approver or time, mixing approvals from different offer versions, self-approval, an unclassified lump sum, Finance changing HR/Payroll components during contract verification
+The sequential authorization in which the single responsible Company Manager proposes the package, an HR/Payroll Processor classifies its components, the designated HR/Payroll Manager approves payroll and policy correctness, and the Finance Manager approves the financial commitment before Candidate presentation. Each pending step identifies its responsible business role; after completion, it identifies the actual participant and timestamp. The displayed chain applies only to the latest offer version. An ordinary participant cannot approve their own preparation; an authorized General Manager or ADMIN may perform both stages through separate explicit actions marked as an audited self-approval override. Finance later compares the signed contract with this snapshot without editing it.
+_Avoid_: Candidate presentation before all approvals, implying a pending step belongs to a named person when it remains role-owned, hiding the actual completed approver or time, mixing approvals from different offer versions, ordinary self-approval, implicit completion of an override stage, an unclassified lump sum, or Finance changing HR/Payroll components during contract verification
 
 **Candidate Offer Notification**:
 The idempotent SMS notification sent automatically after the latest Offer Compensation Summary receives every required internal approval, directing the Candidate to the fixed `/apply` page. A still-valid Application-specific OTP remains usable without being repeated; if access has expired or been revoked, the system issues a replacement OTP for the same Job Application without changing Candidate information or recruitment history. SMS failure does not reverse the completed offer approvals, remains visibly failed in the Human Resources case view, and can be retried explicitly without producing duplicate successful notifications.
@@ -2639,8 +2671,8 @@ A Payroll Run whose population, evidence, policies, calculations, approvals, and
 _Avoid_: editable approved payroll, approval with unresolved or undeferred participants, treating calculation completion as approval
 
 **Payroll Separation of Duties**:
-The rule that preparation, material adjustment, policy activation, and final approval require appropriately distinct accountable actors, including during ordinary administrator operation.
-_Avoid_: self-approval, generic ADMIN bypass, one person controlling policy, calculation, approval, and payment
+The default rule that preparation, material adjustment, policy activation, and final approval require appropriately distinct accountable actors. An authorized General Manager or ADMIN is the explicit exception and may personally perform multiple stages on the same case; every stage remains a separate intentional action and records the actual actor, privileged override, self-approval state, and time. This exception does not merge Payroll with Accounting ownership or permit Accounting to edit employee calculation lines.
+_Avoid_: ordinary self-approval, silent or automatic ADMIN completion, hiding privileged override use, merging distinct audit events, or treating the override as permission for Accounting to rewrite Payroll calculations
 
 **Payroll Accounting Handoff**:
 The immutable, idempotent transfer of an Approved Payroll Run summary and proposed accounting attribution from HR Payroll to Accounting for posting and settlement.
@@ -3095,8 +3127,16 @@ The mutable `DRAFT` and then immutable `FINALIZED` snapshot of what one Guard-ad
 _Avoid_: editing a finalized revision, changing its admitted identity, erasing rejected revisions, or representing driver substitution as an ordinary quantity correction
 
 **Accounting Dispatch Candidate**:
-The immutable Accounting review input created atomically from one finalized Logistics driver-vehicle allocation, accompanied by an Accounting work item but carrying no Accounting Dispatch Waybill number. Its lifecycle is `PENDING_REVIEW` to terminal `ACCEPTED`, `REJECTED`, or `WITHDRAWN`; acceptance atomically issues the numbered waybill.
-_Avoid_: calling the candidate a waybill, numbering it before Accounting accepts it, editing its Logistics snapshot, or bypassing Accounting review
+The immutable Accounting review input created atomically from one finalized Logistics driver-vehicle allocation and projected as exactly one Cross-Workspace Duty without a parallel Accounting work-item lifecycle or an Accounting Dispatch Waybill number. Its states are `PENDING`, `ACCEPTED`, `REJECTED`, `RETURNED`, `WITHDRAWN`, `STALE_REQUIRES_SUCCESSOR`, or `EVIDENCE_CONFLICT`; acceptance atomically issues the numbered waybill, while every other disposition preserves the finalized source snapshot and its structured reason.
+_Avoid_: calling the candidate a waybill, numbering it before Accounting accepts it, retaining a second work-item truth, combining multiple driver-vehicle allocations into one duty, editing its Logistics snapshot, or bypassing Accounting review
+
+**Accounting Dispatch Return**:
+The structured Accounting result for a correctable allocation defect, atomically releasing its reservation and creating a Logistics successor duty that preserves the same driver, vehicle, and Guard queue turn while identifying the required correction. The original finalized allocation and returned candidate remain immutable evidence.
+_Avoid_: treating return as terminal rejection, requiring Logistics to rediscover the needed action, changing the admitted driver-vehicle identity, retaining the old reservation, or editing the finalized revision
+
+**Accounting Dispatch Rejection**:
+The terminal Accounting refusal of a candidate with a required reason, releasing its reservation without automatically creating a Logistics successor duty. Logistics explicitly chooses cancellation, unloading, or a fresh allocation path, while the rejected candidate and finalized source remain immutable.
+_Avoid_: silently creating a successor after rejection, treating rejection as a correctable return, retaining the old reservation, deleting the candidate, or making Logistics' next disposition implicit
 
 **Logistics Dispatch Candidate Withdrawal**:
 The pre-issuance command by which Logistics ends its own Accounting Dispatch Candidate with a mandatory reason, atomically closes the Accounting work item, and then creates a successor revision or records cancellation or unloading. Once a waybill is issued, Logistics may only request Accounting to void it.
@@ -3168,8 +3208,8 @@ The immutable fact created when Guard atomically verifies and consumes an active
 _Avoid_: recording exit from a stale pre-check, consuming one authorization twice, blocking routine work with an editing lock, duplicating exit on retry, voiding an exited waybill, or rewriting the physical-exit fact
 
 **Manual Outage Exit**:
-The explicit two-person exception that permits physical exit during a verified ERP-wide outage using a pre-numbered emergency record containing the waybill, driver, vehicle, load, outage window, reason, driver acknowledgment, and distinct Accounting and Guard-supervisor approvals. Guard registers the actual exit and evidence after recovery as an outage exception without fabricating normal fingerprint, OTP, or digital-authorization success.
-_Avoid_: using the manual path for an ordinary device failure, allowing one-person approval, inventing a normal confirmation retrospectively, losing the actual exit time, or leaving the exception unregistered after recovery
+The explicit two-person exception that permits physical exit during a verified ERP-wide outage using a pre-numbered emergency record containing the waybill, driver, vehicle, load, outage window, reason, driver acknowledgment, and distinct Accounting and Guard-supervisor approvals. Registration creates parallel permission-scoped duties whose order does not matter, but one User—including a global administrator or User with both grants—may complete only one side; Guard registers the actual exit and evidence after recovery only after both approvals, without fabricating normal fingerprint, OTP, or digital-authorization success.
+_Avoid_: using the manual path for an ordinary device failure, allowing one-person approval, serializing independent approvals unnecessarily, inventing a normal confirmation retrospectively, losing the actual exit time, or leaving the exception unregistered after recovery
 
 **Dispatch Correction**:
 An append-only Accounting delta record linked to an exited Accounting Dispatch Waybill that adjusts downstream quantity or accounting projections without changing the original allocation, waybill, confirmation, authorization, or Guard exit. Its lifecycle is `DRAFT` to immutable `POSTED`: drafts affect no projection, while posting atomically makes the delta effective. Each correction states the change from the previously effective quantity; projections equal the original exited quantity plus every posted correction delta in recorded order. A mistaken posted correction is countered by a new opposite posted delta rather than edited, voided, or silently replaced. A physical return is a separate linked Guard inbound movement rather than a reversal of exit, and a return-related negative correction must reference verified Guard inbound evidence. Who may post and whether maker-checker approval is required are separate authorization decisions that do not change projection semantics.

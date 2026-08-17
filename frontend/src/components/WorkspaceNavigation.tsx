@@ -48,6 +48,8 @@ import {
 } from "@/contexts/WorkspaceContext";
 import { dashboardAPI, securityAPI } from "@/lib/api";
 import { ErpPressable } from '@/components/erp';
+import { DutyCountBadge } from '@/features/cross-workspace-duties/DutyCountBadge';
+import { useCrossWorkspaceDutyCount } from '@/features/cross-workspace-duties/useCrossWorkspaceDutyCount';
 
 interface NavigationItem {
   name: string;
@@ -57,6 +59,7 @@ interface NavigationItem {
   show: boolean;
   separatorBefore?: boolean;
   children?: NavigationItem[];
+  badgeCount?: number;
 }
 
 interface WorkspaceNavigationProps {
@@ -86,6 +89,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   const [canOpenSecurityShiftReport, setCanOpenSecurityShiftReport] =
     useState(false);
   const pathname = usePathname();
+  const dutyCount = useCrossWorkspaceDutyCount(currentWorkspace || null);
 
   const collapsed = !!collapsedProp;
 
@@ -836,11 +840,12 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
               aria-expanded={isExpanded}
               aria-current={isActive ? "page" : undefined}
               onClick={() => toggleExpanded(itemKey)}
-              className={`sds-dashboard-nav-control flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:h-12 lg:w-12 lg:flex-none lg:justify-center" : "justify-between gap-4"}`}
+              className={`sds-dashboard-nav-control relative flex min-w-0 flex-1 items-center ${collapsed ? "gap-3 lg:h-12 lg:w-12 lg:flex-none lg:justify-center" : "justify-between gap-4"}`}
             >
               <span className="flex min-w-0 items-center gap-3">
                 <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
                 <span className={labelClassName}>{item.namePersian}</span>
+                {item.badgeCount !== undefined && <DutyCountBadge count={item.badgeCount} collapsed={collapsed} />}
               </span>
               {!collapsed &&
                 (isExpanded ? (
@@ -855,10 +860,11 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
               aria-current={isActive ? "page" : undefined}
               title={collapsed ? item.namePersian : undefined}
               onClick={() => onNavigate?.(item.href)}
-              className={`sds-dashboard-nav-control flex min-w-0 flex-1 items-center gap-3 ${collapsed ? "lg:h-12 lg:w-12 lg:flex-none lg:justify-center" : ""}`}
+              className={`sds-dashboard-nav-control relative flex min-w-0 flex-1 items-center gap-3 ${collapsed ? "lg:h-12 lg:w-12 lg:flex-none lg:justify-center" : ""}`}
             >
               <span className="sds-dashboard-nav-icon"><Icon className="h-5 w-5" /></span>
               <span className={labelClassName}>{item.namePersian}</span>
+              {item.badgeCount !== undefined && <DutyCountBadge count={item.badgeCount} collapsed={collapsed} />}
             </Link>
           )}
         </div>
@@ -877,10 +883,11 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   const navigationItems = getNavigationItems();
   if (currentWorkspace) navigationItems.splice(1, 0, {
     name: 'Task-scoped HR duties',
-    namePersian: 'وظایف بین‌واحدی من',
+    namePersian: 'وظایف بین‌واحدی',
     href: `${WORKSPACE_CONFIG[currentWorkspace].path}/duties`,
     icon: FaClipboardList,
     show: true,
+    badgeCount: dutyCount,
   });
 
   return (

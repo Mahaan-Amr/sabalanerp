@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { PrismaClient } from '@prisma/client';
 import {
   createHrDutyFromLegacyWorkItem,
-  HR_DUTY_DEFINITIONS,
-  processHrDutyDeadlines,
-  reconcileHrDutyAssignment,
-  respondToHrDuty,
-  syncHrDutyEnvelopeDefinitions,
 } from '../hrDutyEngine';
+import {
+  CROSS_WORKSPACE_DUTY_DEFINITIONS as HR_DUTY_DEFINITIONS,
+  processCrossWorkspaceDutyDeadlines as processHrDutyDeadlines,
+  reconcileCrossWorkspaceDutyAssignment as reconcileHrDutyAssignment,
+  respondToCrossWorkspaceDuty as respondToHrDuty,
+  synchronizeCrossWorkspaceDutyDefinitions as syncHrDutyEnvelopeDefinitions,
+} from '../crossWorkspaceDutyModule';
 import {
   getDestinationDutyDetail,
   getDestinationDutySummary,
@@ -107,15 +109,15 @@ const run = async () => {
       .filter(({ destinationWorkspaceCode }) => Boolean(destinationWorkspaceCode))
       .map(({ envelopeCode }) => envelopeCode);
     assert.equal(
-      await tx.hrDutyEnvelope.count({ where: { code: { in: staticEnvelopeCodes } } }),
+      await tx.crossWorkspaceDutyEnvelope.count({ where: { code: { in: staticEnvelopeCodes } } }),
       staticEnvelopeCodes.length,
     );
-    await tx.hrDutyEnvelope.update({
+    await tx.crossWorkspaceDutyEnvelope.update({
       where: { code_version: { code: HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.envelopeCode, version: 1 } },
       data: { responseSchemaJson: { type: 'string' } },
     });
     await assert.rejects(syncHrDutyEnvelopeDefinitions(tx, sourceActor.id), /HR_DUTY_ENVELOPE_DEFINITION_CONFLICT/);
-    await tx.hrDutyEnvelope.update({
+    await tx.crossWorkspaceDutyEnvelope.update({
       where: { code_version: { code: HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.envelopeCode, version: 1 } },
       data: { responseSchemaJson: HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.responseSchema },
     });
@@ -153,8 +155,8 @@ const run = async () => {
     assert.equal(created.responsibilityId, responsibility.id);
     assert.equal(created.destinationWorkspaceCode, 'ACCOUNTING');
     assert.equal(created.status, 'OPEN');
-    assert.equal((await tx.hrDutyAssignmentHistory.count({ where: { dutyId: created.id } })), 1);
-    assert.equal((await tx.hrDutyAuditVersion.count({ where: { dutyId: created.id, eventCode: 'ASSIGNED' } })), 1);
+    assert.equal((await tx.crossWorkspaceDutyAssignmentHistory.count({ where: { dutyId: created.id } })), 1);
+    assert.equal((await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: created.id, eventCode: 'ASSIGNED' } })), 1);
 
     const assignedDetail = await getDestinationDutyDetail(tx, {
       dutyId: created.id, actorUserId: assignee.id, workspaceCode: 'accounting',
@@ -240,7 +242,7 @@ const run = async () => {
     assert.equal(completed.duty.status, 'COMPLETED');
     assert.deepEqual(completed.duty.structuredResultJson, { actionCode: 'APPROVE', reason: null });
     assert.equal((await tx.hrWorkItem.findUniqueOrThrow({ where: { id: source.id } })).status, 'COMPLETE');
-    assert.equal((await tx.hrDutyAuditVersion.count({ where: { dutyId: successorDuty.id, eventCode: 'COMPLETED' } })), 1);
+    assert.equal((await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: successorDuty.id, eventCode: 'COMPLETED' } })), 1);
     const history = await listDestinationDuties(tx, {
       actorUserId: successorOwner.id, workspaceCode: 'ACCOUNTING', view: 'history',
       now: new Date('2026-08-09T09:00:30.000Z'),
@@ -262,7 +264,7 @@ const run = async () => {
     assert.equal(responseReplay.replayed, true);
     assert.equal((await tx.hrWorkItemAudit.count({ where: { workItemId: source.id, eventType: 'DUTY_APPROVED' } })), 1);
 
-    const safeIdentities = await tx.hrDutyNotificationIdentity.findMany({
+    const safeIdentities = await tx.crossWorkspaceDutyNotificationIdentity.findMany({
       where: { dutyId: { in: [created.id, successorDuty.id] } },
     });
     assert.ok(safeIdentities.length >= 2);
@@ -290,7 +292,7 @@ const run = async () => {
       now: new Date('2026-08-09T08:00:00.000Z'),
     });
     assert.equal(unassigned.currentAssigneeUserId, null);
-    assert.equal((await tx.hrDutyAuditVersion.count({ where: { dutyId: unassigned.id, eventCode: 'UNASSIGNED_TRIAGE' } })), 1);
+    assert.equal((await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: unassigned.id, eventCode: 'UNASSIGNED_TRIAGE' } })), 1);
     const blockedSource = await tx.hrWorkItem.findUniqueOrThrow({ where: { id: unassignedSource.id } });
     assert.equal(blockedSource.status, 'PENDING');
     assert.ok(blockedSource.dutyRoutingBlockedAt);
@@ -350,11 +352,11 @@ const run = async () => {
     });
     assert.ok(deadlineResult.overdue >= 1);
     assert.ok(deadlineResult.escalated >= 1);
-    assert.equal(await tx.hrDutyAuditVersion.count({ where: { dutyId: deadlineDuty.id, eventCode: 'OVERDUE' } }), 1);
-    assert.equal(await tx.hrDutyAuditVersion.count({ where: { dutyId: deadlineDuty.id, eventCode: 'MANAGER_ESCALATION' } }), 1);
+    assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: deadlineDuty.id, eventCode: 'OVERDUE' } }), 1);
+    assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: deadlineDuty.id, eventCode: 'MANAGER_ESCALATION' } }), 1);
     await processHrDutyDeadlines(tx, { now: new Date('2026-08-09T08:05:00.000Z'), policyVersion: 1 });
-    assert.equal(await tx.hrDutyAuditVersion.count({ where: { dutyId: deadlineDuty.id, eventCode: 'OVERDUE' } }), 1);
-    assert.equal(await tx.hrDutyAuditVersion.count({ where: { dutyId: deadlineDuty.id, eventCode: 'MANAGER_ESCALATION' } }), 1);
+    assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: deadlineDuty.id, eventCode: 'OVERDUE' } }), 1);
+    assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: deadlineDuty.id, eventCode: 'MANAGER_ESCALATION' } }), 1);
 
     const concurrentSource = await tx.hrWorkItem.create({ data: {
       title: 'Concurrent accounting handoff', sourceType: 'MANUAL',
@@ -372,9 +374,9 @@ const run = async () => {
       }),
     ]);
     assert.equal(concurrentCreations[0].id, concurrentCreations[1].id);
-    assert.equal(await tx.hrDuty.count({ where: { sourceId: concurrentSource.id } }), 1);
+    assert.equal(await tx.crossWorkspaceDuty.count({ where: { sourceId: concurrentSource.id } }), 1);
     const concurrentDuty = concurrentCreations[0];
-    await tx.hrDutyEnvelope.update({
+    await tx.crossWorkspaceDutyEnvelope.update({
       where: { code_version: { code: concurrentDuty.envelopeCode, version: concurrentDuty.envelopeVersion } },
       data: { allowedActionCodesJson: ['APPROVE', 'UNREGISTERED_ACTION'] },
     });
@@ -383,7 +385,7 @@ const run = async () => {
       expectedSourceVersion: concurrentDuty.sourceVersion, expectedEnvelopeVersion: concurrentDuty.envelopeVersion,
       reason: null, policyVersion: 1, now: new Date('2026-08-09T09:10:30.000Z'),
     }), /HR_DUTY_ENVELOPE_VERSION_STALE/);
-    await tx.hrDutyEnvelope.update({
+    await tx.crossWorkspaceDutyEnvelope.update({
       where: { code_version: { code: concurrentDuty.envelopeCode, version: concurrentDuty.envelopeVersion } },
       data: { allowedActionCodesJson: [...HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.allowedActionCodes] },
     });
@@ -403,7 +405,7 @@ const run = async () => {
       result.status === 'fulfilled' && !result.value.replayed
     )).length;
     assert.equal(completedResponseCount, 1, 'concurrent retries perform the source transition exactly once');
-    assert.equal(await tx.hrDutyAuditVersion.count({ where: { dutyId: concurrentDuty.id, eventCode: 'COMPLETED' } }), 1);
+    assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: concurrentDuty.id, eventCode: 'COMPLETED' } }), 1);
 
     const externallyCompletedSource = await tx.hrWorkItem.create({ data: {
       title: 'Externally completed handoff', sourceType: 'MANUAL',
@@ -430,7 +432,7 @@ const run = async () => {
     assert.ok(cancelled);
     assert.equal(cancelled!.predecessor.status, 'CANCELLED');
     assert.equal(cancelled!.successor, null, 'a terminal source cancels without inventing replacement work');
-    assert.equal(await tx.hrDuty.count({ where: { predecessorDutyId: externallyCompletedDuty.id } }), 0);
+    assert.equal(await tx.crossWorkspaceDuty.count({ where: { predecessorDutyId: externallyCompletedDuty.id } }), 0);
 
     await tx.hrFeatureAccessGrant.update({
       where: { id: successorGrant.id },
@@ -495,7 +497,7 @@ const runCompetingTransactionTest = async () => {
       destinationHref: '/dashboard/accounting', dueDate: new Date('2026-08-14T08:00:00.000Z'),
       createdByUserId: sourceActor.id,
     } });
-    const duty = await tx.hrDuty.create({ data: {
+    const duty = await tx.crossWorkspaceDuty.create({ data: {
       stableKey: `${suffix}:duty`, sourceType: 'HR_WORK_ITEM', sourceId: source.id,
       sourceActionCode: 'FINANCE_APPROVAL', sourceVersion: 1,
       envelopeCode: HR_DUTY_DEFINITIONS.FINANCE_APPROVAL.envelopeCode, envelopeVersion: 1,
@@ -506,13 +508,13 @@ const runCompetingTransactionTest = async () => {
       dueAt: source.dueDate, createdByUserId: sourceActor.id,
     } });
     await Promise.all([
-      tx.hrDutyAssignmentHistory.create({ data: {
+      tx.crossWorkspaceDutyAssignmentHistory.create({ data: {
         dutyId: duty.id, sequence: 1, assignedUserId: assignee.id, responsibilityId: responsibility.id,
         destinationWorkspaceCode: 'ACCOUNTING', destinationQueueCode: 'FINANCE_APPROVALS',
         startedAt: new Date('2026-08-01T00:00:00.000Z'), createdAt: new Date('2026-08-01T00:00:00.000Z'),
         changedByUserId: sourceActor.id, policyVersion: 1,
       } }),
-      tx.hrDutyAuditVersion.create({ data: {
+      tx.crossWorkspaceDutyAuditVersion.create({ data: {
         dutyId: duty.id, version: 1, eventCode: 'ASSIGNED', actorUserId: sourceActor.id,
         sourceVersion: 1, envelopeVersion: 1, policyVersion: 1,
         afterJson: { status: 'OPEN', currentAssigneeUserId: assignee.id },
@@ -536,8 +538,16 @@ const runCompetingTransactionTest = async () => {
     const durableWinners = outcomes.filter((outcome) => (
       outcome.status === 'fulfilled' && !outcome.value.replayed
     ));
-    assert.equal(durableWinners.length, 1, 'competing transactions perform exactly one durable response');
-    assert.equal(await prisma.hrDutyAuditVersion.count({
+    assert.equal(
+      durableWinners.length,
+      1,
+      `competing transactions perform exactly one durable response: ${outcomes.map((outcome) => (
+        outcome.status === 'fulfilled'
+          ? `fulfilled(replayed=${outcome.value.replayed})`
+          : `rejected(${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)})`
+      )).join(', ')}`,
+    );
+    assert.equal(await prisma.crossWorkspaceDutyAuditVersion.count({
       where: { dutyId: seeded.duty.id, eventCode: 'COMPLETED' },
     }), 1);
     assert.equal((await prisma.hrWorkItem.findUniqueOrThrow({ where: { id: seeded.source.id } })).status, 'COMPLETE');
@@ -550,10 +560,10 @@ const runCompetingTransactionTest = async () => {
       const eventIds = events.map(({ id }) => id);
       await tx.notification.deleteMany({ where: { eventId: { in: eventIds } } });
       await tx.notificationEvent.deleteMany({ where: { id: { in: eventIds } } });
-      await tx.hrDutyNotificationIdentity.deleteMany({ where: { dutyId: seeded.duty.id } });
-      await tx.hrDutyAuditVersion.deleteMany({ where: { dutyId: seeded.duty.id } });
-      await tx.hrDutyAssignmentHistory.deleteMany({ where: { dutyId: seeded.duty.id } });
-      await tx.hrDuty.delete({ where: { id: seeded.duty.id } });
+      await tx.crossWorkspaceDutyNotificationIdentity.deleteMany({ where: { dutyId: seeded.duty.id } });
+      await tx.crossWorkspaceDutyAuditVersion.deleteMany({ where: { dutyId: seeded.duty.id } });
+      await tx.crossWorkspaceDutyAssignmentHistory.deleteMany({ where: { dutyId: seeded.duty.id } });
+      await tx.crossWorkspaceDuty.delete({ where: { id: seeded.duty.id } });
       await tx.hrWorkItemAudit.deleteMany({ where: { workItemId: seeded.source.id } });
       await tx.hrWorkItem.delete({ where: { id: seeded.source.id } });
       await tx.hrNamedResponsibility.delete({ where: { id: seeded.responsibility.id } });

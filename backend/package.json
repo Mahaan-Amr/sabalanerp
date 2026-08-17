@@ -4,6 +4,8 @@
   "description": "ERP Backend API",
   "main": "dist/index.js",
   "scripts": {
+    "duty:baseline": "tsx src/scripts/report-hr-duty-baseline.ts",
+    "duty:reconcile:sales-contract-corrections": "tsx src/scripts/report-sales-contract-correction-duty-reconciliation.ts",
     "dispatch-document:recovery": "tsx scripts/dispatch-document-recovery.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -28,6 +30,9 @@
     "test:hr-work-items": "tsx src/services/__tests__/hrWorkItems.test.ts",
     "test:hr-redesign-data-contracts": "tsx src/services/__tests__/hrRedesignDataContracts.test.ts && tsx src/services/__tests__/hrAuthorizationPolicy.test.ts && tsx src/routes/__tests__/hrRedesignRoutes.test.ts && tsx src/routes/__tests__/hrAuthorizationRoutes.test.ts",
     "test:hr-duty-engine": "tsx src/services/__tests__/hrDutyEngine.test.ts && tsx src/services/__tests__/hrDutyNotificationAuthorization.test.ts && tsx src/routes/__tests__/hrDutyRoutes.test.ts && tsx src/services/__tests__/hrDutyEngine.integration.test.ts",
+    "test:cross-workspace-duty-phase1": "tsx --test src/services/__tests__/crossWorkspaceDutyModule.integration.test.ts src/services/__tests__/crossWorkspaceDutyInbox.integration.test.ts && npm run test:hr-duty-engine",
+    "test:sales-contract-correction-duty": "tsx --test src/services/__tests__/salesContractCorrectionDuty.integration.test.ts && tsx src/routes/__tests__/salesContractCorrectionRoutes.test.ts",
+    "test:hr-duty-baseline": "tsx --test src/services/__tests__/hrDutyBaselineReport.integration.test.ts src/services/__tests__/hrDutyBaselineCommand.integration.test.ts",
     "test:hr-organization-capacity": "tsx src/services/__tests__/hrOrganizationCapacity.test.ts && tsx src/services/__tests__/hrOrganizationCapacity.integration.test.ts",
     "test:hr-redesign-migration": "tsx src/services/__tests__/hrRedesignDataMigration.integration.test.ts",
     "test:hr-record-retention": "tsx src/services/__tests__/hrRecordRetentionPolicy.test.ts && tsx src/services/__tests__/hrDeletionFileTransaction.test.ts && tsx src/services/__tests__/hrPersonnelErasureGraph.test.ts && tsx src/services/__tests__/hrPersonnelErasureRecovery.test.ts && tsx src/services/__tests__/hrApplicationDecisionVersions.test.ts && tsx src/services/__tests__/hrHiringAuthorityPolicy.test.ts",

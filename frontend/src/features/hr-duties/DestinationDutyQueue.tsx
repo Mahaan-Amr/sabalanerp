@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useState } from 'react';
-import { FaClock, FaExclamationTriangle, FaHistory, FaInbox, FaSync, FaUserShield } from 'react-icons/fa';
+import { FaClock, FaExclamationTriangle, FaInbox, FaSync, FaUserCheck, FaUserShield } from 'react-icons/fa';
 import {
   ErpBadge,
   ErpButton,
@@ -16,6 +16,8 @@ import {
 } from '@/components/erp';
 import { hrDutyApi, type DestinationDuty, type DestinationDutySummary, type DestinationDutyView } from './hrDutyApi';
 import { initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
+import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-duties/crossWorkspaceDutyApi';
+import { buildDutyQueueTabs, dutyQueueEmptyTitle } from '@/features/cross-workspace-duties/dutyQueuePresentation';
 
 const statusLabel: Record<string, string> = {
   OPEN: 'باز', COMPLETED: 'تکمیل‌شده', WAIVED: 'جایگزین‌شده', CANCELLED: 'لغوشده',
@@ -34,6 +36,7 @@ type QueueData = { summary: DestinationDutySummary; duties: DestinationDuty[]; v
 
 export function DestinationDutyQueue({ workspace }: { workspace: string }) {
   const [view, setView] = useState<DestinationDutyView>('assigned');
+  const [pendingClaim, setPendingClaim] = useState<string | null>(null);
   const [state, dispatch] = useReducer(
     reduceDestinationDutyState<QueueData>,
     initialDestinationDutyState as typeof initialDestinationDutyState & { data: QueueData | null },
@@ -56,14 +59,14 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
 
   if (!state.data && state.loading) {
     return (
-      <ErpPage eyebrow="وظایف بین‌واحدی" title="وظایف منابع انسانی" backHref={`/dashboard/${workspace}`}>
+      <ErpPage eyebrow="وظایف بین‌واحدی" title="وظایف بین‌واحدی" backHref={`/dashboard/${workspace}`}>
         <ErpSkeleton lines={5} label="در حال بارگذاری وظایف" />
       </ErpPage>
     );
   }
   if (!state.data) {
     return (
-      <ErpPage eyebrow="وظایف بین‌واحدی" title="وظایف منابع انسانی" backHref={`/dashboard/${workspace}`}>
+      <ErpPage eyebrow="وظایف بین‌واحدی" title="وظایف بین‌واحدی" backHref={`/dashboard/${workspace}`}>
         <ErpInlineState kind="error" title={state.error || 'وظایف در دسترس نیست.'} action={{ label: 'تلاش دوباره', icon: FaSync, onClick: load }} />
       </ErpPage>
     );
@@ -71,16 +74,23 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
 
   const { summary, duties } = state.data;
   const displayedView = state.loading || state.stale ? state.data.view : view;
-  const options = [
-    { value: 'assigned' as const, label: 'وظایف من', icon: FaInbox, count: summary.open },
-    ...(summary.canManageTriage ? [{ value: 'triage' as const, label: 'نیازمند تعیین مسئول', icon: FaUserShield, count: summary.triage }] : []),
-    { value: 'history' as const, label: 'تاریخچه', icon: FaHistory },
-  ];
+  const options = buildDutyQueueTabs(summary);
+  const claim = async (dutyId: string) => {
+    if (pendingClaim) return;
+    setPendingClaim(dutyId);
+    try {
+      await hrDutyApi.claim(dutyId);
+      announceCrossWorkspaceDutyChanged();
+      setView('assigned');
+    } finally {
+      setPendingClaim(null);
+    }
+  };
 
   return (
     <ErpPage
       eyebrow="وظایف بین‌واحدی"
-      title="وظایف منابع انسانی"
+      title="وظایف بین‌واحدی"
       description="فقط اطلاعات لازم برای همین وظیفه نمایش داده می‌شود."
       backHref={`/dashboard/${workspace}`}
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: load, disabled: state.loading }]}
@@ -90,6 +100,7 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
         { label: 'باز', value: summary.open.toLocaleString('fa-IR'), icon: FaInbox, tone: 'info' },
         { label: 'تا ۲۴ ساعت', value: summary.dueSoon.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
         { label: 'گذشته از موعد', value: summary.overdue.toLocaleString('fa-IR'), icon: FaExclamationTriangle, tone: summary.overdue ? 'danger' : 'neutral' },
+        { label: 'قابل دریافت', value: summary.available.toLocaleString('fa-IR'), icon: FaUserCheck, tone: 'success' },
         ...(summary.canManageTriage ? [{ label: 'بدون مسئول', value: summary.triage.toLocaleString('fa-IR'), icon: FaUserShield, tone: 'purple' as const }] : []),
       ]} />
       <ErpSection>
@@ -98,7 +109,7 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
       {state.loading && <ErpInlineState kind="empty" title="در حال به‌روزرسانی" />}
       {!duties.length ? (
         <ErpEmptyState
-          title={displayedView === 'triage' ? 'وظیفه بدون مسئول وجود ندارد' : displayedView === 'history' ? 'تاریخچه‌ای وجود ندارد' : 'وظیفه بازی ندارید'}
+          title={dutyQueueEmptyTitle(displayedView)}
           description="این شمارش واقعی است و با به‌روزرسانی تغییر می‌کند."
           icon={FaInbox}
         />
@@ -114,7 +125,16 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
                 <p className="sds-text-muted text-sm">مهلت: {duty.dueAtDisplay}</p>
                 {duty.overdue && <p className="text-sm font-semibold text-[var(--sds-danger)]">مهلت انجام گذشته است.</p>}
               </div>
-              {duty.detailAvailable ? (
+              {duty.access === 'AVAILABLE' ? (
+                <ErpButton
+                  label={pendingClaim === duty.id ? 'در حال دریافت…' : 'دریافت وظیفه'}
+                  icon={FaUserCheck}
+                  tone="success"
+                  variant="solid"
+                  disabled={Boolean(pendingClaim)}
+                  onClick={() => void claim(duty.id)}
+                />
+              ) : duty.detailAvailable ? (
                 <ErpButton label="مشاهده وظیفه" href={`/dashboard/${workspace}/duties/${duty.id}`} tone="primary" variant="solid" />
               ) : (
                 <p className="sds-text-muted text-sm">این سابقه بسته شده و دیگر پیوند عملیاتی ندارد.</p>

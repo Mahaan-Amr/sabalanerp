@@ -77,7 +77,7 @@ export const filterCurrentlyAuthorizedNotifications = async <
   const supportTicketIds = [...new Set(rows
     .filter((row) => row.event?.resourceType === 'support-ticket' && row.event.resourceId)
     .map((row) => row.event!.resourceId!))];
-  const hrDutyIds = [...new Set(rows
+  const crossWorkspaceDutyIds = [...new Set(rows
     .filter((row) => row.event?.resourceType === 'HR_DUTY' && row.event.resourceId)
     .map((row) => row.event!.resourceId!))];
   const [tickets, designatedIncidentHandler, hrDuties] = await Promise.all([
@@ -105,9 +105,9 @@ export const filterCurrentlyAuthorizedNotifications = async <
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
     }).then((count) => count > 0),
-    hrDutyIds.length
-      ? database.hrDuty.findMany({
-          where: { id: { in: hrDutyIds } },
+    crossWorkspaceDutyIds.length
+      ? database.crossWorkspaceDuty.findMany({
+          where: { id: { in: crossWorkspaceDutyIds } },
           select: {
             id: true,
             status: true,
@@ -122,7 +122,7 @@ export const filterCurrentlyAuthorizedNotifications = async <
   const ticketById = new Map<string, AuthorizedSupportTicket>(
     (tickets as AuthorizedSupportTicket[]).map((ticket) => [ticket.id, ticket]),
   );
-  const hrDutyById = new Map<string, AuthorizedHrDuty>(hrDuties.map((duty) => [duty.id, {
+  const crossWorkspaceDutyById = new Map<string, AuthorizedHrDuty>(hrDuties.map((duty) => [duty.id, {
     status: duty.status,
     currentAssigneeUserId: duty.currentAssigneeUserId,
     createdByUserId: duty.createdByUserId,
@@ -154,7 +154,7 @@ export const filterCurrentlyAuthorizedNotifications = async <
       });
     }
     if (event.resourceType === 'HR_DUTY' && event.resourceId) {
-      const duty = hrDutyById.get(event.resourceId);
+      const duty = crossWorkspaceDutyById.get(event.resourceId);
       return duty ? canAccessHrDutyNotification({
         userId: user.id,
         type: row.type,

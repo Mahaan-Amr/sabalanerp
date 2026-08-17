@@ -157,9 +157,11 @@ const canonicalPricingComponentsFor = (
     try {
       if (
         typeof material.amountToman !== 'string' ||
-        parseCanonicalDecimal(material.amountToman) !== '0'
+        parseCanonicalDecimal(material.amountToman) !== '0' ||
+        typeof row.commercial.baseAmountToman !== 'string' ||
+        parseCanonicalDecimal(row.commercial.baseAmountToman) !== '0'
       ) {
-        throw new TypeError('Paid source material amount must be zero.');
+        throw new TypeError('Paid source material and commercial base amounts must be zero.');
       }
     } catch {
       throw new Error(`Product ${row.productRowId} material pricing evidence is malformed`);

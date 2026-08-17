@@ -138,6 +138,25 @@ assert.throws(
   /material pricing evidence is malformed/
 );
 
+const conflictingPaidCommercialBaseGraph = {
+  ...paidSourceRemainderGraph,
+  rows: [{
+    ...paidSourceRemainderGraph.rows[0]!,
+    commercial: {
+      ...paidSourceRemainderGraph.rows[0]!.commercial,
+      baseAmountToman: '999',
+      totalAmountToman: '999',
+      calculationSnapshot: {
+        materialPricing: { amountToman: '0', reason: 'paid-in-source-product' }
+      }
+    }
+  }]
+} as unknown as CanonicalProductGraph;
+assert.throws(
+  () => projectCanonicalProductGraph(conflictingPaidCommercialBaseGraph, 'accounting'),
+  /material pricing evidence is malformed/
+);
+
 const reallocatedPaidSourceGraph = parseCanonicalProductGraph({
   ...paidSourceRemainderGraph,
   rows: [{

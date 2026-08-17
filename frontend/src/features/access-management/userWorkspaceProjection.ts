@@ -29,11 +29,13 @@ export const projectUserWorkspaceAccess = ({
   directPermissions,
   roleDefaults,
   canonicalHrGrants,
+  evaluatedAt,
 }: {
   role: string;
   directPermissions: WorkspaceProjectionPermission[];
   roleDefaults: WorkspaceProjectionPermission[];
   canonicalHrGrants: CanonicalHrWorkspaceGrant[];
+  evaluatedAt?: string;
 }): ProjectedWorkspaceAccess[] => {
   if (role === 'ADMIN') {
     return ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security', 'bi', 'logistics'].map((workspace) => ({
@@ -47,13 +49,13 @@ export const projectUserWorkspaceAccess = ({
   const activeDirect = directPermissions.filter((permission) => permission.isActive && permission.workspace !== 'hr');
   const activeRole = roleDefaults.filter((permission) => permission.isActive);
   const directWorkspaces = new Set(activeDirect.map((permission) => permission.workspace));
+  const evaluationTime = evaluatedAt ? new Date(evaluatedAt).getTime() : Date.now();
   const canonicalHr = [...canonicalHrGrants]
     .filter((grant) => {
-      const now = Date.now();
       return grant.status === 'ACTIVE'
         && grant.workspaceCode === 'HUMAN_RESOURCES'
-        && (!grant.effectiveFrom || new Date(grant.effectiveFrom).getTime() <= now)
-        && (!grant.effectiveTo || new Date(grant.effectiveTo).getTime() > now);
+        && (!grant.effectiveFrom || new Date(grant.effectiveFrom).getTime() <= evaluationTime)
+        && (!grant.effectiveTo || new Date(grant.effectiveTo).getTime() > evaluationTime);
     })
     .sort((left, right) => String(right.effectiveFrom || '').localeCompare(String(left.effectiveFrom || '')))[0];
 

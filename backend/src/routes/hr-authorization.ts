@@ -103,6 +103,7 @@ router.get('/me', asyncHandler(async (req, res) => {
 }));
 
 router.get('/context', administer, asyncHandler(async (req, res) => {
+  const generatedAt = new Date();
   const [users, workspaceCatalog, featureCatalog, authorityCatalog, responsibilityTypes, recentWorkspaceGrants,
     activeWorkspaceGrants, recentFeatureGrants, activeFeatureGrants, authorityGrants, responsibilities, destinations, constraints, audit] = await Promise.all([
     prisma.user.findMany({ where: { isActive: true, ...(req.user!.role === 'MANAGER' ? { role: { not: 'ADMIN' } } : {}) }, select: { id: true, username: true, firstName: true, lastName: true, role: true }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
@@ -138,7 +139,7 @@ router.get('/context', administer, asyncHandler(async (req, res) => {
     featureGrants: visibleToActor(featureGrants),
     authorityGrants: visibleToActor(authorityGrants),
     responsibilities: req.user!.role === 'ADMIN' ? responsibilities : responsibilities.filter(({ assignedUserId }) => !assignedUserId || visibleUserIds.has(assignedUserId)),
-    destinations, constraints, audit: req.user!.role === 'ADMIN' ? audit : [],
+    destinations, constraints, audit: req.user!.role === 'ADMIN' ? audit : [], generatedAt,
   } });
 }));
 

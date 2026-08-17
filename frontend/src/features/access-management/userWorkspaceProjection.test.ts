@@ -22,6 +22,29 @@ assert.deepEqual(
 );
 assert.equal(projected.find(({ workspace }) => workspace === 'accounting')?.permissionLevel, 'view');
 
+const serverEvaluatedAt = '2099-08-17T12:00:00.000Z';
+const confirmedAccessWithClientClockSkew = projectUserWorkspaceAccess({
+  role: 'USER',
+  directPermissions: [
+    { id: 'logistics-edit', workspace: 'logistics', permissionLevel: 'edit', isActive: true },
+  ],
+  roleDefaults: [],
+  canonicalHrGrants: [{
+    id: 'canonical-hr-admin',
+    workspaceCode: 'HUMAN_RESOURCES',
+    level: 'ADMIN',
+    status: 'ACTIVE',
+    effectiveFrom: serverEvaluatedAt,
+    effectiveTo: null,
+  }],
+  evaluatedAt: serverEvaluatedAt,
+});
+assert.deepEqual(
+  confirmedAccessWithClientClockSkew.map(({ workspace }) => workspace).sort(),
+  ['hr', 'logistics'],
+  'a Confirmed Access Change must project HR and logistics immediately using authoritative server time',
+);
+
 const inheritedHr = projectUserWorkspaceAccess({
   role: 'USER',
   directPermissions: [],

@@ -87,6 +87,7 @@ export default function UsersManagementPage() {
   const [permissions, setPermissions] = useState<WorkspacePermission[]>([]);
   const [rolePermissions, setRolePermissions] = useState<RoleWorkspacePermission[]>([]);
   const [hrWorkspaceGrants, setHrWorkspaceGrants] = useState<CanonicalHrWorkspaceGrant[]>([]);
+  const [hrContextGeneratedAt, setHrContextGeneratedAt] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -178,6 +179,7 @@ export default function UsersManagementPage() {
       }
       if (hrContextResponse?.data.success) {
         setHrWorkspaceGrants(hrContextResponse.data.data.workspaceGrants || []);
+        setHrContextGeneratedAt(hrContextResponse.data.data.generatedAt);
       }
       referenceDataLoaded.current = true;
     } catch (error: any) {
@@ -222,6 +224,7 @@ export default function UsersManagementPage() {
     directPermissions: getUserWorkspacePermissions(user.id),
     roleDefaults: rolePermissions.filter((permission) => permission.role === user.role),
     canonicalHrGrants: hrWorkspaceGrants.filter((grant) => grant.userId === user.id),
+    evaluatedAt: hrContextGeneratedAt,
   });
 
   const getRoleLabel = (role: string) => {

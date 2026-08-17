@@ -58,6 +58,10 @@ _Avoid_: keeping committed list state only in component memory, adding each filt
 The platform-wide visual, interaction, accessibility, and user-experience language for Sabalan ERP. The Guard workspace and the contract Product Selection flow are reference implementations that inform the shared system without contributing Guard- or contract-specific domain assumptions to generic components.
 _Avoid_: calling the platform system the Guard design system, copying reference-page styling without reusable behavior, or leaking workspace terminology and permissions into shared primitives
 
+**Confirmed Access Change**:
+A User access administration change whose success confirmation means every selected direct access has been durably recorded and is immediately represented consistently when the administrator returns to an access summary. No manual refresh, repeated grant, or waiting period is part of successful completion.
+_Avoid_: confirming success while one access source remains stale, treating eventual badge appearance as completion, requiring the administrator to reconcile access sources, or making repeated submission the recovery path
+
 **داشبورد اصلی**:
 The role-authorized operational overview that prioritizes current business state, items needing attention, and the user's next useful actions; workspace and administration navigation remains available with secondary emphasis.
 _Avoid_: treating the main dashboard as a flat application menu, giving every destination equal visual weight, or hiding operational truth behind decorative presentation

@@ -11,6 +11,7 @@ const customerWithCrmHistory = {
   companyName: 'سنگ سبلان',
   nationalCode: '0012345678',
   homeNumber: '02100000000',
+  customFields: { economicCode: '411111111111', liveCrmScore: 99 },
   primaryContact: {
     id: 'contact-1',
     mobile: '09120000000',
@@ -60,10 +61,12 @@ assert.deepEqual(sanitized.customer, {
   companyName: 'سنگ سبلان',
   nationalCode: '0012345678',
   homeNumber: '02100000000',
+  customFields: { economicCode: '411111111111' },
   primaryContact: { id: 'contact-1', mobile: '09120000000' },
   phoneNumbers: [{ id: 'phone-1', number: '09120000000', type: 'mobile', isPrimary: true }],
 });
 assert.equal(sanitized.customer.projectAddresses, undefined);
+assert.equal(sanitized.customer.customFields.liveCrmScore, undefined);
 assert.deepEqual(sanitized.products, contractData.products);
 assert.deepEqual(sanitized.deliveries, contractData.deliveries);
 assert.deepEqual(sanitized.payment, contractData.payment);

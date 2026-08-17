@@ -20,6 +20,10 @@ export type ContractPhoneNumberSnapshot = {
   isActive?: boolean;
 };
 
+export type ContractCustomerLegalFieldsSnapshot = {
+  economicCode?: string | null;
+};
+
 export type ContractCustomerSnapshot = {
   id?: string;
   companyName?: string | null;
@@ -42,6 +46,7 @@ export type ContractCustomerSnapshot = {
   referrerPhoneNumber?: string | null;
   workAddress?: string | null;
   workNumber?: string | null;
+  customFields?: ContractCustomerLegalFieldsSnapshot;
   primaryContact?: ContractPrimaryContactSnapshot;
   phoneNumbers?: ContractPhoneNumberSnapshot[];
 };
@@ -69,8 +74,16 @@ const PHONE_NUMBER_FIELDS = [
   'id', 'number', 'type', 'isPrimary', 'isActive',
 ] as const;
 
+const CUSTOMER_LEGAL_FIELDS = ['economicCode'] as const;
+
 const projectCustomerSnapshot = (customer: SnapshotRecord): ContractCustomerSnapshot => {
   const snapshot = projectFields(customer, CUSTOMER_FACT_FIELDS) as ContractCustomerSnapshot;
+  if (isRecord(customer.customFields)) {
+    snapshot.customFields = projectFields(
+      customer.customFields,
+      CUSTOMER_LEGAL_FIELDS,
+    ) as ContractCustomerLegalFieldsSnapshot;
+  }
   if (isRecord(customer.primaryContact)) {
     snapshot.primaryContact = projectFields(
       customer.primaryContact,

@@ -32,6 +32,8 @@ const assertBoundedSnapshot = (value: unknown) => {
   assert.equal(customer.primaryContact?.customer, undefined);
   assert.equal(rootCustomer.salesContracts, undefined);
   assert.equal(rootCustomer.id, customer.id);
+  assert.deepEqual(customer.customFields, { economicCode: '411111111111' });
+  assert.deepEqual(rootCustomer.customFields, { economicCode: '411111111111' });
   assert(Array.isArray(snapshot.items) && snapshot.items.length > 0);
   assert(Array.isArray(snapshot.deliveries) && snapshot.deliveries.length === 1);
   assert(Array.isArray(snapshot.deliveries[0].products) && snapshot.deliveries[0].products.length === 1);
@@ -103,6 +105,7 @@ const run = async () => {
         customer: {
           ...sourceCustomer,
           id: source.customerId,
+          customFields: { economicCode: '411111111111', liveCrmScore: 99 },
           primaryContact: {
             id: 'qa-primary-contact',
             firstName: 'QA',

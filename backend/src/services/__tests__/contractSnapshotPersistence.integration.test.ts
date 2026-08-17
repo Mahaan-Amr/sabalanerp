@@ -49,6 +49,7 @@ const run = async () => {
     ...(contractData.customer || {}),
     id: source.customerId,
     companyName: 'QA stable legal identity',
+    customFields: { economicCode: '411111111111', liveCrmScore: 99 },
     salesContracts: [{
       id: 'recursive-history-contract',
       payload: 'x'.repeat(4_200_000),
@@ -93,6 +94,7 @@ const run = async () => {
   const savedData = created.contractData as Record<string, any>;
   assert.equal(savedData.customer.id, source.customerId);
   assert.equal(savedData.customer.companyName, 'QA stable legal identity');
+  assert.deepEqual(savedData.customer.customFields, { economicCode: '411111111111' });
   assert.equal(savedData.customer.salesContracts, undefined);
   assert.equal(savedData.customer.communications, undefined);
   assert(Array.isArray(savedData.products));

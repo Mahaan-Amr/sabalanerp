@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AccountingRecordStatus, FinancialRecordKind } from '@prisma/client';
+import { projectCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import {
   buildApprovedPricingVersion,
   canonicalApprovedPricingHash,
@@ -131,6 +132,90 @@ test('seals canonical slab material and cutting components without dropping vert
   const version = buildApprovedPricingVersion(source, 1, 'existing-slab-version');
   assert.equal(version.grossAmount, '5350000.000000000000');
   assert.equal(version.rows[0]?.componentEvidence['slab-cut-vertical:slab-cut-vertical'], '150000.000000000000');
+});
+
+test('seals a canonical stair row with all persisted layer pricing evidence', () => {
+  const source = approvedPricingSourceFixture();
+  (source.contract.contractData as any).discount = {
+    enabled: false, baseSubtotal: '5700000', percent: '0', amount: '0', currency: 'تومان',
+  };
+  source.leaf.amount = '65000000';
+  source.leaf.invoiceItems = [{ ...source.leaf.invoiceItems[0]!, totalPrice: '65000000' }];
+  source.contract.items = [{ ...source.contract.items[0]!, totalPrice: '6500000' }];
+  source.contract.currentItems = [{ ...source.contract.currentItems[0]!, totalPrice: '6500000' }];
+  (source.contract.contractData as any).products[0].productType = 'stair';
+  source.contract.items = source.contract.items.map(item => ({ ...item, productType: 'stair' }));
+  source.contract.currentItems = source.contract.currentItems.map(item => ({ ...item, productType: 'stair' }));
+
+  const graph = {
+    schemaVersion: 1, revision: 1,
+    calculationPolicy: {
+      calculation: 'calculation-v1', packing: 'packing-v1',
+      pricing: 'pricing-v1', rounding: 'rounding-v1',
+    },
+    catalogSnapshots: [], stairSystems: [], sourceBatches: [], remainingStones: [],
+    allocations: [], operationGroups: [], toolSelections: [], finishingSelections: [],
+    rows: [{
+      productRowId: 'row-1', catalogProductId: 'product-1', catalogSnapshotVersion: 'snapshot-1',
+      productType: 'stair', contractualTitle: 'Stair tread',
+      commercial: {
+        requestedQuantity: '4', baseAmountToman: '5700000', totalAmountToman: '6500000',
+        calculationSnapshot: { pricingLines: [{
+          lineId: 'base-material', quantity: '6', rateToman: '950000', amountToman: '5700000',
+        }, {
+          lineId: 'stair-cut', quantity: '15', rateToman: '20000', amountToman: '300000',
+        }] },
+      },
+    }],
+    layerConfigurations: [{
+      layerConfigurationId: 'front-layer', parentProductRowId: 'row-1',
+      result: {
+        layerPricingLine: {
+          lineId: 'layer-price', quantity: '1', rateToman: '200000', amountToman: '200000',
+        },
+        materialPricingLine: {
+          lineId: 'base-material', quantity: '1', rateToman: '100000', amountToman: '100000',
+        },
+        cuttingPricingLines: [{
+          lineId: 'longitudinal-cut', quantity: '5', rateToman: '20000', amountToman: '100000',
+        }],
+        sideOperationResults: [{
+          operationCollectionId: 'front-polish',
+          result: { pricingLines: [{
+            lineId: 'tool:edge-polish', quantity: '1', rateToman: '100000', amountToman: '100000',
+          }] },
+        }],
+      },
+    }],
+  } as any;
+  const projection = projectCanonicalProductGraph(graph, 'accounting');
+  source.contract.productGraph = {
+    ...projection,
+    inputHash: 'stair-layer-input-hash',
+    resultHash: 'stair-layer-result-hash',
+    rows: projection.products.map(row => ({
+      productRowId: row.productRowId,
+      catalogProductId: 'product-1',
+      contractualTitle: row.contractualTitle,
+      productType: row.productType,
+      baseAmountToman: row.baseAmountToman ?? null,
+      totalAmountToman: row.totalAmountToman,
+      requestedQuantity: row.quantity ?? null,
+      requestedLengthMeters: row.lengthMeters ?? null,
+      requestedAreaSquareMeters: row.areaSquareMeters ?? null,
+      pricingComponents: row.pricingComponents,
+      operations: row.operations,
+    })),
+  };
+
+  const version = buildApprovedPricingVersion(source, 1, 'existing-stair-layer-version');
+  assert.equal(version.grossAmount, '6500000.000000000000');
+  assert.equal(
+    version.rows[0]?.componentEvidence[
+      'stair-layer-operation:tool:edge-polish:layer:front-layer:operation:front-polish:tool:edge-polish'
+    ],
+    '100000.000000000000'
+  );
 });
 
 test('accepts explicit no-discount evidence without deriving a default', () => {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import type { CanonicalProductGraph } from '../productGraph';
 import { parseCanonicalProductGraph } from '../productGraphSerialization';
 import { projectCanonicalGraphToLegacyProducts, projectCanonicalProductGraph } from '../projections';
 
@@ -143,6 +144,89 @@ assert.deepEqual(reallocatedProjection.products[0]?.pricingComponents, [{
 }, {
   id: 'remainder-cutting:reallocated-remainder', kind: 'remainder-cutting',
   amountToman: '250000'
+}]);
+
+for (const malformedRemainderCutting of [
+  ['not-an-object'],
+  'not-an-object',
+  { allocationId: '', amountToman: '250000' },
+  { allocationId: 'reallocated-remainder', amountToman: 'not-an-amount' }
+]) {
+  const malformedRemainderGraph = {
+    ...reallocatedPaidSourceGraph,
+    rows: [{
+      ...reallocatedPaidSourceGraph.rows[0]!,
+      commercial: {
+        ...reallocatedPaidSourceGraph.rows[0]!.commercial,
+        calculationSnapshot: {
+          ...reallocatedPaidSourceGraph.rows[0]!.commercial.calculationSnapshot,
+          remainderCutting: malformedRemainderCutting
+        }
+      }
+    }]
+  } as unknown as CanonicalProductGraph;
+  assert.throws(
+    () => projectCanonicalProductGraph(malformedRemainderGraph, 'accounting'),
+    /remainder cutting evidence is malformed/
+  );
+}
+
+const stairLayerGraph = {
+  ...pricedLongitudinalGraph,
+  rows: [{
+    ...pricedLongitudinalGraph.rows[0]!,
+    productRowId: 'stair-parent',
+    productType: 'stair',
+    commercial: {
+      baseAmountToman: '5700000',
+      totalAmountToman: '6500000',
+      calculationSnapshot: {
+        pricingLines: [{
+          lineId: 'base-material', quantity: '6', rateToman: '950000', amountToman: '5700000'
+        }, {
+          lineId: 'stair-cut', quantity: '15', rateToman: '20000', amountToman: '300000'
+        }]
+      }
+    }
+  }],
+  layerConfigurations: [{
+    layerConfigurationId: 'front-layer',
+    parentProductRowId: 'stair-parent',
+    result: {
+      layerPricingLine: {
+        lineId: 'layer-price', quantity: '1', rateToman: '200000', amountToman: '200000'
+      },
+      materialPricingLine: {
+        lineId: 'base-material', quantity: '1', rateToman: '100000', amountToman: '100000'
+      },
+      cuttingPricingLines: [{
+        lineId: 'longitudinal-cut', quantity: '5', rateToman: '20000', amountToman: '100000'
+      }],
+      sideOperationResults: [{
+        operationCollectionId: 'front-polish',
+        result: {
+          pricingLines: [{
+            lineId: 'tool:edge-polish', quantity: '1', rateToman: '100000', amountToman: '100000'
+          }]
+        }
+      }]
+    }
+  }]
+} as unknown as CanonicalProductGraph;
+const stairLayerProjection = projectCanonicalProductGraph(stairLayerGraph, 'accounting');
+assert.deepEqual(stairLayerProjection.products[0]?.pricingComponents, [{
+  id: 'base-material', kind: 'base-material', amountToman: '5700000'
+}, {
+  id: 'stair-cut', kind: 'stair-cut', amountToman: '300000'
+}, {
+  id: 'layer:front-layer:layer-price', kind: 'stair-layer:layer-price', amountToman: '200000'
+}, {
+  id: 'layer:front-layer:base-material', kind: 'stair-layer:base-material', amountToman: '100000'
+}, {
+  id: 'layer:front-layer:longitudinal-cut', kind: 'stair-layer:longitudinal-cut', amountToman: '100000'
+}, {
+  id: 'layer:front-layer:operation:front-polish:tool:edge-polish',
+  kind: 'stair-layer-operation:tool:edge-polish', amountToman: '100000'
 }]);
 
 const pricedSlabGraph = parseCanonicalProductGraph({

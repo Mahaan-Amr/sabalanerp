@@ -1,10 +1,12 @@
 import type {
   CanonicalFinishingSelection,
+  CanonicalLayerConfiguration,
   CanonicalOperationGroup,
   CanonicalProductGraph,
   CanonicalProductRow,
   CanonicalToolSelection
 } from './productGraph';
+import { parseCanonicalDecimal } from './canonicalDecimal';
 
 export type CanonicalProjectionAudience =
   | 'step5'
@@ -99,7 +101,8 @@ const operationsFor = (
 
 const canonicalPricingComponentsFor = (
   row: CanonicalProductRow,
-  operations: readonly CanonicalProjectedOperation[]
+  operations: readonly CanonicalProjectedOperation[],
+  layers: readonly CanonicalLayerConfiguration[]
 ): CanonicalProjectedPricingComponent[] => {
   const snapshot = row.commercial.calculationSnapshot;
   const rawPricingLines: unknown[] = [];
@@ -120,20 +123,28 @@ const canonicalPricingComponentsFor = (
       rawPricingLines.push(...snapshot.pricingLines);
     }
   }
-  let intrinsic = rawPricingLines.map((value): CanonicalProjectedPricingComponent => {
+  const componentFromLine = (
+    value: unknown,
+    idPrefix?: string,
+    kindPrefix?: string
+  ): CanonicalProjectedPricingComponent => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error(`Product ${row.productRowId} pricing component is malformed`);
     }
     const line = value as Record<string, unknown>;
-    if (typeof line.lineId !== 'string' || typeof line.amountToman !== 'string') {
+    if (
+      typeof line.lineId !== 'string' || line.lineId.trim() === '' ||
+      typeof line.amountToman !== 'string'
+    ) {
       throw new Error(`Product ${row.productRowId} pricing component is malformed`);
     }
     return {
-      id: line.lineId,
-      kind: line.lineId,
+      id: idPrefix ? `${idPrefix}:${line.lineId}` : line.lineId,
+      kind: kindPrefix ? `${kindPrefix}:${line.lineId}` : line.lineId,
       amountToman: line.amountToman
     };
-  });
+  };
+  let intrinsic = rawPricingLines.map(value => componentFromLine(value));
   const materialPricing = snapshot?.materialPricing;
   const materialWasPaidInSource = Boolean(
     materialPricing &&
@@ -148,9 +159,22 @@ const canonicalPricingComponentsFor = (
         : component
     );
     const remainderCutting = snapshot?.remainderCutting;
-    if (remainderCutting && typeof remainderCutting === 'object' && !Array.isArray(remainderCutting)) {
+    if (remainderCutting !== undefined) {
+      if (!remainderCutting || typeof remainderCutting !== 'object' || Array.isArray(remainderCutting)) {
+        throw new Error(`Product ${row.productRowId} remainder cutting evidence is malformed`);
+      }
       const remainder = remainderCutting as Record<string, unknown>;
-      if (typeof remainder.allocationId !== 'string' || typeof remainder.amountToman !== 'string') {
+      if (
+        typeof remainder.allocationId !== 'string' || remainder.allocationId.trim() === '' ||
+        typeof remainder.amountToman !== 'string'
+      ) {
+        throw new Error(`Product ${row.productRowId} remainder cutting evidence is malformed`);
+      }
+      let amountToman: string;
+      try {
+        amountToman = parseCanonicalDecimal(remainder.amountToman);
+        if (amountToman.startsWith('-')) throw new TypeError('Negative remainder cutting amount.');
+      } catch {
         throw new Error(`Product ${row.productRowId} remainder cutting evidence is malformed`);
       }
       intrinsic = [
@@ -160,7 +184,7 @@ const canonicalPricingComponentsFor = (
         {
           id: `remainder-cutting:${remainder.allocationId}`,
           kind: 'remainder-cutting',
-          amountToman: remainder.amountToman
+          amountToman
         }
       ];
     }
@@ -181,7 +205,26 @@ const canonicalPricingComponentsFor = (
     kind: operation.kind,
     amountToman: operation.amountToman
   }));
-  return [...intrinsic, ...attached];
+  const layerComponents = layers
+    .filter(layer => layer.parentProductRowId === row.productRowId)
+    .flatMap(layer => {
+      const prefix = `layer:${layer.layerConfigurationId}`;
+      const result = layer.result;
+      const directLines = [
+        result.layerPricingLine,
+        ...(result.materialPricingLine ? [result.materialPricingLine] : []),
+        ...result.cuttingPricingLines
+      ].map(line => componentFromLine(line, prefix, 'stair-layer'));
+      const operationLines = result.sideOperationResults.flatMap(operation =>
+        operation.result.pricingLines.map(line => componentFromLine(
+          line,
+          `${prefix}:operation:${operation.operationCollectionId}`,
+          'stair-layer-operation'
+        ))
+      );
+      return [...directLines, ...operationLines];
+    });
+  return [...intrinsic, ...layerComponents, ...attached];
 };
 
 export const projectCanonicalProductGraph = (
@@ -208,7 +251,7 @@ export const projectCanonicalProductGraph = (
     ...(row.commercial.baseAmountToman !== undefined
       ? { baseAmountToman: row.commercial.baseAmountToman } : {}),
     totalAmountToman: row.commercial.totalAmountToman ?? '0',
-    pricingComponents: canonicalPricingComponentsFor(row, operations),
+    pricingComponents: canonicalPricingComponentsFor(row, operations, graph.layerConfigurations),
     operations,
     childRowIds: graph.rows
       .filter(candidate => candidate.parentProductRowId === row.productRowId ||

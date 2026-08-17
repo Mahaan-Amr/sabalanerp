@@ -834,9 +834,7 @@ export async function updateContract(
       contractId,
       (existingGraph?.revision ?? 0) + 1
     );
-    const nextContractData = sanitizeContractDataCustomerSnapshot(
-      productSemanticRepair.contractData
-    ) as any;
+    const nextContractData = productSemanticRepair.contractData as any;
     assertNoAmbiguousOperationIdentityRepair(
       operationIdentityRepair.blockedProductRowIds,
       nextContractData

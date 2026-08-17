@@ -11,8 +11,19 @@ const customerWithCrmHistory = {
   companyName: 'سنگ سبلان',
   nationalCode: '0012345678',
   homeNumber: '02100000000',
-  primaryContact: { id: 'contact-1', mobile: '09120000000' },
-  phoneNumbers: [{ id: 'phone-1', number: '09120000000', type: 'mobile', isPrimary: true }],
+  primaryContact: {
+    id: 'contact-1',
+    mobile: '09120000000',
+    communicationHistory: [{ body: 'must not be snapshotted' }],
+    customer: { salesContracts: [{ id: 'nested-contract' }] },
+  },
+  phoneNumbers: [{
+    id: 'phone-1',
+    number: '09120000000',
+    type: 'mobile',
+    isPrimary: true,
+    customer: { salesContracts: [{ id: 'nested-through-phone' }] },
+  }],
   projectAddresses: [{ id: 'project-1', address: 'تهران', projectName: 'پروژه اصلی' }],
   salesContracts: [{
     id: 'previous-contract',
@@ -51,8 +62,8 @@ assert.deepEqual(sanitized.customer, {
   homeNumber: '02100000000',
   primaryContact: { id: 'contact-1', mobile: '09120000000' },
   phoneNumbers: [{ id: 'phone-1', number: '09120000000', type: 'mobile', isPrimary: true }],
-  projectAddresses: [{ id: 'project-1', address: 'تهران', projectName: 'پروژه اصلی' }],
 });
+assert.equal(sanitized.customer.projectAddresses, undefined);
 assert.deepEqual(sanitized.products, contractData.products);
 assert.deepEqual(sanitized.deliveries, contractData.deliveries);
 assert.deepEqual(sanitized.payment, contractData.payment);

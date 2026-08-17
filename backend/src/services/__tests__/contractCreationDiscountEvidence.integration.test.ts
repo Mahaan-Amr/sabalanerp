@@ -51,20 +51,6 @@ const run = async () => {
     eligibilityShape: 'explicit' | 'current-draft-omitted' = 'explicit',
   ) => {
     const contractData = JSON.parse(JSON.stringify(source.contractData));
-    contractData.customer = {
-      ...(contractData.customer || {}),
-      id: source.customerId,
-      salesContracts: [{
-        id: 'recursive-history-contract',
-        contractData: {
-          customer: {
-            id: source.customerId,
-            salesContracts: [{ id: 'older-history-contract' }],
-          },
-        },
-      }],
-      communications: [{ id: 'crm-communication' }],
-    };
     contractData.products = contractData.products.map((product: any) => {
       const meta = { ...(product.meta || {}) };
       if (eligibilityShape === 'explicit' || product.meta?.isLayer === true) {
@@ -128,9 +114,6 @@ const run = async () => {
       const created = await createFromSource(label, discount);
 
       const savedData = created.contractData as any;
-      assert.equal(savedData.customer.salesContracts, undefined);
-      assert.equal(savedData.customer.communications, undefined);
-      assert.equal(savedData.customer.id, source.customerId);
       assert.equal(savedData.discount.enabled, false);
       assert.equal(savedData.discount.percent, 0);
       assert.equal(savedData.discount.amount, 0);

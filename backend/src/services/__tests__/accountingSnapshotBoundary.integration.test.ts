@@ -5,12 +5,13 @@ import {
   CorrectionRequestCategory,
   CorrectionRequestStatus,
   FinancialRecordKind,
+  PaymentMethod,
+  PaymentStatus,
   Prisma,
-  PrismaClient,
 } from '@prisma/client';
+import { prisma } from '../../lib/prisma';
 import { executeAccountingAction } from '../accountingService';
 
-const prisma = new PrismaClient();
 const token = `snapshot-boundary-${Date.now()}`;
 let contractId: string | null = null;
 
@@ -32,6 +33,17 @@ const assertBoundedSnapshot = (value: unknown) => {
   assert.equal(rootCustomer.salesContracts, undefined);
   assert.equal(rootCustomer.id, customer.id);
   assert(Array.isArray(snapshot.items) && snapshot.items.length > 0);
+  assert(Array.isArray(snapshot.deliveries) && snapshot.deliveries.length === 1);
+  assert(Array.isArray(snapshot.deliveries[0].products) && snapshot.deliveries[0].products.length === 1);
+  assert(Array.isArray(snapshot.payments) && snapshot.payments.length === 1);
+  assert(Array.isArray(snapshot.payments[0].installments) && snapshot.payments[0].installments.length === 1);
+  assert(record(snapshot.productGraphState).graph);
+  assert(Array.isArray(contractData.products) && contractData.products.length > 0);
+  assert.deepEqual(contractData.approvedPricingEvidence, {
+    approvalId: `${token}:pricing-approval`,
+    approvedBy: 'pricing-manager',
+    status: 'APPROVED',
+  });
   assert(Buffer.byteLength(JSON.stringify(snapshot), 'utf8') < 200_000);
 };
 
@@ -57,8 +69,9 @@ const run = async () => {
     where: {
       status: { in: [ContractStatus.APPROVED, ContractStatus.SIGNED, ContractStatus.PRINTED] },
       items: { some: {} },
+      productGraphState: { isNot: null },
     },
-    include: { items: true },
+    include: { items: true, productGraphState: true },
     orderBy: { createdAt: 'desc' },
   });
   assert(source, 'sabalanerp-local needs one eligible contract with an item');
@@ -81,6 +94,11 @@ const run = async () => {
       currency: source.currency,
       contractData: {
         ...sourceData,
+        approvedPricingEvidence: {
+          approvalId: `${token}:pricing-approval`,
+          approvedBy: 'pricing-manager',
+          status: 'APPROVED',
+        },
         customerId: source.customerId,
         customer: {
           ...sourceCustomer,
@@ -111,6 +129,48 @@ const run = async () => {
           originalTotalPrice: item.originalTotalPrice,
           stairPartType: item.stairPartType,
         })),
+      },
+      productGraphState: {
+        create: {
+          schemaVersion: source.productGraphState!.schemaVersion,
+          revision: source.productGraphState!.revision,
+          graph: source.productGraphState!.graph as Prisma.InputJsonValue,
+          policySnapshot: source.productGraphState!.policySnapshot as Prisma.InputJsonValue,
+          inputHash: `${token}:input`,
+          resultHash: `${token}:result`,
+          totalAmountToman: source.productGraphState!.totalAmountToman,
+        },
+      },
+      deliveries: {
+        create: {
+          deliveryDate: new Date('2030-01-02T00:00:00.000Z'),
+          deliveryAddress: 'QA snapshot delivery address',
+          products: {
+            create: {
+              productId: source.items[0].productId,
+              productRowId: `${token}-row-0`,
+              quantity: new Prisma.Decimal(1),
+              notes: 'QA delivery evidence',
+            },
+          },
+        },
+      },
+      payments: {
+        create: {
+          paymentMethod: PaymentMethod.CASH,
+          totalAmount: new Prisma.Decimal(1),
+          currency: source.currency,
+          status: PaymentStatus.PENDING,
+          notes: 'QA payment evidence',
+          installments: {
+            create: {
+              installmentNumber: 1,
+              amount: new Prisma.Decimal(1),
+              dueDate: new Date('2030-01-01T00:00:00.000Z'),
+              notes: 'QA installment evidence',
+            },
+          },
+        },
       },
     },
   });
@@ -184,6 +244,9 @@ const run = async () => {
 run()
   .then(() => console.log('all accounting record paths persist bounded source snapshots: ok'))
   .finally(async () => {
-    await cleanup();
-    await prisma.$disconnect();
+    try {
+      await cleanup();
+    } finally {
+      await prisma.$disconnect();
+    }
   });

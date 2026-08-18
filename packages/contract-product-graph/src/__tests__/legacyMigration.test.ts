@@ -945,13 +945,26 @@ const longitudinalPolicyInput = ({
   }
 
   const canonicalInput = {
-    ...longitudinalPolicyInput({
-      sourceBatchId: 'remaining-child-canonical-source',
-      lengthMeters: '1',
-      widthMeters: '0.2'
+    ...createNewLongitudinalProductInput({
+      calculationPolicyVersion: policy.calculation,
+      packingPolicyVersion: policy.packing,
+      pricingPolicyVersion: policy.pricing,
+      roundingPolicyVersion: policy.rounding,
+      sourceBatchId: parseStableIdentity(
+        'source-batch',
+        'remaining-child-canonical-source'
+      ),
+      motherWidthMeters: parseCanonicalDecimal('0.35'),
+      defaultMandatoryPercentage: parseCanonicalDecimal('20'),
+      sawKerfMeters: parseCanonicalDecimal('0.003'),
+      longitudinalCutRateToman: parseCanonicalDecimal('20000'),
+      calibrationCutRateToman: parseCanonicalDecimal('20000')
     }),
+    lengthMeters: parseCanonicalDecimal('1'),
+    widthMeters: parseCanonicalDecimal('0.2'),
+    requestedAreaSquareMeters: parseCanonicalDecimal('0.2'),
     baseMaterialPricing: 'paid-source-zero' as const,
-    baseRateToman: '0',
+    baseRateToman: parseCanonicalDecimal('0'),
     mandatoryEnabled: false
   };
   const canonicalCalculation = calculateLongitudinalProduct(canonicalInput);

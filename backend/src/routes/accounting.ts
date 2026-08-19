@@ -31,8 +31,10 @@ import {
   listPaymentStatuses,
   listReceivables,
   listTaxRecords,
+  recordFinancialEvidenceReviewCase,
   updateAccountingSettings
 } from '../services/accountingService';
+import { FinancialEvidenceConflictError } from '../services/approvedPricing';
 import type { ContractCustomPrintOptions, ContractPrintVariant } from '../utils/printTemplate';
 import { publishNotificationEvent } from '../services/notificationService';
 import { listDispatchDocumentRecoveryAudit } from '../services/dispatchDocumentAuditRecovery';
@@ -864,6 +866,22 @@ export const createAccountingActionHandler = (
       res.json({ success: true, data: result });
     } catch (error: any) {
       console.error('Accounting action error:', error);
+      if (error instanceof FinancialEvidenceConflictError && (req.body.invoiceId || req.body.recordId)) {
+        const reviewCase = await recordFinancialEvidenceReviewCase({
+          invoiceId: req.body.invoiceId || req.body.recordId,
+          actorId: req.user!.id,
+          conflict: error,
+        });
+        return res.status(409).json({
+          success: false,
+          code: error.code,
+          error: reviewCase
+            ? `تأیید مالی متوقف شد. ${error.userMessageFa} پرونده بررسی ایجاد شد.`
+            : error.message,
+          reviewCase,
+          actionUrl: reviewCase?.actionUrl,
+        });
+      }
       res.status(error.message === 'DUTY_LEGACY_ACCOUNTING_CORRECTION_WRITER_RETIRED' ? 410 : 400).json({
         success: false,
         error: error.message || 'Accounting action failed'

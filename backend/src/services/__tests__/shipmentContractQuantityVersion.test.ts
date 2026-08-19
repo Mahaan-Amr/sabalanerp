@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Prisma } from '@prisma/client';
-import { captureContractQuantityVersionAtFinancialApproval, captureFinanciallyApprovedContractQuantityVersions, deriveContractedQuantity, guardReturnValidationFailure, resolveContractProductSnapshot, shipmentProjectionPersistenceData, shipmentQuantityEvidenceIntegrityHash, shipmentQuantityProjectionIntegrityHash } from '../shipmentQuantityProjectionStore';
+import { captureContractQuantityVersionAtFinancialApproval, captureFinanciallyApprovedContractQuantityVersions, deriveContractedQuantity, guardReturnValidationFailure, isPersistedContractQuantitySupersededByApprovedPricing, resolveContractProductSnapshot, shipmentProjectionPersistenceData, shipmentQuantityEvidenceIntegrityHash, shipmentQuantityProjectionIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { projectShipmentQuantities } from '../shipmentQuantityProjection';
 
 test('stable productRowId is the only canonical snapshot identity', () => {
@@ -40,6 +40,12 @@ test('every financial approval captures an immutable contract-row version withou
       id: 'contract-1', contractData,
       items: [{ id: 'item-1', productRowId: 'row-1', productId: 'product-a', productType: null, quantity: new Prisma.Decimal('10') }],
     }) },
+    contractApprovedPricingVersion: { findUnique: async () => ({ rows: [{
+      id: `pricing-row-${contractData.products[0].quantity}`,
+      contractItemId: 'item-1',
+      contractedQuantity: new Prisma.Decimal(contractData.products[0].quantity),
+      unit: 'count',
+    }] }) },
     shipmentQuantityEvidence: { createMany: async ({ data }: any) => { created.push(...data); return { count: data.length }; } },
   } as any;
 
@@ -61,6 +67,44 @@ test('every financial approval captures an immutable contract-row version withou
   }));
   assert.equal(projectShipmentQuantities(evidence, { cutoff: '2026-08-03T00:00:00.000Z' }).rows[0]?.quantities?.contracted, '10.000');
   assert.equal(projectShipmentQuantities(evidence, { cutoff: '2026-08-06T00:00:00.000Z' }).rows[0]?.quantities?.contracted, '7.500');
+});
+
+test('shipment capture uses the approved-pricing scale-three quantity instead of a legacy zero sentinel', async () => {
+  const created: any[] = [];
+  const tx = {
+    salesContract: { findUnique: async () => ({
+      id: 'contract-optimizer',
+      contractData: { products: [{ rowId: 'row-optimizer', productId: 'product-a', productType: 'longitudinal', quantity: 0 }] },
+      items: [{ id: 'item-optimizer', productRowId: 'row-optimizer', productId: 'product-a', productType: 'longitudinal', quantity: new Prisma.Decimal(0) }],
+    }) },
+    contractApprovedPricingVersion: { findUnique: async () => ({ rows: [{
+      id: 'pricing-row-optimizer', contractItemId: 'item-optimizer',
+      contractedQuantity: new Prisma.Decimal('58.333'), unit: 'meter',
+    }] }) },
+    shipmentQuantityEvidence: { createMany: async ({ data }: any) => { created.push(...data); return { count: data.length }; } },
+  } as any;
+
+  await captureContractQuantityVersionAtFinancialApproval(tx, {
+    contractId: 'contract-optimizer', financialRecordId: 'approval-optimizer', approvedAt: new Date('2026-08-19T09:00:00.000Z'),
+  });
+
+  assert.equal(created[0].quantity, '58.333');
+  assert.equal(created[0].unit, 'meter');
+  assert.equal(created[0].metadata.quantityEvidenceOrigin, 'APPROVED_PRICING_ROW');
+  assert.equal(created[0].metadata.approvedPricingRowId, 'pricing-row-optimizer');
+});
+
+test('approved pricing prevents a later legacy zero-sentinel capture from superseding shipment truth', () => {
+  const approvedItems = new Set(['item-optimizer']);
+  assert.equal(isPersistedContractQuantitySupersededByApprovedPricing(
+    { kind: 'CONTRACTED_SET', contractItemId: 'item-optimizer' }, approvedItems,
+  ), true);
+  assert.equal(isPersistedContractQuantitySupersededByApprovedPricing(
+    { kind: 'PHYSICAL_EXIT', contractItemId: 'item-optimizer' }, approvedItems,
+  ), false);
+  assert.equal(isPersistedContractQuantitySupersededByApprovedPricing(
+    { kind: 'CONTRACTED_SET', contractItemId: 'legacy-without-approved-pricing' }, approvedItems,
+  ), false);
 });
 
 test('cutover bootstrap preserves its distinct source, timing, metadata, and integrity policy', async () => {

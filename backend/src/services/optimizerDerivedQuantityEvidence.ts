@@ -1,9 +1,43 @@
 import { Prisma } from '@prisma/client';
+import {
+  ApprovedPricingEvidenceError,
+} from './approvedPricing/evidenceError';
+
+// Deliberate witness-validation failures are typed evidence conflicts; runtime failures remain native.
 
 export const OPTIMIZER_DERIVED_QUANTITY_EVIDENCE_ORIGIN =
   'OPTIMIZER_DERIVED_LONGITUDINAL_ZERO_SENTINEL' as const;
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
+export type OptimizerQuantityPolicyProvenance = {
+  producer: 'LEGACY_MIGRATION' | 'CANONICAL_WIZARD_SAVE';
+  producerVersion: 0 | 1;
+  graphAuditCommandId: string;
+};
+
+export class OptimizerQuantityEvidenceConflictError extends ApprovedPricingEvidenceError {
+  constructor(input: {
+    productRowId: string;
+    policy: string;
+    rawOptimizerQuantity: string;
+    rawProductionQuantity: string;
+    difference: string;
+  }) {
+    super({
+      technicalDetail: `Product ${input.productRowId} optimizer quantities conflict`,
+      evidence: {
+        productRowId: input.productRowId,
+        rule: input.policy,
+        rawOptimizerQuantity: input.rawOptimizerQuantity,
+        rawProductionQuantity: input.rawProductionQuantity,
+        difference: input.difference,
+        unit: 'meter',
+      },
+      userMessageFa: 'کمیت قطعات ثبت‌شده با کمیت کل قرارداد سازگار نیست. مدیر حسابداری باید پروندهٔ بررسی کمیت این قرارداد را تعیین تکلیف کند.',
+    });
+    this.name = 'OptimizerQuantityEvidenceConflictError';
+  }
+}
 
 export type OptimizerDerivedQuantityEvidence = {
   evidenceOrigin: typeof OPTIMIZER_DERIVED_QUANTITY_EVIDENCE_ORIGIN;
@@ -18,13 +52,42 @@ export type OptimizerDerivedQuantityEvidence = {
   };
   canonicalGraph: { requestedLengthMeters: string };
   persistedDeliveries: {
-    rows: readonly { deliveryId: string; deliveryProductId: string; quantity: string }[];
+    rows: readonly { deliveryId: string; deliveryProductId: string; rawQuantity: string; quantity: string }[];
     totalQuantity: string;
   };
-  wizardDelivery: { present: boolean; totalQuantity?: string };
+  wizardDelivery: {
+    present: boolean;
+    rows?: readonly { deliveryIndex: number; productIndex: number; rawQuantity: string }[];
+    totalQuantity?: string;
+  };
+  compatibility: {
+    policy:
+      | 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE'
+      | 'CONTRACT_PRODUCT_GRAPH_V2_SCALE_THREE_PERSISTENCE';
+    graphSchemaVersion: 1;
+    rounding: 'ROUND_HALF_UP';
+    sealedScale: 3;
+    persistedScale: 2 | 3;
+    producer: 'LEGACY_MIGRATION' | 'CANONICAL_WIZARD_SAVE';
+    producerVersion: 0 | 1;
+    graphAuditCommandId: string;
+    rawOptimizerQuantity: string;
+    rawProductionQuantity: string;
+    rawCanonicalGraphQuantity?: string;
+    sourceTransformation?: 'ROUND_HALF_UP_SCALE_THREE';
+    rawPersistedDeliveryTotal: string;
+    sealedQuantity: string;
+    persistedComparableQuantity: string;
+    persistedDifference: string;
+  };
 };
 
 export type OptimizerDerivedQuantityInput = {
+  graphSchemaVersion: number;
+  roundingPolicy: string;
+  producer: 'LEGACY_MIGRATION' | 'CANONICAL_WIZARD_SAVE' | null;
+  producerVersion: number | null;
+  graphAuditCommandId: string | null;
   productRowId: string;
   productId: string;
   productType: string;
@@ -37,32 +100,104 @@ export type OptimizerDerivedQuantityInput = {
 };
 
 const record = (value: unknown, label: string): UnknownRecord => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} is missing or malformed`);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApprovedPricingEvidenceError(`${label} is missing or malformed`);
   return value as UnknownRecord;
 };
 
+export const optimizerQuantityPolicyProvenanceFromAudit = (input: {
+  graphSchemaVersion: number;
+  roundingPolicy: string;
+  graphAuditCommandId: unknown;
+  graphAuditCommand: unknown;
+}): OptimizerQuantityPolicyProvenance | null => {
+  if (typeof input.graphAuditCommandId !== 'string' || !input.graphAuditCommandId.trim()) return null;
+  if (!input.graphAuditCommand || typeof input.graphAuditCommand !== 'object' || Array.isArray(input.graphAuditCommand)) return null;
+  const command = input.graphAuditCommand as UnknownRecord;
+  const producerVersion = command.writerVersion === 1 ? 1 : command.writerVersion === undefined ? 0 : null;
+  if (producerVersion !== null && command.kind === 'legacy-migration' && input.graphSchemaVersion === 1 &&
+    input.roundingPolicy === 'rounding-v1' && typeof command.backupReference === 'string' && command.backupReference.trim()) {
+    return { producer: 'LEGACY_MIGRATION', producerVersion, graphAuditCommandId: input.graphAuditCommandId.trim() };
+  }
+  const policy = command.policy && typeof command.policy === 'object' && !Array.isArray(command.policy)
+    ? command.policy as UnknownRecord
+    : null;
+  if (producerVersion !== null && command.kind === 'canonical-wizard-save' && input.graphSchemaVersion === 1 &&
+    (input.roundingPolicy === 'rounding-v1' || input.roundingPolicy === 'rounding-v2') &&
+    policy?.rounding === input.roundingPolicy) {
+    return { producer: 'CANONICAL_WIZARD_SAVE', producerVersion, graphAuditCommandId: input.graphAuditCommandId.trim() };
+  }
+  return null;
+};
+
 const decimal = (value: unknown, label: string) => {
-  if (value === null || value === undefined || value === '') throw new Error(`${label} is missing or malformed`);
+  if (value === null || value === undefined || value === '') throw new ApprovedPricingEvidenceError(`${label} is missing or malformed`);
   try {
     return new Prisma.Decimal(String(value));
   } catch {
-    throw new Error(`${label} is missing or malformed`);
+    throw new ApprovedPricingEvidenceError(`${label} is missing or malformed`);
   }
 };
 
-const positive = (value: unknown, label: string) => {
+const positive = (value: unknown, label: string, maximumScale?: number) => {
   const result = decimal(value, label);
-  if (!result.gt(0)) throw new Error(`${label} must be positive`);
-  if (result.decimalPlaces() > 3) throw new Error(`${label} must use scale-three precision`);
+  if (!result.gt(0)) throw new ApprovedPricingEvidenceError(`${label} must be positive`);
+  if (maximumScale !== undefined && result.decimalPlaces() > maximumScale) {
+    throw new ApprovedPricingEvidenceError(`${label} must use scale-${maximumScale} precision`);
+  }
   return result;
 };
 
 const requiredString = (value: unknown, label: string) => {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is missing or malformed`);
+  if (typeof value !== 'string' || !value.trim()) throw new ApprovedPricingEvidenceError(`${label} is missing or malformed`);
   return value.trim();
 };
 
-const fixedQuantity = (value: Prisma.Decimal) => value.toDecimalPlaces(3).toFixed(3);
+const fixedQuantity = (value: Prisma.Decimal) =>
+  value.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP).toFixed(3);
+
+const optimizerQuantityPolicy = (input: Pick<OptimizerDerivedQuantityInput,
+  'graphSchemaVersion' | 'roundingPolicy' | 'producer' | 'producerVersion' | 'graphAuditCommandId'>) => {
+  const hasRecordedProducer = Boolean(input.graphAuditCommandId) &&
+    (input.producerVersion === 0 || input.producerVersion === 1);
+  if (hasRecordedProducer &&
+    (input.producer === 'LEGACY_MIGRATION' || input.producer === 'CANONICAL_WIZARD_SAVE') &&
+    input.graphSchemaVersion === 1 && input.roundingPolicy === 'rounding-v1') {
+    return {
+      policy: 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE' as const,
+      graphSchemaVersion: 1 as const,
+      sourceScale: undefined,
+      persistedScale: 2 as const,
+      sealedScale: 3 as const,
+      producer: input.producer,
+      producerVersion: input.producerVersion as 0 | 1,
+      graphAuditCommandId: input.graphAuditCommandId!,
+    };
+  }
+  if (hasRecordedProducer && input.producer === 'CANONICAL_WIZARD_SAVE' &&
+    input.graphSchemaVersion === 1 && input.roundingPolicy === 'rounding-v2') {
+    return {
+      policy: 'CONTRACT_PRODUCT_GRAPH_V2_SCALE_THREE_PERSISTENCE' as const,
+      graphSchemaVersion: 1 as const,
+      sourceScale: undefined,
+      persistedScale: 3 as const,
+      sealedScale: 3 as const,
+      producer: input.producer,
+      producerVersion: input.producerVersion as 0 | 1,
+      graphAuditCommandId: input.graphAuditCommandId!,
+    };
+  }
+  throw new ApprovedPricingEvidenceError({
+    technicalDetail: `Unsupported or missing optimizer quantity provenance ${input.producer ?? 'unknown'}:${input.producerVersion ?? 'unknown'}:${input.graphSchemaVersion}:${input.roundingPolicy}`,
+    evidence: {
+      producer: input.producer,
+      producerVersion: input.producerVersion,
+      graphSchemaVersion: input.graphSchemaVersion,
+      roundingPolicy: input.roundingPolicy,
+      graphAuditCommandId: input.graphAuditCommandId,
+    },
+    userMessageFa: 'منشأ نسخهٔ محاسبهٔ کمیت این قرارداد قابل اثبات نیست. مدیر حسابداری باید پروندهٔ بررسی کمیت را تعیین تکلیف کند.',
+  });
+};
 
 export const canonicalOptimizerDerivedLengthWitness = (
   graphRow: unknown,
@@ -79,10 +214,10 @@ export const canonicalOptimizerDerivedLengthWitness = (
   if (legacySnapshot.smartCutDerivedQuantity !== true) return undefined;
   const plan = record(legacySnapshot.smartCutPlan, `Canonical row ${String(row.productRowId ?? '')} optimizer plan`);
   if (plan.derivedQuantity !== true) {
-    throw new Error(`Canonical row ${String(row.productRowId ?? '')} optimizer plan is not quantity-derived`);
+    throw new ApprovedPricingEvidenceError(`Canonical row ${String(row.productRowId ?? '')} optimizer plan is not quantity-derived`);
   }
   if (plan.totalRequestedLengthM === null || plan.totalRequestedLengthM === undefined || plan.totalRequestedLengthM === '') {
-    throw new Error(`Canonical row ${String(row.productRowId ?? '')} optimizer total length is missing or malformed`);
+    throw new ApprovedPricingEvidenceError(`Canonical row ${String(row.productRowId ?? '')} optimizer total length is missing or malformed`);
   }
   return String(plan.totalRequestedLengthM);
 };
@@ -93,91 +228,151 @@ export const reconcileOptimizerDerivedLongitudinalQuantity = (
   if (input.productType.toLowerCase() !== 'longitudinal' ||
     !decimal(input.rawContractItemQuantity, `Product ${input.productRowId} contract item quantity`).eq(0)) return null;
 
+  const policy = optimizerQuantityPolicy(input);
   const snapshotQuantity = decimal(input.productSnapshot.quantity, `Product ${input.productRowId} snapshot quantity`);
-  if (!snapshotQuantity.eq(0)) throw new Error(`Product ${input.productRowId} zero-sentinel quantities conflict`);
+  if (!snapshotQuantity.eq(0)) throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} zero-sentinel quantities conflict`);
   if (input.productSnapshot.smartCutDerivedQuantity !== true) {
-    throw new Error(`Product ${input.productRowId} optimizer-derived quantity evidence is missing`);
+    throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} optimizer-derived quantity evidence is missing`);
   }
   const plan = record(input.productSnapshot.smartCutPlan, `Product ${input.productRowId} optimizer plan`);
-  if (plan.derivedQuantity !== true) throw new Error(`Product ${input.productRowId} optimizer plan is not quantity-derived`);
-  positive(plan.requestedQuantity, `Product ${input.productRowId} optimizer requested quantity`);
-  const planQuantity = positive(plan.totalRequestedLengthM, `Product ${input.productRowId} optimizer total length`);
+  if (plan.derivedQuantity !== true) throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} optimizer plan is not quantity-derived`);
+  positive(plan.requestedQuantity, `Product ${input.productRowId} optimizer requested quantity`, policy.sourceScale);
+  const planQuantity = positive(plan.totalRequestedLengthM, `Product ${input.productRowId} optimizer total length`, policy.sourceScale);
   if (!Array.isArray(plan.productionPieces) || plan.productionPieces.length === 0) {
-    throw new Error(`Product ${input.productRowId} optimizer production pieces are missing`);
+    throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} optimizer production pieces are missing`);
   }
   const productionQuantity = plan.productionPieces.reduce((sum, value, index) => {
     const piece = record(value, `Product ${input.productRowId} optimizer production piece ${index}`);
     return sum.plus(
-      positive(piece.lengthM, `Product ${input.productRowId} optimizer production length ${index}`)
-        .mul(positive(piece.quantity, `Product ${input.productRowId} optimizer production quantity ${index}`)),
+      positive(piece.lengthM, `Product ${input.productRowId} optimizer production length ${index}`, policy.sourceScale)
+        .mul(positive(piece.quantity, `Product ${input.productRowId} optimizer production quantity ${index}`, policy.sourceScale)),
     );
   }, new Prisma.Decimal(0));
-  if (!productionQuantity.eq(planQuantity)) throw new Error(`Product ${input.productRowId} optimizer quantities conflict`);
+  if (!productionQuantity.eq(planQuantity)) {
+    throw new OptimizerQuantityEvidenceConflictError({
+      productRowId: input.productRowId,
+      policy: policy.policy,
+      rawOptimizerQuantity: planQuantity.toString(),
+      rawProductionQuantity: productionQuantity.toString(),
+      difference: productionQuantity.minus(planQuantity).toString(),
+    });
+  }
 
-  const graphQuantity = positive(input.graphRequestedLengthMeters, `Product ${input.productRowId} canonical graph length`);
-  if (!graphQuantity.eq(planQuantity)) throw new Error(`Product ${input.productRowId} canonical graph quantity conflicts with optimizer plan`);
+  const graphQuantity = positive(input.graphRequestedLengthMeters, `Product ${input.productRowId} canonical graph length`, policy.sourceScale);
+  let sourceTransformation: 'ROUND_HALF_UP_SCALE_THREE' | undefined;
+  if (!graphQuantity.eq(planQuantity)) {
+    if (policy.policy !== 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE') {
+      throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} canonical graph quantity conflicts with optimizer plan`);
+    }
+    if (!planQuantity.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP)
+      .eq(graphQuantity.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP))) {
+      throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} canonical graph quantity conflicts with optimizer plan`);
+    }
+    sourceTransformation = 'ROUND_HALF_UP_SCALE_THREE';
+  }
 
   if (!Array.isArray(input.persistedDeliveries) || input.persistedDeliveries.length === 0) {
-    throw new Error(`Product ${input.productRowId} persisted Delivery evidence is missing`);
+    throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} persisted Delivery evidence is missing`);
   }
-  const persistedRows: { deliveryId: string; deliveryProductId: string; quantity: string }[] = [];
+  const persistedRows: { deliveryId: string; deliveryProductId: string; rawQuantity: string; quantity: string }[] = [];
   const persistedKeys = new Set<string>();
   let persistedTotal = new Prisma.Decimal(0);
   for (const [deliveryIndex, rawDelivery] of input.persistedDeliveries.entries()) {
     const delivery = record(rawDelivery, `Persisted Delivery ${deliveryIndex}`);
     const deliveryId = requiredString(delivery.id, `Persisted Delivery ${deliveryIndex} identity`);
-    if (!Array.isArray(delivery.products)) throw new Error(`Persisted Delivery ${deliveryId} products are missing`);
+    if (!Array.isArray(delivery.products)) throw new ApprovedPricingEvidenceError(`Persisted Delivery ${deliveryId} products are missing`);
     for (const [productIndex, rawProduct] of delivery.products.entries()) {
       const product = record(rawProduct, `Persisted Delivery ${deliveryId} product ${productIndex}`);
       if (product.productRowId !== input.productRowId) continue;
-      if (delivery.status === 'CANCELLED') throw new Error(`Product ${input.productRowId} persisted Delivery is cancelled`);
-      if (product.productId !== input.productId) throw new Error(`Product ${input.productRowId} persisted Delivery identity conflicts`);
+      if (delivery.status === 'CANCELLED') throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} persisted Delivery is cancelled`);
+      if (product.productId !== input.productId) throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} persisted Delivery identity conflicts`);
       const deliveryProductId = requiredString(product.id, `Persisted Delivery ${deliveryId} product identity`);
       const key = `${deliveryId}:${input.productRowId}`;
-      if (persistedKeys.has(key)) throw new Error(`Product ${input.productRowId} persisted Delivery row is duplicated`);
+      if (persistedKeys.has(key)) throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} persisted Delivery row is duplicated`);
       persistedKeys.add(key);
-      const rowQuantity = positive(product.quantity, `Product ${input.productRowId} persisted Delivery quantity`);
+      const rowQuantity = positive(product.quantity, `Product ${input.productRowId} persisted Delivery quantity`, policy.persistedScale);
       persistedTotal = persistedTotal.plus(rowQuantity);
-      persistedRows.push({ deliveryId, deliveryProductId, quantity: fixedQuantity(rowQuantity) });
+      persistedRows.push({
+        deliveryId,
+        deliveryProductId,
+        rawQuantity: rowQuantity.toString(),
+        quantity: fixedQuantity(rowQuantity),
+      });
     }
   }
-  if (persistedRows.length === 0) throw new Error(`Product ${input.productRowId} persisted Delivery evidence is missing`);
-  if (!persistedTotal.eq(planQuantity)) throw new Error(`Product ${input.productRowId} persisted Delivery quantity conflicts`);
+  if (persistedRows.length === 0) throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} persisted Delivery evidence is missing`);
 
   let wizardEvidence: OptimizerDerivedQuantityEvidence['wizardDelivery'] = { present: false };
+  let persistedComparableQuantity = planQuantity.toDecimalPlaces(policy.persistedScale, Prisma.Decimal.ROUND_HALF_UP);
+  let hasWizardRows = false;
   if (input.wizardDeliveries !== null && input.wizardDeliveries !== undefined) {
-    if (!Array.isArray(input.wizardDeliveries)) throw new Error(`Product ${input.productRowId} wizard Delivery evidence is malformed`);
+    if (!Array.isArray(input.wizardDeliveries)) throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} wizard Delivery evidence is malformed`);
     if (input.wizardDeliveries.length > 0) {
       let wizardTotal = new Prisma.Decimal(0);
+      let wizardPersistedComparableTotal = new Prisma.Decimal(0);
       let wizardRows = 0;
+      const rawWizardRows: { deliveryIndex: number; productIndex: number; rawQuantity: string }[] = [];
       for (const [deliveryIndex, rawDelivery] of input.wizardDeliveries.entries()) {
         const delivery = record(rawDelivery, `Wizard Delivery ${deliveryIndex}`);
-        if (!Array.isArray(delivery.products)) throw new Error(`Wizard Delivery ${deliveryIndex} products are missing`);
+        if (!Array.isArray(delivery.products)) throw new ApprovedPricingEvidenceError(`Wizard Delivery ${deliveryIndex} products are missing`);
         let matchedInDelivery = false;
         for (const [productIndex, rawProduct] of delivery.products.entries()) {
           const product = record(rawProduct, `Wizard Delivery ${deliveryIndex} product ${productIndex}`);
           if (product.productRowId !== input.productRowId) continue;
-          if (matchedInDelivery) throw new Error(`Product ${input.productRowId} wizard Delivery row is duplicated`);
+          if (matchedInDelivery) throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} wizard Delivery row is duplicated`);
           matchedInDelivery = true;
           wizardRows += 1;
+          hasWizardRows = true;
           if (product.productId !== input.productId || product.unit !== 'meter') {
-            throw new Error(`Product ${input.productRowId} wizard Delivery identity or unit conflicts`);
+            throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} wizard Delivery identity or unit conflicts`);
           }
-          wizardTotal = wizardTotal.plus(positive(product.quantity, `Product ${input.productRowId} wizard Delivery quantity`));
+          const wizardQuantity = positive(
+            product.quantity,
+            `Product ${input.productRowId} wizard Delivery quantity`,
+            policy.sourceScale,
+          );
+          wizardTotal = wizardTotal.plus(wizardQuantity);
+          rawWizardRows.push({ deliveryIndex, productIndex, rawQuantity: wizardQuantity.toString() });
+          wizardPersistedComparableTotal = wizardPersistedComparableTotal.plus(
+            wizardQuantity.toDecimalPlaces(policy.persistedScale, Prisma.Decimal.ROUND_HALF_UP),
+          );
         }
       }
       if (wizardRows === 0 || !wizardTotal.eq(planQuantity)) {
-        throw new Error(`Product ${input.productRowId} wizard Delivery quantity conflicts`);
+        throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} wizard Delivery quantity conflicts`);
       }
-      wizardEvidence = { present: true, totalQuantity: fixedQuantity(wizardTotal) };
+      wizardEvidence = { present: true, rows: rawWizardRows, totalQuantity: fixedQuantity(wizardTotal) };
+      persistedComparableQuantity = wizardPersistedComparableTotal;
     }
+  }
+
+  if (!hasWizardRows && persistedRows.length !== 1) {
+    throw new ApprovedPricingEvidenceError({
+      technicalDetail: `Product ${input.productRowId} has ambiguous multi-row persisted Delivery conversion without wizard-era row witnesses`,
+      evidence: {
+        productRowId: input.productRowId,
+        rule: policy.policy,
+        persistedRowCount: persistedRows.length,
+        rawOptimizerQuantity: planQuantity.toString(),
+        rawPersistedDeliveryRows: persistedRows.map(row => ({
+          deliveryId: row.deliveryId,
+          deliveryProductId: row.deliveryProductId,
+          rawQuantity: row.rawQuantity,
+        })),
+      },
+      userMessageFa: 'نحوهٔ تبدیل کمیت چند تحویل تاریخی این قرارداد یکتا نیست. مدیر حسابداری باید پروندهٔ بررسی کمیت را تعیین تکلیف کند.',
+    });
+  }
+
+  if (!persistedTotal.eq(persistedComparableQuantity)) {
+    throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} persisted Delivery quantity conflicts`);
   }
 
   const invoiceQuantity = input.rawInvoiceItemQuantity === undefined
     ? undefined
     : decimal(input.rawInvoiceItemQuantity, `Product ${input.productRowId} invoice quantity`);
   if (invoiceQuantity !== undefined && !invoiceQuantity.eq(0) && !invoiceQuantity.eq(planQuantity)) {
-    throw new Error(`Product ${input.productRowId} invoice quantity conflicts with sealed meters`);
+    throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} invoice quantity conflicts with sealed meters`);
   }
 
   return {
@@ -197,5 +392,23 @@ export const reconcileOptimizerDerivedLongitudinalQuantity = (
       totalQuantity: fixedQuantity(persistedTotal),
     },
     wizardDelivery: wizardEvidence,
+    compatibility: {
+      policy: policy.policy,
+      graphSchemaVersion: policy.graphSchemaVersion,
+      rounding: 'ROUND_HALF_UP' as const,
+      sealedScale: policy.sealedScale,
+      persistedScale: policy.persistedScale,
+      producer: policy.producer,
+      producerVersion: policy.producerVersion,
+      graphAuditCommandId: policy.graphAuditCommandId,
+      rawOptimizerQuantity: planQuantity.toString(),
+      rawProductionQuantity: productionQuantity.toString(),
+      rawCanonicalGraphQuantity: graphQuantity.toString(),
+      ...(sourceTransformation ? { sourceTransformation } : {}),
+      rawPersistedDeliveryTotal: persistedTotal.toString(),
+      sealedQuantity: fixedQuantity(planQuantity),
+      persistedComparableQuantity: persistedComparableQuantity.toFixed(policy.persistedScale),
+      persistedDifference: persistedTotal.minus(planQuantity).toString(),
+    },
   };
 };

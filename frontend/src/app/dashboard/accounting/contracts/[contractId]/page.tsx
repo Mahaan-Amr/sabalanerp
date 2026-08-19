@@ -131,6 +131,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const [actionLoading, setActionLoading] = useState(false);
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [reviewActionUrl, setReviewActionUrl] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [voidTarget, setVoidTarget] = useState<any | null>(null);
   const [replacementTarget, setReplacementTarget] = useState<any | null>(null);
@@ -192,13 +193,19 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const execute = async (action: any) => {
     try {
       setActionError(null);
+      setReviewActionUrl(null);
       setActionLoading(true);
       await accountingAPI.executeAction(action);
       await loadDetail();
       return true;
     } catch (error) {
       console.error('Accounting action failed:', error);
-      setActionError((error as any)?.response?.data?.error || 'اقدام حسابداری انجام نشد');
+      const response = (error as any)?.response?.data;
+      setActionError(response?.error || 'اقدام حسابداری انجام نشد');
+      setReviewActionUrl(response?.reviewCase?.actionUrl || response?.actionUrl ||
+        (response?.code === 'FINANCIAL_EVIDENCE_CONFLICT'
+          ? `/dashboard/accounting/contracts/${params.contractId}#financial-evidence-review`
+          : null));
       return false;
     } finally {
       setActionLoading(false);
@@ -496,6 +503,11 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       {actionError && !deleteTarget && !voidTarget && !replacementTarget && !resolveTarget && !flagModalOpen && !correctionModalOpen && (
         <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-4 py-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {actionError}
+          {reviewActionUrl && (
+            <div className="mt-3">
+              <ErpButton label="رفتن به پرونده بررسی" tone="danger" variant="outline" onClick={() => router.push(reviewActionUrl)} />
+            </div>
+          )}
         </div>
       )}
       <ErpSection title="مدیریت وضعیت قرارداد">
@@ -971,6 +983,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
               </div>
             </ErpSection>
 
+            <div id="financial-evidence-review" className="scroll-mt-24">
             <ErpSection title="درخواست‌های اصلاح و پرچم‌ها">
               <div className="space-y-3">
                 {(data.flags || []).map((item: any) => (
@@ -978,9 +991,12 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     key={item.id}
                     icon={FaFlag}
                     title={item.title}
-                    meta={item.resolutionNote || item.cancellationReason || item.note}
+                    meta={item.resolutionNote || item.cancellationReason || item.evidence?.userMessageFa || item.note}
                     status={<StatusBadge status={item.status} />}
                     footer={item.status === 'OPEN' ? <div className="flex flex-wrap gap-2">
+                      {(item.trackingCode?.startsWith('financial-evidence:') || item.evidence?.code === 'FINANCIAL_EVIDENCE_CONFLICT' || item.title === 'نیازمند بررسی شواهد مالی') && (
+                        <ErpButton label="رفتن به پرونده بررسی" href={`/dashboard/accounting/contracts/${contract.contractId}#financial-evidence-review`} tone="danger" variant="outline" />
+                      )}
                       <ErpButton label="بستن پرچم" icon={FaCheckCircle} tone="success" variant="soft" onClick={() => setFlagCloseTarget({ item, mode: 'resolve' })} />
                       <ErpButton label="لغو پرچم" icon={FaTimes} tone="danger" variant="soft" onClick={() => setFlagCloseTarget({ item, mode: 'cancel' })} />
                     </div> : undefined}
@@ -1017,6 +1033,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                 ))}
               </div>
             </ErpSection>
+            </div>
             </>
           }
         />

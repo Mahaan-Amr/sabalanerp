@@ -1,5 +1,5 @@
 'use client';
-import { ErpPressable } from '@/components/erp';
+import { ErpButton, ErpPressable } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -84,6 +84,7 @@ export default function AccountingContractsPage() {
   const [searchInput, setSearchInput] = useState(query.search);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [reviewActionUrl, setReviewActionUrl] = useState<string | null>(null);
   const [correctionTarget, setCorrectionTarget] = useState<AccountingContractRow | null>(null);
   const [flagTarget, setFlagTarget] = useState<AccountingContractRow | null>(null);
   const [approvalTarget, setApprovalTarget] = useState<{
@@ -157,12 +158,15 @@ export default function AccountingContractsPage() {
     setActionLoading(`${contract.contractId}:${action.kind}`);
     try {
       setActionError(null);
+      setReviewActionUrl(null);
       await accountingAPI.executeAction(action);
       await loadContracts();
       return true;
     } catch (error) {
       console.error('Accounting action failed:', error);
-      setActionError((error as any)?.response?.data?.error || 'اقدام حسابداری انجام نشد');
+      const response = (error as any)?.response?.data;
+      setActionError(response?.error || 'اقدام حسابداری انجام نشد');
+      setReviewActionUrl(response?.reviewCase?.actionUrl || null);
       return false;
     } finally {
       setActionLoading(null);
@@ -486,6 +490,11 @@ export default function AccountingContractsPage() {
       {actionError && !flagTarget && !correctionTarget && !approvalTarget && (
         <div className="rounded-lg border border-[var(--sds-danger-border)] bg-[var(--sds-danger-surface)] px-4 py-3 text-sm text-[var(--sds-danger)] dark:border-[var(--sds-danger-border)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
           {actionError}
+          {reviewActionUrl && (
+            <div className="mt-3">
+              <ErpButton label="رفتن به پرونده بررسی" tone="danger" variant="outline" onClick={() => router.push(reviewActionUrl)} />
+            </div>
+          )}
         </div>
       )}
       <ErpSection>

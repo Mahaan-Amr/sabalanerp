@@ -128,6 +128,15 @@ export default function AccountingReceivablesPage() {
         amount: values.amount,
         receivedAt: PersianCalendar.toGregorian(String(values.receivedAt)).toISOString(),
         note: String(values.note || ''),
+        ...(values.method === 'CHECK' ? {
+          check: {
+            checkNumber: String(values.checkNumber || '').trim(),
+            ownerName: String(values.checkOwnerName || '').trim(),
+            dueDate: PersianCalendar.toGregorian(String(values.checkDueDate)).toISOString(),
+            handoverDate: PersianCalendar.toGregorian(String(values.checkHandoverDate)).toISOString(),
+            nationalCode: String(values.checkNationalCode || '').trim(),
+          },
+        } : {}),
       });
       setReceiptTarget(null);
       await loadRows();
@@ -194,7 +203,13 @@ export default function AccountingReceivablesPage() {
             { label: 'نقدی', value: 'CASH' },
             { label: 'حواله بانکی', value: 'BANK_TRANSFER' },
             { label: 'کارت', value: 'CARD' },
+            { label: 'چک', value: 'CHECK' },
           ] },
+          { id: 'checkNumber', label: 'شماره چک', type: 'text', visibleWhen: { fieldId: 'method', equals: 'CHECK' }, requiredWhen: { fieldId: 'method', equals: 'CHECK' } },
+          { id: 'checkOwnerName', label: 'صاحب چک', type: 'text', visibleWhen: { fieldId: 'method', equals: 'CHECK' }, requiredWhen: { fieldId: 'method', equals: 'CHECK' } },
+          { id: 'checkDueDate', label: 'تاریخ سررسید چک', type: 'date', visibleWhen: { fieldId: 'method', equals: 'CHECK' }, requiredWhen: { fieldId: 'method', equals: 'CHECK' } },
+          { id: 'checkHandoverDate', label: 'تاریخ تحویل چک', type: 'date', visibleWhen: { fieldId: 'method', equals: 'CHECK' }, requiredWhen: { fieldId: 'method', equals: 'CHECK' } },
+          { id: 'checkNationalCode', label: 'کد ملی صاحب چک', type: 'text', visibleWhen: { fieldId: 'method', equals: 'CHECK' }, requiredWhen: { fieldId: 'method', equals: 'CHECK' } },
           { id: 'receivedAt', label: 'تاریخ دریافت', type: 'date', required: true },
           { id: 'note', label: 'یادداشت', type: 'textarea' },
         ]}

@@ -1,4 +1,7 @@
 import { Prisma } from '@prisma/client';
+import { ApprovedPricingEvidenceError } from './approvedPricing/evidenceError';
+
+// Discount reconstruction is an evidence interpreter, so its deliberate validation failures are typed.
 
 export const LEGACY_NO_DISCOUNT_EVIDENCE_ORIGIN = {
   EXPLICIT_NULL: 'LEGACY_WIZARD_NULL',
@@ -87,7 +90,7 @@ export const contractDiscountEligibilityEvidence = (
   const normalizedNonLayerProductRowIds: string[] = [];
   const eligibleBase = rows.reduce((sum, row) => {
     const snapshot = snapshotByRow.get(row.productRowId);
-    if (!snapshot) throw new Error(`Canonical row ${row.productRowId} has no product snapshot`);
+    if (!snapshot) throw new ApprovedPricingEvidenceError(`Canonical row ${row.productRowId} has no product snapshot`);
     const baseAmount = row.baseAmountToman == null ? null : new Prisma.Decimal(row.baseAmountToman);
     return isContractRowDiscountEligible(
       snapshot,
@@ -111,18 +114,18 @@ export const isContractRowDiscountEligible = (
 ) => {
   const meta = snapshot.meta;
   if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
-    throw new Error(`Product ${productRowId} discount metadata is missing or null`);
+    throw new ApprovedPricingEvidenceError(`Product ${productRowId} discount metadata is missing or null`);
   }
   const isLayer = (meta as Record<string, unknown>).isLayer;
   if (isLayer === undefined && normalizeMissingNonLayer) {
     normalizeMissingNonLayer();
-    if (baseAmount === null) throw new Error(`Product ${productRowId} base amount is missing or null`);
+    if (baseAmount === null) throw new ApprovedPricingEvidenceError(`Product ${productRowId} base amount is missing or null`);
     return baseAmount.gt(0);
   }
   if (typeof isLayer !== 'boolean') {
-    throw new Error(`Product ${productRowId} discount eligibility evidence is missing`);
+    throw new ApprovedPricingEvidenceError(`Product ${productRowId} discount eligibility evidence is missing`);
   }
   if (isLayer) return false;
-  if (baseAmount === null) throw new Error(`Product ${productRowId} base amount is missing or null`);
+  if (baseAmount === null) throw new ApprovedPricingEvidenceError(`Product ${productRowId} base amount is missing or null`);
   return baseAmount.gt(0);
 };

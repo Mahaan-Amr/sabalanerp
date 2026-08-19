@@ -8,6 +8,23 @@ import type {
 } from './productGraph';
 import { parseCanonicalDecimal } from './canonicalDecimal';
 
+const sumCanonicalDecimals = (values: readonly string[]): string => {
+  const parsed = values.map(value => String(parseCanonicalDecimal(value)).split('.'));
+  const scale = Math.max(0, ...parsed.map(([, fraction = '']) => fraction.length));
+  const factor = 10n ** BigInt(scale);
+  const atoms = parsed.reduce((sum, [integer = '0', fraction = '']) => {
+    const negative = integer.startsWith('-');
+    const magnitude = BigInt(integer.replace('-', '') || '0') * factor +
+      BigInt(fraction.padEnd(scale, '0') || '0');
+    return sum + (negative ? -magnitude : magnitude);
+  }, 0n);
+  const negative = atoms < 0n;
+  const magnitude = negative ? -atoms : atoms;
+  const integer = magnitude / factor;
+  const fraction = scale === 0 ? '' : (magnitude % factor).toString().padStart(scale, '0').replace(/0+$/, '');
+  return String(parseCanonicalDecimal(`${negative ? '-' : ''}${integer}${fraction ? `.${fraction}` : ''}`));
+};
+
 export type CanonicalProjectionAudience =
   | 'step5'
   | 'confirmation'
@@ -283,10 +300,9 @@ export const projectCanonicalProductGraph = (
       .map(stone => stone.remainingStoneId)
     };
   });
-  const totalAmountToman = graph.rows.reduce(
-    (sum, row) => sum + BigInt(row.commercial.totalAmountToman ?? '0'),
-    0n
-  ).toString();
+  const totalAmountToman = sumCanonicalDecimals(
+    graph.rows.map(row => row.commercial.totalAmountToman ?? '0')
+  );
   return { audience, schemaVersion: graph.schemaVersion, revision: graph.revision, totalAmountToman, products };
 };
 

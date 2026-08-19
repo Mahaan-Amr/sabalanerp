@@ -2257,7 +2257,7 @@ model ContractItem {
   productId                         String
   productRowId                      String?
   productType                       String? // نوع محصول: 'longitudinal' | 'stair' | etc.
-  quantity                          Decimal                            @db.Decimal(10, 2)
+  quantity                          Decimal                            @db.Decimal(18, 3)
   unitPrice                         Decimal                            @db.Decimal(15, 2)
   totalPrice                        Decimal                            @db.Decimal(15, 2)
   description                       String?
@@ -2307,8 +2307,8 @@ model DeliveryProduct {
   deliveryId        String
   productId         String
   productRowId      String?
-  quantity          Decimal  @db.Decimal(10, 2)
-  deliveredQuantity Decimal? @db.Decimal(10, 2)
+  quantity          Decimal  @db.Decimal(18, 3)
+  deliveredQuantity Decimal? @db.Decimal(18, 3)
   notes             String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -4262,6 +4262,10 @@ model AccountingContractFlag {
   severity           AccountingFlagSeverity @default(MEDIUM)
   title              String
   note               String?
+  trackingCode       String?                @unique
+  sourceFinancialRecordId String?
+  assignedToUserId   String?
+  evidence           Json?
   status             AccountingFlagStatus   @default(OPEN)
   createdBy          String
   resolvedBy         String?
@@ -4275,6 +4279,8 @@ model AccountingContractFlag {
 
   @@index([contractId])
   @@index([status])
+  @@index([sourceFinancialRecordId])
+  @@index([assignedToUserId, status])
   @@map("accounting_contract_flags")
 }
 

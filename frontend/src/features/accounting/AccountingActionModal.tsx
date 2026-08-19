@@ -8,7 +8,13 @@ import PersianCalendar from '@/lib/persian-calendar';
 import { ErpButton } from '@/components/erp';
 import { toFiniteNumber } from '@/lib/numberFormat';
 
-export type AccountingActionField =
+type AccountingActionFieldCondition = { fieldId: string; equals: string | number };
+type AccountingActionFieldBehavior = {
+  visibleWhen?: AccountingActionFieldCondition;
+  requiredWhen?: AccountingActionFieldCondition;
+};
+
+export type AccountingActionField = (
   | {
       id: string;
       label: string;
@@ -25,7 +31,7 @@ export type AccountingActionField =
       options: Array<{ label: string; value: string }>;
       placeholder?: string;
       defaultValue?: string;
-    };
+    }) & AccountingActionFieldBehavior;
 
 type AccountingActionModalProps = {
   open: boolean;
@@ -79,8 +85,12 @@ export default function AccountingActionModal({
     setValues((current) => ({ ...current, [id]: value }));
   };
 
-  const missingFields = fields.filter((field) => {
-    if (!field.required) return false;
+  const visibleFields = fields.filter((field) => !field.visibleWhen ||
+    values[field.visibleWhen.fieldId] === field.visibleWhen.equals);
+  const missingFields = visibleFields.filter((field) => {
+    const required = field.required || (field.requiredWhen &&
+      values[field.requiredWhen.fieldId] === field.requiredWhen.equals);
+    if (!required) return false;
     const value = values[field.id];
     return value == null || String(value).trim() === '' || (field.type === 'number' && toFiniteNumber(value) <= 0);
   });
@@ -114,14 +124,16 @@ export default function AccountingActionModal({
     >
       <div className="space-y-4">
         {description ? <p className="sds-text-secondary text-sm leading-6">{description}</p> : null}
-          {fields.map((field) => {
+          {visibleFields.map((field) => {
             const invalid = Boolean(touched[field.id] && missingFields.some((item) => item.id === field.id));
             const value = values[field.id] ?? '';
+            const required = field.required || Boolean(field.requiredWhen &&
+              values[field.requiredWhen.fieldId] === field.requiredWhen.equals);
             return (
               <ErpField
                 key={field.id}
                 label={field.label}
-                required={field.required}
+                required={required}
                 error={invalid ? 'این فیلد الزامی است.' : undefined}
               >
                 {field.type === 'textarea' ? (
@@ -154,7 +166,7 @@ export default function AccountingActionModal({
                     options={field.options}
                     placeholder={field.placeholder || field.label}
                     searchable
-                    required={field.required}
+                    required={required}
                   />
                 ) : (
                   <ErpInput

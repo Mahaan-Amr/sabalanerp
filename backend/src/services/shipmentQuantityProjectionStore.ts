@@ -79,6 +79,11 @@ const mapPersistedEvidence = (item: any, guardReturnValidated = false): Shipment
   guardReturnValidated: item.kind === 'GUARD_RETURN_VERIFIED' ? guardReturnValidated : undefined,
 });
 
+export const isPersistedContractQuantitySupersededByApprovedPricing = (
+  item: { kind: string; contractItemId: string },
+  approvedPricingContractItems: ReadonlySet<string>,
+) => item.kind === 'CONTRACTED_SET' && approvedPricingContractItems.has(item.contractItemId);
+
 const persistedEvidencePayload = (item: ShipmentQuantityEvidence) => ({
   contractId: item.contractId, contractItemId: item.contractItemId, productRowId: item.productRowId,
   unit: item.unit, kind: item.kind, quantity: item.quantity, effectiveAt: item.effectiveAt,
@@ -168,10 +173,11 @@ const buildContractRowQuantityEvidence = (
   contract: { id: string; contractData: unknown },
   item: { id: string; productRowId: string | null; productId: string; productType: string | null; quantity: Prisma.Decimal },
   policy: ContractQuantityEvidencePolicy,
+  approvedPricingRow?: { id: string; contractedQuantity: Prisma.Decimal; unit: string } | null,
 ): Omit<ShipmentQuantityEvidence, 'id'> => {
   const resolution = resolveContractProductSnapshot(contract.contractData, { productRowId: item.productRowId, productId: item.productId });
   const snapshot = resolution.snapshot || {};
-  const unit = inferUnit(item, snapshot);
+  const unit = approvedPricingRow?.unit || inferUnit(item, snapshot);
   const common = {
     contractId: contract.id, contractItemId: item.id, productRowId: item.productRowId || `missing:${item.id}`, unit,
     effectiveAt: policy.effectiveAt, recordedAt: policy.recordedAt, sourceId: policy.sourceId, sourceVersion: policy.sourceVersion,
@@ -179,8 +185,19 @@ const buildContractRowQuantityEvidence = (
   try {
     if (resolution.conflict) throw new Error(resolution.conflict);
     const version = {
-      ...common, kind: 'CONTRACTED_SET' as const, quantity: deriveContractedQuantity(item, snapshot, unit),
-      sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION', metadata: policy.successMetadata, integrityHash: '',
+      ...common, kind: 'CONTRACTED_SET' as const,
+      quantity: approvedPricingRow
+        ? exactScaleThree(approvedPricingRow.contractedQuantity)
+        : deriveContractedQuantity(item, snapshot, unit),
+      sourceType: 'FINANCIALLY_APPROVED_CONTRACT_QUANTITY_VERSION',
+      metadata: {
+        ...policy.successMetadata,
+        ...(approvedPricingRow ? {
+          quantityEvidenceOrigin: 'APPROVED_PRICING_ROW',
+          approvedPricingRowId: approvedPricingRow.id,
+        } : {}),
+      },
+      integrityHash: '',
     };
     return { ...version, integrityHash: shipmentQuantityEvidenceIntegrityHash({ id: '', ...version }) };
   } catch (error) {
@@ -206,12 +223,18 @@ export const captureContractQuantityVersionAtFinancialApproval = async (
 ) => {
   const contract = await tx.salesContract.findUnique({ where: { id: approval.contractId }, include: { items: true } });
   if (!contract) throw new Error('Financially approved contract not found for shipment quantity capture');
+  const pricingVersion = await tx.contractApprovedPricingVersion.findUnique({
+    where: { sourceFinancialRecordId_contractId: { sourceFinancialRecordId: approval.financialRecordId, contractId: approval.contractId } },
+    include: { rows: true },
+  });
+  if (!pricingVersion) throw new Error('Approved pricing quantity evidence is missing for shipment capture');
+  const pricingRows = new Map(pricingVersion.rows.map((row) => [row.contractItemId, row]));
   const approvedAt = approval.approvedAt.toISOString();
   const metadata = { financialRecordId: approval.financialRecordId, financiallyApprovedAt: approvedAt };
   const versions = contract.items.map((item) => buildContractRowQuantityEvidence(contract, item, {
     effectiveAt: approvedAt, recordedAt: approvedAt, sourceId: `${approval.financialRecordId}:${item.id}`, sourceVersion: 1,
     successMetadata: metadata, conflictMetadata: metadata,
-  }));
+  }, pricingRows.get(item.id)));
   if (versions.length > 0) await tx.shipmentQuantityEvidence.createMany({
     data: versions.map(persistedContractQuantityEvidence),
     skipDuplicates: true,
@@ -278,7 +301,7 @@ export const readShipmentQuantityProjection = async (
   if (contracts.length === 0) return projectShipmentQuantities([], options);
 
   const contractIds = contracts.map((contract) => contract.id);
-  const [approvals, persisted, previous] = await Promise.all([
+  const [approvals, persisted, previous, approvedPricingVersions] = await Promise.all([
     prisma.accountingFinancialRecord.findMany({
       where: { contractId: { in: contractIds }, financiallyApprovedAt: { not: null } },
       select: { contractId: true, financiallyApprovedAt: true },
@@ -289,10 +312,41 @@ export const readShipmentQuantityProjection = async (
       include: { guardReturnMovement: true, dispatchEvidence: true },
     }),
     prisma.shipmentQuantityProjection.findMany({ where: { contractId: { in: contractIds }, lastVerifiedAt: { not: null } } }),
+    prisma.contractApprovedPricingVersion.findMany({
+      where: { contractId: { in: contractIds } },
+      include: { rows: true },
+      orderBy: [{ approvedAt: 'asc' }, { versionNumber: 'asc' }],
+    }),
   ]);
   const approvedAt = new Map(approvals.map((item) => [item.contractId, item.financiallyApprovedAt!]));
   const evidence: ShipmentQuantityEvidence[] = [];
+  const approvedPricingContractItems = new Set<string>();
+  for (const version of approvedPricingVersions) {
+    for (const row of version.rows) {
+      approvedPricingContractItems.add(row.contractItemId);
+      const event: ShipmentQuantityEvidence = {
+        id: `approved-pricing:${row.id}`,
+        contractId: version.contractId,
+        contractItemId: row.contractItemId,
+        productRowId: row.productRowId,
+        unit: row.unit,
+        kind: 'CONTRACTED_SET',
+        quantity: row.contractedQuantity.toFixed(3),
+        effectiveAt: version.approvedAt.toISOString(),
+        recordedAt: version.createdAt.toISOString(),
+        sourceType: 'APPROVED_PRICING_QUANTITY',
+        sourceId: row.id,
+        sourceVersion: version.versionNumber,
+        integrityHash: '',
+        metadata: { pricingVersionId: version.id, sourceFinancialRecordId: version.sourceFinancialRecordId },
+      };
+      evidence.push({ ...event, integrityHash: shipmentQuantityEvidenceIntegrityHash(event) });
+    }
+  }
   for (const persistedItem of persisted) {
+    // Approved-pricing rows are the canonical immutable quantity authority. Older capture rows may
+    // contain the legacy zero sentinel and must not supersede that authority at a later cutover time.
+    if (isPersistedContractQuantitySupersededByApprovedPricing(persistedItem, approvedPricingContractItems)) continue;
     const validationFailure = guardReturnValidationFailure(persistedItem, persisted);
     const item = mapPersistedEvidence(persistedItem, !validationFailure);
     if (item.integrityHash === shipmentQuantityEvidenceIntegrityHash(item)) {

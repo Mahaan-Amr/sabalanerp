@@ -42,6 +42,7 @@ export type ApprovedPricingGraphRowSource = {
   productType: string;
   baseAmountToman: string | null;
   totalAmountToman: string | null;
+  legacyRawTotalAmountToman?: string | null;
   requestedQuantity: string | null;
   requestedLengthMeters: string | null;
   requestedAreaSquareMeters: string | null;
@@ -75,10 +76,57 @@ export type ApprovedPricingSource = {
     }[];
     productGraph: {
       schemaVersion: number;
+      roundingPolicy: string;
       revision: number;
       inputHash: string;
       resultHash: string;
       totalAmountToman: string;
+      quantityPolicyProvenance: {
+        producer: 'LEGACY_MIGRATION' | 'CANONICAL_WIZARD_SAVE';
+        producerVersion: 0 | 1;
+        graphAuditCommandId: string;
+      } | null;
+      compatibility?: {
+        evidenceOrigin: 'POST_SNAPSHOT_DETERMINISTIC_LEGACY_GRAPH_MIGRATION' | 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION';
+        migrationAuditCommandId?: string;
+        snapshotOriginallyMissing: boolean;
+        rowIdentityAssignments?: readonly {
+          contractItemId: string;
+          productRowId: string;
+          rawContractItemProductRowId: string | null;
+          rawProductSnapshotRowId: string | null;
+          rule: 'MIGRATED_GRAPH_ORDINAL_PRODUCT_IDENTITY_V1';
+        }[];
+        monetaryNormalizations?: readonly {
+          productRowId: string;
+          rawTotalAmountToman: string;
+          sealedTotalAmountToman: string;
+          difference: string;
+          rule: 'LEGACY_GRAPH_V1_ROUND_HALF_UP_TOMAN';
+          componentConversions?: readonly {
+            component: 'cutting';
+            rawValue: string;
+            duplicatedToolValue: string;
+            sealedValue: string;
+            difference: string;
+            rule: 'LEGACY_STAIR_V1_CUTTING_PHYSICAL_AND_TOOL_LINES';
+          }[];
+        }[];
+        legacyQuantityNormalizations?: readonly {
+          productRowId: string;
+          productType: string;
+          rawValue: string;
+          sealedValue: string;
+          unit: string;
+          rule: 'LEGACY_GRAPH_V1_ROUND_HALF_UP_SCALE_THREE';
+        }[];
+        discountEligibilityAssignments?: readonly {
+          productRowId: string;
+          rawIsLayer: null;
+          sealedIsLayer: false;
+          rule: 'LEGACY_GRAPH_V1_EMPTY_LAYER_CONFIGURATION_NON_LAYER';
+        }[];
+      };
       rows: readonly ApprovedPricingGraphRowSource[];
     } | null;
   };

@@ -22,11 +22,13 @@ import {
 } from '@prisma/client';
 import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
 import { lockFinancialApprovalRecord, publishCurrentApprovedPricingReadinessWithinTransaction,
-  sealApprovedPricingAtFinancialApproval } from './approvedPricing';
+  sealApprovedPricingAtFinancialApproval, FinancialEvidenceConflictError,
+  ApprovedPricingEvidenceError } from './approvedPricing';
 import { captureContractQuantityVersionAtFinancialApproval } from './shipmentQuantityProjectionStore';
 import { parseCanonicalProductGraph, projectCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import {
   canonicalOptimizerDerivedLengthWitness,
+  optimizerQuantityPolicyProvenanceFromAudit,
   reconcileOptimizerDerivedLongitudinalQuantity,
 } from './optimizerDerivedQuantityEvidence';
 import {
@@ -390,19 +392,32 @@ const normalizeFinancialRecords = (records: Array<{
   sepidarAmount?: Prisma.Decimal | null;
   financiallyApprovedAt?: Date | null;
   createdAt: Date;
-}>) =>
-  records.map((record) => ({
+  metadata?: Prisma.JsonValue | null;
+}>, contractNetAmount?: Prisma.Decimal) =>
+  records.map((record) => {
+    const legacyTotalDraft = record.status === AccountingRecordStatus.DRAFT &&
+      metadataObject(record.metadata).mode === 'FROM_CONTRACT_TOTAL' &&
+      contractNetAmount && !amountsEqual(record.amount, contractNetAmount);
+    return ({
     id: record.id,
     kind: record.kind,
     status: record.status,
-    amount: decimalToString(record.amount),
+    amount: decimalToString(legacyTotalDraft ? contractNetAmount : record.amount),
+    ...(legacyTotalDraft ? {
+      amountCompatibility: {
+        rawAmount: decimalToString(record.amount),
+        presentedAmount: decimalToString(contractNetAmount),
+        rule: 'FROM_CONTRACT_TOTAL_CANONICAL_NET_V1',
+      },
+    } : {}),
     currency: record.currency,
     systemInvoiceNumber: record.systemInvoiceNumber,
     systemInvoiceDate: record.systemInvoiceDate,
     sepidarAmount: record.sepidarAmount == null ? null : decimalToString(record.sepidarAmount),
     financiallyApprovedAt: record.financiallyApprovedAt,
     createdAt: record.createdAt
-  }));
+  });
+  });
 
 const getTaxMissingFields = (contract: any, settings: any) => {
   const missing: string[] = [];
@@ -589,6 +604,74 @@ const audit = async (tx: Prisma.TransactionClient | PrismaClient, data: {
   });
 };
 
+export const recordFinancialEvidenceReviewCase = async (input: {
+  invoiceId: string;
+  actorId: string;
+  conflict: FinancialEvidenceConflictError;
+}) => {
+  const source = await prisma.accountingFinancialRecord.findUnique({
+    where: { id: input.invoiceId },
+    select: { id: true, contractId: true },
+  });
+  if (!source?.contractId) return null;
+  const trackingCode = `financial-evidence:${source.id}`;
+  const actionUrl = `/dashboard/accounting/contracts/${source.contractId}#financial-evidence-review`;
+  return prisma.$transaction(async tx => {
+    const existing = await tx.accountingContractFlag.findUnique({ where: { trackingCode } });
+    const evidence = toJsonValue({
+      code: input.conflict.code,
+      technicalDetail: input.conflict.technicalDetail,
+      userMessageFa: input.conflict.userMessageFa,
+      structuredEvidence: input.conflict.evidence,
+      sourceFinancialRecordId: source.id,
+      actorId: input.actorId,
+      actionUrl,
+    });
+    const reviewCase = existing
+      ? await tx.accountingContractFlag.update({
+          where: { id: existing.id },
+          data: {
+            status: AccountingFlagStatus.OPEN,
+            severity: AccountingFlagSeverity.BLOCKER,
+            assignedToUserId: null,
+            evidence,
+            resolvedBy: null,
+            resolvedAt: null,
+            resolutionNote: null,
+            cancelledBy: null,
+            cancelledAt: null,
+            cancellationReason: null,
+          },
+        })
+      : await tx.accountingContractFlag.create({ data: {
+        contractId: source.contractId!,
+        category: AccountingFlagCategory.AMOUNT_PRICING,
+        severity: AccountingFlagSeverity.BLOCKER,
+        title: 'نیازمند بررسی شواهد مالی',
+        note: 'کمیت، قیمت یا اسنپ‌شات‌های فریز‌شده با قاعده نسخه‌ی خود سازگار نشدند. تا تعیین تکلیف این پرونده، تأیید مالی مسدود است.',
+        status: AccountingFlagStatus.OPEN,
+        createdBy: input.actorId,
+        trackingCode,
+        sourceFinancialRecordId: source.id,
+        evidence,
+      } });
+    if (!existing || existing.status !== AccountingFlagStatus.OPEN) {
+      await audit(tx, {
+        action: existing ? 'REOPEN_FINANCIAL_EVIDENCE_REVIEW_CASE' : 'CREATE_FINANCIAL_EVIDENCE_REVIEW_CASE',
+        actorId: input.actorId,
+        contractId: source.contractId,
+        recordId: source.id,
+        entityType: 'AccountingContractFlag',
+        entityId: reviewCase.id,
+        afterState: toJsonValue(reviewCase),
+        beforeState: existing ? toJsonValue(existing) : undefined,
+        note: `Financial approval blocked; ${trackingCode}`,
+      });
+    }
+    return { id: reviewCase.id, trackingCode, contractId: source.contractId!, actionUrl };
+  });
+};
+
 const buildContractRow = async (contract: any, settings: any) => {
   const records = contract.accountingRecords || [];
   const receivables = contract.accountingReceivables || [];
@@ -710,7 +793,7 @@ const buildContractRow = async (contract: any, settings: any) => {
       receivedAmount: decimalToString(receivedAmount),
       remainingAmount: decimalToString(remainingAmount)
     },
-    financialRecords: normalizeFinancialRecords(records),
+    financialRecords: normalizeFinancialRecords(records, contractAmount),
     nextBestActions
   };
 };
@@ -719,6 +802,7 @@ const getAccountingInclude = () => ({
   customer: true,
   items: { include: { product: true } },
   productGraphState: true,
+  productGraphAudits: { orderBy: { resultRevision: 'desc' as const } },
   deliveries: { include: { products: true } },
   payments: { include: { installments: true } }
 });
@@ -737,9 +821,24 @@ const buildAccountingQuantityPresentations = (contract: any) => {
     : {};
   const products = Array.isArray(data.products) ? data.products : [];
   let graphRows: readonly { raw: any; projected: any }[] = [];
+  let graphSchemaVersion: number | null = null;
+  let roundingPolicy: string | null = null;
+  let quantityPolicyProvenance: ReturnType<typeof optimizerQuantityPolicyProvenanceFromAudit> = null;
   try {
     if (contract.productGraphState?.graph) {
       const graph = parseCanonicalProductGraph(contract.productGraphState.graph);
+      graphSchemaVersion = graph.schemaVersion;
+      roundingPolicy = graph.calculationPolicy.rounding;
+      const graphAudit = Array.isArray(contract.productGraphAudits)
+        ? contract.productGraphAudits.find((audit: any) => audit.resultRevision === contract.productGraphState.revision &&
+            audit.inputHash === contract.productGraphState.inputHash && audit.resultHash === contract.productGraphState.resultHash)
+        : null;
+      quantityPolicyProvenance = optimizerQuantityPolicyProvenanceFromAudit({
+        graphSchemaVersion,
+        roundingPolicy,
+        graphAuditCommandId: graphAudit?.commandId,
+        graphAuditCommand: graphAudit?.command,
+      });
       const projectedRows = projectCanonicalProductGraph(graph, 'accounting').products;
       graphRows = graph.rows.map(raw => ({
         raw,
@@ -756,12 +855,17 @@ const buildAccountingQuantityPresentations = (contract: any) => {
       candidate && typeof candidate === 'object' && !Array.isArray(candidate) &&
       String(candidate.rowId ?? candidate.productRowId ?? '') === item.productRowId);
     const graphRow = graphRows.find(row => row.raw.productRowId === item.productRowId);
-    if (!product || !graphRow?.projected || !item.productRowId) {
+    if (!product || !graphRow?.projected || !item.productRowId || graphSchemaVersion === null || !roundingPolicy) {
       presentations.set(item.id, { status: 'REVIEW_REQUIRED' });
       continue;
     }
     try {
       const evidence = reconcileOptimizerDerivedLongitudinalQuantity({
+        graphSchemaVersion,
+        roundingPolicy,
+        producer: quantityPolicyProvenance?.producer ?? null,
+        producerVersion: quantityPolicyProvenance?.producerVersion ?? null,
+        graphAuditCommandId: quantityPolicyProvenance?.graphAuditCommandId ?? null,
         productRowId: item.productRowId,
         productId: item.productId,
         productType: item.productType,
@@ -1173,7 +1277,10 @@ export const getAccountingContractDetail = async (contractId: string) => {
       deliveries: contract.deliveries,
       salesPayments: contract.payments
     },
-    financialRecords,
+    financialRecords: normalizeFinancialRecords(
+      financialRecords,
+      toRialDecimal(getContractAmount(contract), contract.currency),
+    ),
     receivables,
     paymentEvents,
     tax,
@@ -1287,9 +1394,11 @@ const createInvoiceCandidate = async (command: AccountingActionRequest, actor: A
   const selectedItems = command.mode === 'FROM_SELECTED_ITEMS' && command.selectedContractItemIds?.length
     ? contract.items.filter((item) => command.selectedContractItemIds!.includes(item.id))
     : contract.items;
-  const amount = command.amount != null
-    ? toDecimal(command.amount)
-    : selectedItems.reduce((sum, item) => sum.plus(toRialDecimal(item.totalPrice, contract.currency)), new Prisma.Decimal(0));
+  const amount = command.mode === 'FROM_SELECTED_ITEMS'
+    ? command.amount != null
+      ? toDecimal(command.amount)
+      : selectedItems.reduce((sum, item) => sum.plus(toRialDecimal(item.totalPrice, contract.currency)), new Prisma.Decimal(0))
+    : toRialDecimal(getContractAmount(contract), contract.currency);
   const missingFields = getTaxMissingFields(contract, settings);
   const vatRate = settings.defaultVatRate || new Prisma.Decimal(0);
   const vatAmount = amount.mul(vatRate).div(100);
@@ -1505,7 +1614,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
 
   const result = await prisma.$transaction(async (tx) => {
     await lockFinancialApprovalRecord(tx, invoiceId);
-    const before = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
+    let before = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
     if (!before) throw new Error('Invoice record not found');
     if (before.kind !== FinancialRecordKind.INVOICE_CANDIDATE) {
       throw new Error('Only invoice records can be financially approved');
@@ -1515,6 +1624,71 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     }
     if (before.status === AccountingRecordStatus.VOIDED) {
       throw new Error('Voided invoices cannot be financially approved');
+    }
+    if (before.contractId && metadataObject(before.metadata).mode === 'FROM_CONTRACT_TOTAL') {
+      const [contract, invoiceItems] = await Promise.all([
+        tx.salesContract.findUnique({
+          where: { id: before.contractId },
+          select: { totalAmount: true, currency: true },
+        }),
+        tx.accountingInvoiceCandidateItem.findMany({
+          where: { invoiceId: before.id },
+          select: { totalPrice: true },
+        }),
+      ]);
+      if (contract?.totalAmount) {
+        const expectedNetAmount = toRialDecimal(contract.totalAmount, contract.currency);
+        const frozenGrossAmount = invoiceItems.reduce(
+          (sum, item) => sum.plus(item.totalPrice),
+          new Prisma.Decimal(0),
+        );
+        if (!amountsEqual(before.amount, expectedNetAmount)) {
+          if (!amountsEqual(before.amount, frozenGrossAmount)) {
+            throw new FinancialEvidenceConflictError(new ApprovedPricingEvidenceError({
+              technicalDetail: 'Invoice draft amount conflicts with both frozen contract net and frozen item gross amounts',
+              evidence: {
+                rawInvoiceAmount: before.amount.toString(),
+                frozenContractNetAmount: expectedNetAmount.toString(),
+                frozenItemGrossAmount: frozenGrossAmount.toString(),
+                netDifference: before.amount.minus(expectedNetAmount).toString(),
+                grossDifference: before.amount.minus(frozenGrossAmount).toString(),
+                rule: 'FROM_CONTRACT_TOTAL_FROZEN_AMOUNT_RECONCILIATION_V1',
+              },
+              userMessageFa: 'مبلغ پیش‌فاکتور با مبالغ فریز‌شدهٔ قرارداد سازگار نیست. مدیر حسابداری باید پروندهٔ بررسی مبلغ این قرارداد را تعیین تکلیف کند.',
+            }));
+          }
+          const rawAmount = before.amount;
+          before = await tx.accountingFinancialRecord.update({
+            where: { id: before.id },
+            data: { amount: expectedNetAmount },
+          });
+          const tax = await tx.accountingTaxRecord.findFirst({ where: { invoiceRecordId: before.id } });
+          if (tax) {
+            await tx.accountingTaxRecord.update({
+              where: { id: tax.id },
+              data: {
+                taxableAmount: expectedNetAmount,
+                vatAmount: expectedNetAmount.mul(tax.vatRate).div(100),
+              },
+            });
+          }
+          await audit(tx, {
+            action: 'NORMALIZE_LEGACY_INVOICE_GROSS_TO_CONTRACT_NET',
+            actorId: actor.userId,
+            contractId: before.contractId,
+            recordId: before.id,
+            entityType: 'AccountingFinancialRecord',
+            entityId: before.id,
+            beforeState: toJsonValue({ amount: rawAmount.toString() }),
+            afterState: toJsonValue({
+              amount: expectedNetAmount.toString(),
+              rule: 'FROM_CONTRACT_TOTAL_CANONICAL_NET_V1',
+              difference: expectedNetAmount.minus(rawAmount).toString(),
+            }),
+            note: 'Legacy draft gross amount normalized to the frozen contract net amount before financial approval.',
+          });
+        }
+      }
     }
     if (before.contractId) {
       const blockerFlag = await tx.accountingContractFlag.findFirst({
@@ -1561,7 +1735,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     }
 
     const approvedAt = new Date();
-    const updated = await tx.accountingFinancialRecord.update({
+    let updated = await tx.accountingFinancialRecord.update({
       where: { id: invoiceId },
       data: {
         status: AccountingRecordStatus.ISSUED,
@@ -1579,6 +1753,64 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       idempotencyKey: approvalIdempotencyKey,
       effectiveAuthority: approvalAuthorityEvidence,
     });
+    const canonicalInvoiceAmount = toRialDecimal(
+      new Prisma.Decimal(pricingSeal.version.netAmount),
+      pricingSeal.version.currency,
+    );
+    if (!amountsEqual(updated.amount, canonicalInvoiceAmount)) {
+      const normalizations = pricingSeal.version.sourceEvidence.financialAmountNormalizations;
+      if (!Array.isArray(normalizations) || normalizations.length === 0) {
+        throw new FinancialEvidenceConflictError(new ApprovedPricingEvidenceError({
+          technicalDetail: 'Invoice amount conflicts with approved pricing seal without a recorded historical normalization',
+          evidence: {
+            rawInvoiceAmount: updated.amount.toString(),
+            approvedPricingAmount: canonicalInvoiceAmount.toString(),
+            difference: updated.amount.minus(canonicalInvoiceAmount).toString(),
+            approvedPricingVersionId: pricingSeal.version.id,
+            rule: 'APPROVED_PRICING_AMOUNT_EXACT_MATCH_V1',
+          },
+          userMessageFa: 'مبلغ صورتحساب با مهر قیمت‌گذاری تأییدشده سازگار نیست. مدیر حسابداری باید پروندهٔ بررسی مبلغ این قرارداد را تعیین تکلیف کند.',
+        }));
+      }
+      const rawAmount = updated.amount;
+      updated = await tx.accountingFinancialRecord.update({
+        where: { id: updated.id },
+        data: { amount: canonicalInvoiceAmount, sepidarAmount: canonicalInvoiceAmount },
+      });
+      for (const row of pricingSeal.version.rows) {
+        await tx.accountingInvoiceCandidateItem.updateMany({
+          where: { invoiceId: updated.id, contractItemId: row.contractItemId },
+          data: { totalPrice: toRialDecimal(new Prisma.Decimal(row.canonicalAllInTotal), pricingSeal.version.currency) },
+        });
+      }
+      const tax = await tx.accountingTaxRecord.findFirst({ where: { invoiceRecordId: updated.id } });
+      if (tax) {
+        await tx.accountingTaxRecord.update({
+          where: { id: tax.id },
+          data: {
+            taxableAmount: canonicalInvoiceAmount,
+            vatAmount: canonicalInvoiceAmount.mul(tax.vatRate).div(100),
+          },
+        });
+      }
+      await audit(tx, {
+        action: 'NORMALIZE_LEGACY_INVOICE_STORAGE_SCALE',
+        actorId: actor.userId,
+        contractId: updated.contractId,
+        recordId: updated.id,
+        entityType: 'AccountingFinancialRecord',
+        entityId: updated.id,
+        beforeState: toJsonValue({ amount: rawAmount.toString(), sepidarAmount: sepidarAmount.toString() }),
+        afterState: toJsonValue({
+          amount: canonicalInvoiceAmount.toString(),
+          sepidarAmount: canonicalInvoiceAmount.toString(),
+          difference: canonicalInvoiceAmount.minus(rawAmount).toString(),
+          rule: 'LEGACY_GRAPH_V1_AMOUNT_STORAGE_SCALE_TO_CANONICAL_TOMAN',
+          actorId: actor.userId,
+        }),
+        note: 'Legacy graph-v1 storage-scale amount normalized to the canonical approved-pricing seal.',
+      });
+    }
     await publishCurrentApprovedPricingReadinessWithinTransaction(tx, { contractId: pricingSeal.version.contractId,
       pricingVersionId: pricingSeal.version.id, sourceFinancialRecordId: pricingSeal.version.sourceFinancialRecordId,
       evaluatedBy: actor.userId });

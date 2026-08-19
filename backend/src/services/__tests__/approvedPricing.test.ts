@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AccountingRecordStatus, FinancialRecordKind } from '@prisma/client';
+import { AccountingRecordStatus, FinancialRecordKind, Prisma } from '@prisma/client';
 import { projectCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import {
   buildApprovedPricingVersion,
@@ -17,7 +17,211 @@ import type {
   ApprovedPricingVersionInsert,
   ApprovedPricingVersionRecord,
 } from '../approvedPricing/types';
-import { canonicalOptimizerDerivedLengthWitness } from '../optimizerDerivedQuantityEvidence';
+import {
+  canonicalOptimizerDerivedLengthWitness,
+  optimizerQuantityPolicyProvenanceFromAudit,
+  OptimizerQuantityEvidenceConflictError,
+} from '../optimizerDerivedQuantityEvidence';
+import {
+  bindLegacyRowsToMigratedGraph,
+  financialCommercialSnapshotMatches,
+  reconstructLegacyV1DiscountEligibility,
+  reconstructLegacyV1Pricing,
+  reconstructLegacyV1Quantity,
+  resolveFinancialApprovalGraphEvidence,
+} from '../approvedPricing/prismaRepository';
+import {
+  ApprovedPricingEvidenceError,
+  asApprovedPricingEvidenceError,
+} from '../approvedPricing/evidenceError';
+
+test('only typed evidence failures can become a financial review case', () => {
+  const evidenceFailure = new ApprovedPricingEvidenceError('frozen evidence conflict');
+  assert.equal(asApprovedPricingEvidenceError(evidenceFailure), evidenceFailure);
+  assert.equal(asApprovedPricingEvidenceError(new globalThis.Error('database or programming failure')), null);
+});
+
+test('financial staleness follows commercial evidence instead of the contract lifecycle timestamp', () => {
+  const snapshot = { customerId: 'customer-1', currency: 'تومان', totalAmount: '1250', contractData: { products: [{ id: 'p1' }] } };
+  const current = { customerId: 'customer-1', currency: 'تومان', totalAmount: new Prisma.Decimal('1250.00'), contractData: { products: [{ id: 'p1' }] } };
+  assert.equal(financialCommercialSnapshotMatches({ snapshot, current }), true);
+  assert.equal(financialCommercialSnapshotMatches({ snapshot, current: { ...current, contractData: { products: [{ id: 'changed' }] } } }), false);
+});
+
+test('financial staleness excludes live CRM navigation collections on both sides of the snapshot boundary', () => {
+  const customerFacts = { id: 'customer-1', companyName: 'مشتری نمونه', nationalCode: '0012345678' };
+  const snapshot = {
+    customerId: 'customer-1', currency: 'تومان', totalAmount: '1250',
+    contractData: { products: [{ id: 'p1' }], customer: customerFacts },
+  };
+  const current = {
+    customerId: 'customer-1', currency: 'تومان', totalAmount: new Prisma.Decimal('1250'),
+    contractData: {
+      products: [{ id: 'p1' }],
+      customer: { ...customerFacts, contracts: [{ id: 'unrelated-history' }], projectAddresses: [{ id: 'live-crm-navigation' }] },
+    },
+  };
+  assert.equal(financialCommercialSnapshotMatches({ snapshot, current }), true);
+  assert.equal(financialCommercialSnapshotMatches({
+    snapshot,
+    current: { ...current, contractData: { ...current.contractData, customer: { ...current.contractData.customer, nationalCode: '0099999999' } } },
+  }), false);
+});
+
+test('accepts a missing draft graph snapshot only from the exact deterministic legacy migration audit', () => {
+  const currentGraphState = {
+    schemaVersion: 1,
+    revision: 1,
+    graph: { schemaVersion: 1 },
+    inputHash: 'same-hash',
+    resultHash: 'same-hash',
+    totalAmountToman: '100',
+  };
+  const resolved = resolveFinancialApprovalGraphEvidence({
+    snapshotGraphState: null,
+    currentGraphState,
+    migrationAudit: {
+      commandId: 'legacy-migration:contract-1:same-hash',
+      resultRevision: 1,
+      inputHash: 'same-hash',
+      resultHash: 'same-hash',
+      command: { kind: 'legacy-migration', backupReference: 'verified-backup' },
+    },
+  });
+  assert.equal(resolved.graphState, currentGraphState);
+  assert.deepEqual(resolved.compatibility, {
+    evidenceOrigin: 'POST_SNAPSHOT_DETERMINISTIC_LEGACY_GRAPH_MIGRATION',
+    migrationAuditCommandId: 'legacy-migration:contract-1:same-hash',
+    snapshotOriginallyMissing: true,
+  });
+});
+
+test('reconstructs legacy v1 quantities from typed product evidence at scale three', () => {
+  const length = reconstructLegacyV1Quantity({
+    productRowId: 'legacy-row-1', productType: 'longitudinal',
+    productSnapshot: { length: '58.33333333333334', quantity: '1', lengthUnit: 'm' },
+  });
+  assert.equal(length.requestedLengthMeters, '58.333');
+  assert.equal(length.normalization.rawValue, '58.33333333333334');
+  assert.equal(length.normalization.rule, 'LEGACY_GRAPH_V1_ROUND_HALF_UP_SCALE_THREE');
+  const slab = reconstructLegacyV1Quantity({
+    productRowId: 'legacy-row-2', productType: 'slab',
+    productSnapshot: { squareMeters: '12.3456' },
+  });
+  assert.equal(slab.requestedAreaSquareMeters, '12.346');
+});
+
+test('reconstructs missing legacy discount eligibility only when the canonical graph has no layers', () => {
+  const reconstructed = reconstructLegacyV1DiscountEligibility({
+    contractData: { products: [{ rowId: 'row-1', meta: { pricing: {} } }] },
+    graphRows: [{ productRowId: 'row-1' }],
+    layerConfigurationCount: 0,
+  });
+  assert.equal((reconstructed.contractData as any).products[0].meta.isLayer, false);
+  assert.deepEqual(reconstructed.assignments, [{
+    productRowId: 'row-1',
+    rawIsLayer: null,
+    sealedIsLayer: false,
+    rule: 'LEGACY_GRAPH_V1_EMPTY_LAYER_CONFIGURATION_NON_LAYER',
+  }]);
+  assert.throws(() => reconstructLegacyV1DiscountEligibility({
+    contractData: { products: [{ rowId: 'row-1', meta: {} }] },
+    graphRows: [{ productRowId: 'row-1' }],
+    layerConfigurationCount: 1,
+  }), /layer configurations exist/);
+});
+
+test('reconstructs legacy v1 monetary components with audited half-up Toman conversion', () => {
+  const pricing = reconstructLegacyV1Pricing({
+    productRowId: 'legacy-row-1',
+    rawTotalAmountToman: '132500000.0000000001',
+    productSnapshot: {
+      currency: 'تومان', originalTotalPrice: '95000000', cuttingCost: '0',
+      totalSubServiceCost: '0', finishingId: 'finish-1', finishingCost: '37500000',
+      isMandatory: false, mandatoryPercentage: '20', appliedSubServices: [],
+    },
+  });
+  assert.equal(pricing.baseAmountToman, '95000000');
+  assert.equal(pricing.totalAmountToman, '132500000');
+  assert.equal(pricing.normalization.difference, '-0.0000000001');
+  assert.deepEqual(pricing.pricingComponents, [{
+    id: 'base-material', kind: 'base-material', amountToman: '95000000',
+  }, {
+    id: 'legacy-finishing', kind: 'legacy-finishing', amountToman: '37500000',
+  }]);
+  assert.throws(() => reconstructLegacyV1Pricing({
+    productRowId: 'legacy-row-1',
+    rawTotalAmountToman: '132500001',
+    productSnapshot: {
+      currency: 'تومان', originalTotalPrice: '95000000', cuttingCost: '0',
+      totalSubServiceCost: '0', finishingId: 'finish-1', finishingCost: '37500000',
+      isMandatory: false, mandatoryPercentage: '20', appliedSubServices: [],
+    },
+  }), /do not reconcile/);
+});
+
+test('reconstructs graph-v1 stair cutting from its duplicated physical and tool lines', () => {
+  const pricing = reconstructLegacyV1Pricing({
+    productRowId: 'legacy-stair-1',
+    rawTotalAmountToman: '2758000',
+    productSnapshot: {
+      productType: 'stair', currency: 'تومان', originalTotalPrice: '2730000',
+      cuttingCost: '14000', totalSubServiceCost: '0', finishingId: null,
+      isMandatory: false, mandatoryPercentage: '0', appliedSubServices: [],
+      meta: { stair: { baseStoneQuantity: '2' }, tools: [{ toolId: 'cut-cross-1', totalPrice: '14000' }] },
+    },
+  });
+  assert.equal(pricing.totalAmountToman, '2758000');
+  assert.deepEqual(pricing.normalization.componentConversions, [{
+    component: 'cutting', rawValue: '14000', duplicatedToolValue: '14000', sealedValue: '28000',
+    difference: '14000', rule: 'LEGACY_STAIR_V1_CUTTING_PHYSICAL_AND_TOOL_LINES',
+  }]);
+});
+
+test('rejects a missing draft graph snapshot when migration provenance does not match', () => {
+  assert.throws(() => resolveFinancialApprovalGraphEvidence({
+    snapshotGraphState: null,
+    currentGraphState: {
+      schemaVersion: 1,
+      revision: 1,
+      graph: { schemaVersion: 1 },
+      inputHash: 'current-hash',
+      resultHash: 'current-hash',
+      totalAmountToman: '100',
+    },
+    migrationAudit: {
+      commandId: 'legacy-migration:contract-1:other-hash',
+      resultRevision: 1,
+      inputHash: 'other-hash',
+      resultHash: 'other-hash',
+      command: { kind: 'legacy-migration' },
+    },
+  }), /no matching deterministic legacy migration/);
+});
+
+test('binds missing legacy row identities only by matching migrated ordinal and product identity', () => {
+  const binding = bindLegacyRowsToMigratedGraph({
+    contractData: { products: [{ productId: 'product-1', totalPrice: '100' }] },
+    snapshotItems: [{ id: 'item-1', productId: 'product-1', productRowId: null }],
+    currentItems: [{ id: 'item-1', productId: 'product-1', productRowId: null }],
+    graphRows: [{ productRowId: 'migrated-row-1', catalogProductId: 'product-1' }],
+  });
+  assert.equal((binding.contractData as any).products[0].rowId, 'migrated-row-1');
+  assert.equal(binding.snapshotItems[0]?.productRowId, 'migrated-row-1');
+  assert.deepEqual(binding.assignments, [{
+    contractItemId: 'item-1',
+    productRowId: 'migrated-row-1',
+    rawContractItemProductRowId: null,
+    rawProductSnapshotRowId: null,
+    rule: 'MIGRATED_GRAPH_ORDINAL_PRODUCT_IDENTITY_V1',
+  }]);
+  assert.throws(() => bindLegacyRowsToMigratedGraph({
+    contractData: { products: [{ productId: 'different-product' }] },
+    snapshotItems: [{ id: 'item-1', productId: 'product-1', productRowId: null }],
+    currentItems: [{ id: 'item-1', productId: 'product-1', productRowId: null }],
+    graphRows: [{ productRowId: 'migrated-row-1', catalogProductId: 'product-1' }],
+  }), /does not match/);
+});
 
 class MemoryRepository implements ApprovedPricingRepository {
   readonly versions: ApprovedPricingVersionRecord[] = [];
@@ -191,8 +395,10 @@ test('seals a canonical stair row with all persisted layer pricing evidence', ()
   const projection = projectCanonicalProductGraph(graph, 'accounting');
   source.contract.productGraph = {
     ...projection,
+    roundingPolicy: graph.calculationPolicy.rounding,
     inputHash: 'stair-layer-input-hash',
     resultHash: 'stair-layer-result-hash',
+    quantityPolicyProvenance: null,
     rows: projection.products.map(row => ({
       productRowId: row.productRowId,
       catalogProductId: 'product-1',
@@ -229,8 +435,33 @@ test('accepts explicit no-discount evidence without deriving a default', () => {
   assert.equal(version.netAmount, version.grossAmount);
 });
 
+test('accepts graph-v1 money only through its audited historical storage-scale conversion', () => {
+  const source = approvedPricingSourceFixture();
+  (source.contract.contractData as any).discount = {
+    enabled: false, baseSubtotal: '1000', percent: '0', amount: '0', currency: 'تومان',
+  };
+  const row = source.contract.productGraph!.rows[0] as any;
+  row.totalAmountToman = '1251';
+  row.legacyRawTotalAmountToman = '1250.51';
+  row.operations[1].amountToman = '101';
+  source.contract.productGraph!.schemaVersion = 1;
+  source.contract.productGraph!.totalAmountToman = '1251';
+  (source.contract.items[0] as any).totalPrice = '1250.51';
+  (source.contract.currentItems[0] as any).totalPrice = '1250.51';
+  (source.leaf.invoiceItems[0] as any).totalPrice = '12505.10';
+  source.leaf.amount = '12505.10';
+  const version = buildApprovedPricingVersion(source, 1, 'legacy-money-storage-version');
+  assert.equal(version.netAmount, '1251.000000000000');
+  assert.deepEqual((version.sourceEvidence.financialAmountNormalizations as any[]).at(-1), {
+    scope: 'invoice', rawInvoiceAmount: '12505.1', sealedInvoiceAmount: '12510',
+    difference: '4.9', rule: 'LEGACY_GRAPH_V1_AMOUNT_STORAGE_SCALE_TO_CANONICAL_TOMAN',
+  });
+});
+
 const optimizerDerivedSourceFixture = () => {
   const source = approvedPricingSourceFixture();
+  source.contract.productGraph!.schemaVersion = 1;
+  source.contract.productGraph!.roundingPolicy = 'rounding-v1';
   const data = source.contract.contractData as any;
   data.products[0] = {
     ...data.products[0],
@@ -284,6 +515,26 @@ test('reads the optimizer meter witness from an immutable legacy canonical graph
   }, undefined), '40');
 });
 
+test('resolves only recorded writer versions or the explicit legacy command format', () => {
+  const base = {
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v1',
+    graphAuditCommandId: 'legacy-migration:contract-1:hash',
+  };
+  assert.equal(optimizerQuantityPolicyProvenanceFromAudit({
+    ...base,
+    graphAuditCommand: { kind: 'legacy-migration', writerVersion: 1, backupReference: 'verified-backup' },
+  })?.producerVersion, 1);
+  assert.equal(optimizerQuantityPolicyProvenanceFromAudit({
+    ...base,
+    graphAuditCommand: { kind: 'legacy-migration', backupReference: 'verified-backup' },
+  })?.producerVersion, 0);
+  assert.equal(optimizerQuantityPolicyProvenanceFromAudit({
+    ...base,
+    graphAuditCommand: { kind: 'legacy-migration', writerVersion: 2, backupReference: 'verified-backup' },
+  }), null);
+});
+
 test('seals an optimizer-derived longitudinal zero sentinel from agreeing frozen witnesses', () => {
   const source = optimizerDerivedSourceFixture();
 
@@ -304,11 +555,135 @@ test('seals an optimizer-derived longitudinal zero sentinel from agreeing frozen
     },
     canonicalGraph: { requestedLengthMeters: '40.000' },
     persistedDeliveries: {
-      rows: [{ deliveryId: 'delivery-1', deliveryProductId: 'delivery-product-1', quantity: '40.000' }],
+      rows: [{ deliveryId: 'delivery-1', deliveryProductId: 'delivery-product-1', rawQuantity: '40', quantity: '40.000' }],
       totalQuantity: '40.000',
     },
-    wizardDelivery: { present: true, totalQuantity: '40.000' },
+    wizardDelivery: {
+      present: true,
+      rows: [{ deliveryIndex: 0, productIndex: 0, rawQuantity: '40' }],
+      totalQuantity: '40.000',
+    },
+    compatibility: {
+      policy: 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE',
+      graphSchemaVersion: 1,
+      rounding: 'ROUND_HALF_UP',
+      sealedScale: 3,
+      persistedScale: 2,
+      producer: 'CANONICAL_WIZARD_SAVE',
+      producerVersion: 1,
+      graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+      rawOptimizerQuantity: '40',
+      rawProductionQuantity: '40',
+      rawCanonicalGraphQuantity: '40',
+      rawPersistedDeliveryTotal: '40',
+      sealedQuantity: '40.000',
+      persistedComparableQuantity: '40.00',
+      persistedDifference: '0',
+    },
   }]);
+});
+
+test('seals a graph-v1 optimizer float through its recorded scale-two persistence rule', () => {
+  const source = optimizerDerivedSourceFixture();
+  (source.contract.contractData as any).products[0].smartCutPlan = {
+    ...(source.contract.contractData as any).products[0].smartCutPlan,
+    requestedAreaSqm: '35.00000000000001',
+    requestedWidthCm: '60',
+    requestedLengthM: '58.33333333333334',
+    totalRequestedLengthM: '58.33333333333334',
+    sourceLengthConsumedM: '58.33333333333334',
+    productionPieces: [{ lengthM: '58.33333333333334', widthCm: '60', quantity: '1' }],
+  };
+  (source.contract.productGraph!.rows as any)[0] = {
+    ...source.contract.productGraph!.rows[0],
+    requestedLengthMeters: '58.333333333333333333',
+    requestedWidthMeters: '0.6',
+    requestedAreaSquareMeters: '35',
+  };
+  (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '58.33';
+  (source.contract.contractData as any).deliveries[0].products[0].quantity = '58.33333333333334';
+
+  const version = buildApprovedPricingVersion(source, 1, 'optimizer-derived-graph-v1-float');
+
+  assert.equal(version.rows[0]?.contractedQuantity, '58.333');
+  assert.deepEqual((version.sourceEvidence.quantityNormalizations as any[])[0]?.compatibility, {
+    policy: 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE',
+    graphSchemaVersion: 1,
+    rounding: 'ROUND_HALF_UP',
+    sealedScale: 3,
+    persistedScale: 2,
+    producer: 'CANONICAL_WIZARD_SAVE',
+    producerVersion: 1,
+    graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+    rawOptimizerQuantity: '58.33333333333334',
+    rawProductionQuantity: '58.33333333333334',
+    rawCanonicalGraphQuantity: '58.333333333333333333',
+    sourceTransformation: 'ROUND_HALF_UP_SCALE_THREE',
+    rawPersistedDeliveryTotal: '58.33',
+    sealedQuantity: '58.333',
+    persistedComparableQuantity: '58.33',
+    persistedDifference: '-0.00333333333334',
+  });
+});
+
+test('seals a new rounding-v2 optimizer float through audited scale-three persistence', () => {
+  const source = optimizerDerivedSourceFixture();
+  source.contract.productGraph!.roundingPolicy = 'rounding-v2';
+  (source.contract.contractData as any).products[0].smartCutPlan = {
+    ...(source.contract.contractData as any).products[0].smartCutPlan,
+    totalRequestedLengthM: '58.33333333333334',
+    productionPieces: [{ lengthM: '58.33333333333334', quantity: '1' }],
+  };
+  (source.contract.productGraph!.rows as any)[0] = {
+    ...source.contract.productGraph!.rows[0],
+    requestedLengthMeters: '58.33333333333334',
+  };
+  (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '58.333';
+  (source.contract.contractData as any).deliveries[0].products[0].quantity = '58.33333333333334';
+
+  const version = buildApprovedPricingVersion(source, 1, 'optimizer-derived-rounding-v2-float');
+
+  assert.equal(version.rows[0]?.contractedQuantity, '58.333');
+  assert.deepEqual((version.sourceEvidence.quantityNormalizations as any[])[0]?.compatibility, {
+    policy: 'CONTRACT_PRODUCT_GRAPH_V2_SCALE_THREE_PERSISTENCE',
+    graphSchemaVersion: 1,
+    rounding: 'ROUND_HALF_UP',
+    sealedScale: 3,
+    persistedScale: 3,
+    producer: 'CANONICAL_WIZARD_SAVE',
+    producerVersion: 1,
+    graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+    rawOptimizerQuantity: '58.33333333333334',
+    rawProductionQuantity: '58.33333333333334',
+    rawCanonicalGraphQuantity: '58.33333333333334',
+    rawPersistedDeliveryTotal: '58.333',
+    sealedQuantity: '58.333',
+    persistedComparableQuantity: '58.333',
+    persistedDifference: '-0.00033333333334',
+  });
+});
+
+test('uses explicit half-up rounding for an exact scale-three tie', () => {
+  const source = optimizerDerivedSourceFixture();
+  source.contract.productGraph!.roundingPolicy = 'rounding-v2';
+  (source.contract.contractData as any).products[0].smartCutPlan = {
+    ...(source.contract.contractData as any).products[0].smartCutPlan,
+    totalRequestedLengthM: '1.2345',
+    productionPieces: [{ lengthM: '1.2345', quantity: '1' }],
+  };
+  (source.contract.productGraph!.rows as any)[0] = {
+    ...source.contract.productGraph!.rows[0],
+    requestedLengthMeters: '1.2345',
+  };
+  (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '1.235';
+  (source.contract.contractData as any).deliveries[0].products[0].quantity = '1.2345';
+
+  const version = buildApprovedPricingVersion(source, 1, 'optimizer-half-up-tie');
+  assert.equal(version.rows[0]?.contractedQuantity, '1.235');
+  assert.equal(
+    (version.sourceEvidence.quantityNormalizations as any[])[0]?.compatibility.rounding,
+    'ROUND_HALF_UP',
+  );
 });
 
 test('keeps incomplete or conflicting optimizer-derived quantity evidence fail-closed', () => {
@@ -317,7 +692,7 @@ test('keeps incomplete or conflicting optimizer-derived quantity evidence fail-c
       (source.leaf.sourceSnapshot as any).deliveries = [];
     }, /persisted Delivery evidence is missing/],
     ['partial persisted Delivery', source => {
-      (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '39.999';
+      (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '39.99';
     }, /persisted Delivery quantity conflicts/],
     ['duplicate persisted Delivery row', source => {
       const products = (source.leaf.sourceSnapshot as any).deliveries[0].products;
@@ -339,7 +714,7 @@ test('keeps incomplete or conflicting optimizer-derived quantity evidence fail-c
     }, /canonical graph quantity conflicts with optimizer plan/],
     ['more than scale-three precision', source => {
       (source.contract.contractData as any).products[0].smartCutPlan.totalRequestedLengthM = '40.0001';
-    }, /must use scale-three precision/],
+    }, /optimizer quantities conflict/],
   ];
 
   for (const [label, mutate, expected] of cases) {
@@ -351,6 +726,28 @@ test('keeps incomplete or conflicting optimizer-derived quantity evidence fail-c
       label,
     );
   }
+});
+
+test('captures exact raw optimizer conflict evidence without tolerance guessing', () => {
+  const source = optimizerDerivedSourceFixture();
+  (source.contract.contractData as any).products[0].smartCutPlan.productionPieces[0].quantity = '3';
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 1, 'optimizer-structured-conflict'),
+    (error: unknown) => {
+      assert.ok(error instanceof OptimizerQuantityEvidenceConflictError);
+      assert.deepEqual(error.evidence, {
+        productRowId: 'row-1',
+        rule: 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE',
+        rawOptimizerQuantity: '40',
+        rawProductionQuantity: '120',
+        difference: '80',
+        unit: 'meter',
+      });
+      assert.match(error.userMessageFa, /مدیر حسابداری.*پروندهٔ بررسی کمیت/);
+      assert.doesNotMatch(error.userMessageFa, /optimizer|80/);
+      return true;
+    },
+  );
 });
 
 test('accepts a missing redundant wizard Delivery copy when persisted evidence is complete', () => {
@@ -371,6 +768,33 @@ test('treats an empty legacy wizard Delivery collection as an absent redundant c
 
   assert.equal(version.rows[0]?.contractedQuantity, '40.000');
   assert.deepEqual((version.sourceEvidence.quantityNormalizations as any[])[0]?.wizardDelivery, { present: false });
+});
+
+test('rejects ambiguous multi-row persisted conversion when wizard-era row evidence is absent', () => {
+  const source = optimizerDerivedSourceFixture();
+  delete (source.contract.contractData as any).deliveries;
+  const persisted = (source.leaf.sourceSnapshot as any).deliveries[0].products[0];
+  persisted.quantity = '20';
+  (source.leaf.sourceSnapshot as any).deliveries.push({
+    id: 'delivery-2',
+    status: 'SCHEDULED',
+    products: [{ ...persisted, id: 'delivery-product-2', deliveryId: 'delivery-2', quantity: '20' }],
+  });
+
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 1, 'optimizer-ambiguous-delivery-conversion'),
+    /ambiguous multi-row persisted Delivery conversion/,
+  );
+});
+
+test('rejects optimizer normalization when producer provenance is not recorded', () => {
+  const source = optimizerDerivedSourceFixture();
+  source.contract.productGraph!.quantityPolicyProvenance = null;
+
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 1, 'optimizer-missing-provenance'),
+    /Unsupported or missing optimizer quantity provenance/,
+  );
 });
 
 test('normalizes legacy explicit-null no-discount evidence at financial approval', () => {

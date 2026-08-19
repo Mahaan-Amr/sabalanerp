@@ -15,7 +15,8 @@ import {
 } from '@sabalanerp/contract-product-graph';
 import {
   buildLegacyContractMigrationPlan,
-  CURRENT_CONTRACT_PRODUCT_POLICY
+  CURRENT_CONTRACT_PRODUCT_POLICY,
+  CURRENT_CONTRACT_PRODUCT_POLICY_V2
 } from './contractProductGraphMigration';
 import { repairContractDataOperationIdentities } from './contractOperationIdentityRepair';
 import { repairContractDataProductSemantics } from './contractProductSemanticRepair';
@@ -354,6 +355,7 @@ const writeCanonicalGraphSnapshot = async (
     readonly contractData: unknown;
     readonly totalAmount: Prisma.Decimal | number | string | null;
     readonly revision: number;
+    readonly calculationPolicy: typeof CURRENT_CONTRACT_PRODUCT_POLICY;
     readonly operationIdentityRepairEvidence?: readonly OperationIdentityRepairEvidence[];
     readonly operationIdentityRepairStages?: readonly string[];
     readonly productSemanticRepairEvidence?: readonly LegacyProductSemanticRepairEvidence[];
@@ -364,7 +366,7 @@ const writeCanonicalGraphSnapshot = async (
     id: input.contractId,
     totalAmount: input.totalAmount,
     contractData: input.contractData
-  }, input.revision);
+  }, input.revision, input.calculationPolicy);
   if (!plan.ok) {
     throw new ContractProductGraphValidationError(plan.conflicts, input.contractData);
   }
@@ -376,7 +378,7 @@ const writeCanonicalGraphSnapshot = async (
       schemaVersion: plan.graph.schemaVersion,
       revision: plan.graph.revision,
       graph,
-      policySnapshot: toJsonValue(CURRENT_CONTRACT_PRODUCT_POLICY),
+      policySnapshot: toJsonValue(input.calculationPolicy),
       inputHash: plan.provenanceHash,
       resultHash: plan.provenanceHash,
       totalAmountToman: new Prisma.Decimal(plan.reconciliation.canonicalTotalAmountToman)
@@ -385,7 +387,7 @@ const writeCanonicalGraphSnapshot = async (
       schemaVersion: plan.graph.schemaVersion,
       revision: plan.graph.revision,
       graph,
-      policySnapshot: toJsonValue(CURRENT_CONTRACT_PRODUCT_POLICY),
+      policySnapshot: toJsonValue(input.calculationPolicy),
       inputHash: plan.provenanceHash,
       resultHash: plan.provenanceHash,
       totalAmountToman: new Prisma.Decimal(plan.reconciliation.canonicalTotalAmountToman)
@@ -400,7 +402,8 @@ const writeCanonicalGraphSnapshot = async (
       resultRevision: input.revision,
       command: toJsonValue({
         kind: 'canonical-wizard-save',
-        policy: CURRENT_CONTRACT_PRODUCT_POLICY,
+        writerVersion: 1,
+        policy: input.calculationPolicy,
         provenanceHash: plan.provenanceHash,
         ...(input.operationIdentityRepairEvidence?.length
           ? {
@@ -540,6 +543,24 @@ const toDecimalNumber = (value: unknown, fallback = 0): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+export const persistContractQuantityAtPolicyScale = (
+  value: unknown,
+  calculationPolicy: typeof CURRENT_CONTRACT_PRODUCT_POLICY,
+) => {
+  let quantity: Prisma.Decimal;
+  try {
+    if (value === null || value === undefined || value === '') throw new Error('missing');
+    quantity = new Prisma.Decimal(String(value));
+  } catch {
+    throw new Error('کمیت واردشده معتبر نیست؛ مقدار را بررسی کنید و دوباره قرارداد را ذخیره کنید.');
+  }
+  if (!quantity.isFinite() || quantity.isNegative()) {
+    throw new Error('کمیت واردشده معتبر نیست؛ مقدار باید صفر یا یک عدد مثبت باشد.');
+  }
+  const scale = calculationPolicy.rounding === 'rounding-v2' ? 3 : 2;
+  return quantity.toDecimalPlaces(scale, Prisma.Decimal.ROUND_HALF_UP);
+};
+
 const toNullableDecimalNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === '') return null;
   const parsed = parseFloat(String(value));
@@ -673,7 +694,7 @@ export async function createContract(
               productId: item.productId,
               productRowId: item.productRowId || null,
               productType: item.productType || null,
-              quantity: toDecimalNumber(item.quantity),
+              quantity: persistContractQuantityAtPolicyScale(item.quantity, CURRENT_CONTRACT_PRODUCT_POLICY_V2),
               unitPrice: toDecimalNumber(item.unitPrice),
               totalPrice: toDecimalNumber(item.totalPrice),
               description: item.description || null,
@@ -698,7 +719,7 @@ export async function createContract(
                 create: delivery.products.map(product => ({
                   productId: product.productId,
                   productRowId: product.productRowId || null,
-                  quantity: toDecimalNumber(product.quantity),
+                  quantity: persistContractQuantityAtPolicyScale(product.quantity, CURRENT_CONTRACT_PRODUCT_POLICY_V2),
                   notes: product.notes || null
                 }))
               }
@@ -729,6 +750,7 @@ export async function createContract(
           contractData,
           totalAmount: data.totalAmount ?? null,
           revision: 1,
+          calculationPolicy: CURRENT_CONTRACT_PRODUCT_POLICY_V2,
           operationIdentityRepairEvidence,
           operationIdentityRepairStages: [
             ...(reportedOperationRepairEvidence.length
@@ -825,8 +847,11 @@ export async function updateContract(
   const updatedContract = await prisma.$transaction(async (tx) => {
     const existingGraph = await tx.salesContractProductGraphState.findUnique({
       where: { contractId },
-      select: { revision: true }
+      select: { revision: true, graph: true }
     });
+    const calculationPolicy = existingGraph
+      ? parseCanonicalProductGraph(existingGraph.graph).calculationPolicy
+      : CURRENT_CONTRACT_PRODUCT_POLICY_V2;
     const operationIdentityRepair = repairContractDataOperationIdentities(
       data.contractData ?? contract.contractData
     );
@@ -880,7 +905,7 @@ export async function updateContract(
             productId: item.productId,
             productRowId: item.productRowId || null,
             productType: item.productType || null,
-            quantity: toDecimalNumber(item.quantity),
+            quantity: persistContractQuantityAtPolicyScale(item.quantity, calculationPolicy),
             unitPrice: toDecimalNumber(item.unitPrice),
             totalPrice: toDecimalNumber(item.totalPrice),
             description: item.description || null,
@@ -906,7 +931,7 @@ export async function updateContract(
               create: (delivery.products || []).map((product) => ({
                 productId: product.productId,
                 productRowId: product.productRowId || null,
-                quantity: toDecimalNumber(product.quantity),
+                quantity: persistContractQuantityAtPolicyScale(product.quantity, calculationPolicy),
                 notes: product.notes || null
               }))
             }
@@ -964,6 +989,7 @@ export async function updateContract(
       contractData: nextContractData,
       totalAmount: data.totalAmount ?? contract.totalAmount,
       revision: (existingGraph?.revision ?? 0) + 1,
+      calculationPolicy,
       operationIdentityRepairEvidence,
       operationIdentityRepairStages: [
         ...(reportedOperationRepairEvidence.length

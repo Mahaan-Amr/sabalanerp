@@ -315,4 +315,12 @@ assert.deepEqual(
   projectCanonicalProductGraph(malformedPricingGraph, 'step5').products[0]?.pricingComponents,
   []
 );
+const fractionalLegacyProjection = projectCanonicalProductGraph(parseCanonicalProductGraph({
+  ...pricedLongitudinalGraph,
+  rows: [{
+    ...pricedLongitudinalGraph.rows[0]!,
+    commercial: { ...pricedLongitudinalGraph.rows[0]!.commercial, totalAmountToman: '844800.0000000001' },
+  }],
+}), 'accounting');
+assert.equal(fractionalLegacyProjection.totalAmountToman, '844800.0000000001');
 console.log('canonical projection tests passed');

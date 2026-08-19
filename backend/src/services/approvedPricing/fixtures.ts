@@ -53,10 +53,16 @@ export const approvedPricingSourceFixture = (): ApprovedPricingSource => ({
     }],
     productGraph: {
       schemaVersion: 3,
+      roundingPolicy: 'rounding-v1',
       revision: 7,
       inputHash: 'graph-input-hash',
       resultHash: 'graph-result-hash',
       totalAmountToman: '1250',
+      quantityPolicyProvenance: {
+        producer: 'CANONICAL_WIZARD_SAVE',
+        producerVersion: 1,
+        graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+      },
       rows: [{
         productRowId: 'row-1', catalogProductId: 'product-1', productType: 'longitudinal',
         contractualTitle: 'تراورتن طولی', baseAmountToman: '1000', totalAmountToman: '1250',

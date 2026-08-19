@@ -13,6 +13,13 @@ export const CURRENT_CONTRACT_PRODUCT_POLICY: CalculationPolicySnapshot = {
   rounding: 'rounding-v1'
 };
 
+export const CURRENT_CONTRACT_PRODUCT_POLICY_V2: CalculationPolicySnapshot = {
+  calculation: 'calculation-v1',
+  packing: 'packing-v1',
+  pricing: 'pricing-v1',
+  rounding: 'rounding-v2'
+};
+
 const json = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
@@ -29,7 +36,7 @@ export const buildLegacyContractMigrationPlan = (contract: {
   readonly id: string;
   readonly totalAmount: Prisma.Decimal | number | string | null;
   readonly contractData: unknown;
-}, revision = 0) => {
+}, revision = 0, calculationPolicy: CalculationPolicySnapshot = CURRENT_CONTRACT_PRODUCT_POLICY) => {
   /*
    * SalesContract.totalAmount is the preserved contract-envelope total. It can
    * include standalone services and exclude a contract-level discount, while
@@ -40,7 +47,7 @@ export const buildLegacyContractMigrationPlan = (contract: {
   return planLegacyProductGraphMigration({
     contractId: contract.id,
     revision,
-    calculationPolicy: CURRENT_CONTRACT_PRODUCT_POLICY,
+    calculationPolicy,
     products: legacyProducts(contract.contractData)
   });
 };
@@ -119,6 +126,7 @@ export const migrateLegacyContractProductGraph = async (
         resultRevision: plan.graph.revision,
         command: json({
           kind: 'legacy-migration',
+          writerVersion: 1,
           backupReference: input.backupReference,
           provenanceHash: plan.provenanceHash,
           reconciliation: plan.reconciliation

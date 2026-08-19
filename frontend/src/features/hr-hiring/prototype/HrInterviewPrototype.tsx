@@ -15,9 +15,9 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { useTheme } from "@/contexts/ThemeContext";
-import { hiringAPI, hiringError } from "@/lib/hiringApi";
+import { hiringAPI } from "@/lib/hiringApi";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FaArrowLeft,
   FaArrowRight,
@@ -44,6 +44,7 @@ import {
 } from "./interviewPrototypeData";
 import { interviewCompletionFocusTarget, shouldShowNextCriterion } from "../guidedInterviewState";
 import { InterviewDraftSaveCoordinator, type InterviewDraftSaveSnapshot } from "../interviewDraftSaveCoordinator";
+import { completeHrInterview, HrInterviewCompletionError } from "../hrInterviewCompletion";
 
 type Variant = "A" | "B" | "C";
 type Surface = "interview" | "checklist" | "defaults" | "history";
@@ -122,7 +123,43 @@ const surfaceOptions = [
   { value: "history" as const, label: "تاریخچه نسخه‌ها" },
 ];
 
-function ScoreControl({
+export function RequiredInterviewChoice<T extends string>({
+  ariaLabel,
+  value,
+  onChange,
+  options,
+}: {
+  ariaLabel: string;
+  value: T | null;
+  onChange: (value: T | null) => void;
+  options: Array<{ value: T; label: React.ReactNode }>;
+}) {
+  return (
+    <div className="space-y-2" role="group" aria-label={ariaLabel}>
+      <ErpSegmentedControl
+        value={(value ?? "__UNANSWERED__") as T}
+        onChange={onChange}
+        options={options}
+      />
+      <div className="flex min-h-11 items-center justify-end">
+        {value === null ? (
+          <span className="text-sm font-medium text-[var(--sds-warning)]">
+            هنوز انتخاب نشده
+          </span>
+        ) : (
+          <ErpButton
+            label="پاک‌کردن انتخاب"
+            variant="ghost"
+            tone="neutral"
+            onClick={() => onChange(null)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function ScoreControl({
   value,
   onChange,
   allowUnassessed = true,
@@ -132,33 +169,49 @@ function ScoreControl({
   allowUnassessed?: boolean;
 }) {
   return (
-    <div
-      className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6"
-      role="group"
-      aria-label="امتیاز معیار"
-    >
-      {(Object.entries(scoreLabels) as Array<[string, string]>).map(
-        ([score, label]) => {
-          const numericScore = Number(score) as NumericScore;
-          return (
-            <ErpButton
-              key={score}
-              label={`${Number(score).toLocaleString("fa-IR")} · ${label}`}
-              onClick={() => onChange(numericScore)}
-              variant={value === numericScore ? "solid" : "soft"}
-              tone={value === numericScore ? "primary" : "neutral"}
-              className="min-h-11"
-            />
-          );
-        },
-      )}
-      {allowUnassessed && <ErpButton
-        label="ارزیابی نشد"
-        onClick={() => onChange("UNASSESSED")}
-        variant={value === "UNASSESSED" ? "outline" : "ghost"}
-        tone="neutral"
-        className="min-h-11"
-      />}
+    <div className="space-y-2">
+      <div
+        className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6"
+        role="group"
+        aria-label="امتیاز معیار"
+      >
+        {(Object.entries(scoreLabels) as Array<[string, string]>).map(
+          ([score, label]) => {
+            const numericScore = Number(score) as NumericScore;
+            return (
+              <ErpButton
+                key={score}
+                label={`${Number(score).toLocaleString("fa-IR")} · ${label}`}
+                onClick={() => onChange(numericScore)}
+                variant={value === numericScore ? "solid" : "soft"}
+                tone={value === numericScore ? "primary" : "neutral"}
+                className="min-h-11"
+              />
+            );
+          },
+        )}
+        {allowUnassessed && <ErpButton
+          label="ارزیابی نشد"
+          onClick={() => onChange("UNASSESSED")}
+          variant={value === "UNASSESSED" ? "outline" : "ghost"}
+          tone="neutral"
+          className="min-h-11"
+        />}
+      </div>
+      <div className="flex min-h-11 items-center justify-end">
+        {value === null ? (
+          <span className="text-sm font-medium text-[var(--sds-warning)]">
+            هنوز انتخاب نشده
+          </span>
+        ) : (
+          <ErpButton
+            label="پاک‌کردن انتخاب"
+            variant="ghost"
+            tone="neutral"
+            onClick={() => onChange(null)}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -171,16 +224,14 @@ function JudgmentControl({
   onChange: (value: Judgment) => void;
 }) {
   return (
-    <ErpSegmentedControl
-      value={value ?? "UNSET"}
-      onChange={(next) =>
-        onChange(next === "UNSET" ? null : (next as Judgment))
-      }
+    <RequiredInterviewChoice
+      ariaLabel="اثر در تصمیم"
+      value={value}
+      onChange={onChange}
       options={[
         { value: "POSITIVE", label: "مثبت" },
         { value: "NEUTRAL", label: "خنثی" },
         { value: "NEGATIVE", label: "منفی" },
-        { value: "UNSET", label: "ثبت نشده" },
       ]}
     />
   );
@@ -270,13 +321,13 @@ function CriterionEditor({
         <div className="space-y-4">
           <div>
             <FieldLabel required>پاسخ</FieldLabel>
-            <ErpSegmentedControl
-              value={answer.companionPresent ?? "UNSET"}
-              onChange={(value) => update("companionPresent", value === "UNSET" ? null : value as "YES" | "NO")}
+            <RequiredInterviewChoice
+              ariaLabel="پاسخ"
+              value={answer.companionPresent}
+              onChange={(value) => update("companionPresent", value)}
               options={[
                 { value: "YES", label: "بله" },
                 { value: "NO", label: "خیر" },
-                { value: "UNSET", label: "ثبت نشده" },
               ]}
             />
           </div>
@@ -322,18 +373,13 @@ function CriterionEditor({
             <FieldLabel required>
               آیا متقاضی با همراه حضور پیدا کرده است؟
             </FieldLabel>
-            <ErpSegmentedControl
-              value={answer.companionPresent ?? "UNSET"}
-              onChange={(value) =>
-                update(
-                  "companionPresent",
-                  value === "UNSET" ? null : (value as "YES" | "NO"),
-                )
-              }
+            <RequiredInterviewChoice
+              ariaLabel="حضور همراه"
+              value={answer.companionPresent}
+              onChange={(value) => update("companionPresent", value)}
               options={[
                 { value: "YES", label: "بله" },
                 { value: "NO", label: "خیر" },
-                { value: "UNSET", label: "ثبت نشده" },
               ]}
             />
           </div>
@@ -410,19 +456,13 @@ function DecisionEditor({
     <div className="space-y-4">
       <div>
         <FieldLabel required>نتیجه مستقل مصاحبه‌گر</FieldLabel>
-        <ErpSegmentedControl
-          value={state.decision ?? "UNSET"}
-          onChange={(value) =>
-            onChange({
-              ...state,
-              decision:
-                value === "UNSET" ? null : (value as "POSITIVE" | "NEGATIVE"),
-            })
-          }
+        <RequiredInterviewChoice
+          ariaLabel="نتیجه مستقل مصاحبه‌گر"
+          value={state.decision}
+          onChange={(value) => onChange({ ...state, decision: value })}
           options={[
             { value: "POSITIVE", label: "مثبت" },
             { value: "NEGATIVE", label: "منفی" },
-            { value: "UNSET", label: "ثبت نشده" },
           ]}
         />
       </div>
@@ -903,18 +943,13 @@ function CaseSpecificCriteria({
                 />
               ) : null}
               {criterion.kind === "yes-no" ? (
-                <ErpSegmentedControl
-                  value={criterion.yesNo ?? "UNSET"}
-                  onChange={(value) =>
-                    update(criterion.id, {
-                      yesNo:
-                        value === "UNSET" ? null : (value as "YES" | "NO"),
-                    })
-                  }
+                <RequiredInterviewChoice
+                  ariaLabel={`پاسخ ${criterion.title}`}
+                  value={criterion.yesNo}
+                  onChange={(value) => update(criterion.id, { yesNo: value })}
                   options={[
                     { value: "YES", label: "بله" },
                     { value: "NO", label: "خیر" },
-                    { value: "UNSET", label: "ثبت نشده" },
                   ]}
                 />
               ) : null}
@@ -1310,6 +1345,7 @@ export function ProductionHrInterview({
   const [saveSnapshot, setSaveSnapshot] = useState<InterviewDraftSaveSnapshot>({ status: initialVersion ? "saved" : "idle", version: initialVersion });
   const [historyOpen, setHistoryOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [completionError, setCompletionError] = useState<unknown>();
   const [summaryHighlighted, setSummaryHighlighted] = useState(false);
   const [customHighlighted, setCustomHighlighted] = useState(false);
   const [completionHighlighted, setCompletionHighlighted] = useState(false);
@@ -1390,6 +1426,25 @@ export function ProductionHrInterview({
     window.setTimeout(() => completionRef.current?.querySelector<HTMLButtonElement>("button")?.focus(), 0);
   }, [criteria, criteriaComplete, customCriteria, customCriteriaComplete, focusSummary, highlight, state.answers, summaryComplete]);
 
+  const completeCurrentInterview = useCallback(async () => {
+    setCompletionError(undefined);
+    setCompleting(true);
+    try {
+      await completeHrInterview({
+        payload,
+        flush: (nextPayload) => coordinatorRef.current!.flush(nextPayload),
+        complete: onComplete,
+      });
+    } catch (error) {
+      setCompletionError(error);
+      highlight("completion");
+      completionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => completionRef.current?.querySelector<HTMLElement>('[role="alert"] button')?.focus(), 0);
+    } finally {
+      setCompleting(false);
+    }
+  }, [highlight, onComplete, payload]);
+
   useEffect(() => {
     if (initialPayload?.criteriaSnapshot?.length) return;
     let active = true;
@@ -1431,7 +1486,7 @@ export function ProductionHrInterview({
       {saveSnapshot.status === "error" && (
         <ErpInlineState
           kind="error"
-          title={<span>ذخیره خودکار ناموفق بود. <span className="font-normal">{hiringError(saveSnapshot.error)}</span></span>}
+          title="ذخیره خودکار انجام نشد. اطلاعات واردشده در این صفحه حفظ شده است."
           action={{ label: "تلاش مجدد", onClick: () => { coordinatorRef.current?.retry(); } }}
         />
       )}
@@ -1470,25 +1525,23 @@ export function ProductionHrInterview({
       </div>
       <div ref={completionRef} className={`rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${completionHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"}`}>
       <ErpSection title="تکمیل مصاحبه">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-3">
+          {completionError !== undefined ? (
+            <HrInterviewCompletionError
+              error={completionError}
+              onRetry={() => { void completeCurrentInterview(); }}
+            />
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-3">
           <ErpBadge tone={canComplete ? "info" : "warning"}>{canComplete ? "آماده تکمیل" : "اطلاعات ناقص"}</ErpBadge>
           <ErpButton
             label="ثبت و تکمیل مصاحبه"
             icon={FaCheck}
             tone="success"
             disabled={busy || completing || !canComplete}
-            onClick={async () => {
-              try {
-                setCompleting(true);
-                await coordinatorRef.current?.flush(payload);
-                await onComplete(payload);
-              } catch {
-                // The coordinator publishes the actionable save/conflict state above.
-              } finally {
-                setCompleting(false);
-              }
-            }}
+            onClick={() => { void completeCurrentInterview(); }}
           />
+          </div>
         </div>
       </ErpSection>
       </div>

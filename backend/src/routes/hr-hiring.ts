@@ -90,6 +90,8 @@ import {
   projectFormalAssessmentEvidenceGate,
 } from '../services/hrFormalAssessmentPolicy';
 import { DEFAULT_INTERVIEW_CRITERIA, normalizeInterviewCriteriaPublication } from '../services/hrInterviewCriteriaPolicy';
+import { ensureInitialInterviewCriteriaSet } from '../services/hrInitialInterviewCriteriaSet';
+import { initialInterviewDraftSaveError } from '../services/hrInitialInterviewDraftPersistence';
 import { nextEvaluationOccurrenceNumber, normalizeCompanyEvaluationPlanItem, validateCompanyEvaluationResult } from '../services/hrCompanyEvaluationPolicy';
 import { buildHiringCandidateSearchConditions } from '../services/hrHiringSearch';
 
@@ -1141,7 +1143,16 @@ router.get('/me/action-permissions', asyncHandler(async (req: AuthRequest, res: 
 router.get('/interview-criteria', requireActionPermission('VIEW_INITIAL_INTERVIEW_CRITERIA'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const latest = await prisma.hrInterviewCriteriaVersion.findFirst({ orderBy: { version: 'desc' } });
   const canManage = (await authorizeHrUser(prisma, actorId(req), { actionPermissionCodes: ['MANAGE_INITIAL_INTERVIEW_CRITERIA'] })).allowed;
-  res.json({ success: true, data: { ...(latest ?? { version: 0, criteriaJson: normalizeInterviewCriteriaPublication(DEFAULT_INTERVIEW_CRITERIA) }), canManage } });
+  res.json({
+    success: true,
+    data: {
+      ...(latest ?? {
+        version: 1,
+        criteriaJson: normalizeInterviewCriteriaPublication(DEFAULT_INTERVIEW_CRITERIA),
+      }),
+      canManage,
+    },
+  });
 }));
 
 router.post('/interview-criteria/publish', requireActionPermission('MANAGE_INITIAL_INTERVIEW_CRITERIA'), asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -2798,12 +2809,12 @@ router.put('/applications/:id/initial-interview/draft', requireActionPermission(
       throw Object.assign(new Error('پیش‌نویس توسط کاربر دیگری تغییر کرده است. صفحه را تازه‌سازی کنید.'), { statusCode: 409 });
     }
     if (!current) {
-      const latestCriteria = await tx.hrInterviewCriteriaVersion.findFirst({ orderBy: { version: 'desc' } });
-      const criteriaTemplateVersion = latestCriteria?.version ?? 0;
+      const latestCriteria = await ensureInitialInterviewCriteriaSet(tx, actorId(req));
+      const criteriaTemplateVersion = latestCriteria.version;
       const snapshottedPayload = {
         ...(payload as Record<string, unknown>),
         criteriaTemplateVersion,
-        criteriaSnapshot: latestCriteria?.criteriaJson ?? normalizeInterviewCriteriaPublication(DEFAULT_INTERVIEW_CRITERIA),
+        criteriaSnapshot: latestCriteria.criteriaJson,
       };
       return tx.hrInitialInterviewDraft.create({ data: {
       applicationId: req.params.id,
@@ -2819,7 +2830,9 @@ router.put('/applications/:id/initial-interview/draft', requireActionPermission(
       dataJson: { ...(current.dataJson as Record<string, unknown>), ...mutablePayload } as Prisma.InputJsonValue,
       updatedByUserId: actorId(req),
     } });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).catch((error) => {
+    throw initialInterviewDraftSaveError(error);
+  });
   res.json({ success: true, data: { version: row.version, updatedAt: row.updatedAt } });
 }));
 

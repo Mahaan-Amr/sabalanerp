@@ -26,6 +26,10 @@ import {
 } from './contractDiscountEvidence';
 import { sanitizeContractDataCustomerSnapshot } from './contractSnapshotBoundary';
 import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDuty';
+import {
+  validateContractPartyChangeCompleteness,
+  validateContractPartyIdentity
+} from './contractPartyIdentity';
 
 
 // Contract writes intentionally reload the built canonical graph package so
@@ -485,6 +489,7 @@ export interface ContractTransactionRunner {
 }
 
 export interface UpdateContractData {
+  customerId?: string;
   title?: string;
   titlePersian?: string;
   content?: string;
@@ -585,6 +590,17 @@ export async function createContract(
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       return await client.$transaction(async (tx) => {
+        await validateContractPartyIdentity({
+          customerId: data.customerId,
+          contractData: data.contractData,
+          content: data.content
+        }, {
+          findCustomer: id => tx.crmCustomer.findUnique({
+            where: { id },
+            select: { id: true, firstName: true, lastName: true, companyName: true }
+          }),
+          findProject: id => tx.projectAddress.findUnique({ where: { id }, select: { id: true, customerId: true } })
+        });
         const { contractNumber, creatorSequenceNumber } = await generateContractNumberAssignment(userId, tx);
         const potentialProject = data.potentialProjectId
           ? await tx.crmPotentialProject.findUnique({
@@ -845,6 +861,24 @@ export async function updateContract(
 
   // Update contract and relation snapshots atomically.
   const updatedContract = await prisma.$transaction(async (tx) => {
+    const nextCustomerId = data.customerId || contract.customerId;
+    validateContractPartyChangeCompleteness({
+      previousCustomerId: contract.customerId,
+      customerId: nextCustomerId,
+      contractData: data.contractData,
+      content: data.content
+    });
+    await validateContractPartyIdentity({
+      customerId: nextCustomerId,
+      contractData: (data.contractData ?? contract.contractData) as Record<string, unknown>,
+      content: data.content ?? contract.content
+    }, {
+      findCustomer: id => tx.crmCustomer.findUnique({
+        where: { id },
+        select: { id: true, firstName: true, lastName: true, companyName: true }
+      }),
+      findProject: id => tx.projectAddress.findUnique({ where: { id }, select: { id: true, customerId: true } })
+    });
     const existingGraph = await tx.salesContractProductGraphState.findUnique({
       where: { contractId },
       select: { revision: true, graph: true }
@@ -1016,6 +1050,7 @@ export async function updateContract(
         title: data.title,
         titlePersian: data.titlePersian,
         content: data.content,
+        customerId: nextCustomerId,
         totalAmount: data.totalAmount !== undefined ? parseFloat(String(data.totalAmount)) : contract.totalAmount,
         currency: data.currency,
         notes: data.notes,

@@ -91,7 +91,16 @@ test('Hiring lifecycle journey remains keyboard, reduced-motion, mobile, zoom, a
   await expect(page.getByRole('heading', { name: 'جذب و پرونده‌های متقاضیان' })).toBeVisible({ timeout: 15_000 });
   const firstCase = page.locator('[id^="hiring-case-"] a').first();
   await expect(firstCase).toBeVisible();
-  await firstCase.click();
+  const [caseResponse] = await Promise.all([
+    page.waitForResponse((response) =>
+      response.request().method() === 'GET'
+      && /\/api\/hr-hiring\/applications\/[^/?]+(?:\?.*)?$/.test(response.url()),
+    ),
+    firstCase.click(),
+  ]);
+  const casePayload = await caseResponse.json();
+  const expectedPhaseCount = Number(casePayload?.data?.lifecycle?.totalPhases);
+  expect(expectedPhaseCount).toBeGreaterThanOrEqual(8);
   await expect(page.getByText('مسیر جذب و شروع همکاری')).toBeVisible({ timeout: 15_000 });
   await page.getByRole('textbox', { name: 'دلیل رد نهایی پرونده' }).fill('آزمون گذار کامل چرخه جذب');
   await page.getByRole('button', { name: 'ثبت رد نهایی و بستن دسترسی' }).click();
@@ -101,11 +110,11 @@ test('Hiring lifecycle journey remains keyboard, reduced-motion, mobile, zoom, a
   await expect(page.getByRole('status').filter({ hasText: 'رد نهایی ثبت و پرونده بسته شد.' })).toBeVisible();
   expect(finalRejectionPayload?.reason).toBe('آزمون گذار کامل چرخه جذب');
   const phases = page.getByRole('list', { name: 'مراحل جذب' }).first().getByRole('button');
-  await expect(phases).toHaveCount(9);
+  await expect(phases).toHaveCount(expectedPhaseCount);
   await phases.first().focus();
   await page.keyboard.press('Enter');
   await expect(phases.first()).toHaveAttribute('aria-pressed', 'true');
-  for (let index = 1; index < 9; index += 1) {
+  for (let index = 1; index < expectedPhaseCount; index += 1) {
     await phases.nth(index).click();
     await expect(phases.nth(index)).toHaveAttribute('aria-pressed', 'true');
   }

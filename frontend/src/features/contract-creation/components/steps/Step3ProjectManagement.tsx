@@ -1,15 +1,17 @@
 ﻿// Step 3: Project Management Component
 // Project selection from customer's projects
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ErpButton,
+  ErpInlineState,
   ErpNeumorphicInteractiveCard,
   ErpNeumorphicSelectedSummary,
 } from '@/components/erp';
 import { FaPlus, FaCheck, FaUserTie, FaPhone } from 'react-icons/fa';
 import { useRouter } from 'next/navigation';
 import type { ContractWizardData } from '../../types/contract.types';
+import { persistContractLocalValue } from '../../utils/contractRecoveryJournal';
 
 interface Step3ProjectManagementProps {
   wizardData: ContractWizardData;
@@ -27,17 +29,24 @@ export const Step3ProjectManagement: React.FC<Step3ProjectManagementProps> = ({
   const router = useRouter();
   const projects = wizardData.customer?.projectAddresses || [];
   const selectedProject = wizardData.project;
+  const [storageError, setStorageError] = useState<string | null>(null);
 
   const persistAndCreateProject = () => {
-    localStorage.setItem('contractWizardState', JSON.stringify({
+    const persisted = persistContractLocalValue(localStorage, 'contractWizardState', {
       currentStep,
       wizardData
-    }));
+    });
+    if (!persisted) {
+      setStorageError('فضای ذخیرهٔ مرورگر پر است؛ برای جلوگیری از از دست‌رفتن قرارداد، خروج از این مرحله متوقف شد.');
+      return;
+    }
+    setStorageError(null);
     router.push(`/dashboard/crm/customers/${wizardData.customerId}?returnTo=contract&step=${currentStep}&action=addProject`);
   };
 
   return (
     <div className="space-y-5">
+      {storageError && <ErpInlineState kind="error" title={storageError} />}
       <div className="flex justify-end">
         {wizardData.customer && (
           <ErpButton

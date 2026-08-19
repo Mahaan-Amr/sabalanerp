@@ -15,6 +15,23 @@ export interface ContractRecoveryEnvelope<Payload = unknown> {
   payload: Payload;
 }
 
+interface ContractRecoveryStorageWriter {
+  setItem: (key: string, value: string) => unknown;
+}
+
+export const persistContractLocalValue = (
+  storage: ContractRecoveryStorageWriter,
+  key: string,
+  value: unknown
+): boolean => {
+  try {
+    storage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const getContractRecoveryStorageKey = (
   scope: ContractRecoveryScope
 ): string => [
@@ -41,6 +58,16 @@ export const createContractRecoveryEnvelope = <Payload>({
   updatedAt: now,
   payload
 });
+
+export const persistContractRecoveryEnvelope = <Payload>(
+  storage: ContractRecoveryStorageWriter,
+  key: string,
+  envelope: ContractRecoveryEnvelope<Payload>
+): boolean => {
+  // The server checkpoint remains canonical. A full browser storage quota must
+  // disable only this local fallback, never crash or mutate the contract draft.
+  return persistContractLocalValue(storage, key, envelope);
+};
 
 const sameScope = (
   left: ContractRecoveryScope,

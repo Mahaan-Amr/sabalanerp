@@ -286,18 +286,26 @@ export default function HiringCasePage() {
     // `load` intentionally follows the route id; recreating it is harmless but would retrigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-  const run = async (action: () => Promise<any>, success: string) => {
+  const run = async (
+    action: () => Promise<any>,
+    success: string,
+    options: CaseActionOptions = {},
+  ) => {
+    const { propagateActionError = false, awaitRefresh = true } = options;
     try {
       setBusy(true);
       setError("");
       await action();
-      setMessage(success);
-      await load();
     } catch (e) {
+      if (propagateActionError) throw e;
       setError(hiringError(e));
+      return;
     } finally {
       setBusy(false);
     }
+    setMessage(success);
+    if (awaitRefresh) await load();
+    else void load();
   };
   const confirmRetentionAction = async ({ reason }: { reason: string }) => {
     if (!retentionTarget) return;
@@ -2631,7 +2639,13 @@ function Metric({ label, value }: { label: string; value: string }) {
 type CaseActionRunner = (
   action: () => Promise<any>,
   success: string,
+  options?: CaseActionOptions,
 ) => Promise<void>;
+
+type CaseActionOptions = {
+  propagateActionError?: boolean;
+  awaitRefresh?: boolean;
+};
 
 function CompanyEvaluationPlan({ applicationId, actionPermissions, busy, run, onPendingChange }: { applicationId: string; actionPermissions: string[]; busy: boolean; run: CaseActionRunner; onPendingChange: (pending: boolean) => void }) {
   const [items, setItems] = useState<any[]>([]);
@@ -2757,6 +2771,7 @@ function PreIdentitySection({
               changeReason: latest("HR_INTERVIEW") ? "ثبت نسخه اصلاحی مصاحبه" : "",
             }),
             "نسخه مصاحبه هدایت‌شده ثبت شد.",
+            { propagateActionError: true, awaitRefresh: false },
           )}
         />
       )}

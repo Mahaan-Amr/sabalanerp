@@ -34,6 +34,7 @@ export interface CrmCustomer {
 
 export interface ProjectAddress {
   id: string;
+  customerId?: string;
   address: string;
   city: string | null;
   postalCode?: string;

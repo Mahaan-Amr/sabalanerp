@@ -33,10 +33,12 @@ interface UseProductFilteringReturn {
 }
 
 const normalizeSearchText = (value: unknown): string =>
-  normalizeDigits(String(value ?? ''))
+  normalizeDigits(String(value ?? '').normalize('NFKC'))
     .replace(/ي/g, 'ی')
     .replace(/ك/g, 'ک')
-    .replace(/\u200c/g, ' ')
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
     .toLowerCase();
 
 const compareProductsByWidthAsc = (a: Product, b: Product): number => {
@@ -71,17 +73,17 @@ export const useProductFiltering = (options: UseProductFilteringOptions): UsePro
     }
 
     // Show full filtered list when searching
-    const searchLower = customerSearchTerm.toLowerCase();
+    const searchLower = normalizeSearchText(customerSearchTerm);
     return customers.filter(customer =>
-      customer.firstName.toLowerCase().includes(searchLower) ||
-      customer.lastName.toLowerCase().includes(searchLower) ||
-      (customer.companyName && customer.companyName.toLowerCase().includes(searchLower)) ||
-      (customer.nationalCode && customer.nationalCode.includes(searchLower)) ||
-      (customer.homeNumber && customer.homeNumber.includes(searchLower)) ||
-      (customer.workNumber && customer.workNumber.includes(searchLower)) ||
+      normalizeSearchText(`${customer.firstName} ${customer.lastName}`).includes(searchLower) ||
+      normalizeSearchText(customer.firstName).includes(searchLower) ||
+      normalizeSearchText(customer.lastName).includes(searchLower) ||
+      (customer.companyName && normalizeSearchText(customer.companyName).includes(searchLower)) ||
+      (customer.nationalCode && normalizeSearchText(customer.nationalCode).includes(searchLower)) ||
+      (customer.homeNumber && normalizeSearchText(customer.homeNumber).includes(searchLower)) ||
+      (customer.workNumber && normalizeSearchText(customer.workNumber).includes(searchLower)) ||
       (customer.phoneNumbers && customer.phoneNumbers.some(phone =>
-        phone.number.includes(searchLower) ||
-        phone.number.replace(/\s+/g, '').includes(searchLower.replace(/\s+/g, ''))
+        normalizeSearchText(phone.number).replace(/\s+/g, '').includes(searchLower.replace(/\s+/g, ''))
       ))
     );
   }, [customers, customerSearchTerm]);

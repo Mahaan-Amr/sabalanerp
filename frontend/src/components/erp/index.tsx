@@ -637,10 +637,10 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             className={cx(
-              'inline-flex min-h-[var(--sds-control-height)] flex-shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
+              'inline-flex min-h-[var(--sds-control-height)] flex-shrink-0 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sds-surface-subtle)] disabled:cursor-not-allowed dark:focus-visible:ring-offset-[var(--sds-surface-raised)]',
               active
-                ? 'bg-[var(--sds-surface-raised)] text-[var(--sds-text-primary)] shadow-sm dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)]'
-                : 'text-[var(--sds-text-primary)] hover:bg-[var(--sds-surface-raised)] dark:hover:bg-[var(--sds-surface-raised)]'
+                ? 'border-[var(--sds-accent)] bg-[var(--sds-accent-soft)] text-[var(--sds-text-primary)] shadow-sm'
+                : 'border-transparent text-[var(--sds-text-primary)] hover:border-[var(--sds-border-strong)] hover:bg-[var(--sds-surface-raised)] disabled:text-[var(--sds-text-secondary)] disabled:hover:border-transparent disabled:hover:bg-transparent'
             )}
           >
             {Icon && <Icon className="h-4 w-4" />}

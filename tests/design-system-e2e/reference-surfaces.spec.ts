@@ -1239,9 +1239,31 @@ test('Contract submission preserves input across an invalid response, succeeds o
         contractNumber: 'E2E-DRAFT',
         creatorSequenceNumber: null,
         customerId: 'e2e-customer',
-        customer: null,
-        projectId: '',
-        project: null,
+        customer: {
+          id: 'e2e-customer',
+          firstName: 'مشتری',
+          lastName: 'آزمون',
+          customerType: 'Individual',
+          status: 'Active',
+          projectAddresses: [{
+            id: 'e2e-project',
+            customerId: 'e2e-customer',
+            address: 'آدرس آزمون',
+            city: 'شیراز',
+            isActive: true
+          }],
+          phoneNumbers: [],
+          isBlacklisted: false,
+          isLocked: false
+        },
+        projectId: 'e2e-project',
+        project: {
+          id: 'e2e-project',
+          customerId: 'e2e-customer',
+          address: 'آدرس آزمون',
+          city: 'شیراز',
+          isActive: true
+        },
         selectedProductTypeForAddition: null,
         products: [],
         serviceRows: [],

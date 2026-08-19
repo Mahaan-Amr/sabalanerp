@@ -9,6 +9,7 @@ import {
   isDeliveryItemForProduct,
   reconcileDeliveryProductReferences
 } from '../utils/deliveryScheduleController';
+import { validateContractPartyIdentity } from './contractPartyIdentity';
 
 /**
  * Validate a product configuration
@@ -188,12 +189,17 @@ export const validateWizardStep = (
     case 2: // Customer Selection
       if (!wizardData.customerId || !wizardData.customer) {
         errors.customer = 'انتخاب مشتری الزامی است';
+      } else if (wizardData.customer.id !== wizardData.customerId) {
+        errors.customerId = 'اطلاعات مشتری ناسازگار است؛ مشتری را دوباره انتخاب کنید.';
       }
       break;
       
     case 3: // Project Management
       if (!wizardData.projectId || !wizardData.project) {
         errors.project = 'انتخاب پروژه الزامی است';
+      } else {
+        const identityError = validateContractPartyIdentity(wizardData);
+        if (identityError) errors.projectId = identityError;
       }
       break;
       

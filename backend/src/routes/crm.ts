@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+import { expandPersianSearchTokenVariants, normalizePersianSearchTokens } from '../services/crmCustomerSearch';
 
 const router = express.Router();
 const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
@@ -286,6 +287,7 @@ const customerSuggestionSelect = {
     where: { isActive: true },
     select: {
       id: true,
+      customerId: true,
       address: true,
       city: true,
       projectName: true,
@@ -498,19 +500,21 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
     let whereClause: any = buildCustomerScope(req);
     
     if (search) {
-      whereClause.OR = [
-        { firstName: { contains: search, mode: 'insensitive' } },
-        { lastName: { contains: search, mode: 'insensitive' } },
-        { companyName: { contains: search, mode: 'insensitive' } },
-        { nationalCode: { contains: search, mode: 'insensitive' } },
-        { projectManagerName: { contains: search, mode: 'insensitive' } },
-        { homeNumber: { contains: search, mode: 'insensitive' } },
-        { workNumber: { contains: search, mode: 'insensitive' } },
-        { brandName: { contains: search, mode: 'insensitive' } },
-        { primaryContact: { firstName: { contains: search, mode: 'insensitive' } } },
-        { primaryContact: { lastName: { contains: search, mode: 'insensitive' } } },
-        { phoneNumbers: { some: { number: { contains: search, mode: 'insensitive' } } } }
-      ];
+      whereClause.AND = normalizePersianSearchTokens(search).map(token => ({
+        OR: expandPersianSearchTokenVariants(token).flatMap(variant => [
+          { firstName: { contains: variant, mode: 'insensitive' } },
+          { lastName: { contains: variant, mode: 'insensitive' } },
+          { companyName: { contains: variant, mode: 'insensitive' } },
+          { nationalCode: { contains: variant, mode: 'insensitive' } },
+          { projectManagerName: { contains: variant, mode: 'insensitive' } },
+          { homeNumber: { contains: variant, mode: 'insensitive' } },
+          { workNumber: { contains: variant, mode: 'insensitive' } },
+          { brandName: { contains: variant, mode: 'insensitive' } },
+          { primaryContact: { firstName: { contains: variant, mode: 'insensitive' } } },
+          { primaryContact: { lastName: { contains: variant, mode: 'insensitive' } } },
+          { phoneNumbers: { some: { number: { contains: variant, mode: 'insensitive' } } } }
+        ])
+      }));
     }
     
     if (status) whereClause.status = status;
@@ -548,6 +552,7 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
           where: { isActive: true },
           select: {
             id: true,
+            customerId: true,
             address: true,
             city: true,
             projectName: true,
@@ -626,6 +631,7 @@ router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
           where: { isActive: true },
           select: {
             id: true,
+            customerId: true,
             address: true,
             city: true,
             projectName: true,

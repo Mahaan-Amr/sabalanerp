@@ -31,6 +31,7 @@ import {
   validateRequiredIranianMobile
 } from '@/lib/phoneFormat';
 import { CustomerWorkflowPage, CustomerWorkflowSection, hasCustomerDraftChanges } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
+import { writeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
 
 interface ProjectAddress {
   id?: string;
@@ -431,6 +432,15 @@ export default function CreateCustomerPage() {
 
     if (returnTo !== 'contract') return;
 
+    const selectionSaved = writeContractReturnSelection({
+      currentStep: Number(stepParam),
+      customerId: customer.id
+    });
+    if (!selectionSaved) {
+      setErrors({ submit: 'فضای ذخیرهٔ مرورگر پر است؛ بازگشت به قرارداد برای جلوگیری از انتخاب مشتری اشتباه متوقف شد.' });
+      return;
+    }
+
     try {
       const savedStateRaw = localStorage.getItem('contractWizardState');
       const savedState = savedStateRaw ? JSON.parse(savedStateRaw) : { currentStep: Number(stepParam), wizardData: {} };
@@ -542,6 +552,14 @@ export default function CreateCustomerPage() {
         const step = urlParams.get('step');
 
         if (returnTo === 'contract' && step) {
+          const selectionSaved = writeContractReturnSelection({
+            currentStep: Number(step),
+            customerId: response.data.data.id
+          });
+          if (!selectionSaved) {
+            setErrors({ submit: 'مشتری ایجاد شد، اما فضای ذخیرهٔ مرورگر پر است؛ بازگشت خودکار برای جلوگیری از انتخاب مشتری اشتباه متوقف شد.' });
+            return;
+          }
           // Redirect back to contract wizard
           router.push(getContractReturnUrl(step));
         } else {

@@ -31,6 +31,7 @@ import { getCrmPermissions } from '@/lib/permissions';
 import { PROJECT_TYPE_OPTIONS } from '@/lib/projectTypes';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { CustomerWorkflowPage, CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
+import { writeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
 
 interface CrmCustomer {
   id: string;
@@ -142,6 +143,7 @@ export default function CustomerDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'projects' | 'contacts' | 'leads' | 'contracts'>('overview');
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
+  const [projectSubmitError, setProjectSubmitError] = useState<string | null>(null);
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [editingProject, setEditingProject] = useState<any>(null);
   const [editingContact, setEditingContact] = useState<any>(null);
@@ -394,7 +396,6 @@ export default function CustomerDetailPage() {
         const response = await crmAPI.addProjectAddress(customer.id, projectPayload);
         if (response.data.success) {
           await fetchCustomer();
-          setShowAddProjectModal(false);
 
           // Check if we should return to contract wizard
           const urlParams = new URLSearchParams(window.location.search);
@@ -402,8 +403,22 @@ export default function CustomerDetailPage() {
           const step = urlParams.get('step');
 
           if (returnTo === 'contract' && step) {
+            const selectionSaved = writeContractReturnSelection({
+              currentStep: Number(step),
+              customerId: customer.id,
+              projectId: response.data.data.id
+            });
+            if (!selectionSaved) {
+              setProjectSubmitError('پروژه ایجاد شد، اما فضای ذخیرهٔ مرورگر پر است؛ بازگشت خودکار برای جلوگیری از انتخاب پروژه اشتباه متوقف شد.');
+              return;
+            }
+            setProjectSubmitError(null);
+            setShowAddProjectModal(false);
             // Redirect back to contract wizard
             router.push(`/dashboard/sales/contracts/create?returnTo=contract&step=${step}`);
+          } else {
+            setProjectSubmitError(null);
+            setShowAddProjectModal(false);
           }
         }
       }
@@ -958,6 +973,7 @@ export default function CustomerDetailPage() {
         presentation="modal"
       >
             <form onSubmit={handleSubmitProject} className="space-y-4">
+              {projectSubmitError && <ErpInlineState kind="error" title={projectSubmitError} />}
               <CustomerWorkflowField label="نام پروژه" required>
                 <ErpInput
                   type="text"

@@ -4,6 +4,7 @@ import {
   createContractRecoveryEnvelope,
   getContractRecoveryStorageKey,
   parseContractRecoveryEnvelope,
+  persistContractRecoveryEnvelope,
   selectNewestContractRecovery,
   type ContractRecoveryEnvelope,
   type ContractRecoveryScope
@@ -324,7 +325,12 @@ export const useContractEditRecovery = <Payload>({
     });
     sequenceRef.current = envelope.sequence;
     pendingRef.current = envelope;
-    window.localStorage.setItem(scopeKey, JSON.stringify(envelope));
+    const localRecoverySaved = persistContractRecoveryEnvelope(
+      window.localStorage,
+      scopeKey,
+      envelope
+    );
+    if (!localRecoverySaved) setCheckpointError(true);
     if (checkpointTimerRef.current) clearTimeout(checkpointTimerRef.current);
     checkpointTimerRef.current = setTimeout(() => {
       checkpointTimerRef.current = null;

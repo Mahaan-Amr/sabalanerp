@@ -33,6 +33,7 @@ import {
   clearContractSubmissionDiagnostic,
   storeContractSubmissionDiagnostic
 } from '../utils/contractSubmissionDiagnostics';
+import { validateContractPartyIdentity } from '../services/contractPartyIdentity';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -142,6 +143,13 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       }
       if (validateAllSteps && !validateAllSteps()) return;
     } else if (!validateCurrentStep()) {
+      return;
+    }
+
+    const partyIdentityError = validateContractPartyIdentity(wizardData);
+    if (partyIdentityError) {
+      setErrors({ general: `ثبت قرارداد متوقف شد: ${partyIdentityError}` });
+      setCurrentStep(wizardData.customer?.id === wizardData.customerId ? 3 : 2);
       return;
     }
 

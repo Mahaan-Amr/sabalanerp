@@ -61,6 +61,8 @@ import { Step8DigitalSignature } from '@/features/contract-creation/components/s
 // Import shared components
 import { WizardProgressBar, type WizardStep } from '@/features/contract-creation/components/shared/WizardProgressBar';
 import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
+import { consumeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
+import { persistContractLocalValue } from '@/features/contract-creation/utils/contractRecoveryJournal';
 
 // Import modal components
 import { ProductConfigurationModal } from '@/features/contract-creation/components/modals/ProductConfigurationModal';
@@ -2762,8 +2764,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
     if (!scopedRaw && legacyRaw) {
-      localStorage.setItem(contractDraftStorageKey, legacyRaw);
-      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      if (persistContractLocalValue(localStorage, contractDraftStorageKey, legacyRaw)) {
+        localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+      }
     }
 
     if (contractCreationEntryDecision({
@@ -2897,7 +2900,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
 
-    localStorage.setItem(contractDraftStorageKey, JSON.stringify(draft));
+    persistContractLocalValue(localStorage, contractDraftStorageKey, draft);
   }, [
     autosaveHydrated,
     buildContractAutosaveDraft,
@@ -2976,6 +2979,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         if (savedState) {
           try {
             const { currentStep: savedStep, wizardData: savedWizardData } = JSON.parse(savedState);
+            const returnSelection = consumeContractReturnSelection();
 
             // Use the saved step instead of URL step parameter
             setCurrentStep(normalizeWizardStep(savedStep));
@@ -2991,11 +2995,21 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             await generateContractNumber();
 
             // Re-fetch customer so project list (Step 3) includes newly added projects
-            if (savedWizardData.customerId) {
+            const returnedCustomerId = returnSelection?.customerId || savedWizardData.customerId;
+            if (returnedCustomerId) {
               try {
-                const customerRes = await crmAPI.getCustomer(savedWizardData.customerId);
+                const customerRes = await crmAPI.getCustomer(returnedCustomerId);
                 if (customerRes.data.success && customerRes.data.data) {
-                  updateWizardData({ customer: customerRes.data.data });
+                  const returnedCustomer = customerRes.data.data;
+                  const returnedProject = returnSelection?.projectId
+                    ? returnedCustomer.projectAddresses?.find((project: ProjectAddress) => project.id === returnSelection.projectId) || null
+                    : returnedCustomerId === savedWizardData.customerId ? savedWizardData.project : null;
+                  updateWizardData({
+                    customerId: returnedCustomerId,
+                    customer: returnedCustomer,
+                    projectId: returnedProject?.id || '',
+                    project: returnedProject
+                  });
                 }
               } catch (err) {
                 console.error('Error refreshing customer after restore:', err);
@@ -4268,10 +4282,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   };
 
   const handleCreateProductFromContractFlow = () => {
-    localStorage.setItem('contractWizardState', JSON.stringify({
+    const persisted = persistContractLocalValue(localStorage, 'contractWizardState', {
       currentStep,
       wizardData
-    }));
+    });
+    if (!persisted) {
+      setErrors({ general: 'فضای ذخیرهٔ مرورگر پر است؛ پیش از خروج از قرارداد، همگام‌سازی را کامل کنید.' });
+      return;
+    }
     router.push(`/dashboard/sales/products/create?returnTo=contract&step=${currentStep}`);
   };
 
@@ -6254,6 +6272,12 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         />
 
         {/* Error Display */}
+        {editRecovery.checkpointError && (
+          <ErpInlineState
+            kind="stale"
+            title="ذخیرهٔ بازیابی محلی محدود شده است؛ تا برقراری ذخیرهٔ امن سرور این صفحه را نبندید."
+          />
+        )}
         {errors.general && (
           <ErpInlineState kind="error" title={errors.general} />
         )}

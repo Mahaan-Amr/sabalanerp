@@ -3,6 +3,7 @@ import {
   createContractRecoveryEnvelope,
   getContractRecoveryStorageKey,
   parseContractRecoveryEnvelope,
+  persistContractRecoveryEnvelope,
   selectNewestContractRecovery
 } from '../../utils/contractRecoveryJournal';
 
@@ -37,5 +38,23 @@ assert.equal(
 );
 assert.deepEqual(selectNewestContractRecovery(local, server), local);
 assert.deepEqual(selectNewestContractRecovery(null, server), server);
+
+const persisted = new Map<string, string>();
+assert.equal(
+  persistContractRecoveryEnvelope({
+    setItem: (key, value) => persisted.set(key, value)
+  }, 'recovery-key', local),
+  true
+);
+assert.equal(persisted.get('recovery-key'), JSON.stringify(local));
+assert.equal(
+  persistContractRecoveryEnvelope({
+    setItem: () => {
+      throw new DOMException('Storage quota exceeded', 'QuotaExceededError');
+    }
+  }, 'recovery-key', local),
+  false,
+  'browser quota errors must disable only the local fallback, not crash the wizard'
+);
 
 console.log('contractRecoveryJournal tests passed');

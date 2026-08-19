@@ -1,10 +1,11 @@
 ﻿// Step 2: Customer Selection Component
 // Customer search and selection
 
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ErpButton,
   ErpInput,
+  ErpInlineState,
   ErpNeumorphicCard,
   ErpNeumorphicInteractiveCard,
   ErpNeumorphicSelectedSummary,
@@ -13,6 +14,8 @@ import { FaSearch, FaPlus, FaCheck, FaPhone, FaBuilding, FaUser } from 'react-ic
 import { useRouter } from 'next/navigation';
 import { crmAPI } from '@/lib/api';
 import type { ContractWizardData, CrmCustomer } from '../../types/contract.types';
+import { applyLoadedCustomer, createCustomerSelectionUpdates } from '../../services/contractPartyIdentity';
+import { persistContractLocalValue } from '../../utils/contractRecoveryJournal';
 
 interface Step2CustomerSelectionProps {
   wizardData: ContractWizardData;
@@ -39,6 +42,9 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
 }) => {
   const router = useRouter();
   const selectedCustomer = wizardData.customer;
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const selectedCustomerIdRef = useRef(wizardData.customerId);
+  selectedCustomerIdRef.current = wizardData.customerId;
   const hasSearch = customerSearchTerm.trim().length > 0;
 
   const getOwnerLabel = (customer?: CrmCustomer | null) => {
@@ -48,10 +54,15 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
   };
 
   const persistAndCreateCustomer = () => {
-    localStorage.setItem('contractWizardState', JSON.stringify({
+    const persisted = persistContractLocalValue(localStorage, 'contractWizardState', {
       currentStep,
       wizardData
-    }));
+    });
+    if (!persisted) {
+      setStorageError('فضای ذخیرهٔ مرورگر پر است؛ برای جلوگیری از از دست‌رفتن قرارداد، خروج از این مرحله متوقف شد.');
+      return;
+    }
+    setStorageError(null);
     const params = new URLSearchParams({
       returnTo: 'contract',
       step: String(currentStep)
@@ -64,25 +75,18 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
   };
 
   const handleSelectCustomer = async (customer: CrmCustomer) => {
-    updateWizardData({
-      customerId: customer.id,
-      customer: {
-        ...customer,
-        projectAddresses: customer.projectAddresses || [],
-        phoneNumbers: customer.phoneNumbers || []
-      }
-    });
+    selectedCustomerIdRef.current = customer.id;
+    updateWizardData(createCustomerSelectionUpdates(wizardData, customer));
 
     try {
       const fullCustomerResponse = await crmAPI.getCustomer(customer.id);
       if (fullCustomerResponse.data.success && fullCustomerResponse.data.data) {
-        updateWizardData({
-          customer: {
-            ...fullCustomerResponse.data.data,
-            projectAddresses: fullCustomerResponse.data.data.projectAddresses || [],
-            phoneNumbers: fullCustomerResponse.data.data.phoneNumbers || []
-          }
-        });
+        const updates = applyLoadedCustomer(
+          customer.id,
+          selectedCustomerIdRef.current,
+          fullCustomerResponse.data.data
+        );
+        if (updates) updateWizardData(updates);
       }
     } catch (error) {
       console.error('Error fetching full customer data:', error);
@@ -91,6 +95,7 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
 
   return (
     <div className="space-y-5">
+      {storageError && <ErpInlineState kind="error" title={storageError} />}
       <div className="flex justify-end">
         <ErpButton
           label="ایجاد مشتری"

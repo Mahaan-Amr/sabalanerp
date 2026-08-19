@@ -61,6 +61,7 @@ import {
 import salesReportsRouter from './salesReports';
 import { publishNotificationEvent } from '../services/notificationService';
 import { resolveWorkspaceRecipientIds } from '../services/domainNotificationRecipients';
+import { ContractPartyIdentityValidationError } from '../services/contractPartyIdentity';
 
 const router = express.Router();
 const rejectContractGraphWritesWhenReadOnly = (_req: any, res: Response, next: () => void) => {
@@ -1036,6 +1037,9 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     });
     return;
   } catch (error: any) {
+    if (error instanceof ContractPartyIdentityValidationError) {
+      return res.status(422).json({ success: false, code: error.code, error: error.message });
+    }
     console.error('Create sales contract error:', error);
     if (error instanceof ContractProductGraphValidationError) {
       return res.status(422).json({
@@ -1258,6 +1262,9 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
           productRowId: issue.productRowId
         }))
       });
+    }
+    if (error instanceof ContractPartyIdentityValidationError) {
+      return res.status(422).json({ success: false, code: error.code, error: error.message });
     }
     if (error.message === 'Contract not found') {
       return res.status(404).json({

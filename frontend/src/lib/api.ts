@@ -1305,6 +1305,10 @@ export const hrAuthorizationAPI = {
     params: { _fresh: Date.now() },
     headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
   }),
+  getEffectiveAccess: (userId: string) => api.get(`/hr/authorization/effective-access/${userId}`, {
+    params: { _fresh: Date.now() },
+    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+  }),
   saveUserAccess: (userId: string, data: {
     role: string;
     workspaceLevels: Record<string, string | null>;

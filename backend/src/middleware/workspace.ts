@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from './auth';
+import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 
 
 const isPermissionActiveAndNotExpired = (
@@ -147,56 +148,8 @@ export const extractWorkspace = (req: WorkspaceRequest, res: Response, next: Nex
  */
 export const getUserWorkspaces = async (userId: string, userRole: string): Promise<{ workspace: Workspace; permission: WorkspacePermission }[]> => {
   try {
-    const workspaces: { workspace: Workspace; permission: WorkspacePermission }[] = [];
-
-    // Super admin has access to all workspaces
-    if (userRole === 'ADMIN') {
-      return Object.values(WORKSPACES).map(workspace => ({
-        workspace,
-        permission: WORKSPACE_PERMISSIONS.ADMIN
-      }));
-    }
-
-    // Get user-specific permissions
-    const userPermissions = await prisma.workspacePermission.findMany({
-      where: {
-        userId,
-        isActive: true
-      }
-    });
-
-    // Get role-based permissions
-    const rolePermissions = await prisma.roleWorkspacePermission.findMany({
-      where: {
-        role: userRole,
-        isActive: true
-      }
-    });
-
-    // Combine permissions (user-specific overrides role-based)
-    const allWorkspaces = new Set([...userPermissions.map(p => p.workspace), ...rolePermissions.map(p => p.workspace)]);
-
-    for (const workspace of allWorkspaces) {
-      const userPermission = userPermissions.find(
-        (p) => p.workspace === workspace && isPermissionActiveAndNotExpired(p)
-      );
-      const rolePermission = rolePermissions.find(
-        (p) => p.workspace === workspace && isPermissionActiveAndNotExpired(p)
-      );
-
-      let permission: WorkspacePermission;
-      if (userPermission) {
-        permission = userPermission.permissionLevel as WorkspacePermission;
-      } else if (rolePermission) {
-        permission = rolePermission.permissionLevel as WorkspacePermission;
-      } else {
-        continue;
-      }
-
-      workspaces.push({ workspace: workspace as Workspace, permission });
-    }
-
-    return workspaces;
+    const access = await getEffectiveUserAccess(prisma, { userId, userRole });
+    return access.workspaces as Array<{ workspace: Workspace; permission: WorkspacePermission }>;
   } catch (error) {
     console.error('Get user workspaces error:', error);
     return [];

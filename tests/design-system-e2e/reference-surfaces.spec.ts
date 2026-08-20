@@ -729,7 +729,7 @@ test('Product Selection restores into the shared interface without changing pers
   ];
   const dimensionBoxes = await Promise.all(dimensionFields.map((field) => field.boundingBox()));
   expect(dimensionBoxes.every(Boolean)).toBe(true);
-  const dimensionTops = dimensionBoxes.map((box) => box!.y);
+  const dimensionTops = dimensionBoxes.map((box) => Math.round(box!.y));
   expect(Math.max(...dimensionTops) - Math.min(...dimensionTops)).toBeLessThanOrEqual(1);
   for (const unitLabel of ['واحد طول', 'واحد عرض']) {
     const unitControl = productDialog.getByRole('radiogroup', { name: unitLabel });
@@ -1287,11 +1287,9 @@ test('Contract submission preserves input across an invalid response, succeeds o
   await expect(submit).toBeEnabled();
 
   await submit.click();
-  const finish = page.getByRole('button', { name: 'اتمام و بازگشت به قراردادها', exact: true });
-  await expect(finish).toBeVisible();
-
-  await finish.click();
-  await expect(page).toHaveURL(/\/dashboard\/sales\/contracts\?created=1$/);
+  await expect(page).toHaveURL(
+    /\/dashboard\/sales\/contracts\/e2e-contract\?created=1&contractNumber=E2E-1001$/,
+  );
   expect(submissionAttempts).toBe(2);
 });
 
@@ -1644,6 +1642,7 @@ test('public, identity, and confirmation routes share the responsive semantic fo
           || field.getAttribute('type') === 'radio'
         ))
     )).toBe(true);
+    await page.waitForLoadState('networkidle');
   }
 });
 

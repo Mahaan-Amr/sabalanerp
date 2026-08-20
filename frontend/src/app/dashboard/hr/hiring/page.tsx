@@ -22,7 +22,7 @@ import {
   ErpSection,
   ErpSheet,
 } from "@/components/erp";
-import { hrAPI } from "@/lib/api";
+import { hrAPI, hrAuthorizationAPI } from "@/lib/api";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { dateTimeFa } from "@/features/hr/hrUi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
@@ -100,6 +100,7 @@ export default function HiringCasesPage() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [referenceIssue, setReferenceIssue] = useState("");
   const [createOutcome, setCreateOutcome] = useState<CreateOutcome>(null);
   const [actionPermissions, setActionPermissions] = useState<string[]>([]);
   const [assessmentDecision, setAssessmentDecision] = useState<FormalAssessmentDecision>("");
@@ -116,24 +117,29 @@ export default function HiringCasesPage() {
   const foundationLoaded = useRef(false);
   const programmaticHref = useRef("");
   const canManageFormalAssessmentPlan = actionPermissions.includes("MANAGE_COMPANY_EVALUATION_PLAN");
+  const canManageRecruitmentCases = actionPermissions.includes("MANAGE_RECRUITMENT_CASE");
+  const canViewInterviewCriteria = actionPermissions.includes("VIEW_INITIAL_INTERVIEW_CRITERIA");
   const createDirty = Boolean(form.firstName || form.lastName || form.mobile || form.nationalCode || form.positionId || assessmentDecision || assessmentKinds.length);
 
   const load = async (nextFilters: HiringQueueFilters = filters, nextArchiveView = archiveView) => {
     const sequence = ++requestSequence.current;
-    const needsFoundation = !foundationLoaded.current;
+    const needsReference = !foundationLoaded.current;
     try {
       setLoading(true);
       setError("");
-      const [cases, foundation, permissions] = await Promise.all([
+      setReferenceIssue("");
+      const [casesResult, referenceResult, permissionsResult] = await Promise.allSettled([
         hiringAPI.list({
           ...buildHiringQueueParams(nextFilters),
           archived: String(nextArchiveView),
           ...(representedView ? { view: representedView } : {}),
         }),
-        needsFoundation ? hrAPI.getFoundation() : Promise.resolve(null),
-        needsFoundation ? hiringAPI.myActionPermissions() : Promise.resolve(null),
+        needsReference ? hrAPI.getOperationalReference("recruitment") : Promise.resolve(null),
+        needsReference ? hrAuthorizationAPI.getMe() : Promise.resolve(null),
       ]);
       if (sequence !== requestSequence.current) return;
+      if (casesResult.status === "rejected") throw casesResult.reason;
+      const cases = casesResult.value;
       setRows(cases.data.data);
       setMeta(
         cases.data.meta || {
@@ -142,9 +148,26 @@ export default function HiringCasesPage() {
           total: cases.data.data.length,
         },
       );
-      if (foundation) {
-        setPositions(foundation.data.data.positions || []);
-        setActionPermissions(permissions?.data?.data || []);
+      if (referenceResult.status === "fulfilled" && referenceResult.value) {
+        const reference = referenceResult.value;
+        setPositions(reference.data.data.positions || []);
+      } else if (needsReference) {
+        setPositions([]);
+        setReferenceIssue("اطلاعات جایگاه‌ها موقتاً در دسترس نیست؛ صف جذب همچنان قابل استفاده است.");
+      }
+      if (permissionsResult.status === "fulfilled" && permissionsResult.value) {
+        const permissions = permissionsResult.value;
+        setActionPermissions(permissions.data.data.actionPermissionCodes || []);
+      } else if (needsReference) {
+        setActionPermissions([]);
+      }
+      if (
+        needsReference
+        && referenceResult.status === "fulfilled"
+        && Boolean(referenceResult.value)
+        && permissionsResult.status === "fulfilled"
+        && Boolean(permissionsResult.value)
+      ) {
         foundationLoaded.current = true;
       }
     } catch (cause) {
@@ -274,7 +297,7 @@ export default function HiringCasesPage() {
         { label: "جایگاه فعال", value: positions.filter((item: any) => item.isActive).length.toLocaleString("fa-IR"), tone: "neutral" },
       ]}
       actions={[
-        {
+        ...(canManageRecruitmentCases ? [{
           label: "ایجاد متقاضی",
           icon: FaPlus,
           onClick: () => {
@@ -282,25 +305,22 @@ export default function HiringCasesPage() {
             setCreateOpen(true);
           },
           tone: "success",
-        },
+        } as const] : []),
         {
           label: archiveView ? "فهرست فعال" : "بایگانی متقاضیان",
           icon: archiveView ? FaUndo : FaArchive,
           onClick: () => commitContext({ ...filters, page: 1 }, !archiveView),
         },
-        {
+        ...(canViewInterviewCriteria ? [{
           label: "معیارهای مصاحبه اولیه",
           icon: FaClipboardList,
           href: "/dashboard/hr/interview-criteria",
-        },
+        } as const] : []),
         { label: "به‌روزرسانی", icon: FaSync, onClick: () => load() },
       ]}
     >
-      {error && (
-        <p className="rounded-xl bg-[var(--sds-danger-surface)] p-3 text-[var(--sds-danger)] dark:bg-[var(--sds-danger-surface)] dark:text-[var(--sds-danger)]">
-          {error}
-        </p>
-      )}
+      {error && <ErpInlineState kind="error" title={error} />}
+      {referenceIssue && <ErpInlineState kind="stale" title={referenceIssue} />}
       {createOutcome && <ErpInlineState kind={createOutcome.kind} title={createOutcome.title} />}
 
       <ErpSheet
@@ -751,7 +771,7 @@ export default function HiringCasesPage() {
                         >
                           بازکردن پرونده
                         </Link>
-                        {!row.archivedAt && (
+                        {!row.archivedAt && canManageRecruitmentCases && (
                           <ErpPressable
                             type="button"
                             disabled={busy || row.stage === "CLOSED"}
@@ -856,7 +876,7 @@ export default function HiringCasesPage() {
                       onClick={rememberQueuePosition}
                       variant="soft"
                     />
-                    {!row.archivedAt && (
+                    {!row.archivedAt && canManageRecruitmentCases && (
                       <ErpButton
                         label="ارسال دعوت"
                         disabled={busy || row.stage === "CLOSED"}

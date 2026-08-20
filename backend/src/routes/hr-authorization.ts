@@ -5,7 +5,7 @@ import { prisma } from '../lib/prisma';
 import { authorize, type AuthRequest } from '../middleware/auth';
 import { FEATURES, FEATURE_WORKSPACE_MAP } from '../middleware/feature';
 import { requireHrFeature } from '../middleware/hrAuthorization';
-import { activeCompanyManagerUserIds, activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
+import { activeCompanyManagerUserIds, activeHrActionPermissionsForUser, activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
 import { expandFeaturePrerequisites } from '../services/featurePermissionPrerequisites';
 import { canAssignSystemRole } from '../services/userRoleAdministrationPolicy';
 import { HR_REDESIGN_CATALOG } from '../services/hrRedesignDataContracts';
@@ -89,17 +89,23 @@ const writeAudit = async (client: Prisma.TransactionClient, input: {
 
 router.get('/me', asyncHandler(async (req, res) => {
   const now = new Date();
-  const [workspaceGrants, featureGrants, authorityCodes, administration] = await Promise.all([
+  const [workspaceGrants, featureGrants, authorityCodes, actionPermissionCodes, administration, effectiveAccess] = await Promise.all([
     prisma.hrWorkspaceAccessGrant.findMany({ where: { userId: actorId(req) }, orderBy: { createdAt: 'desc' } }),
     prisma.hrFeatureAccessGrant.findMany({ where: { userId: actorId(req) }, orderBy: { createdAt: 'desc' } }),
     activeHrAuthoritiesForUser(prisma, actorId(req), now),
+    activeHrActionPermissionsForUser(prisma, actorId(req), now),
     authorizeHrUser(prisma, actorId(req), {
       workspaceLevel: 'ADMIN',
       feature: { code: 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION', level: 'ADMIN' },
     }, now),
+    getEffectiveUserAccess(prisma, { userId: actorId(req), userRole: req.user!.role, at: now }),
   ]);
   res.json({ success: true, data: {
-    workspaceGrants, featureGrants, authorityCodes,
+    workspaceGrants, featureGrants, authorityCodes, actionPermissionCodes,
+    effectiveAccess: {
+      workspaces: effectiveAccess.workspaces.filter(({ workspace }) => workspace === 'hr'),
+      features: effectiveAccess.features.filter(({ workspace }) => workspace === 'hr'),
+    },
     canAdministerAuthorityResponsibility: administration.allowed,
     generatedAt: now,
   } });

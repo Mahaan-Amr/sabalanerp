@@ -356,6 +356,10 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
   await expect(page.getByRole('navigation', { name: 'ناوبری فروش' })).toHaveCount(0);
   await page.goto('/dashboard/crm/customers?workspace=sales');
 
+  // The customer collection replaces its loading surface after the data request.
+  // Wait for that committed view so the navigation link is not replaced between
+  // pointer-down and click while React applies the collection result.
+  await expect(page.getByText(/^نمایش .* از .* مشتری$/)).toBeVisible();
   await page.getByRole('navigation', { name: 'ناوبری فروش' }).getByRole('link', { name: 'محصولات' }).click();
   await expect(page).toHaveURL(/\/dashboard\/sales\/products$/);
   await expect(page.getByRole('navigation', { name: 'ناوبری فروش' }).getByRole('link', { name: 'محصولات' })).toHaveAttribute('aria-current', 'page');

@@ -10,6 +10,12 @@ import {
   readContractSubmissionDiagnostic,
   storeContractSubmissionDiagnostic
 } from '../../utils/contractSubmissionDiagnostics';
+import {
+  finalizeSuccessfulContractCommit,
+  getContractDetailDestination,
+  getCreatedContractDestination,
+  isContractDateOlderThanToday
+} from '../../utils/contractCreationCompletion';
 
 const globalProductError = {
   response: {
@@ -96,4 +102,49 @@ assert.equal(readContractSubmissionDiagnostic(storage)?.errorCode,
 clearContractSubmissionDiagnostic(storage);
 assert.equal(values.size, 0);
 
-console.log('contract submission failure tests passed');
+assert.equal(
+  getCreatedContractDestination('contract/with spaces'),
+  '/dashboard/sales/contracts/contract%2Fwith%20spaces?created=1'
+);
+assert.equal(
+  getContractDetailDestination('contract/with spaces'),
+  '/dashboard/sales/contracts/contract%2Fwith%20spaces'
+);
+assert.equal(isContractDateOlderThanToday('1405/05/27', '1405/05/29'), true);
+assert.equal(isContractDateOlderThanToday('1405/05/29', '1405/05/29'), false);
+assert.equal(isContractDateOlderThanToday('1405/05/30', '1405/05/29'), false);
+
+const runCompletionAssertions = async () => {
+  const completionEvents: string[] = [];
+  await finalizeSuccessfulContractCommit({
+    contractId: 'contract-1',
+    finalizeRecovery: async () => {
+      completionEvents.push('cleanup');
+      throw new Error('cleanup failed');
+    },
+    navigate: (destination) => completionEvents.push(`navigate:${destination}`),
+    logCleanupError: () => completionEvents.push('logged')
+  });
+  assert.deepEqual(completionEvents, [
+    'cleanup',
+    'logged',
+    'navigate:/dashboard/sales/contracts/contract-1?created=1'
+  ], 'a committed contract must navigate successfully even when recovery cleanup fails');
+
+  const editDestinations: string[] = [];
+  await finalizeSuccessfulContractCommit({
+    contractId: 'contract-1',
+    justCreated: false,
+    navigate: (destination) => editDestinations.push(destination)
+  });
+  assert.deepEqual(editDestinations, [
+    '/dashboard/sales/contracts/contract-1'
+  ], 'an edited contract must not be presented as newly created');
+};
+
+runCompletionAssertions()
+  .then(() => console.log('contract submission failure tests passed'))
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

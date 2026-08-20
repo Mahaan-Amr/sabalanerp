@@ -1145,7 +1145,13 @@ export async function getContract(contractId: string) {
           product: true
         }
       },
-      productGraphState: true
+      productGraphState: true,
+      deliveries: {
+        include: {
+          products: true
+        }
+      },
+      payments: true
     }
   });
 
@@ -1163,6 +1169,7 @@ export async function getContract(contractId: string) {
 
   return {
     ...contract,
+    contractData: sanitizeContractDataCustomerSnapshot(contract.contractData),
     productGraphProjection: contract.productGraphState
       ? projectCanonicalProductGraph(
           parseCanonicalProductGraph(contract.productGraphState.graph),

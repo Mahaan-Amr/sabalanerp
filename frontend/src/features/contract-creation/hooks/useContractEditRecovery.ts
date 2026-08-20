@@ -289,7 +289,7 @@ export const useContractEditRecovery = <Payload>({
   ]);
 
   const flushCheckpoint = useCallback(async () => {
-    if (!scope || !leaseToken || blocked || !pendingRef.current) return;
+    if (deactivatedRef.current || !scope || !leaseToken || blocked || !pendingRef.current) return;
     const envelope = pendingRef.current;
     try {
       await salesAPI.checkpointContractRecovery(scope.draftId, {
@@ -317,7 +317,7 @@ export const useContractEditRecovery = <Payload>({
   }, [blocked, browserSessionId, leaseToken, scope]);
 
   const queueRecovery = useCallback((payload: Payload) => {
-    if (!scope || !scopeKey || blocked) return;
+    if (deactivatedRef.current || !scope || !scopeKey || blocked) return;
     const envelope = createContractRecoveryEnvelope({
       scope,
       sequence: sequenceRef.current + 1,
@@ -387,6 +387,19 @@ export const useContractEditRecovery = <Payload>({
     pendingRef.current = null;
   }, [scopeKey]);
 
+  const finalizeCommitted = useCallback(() => {
+    deactivatedRef.current = true;
+    if (checkpointTimerRef.current) {
+      clearTimeout(checkpointTimerRef.current);
+      checkpointTimerRef.current = null;
+    }
+    clearLocalRecovery();
+    setLeaseToken(null);
+    setBlockReason(null);
+    setCheckpointError(false);
+    setReady(true);
+  }, [clearLocalRecovery]);
+
   const release = useCallback(async () => {
     deactivatedRef.current = true;
     if (!scope || !leaseToken) {
@@ -399,12 +412,11 @@ export const useContractEditRecovery = <Payload>({
         leaseToken,
         baseRevision: scope.baseRevision
       });
-    } catch (error) {
-      console.error('Contract edit session cleanup failed after a successful commit:', error);
     } finally {
       clearLocalRecovery();
       setLeaseToken(null);
       setBlockReason(null);
+      setCheckpointError(false);
     }
   }, [browserSessionId, clearLocalRecovery, leaseToken, scope]);
 
@@ -464,6 +476,7 @@ export const useContractEditRecovery = <Payload>({
     queueRecovery,
     clearLocalRecovery,
     discard,
-    release
+    release,
+    finalizeCommitted
   };
 };

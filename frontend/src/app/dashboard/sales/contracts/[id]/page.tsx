@@ -1,7 +1,7 @@
 'use client';
 import { ErpPressable, ErpSelect, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import {
   FaCalendarAlt,
   FaCheck,
@@ -38,6 +38,7 @@ import { sanitizeUiText, sanitizeUiTextWithCandidates } from '@/lib/textSanitize
 import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPreparedUnitLabel, isPreparedProductType } from '@/features/contract-creation/utils/preparedProductUtils';
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
 import { invoiceStatusLabels, receivableStatusLabels, sourceStatusLabels, StatusBadge, taxStatusLabels } from '@/features/accounting/accountingUi';
+import { buildContractPaymentPresentation } from '@/features/sales/contractPaymentPresentation';
 
 interface Contract {
   id: string;
@@ -160,7 +161,10 @@ const getCustomerName = (contract: Contract) =>
 export default function ContractDetailPage() {
   const { hasPermission } = useWorkspace();
   const params = useParams();
+  const searchParams = useSearchParams();
   const contractId = params.id as string;
+  const wasJustCreated = searchParams.get('created') === '1';
+  const createdContractNumber = sanitizeUiText(searchParams.get('contractNumber'), '');
 
   const [contract, setContract] = useState<Contract | null>(null);
   const [currentUser, setCurrentUser] = useState<PermissionUser | null>(null);
@@ -394,9 +398,13 @@ export default function ContractDetailPage() {
     return contract.deliveries?.length ? contract.deliveries : contract.contractData?.deliveries || [];
   }, [contract]);
 
-  const payments = useMemo(() => {
-    if (!contract) return [];
-    return contract.payments?.length ? contract.payments : contract.contractData?.payment?.installments || [];
+  const paymentPresentation = useMemo(() => {
+    if (!contract) return buildContractPaymentPresentation({ payments: [], contractData: {}, currency: 'تومان' });
+    return buildContractPaymentPresentation({
+      payments: contract.payments,
+      contractData: contract.contractData,
+      currency: sanitizeUiText(contract.currency, 'تومان')
+    });
   }, [contract]);
 
   if (loading) {
@@ -404,6 +412,22 @@ export default function ContractDetailPage() {
   }
 
   if (error || !contract) {
+    if (wasJustCreated) {
+      return (
+        <ErpPage
+          eyebrow="قرارداد فروش"
+          title="قرارداد با موفقیت ثبت شد"
+          description={createdContractNumber ? `شماره قرارداد: ${createdContractNumber}` : undefined}
+          backHref="/dashboard/sales/contracts"
+        >
+          <ErpInlineState
+            kind="success"
+            title="ثبت قرارداد قطعی است، اما جزئیات آن فعلاً بارگذاری نشد. اطلاعات شما از بین نرفته است."
+            action={{ label: 'تلاش مجدد', onClick: () => void loadContract() }}
+          />
+        </ErpPage>
+      );
+    }
     return (
       <ErpEmptyState
         icon={FaFileContract}
@@ -575,6 +599,7 @@ export default function ContractDetailPage() {
                     const productName = sanitizeUiTextWithCandidates([product.namePersian, product.name, item.namePersian, item.name], `محصول ${index + 1}`);
                     const quantity = toFiniteNumber(item.quantity);
                     const squareMeters = item.squareMeters ?? product.squareMeter ?? 0;
+                    const consumedSquareMeters = item.smartCutPlan?.consumedAreaSqm;
                     const unitPrice = item.unitPrice ?? item.pricePerSquareMeter ?? 0;
                     const itemTotal = item.totalPrice ?? 0;
                     const finishing = normalizeProductFinishing(item);
@@ -613,7 +638,10 @@ export default function ContractDetailPage() {
                         )}
                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
                           <ErpFieldView label="تعداد" value={formatDisplayNumber(preparedQuantity)} />
-                          <ErpFieldView label={isPreparedRow ? 'واحد' : 'متراژ'} value={isPreparedRow ? `${getPreparedKindLabel(item.preparedKind)} / ${getPreparedUnitLabel(preparedUnit)}` : formatSquareMeters(squareMeters)} />
+                          <ErpFieldView label={isPreparedRow ? 'واحد' : 'متراژ درخواستی'} value={isPreparedRow ? `${getPreparedKindLabel(item.preparedKind)} / ${getPreparedUnitLabel(preparedUnit)}` : formatSquareMeters(squareMeters)} />
+                          {!isPreparedRow && toFiniteNumber(consumedSquareMeters) > 0 && toFiniteNumber(consumedSquareMeters) !== toFiniteNumber(squareMeters) && (
+                            <ErpFieldView label="مصرف سنگ / مبنای قیمت" value={formatSquareMeters(consumedSquareMeters)} tone="warning" />
+                          )}
                           <ErpFieldView label="قیمت واحد" value={toFiniteNumber(unitPrice) > 0 ? formatPrice(unitPrice, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} />
                           <ErpFieldView label="جمع" value={toFiniteNumber(itemTotal) > 0 ? formatPrice(itemTotal, sanitizeUiText(item.currency || contract.currency, 'تومان')) : 'نامشخص'} tone="primary" />
                         </div>
@@ -694,7 +722,11 @@ export default function ContractDetailPage() {
                   ) : (
                     deliveries.map((delivery: any, index: number) => (
                       <div key={index} className="rounded-lg border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]">
-                        <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{delivery.deliveryDate || delivery.date || 'تاریخ نامشخص'}</p>
+                        <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
+                          {delivery.deliveryDate || delivery.date
+                            ? PersianCalendar.formatForDisplay(delivery.deliveryDate || delivery.date)
+                            : 'تاریخ نامشخص'}
+                        </p>
                         <p className="mt-1 text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{sanitizeUiText(delivery.notes || delivery.deliveryAddress, 'بدون توضیحات')}</p>
                       </div>
                     ))
@@ -702,11 +734,26 @@ export default function ContractDetailPage() {
                 </div>
                 <div className="space-y-3">
                   <h3 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">پرداخت</h3>
-                  <ErpFieldView label="روش پرداخت" value={sanitizeUiText(contract.contractData?.payment?.method, 'ثبت نشده')} tone="primary" />
-                  <ErpFieldView label="مبلغ پرداخت" value={formatCurrency(contract.contractData?.payment?.totalAmount || totalAmount, sanitizeUiText(contract.currency, 'تومان'))} tone="success" />
-                  {payments.length > 0 && (
-                    <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{payments.length.toLocaleString('fa-IR')} قسط/پرداخت ثبت شده است.</p>
+                  <ErpFieldView label="روش پرداخت" value={paymentPresentation.summaryLabel} tone="primary" />
+                  {paymentPresentation.source === 'historical-snapshot' && (
+                    <ErpBadge tone="warning">اطلاعات تاریخی</ErpBadge>
                   )}
+                  {paymentPresentation.rows.length === 0 ? (
+                    <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">برنامه پرداختی ثبت نشده است.</p>
+                  ) : paymentPresentation.rows.map((payment) => (
+                    <div key={payment.id} className="space-y-2 rounded-lg border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <ErpFieldView label="روش" value={payment.methodLabel} />
+                        <ErpFieldView label="مبلغ" value={formatCurrency(payment.amount, payment.currency)} tone="success" />
+                        {payment.paymentDate && <ErpFieldView label="تاریخ پرداخت/سررسید" value={PersianCalendar.formatForDisplay(payment.paymentDate)} />}
+                        {payment.handoverDate && <ErpFieldView label="تاریخ تحویل چک" value={PersianCalendar.formatForDisplay(payment.handoverDate)} />}
+                        {payment.checkNumber && <ErpFieldView label="شماره چک" value={payment.checkNumber} />}
+                        {payment.checkOwnerName && <ErpFieldView label="صاحب چک" value={payment.checkOwnerName} />}
+                        {payment.status && <ErpFieldView label="وضعیت" value={payment.status} />}
+                      </div>
+                      {payment.notes && <p className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{payment.notes}</p>}
+                    </div>
+                  ))}
                 </div>
               </div>
             </ErpSection>

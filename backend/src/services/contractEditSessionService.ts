@@ -404,8 +404,11 @@ export const discardContractCreationDraft = (
 export const releaseContractEditSession = async (
   store: ContractEditSessionStore,
   input: AssertContractEditOwnershipInput
-): Promise<ContractEditOwnershipResult> => {
+): Promise<ContractEditOwnershipResult | { readonly ok: true; readonly alreadyReleased: true }> => {
   const ownership = await assertContractEditOwnership(store, input);
+  if (!ownership.ok && ownership.code === 'edit-session-missing') {
+    return { ok: true, alreadyReleased: true };
+  }
   if (!ownership.ok) return ownership;
   const removed = await store.remove(input.draftId, input.leaseToken);
   if (!removed) {

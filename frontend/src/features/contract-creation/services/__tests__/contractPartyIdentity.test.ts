@@ -27,6 +27,16 @@ const nextCustomer = customer('customer-next', [
   { id: 'project-next', customerId: 'customer-next', address: 'جدید', city: null, isActive: true }
 ]);
 
+const customerWithLiveCrmNavigation = {
+  ...nextCustomer,
+  salesContracts: [{ id: 'contract-old', contractData: { customer: nextCustomer } }],
+  leads: [{ id: 'lead-1' }],
+  communications: [{ id: 'communication-1' }],
+  potentialProjects: [{ id: 'potential-1' }],
+  contacts: [{ id: 'contact-1' }],
+  _count: { salesContracts: 1 }
+} as CrmCustomer;
+
 assert.deepEqual(
   createCustomerSelectionUpdates({
     customerId: 'customer-old', customer: customer('customer-old', [oldProject]),
@@ -62,6 +72,18 @@ assert.deepEqual(
   applyLoadedCustomer('customer-next', 'customer-next', nextCustomer),
   { customerId: 'customer-next', customer: nextCustomer }
 );
+const boundedCustomerSelection = applyLoadedCustomer(
+  'customer-next',
+  'customer-next',
+  customerWithLiveCrmNavigation
+);
+assert.equal('salesContracts' in (boundedCustomerSelection?.customer || {}), false);
+assert.equal('leads' in (boundedCustomerSelection?.customer || {}), false);
+assert.equal('communications' in (boundedCustomerSelection?.customer || {}), false);
+assert.equal('potentialProjects' in (boundedCustomerSelection?.customer || {}), false);
+assert.equal('contacts' in (boundedCustomerSelection?.customer || {}), false);
+assert.equal('_count' in (boundedCustomerSelection?.customer || {}), false);
+assert.deepEqual(boundedCustomerSelection?.customer?.projectAddresses, nextCustomer.projectAddresses);
 
 assert.equal(validateContractPartyIdentity({
   customerId: 'customer-next', customer: nextCustomer,

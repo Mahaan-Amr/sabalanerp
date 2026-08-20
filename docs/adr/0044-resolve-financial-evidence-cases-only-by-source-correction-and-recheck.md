@@ -1,0 +1,3 @@
+# Resolve Financial Evidence Cases Only by Source Correction and Recheck
+
+A financial-evidence conflict is a dedicated, directly addressable review case rather than a generic Accounting flag. The case presents full-precision witnesses in business language, guides the User to responsible-seller source correction, historical-evidence recovery, or technical support, forbids manual quantity overrides and generic close/cancel actions, and lifts the financial-approval block only after the canonical reconciliation succeeds again; this preserves frozen evidence while giving operational Users an exact recovery path.

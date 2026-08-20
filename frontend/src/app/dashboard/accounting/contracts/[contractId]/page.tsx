@@ -30,6 +30,11 @@ import { accountingAPI, dashboardAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import {
+  financialEvidenceCaseHref,
+  financialEvidenceReviewFromConflict,
+  isFinancialEvidenceReviewCase,
+} from '@/features/accounting/financialEvidenceReview';
+import {
   CompactQueueItem,
   FinancialInvoiceApprovalForm,
   FinancialInvoiceApprovalPayload,
@@ -202,10 +207,9 @@ export default function AccountingContractDetailPage({ params }: { params: { con
       console.error('Accounting action failed:', error);
       const response = (error as any)?.response?.data;
       setActionError(response?.error || 'اقدام حسابداری انجام نشد');
-      setReviewActionUrl(response?.reviewCase?.actionUrl || response?.actionUrl ||
-        (response?.code === 'FINANCIAL_EVIDENCE_CONFLICT'
-          ? `/dashboard/accounting/contracts/${params.contractId}#financial-evidence-review`
-          : null));
+      const exactReviewUrl = financialEvidenceReviewFromConflict(response);
+      if (exactReviewUrl) await loadDetail();
+      setReviewActionUrl(exactReviewUrl);
       return false;
     } finally {
       setActionLoading(false);
@@ -483,6 +487,8 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const replacementRecord = replacementWorkflow?.replacementRecordId
     ? (data.financialRecords || []).find((record: any) => record.id === replacementWorkflow.replacementRecordId)
     : null;
+  const reviewCaseForFlag = (flag: any) => (data.financialEvidenceReviewCases || [])
+    .find((reviewCase: any) => reviewCase.id === flag.id);
 
   return (
     <ErpPage
@@ -505,7 +511,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
           {actionError}
           {reviewActionUrl && (
             <div className="mt-3">
-              <ErpButton label="رفتن به پرونده بررسی" tone="danger" variant="outline" onClick={() => router.push(reviewActionUrl)} />
+              <ErpButton label="رفتن به پرونده بررسی" tone="danger" variant="outline" href={reviewActionUrl} />
             </div>
           )}
         </div>
@@ -825,6 +831,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
               </div>
             </ErpSection>
 
+            <div id="financial-records" className="scroll-mt-24">
             <ErpSection title="رکوردهای مالی">
               <div className="space-y-3">
                 {(data.financialRecords || []).map((record: any) => (
@@ -873,6 +880,7 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                 )}
               </div>
             </ErpSection>
+            </div>
 
             <div id="collections" className="scroll-mt-6">
             <ErpSection title="دریافتنی‌ها و دریافت‌ها">
@@ -986,22 +994,29 @@ export default function AccountingContractDetailPage({ params }: { params: { con
             <div id="financial-evidence-review" className="scroll-mt-24">
             <ErpSection title="درخواست‌های اصلاح و پرچم‌ها">
               <div className="space-y-3">
-                {(data.flags || []).map((item: any) => (
-                  <CompactQueueItem
+                {(data.flags || []).map((item: any) => {
+                  const financialReview = reviewCaseForFlag(item);
+                  return <CompactQueueItem
                     key={item.id}
                     icon={FaFlag}
                     title={item.title}
                     meta={item.resolutionNote || item.cancellationReason || item.evidence?.userMessageFa || item.note}
                     status={<StatusBadge status={item.status} />}
                     footer={item.status === 'OPEN' ? <div className="flex flex-wrap gap-2">
-                      {(item.trackingCode?.startsWith('financial-evidence:') || item.evidence?.code === 'FINANCIAL_EVIDENCE_CONFLICT' || item.title === 'نیازمند بررسی شواهد مالی') && (
-                        <ErpButton label="رفتن به پرونده بررسی" href={`/dashboard/accounting/contracts/${contract.contractId}#financial-evidence-review`} tone="danger" variant="outline" />
-                      )}
-                      <ErpButton label="بستن پرچم" icon={FaCheckCircle} tone="success" variant="soft" onClick={() => setFlagCloseTarget({ item, mode: 'resolve' })} />
-                      <ErpButton label="لغو پرچم" icon={FaTimes} tone="danger" variant="soft" onClick={() => setFlagCloseTarget({ item, mode: 'cancel' })} />
+                      {isFinancialEvidenceReviewCase(item) && financialReview ? (
+                        <ErpButton
+                          label="باز کردن پرونده بررسی"
+                          href={financialEvidenceCaseHref(contract.contractId, financialReview.id)}
+                          tone="danger"
+                          variant="outline"
+                        />
+                      ) : <>
+                        <ErpButton label="بستن پرچم" icon={FaCheckCircle} tone="success" variant="soft" onClick={() => setFlagCloseTarget({ item, mode: 'resolve' })} />
+                        <ErpButton label="لغو پرچم" icon={FaTimes} tone="danger" variant="soft" onClick={() => setFlagCloseTarget({ item, mode: 'cancel' })} />
+                      </>}
                     </div> : undefined}
                   />
-                ))}
+                })}
                 {(data.correctionRequests || []).map((item: any) => (
                   <CompactQueueItem
                     key={item.id}

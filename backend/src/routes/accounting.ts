@@ -147,7 +147,8 @@ const managerReviewActions = new Set([
   'VOID_ACCOUNTING_RECORD',
   'CREATE_REPLACEMENT_INVOICE',
   'APPROVE_FINANCIAL_INVOICE',
-  'RESOLVE_CORRECTION'
+  'RESOLVE_CORRECTION',
+  'RECHECK_FINANCIAL_EVIDENCE_REVIEW'
 ]);
 
 const dispatchError = (res: Response, error: unknown) => {
@@ -829,7 +830,7 @@ export const createAccountingActionHandler = (
       ) {
         return res.status(403).json({
           success: false,
-          error: 'Accounting admin permission is required for correction review'
+          error: 'برای انجام این بررسی، دسترسی مدیر فضای حسابداری لازم است.'
         });
       }
 
@@ -901,6 +902,7 @@ router.post(
     body('paymentEventId').optional().isString(),
     body('correctionRequestId').optional().isString(),
     body('flagId').optional().isString(),
+    body('reviewCaseId').optional().isString(),
     body('replacesRecordId').optional().isString(),
     body('externalReference').optional().isString(),
     body('downstreamNote').optional().isString(),

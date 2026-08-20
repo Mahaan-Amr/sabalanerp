@@ -735,19 +735,127 @@ test('captures exact raw optimizer conflict evidence without tolerance guessing'
     () => buildApprovedPricingVersion(source, 1, 'optimizer-structured-conflict'),
     (error: unknown) => {
       assert.ok(error instanceof OptimizerQuantityEvidenceConflictError);
-      assert.deepEqual(error.evidence, {
-        productRowId: 'row-1',
-        rule: 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE',
-        rawOptimizerQuantity: '40',
-        rawProductionQuantity: '120',
-        difference: '80',
+      assert.equal(error.evidence?.productRowId, 'row-1');
+      assert.equal(error.evidence?.rule, 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE');
+      assert.equal(error.evidence?.rawOptimizerQuantity, '40');
+      assert.equal(error.evidence?.transformedOptimizerQuantity, '40');
+      assert.equal(error.evidence?.rawProductionQuantity, '120');
+      assert.equal(error.evidence?.transformedProductionQuantity, '120');
+      assert.equal(error.evidence?.rawCanonicalGraphQuantity, '40');
+      assert.equal(error.evidence?.transformedCanonicalGraphQuantity, '40.000');
+      assert.equal(error.evidence?.difference, '80');
+      assert.equal(error.evidence?.unit, 'meter');
+      assert.deepEqual(error.evidence?.rawProductionPieces, [{ lengthM: 40, quantity: '3' }]);
+      assert.deepEqual(error.evidence?.rawPersistedDeliveryRows, [{
+        deliveryId: 'delivery-1',
+        deliveryProductId: 'delivery-product-1',
+        rawQuantity: '40',
+        transformedQuantity: '40.00',
+      }]);
+      assert.deepEqual(error.evidence?.comparisonDifferences, [{
+        key: 'OPTIMIZER_PRODUCTION_MINUS_OPTIMIZER_TOTAL',
+        labelFa: 'اختلاف جمع قطعات تولیدی optimizer با کمیت کل optimizer',
+        leftSource: 'OPTIMIZER_PRODUCTION',
+        rightSource: 'OPTIMIZER_TOTAL',
         unit: 'meter',
-      });
+        basis: 'RAW',
+        rule: 'EXACT_DECIMAL',
+        leftComparableValue: '120',
+        rightComparableValue: '40',
+        value: '80',
+      }]);
       assert.match(error.userMessageFa, /مدیر حسابداری.*پروندهٔ بررسی کمیت/);
       assert.doesNotMatch(error.userMessageFa, /optimizer|80/);
       return true;
     },
   );
+});
+
+test('captures the exact named difference for graph, persisted Delivery, and invoice conflicts', () => {
+  const cases: Array<{
+    name: string;
+    mutate: (source: ApprovedPricingSource) => void;
+    key: string;
+    value: string;
+    basis: string;
+    leftComparableValue: string;
+    rightComparableValue: string;
+  }> = [
+    {
+      name: 'Product Graph',
+      mutate: source => {
+        (source.contract.productGraph!.rows as any)[0].requestedLengthMeters = '41';
+      },
+      key: 'PRODUCT_GRAPH_MINUS_OPTIMIZER',
+      value: '1',
+      basis: 'HISTORICAL_TRANSFORMED',
+      leftComparableValue: '41.000',
+      rightComparableValue: '40.000',
+    },
+    {
+      name: 'persisted Delivery',
+      mutate: source => {
+        (source.contract.contractData as any).products[0].smartCutPlan.totalRequestedLengthM = '40.005';
+        (source.contract.contractData as any).products[0].smartCutPlan.productionPieces[0].lengthM = '40.005';
+        (source.contract.productGraph!.rows as any)[0].requestedLengthMeters = '40.005';
+        (source.contract.contractData as any).deliveries[0].products[0].quantity = '40.005';
+        (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '40.00';
+      },
+      key: 'PERSISTED_DELIVERY_MINUS_COMPARABLE_OPTIMIZER',
+      value: '-0.01',
+      basis: 'HISTORICAL_TRANSFORMED',
+      leftComparableValue: '40.00',
+      rightComparableValue: '40.01',
+    },
+    {
+      name: 'invoice',
+      mutate: source => {
+        (source.leaf.invoiceItems as any)[0] = { ...source.leaf.invoiceItems[0], quantity: '39' };
+      },
+      key: 'INVOICE_MINUS_OPTIMIZER',
+      value: '-1',
+      basis: 'RAW',
+      leftComparableValue: '39',
+      rightComparableValue: '40',
+    },
+  ];
+
+  for (const item of cases) {
+    const source = optimizerDerivedSourceFixture();
+    item.mutate(source);
+    assert.throws(
+      () => buildApprovedPricingVersion(source, 1, `optimizer-named-difference-${item.name}`),
+      (error: unknown) => {
+        const evidenceError = asApprovedPricingEvidenceError(error);
+        assert.ok(evidenceError, item.name);
+        assert.deepEqual(evidenceError.evidence?.comparisonDifferences, [{
+          key: item.key,
+          labelFa: item.name === 'Product Graph'
+            ? 'اختلاف Product Graph با کمیت کل optimizer'
+            : item.name === 'persisted Delivery'
+              ? 'اختلاف مجموع Delivery با کمیت تبدیل‌شده قابل‌مقایسه'
+              : 'اختلاف کمیت پیش‌فاکتور با کمیت کل optimizer',
+          leftSource: item.name === 'Product Graph'
+            ? 'PRODUCT_GRAPH'
+            : item.name === 'persisted Delivery'
+              ? 'PERSISTED_DELIVERY_TOTAL'
+              : 'INVOICE',
+          rightSource: item.name === 'persisted Delivery' ? 'WIZARD_DELIVERY_TOTAL' : 'OPTIMIZER_TOTAL',
+          value: item.value,
+          unit: 'meter',
+          basis: item.basis,
+          rule: item.name === 'Product Graph'
+            ? 'ROUND_HALF_UP_SCALE_THREE'
+            : item.name === 'persisted Delivery'
+              ? 'ROUND_HALF_UP_SCALE_TWO_PER_ROW_THEN_SUM'
+              : 'EXACT_DECIMAL',
+          leftComparableValue: item.leftComparableValue,
+          rightComparableValue: item.rightComparableValue,
+        }], item.name);
+        return true;
+      },
+    );
+  }
 });
 
 test('accepts a missing redundant wizard Delivery copy when persisted evidence is complete', () => {
@@ -793,7 +901,17 @@ test('rejects optimizer normalization when producer provenance is not recorded',
 
   assert.throws(
     () => buildApprovedPricingVersion(source, 1, 'optimizer-missing-provenance'),
-    /Unsupported or missing optimizer quantity provenance/,
+    (error: unknown) => {
+      const evidenceError = asApprovedPricingEvidenceError(error);
+      assert.ok(evidenceError);
+      assert.match(evidenceError.message, /Unsupported or missing optimizer quantity provenance/);
+      assert.equal(evidenceError.evidence?.rule, undefined);
+      assert.equal(evidenceError.evidence?.transformedOptimizerQuantity, undefined);
+      assert.equal(evidenceError.evidence?.transformedProductionQuantity, undefined);
+      assert.equal(evidenceError.evidence?.transformedCanonicalGraphQuantity, undefined);
+      assert.equal(evidenceError.evidence?.reportedRoundingPolicy, 'rounding-v1');
+      return true;
+    },
   );
 });
 

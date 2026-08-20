@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { randomUUID } from 'node:crypto';
 import { buildAccountingContractSourceSnapshot } from './contractSnapshotBoundary';
 import {
   AccountingFlagCategory,
@@ -23,7 +24,14 @@ import {
 import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
 import { lockFinancialApprovalRecord, publishCurrentApprovedPricingReadinessWithinTransaction,
   sealApprovedPricingAtFinancialApproval, FinancialEvidenceConflictError,
-  ApprovedPricingEvidenceError } from './approvedPricing';
+  ApprovedPricingEvidenceError, preflightApprovedPricingAtFinancialApproval } from './approvedPricing';
+import {
+  assertGeneralFlagTransitionAllowed,
+  FINANCIAL_EVIDENCE_REVIEW_PREFIX,
+  financialEvidenceReviewActionUrl,
+  isFinancialEvidenceReviewCase,
+  presentFinancialEvidenceReviewCase,
+} from './financialEvidenceReviewCase';
 import { captureContractQuantityVersionAtFinancialApproval } from './shipmentQuantityProjectionStore';
 import { parseCanonicalProductGraph, projectCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import {
@@ -156,6 +164,7 @@ type AccountingActionRequest = {
   sepidarAmount?: string | number;
   correctionRequestId?: string;
   flagId?: string;
+  reviewCaseId?: string;
   replacesRecordId?: string;
   externalReference?: string;
   downstreamNote?: string;
@@ -615,16 +624,25 @@ export const recordFinancialEvidenceReviewCase = async (input: {
   });
   if (!source?.contractId) return null;
   const trackingCode = `financial-evidence:${source.id}`;
-  const actionUrl = `/dashboard/accounting/contracts/${source.contractId}#financial-evidence-review`;
   return prisma.$transaction(async tx => {
     const existing = await tx.accountingContractFlag.findUnique({ where: { trackingCode } });
+    const reviewCaseId = existing?.id ?? randomUUID();
+    const actionUrl = financialEvidenceReviewActionUrl(source.contractId!, reviewCaseId);
+    const previousEvidence = metadataObject(existing?.evidence);
+    const now = new Date().toISOString();
     const evidence = toJsonValue({
       code: input.conflict.code,
       technicalDetail: input.conflict.technicalDetail,
       userMessageFa: input.conflict.userMessageFa,
+      reviewKind: input.conflict.reviewKind ?? 'GENERAL',
+      remediationKind: input.conflict.remediationKind ?? 'TECHNICAL_SUPPORT',
       structuredEvidence: input.conflict.evidence,
       sourceFinancialRecordId: source.id,
       actorId: input.actorId,
+      createdActorId: previousEvidence.createdActorId || previousEvidence.actorId || existing?.createdBy || input.actorId,
+      ...(previousEvidence.lastRecheckedBy ? { lastRecheckedBy: previousEvidence.lastRecheckedBy } : {}),
+      ...(previousEvidence.lastRecheckedAt ? { lastRecheckedAt: previousEvidence.lastRecheckedAt } : {}),
+      ...(existing ? { reopenedBy: input.actorId, reopenedAt: now } : {}),
       actionUrl,
     });
     const reviewCase = existing
@@ -644,6 +662,7 @@ export const recordFinancialEvidenceReviewCase = async (input: {
           },
         })
       : await tx.accountingContractFlag.create({ data: {
+        id: reviewCaseId,
         contractId: source.contractId!,
         category: AccountingFlagCategory.AMOUNT_PRICING,
         severity: AccountingFlagSeverity.BLOCKER,
@@ -1256,6 +1275,16 @@ export const getAccountingContractDetail = async (contractId: string) => {
     tax,
     correctionRequests
   );
+  const reviewActors = await getActorMap(flags.flatMap(flag => [
+    flag.createdBy,
+    flag.resolvedBy || '',
+    String(metadataObject(flag.evidence).createdActorId || ''),
+    String(metadataObject(flag.evidence).lastRecheckedBy || ''),
+  ]));
+  const reviewActorLabel = (actorId: string) => {
+    const actor = reviewActors.get(actorId);
+    return actor?.displayName || actor?.username || 'کاربر ثبت‌شده یا حذف‌شده';
+  };
 
   return {
     contract: row,
@@ -1285,6 +1314,9 @@ export const getAccountingContractDetail = async (contractId: string) => {
     paymentEvents,
     tax,
     flags,
+    financialEvidenceReviewCases: flags
+      .filter(isFinancialEvidenceReviewCase)
+      .map(flag => presentFinancialEvidenceReviewCase(flag, reviewActorLabel)),
     auditTrail,
     correctionRequests,
     lifecycleRequests,
@@ -1374,6 +1406,8 @@ export const executeAccountingAction = async (
       return closeContractFlag(command, actor, AccountingFlagStatus.RESOLVED);
     case 'CANCEL_CONTRACT_FLAG':
       return closeContractFlag(command, actor, AccountingFlagStatus.CANCELLED);
+    case 'RECHECK_FINANCIAL_EVIDENCE_REVIEW':
+      return recheckFinancialEvidenceReviewCase(command, actor);
     case 'VOID_ACCOUNTING_RECORD':
       return voidAccountingRecord(command, actor);
     case 'DELETE_DRAFT_ACCOUNTING_RECORD':
@@ -2394,6 +2428,7 @@ const closeContractFlag = async (command: AccountingActionRequest, actor: Actor,
   const updated = await prisma.$transaction(async (tx) => {
     const before = await tx.accountingContractFlag.findUnique({ where: { id: command.flagId } });
     if (!before) throw new Error('Accounting flag not found');
+    assertGeneralFlagTransitionAllowed(before);
     if (before.status !== AccountingFlagStatus.OPEN) throw new Error('Only open flags can be closed or cancelled');
     const now = new Date();
     const item = await tx.accountingContractFlag.update({
@@ -2410,6 +2445,113 @@ const closeContractFlag = async (command: AccountingActionRequest, actor: Actor,
     return item;
   });
   return actionResponse('APPLIED', status === AccountingFlagStatus.RESOLVED ? 'پرچم بسته شد' : 'پرچم لغو شد', { contractId: updated.contractId });
+};
+
+const recheckFinancialEvidenceReviewCase = async (command: AccountingActionRequest, actor: Actor) => {
+  const reviewCaseId = command.reviewCaseId || command.flagId;
+  if (!reviewCaseId) throw new Error('شناسه پرونده بررسی الزامی است.');
+  return prisma.$transaction(async tx => {
+    const before = await tx.accountingContractFlag.findUnique({ where: { id: reviewCaseId } });
+    if (!before || !isFinancialEvidenceReviewCase(before)) {
+      throw new Error('پرونده بررسی شواهد مالی پیدا نشد.');
+    }
+    if (before.status !== AccountingFlagStatus.OPEN) {
+      throw new Error('فقط پرونده بررسی باز قابل بازآزمایی است.');
+    }
+    if (!before.sourceFinancialRecordId) {
+      throw new Error('پیش‌فاکتور مرتبط با پرونده بررسی پیدا نشد.');
+    }
+    try {
+      const version = await preflightApprovedPricingAtFinancialApproval(
+        tx,
+        before.sourceFinancialRecordId,
+        actor.userId,
+      );
+      const now = new Date();
+      const updated = await tx.accountingContractFlag.update({
+        where: { id: before.id },
+        data: {
+          status: AccountingFlagStatus.RESOLVED,
+          resolvedBy: actor.userId,
+          resolvedAt: now,
+          resolutionNote: 'بازآزمایی قطعی شواهد با موفقیت انجام شد؛ قرارداد آماده ادامه تأیید مالی است.',
+          evidence: toJsonValue({
+            ...metadataObject(before.evidence),
+            resolutionMode: 'RECONCILED_BY_EVIDENCE_RECHECK',
+            lastRecheckedBy: actor.userId,
+            lastRecheckedAt: now.toISOString(),
+            reconciledApprovedPricingVersionId: version.id,
+            reconciledApprovedPricingIntegrityHash: version.integrityHash,
+          }),
+        },
+      });
+      await audit(tx, {
+        action: 'RECHECK_FINANCIAL_EVIDENCE_REVIEW_RESOLVED',
+        actorId: actor.userId,
+        contractId: before.contractId,
+        recordId: before.sourceFinancialRecordId,
+        entityType: 'AccountingContractFlag',
+        entityId: before.id,
+        beforeState: toJsonValue(before),
+        afterState: toJsonValue({
+          flag: updated,
+          preflight: {
+            schemaVersion: version.schemaVersion,
+            grossAmount: version.grossAmount,
+            discountAmount: version.discountAmount,
+            netAmount: version.netAmount,
+            integrityHash: version.integrityHash,
+          },
+        }),
+        note: 'Financial evidence preflight passed without mutating the contract, invoice, or approved-pricing versions.',
+      });
+      return actionResponse('APPLIED', 'بازآزمایی شواهد موفق بود. اکنون می‌توانید تأیید مالی را ادامه دهید.', {
+        contractId: before.contractId,
+        reviewCaseId: before.id,
+        readyForFinancialApproval: true,
+        actionUrl: `/dashboard/accounting/contracts/${before.contractId}#financial-records`,
+      });
+    } catch (error) {
+      if (!(error instanceof FinancialEvidenceConflictError)) throw error;
+      const actionUrl = financialEvidenceReviewActionUrl(before.contractId, before.id);
+      const previousEvidence = metadataObject(before.evidence);
+      const nextEvidence = toJsonValue({
+        code: error.code,
+        technicalDetail: error.technicalDetail,
+        userMessageFa: error.userMessageFa,
+        reviewKind: error.reviewKind ?? 'GENERAL',
+        remediationKind: error.remediationKind ?? 'TECHNICAL_SUPPORT',
+        structuredEvidence: error.evidence,
+        sourceFinancialRecordId: before.sourceFinancialRecordId,
+        actorId: actor.userId,
+        createdActorId: previousEvidence.createdActorId || previousEvidence.actorId || before.createdBy,
+        lastRecheckedBy: actor.userId,
+        actionUrl,
+        lastRecheckedAt: new Date().toISOString(),
+      });
+      const updated = await tx.accountingContractFlag.update({
+        where: { id: before.id },
+        data: { evidence: nextEvidence },
+      });
+      await audit(tx, {
+        action: 'RECHECK_FINANCIAL_EVIDENCE_REVIEW_STILL_BLOCKED',
+        actorId: actor.userId,
+        contractId: before.contractId,
+        recordId: before.sourceFinancialRecordId,
+        entityType: 'AccountingContractFlag',
+        entityId: before.id,
+        beforeState: toJsonValue(before),
+        afterState: toJsonValue(updated),
+        note: 'Financial evidence preflight remains blocked; no commercial or financial source was mutated.',
+      });
+      return actionResponse('REJECTED', `بازآزمایی انجام شد، اما تعارض هنوز باقی است. ${error.userMessageFa}`, {
+        contractId: before.contractId,
+        reviewCaseId: before.id,
+        readyForFinancialApproval: false,
+        actionUrl,
+      });
+    }
+  });
 };
 
 const voidAccountingRecord = async (command: AccountingActionRequest, actor: Actor) => {
@@ -2503,7 +2645,7 @@ const voidAccountingRecord = async (command: AccountingActionRequest, actor: Act
 
 const deleteDraftAccountingRecord = async (command: AccountingActionRequest, actor: Actor) => {
   const recordId = command.recordId || command.invoiceId;
-  if (!recordId) throw new Error('recordId is required');
+  if (!recordId) throw new Error('شناسه پیش‌نویس رکورد مالی الزامی است.');
 
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.accountingFinancialRecord.findUnique({
@@ -2515,12 +2657,47 @@ const deleteDraftAccountingRecord = async (command: AccountingActionRequest, act
         journalVouchers: true
       }
     });
-    if (!before) throw new Error('Accounting record not found');
+    if (!before) throw new Error('پیش‌نویس رکورد مالی پیدا نشد.');
     if (before.status !== AccountingRecordStatus.DRAFT || before.financiallyApprovedAt || before.systemInvoiceNumber || before.postedAt) {
-      throw new Error('Only unsubmitted draft accounting records can be deleted');
+      throw new Error('فقط پیش‌نویس ارسال‌نشده و تأییدنشده قابل حذف است.');
     }
     if (before.receivables.length > 0 || before.journalVouchers.length > 0) {
-      throw new Error('Draft accounting records with downstream accounting entries cannot be deleted');
+      throw new Error('این پیش‌نویس دارای ثبت‌های حسابداری وابسته است و قابل حذف نیست.');
+    }
+
+    const supersededReviewCases = await tx.accountingContractFlag.findMany({
+      where: {
+        sourceFinancialRecordId: before.id,
+        status: AccountingFlagStatus.OPEN,
+        trackingCode: { startsWith: FINANCIAL_EVIDENCE_REVIEW_PREFIX },
+      },
+    });
+
+    for (const reviewCase of supersededReviewCases) {
+      const resolvedCase = await tx.accountingContractFlag.update({
+        where: { id: reviewCase.id },
+        data: {
+          status: AccountingFlagStatus.RESOLVED,
+          resolvedBy: actor.userId,
+          resolvedAt: new Date(),
+          resolutionNote: 'پیش‌فاکتور ناسازگار حذف شد. این پرونده فقط برای همان پیش‌فاکتور بسته شد و پیش‌فاکتور تازه باید از مبدأ اصلاح‌شده ساخته شود.',
+          evidence: toJsonValue({
+            ...metadataObject(reviewCase.evidence),
+            resolutionMode: 'SOURCE_DRAFT_RETIRED',
+          }),
+        },
+      });
+      await audit(tx, {
+        action: 'SUPERSEDE_FINANCIAL_EVIDENCE_REVIEW_ON_DRAFT_DELETION',
+        actorId: actor.userId,
+        contractId: before.contractId,
+        recordId: before.id,
+        entityType: 'AccountingContractFlag',
+        entityId: reviewCase.id,
+        beforeState: toJsonValue(reviewCase),
+        afterState: toJsonValue(resolvedCase),
+        note: 'پیش‌فاکتور ناسازگار حذف شد؛ هیچ مقدار تجاری یا کمیتی بازنویسی نشد.',
+      });
     }
 
     await tx.accountingInvoiceCandidateItem.deleteMany({ where: { invoiceId: before.id } });
@@ -2541,7 +2718,11 @@ const deleteDraftAccountingRecord = async (command: AccountingActionRequest, act
     return before;
   });
 
-  return actionResponse('APPLIED', 'پیش‌نویس رکورد مالی حذف شد', { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
+  return actionResponse(
+    'APPLIED',
+    'پیش‌نویس رکورد مالی حذف شد. پس از تکمیل اصلاح مبدأ، پیش‌فاکتور تازه ایجاد کنید.',
+    { contractId: result.contractId || undefined, financialRecordIds: [result.id] },
+  );
 };
 
 const actionResponse = (status: 'APPLIED' | 'REJECTED' | 'NEEDS_CONFIRMATION', messageFa: string, affected: Record<string, unknown>) => ({

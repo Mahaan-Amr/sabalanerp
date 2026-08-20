@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import {
   ApprovedPricingEvidenceError,
+  asApprovedPricingEvidenceError,
 } from './approvedPricing/evidenceError';
 
 // Deliberate witness-validation failures are typed evidence conflicts; runtime failures remain native.
@@ -22,10 +23,12 @@ export class OptimizerQuantityEvidenceConflictError extends ApprovedPricingEvide
     rawOptimizerQuantity: string;
     rawProductionQuantity: string;
     difference: string;
+    additionalEvidence?: Readonly<Record<string, unknown>>;
   }) {
     super({
       technicalDetail: `Product ${input.productRowId} optimizer quantities conflict`,
       evidence: {
+        ...(input.additionalEvidence || {}),
         productRowId: input.productRowId,
         rule: input.policy,
         rawOptimizerQuantity: input.rawOptimizerQuantity,
@@ -34,6 +37,8 @@ export class OptimizerQuantityEvidenceConflictError extends ApprovedPricingEvide
         unit: 'meter',
       },
       userMessageFa: 'کمیت قطعات ثبت‌شده با کمیت کل قرارداد سازگار نیست. مدیر حسابداری باید پروندهٔ بررسی کمیت این قرارداد را تعیین تکلیف کند.',
+      reviewKind: 'QUANTITY',
+      remediationKind: 'RESPONSIBLE_SELLER_CORRECTION',
     });
     this.name = 'OptimizerQuantityEvidenceConflictError';
   }
@@ -196,6 +201,8 @@ const optimizerQuantityPolicy = (input: Pick<OptimizerDerivedQuantityInput,
       graphAuditCommandId: input.graphAuditCommandId,
     },
     userMessageFa: 'منشأ نسخهٔ محاسبهٔ کمیت این قرارداد قابل اثبات نیست. مدیر حسابداری باید پروندهٔ بررسی کمیت را تعیین تکلیف کند.',
+    reviewKind: 'QUANTITY',
+    remediationKind: 'EVIDENCE_RECOVERY',
   });
 };
 
@@ -222,7 +229,7 @@ export const canonicalOptimizerDerivedLengthWitness = (
   return String(plan.totalRequestedLengthM);
 };
 
-export const reconcileOptimizerDerivedLongitudinalQuantity = (
+const reconcileOptimizerDerivedLongitudinalQuantityInternal = (
   input: OptimizerDerivedQuantityInput,
 ): OptimizerDerivedQuantityEvidence | null => {
   if (input.productType.toLowerCase() !== 'longitudinal' ||
@@ -361,6 +368,8 @@ export const reconcileOptimizerDerivedLongitudinalQuantity = (
         })),
       },
       userMessageFa: 'نحوهٔ تبدیل کمیت چند تحویل تاریخی این قرارداد یکتا نیست. مدیر حسابداری باید پروندهٔ بررسی کمیت را تعیین تکلیف کند.',
+      reviewKind: 'QUANTITY',
+      remediationKind: 'EVIDENCE_RECOVERY',
     });
   }
 
@@ -411,4 +420,275 @@ export const reconcileOptimizerDerivedLongitudinalQuantity = (
       persistedDifference: persistedTotal.minus(planQuantity).toString(),
     },
   };
+};
+
+const optionalRecord = (value: unknown): UnknownRecord | null => (
+  value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : null
+);
+
+const provenHistoricalPersistencePolicy = (input: OptimizerDerivedQuantityInput) => {
+  try {
+    return optimizerQuantityPolicy(input);
+  } catch (error) {
+    if (asApprovedPricingEvidenceError(error)) return null;
+    throw error;
+  }
+};
+
+const historicalConvertedQuantity = (value: unknown, scale: number | null) => {
+  if (scale === null || value === null || value === undefined || value === '') return undefined;
+  try {
+    return new Prisma.Decimal(String(value))
+      .toDecimalPlaces(scale, Prisma.Decimal.ROUND_HALF_UP)
+      .toFixed(scale);
+  } catch {
+    return undefined;
+  }
+};
+
+const exactDifference = (left: unknown, right: unknown) => {
+  if (left === null || left === undefined || left === '' || right === null || right === undefined || right === '') return undefined;
+  try {
+    return new Prisma.Decimal(String(left)).minus(String(right)).toString();
+  } catch {
+    return undefined;
+  }
+};
+
+const exactTotal = (values: readonly (string | undefined)[], fixedScale?: number | null) => {
+  if (values.length === 0 || values.some(value => value === undefined || value === '')) return undefined;
+  try {
+    const total = values.reduce((sum, value) => sum.plus(String(value)), new Prisma.Decimal(0));
+    return fixedScale === null || fixedScale === undefined ? total.toString() : total.toFixed(fixedScale);
+  } catch {
+    return undefined;
+  }
+};
+
+const rawProductionTotal = (plan: UnknownRecord | null) => {
+  if (!Array.isArray(plan?.productionPieces) || plan.productionPieces.length === 0) return undefined;
+  try {
+    return plan.productionPieces.reduce((sum, rawPiece) => {
+      const piece = optionalRecord(rawPiece);
+      if (!piece) throw new Error('malformed production piece');
+      return sum.plus(new Prisma.Decimal(String(piece.lengthM)).mul(String(piece.quantity)));
+    }, new Prisma.Decimal(0)).toString();
+  } catch {
+    return undefined;
+  }
+};
+
+const rawQuantityReviewEvidence = (input: OptimizerDerivedQuantityInput, conflictDetail = '') => {
+  const snapshot = optionalRecord(input.productSnapshot);
+  const plan = optionalRecord(snapshot?.smartCutPlan);
+  const provenPolicy = provenHistoricalPersistencePolicy(input);
+  const deliveryScale = provenPolicy?.persistedScale ?? null;
+  const graphScale = provenPolicy?.policy === 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE' ? 3 : null;
+  const persistedRows: Array<{ deliveryId: string; deliveryProductId: string; rawQuantity: string; transformedQuantity?: string }> = [];
+  if (Array.isArray(input.persistedDeliveries)) {
+    for (const rawDelivery of input.persistedDeliveries) {
+      const delivery = optionalRecord(rawDelivery);
+      if (!delivery || !Array.isArray(delivery.products)) continue;
+      for (const rawProduct of delivery.products) {
+        const product = optionalRecord(rawProduct);
+        if (!product || product.productRowId !== input.productRowId) continue;
+        const rawQuantity = String(product.quantity ?? '');
+        persistedRows.push({
+          deliveryId: String(delivery.id ?? ''),
+          deliveryProductId: String(product.id ?? ''),
+          rawQuantity,
+          ...(historicalConvertedQuantity(rawQuantity, deliveryScale) ? {
+            transformedQuantity: historicalConvertedQuantity(rawQuantity, deliveryScale),
+          } : {}),
+        });
+      }
+    }
+  }
+  const wizardRows: Array<{ deliveryIndex: number; productIndex: number; rawQuantity: string; transformedQuantity?: string }> = [];
+  if (Array.isArray(input.wizardDeliveries)) {
+    input.wizardDeliveries.forEach((rawDelivery, deliveryIndex) => {
+      const delivery = optionalRecord(rawDelivery);
+      if (!delivery || !Array.isArray(delivery.products)) return;
+      delivery.products.forEach((rawProduct, productIndex) => {
+        const product = optionalRecord(rawProduct);
+        if (product?.productRowId === input.productRowId) {
+          const rawQuantity = String(product.quantity ?? '');
+          wizardRows.push({
+            deliveryIndex,
+            productIndex,
+            rawQuantity,
+            ...(historicalConvertedQuantity(rawQuantity, deliveryScale) ? {
+              transformedQuantity: historicalConvertedQuantity(rawQuantity, deliveryScale),
+            } : {}),
+          });
+        }
+      });
+    });
+  }
+  const rawOptimizerQuantity = plan?.totalRequestedLengthM === undefined ? undefined : String(plan.totalRequestedLengthM);
+  const rawProductionQuantity = rawProductionTotal(plan);
+  const rawCanonicalGraphQuantity = input.graphRequestedLengthMeters === undefined
+    ? undefined
+    : String(input.graphRequestedLengthMeters);
+  const rawInvoiceItemQuantity = input.rawInvoiceItemQuantity === undefined
+    ? undefined
+    : String(input.rawInvoiceItemQuantity);
+  const rawPersistedDeliveryTotal = exactTotal(persistedRows.map(row => row.rawQuantity));
+  const transformedPersistedDeliveryTotal = exactTotal(persistedRows.map(row => row.transformedQuantity), deliveryScale);
+  const transformedWizardDeliveryTotal = exactTotal(wizardRows.map(row => row.transformedQuantity), deliveryScale);
+  const transformedOptimizerQuantity = provenPolicy ? rawOptimizerQuantity : undefined;
+  const transformedProductionQuantity = provenPolicy ? rawProductionQuantity : undefined;
+  const transformedCanonicalGraphQuantity = !provenPolicy
+    ? undefined
+    : graphScale === null
+      ? rawCanonicalGraphQuantity
+      : historicalConvertedQuantity(rawCanonicalGraphQuantity, graphScale);
+  const graphComparableOptimizerQuantity = !provenPolicy
+    ? undefined
+    : graphScale === null
+      ? rawOptimizerQuantity
+      : historicalConvertedQuantity(rawOptimizerQuantity, graphScale);
+  const transformedInvoiceItemQuantity = provenPolicy ? rawInvoiceItemQuantity : undefined;
+  const deliveryComparableOptimizerQuantity = historicalConvertedQuantity(rawOptimizerQuantity, deliveryScale);
+  const persistedComparableQuantity = transformedWizardDeliveryTotal || deliveryComparableOptimizerQuantity;
+  const comparisonDifferences: Array<{
+    key: string;
+    labelFa: string;
+    leftSource: string;
+    rightSource: string;
+    value: string;
+    unit: 'meter';
+    basis: 'RAW' | 'HISTORICAL_TRANSFORMED';
+    rule: string;
+    leftComparableValue?: string;
+    rightComparableValue?: string;
+  }> = [];
+  const addDifference = (entry: Omit<(typeof comparisonDifferences)[number], 'value'>, value: string | undefined) => {
+    if (value !== undefined) comparisonDifferences.push({ ...entry, value });
+  };
+  if (/optimizer quantities conflict/i.test(conflictDetail)) {
+    addDifference({
+      key: 'OPTIMIZER_PRODUCTION_MINUS_OPTIMIZER_TOTAL',
+      labelFa: 'اختلاف جمع قطعات تولیدی optimizer با کمیت کل optimizer',
+      leftSource: 'OPTIMIZER_PRODUCTION',
+      rightSource: 'OPTIMIZER_TOTAL',
+      unit: 'meter',
+      basis: 'RAW',
+      rule: 'EXACT_DECIMAL',
+      leftComparableValue: rawProductionQuantity,
+      rightComparableValue: rawOptimizerQuantity,
+    }, exactDifference(rawProductionQuantity, rawOptimizerQuantity));
+  }
+  if (/canonical graph quantity conflicts/i.test(conflictDetail)) {
+    addDifference({
+      key: 'PRODUCT_GRAPH_MINUS_OPTIMIZER',
+      labelFa: 'اختلاف Product Graph با کمیت کل optimizer',
+      leftSource: 'PRODUCT_GRAPH',
+      rightSource: 'OPTIMIZER_TOTAL',
+      unit: 'meter',
+      basis: graphScale === null ? 'RAW' : 'HISTORICAL_TRANSFORMED',
+      rule: graphScale === null ? 'EXACT_DECIMAL' : 'ROUND_HALF_UP_SCALE_THREE',
+      leftComparableValue: transformedCanonicalGraphQuantity,
+      rightComparableValue: graphComparableOptimizerQuantity,
+    }, exactDifference(transformedCanonicalGraphQuantity, graphComparableOptimizerQuantity));
+  }
+  if (/persisted Delivery quantity conflicts/i.test(conflictDetail)) {
+    addDifference({
+      key: 'PERSISTED_DELIVERY_MINUS_COMPARABLE_OPTIMIZER',
+      labelFa: 'اختلاف مجموع Delivery با کمیت تبدیل‌شده قابل‌مقایسه',
+      leftSource: 'PERSISTED_DELIVERY_TOTAL',
+      rightSource: transformedWizardDeliveryTotal ? 'WIZARD_DELIVERY_TOTAL' : 'OPTIMIZER_TOTAL',
+      unit: 'meter',
+      basis: 'HISTORICAL_TRANSFORMED',
+      rule: deliveryScale === 2
+        ? 'ROUND_HALF_UP_SCALE_TWO_PER_ROW_THEN_SUM'
+        : 'ROUND_HALF_UP_SCALE_THREE_PER_ROW_THEN_SUM',
+      leftComparableValue: transformedPersistedDeliveryTotal,
+      rightComparableValue: persistedComparableQuantity,
+    }, exactDifference(transformedPersistedDeliveryTotal, persistedComparableQuantity));
+  }
+  if (/invoice quantity conflicts/i.test(conflictDetail)) {
+    addDifference({
+      key: 'INVOICE_MINUS_OPTIMIZER',
+      labelFa: 'اختلاف کمیت پیش‌فاکتور با کمیت کل optimizer',
+      leftSource: 'INVOICE',
+      rightSource: 'OPTIMIZER_TOTAL',
+      unit: 'meter',
+      basis: 'RAW',
+      rule: 'EXACT_DECIMAL',
+      leftComparableValue: rawInvoiceItemQuantity,
+      rightComparableValue: rawOptimizerQuantity,
+    }, exactDifference(rawInvoiceItemQuantity, rawOptimizerQuantity));
+  }
+  return {
+    productRowId: input.productRowId,
+    productId: input.productId,
+    unit: 'meter',
+    rule: provenPolicy?.policy,
+    reportedGraphSchemaVersion: input.graphSchemaVersion,
+    reportedRoundingPolicy: input.roundingPolicy,
+    producer: input.producer,
+    producerVersion: input.producerVersion,
+    graphAuditCommandId: input.graphAuditCommandId,
+    rawContractItemQuantity: String(input.rawContractItemQuantity ?? ''),
+    rawInvoiceItemQuantity,
+    transformedInvoiceItemQuantity,
+    invoiceComparisonRule: provenPolicy ? 'EXACT_DECIMAL' : undefined,
+    rawOptimizerQuantity,
+    transformedOptimizerQuantity,
+    optimizerComparisonRule: provenPolicy ? 'EXACT_DECIMAL' : undefined,
+    rawProductionQuantity,
+    transformedProductionQuantity,
+    productionComparisonRule: provenPolicy ? 'EXACT_DECIMAL' : undefined,
+    rawProductionPieces: Array.isArray(plan?.productionPieces) ? plan.productionPieces : [],
+    rawCanonicalGraphQuantity,
+    transformedCanonicalGraphQuantity,
+    graphComparisonRule: !provenPolicy
+      ? undefined
+      : graphScale === null ? 'EXACT_DECIMAL' : 'ROUND_HALF_UP_SCALE_THREE',
+    rawPersistedDeliveryRows: persistedRows,
+    rawPersistedDeliveryTotal,
+    transformedPersistedDeliveryTotal,
+    deliveryComparisonRule: deliveryScale === 2
+      ? 'ROUND_HALF_UP_SCALE_TWO_PER_ROW_THEN_SUM'
+      : deliveryScale === 3
+        ? 'ROUND_HALF_UP_SCALE_THREE_PER_ROW_THEN_SUM'
+        : undefined,
+    rawWizardDeliveryRows: wizardRows,
+    ...(comparisonDifferences.length > 0 ? { comparisonDifferences } : {}),
+  };
+};
+
+export const reconcileOptimizerDerivedLongitudinalQuantity = (
+  input: OptimizerDerivedQuantityInput,
+): OptimizerDerivedQuantityEvidence | null => {
+  try {
+    return reconcileOptimizerDerivedLongitudinalQuantityInternal(input);
+  } catch (error) {
+    const evidenceError = asApprovedPricingEvidenceError(error);
+    if (!evidenceError) throw error;
+    const technicalDetail = evidenceError.message;
+    const provenanceProblem = /provenance|ambiguous|missing|منشأ|مبهم/i.test(technicalDetail);
+    if (error instanceof OptimizerQuantityEvidenceConflictError) {
+      throw new OptimizerQuantityEvidenceConflictError({
+        productRowId: String(error.evidence?.productRowId || input.productRowId),
+        policy: String(error.evidence?.rule || `graph-v${input.graphSchemaVersion}:${input.roundingPolicy}`),
+        rawOptimizerQuantity: String(error.evidence?.rawOptimizerQuantity || ''),
+        rawProductionQuantity: String(error.evidence?.rawProductionQuantity || ''),
+        difference: String(error.evidence?.difference || ''),
+        additionalEvidence: rawQuantityReviewEvidence(input, technicalDetail),
+      });
+    }
+    throw new ApprovedPricingEvidenceError({
+      technicalDetail,
+      evidence: {
+        ...rawQuantityReviewEvidence(input, technicalDetail),
+        ...(evidenceError.evidence || {}),
+      },
+      userMessageFa: evidenceError.userMessageFa,
+      reviewKind: 'QUANTITY',
+      remediationKind: evidenceError.remediationKind ||
+        (provenanceProblem ? 'EVIDENCE_RECOVERY' : 'RESPONSIBLE_SELLER_CORRECTION'),
+    });
+  }
 };

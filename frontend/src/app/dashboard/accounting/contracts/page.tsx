@@ -28,6 +28,7 @@ import PersianCalendar from '@/lib/persian-calendar';
 import { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
+import { financialEvidenceReviewFromConflict } from '@/features/accounting/financialEvidenceReview';
 import {
   canonicalizeContractsQuery,
   patchContractsQuery,
@@ -165,8 +166,10 @@ export default function AccountingContractsPage() {
     } catch (error) {
       console.error('Accounting action failed:', error);
       const response = (error as any)?.response?.data;
+      const reviewUrl = financialEvidenceReviewFromConflict(response);
+      if (reviewUrl) await loadContracts();
       setActionError(response?.error || 'اقدام حسابداری انجام نشد');
-      setReviewActionUrl(response?.reviewCase?.actionUrl || null);
+      setReviewActionUrl(reviewUrl);
       return false;
     } finally {
       setActionLoading(null);
@@ -492,7 +495,7 @@ export default function AccountingContractsPage() {
           {actionError}
           {reviewActionUrl && (
             <div className="mt-3">
-              <ErpButton label="رفتن به پرونده بررسی" tone="danger" variant="outline" onClick={() => router.push(reviewActionUrl)} />
+              <ErpButton label="رفتن به پرونده بررسی" tone="danger" variant="outline" href={reviewActionUrl} />
             </div>
           )}
         </div>

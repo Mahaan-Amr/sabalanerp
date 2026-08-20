@@ -147,6 +147,15 @@ const released = await releaseContractEditSession(store, {
 });
 assert.equal(released.ok, true);
 assert.equal(store.record, null);
+const releasedAgain = await releaseContractEditSession(store, {
+  draftId: 'draft-1',
+  userId: 'seller-1',
+  browserSessionId: 'browser-b',
+  leaseToken: takeover.session.leaseToken,
+  baseRevision: 4,
+  now: new Date('2026-07-25T08:00:38.000Z')
+});
+assert.equal(releasedAgain.ok, true, 'releasing an already-cleaned committed session must be idempotent');
 
 const expiredLeaseStore = new MemoryStore();
 const expiredFirst = await acquireContractEditSession(expiredLeaseStore, {

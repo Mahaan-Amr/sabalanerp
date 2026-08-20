@@ -1,5 +1,5 @@
 ﻿import React from 'react';
-import { ErpNeumorphicCard, ErpNeumorphicDisclosure, ErpPressable } from '@/components/erp';
+import { ErpInlineState, ErpNeumorphicCard, ErpNeumorphicDisclosure, ErpPressable } from '@/components/erp';
 import {
   FaFileContract,
   FaUser,
@@ -15,7 +15,9 @@ import {
   FaListAlt,
   FaMoneyCheckAlt
 } from 'react-icons/fa';
-import { formatPriceWithRial } from '@/lib/numberFormat';
+import { formatDisplayNumber, formatPriceWithRial } from '@/lib/numberFormat';
+import PersianCalendar from '@/lib/persian-calendar';
+import { isContractDateOlderThanToday } from '../../utils/contractCreationCompletion';
 import type {
   ContractWizardData,
   ContractStep8DeliveryDetail,
@@ -151,10 +153,20 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
 }) => {
   const signature = wizardData.signature;
   const smsPhoneNumber = getCustomerSmsPhoneNumber(wizardData);
+  const contractDateIsOld = isContractDateOlderThanToday(
+    wizardData.contractDate,
+    PersianCalendar.now()
+  );
 
   return (
     <div className="space-y-6">
       <div className="max-w-6xl mx-auto space-y-6">
+        {contractDateIsOld && (
+          <ErpInlineState
+            kind="stale"
+            title={`تاریخ قرارداد ${wizardData.contractDate} از امروز قدیمی‌تر است؛ پیش از ثبت، تاریخ را بازبینی کنید.`}
+          />
+        )}
         <ErpNeumorphicCard className="border-[var(--sds-accent)] p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-2xl font-bold text-[var(--sds-text-primary)]">خلاصه قرارداد</h3>
@@ -304,7 +316,7 @@ export const Step8DigitalSignature: React.FC<Step8DigitalSignatureProps> = ({
                         <td className="py-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{p.stairPartType !== '—' ? `${p.productType} / ${p.stairPartType}` : p.productType}</td>
                         <td className="py-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{p.dimensions}</td>
                         <td className="py-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{p.quantity}</td>
-                        <td className="py-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{p.squareMeters}</td>
+                        <td className="py-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{formatDisplayNumber(p.squareMeters)}</td>
                         <td className="py-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{formatPriceWithRial(p.totalPrice, financialSummary.currency)}</td>
                       </tr>
                     ))}

@@ -2915,6 +2915,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   useEffect(() => {
     if (!editRecovery.ready || editRecovery.blocked) return;
+    if (wizardData.signature?.contractId) return;
     const draft = buildContractAutosaveDraft();
     if (!draft) return;
     editRecovery.queueRecovery(draft);
@@ -2922,7 +2923,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     buildContractAutosaveDraft,
     editRecovery.blocked,
     editRecovery.queueRecovery,
-    editRecovery.ready
+    editRecovery.ready,
+    wizardData.signature?.contractId
   ]);
 
   useEffect(() => {
@@ -6014,7 +6016,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       leaseToken: editRecovery.leaseToken,
       baseRevision: recoveryScope.baseRevision
     } : null,
-    onCommitted: editRecovery.release,
+    onCommitted: editRecovery.finalizeCommitted,
     onEditSessionFailure: editRecovery.reportMutationFailure,
     draftStorageKey: contractDraftStorageKey
   });

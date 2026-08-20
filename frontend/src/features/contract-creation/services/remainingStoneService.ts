@@ -1,5 +1,5 @@
 import type { CuttingBreakdownEntry, RemainingStone, SlabStandardDimensionEntry, SmartLongitudinalCutPlan } from '../types/contract.types';
-import { sumNumericValues } from '@/lib/numberFormat';
+import { normalizeFloatingPointArtifact, sumNumericValues } from '@/lib/numberFormat';
 import { resolveSawKerfCm } from '../utils/sawKerf';
 
 type UnitType = 'cm' | 'm';
@@ -224,8 +224,8 @@ export const calculateSmartLongitudinalCutPlan = ({
   const sourceLengthConsumedM = shouldSplitSingleLogicalLength
     ? requestedLengthM / stripsPerSource
     : requestedLengthM * sourceBandsNeeded;
-  const consumedAreaSqm = (sourceWidthCm / 100) * sourceLengthConsumedM;
-  const calculatedRequestedAreaSqm = (requestedWidthCm / 100) * totalRequestedLengthM;
+  const consumedAreaSqm = normalizeFloatingPointArtifact((sourceWidthCm / 100) * sourceLengthConsumedM);
+  const calculatedRequestedAreaSqm = normalizeFloatingPointArtifact((requestedWidthCm / 100) * totalRequestedLengthM);
   const mode: SmartLongitudinalCutPlan['mode'] = optimizationEnabled && stripsPerSource > 1 ? 'optimized' : 'single-strip';
 
   if (!longitudinalRatePerMeter) {

@@ -34,6 +34,7 @@ import {
   storeContractSubmissionDiagnostic
 } from '../utils/contractSubmissionDiagnostics';
 import { validateContractPartyIdentity } from '../services/contractPartyIdentity';
+import { finalizeSuccessfulContractCommit } from '../utils/contractCreationCompletion';
 
 interface UseContractSubmissionOptions {
   wizardData: ContractWizardData;
@@ -58,44 +59,6 @@ interface UseContractSubmissionOptions {
   onEditSessionFailure?: (error: unknown) => string | null;
   draftStorageKey?: string;
 }
-
-const normalizeIranMobileNumber = (value?: string | null) => {
-  if (!value) return null;
-
-  const digits = value.replace(/\D/g, '');
-  let normalized = digits;
-
-  if (digits.startsWith('0098')) {
-    normalized = `0${digits.slice(4)}`;
-  } else if (digits.startsWith('98') && digits.length === 12) {
-    normalized = `0${digits.slice(2)}`;
-  } else if (digits.startsWith('9') && digits.length === 10) {
-    normalized = `0${digits}`;
-  }
-
-  return /^09\d{9}$/.test(normalized) ? normalized : null;
-};
-
-const getCustomerSmsPhoneNumber = (customer: ContractWizardData['customer']) => {
-  const phoneNumbers = customer?.phoneNumbers || [];
-  const candidates = [
-    phoneNumbers.find((phone) => phone.isPrimary && phone.type === 'mobile')?.number,
-    ...phoneNumbers.filter((phone) => phone.type === 'mobile').map((phone) => phone.number),
-    phoneNumbers.find((phone) => phone.isPrimary)?.number,
-    customer?.projectManagerNumber,
-    ...phoneNumbers.filter((phone) => phone.isActive !== false).map((phone) => phone.number),
-    ...phoneNumbers.map((phone) => phone.number),
-    customer?.homeNumber,
-    customer?.workNumber
-  ];
-
-  for (const candidate of candidates) {
-    const mobile = normalizeIranMobileNumber(candidate);
-    if (mobile) return mobile;
-  }
-
-  return null;
-};
 
 const toIsoDate = (value?: string | null): string | undefined => {
   if (!value) return undefined;
@@ -445,48 +408,28 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
       if (response.data.success) {
         clearContractSubmissionDiagnostic();
         if (isEditMode) {
-          await onCommitted?.();
-          router.push(`/dashboard/sales/contracts/${editContractId}`);
+          await finalizeSuccessfulContractCommit({
+            contractId: editContractId as string,
+            finalizeRecovery: onCommitted,
+            justCreated: false,
+            navigate: (destination) => router.replace(destination)
+          });
           return;
         }
         const createdContractId = response.data.data.id;
         const savedContractNumber = response.data.data.contractNumber || wizardData.contractNumber;
-        const creatorSequenceNumber = response.data.data.creatorSequenceNumber ?? wizardData.creatorSequenceNumber ?? null;
-        
-        // Store contract ID in signature state for Step 8
-        updateWizardData({
-          products: normalizedProducts,
-          contractNumber: savedContractNumber,
-          creatorSequenceNumber,
-          signature: {
-            ...(wizardData.signature || {
-              phoneNumber: null,
-              contractId: null,
-              contractStatus: null,
-              confirmationSent: false,
-              confirmationStatus: null,
-              linkExpiresAt: null,
-              otpExpiresAt: null,
-              attemptsUsed: 0,
-              maxAttempts: 5,
-              resendCount: 0,
-              lastSentAt: null,
-              lastOpenedAt: null
-            }),
-            contractId: createdContractId,
-            contractStatus: response.data.data.status || null,
-            phoneNumber: getCustomerSmsPhoneNumber(wizardData.customer)
-          }
-        });
-        
-        // Move to final step (Digital Signature) instead of redirecting
         if (typeof window !== 'undefined') {
           localStorage.removeItem(draftStorageKey);
           localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
           localStorage.removeItem('contractWizardState');
         }
-        await onCommitted?.();
-        setCurrentStep(7);
+        await finalizeSuccessfulContractCommit({
+          contractId: createdContractId,
+          finalizeRecovery: onCommitted,
+          navigate: (destination) => router.replace(
+            `${destination}&contractNumber=${encodeURIComponent(savedContractNumber)}`
+          )
+        });
       } else {
         setErrors({ general: response.data.error || 'خطا در ثبت قرارداد' });
       }

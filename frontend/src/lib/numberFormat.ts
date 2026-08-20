@@ -155,6 +155,13 @@ export const formatDisplayNumber = (value: number | string | null | undefined): 
   });
 };
 
+export const normalizeFloatingPointArtifact = (value: number): number => {
+  if (!Number.isFinite(value)) return value;
+  const normalized = Number(value.toPrecision(15));
+  const machineNoise = Number.EPSILON * Math.max(1, Math.abs(value)) * 8;
+  return Math.abs(value - normalized) <= machineNoise ? normalized : value;
+};
+
 export const formatDisplayNumberLatin = (value: number | string | null | undefined): string => {
   if (value === null || value === undefined || value === '') {
     return '0';

@@ -9,6 +9,22 @@ const approx = (actual: number, expected: number) => {
 };
 
 {
+  const plan = calculateSmartLongitudinalCutPlan({
+    originalWidthCm: 40,
+    enteredWidth: 27,
+    enteredWidthUnit: 'cm',
+    enteredLength: 1,
+    enteredLengthUnit: 'm',
+    quantity: 30,
+    longitudinalRatePerMeter: 20_000,
+    calibrationCutEnabled: false,
+    seed: 30
+  });
+  assert.equal(plan.requestedAreaSqm, 8.1, 'saved requested area must not retain a binary-float artifact');
+  assert.equal(plan.consumedAreaSqm, 12);
+}
+
+{
   const packedExplicitPieces = calculateSmartLongitudinalCutPlan({
     originalWidthCm: 40,
     enteredWidth: 20,

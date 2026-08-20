@@ -175,7 +175,7 @@ export const createCanonicalLayerCalculationRequest = ({
     ? baseMaterialRate * (1 + Number(mandatoryPercentage || 0) / 100)
     : baseMaterialRate;
   const sourceLengthMeters = usesParentMaterial
-    ? getDraftStandardLengthMeters(draft)
+    ? getPricingLengthMeters(draft)
     : Number(sourceStone?.motherLengthValue || 0);
   const sourceWidthMeters = Number(sourceStone?.widthValue || 0) / 100;
   const sourceBatchId = parseStableIdentity(

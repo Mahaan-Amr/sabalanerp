@@ -5,6 +5,7 @@ import {
   calculateCanonicalLayerDraft,
   calculateLayerSourcePlan,
   computeTotalsV2,
+  createCanonicalLayerCalculationRequest,
   createCanonicalStairDraftInput,
   formatCanonicalLayerConflict,
   getLayerEdgeDemands,
@@ -232,6 +233,60 @@ for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
       canonicalLayer.result.physicalStripCount
     );
   }
+}
+
+{
+  // A blank manual mother length is canonical derived-from-finished intent.
+  // The layer adapter must use the same effective source length as the parent.
+  const parentStone = {
+    id: 'stair-parent-material',
+    code: 'STAIR-PARENT',
+    name: 'Parent stair stone',
+    namePersian: 'سنگ والد پله',
+    currency: 'تومان',
+    isAvailable: true,
+    widthValue: 40
+  } as Product;
+  const layerInput = {
+    part: 'tread',
+    draft: stairDraft({
+      stoneId: parentStone.id,
+      stoneProduct: parentStone,
+      lengthValue: 1.3,
+      standardLengthValue: null,
+      widthCm: 40,
+      quantity: 3,
+      pricePerSquareMeter: 1_500_000,
+      layerConfigurationDraftId: 'derived-parent-layer',
+      numberOfLayersPerStair: 1,
+      layerWidthCm: 10,
+      layerTypeId: 'double-layer',
+      layerTypeName: 'لایه دوبل',
+      layerTypePrice: 50_000,
+      layerEdges: { front: true },
+      layerSourceKind: 'parentMaterial'
+    }),
+    parentProductRowId: 'derived-parent-row',
+    creationOrder: 0,
+    availableInventory: [],
+    parentRemainingStoneIds: [],
+    layerUnit: 'squareMeter',
+    getCuttingTypePricePerMeter: () => 10_000
+  };
+  const layerRequest = createCanonicalLayerCalculationRequest(layerInput);
+  assert.equal(layerRequest.input.source.kind, 'parent-material');
+  assert.equal(
+    layerRequest.input.source.kind === 'parent-material'
+      ? layerRequest.input.source.sourceRows[0]?.lengthMeters
+      : undefined,
+    '1.3'
+  );
+  const canonicalLayer = calculateCanonicalLayerDraft(layerInput);
+  assert.equal(
+    canonicalLayer.ok,
+    true,
+    JSON.stringify(canonicalLayer)
+  );
 }
 
 {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { projectCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { createContract, type ContractTransactionRunner } from '../contractService';
+import { contractDiscountEligibleBase } from '../contractDiscountEvidence';
 import { buildLegacyContractMigrationPlan } from '../contractProductGraphMigration';
 
 const prisma = new PrismaClient();
@@ -48,12 +49,24 @@ const run = async () => {
   const createFromSource = (
     label: string,
     discount: unknown,
-    eligibilityShape: 'explicit' | 'current-draft-omitted' = 'explicit',
+    eligibilityShape:
+      | 'explicit'
+      | 'current-draft-omitted'
+      | 'stair-v2-parent-omitted' = 'explicit',
   ) => {
     const contractData = JSON.parse(JSON.stringify(source.contractData));
+    let stairParentWritten = false;
     contractData.products = contractData.products.map((product: any) => {
       const meta = { ...(product.meta || {}) };
-      if (eligibilityShape === 'explicit' || product.meta?.isLayer === true) {
+      const makeStairParent =
+        eligibilityShape === 'stair-v2-parent-omitted' &&
+        product.meta?.isLayer !== true &&
+        !stairParentWritten;
+      if (makeStairParent) {
+        stairParentWritten = true;
+        meta.stairStepperV2 = true;
+        delete meta.isLayer;
+      } else if (eligibilityShape === 'explicit' || product.meta?.isLayer === true) {
         meta.isLayer = product.meta?.isLayer === true;
       } else {
         delete meta.isLayer;
@@ -94,6 +107,72 @@ const run = async () => {
       },
     }, source.createdBy, undefined, transactionHarness);
   };
+
+  const createdFromStairParent = await createFromSource(
+    'stair-v2-parent-omitted-layer-evidence',
+    null,
+    'stair-v2-parent-omitted',
+  );
+  const stairParent = (createdFromStairParent.contractData as any).products.find(
+    (product: any) => product.meta?.stairStepperV2 === true,
+  );
+  assert(stairParent, 'fixture must contain one ordinary stair V2 parent');
+  assert.equal(
+    stairParent.meta.isLayer,
+    false,
+    'ordinary stair V2 parents must persist explicit non-layer discount eligibility',
+  );
+
+  const createdFromPositiveDiscountStair = await createFromSource(
+    'stair-v2-parent-positive-discount',
+    { enabled: true, percent: 5, amount: 1 },
+    'stair-v2-parent-omitted',
+  );
+  const positiveDiscountStairParent =
+    (createdFromPositiveDiscountStair.contractData as any).products.find(
+      (product: any) => product.meta?.stairStepperV2 === true,
+    );
+  assert.equal(
+    positiveDiscountStairParent?.meta?.isLayer,
+    false,
+    'positive-discount stair contracts must not defer missing eligibility evidence to accounting',
+  );
+  const positiveDiscountProducts =
+    (createdFromPositiveDiscountStair.contractData as any).products as any[];
+  const positiveDiscountSnapshot = new Map(
+    positiveDiscountProducts.map(product => [product.rowId, product]),
+  );
+  const positiveDiscountPlan = buildLegacyContractMigrationPlan({
+    id: createdFromPositiveDiscountStair.id,
+    totalAmount: createdFromPositiveDiscountStair.totalAmount,
+    contractData: createdFromPositiveDiscountStair.contractData,
+  }, 1);
+  assert(positiveDiscountPlan.ok, 'the created stair snapshot must rebuild its canonical graph');
+  const positiveDiscountProjection = projectCanonicalProductGraph(
+    positiveDiscountPlan.graph,
+    'accounting',
+  );
+  const positiveDiscountEligibleBase = contractDiscountEligibleBase(
+    positiveDiscountSnapshot,
+    positiveDiscountProjection.products,
+  );
+  const expectedPositiveDiscountBase = positiveDiscountProjection.products.reduce(
+    (sum, product) => positiveDiscountSnapshot.get(product.productRowId)?.meta?.isLayer === false
+      ? sum.plus(product.baseAmountToman || 0)
+      : sum,
+    new Prisma.Decimal(0),
+  );
+  assert(
+    positiveDiscountProjection.products.some(
+      product => product.productRowId === positiveDiscountStairParent?.rowId,
+    ),
+    'the stair parent must survive into the accounting projection',
+  );
+  assert.equal(
+    positiveDiscountEligibleBase.toString(),
+    expectedPositiveDiscountBase.toString(),
+    'accounting must include ordinary stair V2 parents and exclude only explicit layer rows',
+  );
 
   const createdFromCurrentDraft = await createFromSource(
     'current-draft-omitted-layer-evidence',

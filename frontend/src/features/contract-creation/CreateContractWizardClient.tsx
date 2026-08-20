@@ -9593,6 +9593,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     finishingSquareMeters: draft.finishingEnabled && finishingCost > 0 && finishingCalculationBase === 'squareMeters' ? finishingQuantity : null,
                     meta: {
                       stairStepperV2: true,
+                      isLayer: false,
                       meters: { lengthM: actualLengthM, widthM, toolsMeters },
                       tools: metaTools,
                       stair: {

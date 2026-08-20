@@ -187,8 +187,7 @@ const productRecordsFrom = (contractData: unknown): Readonly<Record<string, unkn
 const hasCurrentLayerEvidence = (
   product: Readonly<Record<string, unknown>>,
   meta: Readonly<Record<string, unknown>>,
-) => meta.stairStepperV2 === true ||
-  meta.layerInfo != null ||
+) => meta.layerInfo != null ||
   meta.layerType != null ||
   product.layerTypeId != null ||
   product.layerTypeName != null ||

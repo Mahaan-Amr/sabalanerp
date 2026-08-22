@@ -4,6 +4,7 @@ import {
   hiringTaskCapability,
   hiringTaskDetailVisible,
   hiringLifecycleStatusLabel,
+  resolvePhaseAfterLifecycleAdvance,
   resolveSelectedHiringPhase,
   selectedHiringPhase,
   shouldLoadCompanyEvaluationPlan,
@@ -72,6 +73,39 @@ assert.equal(
   "REVIEW_IDENTITY",
 );
 assert.equal(hiringLifecycleStatusLabel.ACTION_REQUIRED, "اقدام شما");
+
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: "COMPANY_EVALUATION_PLAN",
+    previousCurrentPhaseId: "COMPANY_EVALUATION_PLAN",
+    nextCurrentPhaseId: "IDENTITY",
+  }),
+  "IDENTITY",
+);
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: "INITIAL_HR_REVIEW",
+    previousCurrentPhaseId: "IDENTITY",
+    nextCurrentPhaseId: "IDENTITY",
+  }),
+  "INITIAL_HR_REVIEW",
+);
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: "APPLICATION",
+    previousCurrentPhaseId: "IDENTITY",
+    nextCurrentPhaseId: "OFFER",
+  }),
+  "APPLICATION",
+);
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: null,
+    previousCurrentPhaseId: null,
+    nextCurrentPhaseId: "IDENTITY",
+  }),
+  null,
+);
 
 const taskCapabilities = [
   {

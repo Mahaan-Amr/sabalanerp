@@ -9,7 +9,7 @@ import {
   ErpSelect,
   ErpTextarea,
 } from "@/components/erp";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useParams,
   usePathname,
@@ -38,6 +38,7 @@ import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { HiringLifecycle } from "@/features/hr-hiring/HiringLifecycle";
 import {
   hiringTaskDetailVisible,
+  resolvePhaseAfterLifecycleAdvance,
   resolveSelectedHiringPhase,
   shouldLoadCompanyEvaluationPlan,
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
@@ -147,6 +148,7 @@ export default function HiringCasePage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const previousCurrentPhaseId = useRef<string | null>(null);
   const [data, setData] = useState<any>();
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -287,6 +289,34 @@ export default function HiringCasePage() {
     // `load` intentionally follows the route id; recreating it is harmless but would retrigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  const requestedLifecyclePhaseId = searchParams.get("phase");
+  const currentLifecyclePhaseId = data?.lifecycle?.currentPhaseId || null;
+  const effectiveRequestedLifecyclePhaseId = currentLifecyclePhaseId
+    ? resolvePhaseAfterLifecycleAdvance({
+        requestedPhaseId: requestedLifecyclePhaseId,
+        previousCurrentPhaseId: previousCurrentPhaseId.current,
+        nextCurrentPhaseId: currentLifecyclePhaseId,
+      })
+    : requestedLifecyclePhaseId;
+  useEffect(() => {
+    if (!currentLifecyclePhaseId) return;
+    previousCurrentPhaseId.current = currentLifecyclePhaseId;
+    if (
+      !effectiveRequestedLifecyclePhaseId ||
+      effectiveRequestedLifecyclePhaseId === requestedLifecyclePhaseId
+    )
+      return;
+    const next = new URLSearchParams(searchParams.toString());
+    next.set("phase", effectiveRequestedLifecyclePhaseId);
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }, [
+    currentLifecyclePhaseId,
+    effectiveRequestedLifecyclePhaseId,
+    pathname,
+    requestedLifecyclePhaseId,
+    router,
+    searchParams,
+  ]);
   const run = async (
     action: () => Promise<any>,
     success: string,
@@ -393,7 +423,10 @@ export default function HiringCasePage() {
     "EMPLOYMENT_ACTIVATION",
   );
   const selectedLifecyclePhase = data.lifecycle
-    ? resolveSelectedHiringPhase(data.lifecycle, searchParams.get("phase"))
+    ? resolveSelectedHiringPhase(
+        data.lifecycle,
+        effectiveRequestedLifecyclePhaseId,
+      )
     : null;
   const selectLifecyclePhase = (phaseId: string) => {
     const next = new URLSearchParams(searchParams.toString());

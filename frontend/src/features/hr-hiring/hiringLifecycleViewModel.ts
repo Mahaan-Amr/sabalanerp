@@ -85,6 +85,21 @@ export const resolveSelectedHiringPhase = (
     ? (requestedPhase as string)
     : projection.currentPhaseId;
 
+export const resolvePhaseAfterLifecycleAdvance = ({
+  requestedPhaseId,
+  previousCurrentPhaseId,
+  nextCurrentPhaseId,
+}: {
+  requestedPhaseId: string | null;
+  previousCurrentPhaseId: string | null;
+  nextCurrentPhaseId: string;
+}) =>
+  previousCurrentPhaseId &&
+  requestedPhaseId === previousCurrentPhaseId &&
+  previousCurrentPhaseId !== nextCurrentPhaseId
+    ? nextCurrentPhaseId
+    : requestedPhaseId;
+
 export const selectedHiringPhase = (
   projection: HiringLifecycleProjection,
   requestedPhase: string | null | undefined,

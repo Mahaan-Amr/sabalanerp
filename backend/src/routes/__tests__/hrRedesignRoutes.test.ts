@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import type { RequestHandler } from 'express';
 import { HR_REDESIGN_CATALOG } from '../../services/hrRedesignDataContracts';
 import router, { canLinkPersonnelUserAccount, featureForPath, filterFoundationPositions, hrBaseFeatureLevelForRequest } from '../hr';
-import hrHiringRouter, { hrHiringBaseFeatureLevelForRequest } from '../hr-hiring';
+import hrHiringRouter, { hrHiringBaseFeatureForRequest, hrHiringBaseFeatureLevelForRequest } from '../hr-hiring';
 
 for (const personnelPath of ['/personnel', '/relationships/relationship-1', '/assignments/assignment-1', '/supervisor-candidates']) {
   assert.equal(featureForPath(personnelPath), 'PERSONNEL', `${personnelPath} must use the Personnel feature boundary`);
@@ -18,6 +18,12 @@ assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications/app-1/dec
 assert.equal(hrHiringBaseFeatureLevelForRequest('PUT', '/applications/app-1/onboarding-tasks/task-1'), 'VIEW');
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/authorities'), 'ADMIN');
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/unclassified-mutation'), 'EDIT');
+assert.equal(
+  hrHiringBaseFeatureForRequest('/work-items/summary'),
+  null,
+  'personal HR work summary must use the workspace boundary instead of an optional feature grant',
+);
+assert.equal(hrHiringBaseFeatureForRequest('/work-items'), 'HR_WORK_MANAGEMENT');
 assert.equal(canLinkPersonnelUserAccount('USER', true), false, 'User Administration also requires an eligible system role');
 assert.equal(canLinkPersonnelUserAccount('MANAGER', false), false, 'system role alone cannot cross User Administration');
 assert.equal(canLinkPersonnelUserAccount('MANAGER', true), true, 'both User Administration boundaries permit account linking');

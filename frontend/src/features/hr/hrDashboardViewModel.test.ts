@@ -1,5 +1,20 @@
 import assert from "node:assert/strict";
-import { positionCapacityCoverage } from "./hrDashboardViewModel";
+import {
+  hasHrWorkspaceAccess,
+  positionCapacityCoverage,
+} from "./hrDashboardViewModel";
+
+assert.equal(
+  hasHrWorkspaceAccess([{ workspace: "hr", permissionLevel: "view" }]),
+  true,
+  "the personal HR dashboard surface belongs to every user with HR workspace access",
+);
+
+assert.equal(
+  hasHrWorkspaceAccess([{ workspace: "accounting", permissionLevel: "admin" }]),
+  false,
+  "access to another workspace must not expose the HR dashboard surface",
+);
 
 assert.deepEqual(positionCapacityCoverage(8, 20), {
   committed: 8,

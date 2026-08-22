@@ -76,7 +76,7 @@ import {
   personalHrWorkProgress,
   staleAutomaticHiringWorkItemStatus
 } from '../services/hrWorkItems';
-import { requireHrFeature } from '../middleware/hrAuthorization';
+import { requireHrAuthorization, requireHrFeature } from '../middleware/hrAuthorization';
 import { activeHrActionPermissionsForUser, activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
 import { normalizeCoveredHiringAmounts, normalizeHiringRial } from '../services/hrApplicantExperience';
 import { assertHiringDecisionGate } from '../services/hrHiringDecisionPolicy';
@@ -1141,13 +1141,19 @@ export const hrHiringBaseFeatureLevelForRequest = (method: string, path: string)
     : 'EDIT' as const;
 };
 
+export const hrHiringBaseFeatureForRequest = (path: string) => {
+  if (path === '/work-items/summary') return null;
+  if (path.startsWith('/work-items')) return 'HR_WORK_MANAGEMENT';
+  if (path.startsWith('/authorities')) return 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION';
+  return 'RECRUITMENT_CASES';
+};
+
 router.use((req: AuthRequest, res: Response, next: NextFunction) => {
-  const featureCode = req.path.startsWith('/work-items')
-    ? 'HR_WORK_MANAGEMENT'
-    : req.path.startsWith('/authorities')
-      ? 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION'
-      : 'RECRUITMENT_CASES';
+  const featureCode = hrHiringBaseFeatureForRequest(req.path);
   const level = hrHiringBaseFeatureLevelForRequest(req.method, req.path);
+  if (!featureCode) {
+    return requireHrAuthorization({ workspaceLevel: level })(req, res, next);
+  }
   return requireHrFeature(featureCode, level)(req, res, next);
 });
 

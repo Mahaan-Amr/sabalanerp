@@ -10,6 +10,10 @@ const router = express.Router();
 const isManager = (req: any) => req.user?.role === 'MANAGER';
 const isAdminPermissionLevel = (permissionLevel?: string) =>
   permissionLevel === WORKSPACE_PERMISSIONS.ADMIN;
+const rejectLegacyHrWriter = (res: Response) => res.status(409).json({
+  success: false,
+  message: 'ثبت مجوز منابع انسانی از این مسیر متوقف شده است. مدیر سامانه باید مجوز را از بخش مدیریت دسترسی منابع انسانی ثبت کند تا سابقه و تاریخ اعتبار آن حفظ شود.',
+});
 
 // ==================== WORKSPACE PERMISSIONS ====================
 
@@ -136,6 +140,7 @@ router.post('/', protect, authorize('ADMIN', 'MANAGER'), [
     }
 
     const { userId, workspace, permissionLevel, expiresAt } = req.body;
+    if (workspace === WORKSPACES.HR) return rejectLegacyHrWriter(res);
 
     // Check if user exists
     const user = await prisma.user.findUnique({
@@ -299,6 +304,7 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
         error: 'Permission not found'
       });
     }
+    if (permission.workspace === WORKSPACES.HR) return rejectLegacyHrWriter(res);
 
     const targetUser = await prisma.user.findUnique({
       where: { id: permission.userId }
@@ -392,6 +398,7 @@ router.delete('/:id', protect, authorize('ADMIN', 'MANAGER'), async (req: any, r
         error: 'Permission not found'
       });
     }
+    if (permission.workspace === WORKSPACES.HR) return rejectLegacyHrWriter(res);
 
     const targetUser = await prisma.user.findUnique({
       where: { id: permission.userId }

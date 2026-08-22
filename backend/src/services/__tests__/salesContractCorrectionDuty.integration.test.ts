@@ -6,12 +6,235 @@ import { claimCrossWorkspaceDuty, reassignCrossWorkspaceDuty, respondToCrossWork
 import {
   completeSalesContractCorrectionEdit,
   reconcileSalesContractCorrectionDuties,
+  requestAccountingSalesContractCorrection,
   requestSalesContractCorrection,
 } from '../salesContractCorrectionDuty';
 
 process.env.DATABASE_URL ??= 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public';
 
 const rollback = new Error('ROLLBACK_SALES_CONTRACT_CORRECTION_DUTY_TEST');
+
+test('Accounting creates a manager-approved correction for the Responsible Seller and verifies the result', async () => {
+  const prisma = new PrismaClient();
+  try {
+    await assert.rejects(prisma.$transaction(async (tx) => {
+      const suffix = `accounting-origin-${Date.now()}`;
+      const [initiator, accountingManager, seller, salesManager, delegateSeller] = await Promise.all([
+        tx.user.create({ data: {
+          email: `${suffix}-initiator@example.invalid`, username: `${suffix}-initiator`, password: 'not-a-login-secret',
+          firstName: 'Accounting', lastName: 'Initiator',
+        } }),
+        tx.user.create({ data: {
+          email: `${suffix}-manager@example.invalid`, username: `${suffix}-manager`, password: 'not-a-login-secret',
+          firstName: 'Accounting', lastName: 'Manager',
+        } }),
+        tx.user.create({ data: {
+          email: `${suffix}-seller@example.invalid`, username: `${suffix}-seller`, password: 'not-a-login-secret',
+          firstName: 'Responsible', lastName: 'Seller',
+        } }),
+        tx.user.create({ data: {
+          email: `${suffix}-sales-manager@example.invalid`, username: `${suffix}-sales-manager`, password: 'not-a-login-secret',
+          firstName: 'Sales', lastName: 'Manager',
+        } }),
+        tx.user.create({ data: {
+          email: `${suffix}-delegate@example.invalid`, username: `${suffix}-delegate`, password: 'not-a-login-secret',
+          firstName: 'Delegate', lastName: 'Seller',
+        } }),
+      ]);
+      const [department, customer] = await Promise.all([
+        tx.department.create({ data: { name: `${suffix}-department`, namePersian: `${suffix}-department-fa` } }),
+        tx.crmCustomer.create({ data: { firstName: 'Test', lastName: 'Customer', createdBy: seller.id } }),
+      ]);
+      const contract = await tx.salesContract.create({ data: {
+        contractNumber: `SC-${suffix}`, title: 'Contract correction', titlePersian: 'اصلاح قرارداد',
+        content: 'Contract content', customerId: customer.id, departmentId: department.id,
+        createdBy: seller.id, responsibleSellerId: seller.id,
+      } });
+      await Promise.all([
+        tx.featurePermission.create({ data: {
+          userId: initiator.id, workspace: 'accounting', feature: 'accounting_corrections_create',
+          permissionLevel: 'edit', grantedBy: accountingManager.id,
+        } }),
+        tx.featurePermission.create({ data: {
+          userId: initiator.id, workspace: 'accounting', feature: 'accounting_corrections_verify',
+          permissionLevel: 'edit', grantedBy: accountingManager.id,
+        } }),
+        tx.featurePermission.create({ data: {
+          userId: accountingManager.id, workspace: 'accounting', feature: 'accounting_corrections_approve',
+          permissionLevel: 'edit', grantedBy: accountingManager.id,
+        } }),
+        tx.workspacePermission.create({ data: {
+          userId: salesManager.id, workspace: 'sales', permissionLevel: 'admin', grantedBy: accountingManager.id,
+        } }),
+        tx.featurePermission.create({ data: {
+          userId: salesManager.id, workspace: 'sales', feature: 'sales_contracts_edit',
+          permissionLevel: 'admin', grantedBy: accountingManager.id,
+        } }),
+        tx.workspacePermission.create({ data: {
+          userId: delegateSeller.id, workspace: 'sales', permissionLevel: 'edit', grantedBy: accountingManager.id,
+        } }),
+        tx.featurePermission.create({ data: {
+          userId: delegateSeller.id, workspace: 'sales', feature: 'sales_contracts_edit',
+          permissionLevel: 'edit', grantedBy: accountingManager.id,
+        } }),
+      ]);
+
+      const created = await requestAccountingSalesContractCorrection(tx, {
+        contractId: contract.id,
+        actorUserId: initiator.id,
+        category: 'AMOUNT_PRICING',
+        priority: 'HIGH',
+        reason: 'مبلغ قرارداد باید اصلاح شود.',
+        idempotencyKey: `${suffix}:request`,
+        now: new Date('2026-08-16T08:00:00.000Z'),
+      });
+      assert.deepEqual({
+        status: created.correction.status,
+        action: created.duty.sourceActionCode,
+        assignee: created.duty.currentAssigneeUserId,
+      }, {
+        status: 'ACKNOWLEDGED',
+        action: 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION',
+        assignee: null,
+      });
+      const joined = await requestAccountingSalesContractCorrection(tx, {
+        contractId: contract.id, actorUserId: initiator.id, category: 'TAX_INFO', priority: 'MEDIUM',
+        reason: 'یافته تکمیلی پیش از تصمیم مدیر.', idempotencyKey: `${suffix}:joined`,
+        now: new Date('2026-08-16T08:01:00.000Z'),
+      });
+      assert.equal(joined.joined, true);
+
+      await assert.rejects(claimCrossWorkspaceDuty(tx, {
+        dutyId: created.duty.id,
+        actorUserId: initiator.id,
+        policyVersion: 2,
+      }), /SEPARATION_OF_DUTIES_CONFLICT/);
+
+      await claimCrossWorkspaceDuty(tx, {
+        dutyId: created.duty.id,
+        actorUserId: accountingManager.id,
+        policyVersion: 2,
+      });
+      const approved = await respondToCrossWorkspaceDuty(tx, {
+        dutyId: created.duty.id,
+        actorUserId: accountingManager.id,
+        actionCode: 'APPROVE',
+        expectedSourceVersion: 1,
+        expectedEnvelopeVersion: 1,
+        reason: null,
+        policyVersion: 2,
+      });
+      assert.equal(approved.successor.currentAssigneeUserId, seller.id);
+      assert.equal(approved.successor.sourceActionCode, 'SALES_EDIT_CONTRACT_CORRECTION');
+
+      const queued = await requestAccountingSalesContractCorrection(tx, {
+        contractId: contract.id, actorUserId: initiator.id, category: 'DELIVERY_SCHEDULE', priority: 'HIGH',
+        reason: 'یافته جدید پس از شروع ویرایش باید در زنجیره بعدی باز شود.',
+        idempotencyKey: `${suffix}:queued`, now: new Date('2026-08-24T07:30:00.000Z'),
+      });
+      assert.equal(queued.queuedSuccessor, true);
+
+      await reassignCrossWorkspaceDuty(tx, {
+        dutyId: approved.successor.id, actorUserId: salesManager.id, targetUserId: delegateSeller.id,
+        expectedAssigneeUserId: seller.id, reason: 'بازتخصیص ممیزی‌شده توسط مدیر فروش.', policyVersion: 2,
+        now: new Date('2026-08-24T07:45:00.000Z'),
+      });
+
+      const edited = await completeSalesContractCorrectionEdit(tx, {
+        contractId: contract.id,
+        actorUserId: delegateSeller.id,
+        note: 'اصلاح فروش ثبت شد.',
+        policyVersion: 2,
+        now: new Date('2026-08-24T08:00:00.000Z'),
+      });
+      assert.equal(edited.successor.currentAssigneeUserId, initiator.id);
+      assert.equal(edited.successor.sourceActionCode, 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION');
+
+      const verified = await respondToCrossWorkspaceDuty(tx, {
+        dutyId: edited.successor.id,
+        actorUserId: initiator.id,
+        actionCode: 'VERIFY',
+        expectedSourceVersion: 3,
+        expectedEnvelopeVersion: 1,
+        reason: 'تغییرات با درخواست حسابداری منطبق است.',
+        policyVersion: 2,
+        now: new Date('2026-08-24T09:00:00.000Z'),
+      });
+      assert.equal(verified.correction.status, 'RESOLVED');
+      assert.equal(verified.successor?.sourceActionCode, 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION');
+      assert.equal((await tx.accountingCorrectionRequest.count({ where: { contractId: contract.id } })), 2);
+      throw rollback;
+    }, { timeout: 120_000 }), (error: unknown) => error === rollback);
+  } finally {
+    await prisma.$disconnect();
+  }
+});
+
+test('ADMIN may execute every correction stage through the audited workflow without becoming the Responsible Seller', async () => {
+  const prisma = new PrismaClient();
+  try {
+    await assert.rejects(prisma.$transaction(async (tx) => {
+      const suffix = `admin-correction-override-${Date.now()}`;
+      const [admin, seller] = await Promise.all([
+        tx.user.create({ data: {
+          email: `${suffix}-admin@example.invalid`, username: `${suffix}-admin`, password: 'not-a-login-secret',
+          firstName: 'System', lastName: 'Admin', role: 'ADMIN',
+        } }),
+        tx.user.create({ data: {
+          email: `${suffix}-seller@example.invalid`, username: `${suffix}-seller`, password: 'not-a-login-secret',
+          firstName: 'Responsible', lastName: 'Seller',
+        } }),
+      ]);
+      const [department, customer] = await Promise.all([
+        tx.department.create({ data: { name: `${suffix}-department`, namePersian: `${suffix}-department-fa` } }),
+        tx.crmCustomer.create({ data: { firstName: 'Admin', lastName: 'Override', createdBy: seller.id } }),
+      ]);
+      const contract = await tx.salesContract.create({ data: {
+        contractNumber: `SC-${suffix}`, title: 'Admin correction', titlePersian: 'اصلاح مدیر سیستم',
+        content: 'Contract content', customerId: customer.id, departmentId: department.id,
+        createdBy: seller.id, responsibleSellerId: seller.id,
+      } });
+      const createdAt = new Date('2026-08-22T10:00:00.000Z');
+      const created = await requestAccountingSalesContractCorrection(tx, {
+        contractId: contract.id, actorUserId: admin.id, category: 'OTHER', priority: 'URGENT',
+        reason: 'مدیر سیستم زنجیره رسمی اصلاح را آغاز می‌کند.', idempotencyKey: `${suffix}:request`, now: createdAt,
+      });
+      await claimCrossWorkspaceDuty(tx, {
+        dutyId: created.duty.id, actorUserId: admin.id, policyVersion: 2,
+        now: new Date('2026-08-22T10:01:00.000Z'),
+      });
+      const approved = await respondToCrossWorkspaceDuty(tx, {
+        dutyId: created.duty.id, actorUserId: admin.id, actionCode: 'APPROVE',
+        expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 2,
+        now: new Date('2026-08-22T10:02:00.000Z'),
+      });
+      assert.equal(approved.successor.currentAssigneeUserId, seller.id);
+      const edited = await completeSalesContractCorrectionEdit(tx, {
+        contractId: contract.id, actorUserId: admin.id, note: 'ویرایش با Admin Override ثبت شد.', policyVersion: 2,
+        now: new Date('2026-09-01T10:03:00.000Z'),
+      });
+      assert.equal(edited.successor.currentAssigneeUserId, admin.id);
+      const verified = await respondToCrossWorkspaceDuty(tx, {
+        dutyId: edited.successor.id, actorUserId: admin.id, actionCode: 'VERIFY',
+        expectedSourceVersion: 3, expectedEnvelopeVersion: 1,
+        reason: 'تغییرات توسط مدیر سیستم بازبینی شد.', policyVersion: 2,
+        now: new Date('2026-09-01T10:04:00.000Z'),
+      });
+      assert.equal(verified.correction.status, 'RESOLVED');
+      const actors = await tx.accountingAuditLog.findMany({
+        where: { contractId: contract.id }, select: { action: true, actorId: true }, orderBy: { createdAt: 'asc' },
+      });
+      assert.ok(actors.length >= 4);
+      assert.ok(actors.every(({ actorId }) => actorId === admin.id));
+      assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
+        dutyId: approved.successor.id, eventCode: 'ADMIN_OVERRIDE_EXPIRED_DUTY', actorUserId: admin.id,
+      } }), 1);
+      throw rollback;
+    }, { timeout: 120_000 }), (error: unknown) => error === rollback);
+  } finally {
+    await prisma.$disconnect();
+  }
+});
 
 test('Responsible Seller creates one correction request assigned to an eligible Accounting processor', async () => {
   const prisma = new PrismaClient();

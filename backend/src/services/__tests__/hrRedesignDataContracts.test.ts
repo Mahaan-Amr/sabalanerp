@@ -55,6 +55,12 @@ assert.deepEqual(HR_REDESIGN_CATALOG.workspaceFeatures.map((feature) => feature.
 ]);
 assert.ok(HR_REDESIGN_CATALOG.workspaceFeatures.some((feature) => feature.code === 'RECORD_INITIAL_INTERVIEW'));
 assert.ok(HR_REDESIGN_CATALOG.workspaceFeatures.some((feature) => feature.code === 'RECORD_FINAL_MANAGEMENT_DECISION'));
+assert.equal(projectLegacyHrAccess({
+  userId: 'dispatch-user',
+  workspacePermission: null,
+  featurePermissions: [{ id: 'dispatch-feature', feature: 'hr_internal_drivers_view', permissionLevel: 'view', isActive: true, grantedAt: new Date('2026-01-02T00:00:00.000Z'), expiresAt: null }],
+  authorities: [],
+}).featureGrants[0]?.featureCode, 'hr_internal_drivers_view');
 assert.deepEqual(HR_REDESIGN_CATALOG.featureLevels, ['VIEW', 'EDIT', 'ADMIN']);
 assert.deepEqual(HR_REDESIGN_CATALOG.assessmentKinds, ['DISC', 'EQ', 'BIG_FIVE']);
 assert.equal(HR_REDESIGN_CATALOG.dutyEnvelopeVersion, 1);

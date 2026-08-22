@@ -3,7 +3,7 @@ import { ErpBadge, ErpField, ErpIconButton, ErpInput, ErpPressable, ErpSelect } 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaTools, FaCut, FaLayerGroup, FaRuler, FaShapes, FaPaintBrush, FaFileExcel } from 'react-icons/fa';
-import { servicesAPI } from '@/lib/api';
+import { dashboardAPI, servicesAPI } from '@/lib/api';
 import { ErpButton, ErpInlineState, ErpLoading, ErpPage, ErpQuickFilters, ErpSection } from '@/components/erp';
 import CatalogExcelSyncModal from '@/components/CatalogExcelSyncModal';
 import { formatPrice } from '@/lib/numberFormat';
@@ -81,6 +81,15 @@ interface StoneFinishing {
 }
 
 type ActiveTab = 'services' | 'cutting-types' | 'sub-services' | 'stair-lengths' | 'layer-types' | 'stone-finishings';
+type Availability = Record<string, { visible: boolean; enabled: boolean; reason: string | null }>;
+const tabActionKey: Record<ActiveTab, string> = {
+  services: 'SERVICE', 'cutting-types': 'CUTTING_TYPES', 'sub-services': 'SUB_SERVICES',
+  'stair-lengths': 'STAIR_LENGTHS', 'layer-types': 'LAYER_TYPES', 'stone-finishings': 'STONE_FINISHINGS',
+};
+const mutationTab: Record<'service' | 'cutting-type' | 'sub-service' | 'stair-length' | 'layer-type' | 'stone-finishing', ActiveTab> = {
+  service: 'services', 'cutting-type': 'cutting-types', 'sub-service': 'sub-services',
+  'stair-length': 'stair-lengths', 'layer-type': 'layer-types', 'stone-finishing': 'stone-finishings',
+};
 
 const ServicesPage: React.FC = () => {
   const router = useRouter();
@@ -123,6 +132,7 @@ const ServicesPage: React.FC = () => {
   const [loadError, setLoadError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [showExcelModal, setShowExcelModal] = useState(false);
+  const [availability, setAvailability] = useState<Availability>({});
 
   useEffect(() => {
     loadData();
@@ -132,6 +142,13 @@ const ServicesPage: React.FC = () => {
     try {
       setLoading(true);
       setLoadError('');
+      const availabilityResponse = await dashboardAPI.getActionAvailability('inventory');
+      const actions = (availabilityResponse.data.data || {}) as Availability;
+      setAvailability(actions);
+      const permitted = (action: string) => actions[action]?.enabled === true;
+      const firstVisibleTab = (Object.keys(tabActionKey) as ActiveTab[])
+        .find((tab) => permitted(`VIEW_${tabActionKey[tab]}`));
+      if (firstVisibleTab && !permitted(`VIEW_${tabActionKey[activeTab]}`)) setActiveTab(firstVisibleTab);
       const [
         servicesResponse,
         cuttingTypesResponse,
@@ -140,35 +157,35 @@ const ServicesPage: React.FC = () => {
         layerTypesResponse,
         finishingResponse
       ] = await Promise.all([
-        servicesAPI.getServices({ limit: 1000 }),
-        servicesAPI.getCuttingTypes({ limit: 1000 }),
-        servicesAPI.getSubServices({ limit: 1000 }),
-        servicesAPI.getStairStandardLengths({ limit: 1000 }),
-        servicesAPI.getLayerTypes({ limit: 1000 }),
-        servicesAPI.getStoneFinishings({ limit: 1000 })
+        permitted('VIEW_SERVICE') ? servicesAPI.getServices({ limit: 1000 }) : Promise.resolve(null),
+        permitted('VIEW_CUTTING_TYPES') ? servicesAPI.getCuttingTypes({ limit: 1000 }) : Promise.resolve(null),
+        permitted('VIEW_SUB_SERVICES') ? servicesAPI.getSubServices({ limit: 1000 }) : Promise.resolve(null),
+        permitted('VIEW_STAIR_LENGTHS') ? servicesAPI.getStairStandardLengths({ limit: 1000 }) : Promise.resolve(null),
+        permitted('VIEW_LAYER_TYPES') ? servicesAPI.getLayerTypes({ limit: 1000 }) : Promise.resolve(null),
+        permitted('VIEW_STONE_FINISHINGS') ? servicesAPI.getStoneFinishings({ limit: 1000 }) : Promise.resolve(null)
       ]);
 
-      if (servicesResponse.data.success) {
+      if (servicesResponse?.data.success) {
         setServices(servicesResponse.data.data);
       }
 
-      if (cuttingTypesResponse.data.success) {
+      if (cuttingTypesResponse?.data.success) {
         setCuttingTypes(cuttingTypesResponse.data.data);
       }
 
-      if (subServicesResponse.data.success) {
+      if (subServicesResponse?.data.success) {
         setSubServices(subServicesResponse.data.data);
       }
 
-      if (stairLengthsResponse.data.success) {
+      if (stairLengthsResponse?.data.success) {
         setStairLengths(stairLengthsResponse.data.data);
       }
 
-      if (layerTypesResponse.data.success) {
+      if (layerTypesResponse?.data.success) {
         setLayerTypes(layerTypesResponse.data.data);
       }
 
-      if (finishingResponse.data.success) {
+      if (finishingResponse?.data.success) {
         setStoneFinishings(finishingResponse.data.data);
       }
     } catch (error) {
@@ -179,7 +196,12 @@ const ServicesPage: React.FC = () => {
     }
   };
 
+  const can = (action: 'VIEW' | 'CREATE' | 'EDIT' | 'DELETE' | 'TOGGLE', tab: ActiveTab = activeTab) => (
+    availability[`${action}_${tabActionKey[tab]}`]?.enabled === true
+  );
+
   const handleToggleStatus = async (type: 'service' | 'cutting-type' | 'sub-service' | 'stair-length' | 'layer-type' | 'stone-finishing', id: string) => {
+    if (!can('TOGGLE', mutationTab[type])) return;
     try {
       const response = type === 'service'
         ? await servicesAPI.toggleServiceStatus(id)
@@ -226,6 +248,7 @@ const ServicesPage: React.FC = () => {
   };
 
   const handleDelete = async (type: 'service' | 'cutting-type' | 'sub-service' | 'stair-length' | 'layer-type' | 'stone-finishing', id: string) => {
+    if (!can('DELETE', mutationTab[type])) return;
     if (!confirm('آیا از حذف این مورد اطمینان دارید؟')) {
       return;
     }
@@ -274,6 +297,7 @@ const ServicesPage: React.FC = () => {
   };
 
   const handleEditStairLength = (item: StairStandardLength) => {
+    if (!can('EDIT', 'stair-lengths')) return;
     setEditingStairLengthId(item.id);
     setStairLengthForm({
       id: item.id,
@@ -285,6 +309,7 @@ const ServicesPage: React.FC = () => {
   };
 
   const handleSaveStairLength = async () => {
+    if (!can(editingStairLengthId ? 'EDIT' : 'CREATE', 'stair-lengths')) return;
     if (!stairLengthForm.value?.trim()) {
       alert('مقدار استاندارد را وارد کنید');
       return;
@@ -329,6 +354,7 @@ const ServicesPage: React.FC = () => {
   };
 
   const handleEditLayerType = (item: LayerType) => {
+    if (!can('EDIT', 'layer-types')) return;
     setEditingLayerTypeId(item.id);
     setLayerTypeForm({
       id: item.id,
@@ -340,6 +366,7 @@ const ServicesPage: React.FC = () => {
   };
 
   const handleSaveLayerType = async () => {
+    if (!can(editingLayerTypeId ? 'EDIT' : 'CREATE', 'layer-types')) return;
     if (!layerTypeForm.name.trim()) {
       alert('نام نوع لایه را وارد کنید');
       return;
@@ -424,7 +451,7 @@ const ServicesPage: React.FC = () => {
     { id: 'stair-lengths', label: 'طول پله', value: 'stair-lengths', count: stairLengths.length, tone: 'warning' as const },
     { id: 'layer-types', label: 'نوع لایه', value: 'layer-types', count: layerTypes.length, tone: 'purple' as const },
     { id: 'stone-finishings', label: 'فرآوری سنگ', value: 'stone-finishings', count: stoneFinishings.length, tone: 'neutral' as const },
-  ];
+  ].filter((tab) => can('VIEW', tab.value as ActiveTab));
 
   const searchPlaceholder = `جستجو در ${tabLabels[activeTab]}...`;
 
@@ -460,14 +487,14 @@ const ServicesPage: React.FC = () => {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </ErpField>
-          <ErpButton
+          {(can('CREATE') || can('EDIT')) && <ErpButton
             label="وارد/صادر کردن"
             onClick={() => setShowExcelModal(true)}
             icon={FaFileExcel}
             variant="outline"
             tone="neutral"
-          />
-          {activeTab !== 'stair-lengths' && activeTab !== 'layer-types' && (
+          />}
+          {can('CREATE') && activeTab !== 'stair-lengths' && activeTab !== 'layer-types' && (
             <ErpButton
               label={`افزودن ${
                 activeTab === 'services'
@@ -531,9 +558,9 @@ const ServicesPage: React.FC = () => {
                           <td className="py-3 px-4"><ErpBadge tone={service.isActive ? 'success' : 'danger'}>{service.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2">
-                              <ErpIconButton label={service.isActive ? 'غیرفعال کردن خدمت' : 'فعال کردن خدمت'} icon={service.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('service', service.id)} tone={service.isActive ? 'warning' : 'success'} />
-                              <ErpIconButton label="ویرایش خدمت" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/services/edit/${service.id}`)} />
-                              <ErpIconButton label="حذف خدمت" icon={FaTrash} onClick={() => handleDelete('service', service.id)} tone="danger" />
+                              <ErpIconButton label={service.isActive ? 'غیرفعال کردن خدمت' : 'فعال کردن خدمت'} icon={service.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('service', service.id)} tone={service.isActive ? 'warning' : 'success'} disabled={!can('TOGGLE', 'services')} />
+                              <ErpIconButton label="ویرایش خدمت" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/services/edit/${service.id}`)} disabled={!can('EDIT', 'services')} />
+                              <ErpIconButton label="حذف خدمت" icon={FaTrash} onClick={() => handleDelete('service', service.id)} tone="danger" disabled={!can('DELETE', 'services')} />
                             </div>
                           </td>
                         </tr>
@@ -592,9 +619,9 @@ const ServicesPage: React.FC = () => {
                           <td className="py-3 px-4"><ErpBadge tone={cuttingType.isActive ? 'success' : 'danger'}>{cuttingType.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2">
-                              <ErpIconButton label={cuttingType.isActive ? 'غیرفعال کردن نوع ابزار' : 'فعال کردن نوع ابزار'} icon={cuttingType.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('cutting-type', cuttingType.id)} tone={cuttingType.isActive ? 'warning' : 'success'} />
-                              <ErpIconButton label="ویرایش نوع ابزار" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/cutting-types/edit/${cuttingType.id}`)} />
-                              <ErpIconButton label="حذف نوع ابزار" icon={FaTrash} onClick={() => handleDelete('cutting-type', cuttingType.id)} tone="danger" />
+                              <ErpIconButton label={cuttingType.isActive ? 'غیرفعال کردن نوع ابزار' : 'فعال کردن نوع ابزار'} icon={cuttingType.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('cutting-type', cuttingType.id)} tone={cuttingType.isActive ? 'warning' : 'success'} disabled={!can('TOGGLE', 'cutting-types')} />
+                              <ErpIconButton label="ویرایش نوع ابزار" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/cutting-types/edit/${cuttingType.id}`)} disabled={!can('EDIT', 'cutting-types')} />
+                              <ErpIconButton label="حذف نوع ابزار" icon={FaTrash} onClick={() => handleDelete('cutting-type', cuttingType.id)} tone="danger" disabled={!can('DELETE', 'cutting-types')} />
                             </div>
                           </td>
                         </tr>
@@ -656,9 +683,9 @@ const ServicesPage: React.FC = () => {
                           <td className="py-3 px-4"><ErpBadge tone={subService.isActive ? 'success' : 'danger'}>{subService.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2">
-                              <ErpIconButton label={subService.isActive ? 'غیرفعال کردن ابزار' : 'فعال کردن ابزار'} icon={subService.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('sub-service', subService.id)} tone={subService.isActive ? 'warning' : 'success'} />
-                              <ErpIconButton label="ویرایش ابزار" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/sub-services/edit/${subService.id}`)} />
-                              <ErpIconButton label="حذف ابزار" icon={FaTrash} onClick={() => handleDelete('sub-service', subService.id)} tone="danger" />
+                              <ErpIconButton label={subService.isActive ? 'غیرفعال کردن ابزار' : 'فعال کردن ابزار'} icon={subService.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('sub-service', subService.id)} tone={subService.isActive ? 'warning' : 'success'} disabled={!can('TOGGLE', 'sub-services')} />
+                              <ErpIconButton label="ویرایش ابزار" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/sub-services/edit/${subService.id}`)} disabled={!can('EDIT', 'sub-services')} />
+                              <ErpIconButton label="حذف ابزار" icon={FaTrash} onClick={() => handleDelete('sub-service', subService.id)} tone="danger" disabled={!can('DELETE', 'sub-services')} />
                             </div>
                           </td>
                         </tr>
@@ -730,7 +757,7 @@ const ServicesPage: React.FC = () => {
                 <div className="flex flex-wrap items-center gap-3 mt-4">
                   <ErpPressable type="submit"
                     onClick={handleSaveStairLength}
-                    disabled={savingStairLength}
+                    disabled={savingStairLength || !can(editingStairLengthId ? 'EDIT' : 'CREATE', 'stair-lengths')}
                     className="rounded-lg bg-[var(--sds-accent)] px-6 py-2 text-[var(--sds-text-inverse)] transition-colors hover:bg-[var(--sds-accent-hover)] disabled:bg-[var(--sds-accent)]/60"
                   >
                     {savingStairLength ? 'در حال ذخیره...' : editingStairLengthId ? 'به‌روزرسانی طول' : 'افزودن طول'}
@@ -792,6 +819,7 @@ const ServicesPage: React.FC = () => {
                             <div className="flex items-center space-x-2 space-x-reverse">
                               <ErpPressable type="submit"
                                 onClick={() => handleToggleStatus('stair-length', length.id)}
+                                disabled={!can('TOGGLE', 'stair-lengths')}
                                 className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
                                 title={length.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
                               >
@@ -803,6 +831,7 @@ const ServicesPage: React.FC = () => {
                               </ErpPressable>
                               <ErpPressable type="submit"
                                 onClick={() => handleEditStairLength(length)}
+                                disabled={!can('EDIT', 'stair-lengths')}
                                 className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-info)] dark:hover:text-[var(--sds-info)] transition-colors"
                                 title="ویرایش"
                               >
@@ -810,6 +839,7 @@ const ServicesPage: React.FC = () => {
                               </ErpPressable>
                               <ErpPressable type="submit"
                                 onClick={() => handleDelete('stair-length', length.id)}
+                                disabled={!can('DELETE', 'stair-lengths')}
                                 className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors"
                                 title="حذف"
                               >
@@ -891,7 +921,7 @@ const ServicesPage: React.FC = () => {
                 <div className="flex flex-wrap items-center gap-3 mt-4">
                   <ErpPressable type="submit"
                     onClick={handleSaveLayerType}
-                    disabled={savingLayerType}
+                    disabled={savingLayerType || !can(editingLayerTypeId ? 'EDIT' : 'CREATE', 'layer-types')}
                     className="rounded-lg bg-[var(--sds-accent)] px-6 py-2 text-[var(--sds-text-inverse)] transition-colors hover:bg-[var(--sds-accent-hover)] disabled:bg-[var(--sds-accent)]/60"
                   >
                     {savingLayerType ? 'در حال ذخیره...' : editingLayerTypeId ? 'به‌روزرسانی نوع لایه' : 'افزودن نوع لایه'}
@@ -962,6 +992,7 @@ const ServicesPage: React.FC = () => {
                             <div className="flex items-center space-x-2 space-x-reverse">
                               <ErpPressable type="submit"
                                 onClick={() => handleToggleStatus('layer-type', layerType.id)}
+                                disabled={!can('TOGGLE', 'layer-types')}
                                 className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-text-primary)] dark:hover:text-[var(--sds-text-primary)] transition-colors"
                                 title={layerType.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
                               >
@@ -973,6 +1004,7 @@ const ServicesPage: React.FC = () => {
                               </ErpPressable>
                               <ErpPressable type="submit"
                                 onClick={() => handleEditLayerType(layerType)}
+                                disabled={!can('EDIT', 'layer-types')}
                                 className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-info)] dark:hover:text-[var(--sds-info)] transition-colors"
                                 title="ویرایش"
                               >
@@ -980,6 +1012,7 @@ const ServicesPage: React.FC = () => {
                               </ErpPressable>
                               <ErpPressable type="submit"
                                 onClick={() => handleDelete('layer-type', layerType.id)}
+                                disabled={!can('DELETE', 'layer-types')}
                                 className="p-2 text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)] hover:text-[var(--sds-danger)] dark:hover:text-[var(--sds-danger)] transition-colors"
                                 title="حذف"
                               >
@@ -1045,9 +1078,9 @@ const ServicesPage: React.FC = () => {
                           <td className="py-3 px-4"><ErpBadge tone={finishing.isActive ? 'success' : 'danger'}>{finishing.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge></td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2">
-                              <ErpIconButton label={finishing.isActive ? 'غیرفعال کردن فرآوری' : 'فعال کردن فرآوری'} icon={finishing.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('stone-finishing', finishing.id)} tone={finishing.isActive ? 'warning' : 'success'} />
-                              <ErpIconButton label="ویرایش فرآوری" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/stone-finishings/edit/${finishing.id}`)} />
-                              <ErpIconButton label="حذف فرآوری" icon={FaTrash} onClick={() => handleDelete('stone-finishing', finishing.id)} tone="danger" />
+                              <ErpIconButton label={finishing.isActive ? 'غیرفعال کردن فرآوری' : 'فعال کردن فرآوری'} icon={finishing.isActive ? FaToggleOn : FaToggleOff} onClick={() => handleToggleStatus('stone-finishing', finishing.id)} tone={finishing.isActive ? 'warning' : 'success'} disabled={!can('TOGGLE', 'stone-finishings')} />
+                              <ErpIconButton label="ویرایش فرآوری" icon={FaEdit} onClick={() => router.push(`/dashboard/inventory/services/stone-finishings/edit/${finishing.id}`)} disabled={!can('EDIT', 'stone-finishings')} />
+                              <ErpIconButton label="حذف فرآوری" icon={FaTrash} onClick={() => handleDelete('stone-finishing', finishing.id)} tone="danger" disabled={!can('DELETE', 'stone-finishings')} />
                             </div>
                           </td>
                         </tr>

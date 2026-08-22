@@ -196,6 +196,22 @@ const base = (
 }
 
 {
+  const result = projectHiringLifecycle(base({
+    preIdentityGrandfatheredAt: null,
+    formRevisions: [submitted],
+    stage: "SCREENING",
+    hiringDecisions: [
+      { kind: "HR_INTERVIEW", outcome: "NEGATIVE", version: 1 },
+    ],
+  }), ["HR_MANAGER"]);
+  assert.equal(result.currentPhaseId, "INITIAL_HR_REVIEW");
+  assert.equal(result.phases[1].requiredComplete, 1);
+  assert.equal(result.phases[1].primaryAction?.id, "RECORD_HR_PRELIMINARY_APPROVAL");
+  assert.deepEqual(result.phases[1].primaryAction?.authorities, ["HR_MANAGER"]);
+  assert.equal(result.phases[1].responsibleFunction, "مدیریت منابع انسانی");
+}
+
+{
   const result = projectHiringLifecycle(
     base({
       formRevisions: [submitted],
@@ -487,7 +503,53 @@ const base = (
   assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
   const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
   assert.equal(companyEvaluationPhase?.status, "ACTION_REQUIRED");
-  assert.equal(companyEvaluationPhase?.primaryAction?.id, "APPROVE_PRE_IDENTITY");
+  assert.equal(companyEvaluationPhase?.primaryAction?.id, "RECORD_FINAL_MANAGEMENT_DECISION");
+}
+
+{
+  const result = projectHiringLifecycle(
+    base({
+      preIdentityGrandfatheredAt: null,
+      formRevisions: [submitted],
+      hiringDecisions: [
+        { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+        { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+      ],
+      formalAssessmentPlans: [{ version: 1, status: "ACTIVE", explicitlyNoAssessment: true }],
+      companyEvaluationOccurrences: [{ status: "PLANNED" }],
+    }),
+    ["HR_PROCESSOR"],
+  );
+  assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
+  const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
+  assert.equal(companyEvaluationPhase?.status, "ACTION_REQUIRED");
+  assert.equal(companyEvaluationPhase?.primaryAction?.id, "RECORD_COMPANY_EVALUATION_RESULT");
+  assert.deepEqual(companyEvaluationPhase?.primaryAction?.authorities, ["HR_PROCESSOR"]);
+}
+
+{
+  const result = projectHiringLifecycle(
+    base({
+      preIdentityGrandfatheredAt: null,
+      formRevisions: [submitted],
+      hiringDecisions: [
+        { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+        { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+      ],
+      formalAssessmentPlans: [{ version: 1, status: "ACTIVE", explicitlyNoAssessment: true }],
+      companyEvaluationOccurrences: [{ status: "PLANNED" }],
+    }),
+    [],
+    "processor-with-action-permission",
+    ["RECORD_COMPANY_EVALUATION_RESULT"],
+  );
+  const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
+  assert.equal(
+    companyEvaluationPhase?.status,
+    "ACTION_REQUIRED",
+    "effective action permissions must drive the queue status even when no legacy authority grant exists",
+  );
+  assert.equal(companyEvaluationPhase?.primaryAction?.id, "RECORD_COMPANY_EVALUATION_RESULT");
 }
 
 {

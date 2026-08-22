@@ -21,6 +21,20 @@ export const HR_REDESIGN_CATALOG = Object.freeze({
     { code: 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION' },
     { code: 'DATA_MIGRATION_RECONCILIATION' },
     { code: 'USER_ADMINISTRATION' },
+    // HR-owned driver, vehicle and biometric capabilities use the same
+    // effective-dated grant ledger as every other HR capability.
+    { code: 'hr_internal_drivers_view' },
+    { code: 'hr_internal_drivers_manage' },
+    { code: 'hr_vehicle_operations_view' },
+    { code: 'hr_vehicle_operations_manage' },
+    { code: 'hr_internal_driver_eligibility_manage' },
+    { code: 'hr_driver_biometric_audit_view' },
+    { code: 'hr_driver_biometric_enrollment_manage' },
+    { code: 'hr_driver_profiles_manage' },
+    { code: 'hr_company_vehicles_manage' },
+    { code: 'hr_vehicle_plates_manage' },
+    { code: 'hr_driver_vehicle_assignments_manage' },
+    { code: 'hr_vehicle_operations_audit_view' },
     ...HR_ACTION_PERMISSIONS.map(({ code }) => ({ code })),
   ] as const,
   featureLevels: ['VIEW', 'EDIT', 'ADMIN'] as const,
@@ -97,6 +111,17 @@ export const HR_QA_ACCESS_MATRIX: Record<string, QaAccessContract> = Object.free
   },
 });
 
+const qaFeatureEntries = (contract: QaAccessContract) => {
+  const entries = new Map<string, 'VIEW' | 'EDIT' | 'ADMIN'>(
+    Object.entries(contract.features) as Array<[string, 'VIEW' | 'EDIT' | 'ADMIN']>,
+  );
+  if (contract.authority) for (const code of actionPermissionsForLegacyAuthority(contract.authority)) {
+    const definition = HR_ACTION_PERMISSIONS.find((permission) => permission.code === code);
+    if (definition) entries.set(code, definition.level);
+  }
+  return [...entries.entries()];
+};
+
 export type HrAssessmentKind = typeof HR_REDESIGN_CATALOG.assessmentKinds[number];
 
 const includesCode = <Code extends string>(values: readonly Code[], value: string): value is Code => (
@@ -150,8 +175,12 @@ export const projectLegacyHrAccess = (input: {
     effectiveTo: input.workspacePermission.expiresAt,
   } : null;
   const featureGrants = input.featurePermissions.flatMap((grant) => {
-    const featureCode = grant.feature.trim().replace(/[\s-]+/g, '_').toUpperCase();
-    if (!HR_REDESIGN_CATALOG.workspaceFeatures.some((feature) => feature.code === featureCode)) return [];
+    const normalized = grant.feature.trim().replace(/[\s-]+/g, '_');
+    const catalogFeature = HR_REDESIGN_CATALOG.workspaceFeatures.find(
+      (feature) => feature.code.toLocaleLowerCase('en-US') === normalized.toLocaleLowerCase('en-US'),
+    );
+    if (!catalogFeature) return [];
+    const featureCode = catalogFeature.code;
     return [{
       legacyGrantId: grant.id,
       userId: input.userId,
@@ -355,6 +384,18 @@ const featureDisplayNames: Record<string, string> = {
   AUTHORITY_RESPONSIBILITY_ADMINISTRATION: 'Authority and Responsibility Administration',
   DATA_MIGRATION_RECONCILIATION: 'Data Migration and Reconciliation',
   USER_ADMINISTRATION: 'User Administration',
+  hr_internal_drivers_view: 'مشاهده رانندگان داخلی',
+  hr_internal_drivers_manage: 'مدیریت رانندگان داخلی',
+  hr_vehicle_operations_view: 'مشاهده عملیات خودرو',
+  hr_vehicle_operations_manage: 'مدیریت عملیات خودرو',
+  hr_internal_driver_eligibility_manage: 'مدیریت صلاحیت راننده داخلی',
+  hr_driver_biometric_audit_view: 'مشاهده ممیزی بیومتریک راننده',
+  hr_driver_biometric_enrollment_manage: 'مدیریت ثبت بیومتریک راننده',
+  hr_driver_profiles_manage: 'مدیریت پروفایل رانندگان',
+  hr_company_vehicles_manage: 'مدیریت خودروهای شرکت',
+  hr_vehicle_plates_manage: 'مدیریت پلاک خودروها',
+  hr_driver_vehicle_assignments_manage: 'مدیریت تخصیص راننده و خودرو',
+  hr_vehicle_operations_audit_view: 'مشاهده ممیزی عملیات خودرو',
   ...Object.fromEntries(HR_ACTION_PERMISSIONS.map(({ code, labelFa }) => [code, labelFa])),
 };
 
@@ -379,7 +420,7 @@ export const runHrRedesignBackfill = async (
   const authorityCodes = [...HR_REDESIGN_CATALOG.businessAuthorities];
   const responsibilityCodes = [...HR_REDESIGN_CATALOG.responsibilityTypes];
 
-  const [workspaceCount, featureCount, authorityCount, responsibilityCount, users, applications, personnel] = await Promise.all([
+  const [workspaceCount, featureCount, authorityCount, responsibilityCount, users, applications, personnel, legacyRoleWorkspaces, legacyRoleFeatures] = await Promise.all([
     client.hrWorkspaceCatalog.count({ where: { code: { in: workspaceCodes } } }),
     client.hrFeatureCatalog.count({ where: { code: { in: featureCodes } } }),
     client.hrAuthorityCatalog.count({ where: { code: { in: authorityCodes } } }),
@@ -389,8 +430,12 @@ export const runHrRedesignBackfill = async (
       select: {
         id: true, username: true, role: true, isActive: true, personnelId: true,
         workspacePermissions: {
-          where: { isActive: true },
-          select: { workspace: true, expiresAt: true },
+          where: { workspace: 'hr', isActive: true },
+          select: { id: true, workspace: true, permissionLevel: true, isActive: true, grantedAt: true, expiresAt: true },
+        },
+        featurePermissions: {
+          where: { workspace: 'hr', isActive: true },
+          select: { id: true, feature: true, permissionLevel: true, isActive: true, grantedAt: true, expiresAt: true },
         },
         personnel: {
           select: {
@@ -437,6 +482,14 @@ export const runHrRedesignBackfill = async (
         },
       },
     }),
+    client.roleWorkspacePermission.findMany({
+      where: { workspace: 'hr', isActive: true },
+      select: { id: true, role: true, workspace: true, permissionLevel: true, isActive: true, createdAt: true },
+    }),
+    client.roleFeaturePermission.findMany({
+      where: { workspace: 'hr', isActive: true },
+      select: { id: true, role: true, feature: true, permissionLevel: true, isActive: true, createdAt: true },
+    }),
   ]);
 
   const blockingFailures: BackfillReportRow[] = [];
@@ -462,19 +515,56 @@ export const runHrRedesignBackfill = async (
     const contract = HR_QA_ACCESS_MATRIX[username];
     return [
       ...(contract.workspaceLevel ? [stableKey('qa-workspace-grant', user.id)] : []),
-      ...Object.keys(contract.features).map((featureCode) => stableKey('qa-feature-grant', user.id, featureCode)),
+      ...qaFeatureEntries(contract).map(([featureCode]) => stableKey('qa-feature-grant', user.id, featureCode)),
       ...(contract.authority ? [stableKey('qa-authority-grant', user.id, contract.authority)] : []),
     ];
   });
+  const migrationLevelRank = { VIEW: 1, EDIT: 2, ADMIN: 3 } as const;
+  const legacyAccessProjections = currentUsers.map((user) => {
+    const roleWorkspace = legacyRoleWorkspaces.find((grant) => grant.role === user.role);
+    const directFeatureCodes = new Set(user.featurePermissions.map(({ feature }) => feature.toLocaleLowerCase('en-US')));
+    const inheritedFeatures = legacyRoleFeatures
+      .filter((grant) => grant.role === user.role && !directFeatureCodes.has(grant.feature.toLocaleLowerCase('en-US')))
+      .map((grant) => ({ ...grant, id: `${grant.id}:${user.id}`, grantedAt: grant.createdAt, expiresAt: null }));
+    const combinedFeatures = [...user.featurePermissions, ...inheritedFeatures];
+    const projection = projectLegacyHrAccess({
+      userId: user.id,
+      workspacePermission: user.workspacePermissions[0] ?? (roleWorkspace ? {
+        ...roleWorkspace, id: `${roleWorkspace.id}:${user.id}`, grantedAt: roleWorkspace.createdAt, expiresAt: null,
+      } : null),
+      featurePermissions: combinedFeatures,
+      authorities: [],
+      now,
+    });
+    const prerequisiteLevel = [projection.workspaceGrant?.level, ...projection.featureGrants.map(({ level }) => level)]
+      .filter((level): level is 'VIEW' | 'EDIT' | 'ADMIN' => Boolean(level))
+      .sort((left, right) => migrationLevelRank[right] - migrationLevelRank[left])[0] ?? null;
+    const knownCodes = new Set(HR_REDESIGN_CATALOG.workspaceFeatures.map(({ code }) => code.toLocaleLowerCase('en-US')));
+    const unmappedFeatures = combinedFeatures.filter(({ feature }) => !knownCodes.has(feature.trim().replace(/[\s-]+/g, '_').toLocaleLowerCase('en-US')));
+    const ambiguousFeatures = user.featurePermissions.filter((direct) => legacyRoleFeatures.some((roleGrant) => (
+      roleGrant.role === user.role
+      && roleGrant.feature.toLocaleLowerCase('en-US') === direct.feature.toLocaleLowerCase('en-US')
+      && roleGrant.permissionLevel.toLocaleLowerCase('en-US') !== direct.permissionLevel.toLocaleLowerCase('en-US')
+    )));
+    return { user, projection, prerequisiteLevel, unmappedFeatures, ambiguousFeatures };
+  });
+  const legacyGrantKeys = legacyAccessProjections.flatMap(({ user, projection, prerequisiteLevel }) => [
+    ...(prerequisiteLevel ? [stableKey('legacy-workspace-prerequisite-v1', user.id)] : []),
+    ...projection.featureGrants.map((grant) => stableKey('legacy-feature-conversion-v1', grant.legacyGrantId)),
+  ]);
   const expectedGrantKeys = [...baselineUserIds.flatMap((userId) => [
     stableKey('workspace-grant', userId, HR_REDESIGN_CATALOG.workspaceCode),
     ...featureCodes.map((code) => stableKey('feature-grant', userId, code)),
     ...authorityCodes.map((code) => stableKey('authority-grant', userId, code)),
-  ]), ...qaGrantKeys];
+  ]), ...qaGrantKeys, ...legacyGrantKeys];
   const existingGrantCount = expectedGrantKeys.length === 0 ? 0 : await Promise.all([
     client.hrWorkspaceAccessGrant.count({ where: { stableKey: { in: expectedGrantKeys } } }),
     client.hrFeatureAccessGrant.count({ where: { stableKey: { in: expectedGrantKeys } } }),
     client.hrBusinessAuthorityGrant.count({ where: { stableKey: { in: expectedGrantKeys } } }),
+  ]).then((counts) => counts.reduce((sum, count) => sum + count, 0));
+  const existingLegacyGrantCount = legacyGrantKeys.length === 0 ? 0 : await Promise.all([
+    client.hrWorkspaceAccessGrant.count({ where: { stableKey: { in: legacyGrantKeys } } }),
+    client.hrFeatureAccessGrant.count({ where: { stableKey: { in: legacyGrantKeys } } }),
   ]).then((counts) => counts.reduce((sum, count) => sum + count, 0));
 
   const assessmentMigrations = applications.map((application: { id: string; assessments: Array<{ assessmentType: string }> }) => {
@@ -658,12 +748,18 @@ export const runHrRedesignBackfill = async (
     + (authorityCodes.length - authorityCount)
     + (responsibilityCodes.length - responsibilityCount);
   const actionableConflictCount = reconciliations.filter(({ classification }) => classification.cutoverBlocker).length;
+  const unmappedLegacyPermissionCount = legacyAccessProjections.reduce((sum, item) => sum + item.unmappedFeatures.length, 0);
+  const ambiguousLegacyPermissionCount = legacyAccessProjections.reduce((sum, item) => sum + item.ambiguousFeatures.length, 0);
+  const preservedLegacyPermissionCount = legacyAccessProjections.reduce((sum, item) => (
+    sum + item.projection.featureGrants.length + (item.prerequisiteLevel ? 1 : 0)
+  ), 0);
 
   const report = buildHrRedesignBackfillReport({
     safeBackfills: [
       { code: 'COMPANY_MANAGER_WORKFLOW_CUTOVER', count: companyManagerCutover.pendingChanges },
       { code: 'CATALOGS', count: missingCatalogCount },
       { code: 'BASELINE_GRANTS', count: expectedGrantKeys.length - existingGrantCount },
+      { code: 'LEGACY_PERMISSION_CONVERSION_V1', count: legacyGrantKeys.length - existingLegacyGrantCount },
       { code: 'ASSESSMENT_MIGRATION_EVENTS', count: assessmentEventKeys.length - existingAssessmentEventCount },
       { code: 'RECONCILIATION_RECORDS', count: reconciliationKeys.length - existingReconciliationCount },
       { code: 'RECONCILIATION_STATE_CHANGES', count: reconciliationStateChangeCount },
@@ -672,12 +768,17 @@ export const runHrRedesignBackfill = async (
     actionableConflicts: [
       { code: 'CURRENT_HR_RECONCILIATION', count: actionableConflictCount },
       { code: 'MISSING_PERSISTENT_QA_ACCOUNTS', count: missingQaUsernames.length },
+      { code: 'LEGACY_PERMISSION_AMBIGUITY', count: ambiguousLegacyPermissionCount },
     ],
     neutralLegacyOutcomes: [
+      { code: 'LEGACY_PERMISSION_PARITY_PRESERVED', count: preservedLegacyPermissionCount },
       { code: 'NO_LEGACY_ASSESSMENT_HISTORY', count: assessmentMigrations.filter(({ neutralEvent }) => neutralEvent.code === 'NO_LEGACY_ASSESSMENT_HISTORY').length },
       { code: 'LEGACY_ASSESSMENT_EVIDENCE_PRESERVED', count: assessmentMigrations.filter(({ neutralEvent }) => neutralEvent.code === 'LEGACY_ASSESSMENT_EVIDENCE_PRESERVED').length },
     ],
-    blockingFailures,
+    blockingFailures: [
+      ...blockingFailures,
+      { code: 'UNMAPPED_LEGACY_HR_PERMISSION', count: unmappedLegacyPermissionCount },
+    ],
   });
 
   if (!options.apply) return report;
@@ -726,9 +827,44 @@ export const runHrRedesignBackfill = async (
       });
     }
 
+    for (const { user, projection, prerequisiteLevel } of legacyAccessProjections) {
+      if (prerequisiteLevel) await tx.hrWorkspaceAccessGrant.upsert({
+        where: { stableKey: stableKey('legacy-workspace-prerequisite-v1', user.id) },
+        update: {},
+        create: {
+          stableKey: stableKey('legacy-workspace-prerequisite-v1', user.id),
+          userId: user.id,
+          workspaceCode: HR_REDESIGN_CATALOG.workspaceCode,
+          level: prerequisiteLevel,
+          status: 'ACTIVE',
+          effectiveFrom: projection.workspaceGrant?.effectiveFrom
+            ?? projection.featureGrants.map(({ effectiveFrom }) => effectiveFrom).sort((left, right) => left.getTime() - right.getTime())[0]
+            ?? now,
+          effectiveTo: projection.workspaceGrant?.effectiveTo ?? null,
+          grantedByUserId: options.actorUserId,
+          reason: 'Legacy HR prerequisite-preserving conversion v1',
+        },
+      });
+      for (const grant of projection.featureGrants) await tx.hrFeatureAccessGrant.upsert({
+        where: { stableKey: stableKey('legacy-feature-conversion-v1', grant.legacyGrantId) },
+        update: {},
+        create: {
+          stableKey: stableKey('legacy-feature-conversion-v1', grant.legacyGrantId),
+          userId: grant.userId,
+          featureCode: grant.featureCode,
+          level: grant.level,
+          status: grant.status,
+          effectiveFrom: grant.effectiveFrom,
+          effectiveTo: grant.effectiveTo,
+          grantedByUserId: options.actorUserId,
+          reason: 'Legacy HR permission conversion v1',
+        },
+      });
+    }
+
     for (const [username, user] of qaUsersByUsername) {
       const contract = HR_QA_ACCESS_MATRIX[username];
-      const featureEntries = Object.entries(contract.features) as Array<[string, 'VIEW' | 'EDIT' | 'ADMIN']>;
+      const featureEntries = qaFeatureEntries(contract);
       const expectedFeatureGrantKeys = featureEntries.map(([featureCode]) => stableKey('qa-feature-grant', user.id, featureCode));
       const expectedAuthorityGrantKey = contract.authority ? stableKey('qa-authority-grant', user.id, contract.authority) : null;
       const responsibilityRouting = qaResponsibilityRouting.get(username);

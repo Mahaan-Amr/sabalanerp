@@ -73,10 +73,15 @@ export type AccountingContractRow = {
   nextBestActions?: Array<{
     kind: string;
     labelFa: string;
+    visible?: boolean;
     enabled: boolean;
-    disabledReason?: string;
+    reason?: string | null;
   }>;
 };
+
+export const accountingActionAvailability = (contract: AccountingContractRow, kind: string) => (
+  contract.nextBestActions?.find((action) => action.kind === kind)
+);
 
 export type AccountingPaginatedResult<T> = {
   items: T[];

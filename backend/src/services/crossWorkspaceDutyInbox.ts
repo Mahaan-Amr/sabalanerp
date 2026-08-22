@@ -166,7 +166,7 @@ const envelopeIsCurrent = (duty: any) => {
 const isManager = async (database: Database, userId: string, workspaceCode: string, now: Date) => {
   const user = await database.user.findUnique({ where: { id: userId }, select: { role: true, isActive: true } });
   if (!user?.isActive) return false;
-  if (user.role === 'ADMIN' || user.role === 'MANAGER') return true;
+  if (user.role === 'ADMIN') return true;
   if (workspaceCode === 'HUMAN_RESOURCES') {
     return Boolean(await database.hrWorkspaceAccessGrant.findFirst({
       where: {
@@ -176,13 +176,23 @@ const isManager = async (database: Database, userId: string, workspaceCode: stri
       select: { id: true },
     }));
   }
-  return Boolean(await database.workspacePermission.findFirst({
-    where: {
-      userId, workspace: crossWorkspaceDutyDestinationSlug(workspaceCode), permissionLevel: 'admin', isActive: true,
-      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-    },
-    select: { id: true },
-  }));
+  const workspace = crossWorkspaceDutyDestinationSlug(workspaceCode);
+  const [direct, inherited] = await Promise.all([
+    database.workspacePermission.findFirst({
+      where: {
+        userId, workspace, permissionLevel: 'admin', isActive: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+      select: { id: true },
+    }),
+    database.roleWorkspacePermission.findFirst({
+      where: {
+        role: user.role, workspace, permissionLevel: 'admin', isActive: true,
+      },
+      select: { id: true },
+    }),
+  ]);
+  return Boolean(direct || inherited);
 };
 
 const include = {

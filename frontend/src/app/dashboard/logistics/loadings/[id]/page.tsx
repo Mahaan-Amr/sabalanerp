@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { FaBan, FaCheck, FaEdit, FaPlus, FaPrint, FaSync, FaTrash } from 'react-icons/fa';
 import { ErpButton, ErpCard, ErpInlineState, ErpLoading, ErpPage, ErpSection, ErpSummaryGrid, ErpTwoColumn } from '@/components/erp';
-import { logisticsAPI } from '@/lib/api';
+import { dashboardAPI, logisticsAPI } from '@/lib/api';
 import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
 import { StatusBadge, dateFa, inputClass, labelClass, loadingDriversName, numberFa, unitLabels } from '../../logistics-ui';
 
@@ -18,12 +18,17 @@ export default function LoadingDetailPage() {
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [correction, setCorrection] = useState({ sourceContractItemId: '', loadingLineId: '', deltaQuantity: '', reason: '' });
+  const [actionAvailability, setActionAvailability] = useState<any>({});
 
   const load = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await logisticsAPI.getLoading(params.id);
+      const [response, availability] = await Promise.all([
+        logisticsAPI.getLoading(params.id),
+        dashboardAPI.getActionAvailability('logistics'),
+      ]);
       if (response.data.success) setLoading(response.data.data);
+      setActionAvailability(availability.data.data || {});
     } finally {
       setIsLoading(false);
     }
@@ -74,10 +79,10 @@ export default function LoadingDetailPage() {
   const phoneSummary = assignedDrivers.length
     ? assignedDrivers.map((assignment: any) => assignment.driverSnapshot?.phone || assignment.vehiclePair?.phone).filter(Boolean).join('، ')
     : driver.phone || '—';
-  const canFinalize = loading.status === 'DRAFT';
-  const canDeleteDraft = loading.status === 'DRAFT';
-  const canCancel = loading.status !== 'CANCELLED';
-  const canCorrect = loading.status === 'FINALIZED';
+  const canFinalize = actionAvailability.FINALIZE_LOADING?.enabled === true && loading.status === 'DRAFT';
+  const canDeleteDraft = actionAvailability.EDIT_LOADING?.enabled === true && loading.status === 'DRAFT';
+  const canCancel = actionAvailability.CANCEL_LOADING?.enabled === true && loading.status !== 'CANCELLED';
+  const canCorrect = actionAvailability.CREATE_CORRECTION?.enabled === true && loading.status === 'FINALIZED';
   const printPage = () => window.print();
 
   return (

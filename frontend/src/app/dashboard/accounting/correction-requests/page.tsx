@@ -40,6 +40,7 @@ export default function AccountingCorrectionRequestsPage() {
   const [declineTarget, setDeclineTarget] = useState<any | null>(null);
   const [resolveTarget, setResolveTarget] = useState<any | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionAvailability, setActionAvailability] = useState<any>({});
 
   const replaceQuery = useCallback((next: ReturnType<typeof canonicalizeCorrectionRequestsQuery>) => {
     const serialized = next.params.toString();
@@ -76,6 +77,7 @@ export default function AccountingCorrectionRequestsPage() {
         const data = readAccountingListResponse<any>(response.data.data);
         setRows(data.items);
         setPagination({ page: data.page, pageSize: data.pageSize, total: data.total });
+        setActionAvailability(response.data.data?.actionAvailability || {});
       }
     } catch (error) {
       console.error('Error loading correction requests:', error);
@@ -151,29 +153,36 @@ export default function AccountingCorrectionRequestsPage() {
   const rowActions = (row: any): ErpAction[] => [
     ...(row.contractId ? [
       { label: 'مشاهده پرونده', href: `/dashboard/accounting/contracts/${row.contractId}`, icon: FaEye, tone: 'primary' as const },
-      ...(row.status === 'APPROVED_FOR_SALES_EDIT' ? [{ label: 'اصلاح قرارداد', href: `/dashboard/sales/contracts/${row.contractId}/edit`, icon: FaEdit, tone: 'info' as const }] : []),
     ] : []),
-    {
+    ...(row.requestIdempotencyKey ? [{
+      label: 'مشاهده وظیفه مرتبط',
+      href: '/dashboard/accounting/duties',
+      icon: FaEdit,
+      tone: 'info' as const,
+    }] : []),
+    ...(!row.requestIdempotencyKey && actionAvailability.approve?.visible ? [{
       label: 'تایید اصلاح فروش',
       icon: FaCheckCircle,
-      tone: 'success',
+      tone: 'success' as const,
       disabled: row.status !== 'OPEN' || actionLoading === row.id,
       onClick: () => setApproveTarget(row),
     },
     {
       label: 'رد درخواست',
       icon: FaTimesCircle,
-      tone: 'danger',
+      tone: 'danger' as const,
       disabled: !['OPEN', 'APPROVED_FOR_SALES_EDIT'].includes(row.status) || actionLoading === row.id,
       onClick: () => setDeclineTarget(row),
     },
-    {
+    ] : []),
+    ...(!row.requestIdempotencyKey && actionAvailability.verify?.visible ? [{
       label: 'بستن پس از بررسی',
       icon: FaCheckCircle,
-      tone: 'success',
+      tone: 'success' as const,
       disabled: row.status !== 'SALES_EDITED' || actionLoading === row.id,
       onClick: () => setResolveTarget(row),
-    },
+    } as ErpAction
+    ] : []),
   ];
 
   const columns: ErpColumn<any>[] = [
@@ -188,7 +197,7 @@ export default function AccountingCorrectionRequestsPage() {
     <ErpListPage
       eyebrow="حسابداری"
       title="بررسی اصلاحات"
-      description="بررسی مدیریتی درخواست‌های اصلاح، باز کردن پنجره اصلاح فروش، و بستن اصلاح پس از بازبینی حسابداری."
+      description="درخواست حسابداری پس از تصمیم مدیر به فروش ارجاع می‌شود و نتیجه برای بازبینی نهایی به صف وظایف حسابداری بازمی‌گردد."
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadRows, tone: 'neutral' }]}
       filters={[
         { id: 'search', label: 'جستجو', type: 'search', value: searchInput, onChange: setSearchInput, placeholder: 'شماره قرارداد یا مشتری...' },

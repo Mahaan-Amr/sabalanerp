@@ -85,6 +85,21 @@ export const resolveSelectedHiringPhase = (
     ? (requestedPhase as string)
     : projection.currentPhaseId;
 
+export const resolvePhaseAfterLifecycleAdvance = ({
+  requestedPhaseId,
+  previousCurrentPhaseId,
+  nextCurrentPhaseId,
+}: {
+  requestedPhaseId: string | null;
+  previousCurrentPhaseId: string | null;
+  nextCurrentPhaseId: string;
+}) =>
+  previousCurrentPhaseId &&
+  requestedPhaseId === previousCurrentPhaseId &&
+  previousCurrentPhaseId !== nextCurrentPhaseId
+    ? nextCurrentPhaseId
+    : requestedPhaseId;
+
 export const selectedHiringPhase = (
   projection: HiringLifecycleProjection,
   requestedPhase: string | null | undefined,
@@ -95,3 +110,10 @@ export const selectedHiringPhase = (
     projection.phases[0]
   );
 };
+
+export const shouldLoadCompanyEvaluationPlan = (
+  phaseId: string | null | undefined,
+  actionPermissions: readonly string[],
+) =>
+  phaseId === "COMPANY_EVALUATION_PLAN" &&
+  actionPermissions.includes("VIEW_COMPANY_EVALUATION_RESULTS");

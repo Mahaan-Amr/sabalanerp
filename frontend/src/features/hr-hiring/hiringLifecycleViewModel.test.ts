@@ -4,8 +4,10 @@ import {
   hiringTaskCapability,
   hiringTaskDetailVisible,
   hiringLifecycleStatusLabel,
+  resolvePhaseAfterLifecycleAdvance,
   resolveSelectedHiringPhase,
   selectedHiringPhase,
+  shouldLoadCompanyEvaluationPlan,
   type HiringLifecycleProjection,
 } from "./hiringLifecycleViewModel";
 
@@ -72,6 +74,39 @@ assert.equal(
 );
 assert.equal(hiringLifecycleStatusLabel.ACTION_REQUIRED, "اقدام شما");
 
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: "COMPANY_EVALUATION_PLAN",
+    previousCurrentPhaseId: "COMPANY_EVALUATION_PLAN",
+    nextCurrentPhaseId: "IDENTITY",
+  }),
+  "IDENTITY",
+);
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: "INITIAL_HR_REVIEW",
+    previousCurrentPhaseId: "IDENTITY",
+    nextCurrentPhaseId: "IDENTITY",
+  }),
+  "INITIAL_HR_REVIEW",
+);
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: "APPLICATION",
+    previousCurrentPhaseId: "IDENTITY",
+    nextCurrentPhaseId: "OFFER",
+  }),
+  "APPLICATION",
+);
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: null,
+    previousCurrentPhaseId: null,
+    nextCurrentPhaseId: "IDENTITY",
+  }),
+  null,
+);
+
 const taskCapabilities = [
   {
     id: "SIGNED_CONTRACT",
@@ -101,5 +136,19 @@ assert.equal(
   "UPDATE_INSURANCE",
 );
 assert.equal(hiringTaskCapability(taskCapabilities, "UNKNOWN"), null);
+
+assert.equal(
+  shouldLoadCompanyEvaluationPlan("COMPANY_EVALUATION_PLAN", [
+    "VIEW_INITIAL_INTERVIEW_REPORT",
+    "RECORD_PRELIMINARY_DECISION",
+  ]),
+  false,
+);
+assert.equal(
+  shouldLoadCompanyEvaluationPlan("COMPANY_EVALUATION_PLAN", [
+    "VIEW_COMPANY_EVALUATION_RESULTS",
+  ]),
+  true,
+);
 
 console.log("HR hiring lifecycle view-model tests passed.");

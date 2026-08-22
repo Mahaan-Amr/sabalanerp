@@ -11,6 +11,7 @@ export default function AccountingSettingsPage() {
   const [settings, setSettings] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const canEdit = Boolean(settings?.actionAvailability?.edit?.enabled);
 
   const loadSettings = async () => {
     try {
@@ -36,7 +37,10 @@ export default function AccountingSettingsPage() {
     try {
       setSaving(true);
       const response = await accountingAPI.updateSettings(settings);
-      if (response.data.success) setSettings(response.data.data);
+      if (response.data.success) setSettings((current: any) => ({
+        ...response.data.data,
+        actionAvailability: current?.actionAvailability,
+      }));
     } catch (error) {
       console.error('Error saving accounting settings:', error);
     } finally {
@@ -53,26 +57,26 @@ export default function AccountingSettingsPage() {
       description="پایه‌های کوچک فاز اول برای مالیات، شماره‌گذاری صورتحساب و پیش‌فرض‌های آینده سند حسابداری."
       actions={[
         { label: 'به‌روزرسانی', icon: FaSync, onClick: loadSettings, tone: 'neutral' },
-        { label: saving ? 'در حال ذخیره...' : 'ذخیره', icon: FaSave, onClick: saveSettings, tone: 'primary', variant: 'solid', disabled: saving },
+        ...(canEdit ? [{ label: saving ? 'در حال ذخیره...' : 'ذخیره', icon: FaSave, onClick: saveSettings, tone: 'primary' as const, variant: 'solid' as const, disabled: saving }] : []),
       ]}
     >
       <ErpSection title="پروفایل مالیاتی شرکت">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">کد اقتصادی</span>
-            <ErpInput className={fieldClass} value={settings?.companyEconomicCode || ''} onChange={(event) => updateField('companyEconomicCode', event.target.value)} />
+            <ErpInput disabled={!canEdit} className={fieldClass} value={settings?.companyEconomicCode || ''} onChange={(event) => updateField('companyEconomicCode', event.target.value)} />
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">شناسه ملی</span>
-            <ErpInput className={fieldClass} value={settings?.companyNationalId || ''} onChange={(event) => updateField('companyNationalId', event.target.value)} />
+            <ErpInput disabled={!canEdit} className={fieldClass} value={settings?.companyNationalId || ''} onChange={(event) => updateField('companyNationalId', event.target.value)} />
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">کد شعبه</span>
-            <ErpInput className={fieldClass} value={settings?.branchCode || ''} onChange={(event) => updateField('branchCode', event.target.value)} />
+            <ErpInput disabled={!canEdit} className={fieldClass} value={settings?.branchCode || ''} onChange={(event) => updateField('branchCode', event.target.value)} />
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">شناسه یکتای حافظه مالیاتی</span>
-            <ErpInput className={fieldClass} value={settings?.fiscalMemoryId || ''} onChange={(event) => updateField('fiscalMemoryId', event.target.value)} />
+            <ErpInput disabled={!canEdit} className={fieldClass} value={settings?.fiscalMemoryId || ''} onChange={(event) => updateField('fiscalMemoryId', event.target.value)} />
           </label>
         </div>
       </ErpSection>
@@ -81,19 +85,19 @@ export default function AccountingSettingsPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">نرخ ارزش افزوده پیش‌فرض</span>
-            <ErpInput className={fieldClass} type="number" value={settings?.defaultVatRate || ''} onChange={(event) => updateField('defaultVatRate', event.target.value)} />
+            <ErpInput disabled={!canEdit} className={fieldClass} type="number" value={settings?.defaultVatRate || ''} onChange={(event) => updateField('defaultVatRate', event.target.value)} />
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">واحد پول پیش‌فرض</span>
-            <ErpInput className={fieldClass} value={settings?.defaultCurrency || 'TOMAN'} onChange={(event) => updateField('defaultCurrency', event.target.value)} />
+            <ErpInput disabled={!canEdit} className={fieldClass} value={settings?.defaultCurrency || 'TOMAN'} onChange={(event) => updateField('defaultCurrency', event.target.value)} />
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">پیشوند شماره صورتحساب</span>
-            <ErpInput className={fieldClass} value={settings?.invoiceNumberPrefix || ''} onChange={(event) => updateField('invoiceNumberPrefix', event.target.value)} />
+            <ErpInput disabled={!canEdit} className={fieldClass} value={settings?.invoiceNumberPrefix || ''} onChange={(event) => updateField('invoiceNumberPrefix', event.target.value)} />
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">مهلت پیش‌فرض دریافتنی</span>
-            <ErpInput className={fieldClass} type="number" value={settings?.defaultInvoiceDueDays || 0} onChange={(event) => updateField('defaultInvoiceDueDays', event.target.value)} />
+            <ErpInput disabled={!canEdit} className={fieldClass} type="number" value={settings?.defaultInvoiceDueDays || 0} onChange={(event) => updateField('defaultInvoiceDueDays', event.target.value)} />
           </label>
         </div>
       </ErpSection>

@@ -4,16 +4,25 @@ import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
-import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES, FEATURE_WORKSPACE_MAP } from '../middleware/feature';
 import { expandPersianSearchTokenVariants, normalizePersianSearchTokens } from '../services/crmCustomerSearch';
+import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 
 const router = express.Router();
 const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
 
 const isOwnerScopedUser = (req: any) => req?.user?.role && req.user.role !== 'ADMIN';
 
-const buildCustomerScope = (req: any) => {
-  return {};
+export const customerScopeForActor = (input: { userId: string; role: string; canAssignOwner: boolean }) => {
+  if (input.role === 'ADMIN' || input.canAssignOwner) return {};
+  return { OR: [{ ownerUserId: input.userId }, { ownerUserId: null, createdBy: input.userId }] };
+};
+
+const buildCustomerScope = async (req: any) => {
+  if (!isOwnerScopedUser(req)) return {};
+  return customerScopeForActor({
+    userId: req.user.id, role: req.user.role, canAssignOwner: await canAssignCustomerOwner(req),
+  });
 };
 
 const normalizeDigits = (value: unknown): string => {
@@ -65,32 +74,19 @@ const hasFeaturePermission = async (
   requiredPermission: 'view' | 'edit' | 'admin'
 ): Promise<boolean> => {
   if (!user) return false;
-  if (user.role === 'ADMIN') return true;
-
-  const levels = ['view', 'edit', 'admin'];
-  const requiredLevel = levels.indexOf(requiredPermission);
-
-  const userPermission = await prisma.featurePermission.findFirst({
-    where: {
+  for (const feature of features) {
+    const workspace = FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP];
+    if (!workspace) continue;
+    const access = await resolveNarrowFeatureAccess(prisma, {
       userId: user.id,
-      feature: { in: features },
-      isActive: true
-    }
-  });
-
-  if (userPermission && levels.indexOf(userPermission.permissionLevel) >= requiredLevel) {
-    return true;
-  }
-
-  const rolePermission = await prisma.roleFeaturePermission.findFirst({
-    where: {
       role: user.role,
-      feature: { in: features },
-      isActive: true
-    }
-  });
-
-  return !!rolePermission && levels.indexOf(rolePermission.permissionLevel) >= requiredLevel;
+      workspace,
+      feature,
+      requiredPermission,
+    });
+    if (access.allowed) return true;
+  }
+  return false;
 };
 
 const canAssignCustomerOwner = async (req: any): Promise<boolean> =>
@@ -102,17 +98,7 @@ const canAssignCustomerOwner = async (req: any): Promise<boolean> =>
 
 const canManageCrmPipeline = async (req: any): Promise<boolean> => {
   if (!req.user) return false;
-  if (req.user.role === 'ADMIN') return true;
-  if (await hasFeaturePermission(req.user, [FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN], 'edit')) return true;
-
-  const userWorkspacePermission = await prisma.workspacePermission.findUnique({
-    where: { userId_workspace: { userId: req.user.id, workspace: WORKSPACES.CRM } }
-  });
-  const roleWorkspacePermission = await prisma.roleWorkspacePermission.findUnique({
-    where: { role_workspace: { role: req.user.role, workspace: WORKSPACES.CRM } }
-  });
-  const permission = userWorkspacePermission?.isActive ? userWorkspacePermission.permissionLevel : roleWorkspacePermission?.isActive ? roleWorkspacePermission.permissionLevel : null;
-  return permission === WORKSPACE_PERMISSIONS.ADMIN;
+  return hasFeaturePermission(req.user, [FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN], 'edit');
 };
 
 const parseOptionalDate = (value: unknown): Date | null => {
@@ -345,6 +331,7 @@ const ensureOwnershipOrDeny = async (
 const findDuplicateCustomers = async (params: {
   nationalCode?: unknown;
   phoneNumbers?: Array<{ number?: unknown }>;
+  scope?: Record<string, unknown>;
 }) => {
   const normalizedNationalCode = normalizeNationalCode(params.nationalCode);
   const normalizedPhones = Array.from(
@@ -360,13 +347,14 @@ const findDuplicateCustomers = async (params: {
   }
 
   const candidates = await prisma.crmCustomer.findMany({
-    where: {
-      isActive: true,
-      OR: [
-        normalizedNationalCode ? { nationalCode: { not: null } } : undefined,
-        normalizedPhones.length > 0 ? { phoneNumbers: { some: { isActive: true } } } : undefined
-      ].filter(Boolean) as any
-    },
+    where: { AND: [
+      params.scope || {},
+      { isActive: true },
+      { OR: [
+          normalizedNationalCode ? { nationalCode: { not: null } } : undefined,
+          normalizedPhones.length > 0 ? { phoneNumbers: { some: { isActive: true } } } : undefined
+        ].filter(Boolean) as any },
+    ] },
     select: customerSuggestionSelect
   });
 
@@ -388,7 +376,8 @@ router.post(
     try {
       const duplicateCustomers = await findDuplicateCustomers({
         nationalCode: req.body?.nationalCode,
-        phoneNumbers: req.body?.phoneNumbers
+        phoneNumbers: req.body?.phoneNumbers,
+        scope: await buildCustomerScope(req),
       });
 
       res.json({
@@ -497,7 +486,7 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
     const customerType = req.query.customerType as string;
 
     // Build where clause
-    let whereClause: any = buildCustomerScope(req);
+    let whereClause: any = await buildCustomerScope(req);
     
     if (search) {
       whereClause.AND = normalizePersianSearchTokens(search).map(token => ({

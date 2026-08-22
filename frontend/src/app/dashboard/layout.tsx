@@ -43,7 +43,7 @@ import {
 } from '@/components/erp';
 import { NotificationCenter } from "@/components/NotificationCenter";
 import { readContractSubmissionDiagnostic } from "@/features/contract-creation/utils/contractSubmissionDiagnostics";
-import { canAccessHrRoute, hasHrFeature, type HrBaseFeature } from '@/features/hr/hrAccessNavigation';
+import { hasHrFeature, type HrBaseFeature } from '@/features/hr/hrAccessNavigation';
 
 interface User {
   id: string;
@@ -161,6 +161,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [sanitizedEnvironment, setSanitizedEnvironment] = useState(false);
+  const [routeAvailability, setRouteAvailability] = useState<{ allowed: boolean; reason: string | null } | null>(null);
   const [supportCaptureOpen, setSupportCaptureOpen] = useState(false);
   const [sensitiveCaptureConsent, setSensitiveCaptureConsent] = useState(false);
   const [sensitiveCandidateItems, setSensitiveCandidateItems] = useState<SensitiveCandidateItem[]>([]);
@@ -168,7 +169,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { currentWorkspace, accessibleWorkspaces } = useWorkspace();
+  const { currentWorkspace, accessibleWorkspaces, loading: workspaceAccessLoading } = useWorkspace();
   const isHrWorkspace = pathname.startsWith("/dashboard/hr");
   const isSalesWorkspace = pathname.startsWith("/dashboard/sales");
   const isSalesLanding = pathname === "/dashboard/sales";
@@ -180,11 +181,30 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const hasMobileBottomNavigation = isHrWorkspace || showsSalesMobileNavigation;
   const isWorkspaceDetail = pathname !== "/dashboard";
   const effectiveHrFeatures = user?.permissions?.features || [];
-  const deniesHrRoute = Boolean(
-    isHrWorkspace
-      && pathname !== '/dashboard/hr'
-      && !canAccessHrRoute(effectiveHrFeatures, pathname, user?.role),
+  const deniesHrRoute = Boolean(isHrWorkspace && routeAvailability?.allowed === false);
+  const isTaskScopedDutyRoute = /\/duties(?:\/|$)/.test(pathname);
+  const deniesWorkspaceRoute = Boolean(
+    !workspaceAccessLoading
+      && currentWorkspace
+      && !isTaskScopedDutyRoute
+      && !accessibleWorkspaces.some((workspace) => workspace.id === currentWorkspace),
   );
+  const deniesFeatureRoute = Boolean(!isHrWorkspace && routeAvailability?.allowed === false);
+
+  useEffect(() => {
+    let active = true;
+    setRouteAvailability(null);
+    if (isTaskScopedDutyRoute) return () => { active = false; };
+    dashboardAPI.getRouteAvailability(pathname)
+      .then((response) => { if (active) setRouteAvailability(response.data.data); })
+      .catch(() => {
+        if (active) setRouteAvailability({
+          allowed: false,
+          reason: 'بررسی دسترسی انجام نشد. پشتیبان سامانه باید وضعیت سرور را بررسی کند.',
+        });
+      });
+    return () => { active = false; };
+  }, [isTaskScopedDutyRoute, pathname]);
   const hrMobileNavigation = [
     {
       id: "dashboard",
@@ -673,12 +693,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               محیط آزمایشی با داده‌های پاک‌سازی‌شده — استفاده عملیاتی ممنوع
             </div>
           )}
-          {deniesHrRoute ? (
-            <ErpPage eyebrow="منابع انسانی" title="دسترسی به این بخش مجاز نیست">
+          {deniesWorkspaceRoute || deniesFeatureRoute || deniesHrRoute ? (
+            <ErpPage eyebrow={deniesHrRoute ? 'منابع انسانی' : 'دسترسی'} title="دسترسی به این بخش مجاز نیست">
               <ErpEmptyState
                 icon={FaShieldAlt}
                 title="مجوز لازم برای این بخش به حساب شما داده نشده است"
-                description="آدرس صفحه حفظ شده است. برای دسترسی، مجوز پایه مرتبط باید توسط مدیر سامانه ثبت شود."
+                description={routeAvailability?.reason || "آدرس صفحه حفظ شده است. برای دسترسی، مجوز مرتبط باید توسط مدیر همان فضای کاری ثبت شود."}
               />
             </ErpPage>
           ) : children}

@@ -9,8 +9,7 @@ import ExceptionRequestForm from '@/components/ExceptionRequestForm';
 import MissionAssignmentForm from '@/components/MissionAssignmentForm';
 import { askSecurityAction, notifySecurity } from '@/components/SecurityNoticeHost';
 import PersianCalendar from '@/lib/persian-calendar';
-import { securityAPI } from '@/lib/api';
-import { WORKSPACES, WORKSPACE_PERMISSIONS, useWorkspace } from '@/contexts/WorkspaceContext';
+import { dashboardAPI, securityAPI } from '@/lib/api';
 
 type Kind = 'exception' | 'mission';
 type ReviewView = 'pending' | 'all';
@@ -23,8 +22,9 @@ const initialFormData = (item: any) => ({ ...item, personnelId: item.personnelId
 export default function SecurityExceptionsPage() {
   const router = useRouter();
   const pathname = usePathname();
-  const { hasPermission } = useWorkspace();
-  const reviewer = hasPermission(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN);
+  const [actionAvailability, setActionAvailability] = useState<any>({});
+  const reviewer = actionAvailability.REVIEW_EXCEPTION?.enabled === true;
+  const canEdit = actionAvailability.CREATE_EXCEPTION?.enabled === true;
   const [view, setView] = useState<ReviewView>(reviewer ? 'pending' : 'all');
   const [kind, setKind] = useState<'all' | Kind>('all');
   const [exceptions, setExceptions] = useState<any[]>([]);
@@ -38,9 +38,10 @@ export default function SecurityExceptionsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [exceptionResult, missionResult] = await Promise.allSettled([securityAPI.getExceptionRequests({ limit: 250 }), securityAPI.getMissionAssignments({ limit: 250 })]);
+      const [exceptionResult, missionResult, availabilityResult] = await Promise.allSettled([securityAPI.getExceptionRequests({ limit: 250 }), securityAPI.getMissionAssignments({ limit: 250 }), dashboardAPI.getActionAvailability('security')]);
       if (exceptionResult.status === 'fulfilled') setExceptions(exceptionResult.value.data.data || []);
       if (missionResult.status === 'fulfilled') setMissions(missionResult.value.data.data || []);
+      if (availabilityResult.status === 'fulfilled') setActionAvailability(availabilityResult.value.data.data || {});
       if (exceptionResult.status === 'rejected' || missionResult.status === 'rejected') setError('بخشی از موارد دریافت نشد؛ اطلاعات موفق نمایش داده می‌شود.');
     } finally { setLoading(false); }
   }, []);
@@ -85,12 +86,12 @@ export default function SecurityExceptionsPage() {
   const remove = async (item: any) => { const accepted = await askSecurityAction({ title: 'حذف مورد در انتظار', description: 'این مورد هنوز اثری بر حضور و غیاب ندارد و حذف می‌شود.' }); if (!accepted) return; try { item.recordKind === 'exception' ? await securityAPI.deleteException(item.id) : await securityAPI.deleteMissionAssignment(item.id); await load(); } catch (requestError: any) { setError(requestError.response?.data?.error || 'حذف ناموفق بود.'); } };
 
   return (
-    <ErpWorkspacePage className="guard-workspace" title="استثناها و مأموریت‌ها" primaryAction={{ label: 'ثبت مورد', icon: FaPlus, onClick: () => setCreatePickerOpen(true), variant: 'solid' }} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load }]}>
+    <ErpWorkspacePage className="guard-workspace" title="استثناها و مأموریت‌ها" primaryAction={canEdit ? { label: 'ثبت مورد', icon: FaPlus, onClick: () => setCreatePickerOpen(true), variant: 'solid' } : undefined} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: load }]}>
       {loading && !exceptions.length && !missions.length ? <ErpSkeleton lines={5} /> : error && !exceptions.length && !missions.length ? <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: load }} /> : <>
         {error && <ErpInlineState kind="stale" title="آخرین به‌روزرسانی ناموفق بود؛ اطلاعات قبلی نمایش داده می‌شود." action={{ label: 'تلاش مجدد', onClick: load }} />}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><ErpSegmentedControl value={view} onChange={setView} options={[{ value: 'pending', label: 'نیازمند بررسی' }, { value: 'all', label: 'همه موارد' }]} /><div className="flex gap-2"><ErpButton label="همه" onClick={() => setKind('all')} variant={kind === 'all' ? 'solid' : 'soft'} /><ErpButton label="استثنا" onClick={() => setKind('exception')} variant={kind === 'exception' ? 'solid' : 'soft'} /><ErpButton label="مأموریت" icon={FaPlane} onClick={() => setKind('mission')} variant={kind === 'mission' ? 'solid' : 'soft'} /></div></div>
         <ErpSection title={view === 'pending' ? 'نیازمند بررسی' : 'همه موارد'}>
-          {!items.length ? <ErpEmptyState icon={FaCheck} title={view === 'pending' ? 'موردی نیازمند بررسی نیست' : 'موردی با این فیلترها ثبت نشده است'} /> : <div className="divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">{items.map((item) => <article key={`${item.recordKind}-${item.id}`} className="py-4 first:pt-0 last:pb-0"><div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h2 className="font-bold sds-text-primary ">{personName(item)}</h2><ErpStatus label={item.recordKind === 'exception' ? 'استثنا' : 'مأموریت'} tone={item.recordKind === 'mission' ? 'info' : 'purple'} /><ErpStatus label={statusLabel[item.status] || item.status} tone={statusTone(item.status)} /></div><p className="mt-2 text-sm font-semibold sds-text-secondary ">{item.recordKind === 'exception' ? item.exceptionType : `${item.missionType}${item.missionLocation ? ` · ${item.missionLocation}` : ''}`}</p><p className="mt-1 text-sm sds-text-muted">{new Date(item.startDate).toLocaleDateString('fa-IR')} {item.startTime || ''} تا {item.endDate ? new Date(item.endDate).toLocaleDateString('fa-IR') : ''} {item.endTime || ''}</p>{(item.reason || item.missionPurpose) && <p className="mt-2 text-sm sds-text-secondary ">{item.reason || item.missionPurpose}</p>}{item.auditEvents?.length ? <p className="mt-2 text-xs sds-text-muted">{item.auditEvents.length.toLocaleString('fa-IR')} رویداد حسابرسی</p> : null}</div><div className="flex flex-wrap gap-2">{item.status === 'PENDING' && <><ErpButton label="تأیید" icon={FaCheck} onClick={() => approve(item)} tone="success" /><ErpButton label="ویرایش" icon={FaEdit} onClick={() => setEditor({ kind: item.recordKind, item })} variant="ghost" /><ErpButton label="رد" icon={FaTimes} onClick={() => reject(item)} tone="warning" variant="ghost" /><ErpButton label="حذف" icon={FaTrash} onClick={() => remove(item)} tone="danger" variant="ghost" /></>}{item.status === 'APPROVED' && <><ErpButton label="اصلاح" icon={FaEdit} onClick={() => setEditor({ kind: item.recordKind, item, correction: true })} variant="ghost" /><ErpButton label="لغو" icon={FaTimes} onClick={() => cancel(item)} tone="neutral" variant="ghost" /></>}</div></div></article>)}</div>}
+          {!items.length ? <ErpEmptyState icon={FaCheck} title={view === 'pending' ? 'موردی نیازمند بررسی نیست' : 'موردی با این فیلترها ثبت نشده است'} /> : <div className="divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">{items.map((item) => <article key={`${item.recordKind}-${item.id}`} className="py-4 first:pt-0 last:pb-0"><div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h2 className="font-bold sds-text-primary ">{personName(item)}</h2><ErpStatus label={item.recordKind === 'exception' ? 'استثنا' : 'مأموریت'} tone={item.recordKind === 'mission' ? 'info' : 'purple'} /><ErpStatus label={statusLabel[item.status] || item.status} tone={statusTone(item.status)} /></div><p className="mt-2 text-sm font-semibold sds-text-secondary ">{item.recordKind === 'exception' ? item.exceptionType : `${item.missionType}${item.missionLocation ? ` · ${item.missionLocation}` : ''}`}</p><p className="mt-1 text-sm sds-text-muted">{new Date(item.startDate).toLocaleDateString('fa-IR')} {item.startTime || ''} تا {item.endDate ? new Date(item.endDate).toLocaleDateString('fa-IR') : ''} {item.endTime || ''}</p>{(item.reason || item.missionPurpose) && <p className="mt-2 text-sm sds-text-secondary ">{item.reason || item.missionPurpose}</p>}{item.auditEvents?.length ? <p className="mt-2 text-xs sds-text-muted">{item.auditEvents.length.toLocaleString('fa-IR')} رویداد حسابرسی</p> : null}</div><div className="flex flex-wrap gap-2">{item.status === 'PENDING' && <>{reviewer && <ErpButton label="تأیید" icon={FaCheck} onClick={() => approve(item)} tone="success" />}{canEdit && <ErpButton label="ویرایش" icon={FaEdit} onClick={() => setEditor({ kind: item.recordKind, item })} variant="ghost" />}{reviewer && <ErpButton label="رد" icon={FaTimes} onClick={() => reject(item)} tone="warning" variant="ghost" />}{canEdit && <ErpButton label="حذف" icon={FaTrash} onClick={() => remove(item)} tone="danger" variant="ghost" />}</>}{item.status === 'APPROVED' && reviewer && <><ErpButton label="اصلاح" icon={FaEdit} onClick={() => setEditor({ kind: item.recordKind, item, correction: true })} variant="ghost" /><ErpButton label="لغو" icon={FaTimes} onClick={() => cancel(item)} tone="neutral" variant="ghost" /></>}</div></div></article>)}</div>}
         </ErpSection>
       </>}
 

@@ -122,6 +122,9 @@ interface PreIdentityChecklistLike {
   status: string;
   managementResolution?: string | null;
 }
+interface CompanyEvaluationOccurrenceLike {
+  status: string;
+}
 interface HiringDecisionLike {
   kind: string;
   outcome: string;
@@ -164,6 +167,7 @@ export interface HiringLifecycleSource {
   preIdentityReleasedAt?: Date | string | null;
   preIdentityGrandfatheredAt?: Date | string | null;
   preIdentityChecklistItems?: PreIdentityChecklistLike[];
+  companyEvaluationOccurrences?: CompanyEvaluationOccurrenceLike[];
   formalAssessmentPlans?: FormalAssessmentPlanLike[];
   hiringDecisions?: HiringDecisionLike[];
   compensationClearance?: string | null;
@@ -337,12 +341,61 @@ const blocker = (
   label,
   responsibleAuthorities,
 });
+export const actionPermissionForHiringLifecycleAction = (actionId: string) => {
+  if (actionId.startsWith("RECORD_COMPANY_ASSESSMENT_RESULT:")) {
+    return "RECORD_COMPANY_EVALUATION_RESULT";
+  }
+  return ({
+    RECORD_HR_INTERVIEW: "RECORD_INITIAL_INTERVIEW",
+    RECORD_HR_PRELIMINARY_APPROVAL: "RECORD_PRELIMINARY_DECISION",
+    FINALIZE_FORMAL_ASSESSMENT_PLAN: "MANAGE_COMPANY_EVALUATION_PLAN",
+    REVISE_FORMAL_ASSESSMENT_PLAN: "MANAGE_COMPANY_EVALUATION_PLAN",
+    RECORD_COMPANY_EVALUATION_RESULT: "RECORD_COMPANY_EVALUATION_RESULT",
+    ADD_COMPANY_EVALUATION: "MANAGE_COMPANY_EVALUATION_PLAN",
+    FINALIZE_PRE_IDENTITY_REQUIREMENTS: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    ADD_PRE_IDENTITY_ITEM: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    RESOLVE_NEGATIVE_PRE_IDENTITY_ITEM: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    APPROVE_PRE_IDENTITY: "RECORD_FINAL_MANAGEMENT_DECISION",
+    COMPLETE_PRE_IDENTITY_ITEM: "MANAGE_RECRUITMENT_CASE",
+    RELEASE_PRE_IDENTITY: "MANAGE_RECRUITMENT_CASE",
+    CREATE_OFFER: "MANAGE_COMPENSATION",
+    PREPARE_OFFER_PAYROLL: "MANAGE_PAYROLL",
+    APPROVE_OFFER_HR: "MANAGE_PAYROLL",
+    APPROVE_OFFER_FINANCE: "MANAGE_FINANCE_EVIDENCE",
+    RECORD_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    UPLOAD_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    SUBMIT_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    REVIEW_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    APPROVE_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    CONFIGURE_PAYROLL: "MANAGE_PAYROLL",
+    REVIEW_IDENTITY: "MANAGE_RECRUITMENT_CASE",
+    APPROVE_IDENTITY: "MANAGE_RECRUITMENT_CASE",
+    RECORD_ASSESSMENT: "MANAGE_RECRUITMENT_CASE",
+    COMPLETE_ASSESSMENT: "MANAGE_RECRUITMENT_CASE",
+    DECIDE_ASSESSMENT: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    CONVERT_TO_PERSONNEL: "MANAGE_RECRUITMENT_CASE",
+    COMPLETE_COLLATERAL: "MANAGE_FINANCE_EVIDENCE",
+    UPDATE_INSURANCE: "MANAGE_RECRUITMENT_CASE",
+    UPDATE_ONBOARDING_TASK: "MANAGE_RECRUITMENT_CASE",
+    COMPLETE_ONBOARDING_TASK: "MANAGE_RECRUITMENT_CASE",
+    ACTIVATE_EMPLOYMENT: "MANAGE_RECRUITMENT_CASE",
+    RESEND_INVITATION: "MANAGE_RECRUITMENT_CASE",
+  } as Record<string, string>)[actionId] ?? null;
+};
+
 const canPerform = (
   viewerAuthorities: ReadonlySet<string>,
+  viewerActionPermissions: ReadonlySet<string>,
   candidate: HiringLifecycleAction | null,
 ) =>
   Boolean(
-    candidate?.authorities.some((required) => viewerAuthorities.has(required)),
+    candidate && (
+      candidate.authorities.some((required) => viewerAuthorities.has(required))
+      || Boolean(
+        actionPermissionForHiringLifecycleAction(candidate.id)
+        && viewerActionPermissions.has(actionPermissionForHiringLifecycleAction(candidate.id)!),
+      )
+    ),
   );
 const isCompleteTask = (status: string) =>
   status === "COMPLETE" || status === "WAIVED";
@@ -402,15 +455,15 @@ const initialHrReviewGate = (source: HiringLifecycleSource): Gate => {
   if (source.preIdentityGrandfatheredAt) {
     return completedGate(2);
   }
-  const interviewApproved = latestDecision(source, "HR_INTERVIEW")?.outcome === "POSITIVE";
+  const interviewRecorded = Boolean(latestDecision(source, "HR_INTERVIEW"));
   const hrApproved = latestDecision(source, "HR_PRELIMINARY_APPROVAL")?.outcome === "POSITIVE";
-  const completed = Number(interviewApproved) + Number(hrApproved);
+  const completed = Number(interviewRecorded) + Number(hrApproved);
   return {
     complete: completed === 2,
     requiredComplete: completed,
     requiredTotal: 2,
     blockers: [],
-    action: !interviewApproved
+    action: !interviewRecorded
       ? action("RECORD_HR_INTERVIEW", "ثبت نتیجه مصاحبه اولیه HR", "HR_PROCESSOR")
       : action("RECORD_HR_PRELIMINARY_APPROVAL", "ثبت تأیید اولیه HR", "HR_MANAGER"),
     secondaryActions: [],
@@ -466,36 +519,29 @@ const formalAssessmentGate = (source: HiringLifecycleSource): Gate => {
 
 const companyEvaluationPlanGate = (source: HiringLifecycleSource): Gate => {
   if (source.preIdentityGrandfatheredAt) return completedGate(2);
-  const requirementsFinalized = Boolean(source.preIdentityRequirementsFinalizedAt);
-  const items = source.preIdentityChecklistItems || [];
-  const incompleteItems = items.filter((item) =>
-    !["POSITIVE", "NEGATIVE", "CANCELLED", "WAIVED"].includes(item.status),
-  );
-  const unresolvedNegative = items.filter(
-    (item) => item.status === "NEGATIVE" && !item.managementResolution,
-  );
-  const managementApproved = Boolean(source.preIdentityManagementApprovedAt);
-  const released = Boolean(source.preIdentityReleasedAt);
+  const evaluations = source.companyEvaluationOccurrences || [];
+  const pendingEvaluations = evaluations.filter((item) => item.status === "PLANNED");
+  const resolvedEvaluations = evaluations.length - pendingEvaluations.length;
   const companyApproved = latestDecision(source, "COMPANY_APPROVAL")?.outcome === "POSITIVE";
-  const completed = Number(requirementsFinalized) + Number(companyApproved && managementApproved && released);
-  let nextAction = action("FINALIZE_PRE_IDENTITY_REQUIREMENTS", "تعیین و نهایی‌سازی الزامات پرونده", "COMPANY_MANAGER");
-  if (requirementsFinalized && incompleteItems.length)
-    nextAction = action("COMPLETE_PRE_IDENTITY_ITEM", "پیگیری و ثبت نتیجه الزامات", "HR_PROCESSOR");
-  else if (requirementsFinalized && unresolvedNegative.length)
-    nextAction = action("RESOLVE_NEGATIVE_PRE_IDENTITY_ITEM", "تصمیم درباره نتیجه منفی", "COMPANY_MANAGER");
-  else if (requirementsFinalized && (!managementApproved || !companyApproved))
-    nextAction = action("APPROVE_PRE_IDENTITY", "تأیید ادامه پرونده توسط مدیریت شرکت", "COMPANY_MANAGER");
-  else if (managementApproved && !released)
-    nextAction = action("RELEASE_PRE_IDENTITY", "تأیید تکمیل اداری چک‌لیست", "HR_PROCESSOR");
   return {
-    complete: released && managementApproved && companyApproved && !incompleteItems.length && !unresolvedNegative.length,
-    requiredComplete: completed,
-    requiredTotal: 2,
+    complete: companyApproved && pendingEvaluations.length === 0,
+    requiredComplete: resolvedEvaluations + Number(companyApproved),
+    requiredTotal: evaluations.length + 1,
     blockers: [],
-    action: nextAction,
-    secondaryActions: requirementsFinalized
-      ? [action("ADD_PRE_IDENTITY_ITEM", "افزودن الزام جدید", "COMPANY_MANAGER")]
-      : [],
+    action: pendingEvaluations.length
+      ? action(
+          "RECORD_COMPANY_EVALUATION_RESULT",
+          "پیگیری و ثبت نتیجه ارزیابی‌های شرکت",
+          "HR_PROCESSOR",
+        )
+      : action(
+          "RECORD_FINAL_MANAGEMENT_DECISION",
+          "ثبت تصمیم نهایی مدیریت شرکت",
+          "COMPANY_MANAGER",
+        ),
+    secondaryActions: [
+      action("ADD_COMPANY_EVALUATION", "افزودن ارزیابی شرکت", "COMPANY_MANAGER"),
+    ],
   };
 };
 
@@ -824,8 +870,10 @@ export const projectHiringLifecycle = (
   source: HiringLifecycleSource,
   viewerAuthorities: Iterable<string> = [],
   viewerUserId?: string,
+  viewerActionPermissions: Iterable<string> = [],
 ): HiringLifecycleProjection => {
   const authorities = new Set(viewerAuthorities);
+  const actionPermissions = new Set(viewerActionPermissions);
   const gates = [
     applicationGate(source),
     initialHrReviewGate(source),
@@ -853,7 +901,7 @@ export const projectHiringLifecycle = (
       else if (gate.blockers.length) status = "BLOCKED";
       else if (
         [gate.action, ...gate.secondaryActions].some((candidate) =>
-          canPerform(authorities, candidate),
+          canPerform(authorities, actionPermissions, candidate),
         )
       )
         status = "ACTION_REQUIRED";
@@ -867,7 +915,7 @@ export const projectHiringLifecycle = (
       const permittedActions = actionable
         ? [gate.action, ...gate.secondaryActions].filter(
             (candidate): candidate is HiringLifecycleAction =>
-              canPerform(authorities, candidate),
+              canPerform(authorities, actionPermissions, candidate),
           )
         : [];
       const primaryAction = permittedActions[0] || null;

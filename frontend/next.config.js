@@ -2,6 +2,7 @@
 const path = require('path');
 
 const nextConfig = {
+  skipTrailingSlashRedirect: true,
   // Keep production builds isolated from an active local dev server. Next can
   // corrupt the shared webpack cache when `next build` and `next dev` write to
   // the same directory, which previously made visual QA fail with transient
@@ -39,6 +40,10 @@ const nextConfig = {
       {
         source: '/api/:path*',
         destination: `${process.env.BACKEND_API_ORIGIN}/api/:path*`,
+      },
+      {
+        source: '/socket.io/:path*',
+        destination: `${process.env.BACKEND_API_ORIGIN}/socket.io/:path*/`,
       },
     ];
   },

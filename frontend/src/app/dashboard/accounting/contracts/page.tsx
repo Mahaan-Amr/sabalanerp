@@ -36,6 +36,7 @@ import {
 } from '@/features/accounting/accountingQueryState';
 import {
   AccountingContractRow,
+  accountingActionAvailability,
   FinancialInvoiceApprovalForm,
   FinancialInvoiceApprovalPayload,
   StatusBadge,
@@ -269,14 +270,22 @@ export default function AccountingContractsPage() {
     if (!correctionTarget) return;
     const reason = String(values.reason || '').trim();
     if (!reason) return;
-    const applied = await execute(correctionTarget, {
-      kind: 'REQUEST_CORRECTION',
-      contractId: correctionTarget.contractId,
-      category: values.category || 'OTHER',
-      priority: values.priority || 'MEDIUM',
-      reason,
-    });
-    if (applied) setCorrectionTarget(null);
+    setActionLoading(`${correctionTarget.contractId}:CREATE_CORRECTION_REQUEST`);
+    try {
+      setActionError(null);
+      await accountingAPI.createCorrectionRequest(correctionTarget.contractId, {
+        category: String(values.category || 'OTHER'),
+        priority: String(values.priority || 'MEDIUM'),
+        reason,
+      }, crypto.randomUUID());
+      await loadContracts();
+      setCorrectionTarget(null);
+    } catch (error) {
+      const response = (error as any)?.response?.data;
+      setActionError(response?.message || 'ثبت درخواست اصلاح انجام نشد. دوباره تلاش کنید.');
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const flagContract = async (values: Record<string, string | number>) => {
@@ -399,34 +408,38 @@ export default function AccountingContractsPage() {
       disabled: actionLoading === `${contract.contractId}:PRINT_SALES_PDF`,
       onClick: () => openSalesContractPdf(contract, true),
     },
-    {
+    ...(accountingActionAvailability(contract, 'CREATE_INVOICE')?.visible ? [{
       label: 'پیش‌نویس صورتحساب',
       icon: FaFileInvoice,
       tone: 'info',
-      disabled: !contract.accounting.eligibleForFinancialRecords || actionLoading === `${contract.contractId}:CREATE_INVOICE`,
-      title: contract.accounting.eligibilityReason,
+      disabled: accountingActionAvailability(contract, 'CREATE_INVOICE')?.enabled !== true || !contract.accounting.eligibleForFinancialRecords || actionLoading === `${contract.contractId}:CREATE_INVOICE`,
+      title: accountingActionAvailability(contract, 'CREATE_INVOICE')?.reason || contract.accounting.eligibilityReason,
       onClick: () => createInvoice(contract),
-    },
-    {
+    } as ErpAction] : []),
+    ...(accountingActionAvailability(contract, 'CREATE_RECEIVABLE')?.visible ? [{
       label: 'دریافتنی',
       icon: FaReceipt,
       tone: 'success',
-      disabled: !contract.accounting.eligibleForFinancialRecords || contract.accounting.invoiceStatus !== 'ISSUED' || actionLoading === `${contract.contractId}:CREATE_RECEIVABLE`,
-      title: contract.accounting.eligibilityReason || (contract.accounting.invoiceStatus !== 'ISSUED' ? 'ابتدا صورتحساب را تایید مالی کنید' : undefined),
+      disabled: accountingActionAvailability(contract, 'CREATE_RECEIVABLE')?.enabled !== true || !contract.accounting.eligibleForFinancialRecords || contract.accounting.invoiceStatus !== 'ISSUED' || actionLoading === `${contract.contractId}:CREATE_RECEIVABLE`,
+      title: accountingActionAvailability(contract, 'CREATE_RECEIVABLE')?.reason || contract.accounting.eligibilityReason || (contract.accounting.invoiceStatus !== 'ISSUED' ? 'ابتدا صورتحساب را تایید مالی کنید' : undefined),
       onClick: () => createReceivable(contract),
-    },
-    {
+    } as ErpAction] : []),
+    ...(accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.visible ? [{
       label: 'تایید مالی',
       icon: FaCheckCircle,
       tone: 'success',
-      disabled: !contract.accounting.eligibleForFinancialRecords || contract.accounting.openCorrections > 0 || contract.accounting.openBlockerFlags > 0 || getPendingInvoiceCandidates(contract).length !== 1 || actionLoading === `${contract.contractId}:APPROVE_FINANCIAL_INVOICE`,
+      disabled: accountingActionAvailability(contract, 'APPROVE_FINANCIAL_INVOICE')?.enabled !== true || !contract.accounting.eligibleForFinancialRecords || contract.accounting.openCorrections > 0 || contract.accounting.openBlockerFlags > 0 || getPendingInvoiceCandidates(contract).length !== 1 || actionLoading === `${contract.contractId}:APPROVE_FINANCIAL_INVOICE`,
       title: contract.accounting.openCorrections > 0
         ? 'ابتدا درخواست‌های اصلاح باز را ببندید'
         : getPendingInvoiceCandidates(contract).length !== 1 ? 'برای تایید سریع باید دقیقا یک صورتحساب تایید نشده وجود داشته باشد' : undefined,
       onClick: () => openApprovalModal(contract),
-    },
-    { label: 'پرچم', icon: FaFlag, tone: 'warning', onClick: () => setFlagTarget(contract) },
-    { label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger', disabled: contract.isInactive, title: contract.isInactive ? 'قرارداد غیرفعال و فقط‌خواندنی است' : undefined, onClick: () => setCorrectionTarget(contract) },
+    } as ErpAction] : []),
+    ...(accountingActionAvailability(contract, 'FLAG_CONTRACT')?.visible
+      ? [{ label: 'پرچم', icon: FaFlag, tone: 'warning', disabled: accountingActionAvailability(contract, 'FLAG_CONTRACT')?.enabled !== true, title: accountingActionAvailability(contract, 'FLAG_CONTRACT')?.reason || undefined, onClick: () => setFlagTarget(contract) } as ErpAction]
+      : []),
+    ...(accountingActionAvailability(contract, 'CREATE_CORRECTION_REQUEST')?.visible
+      ? [{ label: 'درخواست اصلاح', icon: FaExclamationTriangle, tone: 'danger', disabled: accountingActionAvailability(contract, 'CREATE_CORRECTION_REQUEST')?.enabled !== true || contract.isInactive, title: accountingActionAvailability(contract, 'CREATE_CORRECTION_REQUEST')?.reason || (contract.isInactive ? 'قرارداد غیرفعال و فقط‌خواندنی است' : undefined), onClick: () => setCorrectionTarget(contract) } as ErpAction]
+      : []),
   ];
 
   return (

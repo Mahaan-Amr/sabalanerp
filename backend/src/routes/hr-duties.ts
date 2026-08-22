@@ -84,6 +84,20 @@ const serializeDuty = <Duty extends { dueAt: Date }>(duty: Duty) => ({
   ...duty,
   dueAtDisplay: formatCrossWorkspaceDutyDeadlineTehran(duty.dueAt),
 });
+type CrossWorkspaceDutyResponseResult<Duty> =
+  | { duty: Duty; predecessor?: never; replayed?: boolean }
+  | { duty?: never; predecessor: Duty; successor?: unknown; correction?: unknown; replayed?: boolean };
+
+export const serializeCrossWorkspaceDutyResponse = <Duty extends { dueAt: Date }>(
+  result: CrossWorkspaceDutyResponseResult<Duty>,
+) => {
+  const completedDuty = result.duty ?? result.predecessor;
+  if (!completedDuty) throw new Error('DUTY_RESPONSE_INVALID');
+  return {
+    data: serializeDuty(completedDuty),
+    meta: { replayed: Boolean(result.replayed) },
+  };
+};
 const requireDestinationWorkspace = (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     res.locals.destinationWorkspaceCode = crossWorkspaceDutyDestinationCode(req.params.workspaceCode);
@@ -216,7 +230,7 @@ router.post(
       targetUserId: String(req.body.targetUserId ?? '').trim() || undefined,
       policyVersion: 1,
     });
-    res.json({ success: true, data: serializeDuty(result.duty), meta: { replayed: result.replayed } });
+    res.json({ success: true, ...serializeCrossWorkspaceDutyResponse(result) });
   }),
 );
 

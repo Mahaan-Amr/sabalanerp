@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import router from '../sales';
 import { createAccountingActionHandler, createAccountingCorrectionRequestHandler } from '../accounting';
-import dutyRouter from '../hr-duties';
+import dutyRouter, { serializeCrossWorkspaceDutyResponse } from '../hr-duties';
 
 const routes = (router as unknown as {
   stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: unknown[] } }>;
@@ -21,6 +21,16 @@ assert.ok(dutyRoutes.some(({ path, methods }) => path === '/:id/reassign' && met
 assert.ok(dutyRoutes.some(({ path, methods }) => (
   path === '/workspaces/:workspaceCode/duties/:id/eligible-assignees' && methods.get
 )), 'missing eligible duty assignees endpoint');
+
+const transitionedAt = new Date('2026-08-22T12:00:00.000Z');
+const serializedCorrectionResponse = serializeCrossWorkspaceDutyResponse({
+  predecessor: { id: 'accounting-duty-1', dueAt: transitionedAt },
+  successor: { id: 'sales-duty-1', dueAt: transitionedAt },
+  replayed: false,
+});
+assert.equal(serializedCorrectionResponse.data.id, 'accounting-duty-1');
+assert.equal(serializedCorrectionResponse.data.dueAtDisplay.length > 0, true);
+assert.deepEqual(serializedCorrectionResponse.meta, { replayed: false });
 
 const verifyLegacyAccountingWriterIsGone = async () => {
   const handler = createAccountingActionHandler();

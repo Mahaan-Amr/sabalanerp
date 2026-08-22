@@ -6,6 +6,7 @@ import router, {
   initialInterviewCompletionErrorResponse,
   initialInterviewCompletionTransactionError,
   initialInterviewTrackingId,
+  latestCompletedFinalRejectionResultReferences,
 } from "../hr-hiring";
 
 const routes = (router as unknown as {
@@ -48,6 +49,19 @@ assert.ok(
 assert.ok(
   routes.find(({ key }) => key === "POST /applications/:id/formal-assessment-plans")!.stack.length >= 2,
   "Plan finalization must enforce Company Manager authority before its command handler",
+);
+
+assert.deepEqual(
+  latestCompletedFinalRejectionResultReferences([
+    { id: "disc-1", assessmentKind: "DISC", resultVersion: 1 },
+    { id: "disc-2", assessmentKind: "DISC", resultVersion: 2 },
+    { id: "eq-1", assessmentKind: "EQ", resultVersion: 1 },
+  ]),
+  [
+    { id: "disc-2", assessmentKind: "DISC", resultVersion: 2 },
+    { id: "eq-1", assessmentKind: "EQ", resultVersion: 1 },
+  ],
+  "final rejection must automatically retain the latest completed result for each assessment kind",
 );
 
 assert.deepEqual(

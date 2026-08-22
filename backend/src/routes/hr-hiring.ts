@@ -2653,14 +2653,29 @@ router.post('/applications/:id/formal-assessments/:kind/evidence', requireAction
   }
 }));
 
+type CompletedFinalRejectionResult = { id: string; assessmentKind: string; resultVersion: number };
+
+export const latestCompletedFinalRejectionResultReferences = (results: CompletedFinalRejectionResult[]) => {
+  const latest = new Map<string, CompletedFinalRejectionResult>();
+  for (const result of results) {
+    const current = latest.get(result.assessmentKind);
+    if (!current || result.resultVersion > current.resultVersion) latest.set(result.assessmentKind, result);
+  }
+  return Array.from(latest.values());
+};
+
 router.post('/applications/:id/final-rejection', requireActionPermission('RECORD_PRELIMINARY_DECISION', 'RECORD_FINAL_MANAGEMENT_DECISION'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const applicationId = req.params.id;
   const reason = String(req.body?.reason || '').trim();
   if (!reason) throw new Error('دلیل رد نهایی الزامی است.');
-  const references = Array.isArray(req.body?.resultVersions) ? req.body.resultVersions : [];
-  const referencedResults = await Promise.all(references.map((reference: any) => prisma.hrFormalAssessmentResult.findFirst({ where: { applicationId, assessmentKind: String(reference.assessmentKind) as any, resultVersion: Number(reference.resultVersion), status: 'COMPLETED' }, select: { id: true, assessmentKind: true, resultVersion: true } })));
-  if (referencedResults.some((result) => !result)) throw new Error('یکی از نسخه‌های نتیجه ارجاع‌شده معتبر نیست.');
-  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: applicationId }, include: { collateralItems: true } });
+  const [application, completedResults] = await Promise.all([
+    prisma.hrJobApplication.findUniqueOrThrow({ where: { id: applicationId }, include: { collateralItems: true } }),
+    prisma.hrFormalAssessmentResult.findMany({
+      where: { applicationId, status: 'COMPLETED' },
+      select: { id: true, assessmentKind: true, resultVersion: true },
+    }),
+  ]);
+  const referencedResults = latestCompletedFinalRejectionResultReferences(completedResults);
   if (application.convertedAt || application.outcome === 'HIRED') throw new Error('پرونده تبدیل‌شده قابل رد نهایی نیست.');
   if (application.collateralItems.some((item) => item.receivedAt && (!item.returnedAt || !item.returnConfirmedAt))) {
     throw new Error('بازگشت همه وثیقه‌های دریافت‌شده باید ثبت و توسط مدیر مالی تأیید شود.');
@@ -2671,7 +2686,7 @@ router.post('/applications/:id/final-rejection', requireActionPermission('RECORD
     await tx.hrCandidateInvitation.updateMany({ where: { applicationId, revokedAt: null }, data: { revokedAt: now } });
     return updated;
   });
-  await audit(applicationId, 'APPLICATION_FINAL_REJECTED', req, { reason, actionPermissions: ['RECORD_PRELIMINARY_DECISION', 'RECORD_FINAL_MANAGEMENT_DECISION'], resultVersions: referencedResults.filter(Boolean) });
+  await audit(applicationId, 'APPLICATION_FINAL_REJECTED', req, { reason, actionPermissions: ['RECORD_PRELIMINARY_DECISION', 'RECORD_FINAL_MANAGEMENT_DECISION'], resultVersions: referencedResults });
   res.json({ success: true, data: row });
 }));
 

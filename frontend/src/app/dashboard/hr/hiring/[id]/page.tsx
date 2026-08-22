@@ -713,7 +713,6 @@ export default function HiringCasePage() {
       {canFinallyReject && data.stage !== "CLOSED" && !data.convertedAt && data.outcome !== "HIRED" && (
         <FinalHiringRejection
           applicationId={id}
-          plans={data.formalAssessmentPlans || []}
           busy={busy}
           run={run}
         />

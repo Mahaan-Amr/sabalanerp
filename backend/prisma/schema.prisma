@@ -70,6 +70,7 @@ model User {
   workspacePermissions                       WorkspacePermission[]
   grantedFeaturePermissions                  FeaturePermission[]                  @relation("FeaturePermissionGranter")
   featurePermissions                         FeaturePermission[]
+  crossWorkspaceDutyHistoryReceipts          CrossWorkspaceDutyHistoryReceipt[]
   ownedCrmCustomers                          CrmCustomer[]                        @relation("CrmCustomerOwner")
   createdCrmCustomers                        CrmCustomer[]                        @relation("CrmCustomerCreatedBy")
   updatedCrmCustomers                        CrmCustomer[]                        @relation("CrmCustomerUpdatedBy")
@@ -6576,6 +6577,20 @@ model CrossWorkspaceDutyNotificationIdentity {
 
   @@unique([dutyId, dutyAuditVersion, recipientUserId, channelCode])
   @@map("hr_duty_notification_identities")
+}
+
+model CrossWorkspaceDutyHistoryReceipt {
+  id                       String   @id @default(cuid())
+  userId                   String
+  destinationWorkspaceCode String
+  lastSeenAt               DateTime
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, destinationWorkspaceCode])
+  @@index([destinationWorkspaceCode, lastSeenAt])
+  @@map("cross_workspace_duty_history_receipts")
 }
 
 model HrFormalAssessmentPlan {

@@ -58,6 +58,8 @@ export type ErpSegmentOption<T extends string> = {
   value: T;
   label: React.ReactNode;
   icon?: IconType;
+  count?: number;
+  countTone?: ErpTone;
   disabled?: boolean;
 };
 
@@ -645,6 +647,11 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
           >
             {Icon && <Icon className="h-4 w-4" />}
             <span>{option.label}</span>
+            {option.count != null && option.count > 0 && (
+              <ErpBadge tone={option.countTone || 'danger'} variant="solid">
+                {option.count.toLocaleString('fa-IR')}
+              </ErpBadge>
+            )}
           </button>
         );
       })}

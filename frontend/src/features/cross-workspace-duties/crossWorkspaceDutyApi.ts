@@ -8,6 +8,7 @@ export type CrossWorkspaceDutySummary = {
   dueSoon: number;
   overdue: number;
   triage: number;
+  historyUnseen: number;
   canManageTriage: boolean;
 };
 
@@ -16,6 +17,8 @@ export type CrossWorkspaceDuty = {
   status: 'OPEN' | 'COMPLETED' | 'WAIVED' | 'CANCELLED';
   access: 'ASSIGNEE' | 'AVAILABLE' | 'MANAGER_TRIAGE';
   canReassign: boolean;
+  claimRequiresReason: boolean;
+  responseRequiresReason: boolean;
   currentAssigneeUserId: string | null;
   workspace: string;
   sourceActionCode: string;
@@ -31,6 +34,7 @@ export type CrossWorkspaceDuty = {
   detailAvailable: boolean;
   createdAt: string;
   respondedAt: string | null;
+  updatedAt: string;
   history: Array<{ version: number; eventCode: string; reason: string | null; createdAt: string }>;
 };
 
@@ -50,7 +54,11 @@ export const crossWorkspaceDutyApi = {
   detail: (workspace: string, dutyId: string) => api.get<{ success: true; data: CrossWorkspaceDuty }>(
     `/duties/workspaces/${workspace}/duties/${dutyId}`,
   ),
-  claim: (dutyId: string) => api.post(`/duties/${dutyId}/claim`),
+  claim: (dutyId: string, reason?: string | null) => api.post(`/duties/${dutyId}/claim`, { reason: reason || null }),
+  markHistorySeen: (workspace: string, seenThrough: string) => api.post(
+    `/duties/workspaces/${workspace}/history-seen`,
+    { seenThrough },
+  ),
   eligibleAssignees: (workspace: string, dutyId: string) => api.get<{
     success: true;
     data: Array<{ id: string; displayName: string; username: string; role: string }>;

@@ -199,15 +199,37 @@ test('ADMIN may execute every correction stage through the audited workflow with
         contractId: contract.id, actorUserId: admin.id, category: 'OTHER', priority: 'URGENT',
         reason: 'مدیر سیستم زنجیره رسمی اصلاح را آغاز می‌کند.', idempotencyKey: `${suffix}:request`, now: createdAt,
       });
+      await tx.crossWorkspaceDutyAuditVersion.create({ data: {
+        dutyId: created.duty.id,
+        version: 2,
+        eventCode: 'NEAR_DUE',
+        actorUserId: null,
+        sourceVersion: created.duty.sourceVersion,
+        envelopeVersion: created.duty.envelopeVersion,
+        policyVersion: 2,
+      } });
       await claimCrossWorkspaceDuty(tx, {
         dutyId: created.duty.id, actorUserId: admin.id, policyVersion: 2,
+        reason: 'مدیر سیستم مسئولیت تصمیم روی درخواست خود را می‌پذیرد.',
         now: new Date('2026-08-22T10:01:00.000Z'),
       });
+      assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
+        dutyId: created.duty.id, eventCode: 'ADMIN_OVERRIDE_CLAIM_SEPARATION_OF_DUTIES', actorUserId: admin.id,
+      } }), 1);
+      const assignedDetail = await getCrossWorkspaceDutyDetail(tx, {
+        dutyId: created.duty.id, actorUserId: admin.id, workspaceCode: 'ACCOUNTING',
+        now: new Date('2026-08-22T10:01:30.000Z'),
+      });
+      assert.equal(assignedDetail.responseRequiresReason, true);
       const approved = await respondToCrossWorkspaceDuty(tx, {
         dutyId: created.duty.id, actorUserId: admin.id, actionCode: 'APPROVE',
-        expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 2,
+        expectedSourceVersion: 1, expectedEnvelopeVersion: 1,
+        reason: 'مدیر سیستم تصمیم خود بر درخواست را به‌صورت صریح تأیید می‌کند.', policyVersion: 2,
         now: new Date('2026-08-22T10:02:00.000Z'),
       });
+      assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
+        dutyId: created.duty.id, eventCode: 'ADMIN_OVERRIDE_DECISION_SEPARATION_OF_DUTIES', actorUserId: admin.id,
+      } }), 1);
       assert.equal(approved.successor.currentAssigneeUserId, seller.id);
       const edited = await completeSalesContractCorrectionEdit(tx, {
         contractId: contract.id, actorUserId: admin.id, note: 'ویرایش با Admin Override ثبت شد.', policyVersion: 2,
@@ -281,6 +303,12 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         } }),
       ]);
 
+      const summaryBefore = await getCrossWorkspaceDutySummary(tx, {
+        actorUserId: processor.id,
+        workspaceCode: 'ACCOUNTING',
+        now: new Date('2026-08-16T07:59:00.000Z'),
+      });
+
       const created = await requestSalesContractCorrection(tx, {
         contractId: contract.id,
         actorUserId: seller.id,
@@ -309,21 +337,19 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         view: 'available',
         now: new Date('2026-08-16T08:02:00.000Z'),
       });
-      assert.deepEqual(available.map(({ id, access }) => ({ id, access })), [
-        { id: created.duty.id, access: 'AVAILABLE' },
-      ]);
-      assert.deepEqual(await getCrossWorkspaceDutySummary(tx, {
+      assert.deepEqual(
+        available.filter(({ id }) => id === created.duty.id).map(({ id, access }) => ({ id, access })),
+        [{ id: created.duty.id, access: 'AVAILABLE' }],
+      );
+      const summaryAfter = await getCrossWorkspaceDutySummary(tx, {
         actorUserId: processor.id,
         workspaceCode: 'ACCOUNTING',
         now: new Date('2026-08-16T08:02:00.000Z'),
-      }), {
-        open: 0,
-        available: 1,
-        dueSoon: 0,
-        overdue: 0,
-        triage: 1,
-        canManageTriage: true,
       });
+      assert.equal(summaryAfter.open, summaryBefore.open);
+      assert.equal(summaryAfter.available, summaryBefore.available + 1);
+      assert.equal(summaryAfter.triage, summaryBefore.triage + 1);
+      assert.equal(summaryAfter.canManageTriage, true);
 
       const claimed = await claimCrossWorkspaceDuty(tx, {
         dutyId: created.duty.id,

@@ -45,6 +45,7 @@ import {
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import { ApplicantCaseOverview } from "@/features/hr-hiring/ApplicantCaseOverview";
+import { FinalHiringRejection } from "@/features/hr-hiring/FinalHiringRejection";
 import { ProductionHrInterview, ProductionInterviewReport, type ProductionInterviewPayload } from "@/features/hr-hiring/prototype/HrInterviewPrototype";
 import { validateHiringQueueReturnHref } from "@/features/hr-hiring/hiringQueueViewModel";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
@@ -596,6 +597,12 @@ export default function HiringCasePage() {
         applicationId={id}
         returnTo={searchParams.get("returnTo") || undefined}
       />
+      {!data.disposition
+        && data.stage !== "CLOSED"
+        && (hasActionPermission("RECORD_PRELIMINARY_DECISION")
+          || hasActionPermission("RECORD_FINAL_MANAGEMENT_DECISION")) && (
+        <FinalHiringRejection applicationId={id} busy={busy} run={run} />
+      )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
         <Metric label="مرحله" value={data.stage} />
         <Metric label="هویت" value={data.identityClearance} />

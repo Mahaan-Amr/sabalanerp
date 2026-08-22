@@ -3102,8 +3102,26 @@ export const listCorrectionRequests = async (query: any = {}) => {
     prisma.accountingCorrectionRequest.count({ where })
   ]);
   const enrichedRows = await attachListContext(rows);
+  const relatedDuties = rows.length ? await prisma.crossWorkspaceDuty.findMany({
+    where: {
+      sourceType: 'SALES_CONTRACT_CORRECTION',
+      sourceId: { in: rows.map((row) => row.id) },
+      destinationWorkspaceCode: 'ACCOUNTING',
+      status: 'OPEN',
+    },
+    select: { id: true, sourceId: true, sourceVersion: true, createdAt: true },
+    orderBy: [{ sourceVersion: 'desc' }, { createdAt: 'desc' }],
+  }) : [];
+  const accountingDutyByRequest = new Map<string, string>();
+  for (const duty of relatedDuties) {
+    if (!accountingDutyByRequest.has(duty.sourceId)) accountingDutyByRequest.set(duty.sourceId, duty.id);
+  }
+  const rowsWithDuty = enrichedRows.map((row) => ({
+    ...row,
+    accountingDutyId: accountingDutyByRequest.get(row.id) ?? null,
+  }));
   const contractIds = [...new Set(rows.map((row) => row.contractId).filter(Boolean))] as string[];
-  if (!contractIds.length) return { items: enrichedRows, page, pageSize, total };
+  if (!contractIds.length) return { items: rowsWithDuty, page, pageSize, total };
 
   const approvedRecords = await prisma.accountingFinancialRecord.findMany({
     where: {
@@ -3115,7 +3133,7 @@ export const listCorrectionRequests = async (query: any = {}) => {
   const lockedContractIds = new Set(approvedRecords.map((record) => record.contractId).filter(Boolean));
 
   return {
-    items: enrichedRows.map((row) => ({
+    items: rowsWithDuty.map((row) => ({
     ...row,
     accountingEditLocked: row.contractId ? lockedContractIds.has(row.contractId) : false
     })),

@@ -27,6 +27,7 @@ export type ClaimCrossWorkspaceDutyInput = {
   dutyId: string;
   actorUserId: string;
   policyVersion: number;
+  reason?: string | null;
   now?: Date;
 };
 
@@ -84,6 +85,14 @@ export interface CrossWorkspaceDutySourceAdapter {
   canClaim(
     database: CrossWorkspaceDutyDatabase,
     input: ClaimCrossWorkspaceDutyInput,
+  ): Promise<boolean>;
+  claimRequiresReason(
+    database: CrossWorkspaceDutyDatabase,
+    input: ClaimCrossWorkspaceDutyInput,
+  ): Promise<boolean>;
+  responseRequiresReason(
+    database: CrossWorkspaceDutyDatabase,
+    input: { dutyId: string; actorUserId: string },
   ): Promise<boolean>;
   reassign(
     database: CrossWorkspaceDutyDatabase,

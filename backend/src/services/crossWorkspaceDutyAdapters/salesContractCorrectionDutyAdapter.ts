@@ -89,6 +89,10 @@ const definitionFor = (actionCode: string): Definition => {
   return found;
 };
 const asJson = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
+const lockDutyAuditStream = async (
+  database: Parameters<CrossWorkspaceDutySourceAdapter['respond']>[0],
+  dutyId: string,
+) => database.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`hr-duty-deadline:${dutyId}`}))`;
 
 const assertAccountingActor = async (
   database: Parameters<CrossWorkspaceDutySourceAdapter['respond']>[0],
@@ -244,6 +248,7 @@ const synchronize = async (database: Parameters<CrossWorkspaceDutySourceAdapter[
 
 const claim: CrossWorkspaceDutySourceAdapter['claim'] = async (database, input) => {
   const now = input.now ?? new Date();
+  await lockDutyAuditStream(database, input.dutyId);
   const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
   if (!duty || duty.sourceType !== 'SALES_CONTRACT_CORRECTION') throw new Error('DUTY_NOT_AVAILABLE');
   const claimPolicy = {
@@ -254,9 +259,11 @@ const claim: CrossWorkspaceDutySourceAdapter['claim'] = async (database, input) 
   if (!claimPolicy) throw new Error('DUTY_CLAIM_NOT_SUPPORTED');
   if (duty.status !== 'OPEN') throw new Error('DUTY_NOT_OPEN');
   if (duty.currentAssigneeUserId) throw new Error('DUTY_ALREADY_CLAIMED');
-  if (duty.sourceActionCode === 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION'
-    && duty.sourceActorUserId === input.actorUserId
-    && !await isSystemAdmin(database, input.actorUserId)) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
+  const selfDecision = duty.sourceActionCode === 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION'
+    && duty.sourceActorUserId === input.actorUserId;
+  const adminOverride = selfDecision && await isSystemAdmin(database, input.actorUserId);
+  if (selfDecision && !adminOverride) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
+  if (adminOverride && String(input.reason ?? '').trim().length < 3) throw new Error('REASON_REQUIRED');
   await assertAccountingActor(database, input.actorUserId, claimPolicy.features, now);
   const correction = await database.accountingCorrectionRequest.findUnique({ where: { id: duty.sourceId } });
   if (!correction || correction.status !== claimPolicy.sourceStatus || correction.assignedToUserId) {
@@ -284,7 +291,7 @@ const claim: CrossWorkspaceDutySourceAdapter['claim'] = async (database, input) 
   } });
   await database.crossWorkspaceDutyAuditVersion.create({ data: {
     dutyId: duty.id,
-    version: 2,
+    version: await nextAuditVersion(database, duty.id),
     eventCode: 'CLAIMED',
     actorUserId: input.actorUserId,
     sourceVersion: duty.sourceVersion,
@@ -293,12 +300,47 @@ const claim: CrossWorkspaceDutySourceAdapter['claim'] = async (database, input) 
     beforeJson: asJson({ status: 'OPEN', currentAssigneeUserId: null }),
     afterJson: asJson({ status: 'OPEN', currentAssigneeUserId: input.actorUserId }),
   } });
+  if (adminOverride) await database.crossWorkspaceDutyAuditVersion.create({ data: {
+    dutyId: duty.id,
+    version: await nextAuditVersion(database, duty.id),
+    eventCode: 'ADMIN_OVERRIDE_CLAIM_SEPARATION_OF_DUTIES',
+    actorUserId: input.actorUserId,
+    sourceVersion: duty.sourceVersion,
+    envelopeVersion: duty.envelopeVersion,
+    policyVersion: input.policyVersion,
+    beforeJson: asJson({ sourceActorUserId: duty.sourceActorUserId, currentAssigneeUserId: null }),
+    afterJson: asJson({ currentAssigneeUserId: input.actorUserId }),
+    reason: String(input.reason).trim(),
+  } });
   const sourceClaim = await database.accountingCorrectionRequest.updateMany({
     where: { id: correction.id, status: claimPolicy.sourceStatus, assignedToUserId: null },
     data: { assignedToUserId: input.actorUserId },
   });
   if (!sourceClaim.count) throw new Error('DUTY_CLAIM_CONFLICT');
   return database.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } });
+};
+
+const claimRequiresReason: CrossWorkspaceDutySourceAdapter['claimRequiresReason'] = async (database, input) => {
+  const duty = await database.crossWorkspaceDuty.findUnique({
+    where: { id: input.dutyId },
+    select: { sourceActionCode: true, sourceActorUserId: true },
+  });
+  return Boolean(duty
+    && duty.sourceActionCode === 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION'
+    && duty.sourceActorUserId === input.actorUserId
+    && await isSystemAdmin(database, input.actorUserId));
+};
+
+const responseRequiresReason: CrossWorkspaceDutySourceAdapter['responseRequiresReason'] = async (database, input) => {
+  const duty = await database.crossWorkspaceDuty.findUnique({
+    where: { id: input.dutyId },
+    select: { sourceActionCode: true, sourceActorUserId: true, currentAssigneeUserId: true },
+  });
+  return Boolean(duty
+    && duty.currentAssigneeUserId === input.actorUserId
+    && duty.sourceActionCode === 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION'
+    && duty.sourceActorUserId === input.actorUserId
+    && await isSystemAdmin(database, input.actorUserId));
 };
 
 const canClaim: CrossWorkspaceDutySourceAdapter['canClaim'] = async (database, input) => {
@@ -338,6 +380,7 @@ const reassign: CrossWorkspaceDutySourceAdapter['reassign'] = async (database, i
   const now = input.now ?? new Date();
   const reason = input.reason.trim();
   if (reason.length < 3) throw new Error('REASON_REQUIRED');
+  await lockDutyAuditStream(database, input.dutyId);
   const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
   if (!duty || duty.sourceType !== 'SALES_CONTRACT_CORRECTION') throw new Error('DUTY_NOT_AVAILABLE');
   if (duty.status !== 'OPEN') throw new Error('DUTY_NOT_OPEN');
@@ -482,13 +525,16 @@ const listEligibleAssignees: CrossWorkspaceDutySourceAdapter['listEligibleAssign
 
 const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, input) => {
   const now = input.now ?? new Date();
+  await lockDutyAuditStream(database, input.dutyId);
   const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
   if (!duty || duty.sourceType !== 'SALES_CONTRACT_CORRECTION') throw new Error('DUTY_NOT_AVAILABLE');
   if (duty.status !== 'OPEN') throw new Error('DUTY_NOT_OPEN');
   if (duty.currentAssigneeUserId !== input.actorUserId) throw new Error('ASSIGNEE_CHANGED');
-  if (duty.sourceActionCode === 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION'
-    && duty.sourceActorUserId === input.actorUserId
-    && !await isSystemAdmin(database, input.actorUserId)) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
+  const selfDecision = duty.sourceActionCode === 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION'
+    && duty.sourceActorUserId === input.actorUserId;
+  const adminOverride = selfDecision && await isSystemAdmin(database, input.actorUserId);
+  if (selfDecision && !adminOverride) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
+  if (adminOverride && String(input.reason ?? '').trim().length < 3) throw new Error('REASON_REQUIRED');
   if (duty.sourceVersion !== input.expectedSourceVersion) throw new Error('SOURCE_VERSION_CHANGED');
   if (duty.envelopeVersion !== input.expectedEnvelopeVersion) throw new Error('ENVELOPE_VERSION_CHANGED');
   const correction = await database.accountingCorrectionRequest.findUnique({ where: { id: duty.sourceId } });
@@ -560,6 +606,18 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
     where: { dutyId: duty.id, endedAt: null },
     data: { endedAt: now, endReason: 'COMPLETED', changedByUserId: input.actorUserId },
   });
+  if (adminOverride) await database.crossWorkspaceDutyAuditVersion.create({ data: {
+    dutyId: duty.id,
+    version: await nextAuditVersion(database, duty.id),
+    eventCode: 'ADMIN_OVERRIDE_DECISION_SEPARATION_OF_DUTIES',
+    actorUserId: input.actorUserId,
+    sourceVersion: duty.sourceVersion,
+    envelopeVersion: duty.envelopeVersion,
+    policyVersion: input.policyVersion,
+    beforeJson: asJson({ sourceActorUserId: duty.sourceActorUserId, actionCode: input.actionCode }),
+    afterJson: asJson({ respondedByUserId: input.actorUserId, actionCode: input.actionCode }),
+    reason: String(input.reason).trim(),
+  } });
   await database.crossWorkspaceDutyAuditVersion.create({ data: {
     dutyId: duty.id, version: await nextAuditVersion(database, duty.id), eventCode: 'COMPLETED', actorUserId: input.actorUserId,
     sourceVersion: duty.sourceVersion, envelopeVersion: duty.envelopeVersion,
@@ -657,13 +715,16 @@ export const completeSalesCorrectionEditDuty = async (
     });
     throw new Error(consumed ? 'DUTY_SALES_EDIT_ALREADY_CONSUMED' : 'DUTY_SALES_EDIT_NOT_AVAILABLE');
   }
-  const salesDuty = await database.crossWorkspaceDuty.findFirst({
+  let salesDuty = await database.crossWorkspaceDuty.findFirst({
     where: {
       sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: correction.id,
       sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN',
     },
   });
   if (!salesDuty) throw new Error('DUTY_SALES_EDIT_ALREADY_CONSUMED');
+  await lockDutyAuditStream(database, salesDuty.id);
+  salesDuty = await database.crossWorkspaceDuty.findUnique({ where: { id: salesDuty.id } });
+  if (!salesDuty || salesDuty.status !== 'OPEN') throw new Error('DUTY_SALES_EDIT_ALREADY_CONSUMED');
   const actorIsAdmin = await isSystemAdmin(database, input.actorUserId);
   if (salesDuty.currentAssigneeUserId !== input.actorUserId && !actorIsAdmin) throw new Error('ASSIGNEE_CHANGED');
   const expiredAdminOverride = salesDuty.dueAt < input.now && actorIsAdmin;
@@ -740,6 +801,8 @@ export const salesContractCorrectionDutyAdapter = {
   synchronize,
   claim,
   canClaim,
+  claimRequiresReason,
+  responseRequiresReason,
   reassign,
   listEligibleAssignees,
   respond,

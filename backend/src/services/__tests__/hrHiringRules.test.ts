@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { compensationTotalRials, normalizeCompensationComponents, unresolvedActivationRequirements, validateHiringQuestionnaire } from '../hrHiringRules';
+import { collateralCandidateExplanation, compensationTotalRials, normalizeCompensationComponents, unresolvedActivationRequirements, validateHiringQuestionnaire } from '../hrHiringRules';
 import { validateHiringFileSignature } from '../hrHiringFileStorage';
 
 const complete = {
@@ -43,6 +43,22 @@ assert.throws(
   () => normalizeCompensationComponents([{ category: 'UNKNOWN', label: 'ناشناخته', amountRials: '1000' }]),
   /طبقه‌بندی/,
 );
+assert.throws(
+  () => normalizeCompensationComponents([{ category: 'FIXED_BENEFIT', amountRials: '1000' }]),
+  /حقوق پایه/,
+);
+assert.throws(
+  () => normalizeCompensationComponents([{ category: 'BASE_SALARY', amountRials: '0' }]),
+  /بزرگ‌تر از صفر/,
+);
+assert.throws(
+  () => normalizeCompensationComponents([
+    { category: 'BASE_SALARY', amountRials: '1000' },
+    { category: 'ALLOWANCE', amountRials: '200' },
+    { category: 'ALLOWANCE', amountRials: '300' },
+  ]),
+  /تکراری/,
+);
 
 const ready = unresolvedActivationRequirements({
   scheduledStartDate: new Date('2026-01-01'), identityClearance: 'APPROVED', collateralClearance: 'APPROVED',
@@ -70,4 +86,5 @@ try {
   fs.rmSync(uploadTestDir, { recursive: true, force: true });
 }
 
+assert.equal(collateralCandidateExplanation('PROMISSORY_NOTE', '20000000'), 'پس از پذیرش پیشنهاد، امور مالی برای دریافت سفته به مبلغ 20,000,000 ریال با شما هماهنگ می‌کند.');
 console.log('HR hiring rule tests passed.');

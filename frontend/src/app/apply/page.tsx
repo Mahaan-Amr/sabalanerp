@@ -1,5 +1,5 @@
 'use client';
-import { ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpPressable, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpCard, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpPressable, ErpRialInput, ErpSelect, ErpSheet, ErpTextarea } from '@/components/erp';
 import { useEffect, useMemo, useState } from "react";
 import { applicantHiringAPI, hiringError } from "@/lib/hiringApi";
 import { normalizeIranianMobile } from "@/lib/phoneFormat";
@@ -674,17 +674,11 @@ export default function ApplicantFormPage() {
                     updateList("workHistory", i, "lastPosition", e.target.value)
                   }
                 />
-                <ErpInput
+                <ErpRialInput
+                  aria-label="آخرین حقوق و مزایا به ریال"
                   placeholder="آخرین حقوق و مزایا (ریال)"
                   value={row.lastSalaryBenefits}
-                  onChange={(e) =>
-                    updateList(
-                      "workHistory",
-                      i,
-                      "lastSalaryBenefits",
-                      e.target.value.replace(/[^0-9۰-۹٠-٩٬,،\s]/g, ""),
-                    )
-                  }
+                  onValueChange={(lastSalaryBenefits) => updateList("workHistory", i, "lastSalaryBenefits", lastSalaryBenefits)}
                 />
               </div>
             )}
@@ -790,12 +784,10 @@ export default function ApplicantFormPage() {
                 />
               </ErpField>
               <ErpField label="حقوق پیشنهادی (ریال)">
-                <ErpInput
-                  inputMode="numeric"
+                <ErpRialInput
+                  aria-label="حقوق پیشنهادی به ریال"
                   value={data.desiredSalary}
-                  onChange={(e) =>
-                    set("desiredSalary", e.target.value.replace(/[^0-9۰-۹٠-٩٬,،\s]/g, ""))
-                  }
+                  onValueChange={(desiredSalary) => set("desiredSalary", desiredSalary)}
                 />
               </ErpField>
             </div>
@@ -893,9 +885,6 @@ export default function ApplicantFormPage() {
                     <span>
                       مبلغ: {formatPrice(Number(application.compensation.collateralRequirement.amountRials), 'ریال')}
                     </span>
-                  )}
-                  {application.compensation.collateralRequirement.dueTiming && (
-                    <span>زمان تحویل: {application.compensation.collateralRequirement.dueTiming}</span>
                   )}
                 </div>
               </ErpCard>

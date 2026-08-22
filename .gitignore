@@ -114,6 +114,8 @@ backend/storage/contracts/*.pdf
 backend/storage/contracts/**/*.pdf
 backend/storage/contracts/*
 backend/storage/accounting-contracts/*
+backend/storage/hr-hiring/*
+!backend/storage/hr-hiring/.gitkeep
 !backend/storage/contracts/.gitkeep
 !backend/uploads/.gitkeep
 

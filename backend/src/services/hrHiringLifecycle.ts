@@ -96,6 +96,8 @@ interface FormRevisionLike {
 interface CompensationLike {
   obsoleteAt?: Date | string | null;
   proposedBy?: string | null;
+  payrollReviewStatus?: string | null;
+  payrollVerifiedAt?: Date | string | null;
   preparedAt?: Date | string | null;
   hrApprovedAt?: Date | string | null;
   financeApprovedAt?: Date | string | null;
@@ -359,9 +361,7 @@ export const actionPermissionForHiringLifecycleAction = (actionId: string) => {
     COMPLETE_PRE_IDENTITY_ITEM: "MANAGE_RECRUITMENT_CASE",
     RELEASE_PRE_IDENTITY: "MANAGE_RECRUITMENT_CASE",
     CREATE_OFFER: "MANAGE_COMPENSATION",
-    PREPARE_OFFER_PAYROLL: "MANAGE_PAYROLL",
-    APPROVE_OFFER_HR: "MANAGE_PAYROLL",
-    APPROVE_OFFER_FINANCE: "MANAGE_FINANCE_EVIDENCE",
+    VERIFY_OFFER_PAYROLL: "MANAGE_PAYROLL",
     RECORD_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
     UPLOAD_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
     SUBMIT_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
@@ -620,15 +620,15 @@ const assessmentGate = (source: HiringLifecycleSource): Gate => {
 const offerGate = (source: HiringLifecycleSource): Gate => {
   const latest = source.compensationSnapshots?.find((snapshot) => !snapshot.obsoleteAt);
   const proposed = Boolean(latest?.proposedBy);
-  const prepared = Boolean(latest?.preparedAt);
-  const hrApproved = Boolean(latest?.hrApprovedAt);
-  const financeApproved = Boolean(latest?.financeApprovedAt);
+  const payrollVerified = Boolean(
+    latest?.payrollReviewStatus === "VERIFIED" ||
+    latest?.payrollVerifiedAt ||
+    (latest?.hrApprovedAt && latest?.financeApprovedAt),
+  );
   const candidateAccepted = Boolean(latest?.candidateAcceptedAt);
   const completed = [
     proposed,
-    prepared,
-    hrApproved,
-    financeApproved,
+    payrollVerified,
     candidateAccepted,
   ].filter(Boolean).length;
   let nextAction = action(
@@ -636,23 +636,17 @@ const offerGate = (source: HiringLifecycleSource): Gate => {
     "ایجاد پیشنهاد همکاری",
     "COMPANY_MANAGER",
   );
-  if (latest && !prepared)
+  if (latest?.payrollReviewStatus === "RETURNED")
     nextAction = action(
-      "PREPARE_OFFER_PAYROLL",
-      "آماده‌سازی پیشنهاد توسط کارشناس حقوق‌ودستمزد",
-      "HR_PAYROLL_PROCESSOR",
+      "CREATE_OFFER",
+      "ثبت نسخه اصلاح‌شده پیشنهاد همکاری",
+      "COMPANY_MANAGER",
     );
-  else if (latest && !hrApproved)
+  else if (latest && !payrollVerified)
     nextAction = action(
-      "APPROVE_OFFER_HR",
-      "تأیید پیشنهاد توسط منابع انسانی و حقوق‌ودستمزد",
+      "VERIFY_OFFER_PAYROLL",
+      "بررسی ردیف‌های پیشنهاد حقوق",
       "HR_PAYROLL_MANAGER",
-    );
-  else if (latest && !financeApproved)
-    nextAction = action(
-      "APPROVE_OFFER_FINANCE",
-      "تأیید مالی پیشنهاد همکاری",
-      "FINANCE_MANAGER",
     );
   else if (latest && !candidateAccepted)
     nextAction = action(
@@ -660,9 +654,9 @@ const offerGate = (source: HiringLifecycleSource): Gate => {
       "در انتظار پذیرش پیشنهاد توسط متقاضی",
     );
   return {
-    complete: completed === 5,
+    complete: completed === 3,
     requiredComplete: completed,
-    requiredTotal: 5,
+    requiredTotal: 3,
     blockers:
       source.compensationClearance === "REJECTED"
         ? [

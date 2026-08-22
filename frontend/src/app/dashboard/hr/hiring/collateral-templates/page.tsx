@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpPressable, ErpSelect } from '@/components/erp';
+import { ErpInput, ErpPressable, ErpRialInput, ErpSelect } from '@/components/erp';
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { FaPlus, FaSync } from "react-icons/fa";
@@ -119,19 +119,16 @@ export default function CollateralTemplatesPage() {
                 )
               }
             />
-            <ErpInput
+            <ErpRialInput
               className={field}
-              inputMode="numeric"
+              aria-label="مبلغ پیش‌فرض وثیقه به ریال"
               placeholder="مبلغ پیش‌فرض ریال"
               value={item.defaultAmountRials}
-              onChange={(e) =>
+              onValueChange={(defaultAmountRials) =>
                 setItems(
                   items.map((x, i) =>
                     i === index
-                      ? {
-                          ...x,
-                          defaultAmountRials: e.target.value.replace(/\D/g, ""),
-                        }
+                      ? { ...x, defaultAmountRials }
                       : x,
                   ),
                 )

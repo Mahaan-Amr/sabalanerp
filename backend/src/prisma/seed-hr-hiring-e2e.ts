@@ -21,6 +21,8 @@ const fixture = {
   unitId: "hr-e2e-unit",
   jobId: "hr-e2e-job",
   positionId: "hr-e2e-position",
+  financeRecorderEmail: "finance.recorder.e2e@sabalanerp.test",
+  financeManagerEmail: "finance.manager.e2e@sabalanerp.test",
 };
 
 const plusDays = (days: number) =>
@@ -51,6 +53,21 @@ async function main() {
       creationSource: "SYSTEM_SEEDED",
     },
   });
+  const [financeRecorder, financeManager] = await Promise.all([
+    { email: fixture.financeRecorderEmail, username: "finance_recorder_e2e", firstName: "ثبت‌کننده", lastName: "مالی" },
+    { email: fixture.financeManagerEmail, username: "finance_manager_e2e", firstName: "مدیر", lastName: "مالی" },
+  ].map((financeUser) => prisma.user.upsert({
+    where: { email: financeUser.email },
+    update: { ...financeUser, password, role: "USER", isActive: true, mustChangePassword: false },
+    create: { ...financeUser, password, role: "USER", isActive: true, mustChangePassword: false, creationSource: "SYSTEM_SEEDED" },
+  })));
+  for (const financeUser of [financeRecorder, financeManager]) {
+    await prisma.workspacePermission.upsert({
+      where: { userId_workspace: { userId: financeUser.id, workspace: "accounting" } },
+      update: { permissionLevel: "edit", isActive: true },
+      create: { userId: financeUser.id, workspace: "accounting", permissionLevel: "edit", isActive: true, grantedBy: user.id },
+    });
+  }
 
   await prisma.workspacePermission.upsert({
     where: { userId_workspace: { userId: user.id, workspace: "hr" } },
@@ -98,11 +115,23 @@ async function main() {
     { code: "MANAGE_RECRUITMENT_CASE", displayName: "Manage Recruitment Case" },
     { code: "PERSONNEL", displayName: "Personnel" },
     { code: "MANAGE_PERSONNEL_SCHEDULE", displayName: "Manage Personnel Schedule" },
+    { code: "MANAGE_FINANCE_EVIDENCE", displayName: "Manage Finance Evidence" },
   ]) {
     await prisma.hrFeatureCatalog.upsert({
       where: { code: feature.code },
       update: { workspaceCode: "HUMAN_RESOURCES", isActive: true },
       create: { ...feature, workspaceCode: "HUMAN_RESOURCES" },
+    });
+  }
+  for (const financeUser of [financeRecorder, financeManager]) {
+    await prisma.hrFeatureAccessGrant.upsert({
+      where: { stableKey: `hr-e2e:feature:${financeUser.id}:MANAGE_FINANCE_EVIDENCE` },
+      update: { level: "EDIT", status: "ACTIVE", effectiveTo: null },
+      create: {
+        stableKey: `hr-e2e:feature:${financeUser.id}:MANAGE_FINANCE_EVIDENCE`, userId: financeUser.id,
+        featureCode: "MANAGE_FINANCE_EVIDENCE", level: "EDIT", effectiveFrom: authorizationEffectiveFrom,
+        grantedByUserId: user.id, reason: "Accounting-only hiring Finance E2E fixture",
+      },
     });
   }
   await prisma.hrFeatureCatalog.upsert({
@@ -297,6 +326,9 @@ async function main() {
       assessmentReviewAcknowledgedBy: null,
       assessmentReviewAcknowledgedAt: null,
       preIdentityReleasedAt: new Date(),
+      acceptedOfferAt: null,
+      collateralClearance: "NOT_STARTED",
+      compensationClearance: "IN_PROGRESS",
     },
     create: {
       id: fixture.applicationId,
@@ -312,6 +344,22 @@ async function main() {
       assessmentDecisionBy: user.id,
       assessmentDecisionAt: new Date(),
       preIdentityReleasedAt: new Date(),
+      collateralClearance: "NOT_STARTED",
+      compensationClearance: "IN_PROGRESS",
+    },
+  });
+  await prisma.hrCollateralRequirement.upsert({
+    where: { applicationId_version: { applicationId: fixture.applicationId, version: 1 } },
+    update: {
+      type: "PROMISSORY_NOTE", amountRials: "20000000", status: "ACTIVE",
+      candidateExplanation: "پس از پذیرش پیشنهاد، امور مالی برای دریافت سفته به مبلغ 20,000,000 ریال با شما هماهنگ می‌کند.",
+      proposedBy: user.id, dueTiming: null,
+    },
+    create: {
+      applicationId: fixture.applicationId, version: 1, type: "PROMISSORY_NOTE",
+      amountRials: "20000000", status: "ACTIVE",
+      candidateExplanation: "پس از پذیرش پیشنهاد، امور مالی برای دریافت سفته به مبلغ 20,000,000 ریال با شما هماهنگ می‌کند.",
+      proposedBy: user.id,
     },
   });
 
@@ -536,6 +584,9 @@ async function main() {
       hrApprovedAt: new Date(),
       financeApprovedBy: user.id,
       financeApprovedAt: new Date(),
+      payrollReviewStatus: "VERIFIED",
+      payrollVerifiedBy: user.id,
+      payrollVerifiedAt: new Date(),
       candidateAcceptedAt: null,
       candidateAcceptedName: null,
       candidateDecision: null,
@@ -556,6 +607,7 @@ async function main() {
       candidateNotificationAttempts: 1,
     },
     create: {
+      id: "hr-e2e-compensation-snapshot",
       applicationId: fixture.applicationId,
       version: 1,
       componentsJson: [
@@ -573,6 +625,9 @@ async function main() {
       hrApprovedAt: new Date(),
       financeApprovedBy: user.id,
       financeApprovedAt: new Date(),
+      payrollReviewStatus: "VERIFIED",
+      payrollVerifiedBy: user.id,
+      payrollVerifiedAt: new Date(),
       candidateNotificationStatus: "FAILED",
       candidateNotificationError: "خطای آزمایشی ارسال پیامک پیشنهاد",
       candidateNotifiedAt: null,

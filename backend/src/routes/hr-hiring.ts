@@ -22,7 +22,7 @@ import {
   validateHiringFileSignature
 } from '../services/hrHiringFileStorage';
 import { normalizeCandidateAssessmentResult } from '../services/hrCandidateAssessment';
-import { compensationTotalRials, isValidIranianNationalCode, normalizeCompensationComponents, validateHiringCorrection, validateHiringQuestionnaire } from '../services/hrHiringRules';
+import { collateralCandidateExplanation, compensationTotalRials, isValidIranianNationalCode, normalizeCompensationComponents, validateHiringCorrection, validateHiringQuestionnaire } from '../services/hrHiringRules';
 import {
   applicantOtpHash,
   applicantSubjectHash,
@@ -56,7 +56,6 @@ import {
 } from '../services/hrEmploymentContract';
 import { normalizeInsuranceEnrollmentCommand } from '../services/hrInsuranceEnrollment';
 import { normalizePayrollParticipationCommand } from '../services/hrPayrollParticipation';
-import { buildHiringDocumentIndex } from '../services/hrHiringDocumentIndex';
 import { buildEmploymentActivationReadiness } from '../services/hrEmploymentActivation';
 import {
   assertArchiveReason,
@@ -100,6 +99,13 @@ import { ensureInitialInterviewCriteriaSet } from '../services/hrInitialIntervie
 import { initialInterviewDraftSaveError } from '../services/hrInitialInterviewDraftPersistence';
 import { nextEvaluationOccurrenceNumber, normalizeCompanyEvaluationPlanItem, validateCompanyEvaluationResult } from '../services/hrCompanyEvaluationPolicy';
 import { buildHiringCandidateSearchConditions } from '../services/hrHiringSearch';
+import {
+  compensationVerificationDueAt,
+  isCompensationPayrollVerified,
+  normalizeCompensationReturnReason,
+} from '../services/hrCompensationWorkflow';
+import { tehranCivilDateKey } from '../services/tehranBusinessCalendar';
+import { createHrHiringCollateralReturnDuty, createHrHiringFinanceDuty } from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
 
 const router = express.Router();
 const ACCESS_TTL_DAYS = 7;
@@ -145,6 +151,27 @@ const upload = multer({
 });
 
 const plusDays = (days: number) => new Date(Date.now() + days * 86_400_000);
+const initiatePendingCollateralReturns = async (application: any, outcome: string, reason: string, requestedBy: string) => {
+  const held = application.collateralItems.filter((item: any) => item.receivedAt && !item.returnConfirmedAt);
+  if (!held.length) return 0;
+  await prisma.$transaction(async (tx) => {
+    await tx.hrJobApplication.update({ where: { id: application.id }, data: {
+      pendingClosureOutcome: outcome, pendingClosureReason: reason,
+      pendingClosureRequestedBy: requestedBy, pendingClosureRequestedAt: new Date(),
+    } });
+    for (const item of held) {
+      const latest = await tx.hrCollateralOriginalReturn.findFirst({ where: { collateralItemId: item.id }, orderBy: { version: 'desc' } });
+      if (latest && ['DRAFT', 'SUBMITTED'].includes(latest.status)) continue;
+      const source = await tx.hrCollateralOriginalReturn.create({ data: {
+        collateralItemId: item.id, version: (latest?.version || 0) + 1, status: 'DRAFT',
+      } });
+      await createHrHiringCollateralReturnDuty(tx, {
+        returnId: source.id, actionCode: 'HIRING_COLLATERAL_RECORD_ORIGINAL_RETURN', actorUserId: requestedBy,
+      });
+    }
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  return held.length;
+};
 const invitationIsUsableWhere = (now = new Date()) => ({
   revokedAt: null,
   expiresAt: { gt: now },
@@ -255,8 +282,14 @@ const resolveOfferAccessCode = async (
   };
 };
 
-const audit = (applicationId: string, eventType: string, req: AuthRequest | express.Request, payload?: unknown, actorKind = 'USER') =>
-  prisma.hrHiringAudit.create({ data: {
+const auditWithDatabase = (
+  database: PrismaClient | Prisma.TransactionClient,
+  applicationId: string,
+  eventType: string,
+  req: AuthRequest | express.Request,
+  payload?: unknown,
+  actorKind = 'USER',
+) => database.hrHiringAudit.create({ data: {
     applicationId,
     actorUserId: (req as AuthRequest).user?.id,
     actorKind,
@@ -271,6 +304,9 @@ const audit = (applicationId: string, eventType: string, req: AuthRequest | expr
     ipAddress: req.ip,
     userAgent: req.get('user-agent')
   }});
+
+const audit = (applicationId: string, eventType: string, req: AuthRequest | express.Request, payload?: unknown, actorKind = 'USER') =>
+  auditWithDatabase(prisma, applicationId, eventType, req, payload, actorKind);
 
 const notifyOfferDecline = async (
   tx: Prisma.TransactionClient,
@@ -548,6 +584,10 @@ const syncAutomaticHiringWorkItems = async () => {
       if (!eligibleUserIds.length) continue;
       // One source action owns one shared item. Eligibility is evaluated at read/action time.
       const assignees: Array<string | null> = [null];
+      const latestCompensation = application.compensationSnapshots.find((snapshot) => !snapshot.obsoleteAt);
+      const dueDate = action.id === 'VERIFY_OFFER_PAYROLL' && latestCompensation?.verificationDueAt
+        ? latestCompensation.verificationDueAt
+        : endOfToday();
 
       for (const assignedToUserId of assignees) {
         const sourceKey = automaticHiringWorkItemSourceKey(application.id, action.id, assignedToUserId);
@@ -558,12 +598,13 @@ const syncAutomaticHiringWorkItems = async () => {
           description: `پرونده متقاضی · ${application.position.title}`,
           sourceType: 'HIRING_ACTION' as const,
           destinationHref: `/dashboard/hr/hiring/${application.id}`,
-          assignedToUserId
+          assignedToUserId,
+          dueDate,
         };
         if (!existing) {
-          const created = await prisma.hrWorkItem.create({ data: { ...values, sourceKey, dueDate: endOfToday(), createdByUserId: null } });
+          const created = await prisma.hrWorkItem.create({ data: { ...values, sourceKey, createdByUserId: null } });
           await auditWorkItem(created.id, 'AUTOMATIC_TASK_CREATED', null, null, created);
-        } else if (existing.assignedToUserId !== assignedToUserId || existing.title !== values.title || !['PENDING', 'IN_PROGRESS'].includes(existing.status)) {
+        } else if (existing.assignedToUserId !== assignedToUserId || existing.title !== values.title || existing.dueDate.getTime() !== dueDate.getTime() || !['PENDING', 'IN_PROGRESS'].includes(existing.status)) {
           const reopened = !['PENDING', 'IN_PROGRESS'].includes(existing.status);
           const updated = await prisma.hrWorkItem.update({ where: { id: existing.id }, data: {
             ...values,
@@ -750,7 +791,7 @@ router.get('/public/application', applicantSession, asyncHandler(async (req: App
     position: application.position,
     revision: application.formRevisions[0] || null,
     correctionSource: application.formRevisions.find((item) => item.status === 'RETURNED') || null,
-    compensation: compensation?.hrApprovedAt && compensation.financeApprovedAt ? { ...compensation, collateralRequirement: application.collateralRequirements[0] || null } : null,
+    compensation: isCompensationPayrollVerified(compensation) ? { ...compensation, collateralRequirement: application.collateralRequirements[0] || null } : null,
     formalAssessments: activeFormalAssessmentPlan
       ? {
           planVersion: activeFormalAssessmentPlan.version,
@@ -953,7 +994,7 @@ router.post('/public/application/compensation/accept', applicantSession, asyncHa
   ]);
   const formalAssessmentGate = await formalAssessmentEvidenceFor(applicationId);
   if (!formalAssessmentGate.evidence.complete) return res.status(409).json({ success: false, error: 'ارزیابی‌های رسمی انتخاب‌شده هنوز تکمیل نشده‌اند.' });
-  if (!snapshot?.hrApprovedAt || !snapshot.financeApprovedAt || snapshot.obsoleteAt) return res.status(409).json({ success: false, error: 'پیشنهاد جبران خدمات هنوز نهایی نشده یا منسوخ شده است.' });
+  if (!snapshot || !isCompensationPayrollVerified(snapshot) || snapshot.obsoleteAt) return res.status(409).json({ success: false, error: 'پیشنهاد جبران خدمات هنوز بررسی نشده یا منسوخ شده است.' });
   if (snapshot.candidateDecision) return res.status(409).json({ success: false, error: 'برای این نسخه قبلاً تصمیم ثبت شده است.' });
   if (req.body.accepted !== true) throw new Error('تأیید صریح پذیرش پیشنهاد الزامی است.');
   const acceptedName = normalizedName(req.body.fullName);
@@ -981,6 +1022,20 @@ router.post('/public/application/compensation/accept', applicantSession, asyncHa
       where: { id: applicationId },
       data: { acceptedOfferAt: now, stage: 'OFFER', compensationClearance: 'APPROVED' }
     });
+    const requirement = await tx.hrCollateralRequirement.findFirst({
+      where: { applicationId, status: 'ACTIVE' }, orderBy: { version: 'desc' },
+    });
+    if (requirement && await tx.hrCollateralItem.count({ where: { applicationId } }) === 0) {
+      const item = await tx.hrCollateralItem.create({ data: {
+        applicationId, type: requirement.type, required: true, amountRials: requirement.amountRials,
+        status: 'MISSING', note: requirement.candidateExplanation, recordedBy: snapshot.proposedBy,
+      } });
+      await tx.hrJobApplication.update({ where: { id: applicationId }, data: { collateralClearance: 'IN_PROGRESS' } });
+      await createHrHiringFinanceDuty(tx, {
+        collateralItemId: item.id, actionCode: 'HIRING_COLLATERAL_RECORD_RECEIPT',
+        actorUserId: snapshot.proposedBy, now,
+      });
+    }
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   await audit(applicationId, 'OFFER_COMPENSATION_ACCEPTED', req, { snapshotId: snapshot.id }, 'CANDIDATE');
   res.json({ success: true });
@@ -992,7 +1047,7 @@ router.post('/public/application/compensation/decline', applicantSession, asyncH
     prisma.hrCompensationSnapshot.findFirst({ where: { applicationId }, orderBy: { version: 'desc' } }),
     prisma.hrJobApplication.findUniqueOrThrow({ where: { id: applicationId } })
   ]);
-  if (!snapshot?.hrApprovedAt || !snapshot.financeApprovedAt || snapshot.obsoleteAt) return res.status(409).json({ success: false, error: 'پیشنهاد همکاری هنوز نهایی نشده یا منسوخ شده است.' });
+  if (!snapshot || !isCompensationPayrollVerified(snapshot) || snapshot.obsoleteAt) return res.status(409).json({ success: false, error: 'پیشنهاد همکاری هنوز بررسی نشده یا منسوخ شده است.' });
   const formalAssessmentGate = await formalAssessmentEvidenceFor(applicationId);
   if (!formalAssessmentGate.evidence.complete) return res.status(409).json({ success: false, error: 'ارزیابی‌های رسمی انتخاب‌شده هنوز تکمیل نشده‌اند.' });
   if (snapshot.candidateDecision) return res.status(409).json({ success: false, error: 'برای این نسخه قبلاً تصمیم ثبت شده است.' });
@@ -1089,7 +1144,7 @@ const actionProtectedHiringMutationPaths = [
   /^\/applications\/[^/]+\/form\/correction\/retry$/,
   /^\/applications\/[^/]+\/documents$/,
   /^\/applications\/[^/]+\/identity-checks\/[^/]+$/,
-  /^\/applications\/[^/]+\/compensation(?:\/[^/]+\/(?:prepare|hr-approve|finance-approve|notification\/retry|offline-decision))?$/,
+  /^\/applications\/[^/]+\/compensation(?:\/[^/]+\/(?:payroll-review|prepare|hr-approve|finance-approve|notification\/retry|offline-decision))?$/,
   /^\/applications\/[^/]+\/formal-assessment-plans$/,
   /^\/applications\/[^/]+\/formal-assessments\/[^/]+\/(?:result|evidence)$/,
   /^\/applications\/[^/]+\/assessments(?:\/complete|\/review-acknowledge|\/decision|\/[^/]+\/(?:revise|void))?$/,
@@ -1563,7 +1618,7 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
       formalAssessmentPlans: { include: formalAssessmentPlanInclude, orderBy: { version: 'desc' } },
       preIdentityChecklistItems: { select: { status: true, managementResolution: true, dueAt: true } },
       hiringDecisions: { select: { kind: true, outcome: true, explanation: true, changeReason: true, version: true, decidedBy: true, decidedAt: true }, orderBy: [{ kind: 'asc' }, { version: 'desc' }] },
-      compensationSnapshots: { select: { proposedBy: true, preparedAt: true, hrApprovedAt: true, financeApprovedAt: true, candidateAcceptedAt: true, obsoleteAt: true }, orderBy: { version: 'desc' }, take: 3 },
+      compensationSnapshots: { select: { proposedBy: true, payrollReviewStatus: true, payrollVerifiedAt: true, hrApprovedAt: true, financeApprovedAt: true, candidateAcceptedAt: true, obsoleteAt: true }, orderBy: { version: 'desc' }, take: 3 },
       collateralItems: { select: { required: true, status: true } },
       contracts: { select: { uploadedBy: true, submittedAt: true, returnedAt: true, approvedAt: true }, orderBy: { version: 'desc' }, take: 1 },
       payrollParticipation: { select: { id: true } },
@@ -1697,7 +1752,6 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
     actionPermissionCodes,
   );
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities, actorId(req));
-  data.documentIndex = buildHiringDocumentIndex(row, actionPermissions);
   data.activationReadiness = actionPermissions.has('MANAGE_RECRUITMENT_CASE')
     ? buildEmploymentActivationReadiness(row)
     : null;
@@ -2305,84 +2359,101 @@ router.post('/applications/:id/identity/approve', requireActionPermission('MANAG
 }));
 
 router.post('/applications/:id/compensation', requireActionPermission('MANAGE_COMPENSATION'), asyncHandler(async (req: AuthRequest, res: Response) => {
-  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } });
-  if (application.identityClearance !== 'APPROVED') throw new Error('پیشنهاد جبران خدمات پس از تأیید هویت ثبت می‌شود.');
-  await assertFormalAssessmentEvidenceComplete(req.params.id);
-  if (application.acceptedOfferAt) throw new Error('پس از پذیرش متقاضی، تغییر پیشنهاد نیازمند فرایند اصلاح قرارداد است.');
   const components = normalizeCompensationComponents(Array.isArray(req.body.components) ? req.body.components : []);
   const total = compensationTotalRials(components);
-  const aggregate = await prisma.hrCompensationSnapshot.aggregate({ where: { applicationId: req.params.id }, _max: { version: true } });
-  const row = await prisma.hrCompensationSnapshot.create({ data: {
-    applicationId: req.params.id, version: (aggregate._max.version || 0) + 1,
-    componentsJson: components, totalRials: total.toString(), proposedBy: actorId(req)
-  }});
-  await prisma.hrJobApplication.update({ where: { id: req.params.id }, data: { compensationClearance: 'IN_PROGRESS', stage: 'OFFER' } });
+  await assertFormalAssessmentEvidenceComplete(req.params.id);
+  const holidayRows = await prisma.sabalanCalendarEntry.findMany({ where: { isActive: true, isHoliday: true }, select: { date: true } });
+  const holidays = new Set(holidayRows.map((entry) => tehranCivilDateKey(entry.date)));
+  const row = await prisma.$transaction(async (tx) => {
+    const application = await tx.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } });
+    if (application.identityClearance !== 'APPROVED') throw new Error('پیشنهاد جبران خدمات پس از تأیید هویت ثبت می‌شود.');
+    if (application.acceptedOfferAt) throw new Error('پس از پذیرش متقاضی، تغییر پیشنهاد نیازمند فرایند اصلاح قرارداد است.');
+    const latest = await tx.hrCompensationSnapshot.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' } });
+    if (latest && !latest.obsoleteAt && latest.payrollReviewStatus !== 'RETURNED' && latest.candidateDecision !== 'DECLINED') {
+      throw new Error('آخرین پیشنهاد هنوز فعال است و ابتدا باید بررسی یا تعیین تکلیف شود.');
+    }
+    const now = new Date();
+    const created = await tx.hrCompensationSnapshot.create({ data: {
+      applicationId: req.params.id,
+      version: (latest?.version || 0) + 1,
+      componentsJson: components,
+      totalRials: total.toString(),
+      proposedBy: actorId(req),
+      payrollReviewStatus: 'PENDING',
+      verificationDueAt: compensationVerificationDueAt(now, holidays),
+      supersedesSnapshotId: latest?.payrollReviewStatus === 'RETURNED' ? latest.id : null,
+      createdAt: now,
+    }});
+    await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { compensationClearance: 'IN_PROGRESS', stage: 'OFFER' } });
+    await auditWithDatabase(tx, req.params.id, 'COMPENSATION_PROPOSED', req, {
+      snapshotId: created.id,
+      version: created.version,
+      supersedesSnapshotId: created.supersedesSnapshotId,
+      verificationDueAt: created.verificationDueAt?.toISOString() || null,
+    });
+    return created;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   res.status(201).json({ success: true, data: row });
 }));
 
-router.put('/applications/:id/compensation/:snapshotId/prepare', requireActionPermission('MANAGE_PAYROLL'), asyncHandler(async (req: AuthRequest, res: Response) => {
-  const row = await prisma.hrCompensationSnapshot.findUniqueOrThrow({ where: { id: req.params.snapshotId } });
-  const latest = await prisma.hrCompensationSnapshot.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true } });
-  if (latest?.id !== row.id) throw new Error('فقط آخرین نسخه پیشنهاد قابل پردازش است.');
-  if (row.applicationId !== req.params.id || row.proposedBy === actorId(req)) throw new Error('کارشناس حقوق و دستمزد باید مستقل از پیشنهاددهنده باشد.');
-  if (row.hrApprovedAt || row.financeApprovedAt || row.candidateAcceptedAt) throw new Error('نسخه تأییدشده قابل آماده‌سازی مجدد نیست.');
-  const components = normalizeCompensationComponents(Array.isArray(req.body.components) ? req.body.components : row.componentsJson as any[]);
-  const total = compensationTotalRials(components);
-  const updated = await prisma.hrCompensationSnapshot.update({ where: { id: row.id }, data: { componentsJson: components, totalRials: total.toString(), preparedBy: actorId(req), preparedAt: new Date() } });
-  await audit(req.params.id, 'COMPENSATION_PAYROLL_PREPARED', req, { snapshotId: row.id });
+router.post('/applications/:id/compensation/:snapshotId/payroll-review', requireActionPermission('MANAGE_PAYROLL'), asyncHandler(async (req: AuthRequest, res: Response) => {
+  await assertFormalAssessmentEvidenceComplete(req.params.id);
+  const decision = String(req.body.decision || '');
+  if (!['APPROVE', 'RETURN'].includes(decision)) throw new Error('نتیجه بررسی پیشنهاد حقوق معتبر نیست.');
+  const returnReason = decision === 'RETURN' ? normalizeCompensationReturnReason({
+    code: req.body.reasonCode,
+    detail: req.body.reasonDetail,
+  }) : null;
+  const claimToken = decision === 'APPROVE' ? crypto.randomUUID() : null;
+  const result = await prisma.$transaction(async (tx) => {
+    const [row, latest, application] = await Promise.all([
+      tx.hrCompensationSnapshot.findUniqueOrThrow({ where: { id: req.params.snapshotId } }),
+      tx.hrCompensationSnapshot.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true } }),
+      tx.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { candidate: true } }),
+    ]);
+    if (latest?.id !== row.id || row.applicationId !== req.params.id) throw new Error('فقط آخرین نسخه پیشنهاد قابل بررسی است.');
+    const selfVerification = row.proposedBy === actorId(req);
+    if (selfVerification && !(req as any).hrBroadManagerOverride) throw new Error('بررسی‌کننده حقوق و دستمزد باید مستقل از پیشنهاددهنده باشد.');
+    if (row.payrollReviewStatus !== 'PENDING') throw new Error('این نسخه قبلاً بررسی شده است.');
+    const now = new Date();
+    const updated = await tx.hrCompensationSnapshot.update({
+      where: { id: row.id },
+      data: decision === 'APPROVE' ? {
+        payrollReviewStatus: 'VERIFIED',
+        payrollVerifiedBy: actorId(req),
+        payrollVerifiedAt: now,
+        candidateNotificationStatus: 'PENDING',
+        candidateNotificationClaimedAt: now,
+        candidateNotificationClaimToken: claimToken,
+      } : {
+        payrollReviewStatus: 'RETURNED',
+        payrollReturnedBy: actorId(req),
+        payrollReturnedAt: now,
+        payrollReturnReasonCode: returnReason!.code,
+        payrollReturnReasonDetail: returnReason!.detail,
+      },
+    });
+    await auditWithDatabase(tx, req.params.id, decision === 'APPROVE' ? 'COMPENSATION_PAYROLL_VERIFIED' : 'COMPENSATION_PAYROLL_RETURNED', req, {
+      snapshotId: row.id,
+      selfApproval: selfVerification,
+      reasonCode: returnReason?.code || null,
+      reasonDetail: returnReason?.detail || null,
+    });
+    return { updated, mobile: application.candidate.mobile };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  const updated = decision === 'APPROVE' && claimToken
+    ? await deliverClaimedOfferNotification(req.params.id, result.updated.id, result.mobile, claimToken, actorId(req))
+    : result.updated;
+  await audit(req.params.id, decision === 'APPROVE' ? 'OFFER_NOTIFICATION_ATTEMPTED' : 'COMPENSATION_RETURN_COMPLETED', req, {
+    snapshotId: result.updated.id,
+    notificationStatus: decision === 'APPROVE' ? updated.candidateNotificationStatus : null,
+  });
   res.json({ success: true, data: updated });
 }));
 
-router.post('/applications/:id/compensation/:snapshotId/hr-approve', requireActionPermission('MANAGE_PAYROLL'), asyncHandler(async (req: AuthRequest, res: Response) => {
-  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } });
-  await assertFormalAssessmentEvidenceComplete(req.params.id);
-  const row = await prisma.hrCompensationSnapshot.findUniqueOrThrow({ where: { id: req.params.snapshotId } });
-  const latest = await prisma.hrCompensationSnapshot.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true } });
-  if (latest?.id !== row.id) throw new Error('فقط آخرین نسخه پیشنهاد قابل تأیید است.');
-  if (row.applicationId !== req.params.id || !row.preparedBy || row.preparedBy === actorId(req) || row.proposedBy === actorId(req)) throw new Error('نسخه باید توسط پیشنهاددهنده، پردازش‌کننده و مدیران مستقل آماده و تأیید شود.');
-  const approval = await prisma.hrCompensationSnapshot.updateMany({
-    where: { id: row.id, hrApprovedAt: null },
-    data: { hrApprovedBy: actorId(req), hrApprovedAt: new Date() }
-  });
-  if (approval.count === 0) return res.json({ success: true });
-  await audit(req.params.id, 'COMPENSATION_HR_APPROVED', req, { snapshotId: row.id });
-  res.json({ success: true });
-}));
-
-router.post('/applications/:id/compensation/:snapshotId/finance-approve', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
-  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } });
-  await assertFormalAssessmentEvidenceComplete(req.params.id);
-  const row = await prisma.hrCompensationSnapshot.findUniqueOrThrow({ where: { id: req.params.snapshotId } });
-  const latest = await prisma.hrCompensationSnapshot.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true } });
-  if (latest?.id !== row.id) throw new Error('فقط آخرین نسخه پیشنهاد قابل تأیید است.');
-  if (row.applicationId !== req.params.id || !row.hrApprovedAt) throw new Error('تأیید مدیر حقوق و دستمزد هنوز انجام نشده است.');
-  if ([row.proposedBy, row.preparedBy, row.hrApprovedBy].includes(actorId(req))) throw new Error('مدیر مالی باید مستقل از پیشنهاددهنده و پردازش‌کنندگان قبلی باشد.');
-  const claimToken = crypto.randomUUID();
-  const approval = await prisma.hrCompensationSnapshot.updateMany({
-    where: { id: row.id, financeApprovedAt: null },
-    data: {
-      financeApprovedBy: actorId(req),
-      financeApprovedAt: new Date(),
-      candidateNotificationStatus: 'PENDING',
-      candidateNotificationClaimedAt: new Date(),
-      candidateNotificationClaimToken: claimToken
-    }
-  });
-  if (approval.count === 0) return res.json({ success: true });
-  await audit(req.params.id, 'COMPENSATION_FINANCE_APPROVED', req, { snapshotId: row.id });
-  const applicationWithCandidate = await prisma.hrJobApplication.findUniqueOrThrow({
-    where: { id: req.params.id },
-    include: { candidate: true }
-  });
-  await deliverClaimedOfferNotification(
-    req.params.id,
-    row.id,
-    applicationWithCandidate.candidate.mobile,
-    claimToken,
-    actorId(req),
-  );
-  res.json({ success: true });
-}));
+router.all('/applications/:id/compensation/:snapshotId/prepare', (_req, res) => res.status(410).json({ success: false, error: 'مرحله آماده‌سازی جداگانه بازنشسته شده است.' }));
+router.all('/applications/:id/compensation/:snapshotId/hr-approve', (_req, res) => res.status(410).json({ success: false, error: 'از بررسی یک‌مرحله‌ای حقوق و دستمزد استفاده کنید.' }));
+router.all('/applications/:id/compensation/:snapshotId/finance-approve', (_req, res) => res.status(410).json({ success: false, error: 'پیشنهاد حقوق دیگر تأیید مالی جداگانه ندارد.' }));
 
 router.post('/applications/:id/compensation/:snapshotId/notification/retry', requireActionPermission('MANAGE_RECRUITMENT_CASE'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const [snapshot, application] = await Promise.all([
@@ -2390,7 +2461,7 @@ router.post('/applications/:id/compensation/:snapshotId/notification/retry', req
     prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { candidate: true } })
   ]);
   const latest = await prisma.hrCompensationSnapshot.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true } });
-  if (latest?.id !== snapshot.id || !snapshot.hrApprovedAt || !snapshot.financeApprovedAt) throw new Error('فقط اعلان آخرین پیشنهاد نهایی قابل ارسال است.');
+  if (latest?.id !== snapshot.id || !isCompensationPayrollVerified(snapshot)) throw new Error('فقط اعلان آخرین پیشنهاد بررسی‌شده قابل ارسال است.');
   if (snapshot.candidateNotificationStatus === 'SENT') return res.json({ success: true, data: snapshot });
   const claimToken = crypto.randomUUID();
   const claim = await prisma.hrCompensationSnapshot.updateMany({
@@ -2399,7 +2470,8 @@ router.post('/applications/:id/compensation/:snapshotId/notification/retry', req
       candidateNotificationStatus: { not: 'SENT' },
       OR: [
         { candidateNotificationStatus: 'FAILED' },
-        { candidateNotificationStatus: null }
+        { candidateNotificationStatus: null },
+        { candidateNotificationStatus: 'PENDING', candidateNotificationClaimedAt: { lt: new Date(Date.now() - 10 * 60_000) } }
       ]
     },
     data: {
@@ -2437,7 +2509,7 @@ router.post('/applications/:id/compensation/:snapshotId/offline-decision', requi
     prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } }),
     latestSubmittedFullName(req.params.id)
   ]);
-  if (latest?.id !== snapshot.id || !snapshot.hrApprovedAt || !snapshot.financeApprovedAt || snapshot.obsoleteAt) throw new Error('تصمیم آفلاین فقط برای آخرین پیشنهاد نهایی و غیرمنسوخ قابل ثبت است.');
+  if (latest?.id !== snapshot.id || !isCompensationPayrollVerified(snapshot) || snapshot.obsoleteAt) throw new Error('تصمیم آفلاین فقط برای آخرین پیشنهاد بررسی‌شده و غیرمنسوخ قابل ثبت است.');
   await assertFormalAssessmentEvidenceComplete(req.params.id);
   if (snapshot.candidateDecision) throw new Error('برای این نسخه قبلاً تصمیم ثبت شده است.');
   if (normalizedName(evidence.confirmedCandidateInformation) !== submittedFullName) {
@@ -2656,7 +2728,8 @@ router.post('/applications/:id/final-rejection', requireActionPermission('RECORD
   const referencedResults = latestCompletedFinalRejectionResultReferences(completedResults);
   if (application.convertedAt || application.outcome === 'HIRED') throw new Error('پرونده تبدیل‌شده قابل رد نهایی نیست.');
   if (application.collateralItems.some((item) => item.receivedAt && (!item.returnedAt || !item.returnConfirmedAt))) {
-    throw new Error('بازگشت همه وثیقه‌های دریافت‌شده باید ثبت و توسط مدیر مالی تأیید شود.');
+    const count = await initiatePendingCollateralReturns(application, 'REJECTED', reason, actorId(req));
+    return res.status(202).json({ success: true, data: { pendingCollateralReturns: count }, message: 'درخواست بازگرداندن اصل وثیقه در وظایف امور مالی ایجاد شد.' });
   }
   const now = new Date();
   const row = await prisma.$transaction(async (tx) => {
@@ -3285,13 +3358,14 @@ router.post('/applications/:id/reopen/execute', requireActionPermission('MANAGE_
 
 router.post('/applications/:id/collateral-requirements', requireActionPermission('MANAGE_PRE_EMPLOYMENT_REQUIREMENTS'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const type = String(req.body.type || '');
-  const explanation = String(req.body.candidateExplanation || '').trim();
-  if (!COLLATERAL_TYPES.has(type) || !explanation) throw new Error('نوع وثیقه و توضیح قابل نمایش به متقاضی الزامی است.');
+  if (!COLLATERAL_TYPES.has(type)) throw new Error('نوع وثیقه الزامی است.');
+  const amountRials = req.body.amountRials === '' || req.body.amountRials == null ? null : normalizeHiringRial(req.body.amountRials);
+  const explanation = collateralCandidateExplanation(type, amountRials);
   const latest = await prisma.hrCollateralRequirement.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' } });
   const latestOffer = await prisma.hrCompensationSnapshot.findFirst({ where: { applicationId: req.params.id, obsoleteAt: null }, orderBy: { version: 'desc' } });
   const row = await prisma.$transaction(async (tx) => {
     if (latest) await tx.hrCollateralRequirement.update({ where: { id: latest.id }, data: { status: 'SUPERSEDED' } });
-    const created = await tx.hrCollateralRequirement.create({ data: { applicationId: req.params.id, version: (latest?.version || 0) + 1, type, amountRials: req.body.amountRials === '' || req.body.amountRials == null ? null : normalizeHiringRial(req.body.amountRials), obligation: null, dueTiming: String(req.body.dueTiming || '').trim() || null, candidateExplanation: explanation, proposedBy: actorId(req), supersedesId: latest?.id || null } });
+    const created = await tx.hrCollateralRequirement.create({ data: { applicationId: req.params.id, version: (latest?.version || 0) + 1, type, amountRials, obligation: null, dueTiming: null, candidateExplanation: explanation, proposedBy: actorId(req), supersedesId: latest?.id || null } });
     if (latestOffer?.candidateAcceptedAt) {
       await tx.hrCompensationSnapshot.update({ where: { id: latestOffer.id }, data: { obsoleteAt: new Date(), obsoleteBy: actorId(req), obsoleteReason: 'تغییر الزام وثیقه پس از پذیرش؛ نسخه جدید پیشنهاد الزامی است.' } });
       await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { acceptedOfferAt: null, compensationClearance: 'NOT_STARTED' } });
@@ -3313,6 +3387,17 @@ router.get('/applications/:id/assessments/:assessmentId/download', requireAction
   await audit(req.params.id, 'SENSITIVE_RECRUITMENT_EVIDENCE_ACCESSED', req, { evidenceType: 'ASSESSMENT', evidenceId: row.id, action: 'DOWNLOAD' });
   res.download(safeHiringStoragePath(row.storageName), row.originalName);
 }));
+
+const retiredHiringFinanceMutation = (_req: express.Request, res: Response) => res.status(410).json({
+  success: false,
+  error: 'ثبت و تأیید وثیقه فقط از وظایف بین‌واحدی فضای حسابداری انجام می‌شود.',
+});
+router.post('/applications/:id/collateral/apply-template', retiredHiringFinanceMutation);
+router.post('/applications/:id/collateral', retiredHiringFinanceMutation);
+router.put('/applications/:id/collateral/:itemId/review', retiredHiringFinanceMutation);
+router.post('/applications/:id/collateral/approve', retiredHiringFinanceMutation);
+router.put('/applications/:id/collateral/:itemId/return', retiredHiringFinanceMutation);
+router.post('/applications/:id/collateral/:itemId/return-confirm', retiredHiringFinanceMutation);
 
 router.post('/applications/:id/collateral/apply-template', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const [application, requirement, existing] = await Promise.all([
@@ -3377,11 +3462,13 @@ router.get('/applications/:id/collateral/:itemId/download', requireActionPermiss
 
 router.put('/applications/:id/collateral/:itemId/review', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!['VERIFIED', 'MISMATCH', 'UNREADABLE'].includes(req.body.status)) throw new Error('وضعیت بررسی وثیقه نامعتبر است.');
+  const coordinationReason = String(req.body.coordinationReason || '').trim();
+  if (req.body.status !== 'VERIFIED' && !coordinationReason) throw new Error('علت نیاز به اصلاح یا پیگیری الزامی است.');
   const item = await prisma.hrCollateralItem.findUniqueOrThrow({ where: { id: req.params.itemId } });
   if (await prisma.hrCollateralItem.findUnique({ where: { supersedesItemId: item.id }, select: { id: true } })) throw new Error('این قلم با نسخه جدید جایگزین شده است.');
   if (item.applicationId !== req.params.id || item.recordedBy === actorId(req)) throw new Error('مدیر مالی ثبت‌کننده نمی‌تواند همان قلم را تأیید کند.');
   const row = await prisma.hrCollateralItem.update({ where: { id: item.id }, data: {
-    status: req.body.status, note: req.body.note ?? item.note, coordinationReason: req.body.coordinationReason ?? item.coordinationReason,
+    status: req.body.status, note: req.body.note ?? item.note, coordinationReason: req.body.status === 'VERIFIED' ? null : coordinationReason,
     approvedBy: req.body.status === 'VERIFIED' ? actorId(req) : null, approvedAt: req.body.status === 'VERIFIED' ? new Date() : null
   }});
   res.json({ success: true, data: row });
@@ -3423,6 +3510,16 @@ router.get('/applications/:id/collateral/:itemId/return-evidence/download', requ
   res.download(safeHiringStoragePath(row.returnEvidenceStorageName), row.returnEvidenceOriginalName);
 }));
 
+router.get('/applications/:id/collateral-returns/:returnId/download', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+  const row = await prisma.hrCollateralOriginalReturn.findFirst({
+    where: { id: req.params.returnId, collateralItem: { applicationId: req.params.id } },
+  });
+  if (!row?.evidenceStorageName || !row.evidenceOriginalName) return res.status(404).json({ success: false, error: 'مدرک تحویل پیدا نشد.' });
+  await audit(req.params.id, 'COLLATERAL_RETURN_EVIDENCE_DOWNLOADED', req, { collateralReturnId: row.id, version: row.version });
+  await audit(req.params.id, 'SENSITIVE_RECRUITMENT_EVIDENCE_ACCESSED', req, { evidenceType: 'COLLATERAL_RETURN', evidenceId: row.id, action: 'DOWNLOAD' });
+  res.download(safeHiringStoragePath(row.evidenceStorageName), row.evidenceOriginalName);
+}));
+
 router.post('/applications/:id/collateral/:itemId/return-confirm', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const item = await prisma.hrCollateralItem.findFirstOrThrow({ where: { id: req.params.itemId, applicationId: req.params.id } });
   if (!item.returnedAt || !item.returnedTo || !item.returnEvidenceNote || !item.returnEvidenceStorageName) throw new Error('جزئیات و مدرک تحویل باید کامل باشد.');
@@ -3437,7 +3534,7 @@ router.post('/applications/:id/convert', requireActionPermission('MANAGE_RECRUIT
   if (application.convertedAt) return res.status(409).json({ success: false, error: 'این پرونده قبلاً به پرسنل تبدیل شده است.' });
   await assertFormalAssessmentEvidenceComplete(req.params.id);
   const compensation = application.compensationSnapshots[0];
-  if (application.identityClearance !== 'APPROVED' || application.collateralClearance !== 'APPROVED' || !application.acceptedOfferAt || !compensation?.candidateAcceptedAt || !compensation.hrApprovedAt || !compensation.financeApprovedAt) {
+  if (application.identityClearance !== 'APPROVED' || application.collateralClearance !== 'APPROVED' || !application.acceptedOfferAt || !compensation?.candidateAcceptedAt || !isCompensationPayrollVerified(compensation)) {
     throw new Error('هویت، وثیقه و پیشنهاد جبران خدمات باید پیش از تبدیل کامل باشند.');
   }
   const startDate = parseDate(req.body.scheduledStartDate, 'تاریخ شروع برنامه‌ریزی‌شده');
@@ -3688,7 +3785,10 @@ router.post('/applications/:id/close', requireActionPermission('MANAGE_RECRUITME
   if (!['REJECTED', 'WITHDRAWN', 'REQUEST_CANCELLED'].includes(req.body.outcome)) throw new Error('نتیجه بستن پرونده نامعتبر است.');
   if (!String(req.body.reason || '').trim()) throw new Error('دلیل بستن پرونده الزامی است.');
   if (application.employmentRelationship?.status === 'ACTIVE') throw new Error('پرونده استخدام فعال از مسیر خاتمه رابطه استخدامی مدیریت می‌شود.');
-  if (application.collateralItems.some((item) => item.receivedAt && (!item.returnedAt || !item.returnConfirmedAt))) throw new Error('بازگشت همه وثیقه‌های دریافت‌شده باید ثبت و توسط مدیر مالی تأیید شود.');
+  if (application.collateralItems.some((item) => item.receivedAt && (!item.returnedAt || !item.returnConfirmedAt))) {
+    const count = await initiatePendingCollateralReturns(application, req.body.outcome, String(req.body.reason).trim(), actorId(req));
+    return res.status(202).json({ success: true, data: { pendingCollateralReturns: count }, message: 'درخواست بازگرداندن اصل وثیقه در وظایف امور مالی ایجاد شد.' });
+  }
   await prisma.$transaction(async (tx) => {
     if (application.employmentRelationship?.status === 'PLANNED') {
       await tx.hrEmploymentAssignment.updateMany({ where: { employmentRelationshipId: application.employmentRelationship.id, effectiveTo: null }, data: { effectiveTo: new Date() } });

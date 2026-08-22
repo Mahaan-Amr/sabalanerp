@@ -5358,6 +5358,10 @@ model HrJobApplication {
   collateralClearance                HrClearanceStatus              @default(NOT_STARTED)
   contractClearance                  HrClearanceStatus              @default(NOT_STARTED)
   compensationClearance              HrClearanceStatus              @default(NOT_STARTED)
+  pendingClosureOutcome              String?
+  pendingClosureReason               String?
+  pendingClosureRequestedBy          String?
+  pendingClosureRequestedAt          DateTime?
   acceptedOfferAt                    DateTime?
   convertedAt                        DateTime?
   scheduledStartDate                 DateTime?
@@ -5839,9 +5843,36 @@ model HrCollateralItem {
   templateItem                    HrCollateralChecklistTemplateItem? @relation(fields: [templateItemId], references: [id], onDelete: SetNull)
   supersedesItem                  HrCollateralItem?                  @relation("HrCollateralReplacement", fields: [supersedesItemId], references: [id], onDelete: SetNull)
   supersededBy                    HrCollateralItem?                  @relation("HrCollateralReplacement")
+  returns                         HrCollateralOriginalReturn[]
 
   @@index([applicationId, status])
   @@map("hr_collateral_items")
+}
+
+model HrCollateralOriginalReturn {
+  id                        String           @id @default(cuid())
+  collateralItemId          String
+  version                   Int
+  status                    String           @default("SUBMITTED")
+  returnedAt                DateTime?
+  returnedTo                String?
+  returnedBy                String?
+  evidenceNote              String?
+  evidenceStorageName       String?
+  evidenceOriginalName      String?
+  evidenceMimeType          String?
+  evidenceSize              Int?
+  evidenceSha256            String?
+  evidenceMalwareScanStatus String?
+  confirmedBy               String?
+  confirmedAt               DateTime?
+  returnedReason            String?
+  createdAt                 DateTime         @default(now())
+  collateralItem            HrCollateralItem @relation(fields: [collateralItemId], references: [id], onDelete: Restrict)
+
+  @@unique([collateralItemId, version])
+  @@index([collateralItemId, status])
+  @@map("hr_collateral_original_returns")
 }
 
 model HrCollateralChecklistTemplate {
@@ -5910,6 +5941,15 @@ model HrCompensationSnapshot {
   componentsJson                  Json
   totalRials                      Decimal          @db.Decimal(18, 0)
   proposedBy                      String
+  payrollReviewStatus             String           @default("PENDING")
+  payrollVerifiedBy               String?
+  payrollVerifiedAt               DateTime?
+  verificationDueAt               DateTime?
+  payrollReturnedBy               String?
+  payrollReturnedAt               DateTime?
+  payrollReturnReasonCode         String?
+  payrollReturnReasonDetail       String?
+  supersedesSnapshotId            String?           @unique
   preparedBy                      String?
   preparedAt                      DateTime?
   hrApprovedBy                    String?
@@ -5939,9 +5979,12 @@ model HrCompensationSnapshot {
   obsoleteReason                  String?
   createdAt                       DateTime         @default(now())
   application                     HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  supersedesSnapshot              HrCompensationSnapshot? @relation("HrCompensationRevision", fields: [supersedesSnapshotId], references: [id], onDelete: SetNull)
+  successorSnapshot               HrCompensationSnapshot? @relation("HrCompensationRevision")
 
   @@unique([applicationId, version])
   @@index([applicationId, createdAt])
+  @@index([payrollReviewStatus, verificationDueAt])
   @@map("hr_compensation_snapshots")
 }
 

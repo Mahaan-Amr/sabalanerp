@@ -10,6 +10,7 @@ import {
   ErpPage,
   ErpSection,
   ErpSelect,
+  ErpSheet,
   ErpSkeleton,
   ErpSummaryGrid,
   ErpTextarea,
@@ -17,6 +18,7 @@ import {
 import { hrDutyApi, type DestinationDuty } from './hrDutyApi';
 import { initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
 import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-duties/crossWorkspaceDutyApi';
+import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
 
 const actionPresentation: Record<string, { label: string; icon: typeof FaCheck; tone: 'success' | 'danger' | 'warning' | 'info' }> = {
   APPROVE: { label: 'تأیید', icon: FaCheck, tone: 'success' },
@@ -66,6 +68,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reasonError, setReasonError] = useState<string | null>(null);
+  const [overrideAction, setOverrideAction] = useState<string | null>(null);
   const [eligibleAssignees, setEligibleAssignees] = useState<Array<{ id: string; displayName: string; username: string }>>([]);
   const [reassignmentTarget, setReassignmentTarget] = useState('');
   const [reassignmentReason, setReassignmentReason] = useState('');
@@ -86,12 +89,8 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
   }, [dutyId, workspace]);
   useEffect(() => { void load(); }, [load]);
 
-  const respond = async (actionCode: string) => {
+  const submitResponse = async (actionCode: string) => {
     if (!state.data || pendingAction) return;
-    if (!['APPROVE', 'FORWARD_TO_MANAGER'].includes(actionCode) && reason.trim().length < 3) {
-      setReasonError('برای این اقدام، دلیل کوتاه و روشن وارد کنید.');
-      return;
-    }
     setPendingAction(actionCode);
     setActionError(null);
     setReasonError(null);
@@ -99,6 +98,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
       await hrDutyApi.respond(state.data, actionCode, reason.trim() || null);
       announceCrossWorkspaceDutyChanged();
       setReason('');
+      setOverrideAction(null);
       await load();
     } catch (error) {
       setActionError(failureMessage(error));
@@ -106,6 +106,20 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
     } finally {
       setPendingAction(null);
     }
+  };
+
+  const respond = (actionCode: string) => {
+    if (!state.data || pendingAction) return;
+    if ((state.data.responseRequiresReason || !['APPROVE', 'FORWARD_TO_MANAGER'].includes(actionCode)) && reason.trim().length < 3) {
+      setReasonError('برای این اقدام، دلیل کوتاه و روشن وارد کنید.');
+      return;
+    }
+    setReasonError(null);
+    if (state.data.responseRequiresReason) {
+      setOverrideAction(actionCode);
+      return;
+    }
+    void submitResponse(actionCode);
   };
 
   const reassign = async () => {
@@ -162,6 +176,11 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
           { label: 'نسخه', value: `${duty.sourceVersion.toLocaleString('fa-IR')} / ${duty.envelopeVersion.toLocaleString('fa-IR')}` },
         ]} />
       </ErpSection>
+      {duty.access === 'AVAILABLE' && (
+        <ErpSection title="دریافت مسئولیت" description="پس از دریافت، تصمیم و نتیجه این درخواست به نام شما ثبت می‌شود.">
+          <DestinationDutyClaimAction duty={duty} disabled={state.loading || state.stale} onClaimed={load} />
+        </ErpSection>
+      )}
       <ErpSection title="اطلاعات لازم">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {Object.entries(duty.fields).map(([key, value]) => (
@@ -189,7 +208,11 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
             aria-invalid={Boolean(reasonError)}
             aria-describedby={reasonError ? 'duty-reason-hint duty-reason-error' : 'duty-reason-hint'}
           />
-          <p id="duty-reason-hint" className="sds-text-muted mt-2 text-xs">برای تأیید اختیاری و برای سایر نتیجه‌ها الزامی است.</p>
+          <p id="duty-reason-hint" className="sds-text-muted mt-2 text-xs">
+            {duty.responseRequiresReason
+              ? 'به‌دلیل اقدام مدیر سیستم روی درخواست خودش، ثبت دلیل برای همه نتیجه‌ها الزامی است.'
+              : 'برای تأیید اختیاری و برای سایر نتیجه‌ها الزامی است.'}
+          </p>
           {reasonError && <p id="duty-reason-error" role="alert" className="mt-2 text-sm font-semibold text-[var(--sds-danger)]">{reasonError}</p>}
           <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {duty.allowedActionCodes.map((actionCode) => {
@@ -203,13 +226,35 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
                   tone={presentation.tone}
                   variant={actionCode === 'APPROVE' ? 'solid' : 'soft'}
                   disabled={Boolean(pendingAction) || state.loading || state.stale}
-                  onClick={() => void respond(actionCode)}
+                  onClick={() => respond(actionCode)}
                 />
               );
             })}
           </div>
         </ErpSection>
       )}
+      <ErpSheet
+        open={Boolean(overrideAction)}
+        onClose={() => { if (!pendingAction) setOverrideAction(null); }}
+        title="تأیید اقدام مدیر سیستم"
+        presentation="modal"
+        dismissible={!pendingAction}
+        footer={(
+          <div className="flex flex-wrap justify-end gap-2">
+            <ErpButton label="انصراف" variant="ghost" disabled={Boolean(pendingAction)} onClick={() => setOverrideAction(null)} />
+            <ErpButton
+              label="تأیید و ثبت تصمیم"
+              tone="danger"
+              disabled={Boolean(pendingAction)}
+              onClick={() => { if (overrideAction) void submitResponse(overrideAction); }}
+            />
+          </div>
+        )}
+      >
+        <p className="text-sm text-[var(--sds-text-secondary)]">
+          شما ایجادکننده این درخواست هستید. تصمیم با دلیل ثبت‌شده و رویداد حسابرسی مستقل به نام مدیر سیستم ذخیره می‌شود.
+        </p>
+      </ErpSheet>
       {duty.canReassign && (
         <ErpSection title="واگذاری مجدد" description="مهلت و نسخه پرونده تغییر نمی‌کند و این اقدام در تاریخچه ثبت می‌شود.">
           {eligibleAssignees.length > 0 ? (

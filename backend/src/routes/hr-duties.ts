@@ -15,14 +15,25 @@ import {
   getCrossWorkspaceDutyDetail,
   getCrossWorkspaceDutySummary,
   listCrossWorkspaceDuties,
+  markCrossWorkspaceDutyHistorySeen,
 } from '../services/crossWorkspaceDutyInbox';
 
 const router = express.Router();
 const manageHrWork = requireHrFeature('HR_WORK_MANAGEMENT', 'EDIT');
+const dutyOperationalMessage = (code: string) => ({
+  SEPARATION_OF_DUTIES_CONFLICT: 'این درخواست را شما ثبت کرده‌اید؛ برای حفظ تفکیک وظایف، مدیر حسابداری دیگری باید آن را دریافت کند. مدیر سیستم می‌تواند با ثبت دلیل اقدام کند.',
+  REASON_REQUIRED: 'دریافت وظیفه متوقف شد؛ مدیر سیستم برای اقدام روی درخواست خودش باید دلیل کنترلی ثبت کند.',
+  DUTY_ALREADY_CLAIMED: 'این وظیفه قبلاً توسط کاربر دیگری دریافت شده است. فهرست را به‌روزرسانی کنید.',
+  DUTY_CLAIM_CONFLICT: 'دریافت وظیفه متوقف شد؛ وضعیت آن هم‌زمان تغییر کرده است. فهرست را به‌روزرسانی کنید.',
+  SOURCE_STATE_CHANGED: 'وضعیت درخواست اصلاح تغییر کرده است. فهرست را به‌روزرسانی و از مرحله جاری ادامه دهید.',
+  CONTRACT_INACTIVE: 'تصمیم‌گیری متوقف شد؛ قرارداد غیرفعال است. مدیر مجاز باید ابتدا آن را از مسیر رسمی فعال‌سازی مجدد بازگرداند.',
+  RESPONSIBLE_SELLER_REQUIRED: 'تأیید اصلاح متوقف شد؛ فروشنده مسئول قرارداد مشخص نیست. مدیر فروش باید ابتدا مسئول قرارداد را تعیین کند.',
+  DUTY_HISTORY_SEEN_THROUGH_REQUIRED: 'ثبت مشاهده تاریخچه انجام نشد؛ صفحه را دوباره باز کنید.',
+}[code] || 'عملیات وظیفه متوقف شد. صفحه را به‌روزرسانی کنید و در صورت تکرار با مدیر همان فضای کاری تماس بگیرید.');
 const asyncHandler = (
   handler: (req: AuthRequest, res: Response, next: NextFunction) => Promise<unknown>,
 ) => (req: AuthRequest, res: Response, next: NextFunction) => void handler(req, res, next).catch((error) => {
-  if (!(error instanceof Error) || !/^(?:(?:HR_)?DUTY_|SOURCE_|ENVELOPE_|ASSIGNEE_|RESPONSIBILITY_|SEPARATION_OF_DUTIES_|ACTION_NOT_ALLOWED|REASON_REQUIRED)/.test(error.message)) return next(error);
+  if (!(error instanceof Error) || !/^(?:(?:HR_)?DUTY_|SOURCE_|ENVELOPE_|ASSIGNEE_|RESPONSIBILITY_|SEPARATION_OF_DUTIES_|CONTRACT_|RESPONSIBLE_SELLER_|ACTION_NOT_ALLOWED|REASON_REQUIRED)/.test(error.message)) return next(error);
   const conflictCodes = new Set([
     'DUTY_NOT_OPEN', 'DUTY_RESPONSE_CONFLICT', 'SOURCE_VERSION_CHANGED',
     'ENVELOPE_VERSION_CHANGED', 'SOURCE_STATE_CHANGED', 'RESPONSIBILITY_CHANGED',
@@ -30,6 +41,7 @@ const asyncHandler = (
     'DUTY_ASSIGNMENT_CHANGED',
     'DUTY_ALREADY_CLAIMED', 'DUTY_CLAIM_CONFLICT',
     'DUTY_REASSIGN_CONFLICT',
+    'CONTRACT_INACTIVE', 'RESPONSIBLE_SELLER_REQUIRED',
   ]);
   const forbiddenCodes = new Set([
     'ASSIGNEE_CHANGED', 'ASSIGNEE_INELIGIBLE', 'SEPARATION_OF_DUTIES_CONFLICT',
@@ -44,7 +56,8 @@ const asyncHandler = (
       : forbiddenCodes.has(error.message)
         ? 403
         : 400;
-  return res.status(status).json({ success: false, error: error.message });
+  console.warn('Cross-workspace duty operation rejected:', error.message);
+  return res.status(status).json({ success: false, error: dutyOperationalMessage(error.message) });
 });
 const requiredText = (value: unknown, code: string) => {
   const result = String(value ?? '').trim();
@@ -63,7 +76,7 @@ const dutyResponseRequest = (req: AuthRequest, res: Response, next: NextFunction
     positiveVersion(req.body.expectedEnvelopeVersion, 'HR_DUTY_ENVELOPE_VERSION_REQUIRED');
     next();
   } catch (error) {
-    if (error instanceof Error) return res.status(400).json({ success: false, error: error.message });
+    if (error instanceof Error) return res.status(400).json({ success: false, error: dutyOperationalMessage(error.message) });
     return next(error);
   }
 };
@@ -76,7 +89,7 @@ const requireDestinationWorkspace = (req: AuthRequest, res: Response, next: Next
     res.locals.destinationWorkspaceCode = crossWorkspaceDutyDestinationCode(req.params.workspaceCode);
     next();
   } catch (error) {
-    if (error instanceof Error) return res.status(404).json({ success: false, error: error.message });
+    if (error instanceof Error) return res.status(404).json({ success: false, error: 'این صف وظیفه برای فضای کاری انتخاب‌شده در دسترس نیست.' });
     return next(error);
   }
 };
@@ -90,6 +103,22 @@ router.get(
     const data = await getCrossWorkspaceDutySummary(prisma, {
       actorUserId: req.user!.id,
       workspaceCode: res.locals.destinationWorkspaceCode,
+    });
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  '/workspaces/:workspaceCode/history-seen',
+  enforceMutationIdempotency,
+  requireDestinationWorkspace,
+  asyncHandler(async (req, res) => {
+    const seenThrough = new Date(String(req.body.seenThrough ?? ''));
+    if (Number.isNaN(seenThrough.getTime())) throw new Error('DUTY_HISTORY_SEEN_THROUGH_REQUIRED');
+    const data = await markCrossWorkspaceDutyHistorySeen(prisma, {
+      actorUserId: req.user!.id,
+      workspaceCode: res.locals.destinationWorkspaceCode,
+      seenThrough,
     });
     res.json({ success: true, data });
   }),
@@ -140,7 +169,7 @@ router.post(
   '/legacy-work-items/:id/duties',
   enforceMutationIdempotency,
   manageHrWork,
-  (_req, res) => res.status(410).json({ success: false, error: 'HR_LEGACY_DUTY_ROUTING_RETIRED' }),
+  (_req, res) => res.status(410).json({ success: false, error: 'این مسیر قدیمی متوقف شده است. وظیفه را از صف بین‌واحدی فضای مقصد ادامه دهید.' }),
 );
 
 router.post(
@@ -151,6 +180,7 @@ router.post(
       dutyId: req.params.id,
       actorUserId: req.user!.id,
       policyVersion: 1,
+      reason: String(req.body.reason ?? '').trim() || null,
     });
     res.json({ success: true, data: serializeDuty(data) });
   }),
@@ -194,7 +224,10 @@ router.post(
   '/:id/reconcile',
   enforceMutationIdempotency,
   manageHrWork,
-  (_req, res) => res.status(410).json({ success: false, error: 'HR_NAMED_RESPONSIBILITY_ROUTING_RETIRED' }),
+  (_req, res) => res.status(410).json({
+    success: false,
+    error: 'این مسیر قدیمی متوقف شده است. تعیین مسئول را از صف بین‌واحدی فضای مقصد انجام دهید.',
+  }),
 );
 
 export default router;

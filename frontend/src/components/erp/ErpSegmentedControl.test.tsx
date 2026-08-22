@@ -24,3 +24,21 @@ test('segmented control makes the pressed option visually and accessibly distinc
   assert.match(pressedButton, /focus-visible:ring-2/);
   assert.doesNotMatch(pressedButton, /<svg/);
 });
+
+test('segmented control renders a semantic attention badge only for a positive count', () => {
+  const html = renderToStaticMarkup(
+    <ErpSegmentedControl
+      value="assigned"
+      onChange={() => undefined}
+      options={[
+        { value: 'assigned', label: 'وظایف من', count: 4, countTone: 'danger' },
+        { value: 'history', label: 'تاریخچه', count: 0, countTone: 'danger' },
+      ]}
+    />,
+  );
+
+  assert.match(html, /وظایف من/);
+  assert.match(html, /۴/);
+  assert.match(html, /sds-tone-danger/);
+  assert.doesNotMatch(html, />۰</);
+});

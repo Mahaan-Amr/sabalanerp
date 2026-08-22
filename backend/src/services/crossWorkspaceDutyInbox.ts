@@ -1,7 +1,10 @@
-import type { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import {
   CROSS_WORKSPACE_DUTY_DEFINITIONS,
   canClaimCrossWorkspaceDuty,
+  crossWorkspaceDutyClaimRequiresReason,
+  crossWorkspaceDutyResponseRequiresReason,
   formatCrossWorkspaceDutyDeadlineTehran,
   loadCrossWorkspaceDutySourceProjection,
 } from './crossWorkspaceDutyModule';
@@ -74,6 +77,7 @@ export const projectCrossWorkspaceDuty = (input: {
     dueAt: Date;
     createdAt: Date;
     respondedAt: Date | null;
+    updatedAt: Date;
     currentAssigneeUserId: string | null;
     structuredResultJson: unknown;
   };
@@ -91,6 +95,8 @@ export const projectCrossWorkspaceDuty = (input: {
   };
   access: Access;
   canReassign?: boolean;
+  claimRequiresReason?: boolean;
+  responseRequiresReason?: boolean;
   includeHistory: boolean;
   now: Date;
   audit?: Array<{ version: number; eventCode: string; reason: string | null; createdAt: Date }>;
@@ -105,6 +111,8 @@ export const projectCrossWorkspaceDuty = (input: {
     status: input.duty.status,
     access: input.access,
     canReassign: Boolean(input.canReassign && input.duty.status === 'OPEN'),
+    claimRequiresReason: Boolean(input.claimRequiresReason && input.duty.status === 'OPEN' && input.access === 'AVAILABLE'),
+    responseRequiresReason: Boolean(input.responseRequiresReason && input.duty.status === 'OPEN' && input.access === 'ASSIGNEE'),
     currentAssigneeUserId: input.duty.currentAssigneeUserId,
     workspace: crossWorkspaceDutyDestinationSlug(input.duty.destinationWorkspaceCode),
     sourceActionCode: input.duty.sourceActionCode,
@@ -124,6 +132,7 @@ export const projectCrossWorkspaceDuty = (input: {
     detailAvailable: true,
     createdAt: input.duty.createdAt.toISOString(),
     respondedAt: input.duty.respondedAt?.toISOString() ?? null,
+    updatedAt: input.duty.updatedAt.toISOString(),
     history: input.includeHistory
       ? (input.audit ?? []).map((event) => ({
         version: event.version,
@@ -220,11 +229,15 @@ const authorizeLoadedDuty = async (
   // are created by the action-permission shared-work flow instead.
   const assignmentIsCurrent = true;
   if (duty.currentAssigneeUserId === null && await canClaimCrossWorkspaceDuty(database, {
-    dutyId: duty.id,
-    actorUserId,
-    policyVersion: 1,
-    now,
-  })) return { duty, source, access: 'AVAILABLE' as const };
+    dutyId: duty.id, actorUserId, policyVersion: 1, now,
+  })) return {
+    duty,
+    source,
+    access: 'AVAILABLE' as const,
+    claimRequiresReason: await crossWorkspaceDutyClaimRequiresReason(database, {
+      dutyId: duty.id, actorUserId, policyVersion: 1, now,
+    }),
+  };
   const decision = authorizeCrossWorkspaceDutyInbox({
     duty,
     actorUserId,
@@ -235,7 +248,15 @@ const authorizeLoadedDuty = async (
     assignmentIsCurrent,
   });
   if (!decision.allowed) throw new Error(decision.code);
-  return { duty, source, access: decision.access };
+  return {
+    duty,
+    source,
+    access: decision.access,
+    claimRequiresReason: false,
+    responseRequiresReason: decision.access === 'ASSIGNEE'
+      ? await crossWorkspaceDutyResponseRequiresReason(database, { dutyId: duty.id, actorUserId })
+      : false,
+  };
 };
 
 export const getCrossWorkspaceDutyDetail = async (
@@ -253,6 +274,8 @@ export const getCrossWorkspaceDutyDetail = async (
     source: authorized.source,
     envelope: duty.envelope,
     access: authorized.access,
+    claimRequiresReason: authorized.claimRequiresReason,
+    responseRequiresReason: authorized.responseRequiresReason,
     canReassign: manager,
     includeHistory: true,
     audit: duty.auditVersions,
@@ -274,7 +297,10 @@ export const listCrossWorkspaceDuties = async (
       ...(input.view === 'triage' || input.view === 'available'
         ? { status: 'OPEN', currentAssigneeUserId: null }
         : input.view === 'history'
-          ? { status: { in: ['COMPLETED', 'WAIVED', 'CANCELLED'] }, ...(manager ? {} : { currentAssigneeUserId: input.actorUserId }) }
+          ? { status: { in: ['COMPLETED', 'WAIVED', 'CANCELLED'] }, ...(manager ? {} : { OR: [
+            { currentAssigneeUserId: input.actorUserId },
+            { assignmentHistory: { some: { assignedUserId: input.actorUserId } } },
+          ] }) }
           : { status: 'OPEN', currentAssigneeUserId: input.actorUserId }),
     },
     include,
@@ -284,8 +310,11 @@ export const listCrossWorkspaceDuties = async (
   for (const duty of duties) {
     try {
       const authorized = await authorizeLoadedDuty(database, duty, input.actorUserId, workspaceCode, now, manager);
+      if (input.view === 'available' && authorized.access !== 'AVAILABLE') continue;
       visible.push(projectCrossWorkspaceDuty({
         duty, source: authorized.source, envelope: duty.envelope, access: authorized.access,
+        claimRequiresReason: authorized.claimRequiresReason,
+        responseRequiresReason: authorized.responseRequiresReason,
         includeHistory: input.view === 'history', audit: duty.auditVersions, now,
       }));
     } catch {
@@ -330,6 +359,23 @@ export const getCrossWorkspaceDutySummary = async (
   const triage = manager
     ? await listCrossWorkspaceDuties(database, { ...input, view: 'triage', now })
     : [];
+  const destinationWorkspaceCode = crossWorkspaceDutyDestinationCode(input.workspaceCode);
+  const historyReceipt = await database.crossWorkspaceDutyHistoryReceipt.findUnique({
+    where: { userId_destinationWorkspaceCode: {
+      userId: input.actorUserId,
+      destinationWorkspaceCode,
+    } },
+    select: { lastSeenAt: true },
+  });
+  const historyUnseen = await database.crossWorkspaceDuty.count({ where: {
+    destinationWorkspaceCode,
+    status: { in: ['COMPLETED', 'WAIVED', 'CANCELLED'] },
+    ...(historyReceipt ? { updatedAt: { gt: historyReceipt.lastSeenAt } } : {}),
+    ...(manager ? {} : { OR: [
+      { currentAssigneeUserId: input.actorUserId },
+      { assignmentHistory: { some: { assignedUserId: input.actorUserId } } },
+    ] }),
+  } });
   return {
     open: assigned.length,
     available: available.length,
@@ -338,6 +384,41 @@ export const getCrossWorkspaceDutySummary = async (
     )).length,
     overdue: assigned.filter((duty) => duty.overdue).length,
     triage: triage.length,
+    historyUnseen,
     canManageTriage: manager,
   };
+};
+
+export const markCrossWorkspaceDutyHistorySeen = async (
+  database: Database,
+  input: { actorUserId: string; workspaceCode: string; seenThrough: Date; now?: Date },
+) => {
+  const now = input.now ?? new Date();
+  const destinationWorkspaceCode = crossWorkspaceDutyDestinationCode(input.workspaceCode);
+  const visibleHistory = await listCrossWorkspaceDuties(database, {
+    actorUserId: input.actorUserId,
+    workspaceCode: destinationWorkspaceCode,
+    view: 'history',
+    now,
+  });
+  const visibleCutoff = visibleHistory.reduce<Date | null>((latest, duty) => {
+    const changedAt = new Date(duty.updatedAt);
+    if (changedAt > input.seenThrough || changedAt > now) return latest;
+    return !latest || changedAt > latest ? changedAt : latest;
+  }, null);
+  if (!visibleCutoff) return { lastSeenAt: null };
+  const receipts = await database.$queryRaw<Array<{ lastSeenAt: Date }>>(Prisma.sql`
+    INSERT INTO "cross_workspace_duty_history_receipts"
+      ("id", "userId", "destinationWorkspaceCode", "lastSeenAt", "createdAt", "updatedAt")
+    VALUES
+      (${randomUUID()}, ${input.actorUserId}, ${destinationWorkspaceCode}, ${visibleCutoff}, ${now}, ${now})
+    ON CONFLICT ("userId", "destinationWorkspaceCode") DO UPDATE
+    SET "lastSeenAt" = GREATEST(
+      "cross_workspace_duty_history_receipts"."lastSeenAt",
+      EXCLUDED."lastSeenAt"
+    ),
+    "updatedAt" = EXCLUDED."updatedAt"
+    RETURNING "lastSeenAt"
+  `);
+  return { lastSeenAt: receipts[0]?.lastSeenAt ?? visibleCutoff };
 };

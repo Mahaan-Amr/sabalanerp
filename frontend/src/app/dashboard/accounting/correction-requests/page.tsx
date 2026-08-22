@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { FaCheckCircle, FaEdit, FaExclamationTriangle, FaEye, FaSync, FaTimesCircle } from 'react-icons/fa';
+import { FaCheckCircle, FaClipboardCheck, FaExclamationTriangle, FaEye, FaSync, FaTimesCircle } from 'react-icons/fa';
 import { ErpEmptyState, ErpListPage, ErpPagination, type ErpAction, type ErpColumn } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { emptyAccountingPagination, readAccountingListResponse, StatusBadge, dateFa } from '@/features/accounting/accountingUi';
@@ -154,10 +154,10 @@ export default function AccountingCorrectionRequestsPage() {
     ...(row.contractId ? [
       { label: 'مشاهده پرونده', href: `/dashboard/accounting/contracts/${row.contractId}`, icon: FaEye, tone: 'primary' as const },
     ] : []),
-    ...(row.requestIdempotencyKey ? [{
-      label: 'مشاهده وظیفه مرتبط',
-      href: '/dashboard/accounting/duties',
-      icon: FaEdit,
+    ...(row.accountingDutyId ? [{
+      label: 'رسیدگی به درخواست',
+      href: `/dashboard/accounting/duties/${row.accountingDutyId}`,
+      icon: FaClipboardCheck,
       tone: 'info' as const,
     }] : []),
     ...(!row.requestIdempotencyKey && actionAvailability.approve?.visible ? [{

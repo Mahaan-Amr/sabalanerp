@@ -99,6 +99,16 @@ export const canClaimCrossWorkspaceDuty = async (
   input: ClaimCrossWorkspaceDutyInput,
 ) => (await adapterForDuty(database, input.dutyId)).canClaim(database, input);
 
+export const crossWorkspaceDutyClaimRequiresReason = async (
+  database: CrossWorkspaceDutyDatabase,
+  input: ClaimCrossWorkspaceDutyInput,
+) => (await adapterForDuty(database, input.dutyId)).claimRequiresReason(database, input);
+
+export const crossWorkspaceDutyResponseRequiresReason = async (
+  database: CrossWorkspaceDutyDatabase,
+  input: { dutyId: string; actorUserId: string },
+) => (await adapterForDuty(database, input.dutyId)).responseRequiresReason(database, input);
+
 export const reassignCrossWorkspaceDuty = async (
   database: CrossWorkspaceDutyDatabase,
   input: ReassignCrossWorkspaceDutyInput,

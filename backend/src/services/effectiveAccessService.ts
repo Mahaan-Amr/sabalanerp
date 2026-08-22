@@ -186,12 +186,15 @@ export const getEffectiveUserAccess = async (
       : [...hrFeatureCodes].map((feature) => {
     const direct = directHrFeatures.get(feature);
     const inherited = inheritedHrFeatures.find((grant) => grant.feature === feature);
+    const resolvedLevel = direct?.level ?? inherited!.permissionLevel;
     return {
       feature,
-      permission: capAtWorkspaceLevel(
-        direct?.level ?? inherited!.permissionLevel,
-        effectiveHrWorkspaceLevel,
-      ),
+      // Action permissions are independently scoped authorization. A VIEW
+      // workspace grant admits the user to the destination without reducing
+      // an explicitly granted EDIT action to VIEW.
+      permission: HR_ACTION_CODES.has(feature)
+        ? permission(resolvedLevel)
+        : capAtWorkspaceLevel(resolvedLevel, effectiveHrWorkspaceLevel),
       workspace: 'hr',
     };
       });

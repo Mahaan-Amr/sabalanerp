@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import type { RequestHandler } from 'express';
 import { prisma } from '../../lib/prisma';
-import router from '../hr-authorization';
+import router, { viewAuthorizationContext } from '../hr-authorization';
 
 const registeredRoutes = (router as unknown as {
   stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
@@ -14,6 +14,7 @@ const registeredRoutes = (router as unknown as {
 for (const route of [
   'GET /me',
   'GET /context',
+  'GET /effective-access/:userId',
   'POST /workspace-grants',
   'POST /workspace-grants/:id/revoke',
   'POST /feature-grants',
@@ -26,11 +27,20 @@ for (const route of [
   'POST /destinations',
 ]) assert.ok(registeredRoutes.includes(route), `missing HR authorization route: ${route}`);
 
-for (const guardedRoute of ['/context', '/user-access/:userId', '/workspace-grants', '/feature-grants']) {
+for (const guardedRoute of ['/context', '/effective-access/:userId', '/user-access/:userId', '/workspace-grants', '/feature-grants']) {
   const layer = (router as unknown as { stack: Array<{ route?: { path: string; stack: unknown[] } }> }).stack
     .find((candidate) => candidate.route?.path === guardedRoute);
   assert.ok(layer && layer.route!.stack.length >= 2, `${guardedRoute} must retain server-side authorization middleware`);
 }
+
+const contextLayer = (router as unknown as {
+  stack: Array<{ route?: { path: string; stack: Array<{ handle: RequestHandler }> } }>;
+}).stack.find((candidate) => candidate.route?.path === '/context');
+assert.equal(
+  contextLayer?.route?.stack[0]?.handle,
+  viewAuthorizationContext,
+  'authorization context must use the canonical HR feature grant instead of a system-role gate',
+);
 
 for (const historicalMutation of ['/business-authorities', '/business-authorities/:id/revoke', '/responsibilities', '/responsibilities/:id/end', '/destinations']) {
   const layer = (router as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: RequestHandler }> } }> }).stack

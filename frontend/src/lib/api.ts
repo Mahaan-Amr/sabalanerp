@@ -316,6 +316,7 @@ export const personnelAPI = {
 export const hrAPI = {
   getDashboard: () => api.get('/hr/dashboard'),
   getFoundation: (params?: { dependencyAt?: string }) => api.get('/hr/foundation', { params }),
+  getOperationalReference: (surface: 'personnel' | 'recruitment') => api.get(`/hr/operational-reference/${surface}`),
   getPositions: (params?: { filter?: string; dependencyAt?: string }) => api.get('/hr/positions', { params }),
   getPositionCapacitySummary: (params?: { dependencyAt?: string }) => api.get('/hr/positions/capacity-summary', { params }),
   getPositionHistory: (id: string) => api.get(`/hr/positions/${id}/history`),
@@ -1302,6 +1303,10 @@ export const sabalanCalendarAPI = {
 export const hrAuthorizationAPI = {
   getMe: () => api.get('/hr/authorization/me'),
   getContext: () => api.get('/hr/authorization/context', {
+    params: { _fresh: Date.now() },
+    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+  }),
+  getEffectiveAccess: (userId: string) => api.get(`/hr/authorization/effective-access/${userId}`, {
     params: { _fresh: Date.now() },
     headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
   }),

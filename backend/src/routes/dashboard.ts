@@ -2,8 +2,9 @@ import { prisma } from '../lib/prisma';
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
-import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES, getUserFeatures } from '../middleware/feature';
+import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { getUserWorkspaces } from '../middleware/workspace';
+import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import { resolveCoreDashboardSalesAccess } from '../services/coreDashboardAccess';
 import { summarizeCoreDashboard } from '../services/coreDashboardSummary';
 import { buildRealizedSalesHeadline, buildSalesReportContractWhere, buildSalesReportScope, resolveAllTimeSalesReportPeriod } from '../services/salesReportingService';
@@ -128,10 +129,7 @@ router.get('/profile', protect, async (req: any, res) => {
       });
     }
 
-    const [featurePermissions, workspacePermissions] = await Promise.all([
-      getUserFeatures(userId, user.role),
-      getUserWorkspaces(userId, user.role)
-    ]);
+    const effectiveAccess = await getEffectiveUserAccess(prisma, { userId, userRole: user.role });
 
     // Remove sensitive information
     const { password, ...userWithoutPassword } = user;
@@ -141,12 +139,12 @@ router.get('/profile', protect, async (req: any, res) => {
       data: {
         ...userWithoutPassword,
         permissions: {
-          features: featurePermissions.map((permission) => ({
+          features: effectiveAccess.features.map((permission) => ({
             feature: permission.feature,
             permissionLevel: permission.permission,
             workspace: permission.workspace
           })),
-          workspaces: workspacePermissions.map((permission) => ({
+          workspaces: effectiveAccess.workspaces.map((permission) => ({
             workspace: permission.workspace,
             permissionLevel: permission.permission
           }))

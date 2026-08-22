@@ -35,12 +35,15 @@ import { SecurityNoticeHost } from "@/components/SecurityNoticeHost";
 import {
   ErpButton,
   ErpCheckbox,
+  ErpEmptyState,
   ErpMobileBottomNavigation,
+  ErpPage,
   ErpPressable,
   ErpSheet,
 } from '@/components/erp';
 import { NotificationCenter } from "@/components/NotificationCenter";
 import { readContractSubmissionDiagnostic } from "@/features/contract-creation/utils/contractSubmissionDiagnostics";
+import { canAccessHrRoute, hasHrFeature, type HrBaseFeature } from '@/features/hr/hrAccessNavigation';
 
 interface User {
   id: string;
@@ -65,6 +68,9 @@ interface User {
     avatar: string;
     phone: string;
     address: string;
+  };
+  permissions?: {
+    features?: Array<{ feature: string; permissionLevel: string; workspace?: string }>;
   };
 }
 
@@ -173,6 +179,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const isNeumorphicWorkspace = isHrWorkspace || isSalesLanding;
   const hasMobileBottomNavigation = isHrWorkspace || showsSalesMobileNavigation;
   const isWorkspaceDetail = pathname !== "/dashboard";
+  const effectiveHrFeatures = user?.permissions?.features || [];
+  const deniesHrRoute = Boolean(
+    isHrWorkspace
+      && pathname !== '/dashboard/hr'
+      && !canAccessHrRoute(effectiveHrFeatures, pathname, user?.role),
+  );
   const hrMobileNavigation = [
     {
       id: "dashboard",
@@ -180,32 +192,40 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       href: "/dashboard/hr",
       icon: FaChartLine,
       exact: true,
+      feature: 'DASHBOARD' as HrBaseFeature,
     },
     {
       id: "structure",
       label: "ساختار",
       href: "/dashboard/hr/structure",
       icon: FaBuilding,
+      feature: 'ORGANIZATIONAL_STRUCTURE' as HrBaseFeature,
     },
     {
       id: "hiring",
       label: "جذب",
       href: "/dashboard/hr/hiring",
       icon: FaUserPlus,
+      feature: 'RECRUITMENT_CASES' as HrBaseFeature,
     },
     {
       id: "personnel",
       label: "پرسنل",
       href: "/dashboard/hr/personnel",
       icon: FaUsers,
+      feature: 'PERSONNEL' as HrBaseFeature,
     },
     {
       id: "migration",
       label: "تطبیق",
       href: "/dashboard/hr/migration",
       icon: FaClipboardList,
+      feature: 'DATA_MIGRATION_RECONCILIATION' as HrBaseFeature,
     },
   ];
+  const visibleHrMobileNavigation = hrMobileNavigation.filter(({ feature }) => (
+    hasHrFeature(effectiveHrFeatures, feature)
+  ));
   const salesMobileNavigation = [
     {
       id: "dashboard",
@@ -653,12 +673,20 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               محیط آزمایشی با داده‌های پاک‌سازی‌شده — استفاده عملیاتی ممنوع
             </div>
           )}
-          {children}
+          {deniesHrRoute ? (
+            <ErpPage eyebrow="منابع انسانی" title="دسترسی به این بخش مجاز نیست">
+              <ErpEmptyState
+                icon={FaShieldAlt}
+                title="مجوز لازم برای این بخش به حساب شما داده نشده است"
+                description="آدرس صفحه حفظ شده است. برای دسترسی، مجوز پایه مرتبط باید توسط مدیر سامانه ثبت شود."
+              />
+            </ErpPage>
+          ) : children}
         </main>
       </div>
-      {isHrWorkspace && (
+      {isHrWorkspace && visibleHrMobileNavigation.length > 0 && (
         <ErpMobileBottomNavigation
-          items={hrMobileNavigation}
+          items={visibleHrMobileNavigation}
           ariaLabel="ناوبری منابع انسانی"
         />
       )}

@@ -1,10 +1,40 @@
 import assert from 'node:assert/strict';
 import type { RequestHandler } from 'express';
 import { HR_REDESIGN_CATALOG } from '../../services/hrRedesignDataContracts';
-import router, { featureForPath, filterFoundationPositions } from '../hr';
+import router, { canLinkPersonnelUserAccount, featureForPath, filterFoundationPositions, hrBaseFeatureLevelForRequest } from '../hr';
+import hrHiringRouter, { hrHiringBaseFeatureLevelForRequest } from '../hr-hiring';
 
 for (const personnelPath of ['/personnel', '/relationships/relationship-1', '/assignments/assignment-1', '/supervisor-candidates']) {
   assert.equal(featureForPath(personnelPath), 'PERSONNEL', `${personnelPath} must use the Personnel feature boundary`);
+}
+assert.equal(featureForPath('/operational-reference/personnel'), 'PERSONNEL', 'Personnel operational reference must use the Personnel feature boundary');
+assert.equal(featureForPath('/operational-reference/recruitment'), 'RECRUITMENT_CASES', 'Recruitment operational reference must use the Recruitment Cases feature boundary');
+assert.equal(hrBaseFeatureLevelForRequest('POST', '/personnel/person-1/archive'), 'VIEW');
+assert.equal(hrBaseFeatureLevelForRequest('POST', '/personnel/exceptional'), 'VIEW');
+assert.equal(hrBaseFeatureLevelForRequest('POST', '/personnel/person-1/work-schedule/changes/change-1/approve'), 'VIEW');
+assert.equal(hrBaseFeatureLevelForRequest('PUT', '/personnel/person-1'), 'EDIT');
+assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications'), 'VIEW');
+assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications/app-1/decisions/HR_PRELIMINARY_APPROVAL'), 'VIEW');
+assert.equal(hrHiringBaseFeatureLevelForRequest('PUT', '/applications/app-1/onboarding-tasks/task-1'), 'VIEW');
+assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/authorities'), 'ADMIN');
+assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/unclassified-mutation'), 'EDIT');
+assert.equal(canLinkPersonnelUserAccount('USER', true), false, 'User Administration also requires an eligible system role');
+assert.equal(canLinkPersonnelUserAccount('MANAGER', false), false, 'system role alone cannot cross User Administration');
+assert.equal(canLinkPersonnelUserAccount('MANAGER', true), true, 'both User Administration boundaries permit account linking');
+
+const concreteHiringPath = (path: string) => path.replace(/:[^/]+/g, 'sample');
+for (const layer of (hrHiringRouter as unknown as {
+  stack: Array<{ route?: { path: string | string[]; methods: Record<string, boolean> } }>;
+}).stack) {
+  if (!layer.route) continue;
+  const paths = Array.isArray(layer.route.path) ? layer.route.path : [layer.route.path];
+  for (const path of paths) {
+    if (path.startsWith('/public/')) continue;
+    for (const method of Object.keys(layer.route.methods).filter((candidate) => candidate !== 'get')) {
+      const level = hrHiringBaseFeatureLevelForRequest(method.toUpperCase(), concreteHiringPath(path));
+      assert.notEqual(level, 'EDIT', `${method.toUpperCase()} ${path} must be explicitly classified as action-protected or administrative`);
+    }
+  }
 }
 
 const registeredRoutes = (router as unknown as {
@@ -28,6 +58,7 @@ for (const route of [
 ]) assert.ok(registeredRoutes.includes(route), `missing HR redesign API route: ${route}`);
 
 for (const route of [
+  'GET /operational-reference/:surface',
   'GET /positions',
   'GET /positions/capacity-summary',
   'GET /positions/:id/history',

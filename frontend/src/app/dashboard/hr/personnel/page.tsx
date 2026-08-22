@@ -45,8 +45,7 @@ import {
   ErpPage,
   ErpSection,
 } from "@/components/erp";
-import { hrAPI } from "@/lib/api";
-import { hiringAPI } from "@/lib/hiringApi";
+import { hrAPI, hrAuthorizationAPI, usersAPI } from "@/lib/api";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
 import RetentionAction from "@/features/hr/RetentionActionSheet";
@@ -145,6 +144,7 @@ export default function HrPersonnelPage() {
   const [resultsLoading, setResultsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [referenceIssue, setReferenceIssue] = useState("");
   const [success, setSuccess] = useState("");
   const [searchDraft, setSearchDraft] = useState(listState.search);
   const [form, setForm] = useState(blankPerson);
@@ -156,6 +156,8 @@ export default function HrPersonnelPage() {
   const [assignmentSupervisors, setAssignmentSupervisors] = useState<any[]>([]);
   const [endDates, setEndDates] = useState<Record<string, string>>({});
   const [actionPermissions, setActionPermissions] = useState<string[]>([]);
+  const [canEditPersonnel, setCanEditPersonnel] = useState(false);
+  const [canLinkUserAccounts, setCanLinkUserAccounts] = useState(false);
   const [meta, setMeta] = useState({ page: 1, total: 0, totalPages: 1 });
   const [deletionTarget, setDeletionTarget] = useState<any>(null);
   const [retentionTarget, setRetentionTarget] = useState<any>(null);
@@ -167,6 +169,7 @@ export default function HrPersonnelPage() {
   const [confirmDiscardExceptional, setConfirmDiscardExceptional] = useState(false);
   const [originHref, setOriginHref] = useState("/dashboard/hr");
   const lastSuccessfulView = useRef(false);
+  const referenceLoaded = useRef(false);
   const loadSequence = useRef(0);
   const restoredFocus = useRef<string | null>(null);
   const expanded = listState.focus || null;
@@ -180,12 +183,13 @@ export default function HrPersonnelPage() {
 
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
-    const needsFoundation = !lastSuccessfulView.current;
+    const needsReference = !referenceLoaded.current;
     try {
-      if (needsFoundation) setLoading(true);
+      if (needsReference) setLoading(true);
       setResultsLoading(true);
       setError("");
-      const [people, base, authorityResponse] = await Promise.all([
+      setReferenceIssue("");
+      const [peopleResult, referenceResult, authorityResult] = await Promise.allSettled([
         hrAPI.getPersonnel({
           ...(search ? { search } : {}),
           archived: archiveView,
@@ -198,19 +202,64 @@ export default function HrPersonnelPage() {
           page,
           ...(expanded ? { focus: expanded } : {}),
         }),
-        needsFoundation ? hrAPI.getFoundation() : Promise.resolve(null),
-        needsFoundation ? hiringAPI.myActionPermissions() : Promise.resolve(null),
+        needsReference ? hrAPI.getOperationalReference("personnel") : Promise.resolve(null),
+        needsReference ? hrAuthorizationAPI.getMe() : Promise.resolve(null),
       ]);
       if (sequence !== loadSequence.current) return;
+      if (peopleResult.status === "rejected") throw peopleResult.reason;
+      const people = peopleResult.value;
       const nextMeta = people.data.meta || {
           page: 1,
           total: people.data.data.length,
           totalPages: 1,
-        };
+      };
       setRows(people.data.data);
       setMeta(nextMeta);
-      if (base) setFoundation(base.data.data);
-      if (authorityResponse) setActionPermissions(authorityResponse.data.data || []);
+      if (referenceResult.status === "fulfilled" && referenceResult.value) {
+        const reference = referenceResult.value;
+        setFoundation((current: any) => ({ ...current, positions: reference.data.data.positions || [] }));
+      } else if (needsReference) {
+        setFoundation((current: any) => ({ ...current, positions: [] }));
+        setReferenceIssue("اطلاعات جایگاه‌ها موقتاً در دسترس نیست؛ فهرست پرسنل همچنان قابل استفاده است.");
+        referenceLoaded.current = false;
+      }
+      if (authorityResult.status === "fulfilled" && authorityResult.value) {
+        const authority = authorityResult.value;
+        const permissions = authority.data.data.actionPermissionCodes || [];
+        setActionPermissions(permissions);
+        const personnelAccess = (authority.data.data.effectiveAccess?.features || [])
+          .find((feature: any) => feature.feature === "PERSONNEL");
+        const userAdministrationAccess = (authority.data.data.effectiveAccess?.features || [])
+          .find((feature: any) => feature.feature === "USER_ADMINISTRATION");
+        setCanEditPersonnel(["edit", "admin"].includes(personnelAccess?.permission));
+        const mayLinkUserAccounts = ["ADMIN", "MANAGER"].includes(user?.role || "")
+          && userAdministrationAccess?.permission === "admin";
+        setCanLinkUserAccounts(mayLinkUserAccounts);
+        if (mayLinkUserAccounts) {
+          try {
+            const usersResponse = await usersAPI.getUsers(1, 500, { status: "active" });
+            const availableUsers = (usersResponse.data.data || []).filter((candidate: any) => !candidate.personnel);
+            if (sequence === loadSequence.current) setFoundation((current: any) => ({ ...current, availableUsers }));
+          } catch {
+            if (sequence === loadSequence.current) setFoundation((current: any) => ({ ...current, availableUsers: [] }));
+          }
+        } else {
+          setFoundation((current: any) => ({ ...current, availableUsers: [] }));
+        }
+      } else if (needsReference) {
+        setActionPermissions([]);
+        setCanEditPersonnel(false);
+        setCanLinkUserAccounts(false);
+      }
+      if (
+        needsReference
+        && referenceResult.status === "fulfilled"
+        && referenceResult.value
+        && authorityResult.status === "fulfilled"
+        && authorityResult.value
+      ) {
+        referenceLoaded.current = true;
+      }
       lastSuccessfulView.current = true;
       if (nextMeta.page !== page || nextMeta.focus === "removed") {
         replaceListState({
@@ -223,6 +272,8 @@ export default function HrPersonnelPage() {
         setRows([]);
         setFoundation({ positions: [], availableUsers: [] });
         setActionPermissions([]);
+        setCanEditPersonnel(false);
+        setCanLinkUserAccounts(false);
         setScheduleData(null);
         setScheduleDirty(false);
         setForm(blankPerson());
@@ -231,6 +282,7 @@ export default function HrPersonnelPage() {
           clearPersonnelScheduleDrafts(currentUserId);
         }
         lastSuccessfulView.current = false;
+        referenceLoaded.current = false;
         replaceListState({ focus: "", panel: "" });
       }
       setError(apiError(err));
@@ -239,7 +291,7 @@ export default function HrPersonnelPage() {
       setLoading(false);
       setResultsLoading(false);
     }
-  }, [search, archiveView, page, relationshipStatus, attention, organizationalUnitId, workplaceId, costCenterId, dependencyAt, expanded, replaceListState, currentUserId]);
+  }, [search, archiveView, page, relationshipStatus, attention, organizationalUnitId, workplaceId, costCenterId, dependencyAt, expanded, replaceListState, currentUserId, user?.role]);
 
   useEffect(() => {
     void load();
@@ -580,6 +632,7 @@ export default function HrPersonnelPage() {
       ]}
     >
       {error && <ErpInlineState kind="error" title={error} />}
+      {referenceIssue && <ErpInlineState kind="stale" title={referenceIssue} />}
       {success && <ErpInlineState kind="success" title={success} />}
 
       {canCreateExceptionalPersonnel ? (
@@ -664,16 +717,16 @@ export default function HrPersonnelPage() {
                 >
                   <option value="">انتخاب جایگاه</option>
                   {foundation.positions
-                    .filter((item: any) => item.isActive && item.vacancy > 0)
+                    .filter((item: any) => item.isActive && item.availableCapacity > 0)
                     .map((item: any) => (
                       <option key={item.id} value={item.id}>
-                        {item.title} · {item.vacancy.toLocaleString("fa-IR")}{" "}
+                        {item.title} · {item.availableCapacity.toLocaleString("fa-IR")}{" "}
                         جای خالی
                       </option>
                     ))}
                 </ErpSelect>
               </ErpField>
-              <ErpField
+              {canLinkUserAccounts && <ErpField
                 label="کاربر سامانه"
                 hint="اختیاری؛ تنها برای دسترسی ERP."
               >
@@ -689,7 +742,7 @@ export default function HrPersonnelPage() {
                     </option>
                   ))}
                 </ErpSelect>
-              </ErpField>
+              </ErpField>}
               {supervisors.length > 1 && (
                 <div className="md:col-span-2">
                   <ErpField
@@ -778,6 +831,7 @@ export default function HrPersonnelPage() {
                     () =>
                       hrAPI.createExceptionalPersonnel({
                         ...form,
+                        userId: canLinkUserAccounts ? form.userId : "",
                         effectiveFrom: toIsoDate(form.effectiveFrom),
                       }),
                     "پرسنل استثنایی، رابطه استخدامی، تخصیص اصلی و رویداد ممیزی ثبت شد.",
@@ -883,6 +937,8 @@ export default function HrPersonnelPage() {
               run={run}
               changeArchiveState={changeArchiveState}
               permanentlyDelete={permanentlyDelete}
+              canEditPersonnel={canEditPersonnel}
+              canAccessVehicleOperations={["ADMIN", "MANAGER"].includes(user?.role || "")}
             />
           ))}
           {!rows.length && (
@@ -1011,6 +1067,8 @@ function PersonnelCard(props: any) {
     run,
     changeArchiveState,
     permanentlyDelete,
+    canEditPersonnel,
+    canAccessVehicleOperations,
   } = props;
   const relationship = person.hrEmploymentRelationships?.[0];
   const primary = relationship?.assignments?.find(
@@ -1080,9 +1138,9 @@ function PersonnelCard(props: any) {
           />
         </div>
       )}
-      <div className="mt-2">
+      {canAccessVehicleOperations && <div className="mt-2">
         <ErpButton label="صلاحیت رانندگی" icon={FaUserPlus} variant="soft" href={`/dashboard/hr/personnel/${person.id}/driver-eligibility`} />
-      </div>
+      </div>}
       {person.retentionCapabilities?.canPermanentlyDelete && (
         <div className="mt-2">
           <ErpButton
@@ -1139,7 +1197,7 @@ function PersonnelCard(props: any) {
               onClick={onOpenSchedule}
             />
           </div>
-          {relationship && (
+          {relationship && canEditPersonnel && (
             <>
               <div className="mt-4 flex flex-wrap gap-2">
                 {relationship.status === "PLANNED" &&
@@ -1504,7 +1562,7 @@ function AssignmentForm({
               .filter(
                 (item: any) =>
                   item.isActive &&
-                  (assignment.type === "ACTING" || item.vacancy > 0),
+                  (assignment.type === "ACTING" || item.availableCapacity > 0),
               )
               .map((item: any) => (
                 <option key={item.id} value={item.id}>

@@ -6,6 +6,7 @@ import {
   type HrAuthorizationSnapshot,
 } from './hrAuthorizationPolicy';
 import { HR_ACTION_PERMISSIONS, actionPermissionsForLegacyAuthority } from './hrActionPermissionCatalog';
+import { getEffectiveUserAccess } from './effectiveAccessService';
 
 type HrAuthorizationClient = PrismaClient | Prisma.TransactionClient;
 
@@ -18,25 +19,11 @@ export const activeHrGrantWhere = (at = new Date()) => ({
 export const loadHrAuthorizationSnapshot = async (
   client: HrAuthorizationClient,
   userId: string,
+  at = new Date(),
 ): Promise<HrAuthorizationSnapshot> => {
   const user = await client.user.findUnique({ where: { id: userId }, select: { id: true, role: true, isActive: true } });
-  const [workspaceGrants, featureGrants, roleWorkspaceGrants, roleFeatureGrants, duties] = await Promise.all([
-    client.hrWorkspaceAccessGrant.findMany({
-      where: { userId, workspaceCode: 'HUMAN_RESOURCES' },
-      select: { workspaceCode: true, level: true, status: true, effectiveFrom: true, effectiveTo: true, reason: true },
-    }),
-    client.hrFeatureAccessGrant.findMany({
-      where: { userId },
-      select: { featureCode: true, level: true, status: true, effectiveFrom: true, effectiveTo: true, reason: true },
-    }),
-    client.roleWorkspacePermission.findMany({
-      where: { role: user?.role ?? 'USER', workspace: 'hr', isActive: true },
-      select: { permissionLevel: true },
-    }),
-    client.roleFeaturePermission.findMany({
-      where: { role: user?.role ?? 'USER', workspace: 'hr', isActive: true },
-      select: { feature: true, permissionLevel: true },
-    }),
+  const [effectiveAccess, duties] = await Promise.all([
+    getEffectiveUserAccess(client, { userId, userRole: user?.role ?? 'USER', at }),
     client.crossWorkspaceDuty.findMany({
       where: { currentAssigneeUserId: userId, status: 'OPEN' },
       select: { id: true },
@@ -44,20 +31,18 @@ export const loadHrAuthorizationSnapshot = async (
   ]);
   return {
     user: user ?? { id: userId, role: 'USER', isActive: false },
-    workspaceGrants: [
-      ...workspaceGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
-      ...roleWorkspaceGrants.map((grant) => ({
-        workspaceCode: 'HUMAN_RESOURCES', level: grant.permissionLevel.toUpperCase() as 'VIEW' | 'EDIT' | 'ADMIN',
+    workspaceGrants: effectiveAccess.workspaces
+      .filter(({ workspace }) => workspace === 'hr')
+      .map(({ permission }) => ({
+        workspaceCode: 'HUMAN_RESOURCES', level: permission.toUpperCase() as 'VIEW' | 'EDIT' | 'ADMIN',
         status: 'ACTIVE' as const, effectiveFrom: new Date(0), effectiveTo: null,
       })),
-    ],
-    featureGrants: [
-      ...featureGrants.map(({ reason, ...grant }) => ({ ...grant, bootstrapOnly: reason === 'HR redesign baseline' })),
-      ...roleFeatureGrants.map((grant) => ({
-        featureCode: grant.feature, level: grant.permissionLevel.toUpperCase() as 'VIEW' | 'EDIT' | 'ADMIN',
+    featureGrants: effectiveAccess.features
+      .filter(({ workspace }) => workspace === 'hr')
+      .map(({ feature, permission }) => ({
+        featureCode: feature, level: permission.toUpperCase() as 'VIEW' | 'EDIT' | 'ADMIN',
         status: 'ACTIVE' as const, effectiveFrom: new Date(0), effectiveTo: null,
       })),
-    ],
     // Legacy business-authority rows are retained as history but are not authorization input.
     authorityGrants: [],
     assignedDutyIds: duties.map(({ id }) => id),
@@ -69,7 +54,7 @@ export const authorizeHrUser = async (
   userId: string,
   requirement: HrAuthorizationRequirement,
   at = new Date(),
-) => evaluateHrAuthorization(await loadHrAuthorizationSnapshot(client, userId), requirement, at);
+) => evaluateHrAuthorization(await loadHrAuthorizationSnapshot(client, userId, at), requirement, at);
 
 export const authorizeHrAction = async (
   client: HrAuthorizationClient,
@@ -83,7 +68,7 @@ export const activeHrActionPermissionsForUser = async (
   userId: string,
   at = new Date(),
 ) => {
-  const snapshot = await loadHrAuthorizationSnapshot(client, userId);
+  const snapshot = await loadHrAuthorizationSnapshot(client, userId, at);
   if (!snapshot.user.isActive) return [];
   return HR_ACTION_PERMISSIONS
     .map(({ code }) => code)
@@ -95,7 +80,7 @@ export const activeHrAuthoritiesForUser = async (
   userId: string,
   at = new Date(),
 ) => {
-  const snapshot = await loadHrAuthorizationSnapshot(client, userId);
+  const snapshot = await loadHrAuthorizationSnapshot(client, userId, at);
   if (!snapshot.user.isActive) return [];
   const broadOverride = evaluateHrAuthorization(snapshot, { workspaceLevel: 'ADMIN' }, at).allowed
     && (snapshot.user.role === 'ADMIN' || snapshot.user.role === 'MANAGER');

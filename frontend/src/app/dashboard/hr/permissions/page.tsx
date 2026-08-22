@@ -31,11 +31,16 @@ import {
   type AccessLevel,
 } from '@/features/access-management/accessEditorState';
 import { isAccessEffectiveAt } from '@/features/access-management/userWorkspaceProjection';
+import { canAdministerHrAccess } from '@/features/hr/hrAccessNavigation';
 
 type User = { id: string; firstName: string; lastName: string; email: string; username: string; role: string };
 type DirectPermission = { id: string; workspace: string; permissionLevel: AccessLevel; feature?: string; expiresAt?: string | null; isActive: boolean };
 type RolePermission = { id: string; role: string; workspace: string; permissionLevel: AccessLevel; feature?: string; isActive: boolean };
 type HrGrant = { id: string; userId: string; level: 'VIEW' | 'EDIT' | 'ADMIN'; status: string; effectiveFrom: string; effectiveTo?: string | null; workspaceCode?: string; featureCode?: string };
+type EffectiveAccess = {
+  workspaces: Array<{ workspace: string; permission: AccessLevel }>;
+  features: Array<{ feature: string; permission: AccessLevel; workspace: string }>;
+};
 type FeatureDefinition = AccessFeatureDefinition & { source: 'legacy' | 'hr' };
 type Feedback = { kind: 'success' | 'error' | 'stale'; title: string; description?: string };
 
@@ -89,6 +94,7 @@ export default function PermissionsPage() {
   const [directFeatures, setDirectFeatures] = useState<DirectPermission[]>([]);
   const [hrWorkspaces, setHrWorkspaces] = useState<HrGrant[]>([]);
   const [hrFeatures, setHrFeatures] = useState<HrGrant[]>([]);
+  const [effectiveAccess, setEffectiveAccess] = useState<EffectiveAccess>({ workspaces: [], features: [] });
   const [draft, setDraft] = useState<AccessDraft>(() => createAccessDraft());
   const [draftRole, setDraftRole] = useState('USER');
   const [expiresAt, setExpiresAt] = useState('');
@@ -105,12 +111,26 @@ export default function PermissionsPage() {
   const loadBase = useCallback(async () => {
     setLoading(true);
     try {
-      const [profileResponse, usersResponse, definitionsResponse, roleWorkspaceResponse, roleFeatureResponse, hrResponse] = await Promise.all([
-        authAPI.getMe(), usersAPI.getUsers(1, 1000), permissionsAPI.getFeatureDefinitions(),
-        workspacePermissionsAPI.getRolePermissions(), permissionsAPI.getRoleFeaturePermissions({ limit: 1000 }), hrAuthorizationAPI.getContext(),
-      ]);
+      const profileResponse = await authAPI.getMe();
       const currentActor = profileResponse.data.data as User;
-      const availableUsers = (usersResponse.data.data || []).filter((user: User) => currentActor.role !== 'MANAGER' || user.role !== 'ADMIN');
+      const hrResponse = await hrAuthorizationAPI.getContext();
+      const administrationAllowed = canAdministerHrAccess(currentActor.role);
+      let availableUsers = (hrResponse.data.data.users || []) as User[];
+      let legacyDefinitions: FeatureDefinition[] = [];
+      let workspaceRoleDefaults: RolePermission[] = [];
+      let featureRoleDefaults: RolePermission[] = [];
+      if (administrationAllowed) {
+        const [usersResponse, definitionsResponse, roleWorkspaceResponse, roleFeatureResponse] = await Promise.all([
+          usersAPI.getUsers(1, 1000), permissionsAPI.getFeatureDefinitions(),
+          workspacePermissionsAPI.getRolePermissions(), permissionsAPI.getRoleFeaturePermissions({ limit: 1000 }),
+        ]);
+        availableUsers = (usersResponse.data.data || []).filter((user: User) => currentActor.role !== 'MANAGER' || user.role !== 'ADMIN');
+        legacyDefinitions = (definitionsResponse.data.data || [])
+          .map(normalizeLegacyDefinition)
+          .filter((definition: FeatureDefinition) => definition.workspace !== 'hr');
+        workspaceRoleDefaults = roleWorkspaceResponse.data.data || [];
+        featureRoleDefaults = roleFeatureResponse.data.data || [];
+      }
       const actionDefinitions = (hrResponse.data.data.actionPermissionGroups || []).flatMap((group: any) => group.permissions).map((permission: any): FeatureDefinition => ({
         key: permission.code, workspace: 'hr', label: permission.labelFa, requiredLevel: FROM_HR_LEVEL[permission.level as 'VIEW' | 'EDIT' | 'ADMIN'], prerequisites: permission.prerequisites || [], source: 'hr',
       }));
@@ -120,9 +140,9 @@ export default function PermissionsPage() {
       }));
       setActor(currentActor);
       setUsers(availableUsers);
-      setDefinitions([...(definitionsResponse.data.data || []).map(normalizeLegacyDefinition).filter((definition: FeatureDefinition) => definition.workspace !== 'hr'), ...hrBaseDefinitions, ...actionDefinitions]);
-      setRoleWorkspacePermissions(roleWorkspaceResponse.data.data || []);
-      setRoleFeaturePermissions(roleFeatureResponse.data.data || []);
+      setDefinitions([...legacyDefinitions, ...hrBaseDefinitions, ...actionDefinitions]);
+      setRoleWorkspacePermissions(workspaceRoleDefaults);
+      setRoleFeaturePermissions(featureRoleDefaults);
       setHrContext(hrResponse.data.data);
       setSelectedUserId((current) => {
         const requested = availableUsers.some((user: User) => user.id === requestedUserId) ? requestedUserId! : '';
@@ -141,14 +161,19 @@ export default function PermissionsPage() {
     setFeedback(undefined);
     try {
       const user = users.find((candidate) => candidate.id === userId) || null;
-      const [workspaceResponse, featureResponse] = await Promise.all([
-        workspacePermissionsAPI.getUserPermissions({ userId, limit: 100 }),
-        permissionsAPI.getUserFeaturePermissions(userId),
-      ]);
-      const clientEvaluationTime = Date.now();
+      const effectiveResponse = await hrAuthorizationAPI.getEffectiveAccess(userId);
+      let workspaces: DirectPermission[] = [];
+      let features: DirectPermission[] = [];
+      if (canAdministerHrAccess(actor?.role)) {
+        const [workspaceResponse, featureResponse] = await Promise.all([
+          workspacePermissionsAPI.getUserPermissions({ userId, limit: 100 }),
+          permissionsAPI.getUserFeaturePermissions(userId),
+        ]);
+        const clientEvaluationTime = Date.now();
+        workspaces = (workspaceResponse.data.data || []).filter((permission: DirectPermission) => isAccessEffectiveAt(permission, clientEvaluationTime));
+        features = (featureResponse.data.data || []).filter((permission: DirectPermission) => isAccessEffectiveAt(permission, clientEvaluationTime));
+      }
       const serverEvaluationTime = authorizationContext.evaluatedAt;
-      const workspaces = (workspaceResponse.data.data || []).filter((permission: DirectPermission) => isAccessEffectiveAt(permission, clientEvaluationTime));
-      const features = (featureResponse.data.data || []).filter((permission: DirectPermission) => isAccessEffectiveAt(permission, clientEvaluationTime));
       const activeHrWorkspaces = (authorizationContext.workspaceGrants || []).filter((grant: HrGrant) => grant.userId === userId && isAccessEffectiveAt(grant, serverEvaluationTime));
       const activeHrFeatures = (authorizationContext.featureGrants || []).filter((grant: HrGrant) => grant.userId === userId && isAccessEffectiveAt(grant, serverEvaluationTime));
       const levels = Object.fromEntries(WORKSPACES.map(({ key }) => [key, workspaces.find((permission: DirectPermission) => permission.workspace === key)?.permissionLevel || null])) as Record<string, AccessLevel | null>;
@@ -160,6 +185,7 @@ export default function PermissionsPage() {
       setDirectFeatures(features);
       setHrWorkspaces(activeHrWorkspaces);
       setHrFeatures(activeHrFeatures);
+      setEffectiveAccess(effectiveResponse.data.data as EffectiveAccess);
       setDraft(createAccessDraft({
         workspaceLevels: levels,
         explicitlySelectedFeatures: [...features.map((permission: DirectPermission) => permission.feature!), ...activeHrFeatures.map((permission: HrGrant) => permission.featureCode!)],
@@ -169,16 +195,21 @@ export default function PermissionsPage() {
     } catch (error: any) {
       setFeedback({ kind: 'error', title: error.response?.data?.error || 'خواندن دسترسی‌های کاربر ناموفق بود.' });
     } finally { setLoadingUser(false); }
-  }, [definitions, hrContext, users]);
+  }, [actor?.role, definitions, hrContext, users]);
 
   useEffect(() => { void loadUser(selectedUserId); }, [loadUser, selectedUserId]);
 
   const maxLevel: AccessLevel = actor?.role === 'MANAGER' ? 'edit' : 'admin';
   const isAdminTarget = selectedUser?.role === 'ADMIN';
-  const canEdit = !!selectedUser && !isAdminTarget;
+  const canEdit = !!selectedUser && !isAdminTarget && canAdministerHrAccess(actor?.role);
+  const visibleWorkspaces = canAdministerHrAccess(actor?.role)
+    ? WORKSPACES
+    : WORKSPACES.filter(({ key }) => key === 'hr');
   const filteredDefinitions = useMemo(() => definitions.filter((definition) => !permissionSearch.trim() || definition.label.includes(permissionSearch.trim()) || definition.key.toLowerCase().includes(permissionSearch.trim().toLowerCase())), [definitions, permissionSearch]);
   const roleWorkspaceForSelected = roleWorkspacePermissions.filter((permission) => permission.role === draftRole && permission.isActive);
   const roleFeatureForSelected = roleFeaturePermissions.filter((permission) => permission.role === draftRole && permission.isActive);
+  const effectiveHrWorkspaceLevel = effectiveAccess.workspaces.find(({ workspace }) => workspace === 'hr')?.permission;
+  const effectiveHrFeatureLevels = new Map(effectiveAccess.features.map(({ feature, permission }) => [feature, permission]));
 
   const save = async () => {
     if (!selectedUser || !canEdit || reason.trim().length < 3) {
@@ -235,6 +266,9 @@ export default function PermissionsPage() {
   return (
     <ErpPage eyebrow="منابع انسانی" title="مدیریت دسترسی کاربران" description="نقش، دسترسی فضای کاری و مجوزهای جزئی تمام سامانه را از یک محل مدیریت کنید.">
       {feedback && <ErpInlineState kind={feedback.kind} title={<span>{feedback.title}{feedback.description && <small className="mt-1 block font-normal">{feedback.description}</small>}</span>} />}
+      {actor && !canAdministerHrAccess(actor.role) && (
+        <ErpInlineState kind="permission" title="نمایش فقط‌خواندنی دسترسی‌های منابع انسانی" />
+      )}
       <ErpSegmentedControl options={[{ value: 'users', label: 'دسترسی کاربران' }, { value: 'roles', label: 'پیش‌فرض‌های نقش', disabled: actor?.role !== 'ADMIN' }]} value={tab} onChange={setTab} />
       {tab === 'roles' ? (
         <ErpSection title="پیش‌فرض‌های نقش" description="این دسترسی‌ها ارثی هستند و فقط مدیر سامانه می‌تواند آن‌ها را تغییر دهد.">
@@ -282,11 +316,11 @@ export default function PermissionsPage() {
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">نقش سامانه</span><ErpSelect disabled={!canEdit} value={draftRole} onChange={(event) => setDraftRole(event.target.value)}>{ROLES.filter((role) => actor?.role === 'ADMIN' || role !== 'ADMIN').map((role) => <option key={role} value={role}>{role}</option>)}</ErpSelect></label>
                   <label><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">انقضای تغییرات جدید</span><HrPersianCalendar disabled={!canEdit} value={expiresAt} onChange={setExpiresAt} showTime clearable /></label>
-                  <div><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">دسترسی مؤثر</span><div className="flex min-h-11 flex-wrap items-center gap-2">{selectedUser.role === 'ADMIN' ? <ErpBadge tone="success">کامل · ضمنی مدیر سامانه</ErpBadge> : <><ErpBadge tone="primary">مستقیم: {directWorkspaces.length + directFeatures.length + hrFeatures.length}</ErpBadge><ErpBadge tone="info">از نقش: {roleWorkspaceForSelected.length + roleFeatureForSelected.length}</ErpBadge></>}</div></div>
+                  <div><span className="mb-2 block text-sm text-[var(--sds-text-secondary)]">دسترسی مؤثر</span><div className="flex min-h-11 flex-wrap items-center gap-2">{selectedUser.role === 'ADMIN' ? <ErpBadge tone="success">کامل · ضمنی مدیر سامانه</ErpBadge> : canEdit ? <><ErpBadge tone="primary">مستقیم: {directWorkspaces.length + directFeatures.length + hrFeatures.length}</ErpBadge><ErpBadge tone="info">از نقش: {roleWorkspaceForSelected.length + roleFeatureForSelected.length}</ErpBadge></> : <ErpBadge tone="info">{effectiveAccess.features.length} مجوز مؤثر منابع انسانی</ErpBadge>}</div></div>
                 </div>
               </ErpSection>
               <div className="space-y-4">
-                {WORKSPACES.map(({ key, label }) => {
+                {visibleWorkspaces.map(({ key, label }) => {
                   const workspaceDefinitions = filteredDefinitions.filter((definition) => definition.workspace === key);
                   const searchingPermissions = Boolean(permissionSearch.trim());
                   if (searchingPermissions && workspaceDefinitions.length === 0) return null;
@@ -294,7 +328,7 @@ export default function PermissionsPage() {
                   const selectableDefinitions = definitions.filter((definition) => actor?.role === 'ADMIN' || definition.requiredLevel !== 'admin');
                   const inheritedLevel = roleWorkspaceForSelected.find((permission) => permission.workspace === key)?.permissionLevel;
                   const directLevel = draft.workspaceLevels[key];
-                  const effectiveLevel = directLevel || inheritedLevel;
+                  const effectiveLevel = canEdit ? directLevel || inheritedLevel : effectiveHrWorkspaceLevel;
                   const automatic = definitions.filter((definition) => definition.workspace === key && draft.automaticallyAddedFeatures.has(definition.key));
                   return <ErpSection key={key} title={label} description={effectiveLevel ? `دسترسی مؤثر: ${LEVEL_LABELS[effectiveLevel]} · منشأ: ${directLevel ? 'مستقیم' : 'از نقش'}` : 'بدون دسترسی مؤثر'} actions={searchingPermissions ? [] : [{ label: workspaceExpanded ? 'بستن مجوزها' : 'نمایش مجوزها', variant: 'ghost', onClick: () => setExpanded((current) => ({ ...current, [key]: !current[key] })) }]}>
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -305,7 +339,11 @@ export default function PermissionsPage() {
                       const inherited = roleFeatureForSelected.some((permission) => permission.workspace === key && permission.feature === definition.key);
                       const isAutomatic = draft.automaticallyAddedFeatures.has(definition.key);
                       const direct = draft.explicitlySelectedFeatures.has(definition.key);
-                      return <div key={`${definition.source}-${definition.key}`} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3"><ErpCheckbox checked={draft.selectedFeatures.has(definition.key) || inherited || selectedUser.role === 'ADMIN'} disabled={!canEdit || inherited || isAutomatic || (actor?.role === 'MANAGER' && definition.requiredLevel === 'admin')} onChange={(event) => setDraft((current) => setFeatureSelection(current, definitions, definition.key, event.target.checked))} label={<span>{definition.label} {direct && <ErpBadge tone="primary">مستقیم · {LEVEL_LABELS[definition.requiredLevel]}</ErpBadge>} {inherited && <ErpBadge tone="info">از نقش · مؤثر</ErpBadge>} {isAutomatic && <ErpBadge tone="purple">پیش‌نیاز</ErpBadge>}</span>} /></div>;
+                      const serverEffectiveLevel = effectiveHrFeatureLevels.get(definition.key);
+                      const checked = canEdit
+                        ? draft.selectedFeatures.has(definition.key) || inherited || selectedUser.role === 'ADMIN'
+                        : Boolean(serverEffectiveLevel);
+                      return <div key={`${definition.source}-${definition.key}`} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3"><ErpCheckbox checked={checked} disabled={!canEdit || inherited || isAutomatic || (actor?.role === 'MANAGER' && definition.requiredLevel === 'admin')} onChange={(event) => setDraft((current) => setFeatureSelection(current, definitions, definition.key, event.target.checked))} label={<span>{definition.label} {direct && canEdit && <ErpBadge tone="primary">مستقیم · {LEVEL_LABELS[definition.requiredLevel]}</ErpBadge>} {inherited && canEdit && <ErpBadge tone="info">از نقش · مؤثر</ErpBadge>} {!canEdit && serverEffectiveLevel && <ErpBadge tone="info">مؤثر · {LEVEL_LABELS[serverEffectiveLevel]}</ErpBadge>} {isAutomatic && canEdit && <ErpBadge tone="purple">پیش‌نیاز</ErpBadge>}</span>} /></div>;
                     })}</div>{automatic.length > 0 && <ErpCard tone="info" className="mt-4 p-3"><strong className="text-sm">پیش‌نیازهای افزوده‌شده</strong><div className="mt-2 flex flex-wrap gap-2">{automatic.map((definition) => <ErpBadge key={definition.key} tone="info">{definition.label}</ErpBadge>)}</div></ErpCard>}</div>}
                   </ErpSection>;
                 })}

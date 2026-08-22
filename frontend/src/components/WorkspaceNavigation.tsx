@@ -50,6 +50,7 @@ import { dashboardAPI, securityAPI } from "@/lib/api";
 import { ErpPressable } from '@/components/erp';
 import { DutyCountBadge } from '@/features/cross-workspace-duties/DutyCountBadge';
 import { useCrossWorkspaceDutyCount } from '@/features/cross-workspace-duties/useCrossWorkspaceDutyCount';
+import { projectHrNavigation } from '@/features/hr/hrAccessNavigation';
 
 interface NavigationItem {
   name: string;
@@ -74,7 +75,7 @@ interface User {
   lastName: string;
   email: string;
   role: string;
-  permissions?: { features?: Array<{ feature: string; permissionLevel: string }> };
+  permissions?: { features?: Array<{ feature: string; permissionLevel: string; workspace?: string }> };
 }
 
 export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
@@ -497,50 +498,22 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         ];
 
       case WORKSPACES.HR:
-        return [
-          {
-            name: "HR Dashboard",
-            namePersian: "داشبورد منابع انسانی",
-            href: "/dashboard/hr",
-            icon: FaChartLine,
-            show: true,
-          },
-          {
-            name: "Organization",
-            namePersian: "ساختار سازمانی",
-            href: "/dashboard/hr/structure",
-            icon: FaBuilding,
-            show: true,
-          },
-          {
-            name: "Recruitment",
-            namePersian: "جذب و پرونده‌های متقاضیان",
-            href: "/dashboard/hr/hiring",
-            icon: FaUserPlus,
-            show: true,
-          },
-          {
-            name: "My HR Tasks",
-            namePersian: "وظایف منابع انسانی",
-            href: "/dashboard/hr/tasks",
-            icon: FaClipboardList,
-            show: true,
-          },
-          {
-            name: "Personnel",
-            namePersian: "پرسنل و روابط استخدامی",
-            href: "/dashboard/hr/personnel",
-            icon: FaUsers,
-            show: true,
-          },
-          {
-            name: "Migration",
-            namePersian: "مهاجرت و تطبیق",
-            href: "/dashboard/hr/migration",
-            icon: FaClipboardList,
-            show: hasPermission(WORKSPACES.HR, "admin" as any),
-          },
-        ];
+        return projectHrNavigation(currentUser?.permissions?.features || [], currentUser?.role).map((item) => ({
+          name: item.id,
+          namePersian: item.label,
+          href: item.href,
+          icon: ({
+            dashboard: FaChartLine,
+            structure: FaBuilding,
+            hiring: FaUserPlus,
+            tasks: FaClipboardList,
+            personnel: FaUsers,
+            authority: FaShieldAlt,
+            migration: FaClipboardList,
+            users: FaUserCog,
+          } as Record<string, any>)[item.id] || FaClipboardList,
+          show: true,
+        }));
 
       case WORKSPACES.ACCOUNTING:
         return [

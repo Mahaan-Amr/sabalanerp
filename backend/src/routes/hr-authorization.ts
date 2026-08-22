@@ -4,10 +4,12 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { authorize, type AuthRequest } from '../middleware/auth';
 import { FEATURES, FEATURE_WORKSPACE_MAP } from '../middleware/feature';
-import { activeCompanyManagerUserIds, activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
+import { requireHrFeature } from '../middleware/hrAuthorization';
+import { activeCompanyManagerUserIds, activeHrActionPermissionsForUser, activeHrAuthoritiesForUser, authorizeHrUser } from '../services/hrAuthorizationService';
 import { expandFeaturePrerequisites } from '../services/featurePermissionPrerequisites';
 import { canAssignSystemRole } from '../services/userRoleAdministrationPolicy';
 import { HR_REDESIGN_CATALOG } from '../services/hrRedesignDataContracts';
+import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import {
   HR_ACTION_PERMISSION_GROUPS,
   expandHrActionPermissionSelection,
@@ -16,6 +18,7 @@ import {
 
 const router = express.Router();
 const administer = authorize('ADMIN', 'MANAGER');
+export const viewAuthorizationContext = requireHrFeature('AUTHORITY_RESPONSIBILITY_ADMINISTRATION', 'VIEW');
 const levelValues = new Set(HR_REDESIGN_CATALOG.featureLevels);
 const authorityValues = new Set<string>(HR_REDESIGN_CATALOG.businessAuthorities);
 const responsibilityValues = new Set<string>(HR_REDESIGN_CATALOG.responsibilityTypes);
@@ -86,27 +89,33 @@ const writeAudit = async (client: Prisma.TransactionClient, input: {
 
 router.get('/me', asyncHandler(async (req, res) => {
   const now = new Date();
-  const [workspaceGrants, featureGrants, authorityCodes, administration] = await Promise.all([
+  const [workspaceGrants, featureGrants, authorityCodes, actionPermissionCodes, administration, effectiveAccess] = await Promise.all([
     prisma.hrWorkspaceAccessGrant.findMany({ where: { userId: actorId(req) }, orderBy: { createdAt: 'desc' } }),
     prisma.hrFeatureAccessGrant.findMany({ where: { userId: actorId(req) }, orderBy: { createdAt: 'desc' } }),
     activeHrAuthoritiesForUser(prisma, actorId(req), now),
+    activeHrActionPermissionsForUser(prisma, actorId(req), now),
     authorizeHrUser(prisma, actorId(req), {
       workspaceLevel: 'ADMIN',
       feature: { code: 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION', level: 'ADMIN' },
     }, now),
+    getEffectiveUserAccess(prisma, { userId: actorId(req), userRole: req.user!.role, at: now }),
   ]);
   res.json({ success: true, data: {
-    workspaceGrants, featureGrants, authorityCodes,
+    workspaceGrants, featureGrants, authorityCodes, actionPermissionCodes,
+    effectiveAccess: {
+      workspaces: effectiveAccess.workspaces.filter(({ workspace }) => workspace === 'hr'),
+      features: effectiveAccess.features.filter(({ workspace }) => workspace === 'hr'),
+    },
     canAdministerAuthorityResponsibility: administration.allowed,
     generatedAt: now,
   } });
 }));
 
-router.get('/context', administer, asyncHandler(async (req, res) => {
+router.get('/context', viewAuthorizationContext, asyncHandler(async (req, res) => {
   const evaluatedAt = new Date();
   const [users, workspaceCatalog, featureCatalog, authorityCatalog, responsibilityTypes, recentWorkspaceGrants,
     activeWorkspaceGrants, recentFeatureGrants, activeFeatureGrants, authorityGrants, responsibilities, destinations, constraints, audit] = await Promise.all([
-    prisma.user.findMany({ where: { isActive: true, ...(req.user!.role === 'MANAGER' ? { role: { not: 'ADMIN' } } : {}) }, select: { id: true, username: true, firstName: true, lastName: true, role: true }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
+    prisma.user.findMany({ where: { isActive: true, ...(req.user!.role !== 'ADMIN' ? { role: { not: 'ADMIN' } } : {}) }, select: { id: true, username: true, firstName: true, lastName: true, email: true, role: true }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
     prisma.hrWorkspaceCatalog.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
     prisma.hrFeatureCatalog.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
     prisma.hrAuthorityCatalog.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } }),
@@ -140,6 +149,28 @@ router.get('/context', administer, asyncHandler(async (req, res) => {
     authorityGrants: visibleToActor(authorityGrants),
     responsibilities: req.user!.role === 'ADMIN' ? responsibilities : responsibilities.filter(({ assignedUserId }) => !assignedUserId || visibleUserIds.has(assignedUserId)),
     destinations, constraints, audit: req.user!.role === 'ADMIN' ? audit : [], evaluatedAt,
+  } });
+}));
+
+router.get('/effective-access/:userId', viewAuthorizationContext, asyncHandler(async (req, res) => {
+  const targetUserId = text(req.params.userId);
+  const target = await prisma.user.findFirst({
+    where: {
+      id: targetUserId,
+      isActive: true,
+      ...(req.user!.role === 'ADMIN' ? {} : { role: { not: 'ADMIN' } }),
+    },
+    select: { id: true, role: true },
+  });
+  if (!target) throw httpError(404, 'کاربر فعال پیدا نشد.');
+  const effective = await getEffectiveUserAccess(prisma, {
+    userId: target.id,
+    userRole: target.role,
+  });
+  res.json({ success: true, data: {
+    workspaces: effective.workspaces.filter(({ workspace }) => workspace === 'hr'),
+    features: effective.features.filter(({ workspace }) => workspace === 'hr'),
+    evaluatedAt: new Date(),
   } });
 }));
 

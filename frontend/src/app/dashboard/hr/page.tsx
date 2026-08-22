@@ -1,5 +1,4 @@
 "use client";
-import { ErpInlineState } from "@/components/erp";
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -14,20 +13,33 @@ import {
 } from "react-icons/fa";
 import {
   ErpButton,
+  ErpEmptyState,
+  ErpInlineState,
   ErpLoading,
   ErpNeumorphicActionGrid,
   ErpNeumorphicMetricGrid,
   ErpProgressRingCard,
+  ErpWorkspacePage,
   ErpWorkList,
 } from "@/components/erp";
 import { apiError } from "@/features/hr/hrUi";
-import { authAPI, hrAPI, hrAuthorizationAPI } from "@/lib/api";
+import { dashboardAPI, hrAPI } from "@/lib/api";
 import { hiringAPI } from "@/lib/hiringApi";
+import { hasHrFeature, projectHrWorkspaceLanding } from '@/features/hr/hrAccessNavigation';
+
+const actionIconById = {
+  structure: FaBuilding,
+  hiring: FaUserPlus,
+  tasks: FaClipboardCheck,
+  personnel: FaUsers,
+  authority: FaClipboardCheck,
+  migration: FaExchangeAlt,
+  users: FaUsers,
+} as const;
 
 export default function HrDashboardPage() {
   const [data, setData] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [canAdministerAuthority, setCanAdministerAuthority] = useState(false);
   const [workSummary, setWorkSummary] = useState<any>({
     progress: { completed: 0, remaining: 0, total: 0, percentage: null },
     items: [],
@@ -39,17 +51,19 @@ export default function HrDashboardPage() {
     try {
       setLoading(true);
       setError("");
-      const [dashboard, currentUserResponse, authorizationResponse] = await Promise.all([
-        hrAPI.getDashboard(),
-        authAPI.getMe(),
-        hrAuthorizationAPI.getMe(),
-      ]);
+      const currentUserResponse = await dashboardAPI.getProfile();
+      const profile = currentUserResponse.data.data;
+      const features = profile.permissions?.features || [];
+      setCurrentUser(profile);
+      if (!hasHrFeature(features, 'DASHBOARD')) return;
+
+      const dashboard = await hrAPI.getDashboard();
       setData(dashboard.data.data);
-      setCurrentUser(currentUserResponse.data.data);
-      setCanAdministerAuthority(Boolean(authorizationResponse.data.data.canAdministerAuthorityResponsibility));
-      void hiringAPI.workItemSummary()
-        .then((work) => setWorkSummary(work.data.data))
-        .catch(() => setWorkSummary({ progress: { completed: 0, remaining: 0, total: 0, percentage: null }, items: [] }));
+      if (hasHrFeature(features, 'HR_WORK_MANAGEMENT')) {
+        void hiringAPI.workItemSummary()
+          .then((work) => setWorkSummary(work.data.data))
+          .catch(() => setWorkSummary({ progress: { completed: 0, remaining: 0, total: 0, percentage: null }, items: [] }));
+      }
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -62,6 +76,40 @@ export default function HrDashboardPage() {
   }, [load]);
 
   if (loading) return <ErpLoading />;
+
+  if (!currentUser) {
+    return <ErpEmptyState title="خواندن دسترسی منابع انسانی ناموفق بود" description={error || 'دوباره تلاش کنید.'} action={{ label: 'تلاش دوباره', onClick: load }} />;
+  }
+
+  const features = currentUser.permissions?.features || [];
+  const landing = projectHrWorkspaceLanding(features, currentUser.role);
+  if (landing.kind !== 'dashboard') {
+    return (
+      <ErpWorkspacePage
+        title="فضای کاری منابع انسانی"
+        className="sds-neumorphic-scope pb-24 lg:pb-2"
+      >
+        {landing.kind === 'limited' ? (
+          <ErpNeumorphicActionGrid
+            title="بخش‌های در دسترس"
+            showTitle={false}
+            items={landing.links.map((link) => ({
+              id: link.id,
+              title: link.label,
+              href: link.href,
+              icon: actionIconById[link.id as keyof typeof actionIconById],
+            }))}
+          />
+        ) : (
+          <ErpEmptyState
+            icon={FaClipboardCheck}
+            title="دسترسی فضای کاری وجود دارد، اما هیچ مجوزی برای بخش‌های منابع انسانی به حساب شما داده نشده است"
+            description="برای مشاهده یک بخش، مدیر سامانه باید مجوز پایه همان بخش را ثبت کند."
+          />
+        )}
+      </ErpWorkspacePage>
+    );
+  }
 
   const metrics = data?.metrics || {};
   const verification = data?.verification || {};
@@ -101,7 +149,7 @@ export default function HrDashboardPage() {
             value: Number(metrics.personnel || 0).toLocaleString("fa-IR"),
             icon: FaUsers,
             tone: "primary",
-            href: "/dashboard/hr/personnel",
+            href: hasHrFeature(features, 'PERSONNEL') ? "/dashboard/hr/personnel" : undefined,
           },
           {
             id: "active-headcount",
@@ -109,7 +157,7 @@ export default function HrDashboardPage() {
             value: Number(metrics.activeHeadcount || 0).toLocaleString("fa-IR"),
             icon: FaUserTie,
             tone: "success",
-            href: "/dashboard/hr/personnel?relationshipStatus=ACTIVE",
+            href: hasHrFeature(features, 'PERSONNEL') ? "/dashboard/hr/personnel?relationshipStatus=ACTIVE" : undefined,
           },
           {
             id: "committed-capacity",
@@ -119,7 +167,7 @@ export default function HrDashboardPage() {
             ),
             icon: FaClipboardCheck,
             tone: "info",
-            href: "/dashboard/hr/structure/positions?filter=committed",
+            href: hasHrFeature(features, 'ORGANIZATIONAL_STRUCTURE') ? "/dashboard/hr/structure/positions?filter=committed" : undefined,
           },
           {
             id: "vacancies",
@@ -127,7 +175,7 @@ export default function HrDashboardPage() {
             value: Number(metrics.vacancies || 0).toLocaleString("fa-IR"),
             icon: FaBuilding,
             tone: "warning",
-            href: "/dashboard/hr/structure/positions?filter=vacant",
+            href: hasHrFeature(features, 'ORGANIZATIONAL_STRUCTURE') ? "/dashboard/hr/structure/positions?filter=vacant" : undefined,
           },
         ]}
       />
@@ -135,47 +183,17 @@ export default function HrDashboardPage() {
       <ErpNeumorphicActionGrid
         title="دسترسی سریع"
         items={[
-          {
-            id: "structure",
-            title: "ساختار سازمانی",
-            href: "/dashboard/hr/structure",
-            icon: FaBuilding,
-          },
-          {
-            id: "hiring",
-            title: "جذب و پرونده‌های متقاضیان",
-            href: "/dashboard/hr/hiring",
-            icon: FaUserPlus,
-          },
-          {
-            id: "personnel",
-            title: "پرسنل و روابط استخدامی",
-            href: "/dashboard/hr/personnel",
-            icon: FaUsers,
-          },
-          {
+          ...landing.links.map((link) => ({
+            id: link.id,
+            title: link.label,
+            href: link.href,
+            icon: actionIconById[link.id as keyof typeof actionIconById],
+          })),
+          ...(['ADMIN', 'MANAGER'].includes(currentUser.role) ? [{
             id: "vehicle-operations",
             title: "رانندگان و خودروهای شرکت",
             href: "/dashboard/hr/vehicle-operations",
             icon: FaTruck,
-          },
-          {
-            id: "migration",
-            title: "مهاجرت و تطبیق",
-            href: "/dashboard/hr/migration",
-            icon: FaExchangeAlt,
-          },
-          ...(canAdministerAuthority ? [{
-            id: "authority",
-            title: "اختیار و مسئولیت",
-            href: "/dashboard/hr/permissions",
-            icon: FaClipboardCheck,
-          }] : []),
-          ...(["ADMIN", "MANAGER"].includes(currentUser?.role) ? [{
-            id: "users",
-            title: "مدیریت کاربران",
-            href: "/dashboard/hr/users",
-            icon: FaUsers,
           }] : []),
         ]}
       />
@@ -192,41 +210,45 @@ export default function HrDashboardPage() {
                   verification.relationshipsWithoutPrimaryAssignment || 0,
                 ),
                 href: "/dashboard/hr/personnel?attention=missing-primary",
-                tone: "danger",
+                tone: "danger" as const,
               },
               {
                 id: "vacant-supervisor-positions",
                 label: "جایگاه سرپرستی بدون متصدی",
                 count: Number(verification.vacantSupervisorPositions || 0),
                 href: "/dashboard/hr/structure/positions?filter=vacant-supervisor",
-                tone: "danger",
+                tone: "danger" as const,
               },
               {
                 id: "inactive-foundation-records",
                 label: "تعاریف غیرفعال",
                 count: Number(verification.inactiveFoundationRecords || 0),
                 href: "/dashboard/hr/structure?view=inactive",
-                tone: "warning",
+                tone: "warning" as const,
               },
               {
                 id: "planned-hiring",
                 label: "استخدام برنامه‌ریزی‌شده",
                 count: Number(metrics.planned || 0),
                 href: "/dashboard/hr/personnel?relationshipStatus=PLANNED",
-                tone: "info",
+                tone: "info" as const,
               },
               {
                 id: "suspended-hiring",
                 label: "استخدام معلق",
                 count: Number(metrics.suspended || 0),
                 href: "/dashboard/hr/personnel?relationshipStatus=SUSPENDED",
-                tone: "warning",
+                tone: "warning" as const,
               },
-            ]}
+            ].filter((item) => (
+              item.href.startsWith('/dashboard/hr/personnel')
+                ? hasHrFeature(features, 'PERSONNEL')
+                : hasHrFeature(features, 'ORGANIZATIONAL_STRUCTURE')
+            ))}
           />
         </div>
 
-        <div className="xl:col-span-2">
+        {hasHrFeature(features, 'HR_WORK_MANAGEMENT') && <div className="xl:col-span-2">
           <ErpProgressRingCard
             title="پیشرفت وظایف من"
             label="کارهای محول‌شده"
@@ -239,7 +261,7 @@ export default function HrDashboardPage() {
             }
             href="/dashboard/hr/tasks?scope=mine"
           />
-        </div>
+        </div>}
       </div>
     </main>
   );

@@ -1,6 +1,11 @@
 import moment from 'moment-jalaali';
 
-export const apiError = (error: any) => error?.response?.data?.error || error?.message || 'انجام عملیات ناموفق بود.';
+export const apiError = (error: any) => {
+  const code = error?.response?.data?.error;
+  if (code === 'HR_AUTHORIZATION_DENIED') return 'مجوز لازم برای مشاهده این بخش منابع انسانی به شما داده نشده است.';
+  if (code === 'HR_ACTION_PERMISSION_REQUIRED') return 'مجوز انجام این عملیات منابع انسانی به شما داده نشده است.';
+  return code || error?.message || 'انجام عملیات ناموفق بود.';
+};
 const latinDigits = (value: string) => value
   .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
   .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)));

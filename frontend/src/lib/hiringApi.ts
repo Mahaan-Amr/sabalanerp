@@ -264,5 +264,9 @@ export const applicantHiringAPI = {
   },
 };
 
-export const hiringError = (error: any) =>
-  error?.response?.data?.error || error?.message || "عملیات ناموفق بود.";
+export const hiringError = (error: any) => {
+  const code = error?.response?.data?.error;
+  if (code === "HR_AUTHORIZATION_DENIED") return "مجوز لازم برای مشاهده این بخش منابع انسانی به شما داده نشده است.";
+  if (code === "HR_ACTION_PERMISSION_REQUIRED") return "مجوز انجام این عملیات منابع انسانی به شما داده نشده است.";
+  return code || error?.message || "عملیات ناموفق بود.";
+};

@@ -1594,6 +1594,18 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
     },
     orderBy: { updatedAt: 'desc' }
   });
+  const companyEvaluationOccurrences = rows.length
+    ? await prisma.hrCompanyEvaluationOccurrence.findMany({
+        where: { applicationId: { in: rows.map(({ id }) => id) } },
+        select: { applicationId: true, status: true },
+      })
+    : [];
+  const companyEvaluationsByApplication = new Map<string, Array<{ status: string }>>();
+  for (const occurrence of companyEvaluationOccurrences) {
+    const current = companyEvaluationsByApplication.get(occurrence.applicationId) || [];
+    current.push({ status: occurrence.status });
+    companyEvaluationsByApplication.set(occurrence.applicationId, current);
+  }
   const archivedActorIds = [...new Set(rows.map((application) => application.archivedBy).filter(Boolean) as string[])];
   const archivedActors = archivedActorIds.length
     ? await prisma.user.findMany({ where: { id: { in: archivedActorIds } }, select: { id: true, firstName: true, lastName: true, username: true } })
@@ -1608,6 +1620,7 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
   const projected = representedRows.map((source) => {
     const row = {
       ...source,
+      companyEvaluationOccurrences: companyEvaluationsByApplication.get(source.id) || [],
       archivedByDisplayName: source.archivedBy ? archivedActorNames.get(source.archivedBy) || source.archivedBy : null,
       retentionCapabilities: projectRecordRetentionCapabilities({
         role: req.user!.role,
@@ -1660,9 +1673,13 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
 router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Response) => {
   const row = await prisma.hrJobApplication.findUnique({ where: { id: req.params.id }, include: applicationInclude });
   if (!row) return res.status(404).json({ success: false, error: 'پرونده استخدام پیدا نشد.' });
-  const [authorityCodes, actionPermissionCodes] = await Promise.all([
+  const [authorityCodes, actionPermissionCodes, companyEvaluationOccurrences] = await Promise.all([
     activeHiringAuthoritiesForUser(actorId(req)),
     activeHrActionPermissionsForUser(prisma, actorId(req)),
+    prisma.hrCompanyEvaluationOccurrence.findMany({
+      where: { applicationId: row.id },
+      select: { status: true },
+    }),
   ]);
   const authorities = new Set(authorityCodes);
   const actionPermissions = new Set(actionPermissionCodes);
@@ -1690,7 +1707,11 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
     { key: 'APPLICATION_ANSWERS', status: canSeeAssessmentEvidence ? 'AVAILABLE' : 'RESTRICTED' },
     { key: 'DOCUMENT_EVIDENCE', status: canSeeHrSensitive ? 'AVAILABLE' : 'RESTRICTED' }
   ];
-  data.lifecycle = projectHiringLifecycle(row, authorities, actorId(req));
+  data.lifecycle = projectHiringLifecycle(
+    { ...row, companyEvaluationOccurrences },
+    authorities,
+    actorId(req),
+  );
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities, actorId(req));
   data.documentIndex = buildHiringDocumentIndex(row, actionPermissions);
   data.activationReadiness = actionPermissions.has('MANAGE_RECRUITMENT_CASE')

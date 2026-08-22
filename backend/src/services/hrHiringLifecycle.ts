@@ -122,6 +122,9 @@ interface PreIdentityChecklistLike {
   status: string;
   managementResolution?: string | null;
 }
+interface CompanyEvaluationOccurrenceLike {
+  status: string;
+}
 interface HiringDecisionLike {
   kind: string;
   outcome: string;
@@ -164,6 +167,7 @@ export interface HiringLifecycleSource {
   preIdentityReleasedAt?: Date | string | null;
   preIdentityGrandfatheredAt?: Date | string | null;
   preIdentityChecklistItems?: PreIdentityChecklistLike[];
+  companyEvaluationOccurrences?: CompanyEvaluationOccurrenceLike[];
   formalAssessmentPlans?: FormalAssessmentPlanLike[];
   hiringDecisions?: HiringDecisionLike[];
   compensationClearance?: string | null;
@@ -466,36 +470,29 @@ const formalAssessmentGate = (source: HiringLifecycleSource): Gate => {
 
 const companyEvaluationPlanGate = (source: HiringLifecycleSource): Gate => {
   if (source.preIdentityGrandfatheredAt) return completedGate(2);
-  const requirementsFinalized = Boolean(source.preIdentityRequirementsFinalizedAt);
-  const items = source.preIdentityChecklistItems || [];
-  const incompleteItems = items.filter((item) =>
-    !["POSITIVE", "NEGATIVE", "CANCELLED", "WAIVED"].includes(item.status),
-  );
-  const unresolvedNegative = items.filter(
-    (item) => item.status === "NEGATIVE" && !item.managementResolution,
-  );
-  const managementApproved = Boolean(source.preIdentityManagementApprovedAt);
-  const released = Boolean(source.preIdentityReleasedAt);
+  const evaluations = source.companyEvaluationOccurrences || [];
+  const pendingEvaluations = evaluations.filter((item) => item.status === "PLANNED");
+  const resolvedEvaluations = evaluations.length - pendingEvaluations.length;
   const companyApproved = latestDecision(source, "COMPANY_APPROVAL")?.outcome === "POSITIVE";
-  const completed = Number(requirementsFinalized) + Number(companyApproved && managementApproved && released);
-  let nextAction = action("FINALIZE_PRE_IDENTITY_REQUIREMENTS", "تعیین و نهایی‌سازی الزامات پرونده", "COMPANY_MANAGER");
-  if (requirementsFinalized && incompleteItems.length)
-    nextAction = action("COMPLETE_PRE_IDENTITY_ITEM", "پیگیری و ثبت نتیجه الزامات", "HR_PROCESSOR");
-  else if (requirementsFinalized && unresolvedNegative.length)
-    nextAction = action("RESOLVE_NEGATIVE_PRE_IDENTITY_ITEM", "تصمیم درباره نتیجه منفی", "COMPANY_MANAGER");
-  else if (requirementsFinalized && (!managementApproved || !companyApproved))
-    nextAction = action("APPROVE_PRE_IDENTITY", "تأیید ادامه پرونده توسط مدیریت شرکت", "COMPANY_MANAGER");
-  else if (managementApproved && !released)
-    nextAction = action("RELEASE_PRE_IDENTITY", "تأیید تکمیل اداری چک‌لیست", "HR_PROCESSOR");
   return {
-    complete: released && managementApproved && companyApproved && !incompleteItems.length && !unresolvedNegative.length,
-    requiredComplete: completed,
-    requiredTotal: 2,
+    complete: companyApproved && pendingEvaluations.length === 0,
+    requiredComplete: resolvedEvaluations + Number(companyApproved),
+    requiredTotal: evaluations.length + 1,
     blockers: [],
-    action: nextAction,
-    secondaryActions: requirementsFinalized
-      ? [action("ADD_PRE_IDENTITY_ITEM", "افزودن الزام جدید", "COMPANY_MANAGER")]
-      : [],
+    action: pendingEvaluations.length
+      ? action(
+          "RECORD_COMPANY_EVALUATION_RESULT",
+          "پیگیری و ثبت نتیجه ارزیابی‌های شرکت",
+          "HR_PROCESSOR",
+        )
+      : action(
+          "RECORD_FINAL_MANAGEMENT_DECISION",
+          "ثبت تصمیم نهایی مدیریت شرکت",
+          "COMPANY_MANAGER",
+        ),
+    secondaryActions: [
+      action("ADD_COMPANY_EVALUATION", "افزودن ارزیابی شرکت", "COMPANY_MANAGER"),
+    ],
   };
 };
 

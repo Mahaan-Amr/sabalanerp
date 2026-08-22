@@ -4,7 +4,7 @@ import path from 'path';
 import { body, validationResult } from 'express-validator';
 import { protect, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WorkspaceRequest, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
-import { FeatureRequest, FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
+import { FeatureRequest, FEATURE_PERMISSIONS, FEATURES, requireAnyNarrowFeatureAccess, requireFeatureAccess, requireNarrowFeatureAccess, type Feature } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
 import {
@@ -71,9 +71,69 @@ import {
   getContractLifecyclePreview,
   listContractLifecycleRequests,
 } from '../services/contractLifecycleService';
+import { requestAccountingSalesContractCorrection } from '../services/salesContractCorrectionDuty';
+import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 
 const router = express.Router();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
+
+const accountingActionFeature: Record<string, string[]> = {
+  CREATE_INVOICE: [FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE],
+  CREATE_REPLACEMENT_INVOICE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
+  CREATE_RECEIVABLE: [FEATURES.ACCOUNTING_RECEIVABLES_MANAGE],
+  APPROVE_FINANCIAL_INVOICE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
+  REGISTER_RECEIPT: [FEATURES.ACCOUNTING_PAYMENTS_MANAGE],
+  UPDATE_CHECK_STATUS: [FEATURES.ACCOUNTING_PAYMENTS_MANAGE],
+  MARK_TAX_READY: [FEATURES.ACCOUNTING_TAX_MANAGE],
+  TRACK_TAX_SUBMISSION: [FEATURES.ACCOUNTING_TAX_MANAGE],
+  APPROVE_CORRECTION_FOR_SALES_EDIT: [FEATURES.ACCOUNTING_CORRECTIONS_APPROVE],
+  DECLINE_CORRECTION: [FEATURES.ACCOUNTING_CORRECTIONS_APPROVE],
+  RESOLVE_CORRECTION: [FEATURES.ACCOUNTING_CORRECTIONS_VERIFY],
+  FLAG_CONTRACT: [FEATURES.ACCOUNTING_ACTIONS_MANAGE],
+  RESOLVE_CONTRACT_FLAG: [FEATURES.ACCOUNTING_ACTIONS_MANAGE],
+  CANCEL_CONTRACT_FLAG: [FEATURES.ACCOUNTING_ACTIONS_MANAGE],
+  VOID_ACCOUNTING_RECORD: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
+  DELETE_DRAFT_ACCOUNTING_RECORD: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
+};
+
+const getAccountingActionCapabilities = async (userId: string, role: string) => {
+  const effective = await getEffectiveUserAccess(prisma, { userId, userRole: role });
+  const workspaceLevel = effective.workspaces.find(({ workspace }) => workspace === WORKSPACES.ACCOUNTING)?.permission;
+  const canEditWorkspace = Boolean(workspaceLevel && ({ view: 1, edit: 2, admin: 3 }[workspaceLevel] >= 2));
+  const resolveFeatures = async (features: string[]) => (
+    await Promise.all(features.map((feature) => resolveNarrowFeatureAccess(prisma, {
+      userId, role, workspace: WORKSPACES.ACCOUNTING, feature,
+      requiredPermission: FEATURE_PERMISSIONS.EDIT,
+    })))
+  ).some(({ allowed }) => allowed) && canEditWorkspace;
+  const entries = await Promise.all(Object.entries(accountingActionFeature)
+    .map(async ([kind, features]) => [kind, await resolveFeatures(features)] as const));
+  return Object.fromEntries([
+    ...entries,
+    ['CREATE_CORRECTION_REQUEST', await resolveFeatures([FEATURES.ACCOUNTING_CORRECTIONS_CREATE, FEATURES.ACCOUNTING_CORRECTIONS_MANAGE])],
+  ]) as Record<string, boolean>;
+};
+
+const projectAccountingActions = <T extends { nextBestActions?: Array<Record<string, any>> }>(
+  record: T,
+  capabilities: Record<string, boolean>,
+): T => ({
+  ...record,
+  nextBestActions: [
+    ...(record.nextBestActions || []),
+    { kind: 'FLAG_CONTRACT', labelFa: 'ثبت پرچم حسابداری', enabled: true },
+  ].map((action) => {
+    const visible = Boolean(capabilities[action.kind]);
+    return {
+      ...action,
+      visible,
+      enabled: visible && Boolean(action.enabled),
+      reason: !visible
+        ? 'مجوز انجام این عملیات برای شما فعال نیست.'
+        : action.reason ?? action.disabledReason,
+    };
+  }),
+});
 
 export const readAccountingActionIdentities = (req: Pick<Request, 'body' | 'get'>) => ({
   idempotencyKey: String(
@@ -100,6 +160,27 @@ const accountingEdit = [
   requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
   requireFeatureAccess(FEATURES.ACCOUNTING_ACTIONS_MANAGE, FEATURE_PERMISSIONS.EDIT)
 ];
+
+const accountingFeatureView = (feature: Feature) => [
+  protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.VIEW),
+  requireFeatureAccess(feature, FEATURE_PERMISSIONS.VIEW),
+];
+const accountingContractsView = accountingFeatureView(FEATURES.ACCOUNTING_CONTRACTS_VIEW);
+const accountingFinancialRecordsView = accountingFeatureView(FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID);
+const accountingReceivablesView = accountingFeatureView(FEATURES.ACCOUNTING_RECEIVABLES_MANAGE);
+const accountingPaymentsView = accountingFeatureView(FEATURES.ACCOUNTING_PAYMENTS_MANAGE);
+const accountingTaxView = accountingFeatureView(FEATURES.ACCOUNTING_TAX_MANAGE);
+const accountingCorrectionsView = [
+  protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.VIEW),
+  requireAnyNarrowFeatureAccess([
+    FEATURES.ACCOUNTING_CORRECTIONS_MANAGE,
+    FEATURES.ACCOUNTING_CORRECTIONS_APPROVE,
+    FEATURES.ACCOUNTING_CORRECTIONS_VERIFY,
+  ], FEATURE_PERMISSIONS.VIEW),
+];
+const accountingAuditView = accountingFeatureView(FEATURES.ACCOUNTING_AUDIT_VIEW);
 
 const accountingDispatchView = [
   protect,
@@ -394,20 +475,34 @@ export const createAccountingFinancialTrendResponse = (
 
 router.get('/financial-trend', accountingView, createAccountingFinancialTrendResponse());
 
-router.get('/contracts', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/contracts', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {
-    const data = await listAccountingContracts(req.query as any);
-    res.json({ success: true, data });
+    const [data, capabilities] = await Promise.all([
+      listAccountingContracts(req.query as any),
+      getAccountingActionCapabilities(req.user!.id, req.user!.role),
+    ]);
+    res.json({ success: true, data: {
+      ...data,
+      items: data.items.map((record: any) => projectAccountingActions(record, capabilities)),
+    } });
   } catch (error) {
     console.error('Accounting contracts error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });
 
-router.get('/contracts/:contractId', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/contracts/:contractId', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {
-    const data = await getAccountingContractDetail(req.params.contractId);
-    res.json({ success: true, data });
+    const [data, capabilities] = await Promise.all([
+      getAccountingContractDetail(req.params.contractId),
+      getAccountingActionCapabilities(req.user!.id, req.user!.role),
+    ]);
+    const contract = projectAccountingActions((data as any).contract, capabilities);
+    res.json({ success: true, data: {
+      ...(data as any),
+      contract,
+      availableActions: contract.nextBestActions,
+    } });
   } catch (error: any) {
     console.error('Accounting contract detail error:', error);
     res.status(error.message === 'Contract not found' ? 404 : 500).json({
@@ -417,7 +512,7 @@ router.get('/contracts/:contractId', accountingView, async (req: AuthRequest, re
   }
 });
 
-router.get('/contracts/:contractId/lifecycle', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/contracts/:contractId/lifecycle', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {
     const data = await getContractLifecyclePreview(req.params.contractId);
     res.json({ success: true, data });
@@ -518,7 +613,7 @@ router.post(
   },
 );
 
-router.get('/contracts/:contractId/pdf', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/contracts/:contractId/pdf', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {
     const data = await getAccountingContractDetail(req.params.contractId);
     const html = renderAccountingContractHtml(data);
@@ -564,7 +659,7 @@ router.get('/contracts/:contractId/pdf', accountingView, async (req: AuthRequest
   }
 });
 
-router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/contracts/:contractId/sales-pdf', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {
     const contract = await prisma.salesContract.findUnique({
       where: { id: req.params.contractId },
@@ -699,7 +794,7 @@ router.get('/contracts/:contractId/sales-pdf', accountingView, async (req: AuthR
   }
 });
 
-router.get('/financial-records', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/financial-records', accountingFinancialRecordsView, async (req: AuthRequest, res: Response) => {
   try {
     const data = await listFinancialRecords(req.query);
     res.json({ success: true, data });
@@ -709,7 +804,7 @@ router.get('/financial-records', accountingView, async (req: AuthRequest, res: R
   }
 });
 
-router.get('/receivables', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/receivables', accountingReceivablesView, async (req: AuthRequest, res: Response) => {
   try {
     const data = await listReceivables(req.query);
     res.json({ success: true, data });
@@ -719,7 +814,7 @@ router.get('/receivables', accountingView, async (req: AuthRequest, res: Respons
   }
 });
 
-router.get('/payments', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/payments', accountingPaymentsView, async (req: AuthRequest, res: Response) => {
   try {
     const data = await listPaymentStatuses(req.query);
     res.json({ success: true, data });
@@ -729,7 +824,7 @@ router.get('/payments', accountingView, async (req: AuthRequest, res: Response) 
   }
 });
 
-router.get('/tax', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/tax', accountingTaxView, async (req: AuthRequest, res: Response) => {
   try {
     const data = await listTaxRecords(req.query);
     res.json({ success: true, data });
@@ -739,15 +834,81 @@ router.get('/tax', accountingView, async (req: AuthRequest, res: Response) => {
   }
 });
 
-router.get('/correction-requests', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/correction-requests', accountingCorrectionsView, async (req: AuthRequest, res: Response) => {
   try {
-    const data = await listCorrectionRequests(req.query);
-    res.json({ success: true, data });
+    const [data, capabilities] = await Promise.all([
+      listCorrectionRequests(req.query),
+      getAccountingActionCapabilities(req.user!.id, req.user!.role),
+    ]);
+    res.json({ success: true, data: { ...data, actionAvailability: {
+      approve: { visible: capabilities.APPROVE_CORRECTION_FOR_SALES_EDIT, enabled: capabilities.APPROVE_CORRECTION_FOR_SALES_EDIT, reason: capabilities.APPROVE_CORRECTION_FOR_SALES_EDIT ? null : 'مجوز تصمیم‌گیری اصلاح فعال نیست.' },
+      verify: { visible: capabilities.RESOLVE_CORRECTION, enabled: capabilities.RESOLVE_CORRECTION, reason: capabilities.RESOLVE_CORRECTION ? null : 'مجوز راستی‌آزمایی اصلاح فعال نیست.' },
+    } } });
   } catch (error) {
     console.error('Accounting correction requests error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });
+
+const correctionRequestFailure = (message: string) => ({
+  DUTY_REASON_REQUIRED: { status: 400, message: 'متن درخواست اصلاح باید حداقل سه نویسه داشته باشد.' },
+  DUTY_IDEMPOTENCY_KEY_REQUIRED: { status: 400, message: 'ثبت امن درخواست آماده نشد؛ صفحه را تازه‌سازی و دوباره تلاش کنید.' },
+  DUTY_IDEMPOTENCY_CONFLICT: { status: 409, message: 'این شناسه ثبت قبلاً برای درخواست دیگری استفاده شده است؛ صفحه را تازه‌سازی کنید.' },
+  DUTY_ACTIVE_CHAIN_CONFLICT: { status: 409, message: 'برای این قرارداد یک زنجیره اصلاح فعال وجود دارد؛ ابتدا همان درخواست را تکمیل کنید.' },
+  CONTRACT_NOT_FOUND: { status: 404, message: 'قرارداد موردنظر پیدا نشد.' },
+  CONTRACT_INACTIVE: { status: 409, message: 'قرارداد غیرفعال است؛ ابتدا آن را از مسیر رسمی فعال‌سازی مجدد بازگردانید.' },
+  RESPONSIBLE_SELLER_REQUIRED: { status: 409, message: 'فروشنده مسئول قرارداد مشخص نیست؛ مدیر فروش باید ابتدا مسئول قرارداد را تعیین کند.' },
+}[message]);
+
+export const createAccountingCorrectionRequestHandler = (
+  requestCorrection: typeof requestAccountingSalesContractCorrection = requestAccountingSalesContractCorrection,
+) => async (req: AuthRequest & { params: { contractId: string } }, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, message: 'اطلاعات درخواست اصلاح کامل یا معتبر نیست.' });
+  }
+  try {
+    const data = await requestCorrection(prisma, {
+      contractId: req.params.contractId,
+      actorUserId: req.user!.id,
+      category: req.body.category || 'OTHER',
+      priority: req.body.priority || 'MEDIUM',
+      reason: String(req.body.reason || ''),
+      idempotencyKey: String(req.get('X-Idempotency-Key') || req.get('Idempotency-Key') || req.body.idempotencyKey || ''),
+    });
+    return res.status(data.replayed ? 200 : 201).json({ success: true, data });
+  } catch (error) {
+    const internalMessage = error instanceof Error ? error.message : 'UNKNOWN';
+    const known = correctionRequestFailure(internalMessage);
+    if (known) return res.status(known.status).json({ success: false, message: known.message });
+    const trackingId = `CORR-${Date.now().toString(36).toUpperCase()}`;
+    console.error('Accounting-originated correction request failed:', { trackingId, error });
+    return res.status(500).json({
+      success: false,
+      message: `ثبت درخواست اصلاح انجام نشد. کد پیگیری ${trackingId} را به پشتیبانی اعلام کنید.`,
+      trackingId,
+    });
+  }
+};
+
+router.post(
+  '/contracts/:contractId/correction-requests',
+  protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
+  requireAnyNarrowFeatureAccess([
+    FEATURES.ACCOUNTING_CORRECTIONS_CREATE,
+    FEATURES.ACCOUNTING_CORRECTIONS_MANAGE,
+  ], FEATURE_PERMISSIONS.EDIT),
+  [
+    body('reason').isString().trim().isLength({ min: 3 }),
+    body('category').optional().isIn([
+      'CUSTOMER_IDENTITY', 'AMOUNT_PRICING', 'PAYMENT_PLAN', 'DELIVERY_SCHEDULE',
+      'TAX_INFO', 'DOCUMENT_SIGNATURE', 'OTHER',
+    ]),
+    body('priority').optional().isIn(['LOW', 'MEDIUM', 'HIGH', 'URGENT']),
+  ],
+  createAccountingCorrectionRequestHandler(),
+);
 
 router.get('/audit/dispatch-documents/recovery', accountingRecoveryEvidenceView, async (req: AuthRequest, res: Response) => {
   try {
@@ -759,7 +920,7 @@ router.get('/audit/dispatch-documents/recovery', accountingRecoveryEvidenceView,
   }
 });
 
-router.get('/audit', accountingView, async (req: AuthRequest, res: Response) => {
+router.get('/audit', accountingAuditView, async (req: AuthRequest, res: Response) => {
   try {
     const data = await listAuditLogs(req.query);
     res.json({ success: true, data });
@@ -779,10 +940,26 @@ router.get('/performance', accountingView, async (req: AuthRequest, res: Respons
   }
 });
 
-router.get('/settings', accountingView, async (_req: AuthRequest, res: Response) => {
+router.get('/settings', accountingView, async (req: AuthRequest, res: Response) => {
   try {
     const data = await getAccountingSettings();
-    res.json({ success: true, data });
+    const editAccess = await resolveNarrowFeatureAccess(prisma, {
+      userId: req.user!.id,
+      role: req.user!.role,
+      workspace: WORKSPACES.ACCOUNTING,
+      feature: FEATURES.ACCOUNTING_ACTIONS_MANAGE,
+      requiredPermission: FEATURE_PERMISSIONS.EDIT,
+    });
+    res.json({ success: true, data: {
+      ...data,
+      actionAvailability: {
+        edit: {
+          visible: editAccess.allowed,
+          enabled: editAccess.allowed,
+          reason: editAccess.allowed ? null : 'ویرایش تنظیمات به مجوز اقدام‌های حسابداری نیاز دارد.',
+        },
+      },
+    } });
   } catch (error) {
     console.error('Accounting settings error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
@@ -820,7 +997,14 @@ export const createAccountingActionHandler = (
 
   try {
       if (req.body.kind === 'REQUEST_CORRECTION') {
-        return res.status(410).json({ success: false, error: 'DUTY_LEGACY_ACCOUNTING_CORRECTION_WRITER_RETIRED' });
+        console.warn('Rejected retired Accounting correction command.', {
+          code: 'DUTY_LEGACY_ACCOUNTING_CORRECTION_WRITER_RETIRED',
+          actorId: req.user!.id,
+        });
+        return res.status(410).json({
+          success: false,
+          message: 'درخواست اصلاح را از دکمه «درخواست اصلاح» در پرونده حسابداری قرارداد دوباره ثبت کنید.',
+        });
       }
       if (
         managerReviewActions.has(req.body.kind) &&
@@ -840,7 +1024,8 @@ export const createAccountingActionHandler = (
         userId: req.user!.id,
         role: req.user!.role,
         effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace, workspacePermission: req.workspacePermission,
-          feature: FEATURES.ACCOUNTING_ACTIONS_MANAGE, featurePermission: req.featurePermission },
+          feature: accountingActionFeature[String(req.body.kind)]?.[0] || FEATURES.ACCOUNTING_ACTIONS_MANAGE,
+          featurePermission: req.featurePermission },
       }, async (tx, notification) => {
         const correctionRequired = notification.kind === 'APPROVE_CORRECTION_FOR_SALES_EDIT';
         await publishNotificationEvent(tx, {
@@ -882,16 +1067,46 @@ export const createAccountingActionHandler = (
           actionUrl: reviewCase?.actionUrl,
         });
       }
+      const trackingId = `ACC-${Date.now().toString(36).toUpperCase()}`;
+      console.error('Accounting action rejected:', { trackingId, error });
       res.status(error.message === 'DUTY_LEGACY_ACCOUNTING_CORRECTION_WRITER_RETIRED' ? 410 : 400).json({
         success: false,
-        error: error.message || 'Accounting action failed'
+        message: error.message === 'DUTY_LEGACY_ACCOUNTING_CORRECTION_WRITER_RETIRED'
+          ? 'این عملیات از مسیر جدید درخواست اصلاح حسابداری انجام می‌شود.'
+          : `اقدام حسابداری انجام نشد. کد پیگیری ${trackingId} را به پشتیبانی اعلام کنید.`,
+        trackingId,
       });
     }
   };
 
+const authorizeAccountingAction = async (req: WorkspaceRequest & FeatureRequest, res: Response, next: express.NextFunction) => {
+  if (req.body.kind === 'REQUEST_CORRECTION') return next();
+  const features = accountingActionFeature[String(req.body.kind)] || [];
+  if (features.length === 0) return res.status(400).json({
+    success: false,
+    message: 'اقدام درخواست‌شده در سامانه حسابداری تعریف نشده است. پشتیبان سامانه باید مسیر اقدام را بررسی کند.',
+  });
+  const decisions = await Promise.all(features.map((feature) => resolveNarrowFeatureAccess(prisma, {
+    userId: req.user!.id,
+    role: req.user!.role,
+    workspace: WORKSPACES.ACCOUNTING,
+    feature,
+    requiredPermission: FEATURE_PERMISSIONS.EDIT,
+  })));
+  const grantedIndex = decisions.findIndex(({ allowed }) => allowed);
+  if (grantedIndex < 0) return res.status(403).json({
+    success: false,
+    message: 'این اقدام متوقف شد چون مجوز اقدام حسابداری فعال نیست. مدیر حسابداری باید مجوز مرتبط را بررسی کند.',
+  });
+  req.featurePermission = decisions[grantedIndex].permissionLevel!;
+  return next();
+};
+
 router.post(
   '/actions',
-  accountingEdit,
+  protect,
+  requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT),
+  authorizeAccountingAction,
   [
     body('kind').isString().notEmpty(),
     body('contractId').optional().isString(),

@@ -12,6 +12,8 @@ import { BiometricConnector } from '../services/biometricProtocol';
 import { createHmac, randomUUID } from 'node:crypto';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
+import { requireHrFeature } from '../middleware/hrAuthorization';
+import { authorizeHrUser } from '../services/hrAuthorizationService';
 
 const router = express.Router();
 const unavailableConnector: BiometricConnector = { execute: async (command) => ({ commandId: command.commandId, operation: command.operation,
@@ -39,7 +41,7 @@ const handle = (res: Response, error: unknown) => {
   console.error('Dispatch confirmation error:', error);
   return res.status(500).json({ success: false, error: 'Dispatch confirmation failed.' });
 };
-const hrManage = [protect, requireNarrowFeatureAccess(FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE, FEATURE_PERMISSIONS.EDIT)];
+const hrManage = [protect, requireHrFeature(FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE, 'EDIT')];
 const accountingManage = [protect, requireNarrowFeatureAccess(FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE, FEATURE_PERMISSIONS.EDIT)];
 const guardApprove = [protect, requireNarrowFeatureAccess(FEATURES.SECURITY_DISPATCH_CONFIRMATION_APPROVE, FEATURE_PERMISSIONS.EDIT)];
 const evidenceView = [protect, requireNarrowFeatureAccess(FEATURES.SECURITY_DISPATCH_EVIDENCE_VIEW, FEATURE_PERMISSIONS.VIEW)];
@@ -52,7 +54,7 @@ router.get('/capabilities', protect, async (req: AuthRequest, res) => {
       resolve('accounting', FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE),
       resolve('accounting', FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE),
       resolve('security', FEATURES.SECURITY_DISPATCH_CONFIRMATION_APPROVE),
-      resolve('hr', FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE),
+      authorizeHrUser(prisma, req.user!.id, { workspaceLevel: 'EDIT', feature: { code: FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE, level: 'EDIT' } }),
     ]);
     return res.json({ success: true, data: { canManageAccountingCandidates: accountingCandidates.allowed,
       canManageAccountingConfirmation: accountingConfirmation.allowed, canApproveGuardConfirmation: guardConfirmation.allowed,

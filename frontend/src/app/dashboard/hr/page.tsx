@@ -26,7 +26,10 @@ import { apiError } from "@/features/hr/hrUi";
 import { dashboardAPI, hrAPI } from "@/lib/api";
 import { hiringAPI } from "@/lib/hiringApi";
 import { hasHrFeature, projectHrWorkspaceLanding } from '@/features/hr/hrAccessNavigation';
-import { hasHrWorkspaceAccess } from '@/features/hr/hrDashboardViewModel';
+import {
+  hasHrWorkspaceAccess,
+  shouldShowHrPersonalDashboard,
+} from '@/features/hr/hrDashboardViewModel';
 
 const actionIconById = {
   structure: FaBuilding,
@@ -86,8 +89,7 @@ export default function HrDashboardPage() {
   const features = currentUser.permissions?.features || [];
   const workspaces = currentUser.permissions?.workspaces || [];
   const landing = projectHrWorkspaceLanding(features, currentUser.role);
-  const hasWorkspaceAccess = hasHrWorkspaceAccess(workspaces);
-  if (!hasWorkspaceAccess && landing.kind !== 'dashboard') {
+  if (!shouldShowHrPersonalDashboard(workspaces, landing.kind)) {
     return (
       <ErpWorkspacePage
         title="فضای کاری منابع انسانی"

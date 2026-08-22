@@ -530,6 +530,31 @@ const base = (
 {
   const result = projectHiringLifecycle(
     base({
+      preIdentityGrandfatheredAt: null,
+      formRevisions: [submitted],
+      hiringDecisions: [
+        { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+        { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+      ],
+      formalAssessmentPlans: [{ version: 1, status: "ACTIVE", explicitlyNoAssessment: true }],
+      companyEvaluationOccurrences: [{ status: "PLANNED" }],
+    }),
+    [],
+    "processor-with-action-permission",
+    ["RECORD_COMPANY_EVALUATION_RESULT"],
+  );
+  const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
+  assert.equal(
+    companyEvaluationPhase?.status,
+    "ACTION_REQUIRED",
+    "effective action permissions must drive the queue status even when no legacy authority grant exists",
+  );
+  assert.equal(companyEvaluationPhase?.primaryAction?.id, "RECORD_COMPANY_EVALUATION_RESULT");
+}
+
+{
+  const result = projectHiringLifecycle(
+    base({
       disposition: "RESERVE",
       preIdentityGrandfatheredAt: null,
       formRevisions: [submitted],

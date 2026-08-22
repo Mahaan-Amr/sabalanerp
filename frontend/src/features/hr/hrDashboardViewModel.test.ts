@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   hasHrWorkspaceAccess,
   positionCapacityCoverage,
+  shouldShowHrPersonalDashboard,
 } from "./hrDashboardViewModel";
 
 assert.equal(
@@ -14,6 +15,30 @@ assert.equal(
   hasHrWorkspaceAccess([{ workspace: "accounting", permissionLevel: "admin" }]),
   false,
   "access to another workspace must not expose the HR dashboard surface",
+);
+
+assert.equal(
+  shouldShowHrPersonalDashboard(
+    [{ workspace: "hr", permissionLevel: "view" }],
+    "limited",
+  ),
+  true,
+  "HR workspace users keep the personal progress and follow-up dashboard even with a limited landing",
+);
+
+assert.equal(
+  shouldShowHrPersonalDashboard(
+    [{ workspace: "accounting", permissionLevel: "admin" }],
+    "limited",
+  ),
+  false,
+  "an unrelated workspace must not expose the HR personal dashboard",
+);
+
+assert.equal(
+  shouldShowHrPersonalDashboard([], "dashboard"),
+  true,
+  "the full HR dashboard landing continues to show its dashboard surface",
 );
 
 assert.deepEqual(positionCapacityCoverage(8, 20), {

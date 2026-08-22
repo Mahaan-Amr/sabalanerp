@@ -12,7 +12,8 @@ import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { createContractItem } from '../services/contractItemService';
-import { requestSalesContractCorrection } from '../services/salesContractCorrectionDuty';
+import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
+import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import { createDelivery, getDeliveries } from '../services/deliveryService';
 import { createPayment, getPayments, validatePaymentData } from '../services/paymentService';
 import {
@@ -99,43 +100,25 @@ const releaseCommittedContractEditSession = async (req: any, fallbackBaseRevisio
   }
 };
 const userHasCancelAfterApprovalPermission = async (user: any): Promise<boolean> => {
-  if (!user || user.role === 'ADMIN') {
-    return true;
-  }
-
-  const feature = FEATURES.SALES_CONTRACTS_CANCEL_AFTER_APPROVAL;
-  const workspace = 'sales';
-
-  const userFeaturePermission = await prisma.featurePermission.findUnique({
-    where: {
-      userId_workspace_feature: {
-        userId: user.id,
-        workspace,
-        feature
-      }
-    }
+  if (!user) return false;
+  const access = await resolveNarrowFeatureAccess(prisma, {
+    userId: user.id,
+    role: user.role,
+    workspace: WORKSPACES.SALES,
+    feature: FEATURES.SALES_CONTRACTS_CANCEL_AFTER_APPROVAL,
+    requiredPermission: FEATURE_PERMISSIONS.EDIT,
   });
-
-  if (userFeaturePermission?.isActive) {
-    return true;
-  }
-
-  const roleFeaturePermission = await prisma.roleFeaturePermission.findUnique({
-    where: {
-      role_workspace_feature: {
-        role: user.role,
-        workspace,
-        feature
-      }
-    }
-  });
-
-  return !!roleFeaturePermission?.isActive;
+  return access.allowed;
 };
 
 // ==================== SALES CONTRACTS ====================
 
-const canManageDiscountRanges = (user: any) => ['ADMIN', 'MANAGER'].includes(user?.role);
+const canManageDiscountRanges = async (user: any) => {
+  if (user?.role === 'ADMIN') return true;
+  if (!user?.id) return false;
+  const effective = await getEffectiveUserAccess(prisma, { userId: user.id, userRole: user.role });
+  return effective.workspaces.some(({ workspace, permission }) => workspace === WORKSPACES.SALES && permission === 'admin');
+};
 
 const toDiscountRangeDto = (range: any) => ({
   id: range.id,
@@ -193,7 +176,7 @@ const validateDiscountRangeBounds = async ({
 router.get('/discount-ranges', protect, async (req: any, res: Response) => {
   try {
     const activeOnly = req.query.activeOnly === 'true';
-    if (!activeOnly && !canManageDiscountRanges(req.user)) {
+    if (!activeOnly && !await canManageDiscountRanges(req.user)) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
@@ -224,7 +207,7 @@ router.post('/discount-ranges', protect, [
   body('isActive').optional().isBoolean().withMessage('Active flag must be boolean')
 ], async (req: any, res: Response) => {
   try {
-    if (!canManageDiscountRanges(req.user)) {
+    if (!await canManageDiscountRanges(req.user)) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
@@ -276,7 +259,7 @@ router.put('/discount-ranges/:id', protect, [
   body('isActive').optional().isBoolean().withMessage('Active flag must be boolean')
 ], async (req: any, res: Response) => {
   try {
-    if (!canManageDiscountRanges(req.user)) {
+    if (!await canManageDiscountRanges(req.user)) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
@@ -330,7 +313,7 @@ router.put('/discount-ranges/:id', protect, [
 // @access  Private/Admin or Manager
 router.delete('/discount-ranges/:id', protect, async (req: any, res: Response) => {
   try {
-    if (!canManageDiscountRanges(req.user)) {
+    if (!await canManageDiscountRanges(req.user)) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
@@ -1191,31 +1174,10 @@ router.post(
     ]),
     body('priority').optional().isIn(['LOW', 'MEDIUM', 'HIGH', 'URGENT']),
   ],
-  async (req: any, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
-    try {
-      const data = await requestSalesContractCorrection(prisma, {
-        contractId: req.params.id,
-        actorUserId: req.user.id,
-        category: req.body.category || 'OTHER',
-        priority: req.body.priority || 'MEDIUM',
-        reason: String(req.body.reason),
-        idempotencyKey: String(
-          req.get('X-Idempotency-Key') || req.get('Idempotency-Key') || req.body.idempotencyKey || '',
-        ),
-      });
-      return res.status(data.replayed ? 200 : 201).json({ success: true, data });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'DUTY_REQUEST_FAILED';
-      const status = /NOT_RESPONSIBLE_SELLER|ASSIGNEE_INELIGIBLE|SEPARATION_OF_DUTIES/.test(message)
-        ? 403
-        : /ACTIVE_CHAIN_CONFLICT|IDEMPOTENCY_CONFLICT/.test(message)
-          ? 409
-          : /CONTRACT_NOT_FOUND/.test(message) ? 404 : 400;
-      return res.status(status).json({ success: false, error: message });
-    }
-  },
+  (_req: any, res: Response) => res.status(410).json({
+    success: false,
+    message: 'درخواست اصلاح قرارداد از فضای حسابداری آغاز می‌شود. موضوع را برای کاربر مجاز حسابداری ارسال کنید.',
+  }),
 );
 
 // @desc    Update sales contract

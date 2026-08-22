@@ -46,7 +46,6 @@ import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewMo
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import { ApplicantCaseOverview } from "@/features/hr-hiring/ApplicantCaseOverview";
 import { ProductionHrInterview, ProductionInterviewReport, type ProductionInterviewPayload } from "@/features/hr-hiring/prototype/HrInterviewPrototype";
-import { FinalHiringRejection } from "@/features/hr-hiring/FinalHiringRejection";
 import { validateHiringQueueReturnHref } from "@/features/hr-hiring/hiringQueueViewModel";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
@@ -404,7 +403,6 @@ export default function HiringCasePage() {
     !data.readOnlyArchived && values.some((value) => actionPermissions.includes(value));
   const canHrSensitive = hasActionPermission("MANAGE_RECRUITMENT_CASE");
   const canCompanyManager = hasActionPermission("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS", "MANAGE_COMPANY_EVALUATION_PLAN", "RECORD_FINAL_MANAGEMENT_DECISION");
-  const canFinallyReject = hasActionPermission("RECORD_PRELIMINARY_DECISION", "RECORD_FINAL_MANAGEMENT_DECISION");
   const canFinance = hasActionPermission("MANAGE_FINANCE_EVIDENCE");
   const canViewContractTask = hiringTaskDetailVisible(
     data.taskCapabilities,
@@ -710,13 +708,6 @@ export default function HiringCasePage() {
             />
           </>
         )}
-      {canFinallyReject && data.stage !== "CLOSED" && !data.convertedAt && data.outcome !== "HIRED" && (
-        <FinalHiringRejection
-          applicationId={id}
-          busy={busy}
-          run={run}
-        />
-      )}
       {(canHrSensitive ||
         (canCompanyManager && selectedLifecyclePhase === "ASSESSMENT")) && (
         <>
@@ -2575,11 +2566,11 @@ export default function HiringCasePage() {
         hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
           <>
             <ErpSection
-              title="بستن یا لغو پرونده"
-              description="اطلاعات عادی در بانک متقاضیان قابل جست‌وجو می‌ماند؛ داده‌ها و اسناد حساس فقط تحت دسترسی محدود نگهداری می‌شوند."
+              title="مختومه‌کردن پرونده استخدام"
+              description="نتیجه مناسب را انتخاب کنید: رد توسط سازمان، انصراف متقاضی یا لغو درخواست استخدام. سابقه پرونده حفظ می‌شود."
             >
               <ErpCard className="grid gap-3 p-4 md:grid-cols-3">
-                <ErpField label="نتیجه بستن پرونده" required>
+                <ErpField label="نحوه مختومه‌شدن پرونده" required>
                   <ErpSelect
                     value={closure.outcome}
                     onChange={(e) =>
@@ -2601,7 +2592,8 @@ export default function HiringCasePage() {
                   />
                 </ErpField>
                 <ErpButton
-                  label="بستن پرونده توسط مدیر منابع انسانی"
+                  label="ثبت نتیجه و مختومه‌کردن پرونده"
+                  className="w-fit self-end justify-self-start"
                   tone="danger"
                   disabled={busy || !closure.reason || data.outcome === "HIRED"}
                   onClick={() =>

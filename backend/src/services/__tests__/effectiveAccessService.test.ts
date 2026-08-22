@@ -62,6 +62,47 @@ const run = async () => {
     access.features.find(({ feature }) => feature === 'accounting_contracts_view'),
     { feature: 'accounting_contracts_view', permission: 'view', workspace: 'accounting' },
   );
+  assert.deepEqual(
+    access.provenance.features.find(({ feature }) => feature === 'accounting_contracts_view'),
+    { feature: 'accounting_contracts_view', permission: 'view', workspace: 'accounting', source: 'DIRECT_FEATURE', grantId: 'accounting-feature' },
+  );
+  const workspaceAdmin = await getEffectiveUserAccess({
+    ...client,
+    workspacePermission: { findMany: async () => [{
+      id: 'accounting-admin', workspace: 'accounting', permissionLevel: 'admin', isActive: true, expiresAt: null,
+    }] },
+    featurePermission: { findMany: async () => [{
+      id: 'accounting-view-narrowing', workspace: 'accounting', feature: 'accounting_contracts_view',
+      permissionLevel: 'view', isActive: true, expiresAt: null,
+    }] },
+  } as never, { userId: 'accounting-admin', userRole: 'USER', at });
+  assert.deepEqual(workspaceAdmin.features.find(({ feature }) => feature === 'accounting_contracts_view'), {
+    feature: 'accounting_contracts_view', permission: 'admin', workspace: 'accounting',
+  }, 'a direct workspace ADMIN remains complete inside that workspace');
+
+  const workspaceMatrix = await getEffectiveUserAccess({
+    ...client,
+    workspacePermission: { findMany: async () => [] },
+    roleWorkspacePermission: { findMany: async () => ['sales', 'crm', 'accounting', 'inventory', 'security', 'bi', 'logistics'].map((workspace) => ({
+      id: `role-${workspace}`, workspace, permissionLevel: 'edit', isActive: true, expiresAt: null,
+    })) },
+    featurePermission: { findMany: async () => [] },
+    roleFeaturePermission: { findMany: async () => [] },
+    hrWorkspaceAccessGrant: { findMany: async () => [{
+      id: 'matrix-hr', workspaceCode: 'HUMAN_RESOURCES', level: 'EDIT', status: 'ACTIVE',
+      effectiveFrom: new Date('2026-08-01T00:00:00.000Z'), effectiveTo: null, reason: 'matrix',
+    }] },
+    hrFeatureAccessGrant: { findMany: async () => [{
+      id: 'matrix-hr-personnel', featureCode: 'PERSONNEL', level: 'EDIT', status: 'ACTIVE',
+      effectiveFrom: new Date('2026-08-01T00:00:00.000Z'), effectiveTo: null, reason: 'matrix',
+    }] },
+  } as never, { userId: 'matrix-user', userRole: 'USER', at });
+  assert.deepEqual(
+    [...workspaceMatrix.workspaces.map(({ workspace }) => workspace)].sort(),
+    ['accounting', 'bi', 'crm', 'hr', 'inventory', 'logistics', 'sales', 'security'],
+    'the canonical resolver projects all eight commercial workspaces through one matrix',
+  );
+  assert.equal(workspaceMatrix.provenance.workspaces.length, 8);
 
   const managerClient = {
     ...client,

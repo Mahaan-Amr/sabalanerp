@@ -33,7 +33,13 @@ import {
   normalizeApplicantMobile,
   normalizeApplicantOtp
 } from '../services/hrCandidateAccess';
-import { buildHiringQueueItem, projectHiringLifecycle, projectHiringTaskCapabilities, summarizeHiringLifecycle } from '../services/hrHiringLifecycle';
+import {
+  actionPermissionForHiringLifecycleAction,
+  buildHiringQueueItem,
+  projectHiringLifecycle,
+  projectHiringTaskCapabilities,
+  summarizeHiringLifecycle,
+} from '../services/hrHiringLifecycle';
 import {
   buildCandidateCorrectionMessage,
   normalizeCandidateCorrectionRequest
@@ -508,41 +514,7 @@ const auditWorkItem = (workItemId: string, eventType: string, actorUserId: strin
     afterJson: after ? JSON.parse(JSON.stringify(after)) : Prisma.JsonNull
   } });
 
-const actionPermissionForHiringWorkAction = (actionId: string) => ({
-  RECORD_HR_INTERVIEW: 'RECORD_INITIAL_INTERVIEW',
-  RECORD_HR_PRELIMINARY_APPROVAL: 'RECORD_PRELIMINARY_DECISION',
-  FINALIZE_FORMAL_ASSESSMENT_PLAN: 'MANAGE_COMPANY_EVALUATION_PLAN',
-  REVISE_FORMAL_ASSESSMENT_PLAN: 'MANAGE_COMPANY_EVALUATION_PLAN',
-  RECORD_COMPANY_ASSESSMENT_RESULT: 'RECORD_COMPANY_EVALUATION_RESULT',
-  FINALIZE_PRE_IDENTITY_REQUIREMENTS: 'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS',
-  ADD_PRE_IDENTITY_ITEM: 'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS',
-  RESOLVE_NEGATIVE_PRE_IDENTITY_ITEM: 'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS',
-  APPROVE_PRE_IDENTITY: 'RECORD_FINAL_MANAGEMENT_DECISION',
-  COMPLETE_PRE_IDENTITY_ITEM: 'MANAGE_RECRUITMENT_CASE',
-  RELEASE_PRE_IDENTITY: 'MANAGE_RECRUITMENT_CASE',
-  CREATE_OFFER: 'MANAGE_COMPENSATION',
-  PREPARE_OFFER_PAYROLL: 'MANAGE_PAYROLL',
-  APPROVE_OFFER_HR: 'MANAGE_PAYROLL',
-  APPROVE_OFFER_FINANCE: 'MANAGE_FINANCE_EVIDENCE',
-  RECORD_CONTRACT: 'MANAGE_FINANCE_EVIDENCE',
-  UPLOAD_CONTRACT: 'MANAGE_FINANCE_EVIDENCE',
-  SUBMIT_CONTRACT: 'MANAGE_FINANCE_EVIDENCE',
-  REVIEW_CONTRACT: 'MANAGE_FINANCE_EVIDENCE',
-  APPROVE_CONTRACT: 'MANAGE_FINANCE_EVIDENCE',
-  CONFIGURE_PAYROLL: 'MANAGE_PAYROLL',
-  REVIEW_IDENTITY: 'MANAGE_RECRUITMENT_CASE',
-  APPROVE_IDENTITY: 'MANAGE_RECRUITMENT_CASE',
-  RECORD_ASSESSMENT: 'MANAGE_RECRUITMENT_CASE',
-  COMPLETE_ASSESSMENT: 'MANAGE_RECRUITMENT_CASE',
-  DECIDE_ASSESSMENT: 'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS',
-  CONVERT_TO_PERSONNEL: 'MANAGE_RECRUITMENT_CASE',
-  COMPLETE_COLLATERAL: 'MANAGE_FINANCE_EVIDENCE',
-  UPDATE_INSURANCE: 'MANAGE_RECRUITMENT_CASE',
-  UPDATE_ONBOARDING_TASK: 'MANAGE_RECRUITMENT_CASE',
-  COMPLETE_ONBOARDING_TASK: 'MANAGE_RECRUITMENT_CASE',
-  ACTIVATE_EMPLOYMENT: 'MANAGE_RECRUITMENT_CASE',
-  RESEND_INVITATION: 'MANAGE_RECRUITMENT_CASE',
-} as Record<string, string>)[actionId] ?? null;
+const actionPermissionForHiringWorkAction = actionPermissionForHiringLifecycleAction;
 
 const syncAutomaticHiringWorkItems = async () => {
   const now = new Date();
@@ -1641,7 +1613,12 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
     };
     return buildHiringQueueItem(
     row as any,
-    summarizeHiringLifecycle(projectHiringLifecycle(row, authorities, actorId(req)))
+    summarizeHiringLifecycle(projectHiringLifecycle(
+      row,
+      authorities,
+      actorId(req),
+      effectiveActionPermissions,
+    ))
   );}).filter((row) => {
     if (requestedPhase && row.lifecycleSummary.phaseId !== requestedPhase) return false;
     if (requestedStatus && row.lifecycleSummary.status !== requestedStatus) return false;
@@ -1717,6 +1694,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
     { ...row, companyEvaluationOccurrences },
     authorities,
     actorId(req),
+    actionPermissionCodes,
   );
   data.taskCapabilities = projectHiringTaskCapabilities(row, authorities, actorId(req));
   data.documentIndex = buildHiringDocumentIndex(row, actionPermissions);

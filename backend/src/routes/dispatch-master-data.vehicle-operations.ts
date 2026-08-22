@@ -1,26 +1,29 @@
 import express from 'express';
 import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
-import { FEATURE_PERMISSIONS, FEATURES, requireNarrowFeatureAccess } from '../middleware/feature';
+import { FEATURES } from '../middleware/feature';
+import { requireHrFeature } from '../middleware/hrAuthorization';
 import { appendDispatchMasterDataAudit } from '../services/dispatchMasterDataAudit';
 import { assertLifecycleTransition, assertValidEffectivePeriod, canPermanentlyDeleteDraft, normalizeIranianPlate } from '../services/dispatchMasterDataPolicy';
-import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
+import { authorizeHrUser } from '../services/hrAuthorizationService';
 import { activeAt, actor, fail, internalInclude, optionalDate, optionalText, parsedDate, prisma, projectDriver, requiredText } from './dispatch-master-data.shared';
 
 const router = express.Router();
-const view = requireNarrowFeatureAccess(FEATURES.HR_VEHICLE_OPERATIONS_VIEW, FEATURE_PERMISSIONS.VIEW);
-const manageProfiles = requireNarrowFeatureAccess(FEATURES.HR_DRIVER_PROFILES_MANAGE, FEATURE_PERMISSIONS.EDIT);
-const manageVehicles = requireNarrowFeatureAccess(FEATURES.HR_COMPANY_VEHICLES_MANAGE, FEATURE_PERMISSIONS.EDIT);
-const managePlates = requireNarrowFeatureAccess(FEATURES.HR_VEHICLE_PLATES_MANAGE, FEATURE_PERMISSIONS.EDIT);
-const manageAssignments = requireNarrowFeatureAccess(FEATURES.HR_DRIVER_VEHICLE_ASSIGNMENTS_MANAGE, FEATURE_PERMISSIONS.EDIT);
+const view = requireHrFeature(FEATURES.HR_VEHICLE_OPERATIONS_VIEW, 'VIEW');
+const manageProfiles = requireHrFeature(FEATURES.HR_DRIVER_PROFILES_MANAGE, 'EDIT');
+const manageVehicles = requireHrFeature(FEATURES.HR_COMPANY_VEHICLES_MANAGE, 'EDIT');
+const managePlates = requireHrFeature(FEATURES.HR_VEHICLE_PLATES_MANAGE, 'EDIT');
+const manageAssignments = requireHrFeature(FEATURES.HR_DRIVER_VEHICLE_ASSIGNMENTS_MANAGE, 'EDIT');
 
 const capabilitiesFor = async (req: AuthRequest) => {
-  const base = { userId: actor(req), role: req.user!.role, workspace: 'hr' };
+  const decide = (feature: string) => authorizeHrUser(prisma, actor(req), {
+    workspaceLevel: 'EDIT', feature: { code: feature, level: 'EDIT' },
+  });
   const [profiles, vehicles, plates, assignments] = await Promise.all([
-    resolveNarrowFeatureAccess(prisma, { ...base, feature: FEATURES.HR_DRIVER_PROFILES_MANAGE, requiredPermission: 'edit' }),
-    resolveNarrowFeatureAccess(prisma, { ...base, feature: FEATURES.HR_COMPANY_VEHICLES_MANAGE, requiredPermission: 'edit' }),
-    resolveNarrowFeatureAccess(prisma, { ...base, feature: FEATURES.HR_VEHICLE_PLATES_MANAGE, requiredPermission: 'edit' }),
-    resolveNarrowFeatureAccess(prisma, { ...base, feature: FEATURES.HR_DRIVER_VEHICLE_ASSIGNMENTS_MANAGE, requiredPermission: 'edit' }),
+    decide(FEATURES.HR_DRIVER_PROFILES_MANAGE),
+    decide(FEATURES.HR_COMPANY_VEHICLES_MANAGE),
+    decide(FEATURES.HR_VEHICLE_PLATES_MANAGE),
+    decide(FEATURES.HR_DRIVER_VEHICLE_ASSIGNMENTS_MANAGE),
   ]);
   return { canManageProfiles: profiles.allowed, canManageCompanyVehicles: vehicles.allowed, canManagePlates: plates.allowed, canManageAssignments: assignments.allowed };
 };

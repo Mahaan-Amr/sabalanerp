@@ -4,19 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { FaBoxes, FaCog, FaEdit, FaEye, FaPlus, FaToggleOff, FaToggleOn, FaTrash, FaWarehouse } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpEmptyState, ErpIconButton, ErpListPage, ErpLoading, ErpQuickFilters } from '@/components/erp';
 import { dashboardAPI, inventoryAPI } from '@/lib/api';
-import { getInventoryMasterDataPermissions } from '@/lib/permissions';
 import SuccessModal from '@/components/SuccessModal';
 import ErrorModal from '@/components/ErrorModal';
-
-interface User {
-  id: string;
-  role: string;
-  departmentId?: string;
-  permissions?: {
-    features: Array<{ feature: string; permissionLevel: string; workspace: string }>;
-    workspaces: Array<{ workspace: string; permissionLevel: string }>;
-  };
-}
 
 interface MasterDataItem {
   id: string;
@@ -92,10 +81,19 @@ const createSections = (): MasterDataSection[] => [
 ];
 
 const inputClass = 'min-h-11 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-3 py-2 text-sm text-[var(--sds-text-primary)] outline-none transition focus:border-[var(--sds-accent)] focus:bg-[var(--sds-surface-raised)] focus:ring-2 focus:ring-[var(--sds-accent)]/15 dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] dark:text-[var(--sds-text-primary)] dark:focus:border-[var(--sds-border-strong)] dark:focus:bg-[var(--sds-surface-raised)]';
+const sectionActionKey: Record<string, string> = {
+  'cut-types': 'CUT_TYPES',
+  'stone-materials': 'STONE_MATERIALS',
+  'cut-widths': 'CUT_WIDTHS',
+  thicknesses: 'THICKNESSES',
+  mines: 'MINES',
+  'finish-types': 'FINISH_TYPES',
+  colors: 'COLORS',
+};
 
 const MasterDataManagement: React.FC = () => {
   const [initialLoading, setInitialLoading] = useState(true);
-  const [inventoryPermissions, setInventoryPermissions] = useState<any>(null);
+  const [actionAvailability, setActionAvailability] = useState<any>({});
   const [activeSection, setActiveSection] = useState<string>('cut-types');
   const [data, setData] = useState<MasterDataItem[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
@@ -112,23 +110,21 @@ const MasterDataManagement: React.FC = () => {
   const [masterDataSections, setMasterDataSections] = useState<MasterDataSection[]>(createSections);
 
   useEffect(() => {
-    const loadUserProfile = async () => {
+    const loadActionAvailability = async () => {
       try {
-        const response = await dashboardAPI.getProfile();
+        const response = await dashboardAPI.getActionAvailability('inventory');
         if (response.data.success) {
-          const user = response.data.data as User;
-          const permissions = getInventoryMasterDataPermissions(user);
-          setInventoryPermissions(permissions);
+          const actions = response.data.data || {};
+          setActionAvailability(actions);
           setMasterDataSections((prevSections) =>
             prevSections.map((section) => {
-              const sectionKey = section.id.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase()) as keyof typeof permissions;
-              if (!permissions[sectionKey]) return section;
+              const actionKey = sectionActionKey[section.id];
               return {
                 ...section,
-                canView: permissions[sectionKey].canView,
-                canCreate: permissions[sectionKey].canCreate,
-                canEdit: permissions[sectionKey].canEdit,
-                canDelete: permissions[sectionKey].canDelete,
+                canView: actions[`VIEW_${actionKey}`]?.enabled === true,
+                canCreate: actions[`CREATE_${actionKey}`]?.enabled === true,
+                canEdit: actions[`EDIT_${actionKey}`]?.enabled === true,
+                canDelete: actions[`DELETE_${actionKey}`]?.enabled === true,
               };
             })
           );
@@ -140,14 +136,14 @@ const MasterDataManagement: React.FC = () => {
       }
     };
 
-    loadUserProfile();
+    loadActionAvailability();
   }, []);
 
   useEffect(() => {
-    if (activeSection && inventoryPermissions) {
+    if (activeSection && Object.keys(actionAvailability).length) {
       loadSectionData();
     }
-  }, [activeSection, inventoryPermissions]);
+  }, [activeSection, actionAvailability]);
 
   const currentSection = masterDataSections.find((section) => section.id === activeSection);
 

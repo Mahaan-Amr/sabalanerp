@@ -1,14 +1,15 @@
 import express from 'express';
 import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
-import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess, requireNarrowFeatureAccess } from '../middleware/feature';
+import { FEATURES } from '../middleware/feature';
+import { requireHrFeature } from '../middleware/hrAuthorization';
 import { appendDispatchMasterDataAudit } from '../services/dispatchMasterDataAudit';
-import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
+import { authorizeHrUser } from '../services/hrAuthorizationService';
 import { activeAt, actor, fail, internalInclude, parsedDate, prisma, projectDriver, requiredText } from './dispatch-master-data.shared';
 
 const router = express.Router();
-const view = requireFeatureAccess(FEATURES.HR_INTERNAL_DRIVERS_VIEW, FEATURE_PERMISSIONS.VIEW);
-const manage = requireNarrowFeatureAccess(FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE, FEATURE_PERMISSIONS.EDIT);
+const view = requireHrFeature(FEATURES.HR_INTERNAL_DRIVERS_VIEW, 'VIEW');
+const manage = requireHrFeature(FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE, 'EDIT');
 
 router.get('/internal-drivers/personnel/:personnelId', view, async (req: AuthRequest, res) => {
   try {
@@ -16,8 +17,8 @@ router.get('/internal-drivers/personnel/:personnelId', view, async (req: AuthReq
     const [personnel, driver, manageAccess, biometricAccess, activeBiometricEnrollment] = await Promise.all([
       prisma.personnel.findUnique({ where: { id: req.params.personnelId } }),
       prisma.internalDriverProfile.findUnique({ where: { personnelId: req.params.personnelId }, include: internalInclude }),
-      resolveNarrowFeatureAccess(prisma, { userId: actor(req), role: req.user!.role, workspace: 'hr', feature: FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE, requiredPermission: 'edit' }, at),
-      resolveNarrowFeatureAccess(prisma, { userId: actor(req), role: req.user!.role, workspace: 'hr', feature: FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE, requiredPermission: 'edit' }, at),
+      authorizeHrUser(prisma, actor(req), { workspaceLevel: 'EDIT', feature: { code: FEATURES.HR_INTERNAL_DRIVER_ELIGIBILITY_MANAGE, level: 'EDIT' } }, at),
+      authorizeHrUser(prisma, actor(req), { workspaceLevel: 'EDIT', feature: { code: FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE, level: 'EDIT' } }, at),
       prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: req.params.personnelId, status: 'ACTIVE' },
         select: { id: true, status: true, enrolledAt: true }, orderBy: { enrolledAt: 'desc' } }),
     ]);

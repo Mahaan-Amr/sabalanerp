@@ -121,8 +121,13 @@ export function mapDispatchDocumentReadModel(value: unknown): DispatchDocumentCa
 
 const parseJsonResponse = async <T,>(response: Response): Promise<T> => {
   const body = await response.json().catch(() => null) as ApiEnvelope<T> | null;
-  if (response.status === 401 || response.status === 403) throw new DispatchDocumentsAuthorizationError(body?.error || 'دسترسی به اسناد ارسال مجاز نیست.', response.status);
-  if (!response.ok || !body?.success) throw new Error(body?.error || 'سرویس اسناد ارسال در دسترس نیست.');
+  if (response.status === 401 || response.status === 403) throw new DispatchDocumentsAuthorizationError('این عملیات متوقف شد چون مجوز اسناد ارسال فعال نیست. مدیر حسابداری باید مجوز مرتبط را بررسی کند.', response.status);
+  if (!response.ok || !body?.success) {
+    const safeMessage = typeof body?.error === 'string' && /[\u0600-\u06FF]/.test(body.error)
+      ? body.error
+      : 'ارتباط با سرویس اسناد ارسال متوقف شد. پشتیبان سامانه باید وضعیت سرور را بررسی کند.';
+    throw new Error(safeMessage);
+  }
   return body.data;
 };
 

@@ -754,7 +754,7 @@ const buildContractRow = async (contract: any, settings: any) => {
       disabledReason: !eligible ? disabledReason : records.length === 0 ? 'ابتدا پیش‌نویس صورتحساب ایجاد شود' : undefined
     },
     {
-      kind: 'REQUEST_CORRECTION',
+      kind: 'CREATE_CORRECTION_REQUEST',
       labelFa: 'درخواست اصلاح',
       enabled: !contract.isInactive,
       disabledReason: contract.isInactive ? 'قرارداد غیرفعال و فقط‌خواندنی است' : undefined

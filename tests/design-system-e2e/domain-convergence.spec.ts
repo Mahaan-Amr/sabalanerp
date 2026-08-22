@@ -102,10 +102,10 @@ test('Hiring lifecycle journey remains keyboard, reduced-motion, mobile, zoom, a
   const expectedPhaseCount = Number(casePayload?.data?.lifecycle?.totalPhases);
   expect(expectedPhaseCount).toBeGreaterThanOrEqual(8);
   await expect(page.getByText('مسیر جذب و شروع همکاری')).toBeVisible({ timeout: 15_000 });
-  await page.getByRole('textbox', { name: 'دلیل رد نهایی پرونده' }).fill('آزمون گذار کامل چرخه جذب');
-  await page.getByRole('button', { name: 'ثبت رد نهایی و بستن دسترسی' }).click();
-  const rejectionDialog = page.getByRole('dialog', { name: 'تأیید رد نهایی' });
+  await page.getByRole('button', { name: 'رد نهایی پرونده', exact: true }).click();
+  const rejectionDialog = page.getByRole('dialog', { name: 'رد نهایی پرونده' });
   await expect(rejectionDialog).toBeVisible();
+  await rejectionDialog.getByRole('textbox', { name: 'دلیل رد نهایی پرونده' }).fill('آزمون گذار کامل چرخه جذب');
   await rejectionDialog.getByRole('button', { name: 'بستن پرونده و دسترسی' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'رد نهایی ثبت و پرونده بسته شد.' })).toBeVisible();
   expect(finalRejectionPayload?.reason).toBe('آزمون گذار کامل چرخه جذب');

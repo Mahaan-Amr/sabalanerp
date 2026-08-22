@@ -341,12 +341,61 @@ const blocker = (
   label,
   responsibleAuthorities,
 });
+export const actionPermissionForHiringLifecycleAction = (actionId: string) => {
+  if (actionId.startsWith("RECORD_COMPANY_ASSESSMENT_RESULT:")) {
+    return "RECORD_COMPANY_EVALUATION_RESULT";
+  }
+  return ({
+    RECORD_HR_INTERVIEW: "RECORD_INITIAL_INTERVIEW",
+    RECORD_HR_PRELIMINARY_APPROVAL: "RECORD_PRELIMINARY_DECISION",
+    FINALIZE_FORMAL_ASSESSMENT_PLAN: "MANAGE_COMPANY_EVALUATION_PLAN",
+    REVISE_FORMAL_ASSESSMENT_PLAN: "MANAGE_COMPANY_EVALUATION_PLAN",
+    RECORD_COMPANY_EVALUATION_RESULT: "RECORD_COMPANY_EVALUATION_RESULT",
+    ADD_COMPANY_EVALUATION: "MANAGE_COMPANY_EVALUATION_PLAN",
+    FINALIZE_PRE_IDENTITY_REQUIREMENTS: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    ADD_PRE_IDENTITY_ITEM: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    RESOLVE_NEGATIVE_PRE_IDENTITY_ITEM: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    APPROVE_PRE_IDENTITY: "RECORD_FINAL_MANAGEMENT_DECISION",
+    COMPLETE_PRE_IDENTITY_ITEM: "MANAGE_RECRUITMENT_CASE",
+    RELEASE_PRE_IDENTITY: "MANAGE_RECRUITMENT_CASE",
+    CREATE_OFFER: "MANAGE_COMPENSATION",
+    PREPARE_OFFER_PAYROLL: "MANAGE_PAYROLL",
+    APPROVE_OFFER_HR: "MANAGE_PAYROLL",
+    APPROVE_OFFER_FINANCE: "MANAGE_FINANCE_EVIDENCE",
+    RECORD_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    UPLOAD_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    SUBMIT_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    REVIEW_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    APPROVE_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    CONFIGURE_PAYROLL: "MANAGE_PAYROLL",
+    REVIEW_IDENTITY: "MANAGE_RECRUITMENT_CASE",
+    APPROVE_IDENTITY: "MANAGE_RECRUITMENT_CASE",
+    RECORD_ASSESSMENT: "MANAGE_RECRUITMENT_CASE",
+    COMPLETE_ASSESSMENT: "MANAGE_RECRUITMENT_CASE",
+    DECIDE_ASSESSMENT: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    CONVERT_TO_PERSONNEL: "MANAGE_RECRUITMENT_CASE",
+    COMPLETE_COLLATERAL: "MANAGE_FINANCE_EVIDENCE",
+    UPDATE_INSURANCE: "MANAGE_RECRUITMENT_CASE",
+    UPDATE_ONBOARDING_TASK: "MANAGE_RECRUITMENT_CASE",
+    COMPLETE_ONBOARDING_TASK: "MANAGE_RECRUITMENT_CASE",
+    ACTIVATE_EMPLOYMENT: "MANAGE_RECRUITMENT_CASE",
+    RESEND_INVITATION: "MANAGE_RECRUITMENT_CASE",
+  } as Record<string, string>)[actionId] ?? null;
+};
+
 const canPerform = (
   viewerAuthorities: ReadonlySet<string>,
+  viewerActionPermissions: ReadonlySet<string>,
   candidate: HiringLifecycleAction | null,
 ) =>
   Boolean(
-    candidate?.authorities.some((required) => viewerAuthorities.has(required)),
+    candidate && (
+      candidate.authorities.some((required) => viewerAuthorities.has(required))
+      || Boolean(
+        actionPermissionForHiringLifecycleAction(candidate.id)
+        && viewerActionPermissions.has(actionPermissionForHiringLifecycleAction(candidate.id)!),
+      )
+    ),
   );
 const isCompleteTask = (status: string) =>
   status === "COMPLETE" || status === "WAIVED";
@@ -821,8 +870,10 @@ export const projectHiringLifecycle = (
   source: HiringLifecycleSource,
   viewerAuthorities: Iterable<string> = [],
   viewerUserId?: string,
+  viewerActionPermissions: Iterable<string> = [],
 ): HiringLifecycleProjection => {
   const authorities = new Set(viewerAuthorities);
+  const actionPermissions = new Set(viewerActionPermissions);
   const gates = [
     applicationGate(source),
     initialHrReviewGate(source),
@@ -850,7 +901,7 @@ export const projectHiringLifecycle = (
       else if (gate.blockers.length) status = "BLOCKED";
       else if (
         [gate.action, ...gate.secondaryActions].some((candidate) =>
-          canPerform(authorities, candidate),
+          canPerform(authorities, actionPermissions, candidate),
         )
       )
         status = "ACTION_REQUIRED";
@@ -864,7 +915,7 @@ export const projectHiringLifecycle = (
       const permittedActions = actionable
         ? [gate.action, ...gate.secondaryActions].filter(
             (candidate): candidate is HiringLifecycleAction =>
-              canPerform(authorities, candidate),
+              canPerform(authorities, actionPermissions, candidate),
           )
         : [];
       const primaryAction = permittedActions[0] || null;

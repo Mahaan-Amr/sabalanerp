@@ -30,6 +30,8 @@ const router = express.Router();
 const securityView = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
 const securityEdit = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
 const securityAdmin = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.ADMIN);
+const securityExceptionEdit = [securityEdit, requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_EXCEPTION, FEATURE_PERMISSIONS.EDIT)];
+const securityExceptionReview = [securityAdmin, requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_EXCEPTION, FEATURE_PERMISSIONS.ADMIN)];
 const leaveStatuses: AttendanceStatus[] = [
   AttendanceStatus.HOURLY_LEAVE,
   AttendanceStatus.SICK_LEAVE,
@@ -3922,7 +3924,7 @@ const pendingAuthorityOverlap = async (kind: 'exception' | 'mission', item: any)
 // @desc    Create exception request (leave, sick leave, etc.)
 // @route   POST /api/security/exceptions/request
 // @access  Private/All Users
-router.post('/exceptions/request', protect, securityView, [
+router.post('/exceptions/request', protect, securityExceptionEdit, [
   body('personnelId').isString().trim().notEmpty().withMessage('Personnel is required'),
   body('exceptionType').isIn(['HOURLY_LEAVE', 'SICK_LEAVE', 'VACATION', 'EMERGENCY_LEAVE', 'PERSONAL_LEAVE']).withMessage('Invalid exception type'),
   body('startDate').isISO8601().withMessage('Start date must be valid'),
@@ -4041,7 +4043,7 @@ router.get('/exceptions/requests', protect, securityView, async (req: AuthReques
 // @desc    Approve exception request
 // @route   PUT /api/security/exceptions/:id/approve
 // @access  Private/Managers
-router.put('/exceptions/:id/approve', protect, securityView, [
+router.put('/exceptions/:id/approve', protect, securityExceptionReview, [
   body('notes').optional().isString().withMessage('Notes must be a string')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -4106,7 +4108,7 @@ router.put('/exceptions/:id/approve', protect, securityView, [
 // @desc    Reject exception request
 // @route   PUT /api/security/exceptions/:id/reject
 // @access  Private/Managers
-router.put('/exceptions/:id/reject', protect, securityView, [
+router.put('/exceptions/:id/reject', protect, securityExceptionReview, [
   body('rejectionReason').notEmpty().withMessage('Rejection reason is required')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -4153,7 +4155,7 @@ router.put('/exceptions/:id/reject', protect, securityView, [
   }
 });
 
-router.put('/exceptions/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
+router.put('/exceptions/:id', protect, securityExceptionEdit, async (req: AuthRequest, res: Response) => {
   try {
     const existing = await prisma.exceptionRequest.findUnique({ where: { id: req.params.id } });
     if (!existing) return res.status(404).json({ success: false, error: 'استثنای حضور و غیاب پیدا نشد.' });
@@ -4182,7 +4184,7 @@ router.put('/exceptions/:id', protect, securityView, async (req: AuthRequest, re
   } catch (error: any) { res.status(500).json({ success: false, error: error.message || 'ویرایش استثنای حضور و غیاب ناموفق بود.' }); }
 });
 
-router.delete('/exceptions/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
+router.delete('/exceptions/:id', protect, securityExceptionEdit, async (req: AuthRequest, res: Response) => {
   const existing = await prisma.exceptionRequest.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ success: false, error: 'استثنای حضور و غیاب پیدا نشد.' });
   if (existing.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط استثنای در انتظار قابل حذف است.' });
@@ -4190,7 +4192,7 @@ router.delete('/exceptions/:id', protect, securityView, async (req: AuthRequest,
   res.json({ success: true, message: 'استثنای در انتظار حذف شد.' });
 });
 
-router.put('/exceptions/:id/cancel', protect, securityView, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+router.put('/exceptions/:id/cancel', protect, securityExceptionReview, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل لغو الزامی است.' });
   const existing = await prisma.exceptionRequest.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ success: false, error: 'استثنای حضور و غیاب پیدا نشد.' });
@@ -4200,7 +4202,7 @@ router.put('/exceptions/:id/cancel', protect, securityView, [body('reason').isSt
   res.json({ success: true, data: updated });
 });
 
-router.put('/exceptions/:id/correct', protect, securityView, [body('correctionReason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+router.put('/exceptions/:id/correct', protect, securityExceptionReview, [body('correctionReason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل اصلاح الزامی است.' });
   const existing = await prisma.exceptionRequest.findUnique({ where: { id: req.params.id }, include: { employee: { select: { personnelId: true } } } });
   if (!existing) return res.status(404).json({ success: false, error: 'استثنای حضور و غیاب پیدا نشد.' });
@@ -4220,7 +4222,7 @@ router.put('/exceptions/:id/correct', protect, securityView, [body('correctionRe
 // @desc    Create mission assignment
 // @route   POST /api/security/missions/assign
 // @access  Private/Security Personnel
-router.post('/missions/assign', protect, securityView, [
+router.post('/missions/assign', protect, securityExceptionEdit, [
   body('personnelId').notEmpty().withMessage('Personnel ID is required'),
   body('missionType').isIn(['داخل شهری', 'خارج شهری']).withMessage('Invalid mission type'),
   body('missionLocation').notEmpty().withMessage('Mission location is required'),
@@ -4334,7 +4336,7 @@ router.get('/missions', protect, securityView, async (req: AuthRequest, res: Res
 // @desc    Approve mission assignment
 // @route   PUT /api/security/missions/:id/approve
 // @access  Private/Managers
-router.put('/missions/:id/approve', protect, securityView, async (req: AuthRequest, res: Response) => {
+router.put('/missions/:id/approve', protect, securityExceptionReview, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -4370,7 +4372,7 @@ router.put('/missions/:id/approve', protect, securityView, async (req: AuthReque
   }
 });
 
-router.put('/missions/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
+router.put('/missions/:id', protect, securityExceptionEdit, async (req: AuthRequest, res: Response) => {
   const existing = await prisma.missionAssignment.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });
   if (existing.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط مأموریت در انتظار قابل ویرایش است.' });
@@ -4394,7 +4396,7 @@ router.put('/missions/:id', protect, securityView, async (req: AuthRequest, res:
   res.json({ success: true, data: updated, warning: overlap ? 'این مأموریت در انتظار با یک استثنا یا مأموریت دیگر هم‌پوشانی دارد؛ تأیید تا رفع تعارض ممکن نیست.' : undefined });
 });
 
-router.delete('/missions/:id', protect, securityView, async (req: AuthRequest, res: Response) => {
+router.delete('/missions/:id', protect, securityExceptionEdit, async (req: AuthRequest, res: Response) => {
   const existing = await prisma.missionAssignment.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });
   if (existing.status !== ExceptionStatus.PENDING) return res.status(409).json({ success: false, error: 'فقط مأموریت در انتظار قابل حذف است.' });
@@ -4402,7 +4404,7 @@ router.delete('/missions/:id', protect, securityView, async (req: AuthRequest, r
   res.json({ success: true, message: 'مأموریت در انتظار حذف شد.' });
 });
 
-router.put('/missions/:id/reject', protect, securityView, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+router.put('/missions/:id/reject', protect, securityExceptionReview, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل رد الزامی است.' });
   const existing = await prisma.missionAssignment.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });
@@ -4412,7 +4414,7 @@ router.put('/missions/:id/reject', protect, securityView, [body('reason').isStri
   res.json({ success: true, data: updated });
 });
 
-router.put('/missions/:id/cancel', protect, securityView, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+router.put('/missions/:id/cancel', protect, securityExceptionReview, [body('reason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل لغو الزامی است.' });
   const existing = await prisma.missionAssignment.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });
@@ -4422,7 +4424,7 @@ router.put('/missions/:id/cancel', protect, securityView, [body('reason').isStri
   res.json({ success: true, data: updated });
 });
 
-router.put('/missions/:id/correct', protect, securityView, [body('correctionReason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
+router.put('/missions/:id/correct', protect, securityExceptionReview, [body('correctionReason').isString().trim().notEmpty()], async (req: AuthRequest, res: Response) => {
   const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'دلیل اصلاح الزامی است.' });
   const existing = await prisma.missionAssignment.findUnique({ where: { id: req.params.id }, include: { employee: { select: { personnelId: true } } } });
   if (!existing) return res.status(404).json({ success: false, error: 'مأموریت پیدا نشد.' });

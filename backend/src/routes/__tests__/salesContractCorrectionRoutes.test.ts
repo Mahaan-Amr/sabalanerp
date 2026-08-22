@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import router from '../sales';
-import { createAccountingActionHandler } from '../accounting';
+import { createAccountingActionHandler, createAccountingCorrectionRequestHandler } from '../accounting';
 import dutyRouter from '../hr-duties';
 
 const routes = (router as unknown as {
@@ -36,9 +36,34 @@ const verifyLegacyAccountingWriterIsGone = async () => {
     json(body: any) { payload = body; return this; },
   } as any);
   assert.equal(statusCode, 410);
-  assert.equal(payload.error, 'DUTY_LEGACY_ACCOUNTING_CORRECTION_WRITER_RETIRED');
+  assert.equal(payload.message, 'درخواست اصلاح را از دکمه «درخواست اصلاح» در پرونده حسابداری قرارداد دوباره ثبت کنید.');
 };
 
-void verifyLegacyAccountingWriterIsGone()
+const verifyAccountingOriginatedWriterIsLive = async () => {
+  let received: any;
+  const handler = createAccountingCorrectionRequestHandler(async (_database: any, input: any) => {
+    received = input;
+    return { correction: { id: 'correction-1' }, duty: { id: 'manager-duty-1' }, replayed: false } as any;
+  });
+  let statusCode = 200;
+  let payload: any;
+  await handler({
+    params: { contractId: 'contract-1' },
+    body: { category: 'AMOUNT_PRICING', priority: 'HIGH', reason: 'مبلغ قرارداد باید اصلاح شود.' },
+    user: { id: 'accounting-admin', role: 'ADMIN' },
+    get: (name: string) => name === 'X-Idempotency-Key' ? 'correction-request-1' : undefined,
+  } as any, {
+    status(code: number) { statusCode = code; return this; },
+    json(body: any) { payload = body; return this; },
+  } as any);
+  assert.equal(statusCode, 201);
+  assert.equal(payload.success, true);
+  assert.deepEqual(received, {
+    contractId: 'contract-1', actorUserId: 'accounting-admin', category: 'AMOUNT_PRICING',
+    priority: 'HIGH', reason: 'مبلغ قرارداد باید اصلاح شود.', idempotencyKey: 'correction-request-1',
+  });
+};
+
+void Promise.all([verifyLegacyAccountingWriterIsGone(), verifyAccountingOriginatedWriterIsLive()])
   .then(() => console.log('Sales Contract correction route tests passed.'))
   .catch((error) => { console.error(error); process.exitCode = 1; });

@@ -523,7 +523,7 @@ export function ErpMobileBottomNavigation({
   return (
     <nav
       aria-label={ariaLabel}
-      className="sds-neumorphic-bottom-nav fixed inset-x-3 bottom-[max(.75rem,env(safe-area-inset-bottom))] z-30 grid grid-cols-5 p-1.5 lg:hidden"
+      className="sds-neumorphic-bottom-nav sds-neumorphic-scope fixed inset-x-3 bottom-[max(.75rem,env(safe-area-inset-bottom))] z-30 grid grid-cols-5 p-1.5 lg:hidden"
     >
       {items.map((item) => {
         const Icon = item.icon;
@@ -537,9 +537,9 @@ export function ErpMobileBottomNavigation({
             href={item.href}
             aria-current={active ? "page" : undefined}
             className={cx(
-              "flex min-h-16 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-xs font-bold outline-none transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]",
+              "flex min-h-16 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]",
               active
-                ? "bg-[var(--sds-accent-soft)] text-[var(--sds-accent-on-soft)] shadow-[var(--sds-neu-shadow-inset)]"
+                ? "bg-[var(--sds-accent-soft)] text-[var(--sds-text-primary)] shadow-[var(--sds-neu-shadow-inset)]"
                 : "text-[var(--sds-text-secondary)] hover:text-[var(--sds-accent)]",
             )}
           >

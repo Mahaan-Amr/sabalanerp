@@ -73,7 +73,10 @@ assert.equal(HR_QA_ACCESS_MATRIX.qa_finance_manager.workspaceLevel, null);
 assert.equal(HR_REDESIGN_CATALOG.businessAuthorities.includes('HIRING_MANAGER' as never), false);
 assert.equal(HR_REDESIGN_CATALOG.responsibilityTypes.includes('HIRING_MANAGER' as never), false);
 assert.equal(HR_QA_ACCESS_MATRIX.qa_hr_viewer.authority, null);
-assert.equal(HR_QA_ACCESS_MATRIX.qa_hr_manager.features.AUTHORITY_RESPONSIBILITY_ADMINISTRATION, 'ADMIN');
+assert.equal(HR_QA_ACCESS_MATRIX.qa_hr_manager.features.PERSONNEL, 'VIEW');
+assert.equal(HR_QA_ACCESS_MATRIX.qa_hr_manager.features.MANAGE_RECRUITMENT_CASE, 'EDIT');
+assert.equal(HR_QA_ACCESS_MATRIX.qa_hr_manager.features.AUTHORITY_RESPONSIBILITY_ADMINISTRATION, undefined);
+assert.equal(HR_QA_ACCESS_MATRIX.qa_hr_manager.features.MANAGE_FINANCE_EVIDENCE, undefined);
 
 assert.deepEqual(planLegacyAssessmentMigration({
   applicationId: 'application-without-assessments',

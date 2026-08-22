@@ -25,6 +25,14 @@ const nextConfig = {
   experimental: {
     cpus: 1,
   },
+  // The release-critical visual suite intentionally visits nearly every ERP
+  // route. Dispose inactive development entries promptly so that this broad
+  // navigation audit cannot exhaust the local container before V8 can collect
+  // its compilation graph.
+  onDemandEntries: {
+    maxInactiveAge: 15 * 1000,
+    pagesBufferLength: 1,
+  },
   async rewrites() {
     if (!process.env.BACKEND_API_ORIGIN) return [];
     return [

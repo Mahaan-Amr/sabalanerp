@@ -166,6 +166,10 @@
   box-shadow: var(--sds-neu-shadow-card);
 }
 
+.sds-neumorphic-bottom-nav a[aria-current="page"] {
+  color: var(--sds-text-primary);
+}
+
 .sds-neumorphic-icon,
 .sds-neumorphic-count {
   border-radius: 0.875rem;
@@ -216,7 +220,7 @@
 
 [data-theme="dark"] .sds-action.sds-hiring-phase-completed {
   background: color-mix(in srgb, var(--sds-success) 24%, var(--sds-surface-raised));
-  color: color-mix(in srgb, var(--sds-success) 72%, var(--sds-text-inverse));
+  color: var(--sds-text-primary);
 }
 
 .sds-dashboard-sidebar {

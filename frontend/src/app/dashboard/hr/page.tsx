@@ -13,14 +13,13 @@ import {
 } from "react-icons/fa";
 import {
   ErpButton,
-  ErpActionGrid,
   ErpEmptyState,
   ErpInlineState,
   ErpLoading,
   ErpNeumorphicActionGrid,
   ErpNeumorphicMetricGrid,
-  ErpPage,
   ErpProgressRingCard,
+  ErpWorkspacePage,
   ErpWorkList,
 } from "@/components/erp";
 import { apiError } from "@/features/hr/hrUi";
@@ -86,23 +85,21 @@ export default function HrDashboardPage() {
   const landing = projectHrWorkspaceLanding(features, currentUser.role);
   if (landing.kind !== 'dashboard') {
     return (
-      <ErpPage eyebrow="منابع انسانی" title="فضای کاری منابع انسانی">
+      <ErpWorkspacePage
+        title="فضای کاری منابع انسانی"
+        className="sds-neumorphic-scope pb-24 lg:pb-2"
+      >
         {landing.kind === 'limited' ? (
-          <>
-            <ErpInlineState
-              kind="permission"
-              title={<span>دسترسی شما به این فضای کاری محدود است<small className="mt-1 block font-normal">داشبورد منابع انسانی در مجوزهای شما نیست؛ فقط بخش‌های مجاز زیر نمایش داده می‌شوند.</small></span>}
-            />
-            <ErpActionGrid
-              columns={3}
-              items={landing.links.map((link) => ({
-                title: link.label,
-                href: link.href,
-                icon: actionIconById[link.id as keyof typeof actionIconById],
-                tone: 'primary',
-              }))}
-            />
-          </>
+          <ErpNeumorphicActionGrid
+            title="بخش‌های در دسترس"
+            showTitle={false}
+            items={landing.links.map((link) => ({
+              id: link.id,
+              title: link.label,
+              href: link.href,
+              icon: actionIconById[link.id as keyof typeof actionIconById],
+            }))}
+          />
         ) : (
           <ErpEmptyState
             icon={FaClipboardCheck}
@@ -110,7 +107,7 @@ export default function HrDashboardPage() {
             description="برای مشاهده یک بخش، مدیر سامانه باید مجوز پایه همان بخش را ثبت کند."
           />
         )}
-      </ErpPage>
+      </ErpWorkspacePage>
     );
   }
 

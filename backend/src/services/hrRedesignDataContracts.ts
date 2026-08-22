@@ -76,7 +76,17 @@ export const HR_QA_ACCESS_MATRIX: Record<string, QaAccessContract> = Object.free
     features: { DASHBOARD: 'VIEW', PERSONNEL: 'VIEW', RECRUITMENT_CASES: 'EDIT', HR_WORK_MANAGEMENT: 'EDIT' },
     authority: 'HR_PAYROLL_PROCESSOR', responsibility: 'HR_PAYROLL_PROCESSOR', destinationWorkspace: 'HUMAN_RESOURCES',
   },
-  qa_hr_manager: { workspaceLevel: 'ADMIN', features: everyFeatureAt('ADMIN'), authority: 'HR_MANAGER', responsibility: 'HR_MANAGER', destinationWorkspace: 'HUMAN_RESOURCES' },
+  qa_hr_manager: {
+    workspaceLevel: 'ADMIN',
+    features: {
+      PERSONNEL: 'VIEW', RECRUITMENT_CASES: 'VIEW', HR_WORK_MANAGEMENT: 'VIEW',
+      VIEW_INITIAL_INTERVIEW_CRITERIA: 'VIEW', VIEW_INITIAL_INTERVIEW_REPORT: 'VIEW',
+      RECORD_PRELIMINARY_DECISION: 'EDIT', MANAGE_INITIAL_INTERVIEW_CRITERIA: 'ADMIN',
+      ARCHIVE_RECRUITMENT_CASE: 'ADMIN', MANAGE_HR_WORK: 'EDIT',
+      MANAGE_RECRUITMENT_CASE: 'EDIT', MANAGE_PERSONNEL_SCHEDULE: 'EDIT',
+    },
+    authority: 'HR_MANAGER', responsibility: 'HR_MANAGER', destinationWorkspace: 'HUMAN_RESOURCES',
+  },
   qa_hr_processor: {
     workspaceLevel: 'EDIT',
     features: {

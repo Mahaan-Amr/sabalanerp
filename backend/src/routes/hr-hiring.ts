@@ -1104,13 +1104,50 @@ router.get('/dashboard-metrics', asyncHandler(async (req: AuthRequest, res: Resp
 
 // Authenticated HR workspace. Workspace, feature, and business-authority
 // decisions are intentionally evaluated as separate layers.
+const actionProtectedHiringMutationPaths = [
+  /^\/interview-criteria\/publish$/,
+  /^\/work-items(?:\/[^/]+)?$/,
+  /^\/pre-identity\/templates$/,
+  /^\/collateral-templates(?:\/[^/]+\/active)?$/,
+  /^\/deletion-receipts\/[^/]+\/retry-files$/,
+  /^\/applications$/,
+  /^\/applications\/[^/]+\/(?:archive|restore|permanent-delete|form\/return|identity\/approve|final-rejection|convert|activate|close)$/,
+  /^\/applications\/[^/]+\/company-evaluations(?:\/[^/]+\/(?:cancel|result))?$/,
+  /^\/applications\/[^/]+\/invitations(?:\/[^/]+\/delivery\/refresh)?$/,
+  /^\/applications\/[^/]+\/form\/correction\/retry$/,
+  /^\/applications\/[^/]+\/documents$/,
+  /^\/applications\/[^/]+\/identity-checks\/[^/]+$/,
+  /^\/applications\/[^/]+\/compensation(?:\/[^/]+\/(?:prepare|hr-approve|finance-approve|notification\/retry|offline-decision))?$/,
+  /^\/applications\/[^/]+\/formal-assessment-plans$/,
+  /^\/applications\/[^/]+\/formal-assessments\/[^/]+\/(?:result|evidence)$/,
+  /^\/applications\/[^/]+\/assessments(?:\/complete|\/review-acknowledge|\/decision|\/[^/]+\/(?:revise|void))?$/,
+  /^\/applications\/[^/]+\/initial-interview\/draft$/,
+  /^\/applications\/[^/]+\/decisions\/[^/]+$/,
+  /^\/applications\/[^/]+\/pre-identity\/(?:apply-template|finalize|release|items|items\/[^/]+\/(?:correct|result|resolve))$/,
+  /^\/applications\/[^/]+\/disposition\/reactivate$/,
+  /^\/applications\/[^/]+\/reopen\/(?:authorize|execute)$/,
+  /^\/applications\/[^/]+\/collateral-requirements$/,
+  /^\/applications\/[^/]+\/collateral(?:\/apply-template|\/approve|\/[^/]+\/(?:review|return|return-confirm))?$/,
+  /^\/applications\/[^/]+\/contracts(?:\/[^/]+\/(?:submit|approve|return))?$/,
+  /^\/applications\/[^/]+\/(?:payroll-participation|insurance|onboarding-tasks)$/,
+  /^\/applications\/[^/]+\/onboarding-tasks\/[^/]+$/,
+] as const;
+
+export const hrHiringBaseFeatureLevelForRequest = (method: string, path: string) => {
+  if (path.startsWith('/authorities')) return 'ADMIN' as const;
+  if (method === 'GET') return 'VIEW' as const;
+  return actionProtectedHiringMutationPaths.some((pattern) => pattern.test(path))
+    ? 'VIEW' as const
+    : 'EDIT' as const;
+};
+
 router.use((req: AuthRequest, res: Response, next: NextFunction) => {
   const featureCode = req.path.startsWith('/work-items')
     ? 'HR_WORK_MANAGEMENT'
     : req.path.startsWith('/authorities')
       ? 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION'
       : 'RECRUITMENT_CASES';
-  const level = req.path.startsWith('/authorities') ? 'ADMIN' : req.method === 'GET' ? 'VIEW' : 'EDIT';
+  const level = hrHiringBaseFeatureLevelForRequest(req.method, req.path);
   return requireHrFeature(featureCode, level)(req, res, next);
 });
 

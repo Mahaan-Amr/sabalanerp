@@ -273,6 +273,19 @@ const run = async () => {
     }
   }
 
+  const hrManagerFeatures = new Set(Object.keys(HR_QA_ACCESS_MATRIX.qa_hr_manager.features));
+  for (const required of [
+    'RECORD_PRELIMINARY_DECISION', 'MANAGE_INITIAL_INTERVIEW_CRITERIA',
+    'ARCHIVE_RECRUITMENT_CASE', 'MANAGE_HR_WORK', 'MANAGE_RECRUITMENT_CASE',
+    'MANAGE_PERSONNEL_SCHEDULE',
+  ]) assert.equal(hrManagerFeatures.has(required), true, `qa_hr_manager must receive ${required}`);
+  for (const forbidden of [
+    'DASHBOARD',
+    'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS', 'MANAGE_COMPENSATION', 'MANAGE_PAYROLL',
+    'MANAGE_FINANCE_EVIDENCE', 'RECORD_FINAL_MANAGEMENT_DECISION',
+    'AUTHORITY_RESPONSIBILITY_ADMINISTRATION', 'USER_ADMINISTRATION',
+  ]) assert.equal(hrManagerFeatures.has(forbidden), false, `qa_hr_manager must not receive ${forbidden}`);
+
   console.log('Effective access service tests passed.');
 };
 

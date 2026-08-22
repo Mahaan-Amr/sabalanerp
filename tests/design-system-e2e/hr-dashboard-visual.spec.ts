@@ -1,6 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import {
+  assertMinimumTargetSize,
+  assertNoHorizontalOverflow,
+  assertNoSeriousAxeViolations,
+  assertVisibleFocus,
+  setTheme,
+} from './support/design-system';
 
 const screenshotDirectory = path.resolve(
   __dirname,
@@ -107,4 +114,69 @@ test('HR landing preserves real data and produces the approved responsive theme 
   await page.screenshot({ path: path.join(screenshotDirectory, 'mobile-dark-390x844.png') });
 
   expect(runtimeErrors).toEqual([]);
+});
+
+test('limited HR landing is minimal, neumorphic, and shows only effective feature links', async ({ page }, testInfo) => {
+  await login(page);
+  await page.route('**/api/dashboard/profile', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.data.role = 'USER';
+    body.data.permissions = {
+      ...body.data.permissions,
+      features: [
+        { workspace: 'hr', feature: 'RECRUITMENT_CASES', permissionLevel: 'view' },
+        { workspace: 'hr', feature: 'HR_WORK_MANAGEMENT', permissionLevel: 'view' },
+        { workspace: 'hr', feature: 'PERSONNEL', permissionLevel: 'view' },
+      ],
+    };
+    await route.fulfill({ response, json: body });
+  });
+
+  let dashboardRequests = 0;
+  await page.route('**/api/hr/dashboard', async (route) => {
+    dashboardRequests += 1;
+    await route.continue();
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/dashboard/hr');
+
+  await expect(page.getByRole('heading', { name: 'فضای کاری منابع انسانی' })).toBeVisible();
+  await expect(page.getByText('دسترسی شما به این فضای کاری محدود است')).toHaveCount(0);
+  await expect(page.getByText('داشبورد منابع انسانی در مجوزهای شما نیست')).toHaveCount(0);
+  const availableSections = page.getByRole('region', { name: 'بخش‌های در دسترس' });
+  await expect(availableSections.getByRole('link', { name: /جذب و پرونده‌های متقاضیان/ })).toHaveAttribute('href', '/dashboard/hr/hiring');
+  await expect(availableSections.getByRole('link', { name: /وظایف منابع انسانی/ })).toHaveAttribute('href', '/dashboard/hr/tasks');
+  await expect(availableSections.getByRole('link', { name: /پرسنل و روابط استخدامی/ })).toHaveAttribute('href', '/dashboard/hr/personnel');
+  await expect(availableSections.getByRole('link', { name: /ساختار سازمانی/ })).toHaveCount(0);
+  await expect(page.getByText('پرسنل ثبت‌شده')).toHaveCount(0);
+  expect(dashboardRequests).toBe(0);
+
+  const cards = availableSections.locator('.sds-neumorphic-card.sds-neumorphic-interactive');
+  await expect(cards).toHaveCount(3);
+  await assertMinimumTargetSize(cards);
+  await assertVisibleFocus(cards.first());
+  await assertNoHorizontalOverflow(page);
+  await assertNoSeriousAxeViolations(page);
+
+  for (const theme of ['dark', 'light'] as const) {
+    await setTheme(page, theme);
+    await page.screenshot({ path: testInfo.outputPath(`limited-desktop-${theme}.png`), fullPage: true });
+    expect(await cards.first().evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe('none');
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileSidebar = page.locator('[data-dashboard-sidebar]');
+  const closeMobileMenu = mobileSidebar.getByRole('button', { name: 'بستن منوی اصلی' });
+  if (await closeMobileMenu.isVisible()) {
+    await closeMobileMenu.click({ force: true });
+    await expect(mobileSidebar).toHaveClass(/translate-x-full/);
+  }
+  await assertNoHorizontalOverflow(page);
+  await assertMinimumTargetSize(cards);
+  for (const theme of ['dark', 'light'] as const) {
+    await setTheme(page, theme);
+    await page.locator('main.sds-workspace').screenshot({ path: testInfo.outputPath(`limited-mobile-${theme}.png`) });
+  }
 });

@@ -41,6 +41,7 @@ import { assertAutomatedHrMigrationOperationAllowed } from '../services/hrMigrat
 import { getHrReconciliationWorkspace, recordHrReconciliationReview } from '../services/hrMigrationReconciliationStore';
 import { buildPersonnelCollection, personnelOriginFeature } from '../services/hrPersonnelCollection';
 import { publishRealtime } from '../services/realtimePublisher';
+import { loadHrOperationalReference } from '../services/hrOperationalReferenceProjection';
 
 const router = express.Router();
 
@@ -49,6 +50,8 @@ router.use('/authorization', hrAuthorizationRoutes);
 
 export const featureForPath = (path: string) => {
   if (path === '/dashboard') return 'DASHBOARD';
+  if (path.startsWith('/operational-reference/personnel')) return 'PERSONNEL';
+  if (path.startsWith('/operational-reference/recruitment')) return 'RECRUITMENT_CASES';
   if (path.startsWith('/personnel')) return 'PERSONNEL';
   if (path.startsWith('/relationships') || path.startsWith('/assignments') || path.startsWith('/supervisor-candidates')) return 'PERSONNEL';
   if (path.startsWith('/migration')) return 'DATA_MIGRATION_RECONCILIATION';
@@ -57,8 +60,16 @@ export const featureForPath = (path: string) => {
   if (path.startsWith('/redesign/compatibility/access')) return 'AUTHORITY_RESPONSIBILITY_ADMINISTRATION';
   return 'ORGANIZATIONAL_STRUCTURE';
 };
+export const hrBaseFeatureLevelForRequest = (method: string, path: string) => {
+  if (method === 'GET') return 'VIEW' as const;
+  if (path.startsWith('/migration')) return 'ADMIN' as const;
+  if (path === '/personnel/exceptional') return 'VIEW' as const;
+  if (/^\/personnel\/[^/]+\/(?:archive|restore)$/.test(path)) return 'VIEW' as const;
+  if (/^\/personnel\/[^/]+\/work-schedule\/changes\/[^/]+\/(?:prepare|submit|return|approve)$/.test(path)) return 'VIEW' as const;
+  return 'EDIT' as const;
+};
 router.use((req: WorkspaceRequest, res, next) => {
-  const level = req.method === 'GET' ? 'VIEW' : req.path.startsWith('/migration') ? 'ADMIN' : 'EDIT';
+  const level = hrBaseFeatureLevelForRequest(req.method, req.path);
   return requireHrFeature(featureForPath(req.path), level)(req, res, next);
 });
 router.use((req: WorkspaceRequest, res, next) => {
@@ -102,6 +113,26 @@ const requireHrManagerAuthority = async (req: WorkspaceRequest, res: Response, n
     return next();
   } catch (error) {
     next(error);
+  }
+};
+
+export const canLinkPersonnelUserAccount = (systemRole: string, userAdministrationAllowed: boolean) => (
+  ['ADMIN', 'MANAGER'].includes(systemRole) && userAdministrationAllowed
+);
+
+const requireUserAdministrationForPersonnelLink = async (req: WorkspaceRequest, res: Response, next: express.NextFunction) => {
+  if (!req.body.userId) return next();
+  try {
+    const authorization = await authorizeHrUser(prisma, actorId(req), {
+      workspaceLevel: 'ADMIN',
+      feature: { code: 'USER_ADMINISTRATION', level: 'ADMIN' },
+    });
+    if (!canLinkPersonnelUserAccount(req.user!.role, authorization.allowed)) {
+      return res.status(403).json({ success: false, error: 'HR_AUTHORIZATION_DENIED' });
+    }
+    return next();
+  } catch (error) {
+    return next(error);
   }
 };
 
@@ -456,6 +487,28 @@ router.get('/dashboard', viewAccess, async (_req, res) => {
 router.get('/foundation', viewAccess, async (req, res) => {
   try { res.json({ success: true, data: await foundationData(req.query.dependencyAt ? parseDate(req.query.dependencyAt, 'تاریخ وابستگی') : new Date()) }); }
   catch (error) { handleError(res, error, 'HR foundation'); }
+});
+
+router.get('/operational-reference/:surface', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const surface = textValue(req.params.surface);
+    if (!['personnel', 'recruitment'].includes(surface)) {
+      return res.status(404).json({ success: false, error: 'سطح مرجع منابع انسانی پیدا نشد.' });
+    }
+    const [actionPermissions, personnelEdit] = await Promise.all([
+      activeHrActionPermissionsForUser(prisma, actorId(req)),
+      surface === 'personnel'
+        ? authorizeHrUser(prisma, actorId(req), { workspaceLevel: 'EDIT', feature: { code: 'PERSONNEL', level: 'EDIT' } })
+        : Promise.resolve({ allowed: false }),
+    ]);
+    const includeAvailableCapacity = surface === 'recruitment'
+      ? actionPermissions.includes('MANAGE_RECRUITMENT_CASE')
+      : personnelEdit.allowed || actionPermissions.includes('ARCHIVE_RECRUITMENT_CASE');
+    return res.json({
+      success: true,
+      data: await loadHrOperationalReference(prisma, { includeAvailableCapacity }),
+    });
+  } catch (error) { return handleError(res, error, 'HR operational reference'); }
 });
 
 export const filterFoundationPositions = (positions: Awaited<ReturnType<typeof foundationData>>['positions'], filter: string, dependencyAt?: Date) => positions.filter((position) => {
@@ -1468,7 +1521,7 @@ router.get('/personnel/:id/work-schedule', viewAccess, async (req: WorkspaceRequ
   } catch (error) { handleError(res, error, 'Get personnel work schedule on request'); }
 });
 
-router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, async (req: WorkspaceRequest, res) => {
+router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, requireUserAdministrationForPersonnelLink, async (req: WorkspaceRequest, res) => {
   try {
     const firstName = textValue(req.body.firstName); const lastName = textValue(req.body.lastName);
     if (!firstName || !lastName) throw new Error('نام و نام خانوادگی الزامی است.');

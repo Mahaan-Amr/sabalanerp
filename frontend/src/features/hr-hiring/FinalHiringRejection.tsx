@@ -3,8 +3,12 @@
 import { useMemo, useState } from "react";
 import { ErpButton, ErpCard, ErpCheckbox, ErpSection, ErpSheet, ErpTextarea } from "@/components/erp";
 import { hiringAPI } from "@/lib/hiringApi";
-
-const labels: Record<string, string> = { DISC: "DISC", EQ: "EQ", BIG_FIVE: "BIG FIVE" };
+import {
+  FINAL_REJECTION_EVIDENCE_HELP,
+  buildFinalRejectionResultReferences,
+  formalAssessmentLabel,
+  latestCompletedAssessmentResults,
+} from "./finalHiringRejectionEvidence";
 
 export function FinalHiringRejection({
   applicationId,
@@ -20,16 +24,7 @@ export function FinalHiringRejection({
   const [reason, setReason] = useState("");
   const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const completedResults = useMemo(() => {
-    const latest = new Map<string, any>();
-    for (const result of plans.flatMap((plan) => plan.results || [])) {
-      const current = latest.get(result.assessmentKind);
-      if (result.status === "COMPLETED" && (!current || result.resultVersion > current.resultVersion)) {
-        latest.set(result.assessmentKind, result);
-      }
-    }
-    return Array.from(latest.values());
-  }, [plans]);
+  const completedResults = useMemo(() => latestCompletedAssessmentResults(plans), [plans]);
 
   return (
     <ErpSection title="رد نهایی پرونده" description="این تصمیم دسترسی متقاضی را می‌بندد و فقط با فرایند رسمی بازگشایی قابل برگشت است.">
@@ -42,7 +37,8 @@ export function FinalHiringRejection({
         />
         {completedResults.length > 0 && (
           <fieldset className="space-y-2">
-            <legend className="text-sm font-bold">نسخه‌های نتیجه مرتبط (اختیاری)</legend>
+            <legend className="text-sm font-bold">نتایج آزمون‌های مورد استناد در رد نهایی (اختیاری)</legend>
+            <p className="sds-text-muted text-xs leading-5">{FINAL_REJECTION_EVIDENCE_HELP}</p>
             {completedResults.map((result) => (
               <ErpCheckbox
                 key={result.id}
@@ -50,7 +46,7 @@ export function FinalHiringRejection({
                 onChange={(event) => setSelectedResultIds(event.target.checked
                   ? [...selectedResultIds, result.id]
                   : selectedResultIds.filter((id) => id !== result.id))}
-                label={`${labels[result.assessmentKind] || result.assessmentKind} · نسخه ${result.resultVersion.toLocaleString("fa-IR")}`}
+                label={`${formalAssessmentLabel(result.assessmentKind)} · نسخه ${result.resultVersion.toLocaleString("fa-IR")}`}
               />
             ))}
           </fieldset>
@@ -80,9 +76,7 @@ export function FinalHiringRejection({
                 void run(
                   () => hiringAPI.finallyReject(applicationId, {
                     reason: reason.trim(),
-                    resultVersions: completedResults
-                      .filter((result) => selectedResultIds.includes(result.id))
-                      .map((result) => ({ assessmentKind: result.assessmentKind, resultVersion: result.resultVersion })),
+                    resultVersions: buildFinalRejectionResultReferences(completedResults, selectedResultIds),
                   }),
                   "رد نهایی ثبت و پرونده بسته شد.",
                 );

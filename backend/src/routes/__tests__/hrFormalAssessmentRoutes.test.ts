@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { RequestHandler } from "express";
 import router, {
   initialInterviewCompletionErrorResponse,
@@ -22,6 +24,22 @@ for (const expected of [
 ]) {
   assert.ok(routes.some(({ key }) => key === expected), `missing formal-assessment API route: ${expected}`);
 }
+
+const hiringRouteSource = readFileSync(resolve(__dirname, "../hr-hiring.ts"), "utf8");
+const companyApprovalDecisionBlock = hiringRouteSource.slice(
+  hiringRouteSource.indexOf("router.post('/applications/:id/decisions/:kind'"),
+  hiringRouteSource.indexOf("router.post('/applications/:id/pre-identity/items'"),
+);
+assert.doesNotMatch(
+  companyApprovalDecisionBlock,
+  /preIdentityRequirementsFinalizedAt|preIdentityChecklistItems|الزامات پرونده هنوز توسط مدیریت نهایی نشده است/,
+  "Company approval must depend on resolved company evaluations, not the retired hidden pre-identity checklist",
+);
+assert.match(
+  companyApprovalDecisionBlock,
+  /preIdentityReleasedBy: actorId\(req\), preIdentityReleasedAt: approvedAt/,
+  "Positive company approval must release the case to the identity stage without a hidden legacy action",
+);
 
 assert.ok(
   routes.find(({ key }) => key === "POST /public/application/formal-assessments/:kind/result")!.stack.length >= 2,

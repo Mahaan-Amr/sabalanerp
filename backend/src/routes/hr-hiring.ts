@@ -2954,12 +2954,9 @@ router.post('/applications/:id/decisions/:kind', asyncHandler(async (req: AuthRe
   });
   if (kind === 'COMPANY_APPROVAL' && outcome === 'POSITIVE') {
     await assertFormalAssessmentEvidenceComplete(req.params.id);
-    const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { preIdentityChecklistItems: true } });
     const prior = await prisma.hrApplicationDecision.findMany({ where: { applicationId: req.params.id, kind: { in: ['HR_INTERVIEW', 'HR_PRELIMINARY_APPROVAL'] } }, orderBy: { version: 'desc' } });
     const latestPrior = latestDecisionsByKind(prior);
     if (latestPrior.get('HR_INTERVIEW')?.outcome !== 'POSITIVE' || latestPrior.get('HR_PRELIMINARY_APPROVAL')?.outcome !== 'POSITIVE') throw new Error('مصاحبه اولیه و تأیید اولیه HR باید مثبت باشند.');
-    if (!application.preIdentityRequirementsFinalizedAt) throw new Error('الزامات پرونده هنوز توسط مدیریت نهایی نشده است.');
-    if (application.preIdentityChecklistItems.some((item) => ['PENDING', 'IN_PROGRESS'].includes(item.status) || (item.status === 'NEGATIVE' && !item.managementResolution))) throw new Error('همه الزامات باید نتیجه نهایی یا تعیین تکلیف مدیریتی داشته باشند.');
   }
   const row = await prisma.$transaction(async (tx) => {
     const transactionPrevious = await tx.hrApplicationDecision.findFirst({
@@ -3021,7 +3018,12 @@ router.post('/applications/:id/decisions/:kind', asyncHandler(async (req: AuthRe
       await tx.hrCandidateInvitation.updateMany({ where: { applicationId: req.params.id, revokedAt: null }, data: { revokedAt: new Date() } });
     }
     if (kind === 'COMPANY_APPROVAL' && transactionOutcome === 'POSITIVE') {
-      await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { preIdentityManagementApprovedBy: actorId(req), preIdentityManagementApprovedAt: new Date(), preIdentityManagementApprovalNote: transactionExplanation || null } });
+      const approvedAt = new Date();
+      await tx.hrJobApplication.update({ where: { id: req.params.id }, data: {
+        preIdentityManagementApprovedBy: actorId(req), preIdentityManagementApprovedAt: approvedAt,
+        preIdentityManagementApprovalNote: transactionExplanation || null,
+        preIdentityReleasedBy: actorId(req), preIdentityReleasedAt: approvedAt,
+      } });
     }
     if (kind === 'HR_INTERVIEW') {
       const deleted = await tx.hrInitialInterviewDraft.deleteMany({

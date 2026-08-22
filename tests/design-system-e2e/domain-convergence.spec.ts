@@ -30,6 +30,33 @@ test('public login remains accessible at mobile width and 200% zoom in both them
   await expect(page.getByRole('button', { name: 'ورود', exact: true })).toBeVisible();
 });
 
+test('login errors are Persian and successful login starts protected providers without 401 races', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('invalid-e2e-user');
+  await page.locator('input[type="password"]').fill('invalid-e2e-password');
+  await page.getByRole('button', { name: 'ورود', exact: true }).click();
+  const loginError = page.getByRole('alert').filter({ hasText: 'نام کاربری یا رمز عبور نادرست است.' });
+  await expect(loginError).toBeVisible();
+  await expect(loginError).not.toContainText('Invalid credentials');
+
+  const protected401s: string[] = [];
+  page.on('response', (response) => {
+    if (response.status() === 401 && response.url().includes('/api/workspace-permissions')) {
+      protected401s.push(response.url());
+    }
+  });
+  await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(
+    process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin',
+  );
+  await page.locator('input[type="password"]').fill(
+    process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123',
+  );
+  await page.getByRole('button', { name: 'ورود', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
+  await page.waitForLoadState('networkidle');
+  expect(protected401s).toEqual([]);
+});
+
 test('Administration security actions use a pending-safe canonical dialog', async ({ page }) => {
   await loginAsAdmin(page);
   const userId = await page.evaluate(async () => {

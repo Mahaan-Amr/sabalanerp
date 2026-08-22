@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { pricedAllocationIntegrityHash, sumExactMoney } from './pricedAllocationLedger';
+import { approvedPricingOperationalContractItemId } from './approvedPricing';
 
 type Tx = Prisma.TransactionClient;
 
@@ -109,7 +110,7 @@ export const readBoundPricedAllocation = async (
     const reference = referencesByContract.get(revisionLine.sourceContractId);
     if (!reference || reference.pricingVersionId !== event.pricingVersionId
       || event.pricingRow.pricingVersionId !== event.pricingVersionId
-      || event.pricingRow.contractItemId !== revisionLine.sourceContractItemId
+      || approvedPricingOperationalContractItemId(event.pricingRow) !== revisionLine.sourceContractItemId
       || event.pricingRow.productRowId !== revisionLine.productRowId
       || event.pricingRow.unit !== revisionLine.unit
       || event.quantity.toFixed(3) !== revisionLine.quantity.toFixed(3)) {

@@ -229,35 +229,29 @@ test('dedicated review remains usable in dark mobile layout', async ({ page }) =
   await expect(caseSurface).toBeVisible();
   await assertNoHorizontalOverflow(page);
   await assertMinimumTargetSize(page.getByRole('link', { name: 'رفتن به قرارداد فروش', exact: true }).last());
-  await assertMinimumTargetSize(page.getByRole('button', { name: 'بازآزمایی شواهد', exact: true }));
+  await expect(page.getByRole('button', { name: 'بازآزمایی شواهد', exact: true })).toHaveCount(0);
   await assertNoSeriousAxeViolations(page);
 });
 
-test('evidence recovery carries the exact case route into support origin', async ({ page }) => {
-  await page.addInitScript(() => {
-    const originalSetItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function setItemWithSupportOriginProbe(key: string, value: string) {
-      if (key === 'support-ticket-origin') window.name = value;
-      return originalSetItem.call(this, key, value);
-    };
-  });
+test('evidence recovery is referred automatically without a user support action', async ({ page }) => {
   await loginAsAdmin(page);
   await installAccountingFixture(page, true, {
     ...reviewCase,
     remediationKind: 'EVIDENCE_RECOVERY',
     guidance: 'نسخه تولیدکننده و قاعده تاریخی باید با سند حسابرسی بازیابی شود.',
-    primaryAction: {
-      kind: 'OPEN_SUPPORT',
-      labelFa: 'گزارش مشکل فنی',
-      href: '/dashboard/support/new',
-    },
+    primaryAction: null,
+    checklist: [
+      { key: 'OPEN_SUPPORT', labelFa: 'سامانه مورد غیرقابل‌بازیابی را خودکار برای پشتیبانی فنی ثبت می‌کند', complete: false },
+      { key: 'RECOVER_PROVENANCE', labelFa: 'نسخه تولیدکننده و قاعده تبدیل تاریخی با سند حسابرسی بازیابی می‌شود', complete: false },
+      { key: 'RECHECK_EVIDENCE', labelFa: 'بازآزمایی شواهد بدون اقدام کاربر و به‌صورت idempotent اجرا می‌شود', complete: false },
+      { key: 'CONTINUE_APPROVAL', labelFa: 'فقط پس از بازآزمایی موفق، تأیید مالی خودکار آزاد می‌شود', complete: false },
+    ],
   });
-  await page.route('**/dashboard/support/new', route => route.abort());
   await page.goto(caseHref);
   await waitForStableState(page);
 
-  await page.getByRole('button', { name: 'گزارش مشکل فنی', exact: true }).first().click();
-  await expect.poll(() => page.evaluate(() => window.name)).toContain(caseHref);
+  await expect(page.getByRole('button', { name: /گزارش مشکل فنی|ارجاع برای بازیابی/ })).toHaveCount(0);
+  await expect(page.getByText('سامانه مورد غیرقابل‌بازیابی را خودکار برای پشتیبانی فنی ثبت می‌کند')).toBeVisible();
 });
 
 test('captures the release QA views', async ({ page }) => {

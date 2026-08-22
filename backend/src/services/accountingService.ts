@@ -28,6 +28,7 @@ import { lockFinancialApprovalRecord, publishCurrentApprovedPricingReadinessWith
 import {
   assertGeneralFlagTransitionAllowed,
   FINANCIAL_EVIDENCE_REVIEW_PREFIX,
+  ensureFinancialEvidenceSupportReferral,
   financialEvidenceReviewActionUrl,
   isFinancialEvidenceReviewCase,
   presentFinancialEvidenceReviewCase,
@@ -686,6 +687,10 @@ export const recordFinancialEvidenceReviewCase = async (input: {
         beforeState: existing ? toJsonValue(existing) : undefined,
         note: `Financial approval blocked; ${trackingCode}`,
       });
+    }
+    if (input.conflict.remediationKind === 'EVIDENCE_RECOVERY' ||
+      input.conflict.remediationKind === 'TECHNICAL_SUPPORT' || !input.conflict.remediationKind) {
+      await ensureFinancialEvidenceSupportReferral(tx, reviewCase, input.actorId);
     }
     return { id: reviewCase.id, trackingCode, contractId: source.contractId!, actionUrl };
   });

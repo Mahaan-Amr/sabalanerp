@@ -1,5 +1,13 @@
 type JsonRecord = Readonly<Record<string, unknown>>;
 
+import { randomUUID } from 'node:crypto';
+import {
+  AccountingFlagCategory,
+  AccountingFlagSeverity,
+  AccountingFlagStatus,
+  Prisma,
+} from '@prisma/client';
+
 export const FINANCIAL_EVIDENCE_REVIEW_PREFIX = 'financial-evidence:';
 
 export type FinancialEvidenceReviewKind = 'QUANTITY' | 'AMOUNT' | 'SNAPSHOT' | 'GENERAL';
@@ -44,8 +52,166 @@ const stringValue = (value: unknown) => (
   typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 );
 
+export const ensureFinancialEvidenceSupportReferral = async (
+  tx: Prisma.TransactionClient,
+  flag: FinancialEvidenceReviewRecord,
+  actorId: string,
+) => {
+  const idempotencyKey = `system:financial-evidence:${flag.id}`;
+  let ticket = await tx.supportTicket.findUnique({ where: { idempotencyKey } });
+  if (!ticket) {
+    const preferredIds = [flag.createdBy, actorId].filter((value): value is string => Boolean(value));
+    const reporter = await tx.user.findFirst({
+      where: {
+        isActive: true,
+        OR: [
+          ...(preferredIds.length ? [{ id: { in: preferredIds } }] : []),
+          { role: 'ADMIN' },
+        ],
+      },
+      orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+      select: { id: true, role: true },
+    });
+    if (!reporter) throw new Error(`No active reporter is available for financial evidence case ${flag.id}`);
+    ticket = await tx.supportTicket.create({
+      data: {
+        referenceCode: `FE-${flag.id}`,
+        idempotencyKey,
+        reporterId: reporter.id,
+        title: `بازیابی فنی شواهد مالی قرارداد ${flag.contractId}`.slice(0, 180),
+        type: 'TECHNICAL',
+        impact: 'BLOCKING_WORK',
+        workaroundExists: false,
+        reportedWorkspace: 'accounting',
+        reportedFeature: 'financial-evidence-recovery',
+        originRoute: financialEvidenceReviewActionUrl(flag.contractId, flag.id),
+        diagnosticSnapshot: {
+          financialEvidenceReviewCaseId: flag.id,
+          sourceFinancialRecordId: flag.sourceFinancialRecordId ?? null,
+          trackingCode: flag.trackingCode ?? null,
+          automated: true,
+        },
+        releaseBuild: process.env.APP_COMMIT || null,
+        effectiveAccessSnapshot: { systemReferral: true, actorId, capturedAt: new Date().toISOString() },
+        restrictedIncident: false,
+        suggestedPriority: 'CRITICAL',
+        entries: {
+          create: {
+            authorId: reporter.id,
+            kind: 'REPORT',
+            body: 'این پرونده به‌صورت خودکار ثبت شده است؛ کاربر نیاز به اقدام یا بازآزمایی دستی ندارد.',
+          },
+        },
+        auditEvents: {
+          create: {
+            actorId: reporter.id,
+            action: 'CREATED_BY_FINANCIAL_EVIDENCE_RECOVERY',
+            afterData: { financialEvidenceReviewCaseId: flag.id, systemActorId: actorId },
+          },
+        },
+      },
+    });
+  }
+  const evidence = record(flag.evidence);
+  if (stringValue(evidence.supportTicketId) !== ticket.id) {
+    await tx.accountingContractFlag.update({
+      where: { id: flag.id },
+      data: {
+        evidence: {
+          ...evidence,
+          supportTicketId: ticket.id,
+          supportTicketReferenceCode: ticket.referenceCode,
+          supportReferralMode: 'AUTOMATED_IDEMPOTENT',
+          supportReferredAt: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+  return ticket;
+};
+
 export const financialEvidenceReviewActionUrl = (contractId: string, caseId: string) =>
   `/dashboard/accounting/contracts/${encodeURIComponent(contractId)}/financial-evidence-reviews/${encodeURIComponent(caseId)}`;
+
+export const ensureUnresolvedFinancialEvidenceCaseAndSupportReferral = async (
+  tx: Prisma.TransactionClient,
+  input: {
+    contractId: string;
+    financialRecordId: string;
+    actorId: string;
+    technicalDetail: string;
+  },
+) => {
+  const trackingCode = `${FINANCIAL_EVIDENCE_REVIEW_PREFIX}${input.financialRecordId}`;
+  const existing = await tx.accountingContractFlag.findUnique({ where: { trackingCode } });
+  const alreadyOpen = existing?.status === AccountingFlagStatus.OPEN;
+  const reviewCaseId = existing?.id ?? randomUUID();
+  const now = new Date();
+  const previousEvidence = record(existing?.evidence);
+  const evidence = {
+    ...previousEvidence,
+    code: 'FINANCIAL_EVIDENCE_CONFLICT',
+    technicalDetail: input.technicalDetail,
+    userMessageFa: 'ثبت نهایی انجام نشد؛ دوباره تلاش کنید',
+    reviewKind: 'GENERAL',
+    remediationKind: 'TECHNICAL_SUPPORT',
+    sourceFinancialRecordId: input.financialRecordId,
+    actorId: input.actorId,
+    createdActorId: previousEvidence.createdActorId || previousEvidence.actorId || existing?.createdBy || input.actorId,
+    ...(existing && !alreadyOpen ? { reopenedBy: input.actorId, reopenedAt: now.toISOString() } : {}),
+    actionUrl: financialEvidenceReviewActionUrl(input.contractId, reviewCaseId),
+  };
+  const reviewCase = existing && alreadyOpen
+    ? existing
+    : existing
+    ? await tx.accountingContractFlag.update({
+        where: { id: existing.id },
+        data: {
+          status: AccountingFlagStatus.OPEN,
+          severity: AccountingFlagSeverity.BLOCKER,
+          assignedToUserId: null,
+          evidence: evidence as Prisma.InputJsonValue,
+          resolvedBy: null,
+          resolvedAt: null,
+          resolutionNote: null,
+          cancelledBy: null,
+          cancelledAt: null,
+          cancellationReason: null,
+        },
+      })
+    : await tx.accountingContractFlag.create({
+        data: {
+          id: reviewCaseId,
+          contractId: input.contractId,
+          category: AccountingFlagCategory.AMOUNT_PRICING,
+          severity: AccountingFlagSeverity.BLOCKER,
+          title: 'نیازمند بازیابی فنی شواهد مالی',
+          note: 'شواهد قطعی برای تطبیق خودکار کافی نیست. پرونده بدون دخالت کاربر به پشتیبانی فنی ارجاع شد.',
+          status: AccountingFlagStatus.OPEN,
+          createdBy: input.actorId,
+          trackingCode,
+          sourceFinancialRecordId: input.financialRecordId,
+          evidence: evidence as Prisma.InputJsonValue,
+        },
+      });
+  if (!existing || existing.status !== AccountingFlagStatus.OPEN) {
+    await tx.accountingAuditLog.create({
+      data: {
+        action: existing ? 'REOPEN_FINANCIAL_EVIDENCE_REVIEW_CASE' : 'CREATE_FINANCIAL_EVIDENCE_REVIEW_CASE',
+        actorId: input.actorId,
+        contractId: input.contractId,
+        recordId: input.financialRecordId,
+        entityType: 'AccountingContractFlag',
+        entityId: reviewCase.id,
+        beforeState: existing ? JSON.parse(JSON.stringify(existing)) as Prisma.InputJsonValue : undefined,
+        afterState: JSON.parse(JSON.stringify(reviewCase)) as Prisma.InputJsonValue,
+        note: `Automated technical referral; ${trackingCode}`,
+      },
+    });
+  }
+  const ticket = await ensureFinancialEvidenceSupportReferral(tx, reviewCase, input.actorId);
+  return { reviewCase, ticket };
+};
 
 export const isFinancialEvidenceReviewCase = (flag: Pick<FinancialEvidenceReviewRecord, 'trackingCode' | 'evidence'>) => {
   const evidence = record(flag.evidence);
@@ -173,6 +339,9 @@ export const presentFinancialEvidenceReviewCase = (
       ? 'RECONCILED_BY_EVIDENCE_RECHECK' as const
       : 'LEGACY_UNVERIFIED' as const;
   const readyForFinancialApproval = reconciledByEvidenceRecheck;
+  const messageFa = readyForFinancialApproval
+    ? 'شواهد مالی با قانون دقت نسخه‌دار قرارداد به‌صورت خودکار و قطعی تطبیق یافتند؛ مقدار تجاری قرارداد بازنویسی نشده است.'
+    : stringValue(evidence.userMessageFa) || stringValue(flag.note) || 'شواهد مالی قرارداد نیازمند بررسی است.';
   const primaryAction = sourceDraftRetired
     ? {
         kind: 'OPEN_ACCOUNTING_CONTRACT' as const,
@@ -185,17 +354,7 @@ export const presentFinancialEvidenceReviewCase = (
         labelFa: 'رفتن به قرارداد فروش',
         href: `/dashboard/sales/contracts/${encodeURIComponent(flag.contractId)}`,
       }
-    : remediationKind === 'EVIDENCE_RECOVERY'
-      ? {
-          kind: 'OPEN_SUPPORT' as const,
-          labelFa: 'ارجاع برای بازیابی شواهد تاریخی',
-          href: '/dashboard/support/new',
-        }
-      : {
-          kind: 'OPEN_SUPPORT' as const,
-          labelFa: 'گزارش مشکل فنی',
-          href: '/dashboard/support/new',
-        };
+    : null;
   const checklist = remediationKind === 'RESPONSIBLE_SELLER_CORRECTION'
     ? [
         { key: 'SALES_CORRECTION', labelFa: 'فروشنده مسئول از صفحه قرارداد فروش، درخواست اصلاح را ثبت و گردش تأیید را کامل کند', complete: readyForFinancialApproval },
@@ -205,15 +364,15 @@ export const presentFinancialEvidenceReviewCase = (
       ]
     : remediationKind === 'EVIDENCE_RECOVERY'
       ? [
-          { key: 'OPEN_SUPPORT', labelFa: 'پرونده بازیابی شواهد تاریخی برای پشتیبانی ثبت شود', complete: readyForFinancialApproval },
-          { key: 'RECOVER_PROVENANCE', labelFa: 'نسخه تولیدکننده و قاعده تبدیل تاریخی با سند حسابرسی بازیابی شود', complete: readyForFinancialApproval },
-          { key: 'RECHECK_EVIDENCE', labelFa: 'از همین صفحه «بازآزمایی شواهد» اجرا شود', complete: readyForFinancialApproval },
-          { key: 'CONTINUE_APPROVAL', labelFa: 'فقط پس از بازآزمایی موفق، تأیید مالی ادامه پیدا کند', complete: readyForFinancialApproval },
+          { key: 'OPEN_SUPPORT', labelFa: 'سامانه مورد غیرقابل‌بازیابی را خودکار برای پشتیبانی فنی ثبت می‌کند', complete: readyForFinancialApproval },
+          { key: 'RECOVER_PROVENANCE', labelFa: 'نسخه تولیدکننده و قاعده تبدیل تاریخی با سند حسابرسی بازیابی می‌شود', complete: readyForFinancialApproval },
+          { key: 'RECHECK_EVIDENCE', labelFa: 'بازآزمایی شواهد بدون اقدام کاربر و به‌صورت idempotent اجرا می‌شود', complete: readyForFinancialApproval },
+          { key: 'CONTINUE_APPROVAL', labelFa: 'فقط پس از بازآزمایی موفق، تأیید مالی خودکار آزاد می‌شود', complete: readyForFinancialApproval },
         ]
       : [
-          { key: 'OPEN_SUPPORT', labelFa: 'مشکل فنی با شناسه همین پرونده برای پشتیبانی ثبت شود', complete: readyForFinancialApproval },
-          { key: 'FIX_AND_RECHECK', labelFa: 'پس از اصلاح فنی، از همین صفحه «بازآزمایی شواهد» اجرا شود', complete: readyForFinancialApproval },
-          { key: 'CONTINUE_APPROVAL', labelFa: 'فقط پس از بازآزمایی موفق، تأیید مالی ادامه پیدا کند', complete: readyForFinancialApproval },
+          { key: 'OPEN_SUPPORT', labelFa: 'سامانه مشکل فنی را با شناسه همین پرونده برای پشتیبانی ثبت می‌کند', complete: readyForFinancialApproval },
+          { key: 'FIX_AND_RECHECK', labelFa: 'پس از اصلاح فنی، بازآزمایی سیستمی دوباره اجرا می‌شود', complete: readyForFinancialApproval },
+          { key: 'CONTINUE_APPROVAL', labelFa: 'فقط پس از بازآزمایی موفق، تأیید مالی خودکار آزاد می‌شود', complete: readyForFinancialApproval },
         ];
   const scalarDifference = stringValue(structured.difference || structured.persistedDifference);
   const comparisonDifferences = Array.isArray(structured.comparisonDifferences)
@@ -254,7 +413,7 @@ export const presentFinancialEvidenceReviewCase = (
     resolutionMode,
     readyForFinancialApproval,
     titleFa: kind === 'QUANTITY' ? 'پرونده بررسی کمیت قرارداد' : 'پرونده بررسی شواهد مالی',
-    messageFa: stringValue(evidence.userMessageFa) || stringValue(flag.note) || 'شواهد مالی قرارداد نیازمند بررسی است.',
+    messageFa,
     productRowId: stringValue(structured.productRowId) || null,
     rule: rule || null,
     ruleLabelFa,
@@ -267,10 +426,10 @@ export const presentFinancialEvidenceReviewCase = (
     guidance: remediationKind === 'RESPONSIBLE_SELLER_CORRECTION'
       ? 'فروشنده مسئول باید از صفحه قرارداد فروش درخواست اصلاح را آغاز کند. پس از اصلاح مبدأ یا ایجاد پیش‌فاکتور تازه، شواهد را دوباره بازآزمایی کنید.'
       : remediationKind === 'EVIDENCE_RECOVERY'
-        ? 'این مورد با حدس یا گردکردن قابل حل نیست. مسئول پشتیبانی باید منشأ نسخه و شواهد تاریخی را بازیابی کند؛ حسابداری فقط وضعیت پرونده را پیگیری می‌کند.'
-        : 'این مورد یک خرابی فنی است و نباید به‌عنوان تصمیم تجاری بسته شود. مشکل را برای پشتیبانی ثبت کنید.',
+        ? 'این مورد با حدس قابل حل نیست. سامانه بازیابی و بازآزمایی نسخه‌دار را خودکار انجام می‌دهد و فقط مورد واقعاً غیرقابل‌بازیابی را به پشتیبانی فنی می‌فرستد.'
+        : 'این مورد یک خرابی فنی است و نباید به‌عنوان تصمیم تجاری بسته شود. سامانه آن را خودکار برای پشتیبانی فنی ثبت و پیگیری می‌کند.',
     primaryAction,
-    canRetryReconciliation: status === 'OPEN',
+    canRetryReconciliation: false,
     checklist,
     audit: {
       createdBy: createdActorId ? actorLabel(createdActorId) : 'ثبت سیستمی',

@@ -16,7 +16,11 @@ import {
 } from './index';
 import { createPrismaDispatchArtifactAuditPort } from './prisma';
 import { approvedPricingVersionIntegrityHash } from '../approvedPricing/domain';
-import { persistedApprovedPricingRowIntegrityMatches, persistedApprovedPricingVersionIntegrityMatches } from '../approvedPricing/prismaEvidence';
+import {
+  approvedPricingOperationalContractItemId,
+  persistedApprovedPricingRowIntegrityMatches,
+  persistedApprovedPricingVersionIntegrityMatches,
+} from '../approvedPricing/prismaEvidence';
 import { pricedAllocationIntegrityHash } from '../pricedAllocationLedger';
 import { dispatchCorrectionIntegrityHash, dispatchLifecycleAuditEventHash } from '../dispatchCorrectionOutage';
 import { guardPhysicalExitAuditIntegrityHash, guardPhysicalExitIntegrityHash } from '../physicalGateExit';
@@ -377,7 +381,8 @@ export const validatesStatementAdjustmentEvidence = (input: {
       publishedAt: Date; publishedBy: string } | null } | null;
   originalStatement?: { id: string; sourceIntegrityHash: string; sha256: string };
   pricingReferences: readonly { contractId: string; pricingVersionId: string; expectedPricingHash: string; readinessEvidenceHash: string;
-    pricingVersion?: { currency: string; rows: readonly { id: string; contractItemId: string; productRowId: string; unit: string; integrityHash: string }[] } }[];
+    pricingVersion?: { currency: string; rows: readonly { id: string; contractItemId: string; linkedContractItemId?: string | null;
+      productRowId: string; unit: string; integrityHash: string }[] } }[];
   command?: { command: string; status: string; waybillId: string | null; actorId: string; completedAt: Date | null;
     correlationId: string; idempotencyKey: string };
   audit?: { actorId: string; recordedAt: Date; payload: unknown };
@@ -399,7 +404,7 @@ export const validatesStatementAdjustmentEvidence = (input: {
     const reference = input.pricingReferences.find(item => item.contractId === line.contractId && item.pricingVersionId === line.pricingVersionId);
     const pricingRow = reference?.pricingVersion?.rows.find(row => row.id === line.pricingRowId);
     const evidence = line.evidence as Record<string, unknown> | undefined;
-    return !reference || !pricingRow || pricingRow.contractItemId !== line.contractItemId
+    return !reference || !pricingRow || approvedPricingOperationalContractItemId(pricingRow) !== line.contractItemId
       || pricingRow.productRowId !== line.productRowId || pricingRow.unit !== line.unit
       || evidence?.pricingIntegrityHash !== reference.expectedPricingHash
       || evidence?.pricingRowIntegrityHash !== pricingRow.integrityHash

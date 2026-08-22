@@ -20,6 +20,9 @@ DRAINED_EARLY=0
 DB_LEASE_ACQUIRED=0
 PUBLIC_TRAFFIC_OPEN=0
 ROLLBACK_ALREADY_ATTEMPTED=0
+FINANCIAL_EVIDENCE_REFERRAL_REQUIRED=0
+FINANCIAL_EVIDENCE_DRY_RUN_REPORT=""
+FINANCIAL_EVIDENCE_REFERRAL_REPORT=""
 
 cd "${REPO_ROOT}"
 
@@ -336,12 +339,23 @@ recover_failure() {
     switch_to_previous_images
     if start_release_services 300 \
       && DEPLOYMENT_GATE_MODE=ROLLBACK run_backend node dist/scripts/deployment-gates.js; then
-      control maintenance-off
-      MAINTENANCE_ACTIVE=0
-      finish_with_notification_result ROLLED_BACK || true
-      cleanup_locks
-      echo "Automatic rollback completed and the verified previous release was reopened." >&2
-      exit "${exit_code}"
+      referral_ready=1
+      if [ "${FINANCIAL_EVIDENCE_REFERRAL_REQUIRED}" -eq 1 ]; then
+        if ! run_backend node dist/scripts/reconcile-contract-financial-evidence.js \
+          --refer-from="/app/deployment-reports/${FINANCIAL_EVIDENCE_DRY_RUN_REPORT}" \
+          --output="/app/deployment-reports/${FINANCIAL_EVIDENCE_REFERRAL_REPORT}"; then
+          referral_ready=0
+          echo "Rollback succeeded, but durable financial-evidence referral failed; maintenance remains active." >&2
+        fi
+      fi
+      if [ "${referral_ready}" -eq 1 ]; then
+        control maintenance-off
+        MAINTENANCE_ACTIVE=0
+        finish_with_notification_result ROLLED_BACK || true
+        cleanup_locks
+        echo "Automatic rollback completed and the verified previous release was reopened." >&2
+        exit "${exit_code}"
+      fi
     fi
   fi
 
@@ -628,6 +642,26 @@ mkdir -p "${DEPLOYMENT_REPORT_DIR_HOST}"
 audit_name="contract-product-graph-${DEPLOYMENT_ID}.json"
 remaining="$(remaining_mutation_seconds)" || exit 1
 run_backend_timed "${remaining}" node dist/scripts/dry-run-contract-product-graph-migration.js --output="/app/deployment-reports/${audit_name}"
+
+remaining="$(remaining_mutation_seconds)" || exit 1
+run_backend_timed "${remaining}" node dist/scripts/migrate-all-contract-product-graphs.js --apply --deployment-checkpoint
+
+evidence_dry_run_name="contract-financial-evidence-dry-run-${DEPLOYMENT_ID}.json"
+remaining="$(remaining_mutation_seconds)" || exit 1
+if ! run_backend_timed "${remaining}" node dist/scripts/reconcile-contract-financial-evidence.js --deployment-checkpoint \
+  --output="/app/deployment-reports/${evidence_dry_run_name}"; then
+  evidence_referral_name="contract-financial-evidence-referrals-${DEPLOYMENT_ID}.json"
+  FINANCIAL_EVIDENCE_REFERRAL_REQUIRED=1
+  FINANCIAL_EVIDENCE_DRY_RUN_REPORT="${evidence_dry_run_name}"
+  FINANCIAL_EVIDENCE_REFERRAL_REPORT="${evidence_referral_name}"
+  echo "Unresolved financial evidence blocks deployment; durable referral runs after verified rollback." >&2
+  exit 1
+fi
+
+evidence_apply_name="contract-financial-evidence-apply-${DEPLOYMENT_ID}.json"
+remaining="$(remaining_mutation_seconds)" || exit 1
+run_backend_timed "${remaining}" node dist/scripts/reconcile-contract-financial-evidence.js --apply --deployment-checkpoint \
+  --output="/app/deployment-reports/${evidence_apply_name}"
 
 phase RELEASE_STARTED
 remaining="$(remaining_mutation_seconds)" || exit 1

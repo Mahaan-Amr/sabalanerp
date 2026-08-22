@@ -58,6 +58,62 @@ const jsonRecord = (value: Prisma.JsonValue): Readonly<Record<string, unknown>> 
 
 type LeafRecord = Prisma.AccountingFinancialRecordGetPayload<{ include: { invoiceItems: true } }>;
 
+type ContractItemIdentity = {
+  id: string;
+  productId: string;
+  productRowId: string | null;
+  productType: string | null;
+};
+
+export const rebindFrozenContractItemIdentities = (input: {
+  snapshotItems: readonly ContractItemIdentity[];
+  liveItems: readonly ContractItemIdentity[];
+  invoiceItems: readonly { id: string; contractItemId: string | null }[];
+}) => {
+  const liveById = new Map(input.liveItems.map(item => [item.id, item]));
+  const liveByProductRowId = new Map<string, ContractItemIdentity>();
+  for (const item of input.liveItems) {
+    if (!item.productRowId) continue;
+    if (liveByProductRowId.has(item.productRowId)) {
+      throw new ApprovedPricingEvidenceError(`Live contract product row ${item.productRowId} is duplicated`);
+    }
+    liveByProductRowId.set(item.productRowId, item);
+  }
+  const invoiceByContractItemId = new Map<string, { id: string; contractItemId: string | null }>();
+  for (const item of input.invoiceItems) {
+    if (item.contractItemId) invoiceByContractItemId.set(item.contractItemId, item);
+  }
+  const rebindings: Array<{
+    sourceContractItemId: string;
+    linkedContractItemId: string;
+    invoiceItemId: string;
+    productRowId: string;
+    rule: 'FROZEN_STABLE_PRODUCT_ROW_LIVE_ITEM_REBINDING_V1';
+  }> = [];
+  const idMap = new Map<string, string>();
+  for (const snapshotItem of input.snapshotItems) {
+    if (liveById.has(snapshotItem.id)) continue;
+    if (!snapshotItem.productRowId) {
+      throw new ApprovedPricingEvidenceError(`Frozen contract item ${snapshotItem.id} has no stable product row identity`);
+    }
+    const liveItem = liveByProductRowId.get(snapshotItem.productRowId);
+    const invoiceItem = invoiceByContractItemId.get(snapshotItem.id);
+    if (!liveItem || !invoiceItem || liveItem.productId !== snapshotItem.productId ||
+      liveItem.productType !== snapshotItem.productType) {
+      throw new ApprovedPricingEvidenceError(`Frozen contract item ${snapshotItem.id} cannot bind to a live stable product row`);
+    }
+    idMap.set(snapshotItem.id, liveItem.id);
+    rebindings.push({
+      sourceContractItemId: snapshotItem.id,
+      linkedContractItemId: liveItem.id,
+      invoiceItemId: invoiceItem.id,
+      productRowId: snapshotItem.productRowId,
+      rule: 'FROZEN_STABLE_PRODUCT_ROW_LIVE_ITEM_REBINDING_V1',
+    });
+  }
+  return { idMap, rebindings };
+};
+
 const mapLeaf = (leaf: LeafRecord): ApprovalLeaf => ({
   id: leaf.id,
   contractId: leaf.contractId,
@@ -107,7 +163,8 @@ export const resolveFinancialApprovalGraphEvidence = (input: {
   if (snapshotState) return { graphState: snapshotState, compatibility: null };
   const current = input.currentGraphState;
   const auditCommand = optionalRecord(input.migrationAudit?.command);
-  if (!current || !input.migrationAudit || auditCommand?.kind !== 'legacy-migration' ||
+  if (!current || !input.migrationAudit ||
+    !['legacy-migration', 'canonical-wizard-save'].includes(String(auditCommand?.kind ?? '')) ||
     input.migrationAudit.resultRevision !== current.revision ||
     input.migrationAudit.inputHash !== current.inputHash ||
     input.migrationAudit.resultHash !== current.resultHash) {
@@ -116,7 +173,9 @@ export const resolveFinancialApprovalGraphEvidence = (input: {
   return {
     graphState: current as unknown as Record<string, any>,
     compatibility: {
-      evidenceOrigin: 'POST_SNAPSHOT_DETERMINISTIC_LEGACY_GRAPH_MIGRATION' as const,
+      evidenceOrigin: auditCommand?.kind === 'legacy-migration'
+        ? 'POST_SNAPSHOT_DETERMINISTIC_LEGACY_GRAPH_MIGRATION' as const
+        : 'POST_SNAPSHOT_DETERMINISTIC_CANONICAL_GRAPH_BINDING' as const,
       migrationAuditCommandId: input.migrationAudit.commandId,
       snapshotOriginallyMissing: true as const,
     },
@@ -175,6 +234,80 @@ export const bindLegacyRowsToMigratedGraph = (input: {
     currentItems: input.currentItems.map((item, ordinal) => ({
       ...item,
       productRowId: input.graphRows[ordinal]!.productRowId,
+    })),
+    assignments,
+  };
+};
+
+export const bindFrozenRowsToPostSnapshotCanonicalGraph = (input: {
+  contractData: unknown;
+  snapshotItems: readonly Record<string, any>[];
+  graphRows: readonly {
+    productRowId: string;
+    catalogProductId: string;
+    productType: string;
+    legacySnapshot: unknown;
+  }[];
+}) => {
+  const data = optionalRecord(input.contractData);
+  const products = Array.isArray(data?.products) ? data.products.map(optionalRecord) : [];
+  if (!data || products.some(product => !product) || products.length !== input.snapshotItems.length ||
+    input.snapshotItems.length !== input.graphRows.length) {
+    throw new ApprovedPricingEvidenceError('Frozen row identity recovery cannot reconcile product, item, and graph row counts');
+  }
+  const usedRows = new Set<string>();
+  const assignments = input.snapshotItems.map((item, ordinal) => {
+    const product = products[ordinal]!;
+    const productId = String(product.productId ?? product.id ?? '');
+    const productType = String(product.productType ?? item.productType ?? '');
+    const rawQuantity = productType === 'prepared'
+      ? product.preparedQuantity ?? product.quantity
+      : product.quantity;
+    const rawTotal = product.totalPrice;
+    const matches = input.graphRows.filter(row => {
+      const legacy = optionalRecord(row.legacySnapshot);
+      if (!legacy || usedRows.has(row.productRowId)) return false;
+      try {
+        return row.catalogProductId === productId && row.productType === productType &&
+          String(item.productId ?? '') === productId &&
+          new Prisma.Decimal(String(item.quantity ?? '')).eq(String(rawQuantity ?? '')) &&
+          new Prisma.Decimal(String(item.totalPrice ?? '')).eq(String(rawTotal ?? '')) &&
+          String(legacy.productId ?? optionalRecord(legacy.product)?.id ?? '') === productId &&
+          String(legacy.productType ?? '') === productType &&
+          new Prisma.Decimal(String(legacy.quantity ?? '')).eq(String(rawQuantity ?? '')) &&
+          new Prisma.Decimal(String(legacy.totalPrice ?? '')).eq(String(rawTotal ?? ''));
+      } catch {
+        return false;
+      }
+    });
+    if (matches.length !== 1) {
+      throw new ApprovedPricingEvidenceError(`Frozen row ${ordinal + 1} has no unique canonical graph witness`);
+    }
+    const graphRow = matches[0]!;
+    usedRows.add(graphRow.productRowId);
+    return {
+      contractItemId: String(item.id ?? ''),
+      productRowId: graphRow.productRowId,
+      rawContractItemProductRowId: item.productRowId == null ? null : String(item.productRowId),
+      rawProductSnapshotRowId: product.rowId == null && product.productRowId == null
+        ? null
+        : String(product.rowId ?? product.productRowId),
+      rule: 'FROZEN_ITEM_AND_PRODUCT_UNIQUE_COMMERCIAL_TUPLE_V1' as const,
+    };
+  });
+  const assignmentByItem = new Map(assignments.map(assignment => [assignment.contractItemId, assignment]));
+  return {
+    contractData: {
+      ...data,
+      products: products.map((product, ordinal) => ({
+        ...product!,
+        rowId: assignments[ordinal]!.productRowId,
+        productRowId: assignments[ordinal]!.productRowId,
+      })),
+    },
+    snapshotItems: input.snapshotItems.map(item => ({
+      ...item,
+      productRowId: assignmentByItem.get(String(item.id ?? ''))!.productRowId,
     })),
     assignments,
   };
@@ -426,15 +559,16 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
     if (snapshot.id !== contract.id || leaf.sourceId !== contract.id) {
       throw new ApprovedPricingEvidenceError('Invoice candidate source identities conflict with contract');
     }
-    if (!financialCommercialSnapshotMatches({ snapshot, current: contract })) {
-      throw new ApprovedPricingEvidenceError('Contract changed after invoice candidate snapshot');
-    }
-    const migrationAudit = contract.productGraphState
+    const frozenGraphState = optionalRecord(snapshot.productGraphState);
+    const evidenceRevision = frozenGraphState
+      ? Number(frozenGraphState.revision)
+      : contract.productGraphState?.revision;
+    const migrationAudit = Number.isInteger(evidenceRevision)
       ? await this.tx.salesContractProductGraphAudit.findUnique({
           where: {
             contractId_resultRevision: {
               contractId: contract.id,
-              resultRevision: contract.productGraphState.revision,
+              resultRevision: evidenceRevision!,
             },
           },
           select: {
@@ -447,15 +581,15 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
         })
       : null;
     const resolvedGraph = resolveFinancialApprovalGraphEvidence({
-      snapshotGraphState: snapshot.productGraphState,
+      snapshotGraphState: frozenGraphState,
       currentGraphState: contract.productGraphState,
       migrationAudit,
     });
     const graphState = resolvedGraph.graphState;
-    if (!contract.productGraphState ||
+    if (!frozenGraphState && (!contract.productGraphState ||
       contract.productGraphState.revision !== Number(graphState.revision) ||
       contract.productGraphState.inputHash !== String(graphState.inputHash ?? '') ||
-      contract.productGraphState.resultHash !== String(graphState.resultHash ?? '')) {
+      contract.productGraphState.resultHash !== String(graphState.resultHash ?? ''))) {
       throw new ApprovedPricingEvidenceError('Canonical product graph changed after invoice candidate snapshot');
     }
     const snapshotItems = Array.isArray(snapshot.items) ? snapshot.items.map((item: unknown) => {
@@ -467,13 +601,24 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
         quantity: String(row.quantity ?? ''), totalPrice: String(row.totalPrice ?? ''),
       };
     }) : [];
-    const currentItems = contract.items.map(item => ({
-      id: item.id, productId: item.productId, productRowId: item.productRowId, productType: item.productType,
-      quantity: item.quantity.toString(), totalPrice: item.totalPrice.toString(),
-    }));
+    const liveItems = contract.items.map(item => ({
+          id: item.id, productId: item.productId, productRowId: item.productRowId, productType: item.productType,
+          quantity: item.quantity.toString(), totalPrice: item.totalPrice.toString(),
+        }));
+    const frozenIdentityBinding = frozenGraphState
+      ? rebindFrozenContractItemIdentities({
+          snapshotItems,
+          liveItems,
+          invoiceItems: leaf.invoiceItems,
+        })
+      : { idMap: new Map<string, string>(), rebindings: [] };
+    const currentItems = frozenGraphState
+      ? snapshotItems.map(item => ({ ...item }))
+      : liveItems;
     let effectiveContractData = snapshot.contractData;
     let effectiveSnapshotItems = snapshotItems;
     let effectiveCurrentItems = currentItems;
+    let effectiveLeaf = mapLeaf(leaf);
     let productGraph: ApprovedPricingSource['contract']['productGraph'] = null;
     if (graphState.graph) {
       let graph: ReturnType<typeof parseCanonicalProductGraph>;
@@ -493,14 +638,14 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
       const migrationCommand = optionalRecord(migrationAudit?.command);
       const hasMatchingLegacyMigration = canReconstructLegacyV1 && Boolean(migrationAudit) &&
         migrationCommand?.kind === 'legacy-migration' &&
-        migrationAudit!.resultRevision === contract.productGraphState.revision &&
-        migrationAudit!.inputHash === contract.productGraphState.inputHash &&
-        migrationAudit!.resultHash === contract.productGraphState.resultHash;
+        migrationAudit!.resultRevision === Number(graphState.revision) &&
+        migrationAudit!.inputHash === String(graphState.inputHash ?? '') &&
+        migrationAudit!.resultHash === String(graphState.resultHash ?? '');
       const hasMatchingCanonicalWriter = Boolean(migrationAudit) &&
         migrationCommand?.kind === 'canonical-wizard-save' &&
-        migrationAudit!.resultRevision === contract.productGraphState.revision &&
-        migrationAudit!.inputHash === contract.productGraphState.inputHash &&
-        migrationAudit!.resultHash === contract.productGraphState.resultHash;
+        migrationAudit!.resultRevision === Number(graphState.revision) &&
+        migrationAudit!.inputHash === String(graphState.inputHash ?? '') &&
+        migrationAudit!.resultHash === String(graphState.resultHash ?? '');
       const quantityPolicyProvenance: NonNullable<ApprovedPricingSource['contract']['productGraph']>['quantityPolicyProvenance'] =
         (hasMatchingLegacyMigration || hasMatchingCanonicalWriter) && migrationAudit
           ? optimizerQuantityPolicyProvenanceFromAudit({
@@ -512,6 +657,20 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
           : null;
       let compatibility: NonNullable<ApprovedPricingSource['contract']['productGraph']>['compatibility'] =
         resolvedGraph.compatibility ?? undefined;
+      if (frozenIdentityBinding.rebindings.length > 0) {
+        if (!migrationAudit || migrationAudit.inputHash !== String(graphState.inputHash ?? '') ||
+          migrationAudit.resultHash !== String(graphState.resultHash ?? '')) {
+          throw new ApprovedPricingEvidenceError('Frozen contract item live rebinding has no matching canonical graph audit');
+        }
+        compatibility = {
+          ...(compatibility ?? {
+            evidenceOrigin: 'POST_SNAPSHOT_DETERMINISTIC_CANONICAL_GRAPH_BINDING' as const,
+            snapshotOriginallyMissing: false as const,
+          }),
+          ...(migrationAudit ? { migrationAuditCommandId: migrationAudit.commandId } : {}),
+          liveContractItemRebindings: frozenIdentityBinding.rebindings,
+        };
+      }
       const monetaryNormalizations: Array<NonNullable<NonNullable<NonNullable<ApprovedPricingSource['contract']['productGraph']>['compatibility']>['monetaryNormalizations']>[number]> = [];
       const legacyQuantityNormalizations: Array<NonNullable<NonNullable<NonNullable<ApprovedPricingSource['contract']['productGraph']>['compatibility']>['legacyQuantityNormalizations']>[number]> = [];
       const graphRows = projection.products.map((row, ordinal) => {
@@ -579,12 +738,127 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
         migrationAuditCommandId: migrationAudit!.commandId,
         snapshotOriginallyMissing: false as const,
       } : null);
+      let recoveredMissingAccountingRows = false;
+      if (hasMatchingLegacyMigration && snapshotItems.length === 0 && currentItems.length === 0 &&
+        leaf.invoiceItems.length === 0 && Array.isArray(rawProducts) && rawProducts.length === graphRows.length &&
+        graphRows.length > 0 && String(optionalRecord(leaf.metadata)?.mode ?? '') === 'FROM_CONTRACT_TOTAL') {
+        const contractCurrency = String(snapshot.currency ?? '').trim().toLowerCase();
+        const invoiceCurrency = String(leaf.currency ?? '').trim().toLowerCase();
+        const currencyFactor = ['تومان', 'toman'].includes(contractCurrency) && ['ریال', 'rial'].includes(invoiceCurrency)
+          ? new Prisma.Decimal(10)
+          : contractCurrency === invoiceCurrency
+            ? new Prisma.Decimal(1)
+            : null;
+        if (!currencyFactor) throw new ApprovedPricingEvidenceError('Frozen graph accounting row currency conversion is unsupported');
+        const recoveredRows = graphRows.map((graphRow, ordinal) => {
+          const product = optionalRecord(rawProducts[ordinal]);
+          if (!product || String(product.productId ?? product.id ?? '') !== graphRow.catalogProductId ||
+            String(product.productType ?? '') !== graphRow.productType) {
+            throw new ApprovedPricingEvidenceError(`Frozen graph row ${ordinal + 1} cannot recover accounting identity`);
+          }
+          const rawQuantity = graphRow.productType === 'prepared'
+            ? product.preparedQuantity ?? product.quantity
+            : product.quantity;
+          const rawTotal = product.totalPrice;
+          let quantityValue: Prisma.Decimal;
+          let totalValue: Prisma.Decimal;
+          try {
+            quantityValue = new Prisma.Decimal(String(rawQuantity ?? ''));
+            totalValue = new Prisma.Decimal(String(rawTotal ?? ''));
+          } catch {
+            throw new ApprovedPricingEvidenceError(`Frozen graph row ${ordinal + 1} accounting evidence is malformed`);
+          }
+          const contractItemId = `recovered-contract-item:${contract.id}:${graphRow.productRowId}`;
+          const invoiceItemId = `recovered-invoice-item:${leaf.id}:${graphRow.productRowId}`;
+          return {
+            contractItem: {
+              id: contractItemId,
+              productId: graphRow.catalogProductId,
+              productRowId: graphRow.productRowId,
+              productType: graphRow.productType,
+              quantity: quantityValue.toString(),
+              totalPrice: totalValue.toString(),
+            },
+            invoiceItem: {
+              id: invoiceItemId,
+              contractItemId,
+              productId: graphRow.catalogProductId,
+              quantity: quantityValue.toString(),
+              totalPrice: totalValue.mul(currencyFactor).toString(),
+            },
+            audit: {
+              contractItemId,
+              invoiceItemId,
+              productRowId: graphRow.productRowId,
+              rule: 'FROZEN_GRAPH_ROW_ACCOUNTING_EVIDENCE_V1' as const,
+            },
+          };
+        });
+        const recoveredContractTotal = recoveredRows.reduce(
+          (sum, row) => sum.plus(row.contractItem.totalPrice),
+          new Prisma.Decimal(0),
+        );
+        const sealedContractTotal = new Prisma.Decimal(String(snapshot.totalAmount ?? ''));
+        if (!recoveredContractTotal.eq(sealedContractTotal) ||
+          !new Prisma.Decimal(String(graphState.totalAmountToman ?? '')).eq(sealedContractTotal)) {
+          throw new ApprovedPricingEvidenceError('Frozen graph row totals do not seal to the frozen contract total');
+        }
+        if (!new Prisma.Decimal(effectiveLeaf.amount).eq(0)) {
+          throw new ApprovedPricingEvidenceError('Missing accounting rows may only recover a zero-sentinel invoice amount');
+        }
+        const recoveredInvoiceAmount = sealedContractTotal.mul(currencyFactor);
+        effectiveSnapshotItems = recoveredRows.map(row => row.contractItem);
+        effectiveCurrentItems = recoveredRows.map(row => row.contractItem);
+        effectiveLeaf = {
+          ...effectiveLeaf,
+          amount: recoveredInvoiceAmount.toString(),
+          invoiceItems: recoveredRows.map(row => row.invoiceItem),
+        };
+        effectiveContractData = {
+          ...(optionalRecord(effectiveContractData) ?? {}),
+          products: rawProducts.map((rawProduct, ordinal) => ({
+            ...(optionalRecord(rawProduct) ?? {}),
+            rowId: graphRows[ordinal]!.productRowId,
+            productRowId: graphRows[ordinal]!.productRowId,
+          })),
+        };
+        compatibility = {
+          ...(identityCompatibility ?? {
+            evidenceOrigin: 'POST_SNAPSHOT_DETERMINISTIC_LEGACY_GRAPH_MIGRATION' as const,
+            snapshotOriginallyMissing: true as const,
+          }),
+          recoveredAccountingRows: recoveredRows.map(row => row.audit),
+          recoveredInvoiceAmount: {
+            rawFinancialRecordAmount: '0',
+            sealedContractTotal: sealedContractTotal.toString(),
+            recoveredInvoiceAmount: recoveredInvoiceAmount.toString(),
+            currencyFactor: currencyFactor.toString(),
+            rule: 'ZERO_SENTINEL_FROM_FROZEN_CONTRACT_TOTAL_V1' as const,
+          },
+        };
+        recoveredMissingAccountingRows = true;
+      }
       const snapshotProductsMissingRowIdentity = Array.isArray(rawProducts) && rawProducts.some(product => {
         const row = optionalRecord(product);
         return row && (row.rowId == null || String(row.rowId) === '') &&
           (row.productRowId == null || String(row.productRowId) === '');
       });
-      if (identityCompatibility && (snapshotItems.some(item => !item.productRowId) ||
+      if (resolvedGraph.compatibility?.evidenceOrigin === 'POST_SNAPSHOT_DETERMINISTIC_CANONICAL_GRAPH_BINDING') {
+        const binding = bindFrozenRowsToPostSnapshotCanonicalGraph({
+          contractData: snapshot.contractData,
+          snapshotItems,
+          graphRows: graph.rows.map(row => ({
+            productRowId: row.productRowId,
+            catalogProductId: row.catalogProductId,
+            productType: row.productType,
+            legacySnapshot: optionalRecord(row.commercial)?.legacySnapshot,
+          })),
+        });
+        effectiveContractData = binding.contractData;
+        effectiveSnapshotItems = binding.snapshotItems as typeof snapshotItems;
+        effectiveCurrentItems = binding.snapshotItems as typeof currentItems;
+        compatibility = { ...resolvedGraph.compatibility, rowIdentityAssignments: binding.assignments };
+      } else if (!recoveredMissingAccountingRows && identityCompatibility && (snapshotItems.some(item => !item.productRowId) ||
         currentItems.some(item => !item.productRowId) || snapshotProductsMissingRowIdentity)) {
         const binding = bindLegacyRowsToMigratedGraph({
           contractData: snapshot.contractData,
@@ -637,7 +911,7 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
       };
     }
     return {
-      leaf: mapLeaf(leaf),
+      leaf: effectiveLeaf,
       contract: {
         id: String(snapshot.id),
         contractNumber: String(snapshot.contractNumber ?? ''),
@@ -670,6 +944,27 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
   async insertAndAdvance(version: ApprovedPricingVersionInsert, context: ApprovedPricingPersistenceContext = {
     origin: ApprovedPricingVersionOrigin.FINANCIAL_APPROVAL,
   }) {
+    const sourceEvidence = optionalRecord(version.sourceEvidence);
+    const graphEvidence = optionalRecord(sourceEvidence?.graph);
+    const compatibilityEvidence = optionalRecord(graphEvidence?.compatibility);
+    const recoveredContractItemIds = new Set(
+      Array.isArray(compatibilityEvidence?.recoveredAccountingRows)
+        ? compatibilityEvidence.recoveredAccountingRows.flatMap(raw => {
+            const row = optionalRecord(raw);
+            return row?.contractItemId ? [String(row.contractItemId)] : [];
+          })
+        : [],
+    );
+    const liveContractItemRebindings = new Map(
+      Array.isArray(compatibilityEvidence?.liveContractItemRebindings)
+        ? compatibilityEvidence.liveContractItemRebindings.flatMap(raw => {
+            const row = optionalRecord(raw);
+            return row?.sourceContractItemId && row?.linkedContractItemId
+              ? [[String(row.sourceContractItemId), String(row.linkedContractItemId)] as const]
+              : [];
+          })
+        : [],
+    );
     const previousHead = await this.tx.contractApprovedPricingHead.findUnique({
       where: { contractId: version.contractId },
       select: { currentVersionId: true },
@@ -695,6 +990,9 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
           create: version.rows.map(row => ({
             id: row.id,
             contractItemId: row.contractItemId,
+            linkedContractItemId: recoveredContractItemIds.has(row.contractItemId)
+              ? null
+              : liveContractItemRebindings.get(row.contractItemId) ?? row.contractItemId,
             productRowId: row.productRowId,
             ordinal: row.ordinal,
             contractedQuantity: row.contractedQuantity,

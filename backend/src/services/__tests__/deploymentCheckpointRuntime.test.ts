@@ -36,5 +36,15 @@ assert.match(
   /remote\.uploadVerified\(result\.destination, objectKey, result\.sha256\)/,
   'remote read-back must compare against the checksum produced by package creation',
 );
+assert.match(
+  deployScript,
+  /DEPLOYMENT_GATE_MODE=ROLLBACK run_backend node dist\/scripts\/deployment-gates\.js; then[\s\S]*--refer-from="\/app\/deployment-reports\/\$\{FINANCIAL_EVIDENCE_DRY_RUN_REPORT\}"[\s\S]*if \[ "\$\{referral_ready\}" -eq 1 \]; then[\s\S]*control maintenance-off/,
+  'unresolved evidence referral must persist after verified rollback and before traffic reopens',
+);
+assert.doesNotMatch(
+  deployScript,
+  /--refer-unresolved --deployment-checkpoint/,
+  'a pre-rollback support referral would be erased by checkpoint restoration',
+);
 
 console.log('deployment checkpoint runtime tests passed');

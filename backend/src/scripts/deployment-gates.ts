@@ -54,6 +54,18 @@ const main = async () => {
         if (!/up to date/i.test(`${result.stdout}\n${result.stderr}`)) throw new Error('Prisma migration history is not up to date.');
         return { status: 'up-to-date' };
       },
+    }, {
+      name: 'contract-financial-evidence',
+      run: async () => {
+        const output = path.join(reportRoot, `contract-financial-evidence-final-${deploymentId}.json`);
+        const result = await execFileAsync('node', [
+          'dist/scripts/reconcile-contract-financial-evidence.js',
+          `--output=${output}`,
+        ], { env: process.env, timeout: 120_000, windowsHide: true });
+        const report = JSON.parse(result.stdout) as { scannedCandidates: number; reconciled: number; unresolved: number };
+        if (report.unresolved !== 0) throw new Error(`${report.unresolved} contract financial evidence cases remain unresolved.`);
+        return { output, ...report };
+      },
     }] : []),
     {
       name: 'inquiry-sqlite-integrity',

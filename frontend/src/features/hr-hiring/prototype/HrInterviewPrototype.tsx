@@ -44,7 +44,7 @@ import {
 } from "./interviewPrototypeData";
 import { interviewCompletionFocusTarget, shouldShowNextCriterion } from "../guidedInterviewState";
 import { InterviewDraftSaveCoordinator, type InterviewDraftSaveSnapshot } from "../interviewDraftSaveCoordinator";
-import { completeHrInterview, HrInterviewCompletionError } from "../hrInterviewCompletion";
+import { completeHrInterview, HrInterviewCompletionError, interviewCompletionFocus } from "../hrInterviewCompletion";
 
 type Variant = "A" | "B" | "C";
 type Surface = "interview" | "checklist" | "defaults" | "history";
@@ -578,7 +578,7 @@ function GuidedVariant({
         </div>
       </ErpSection>
 
-      <div ref={criterionRef} className={`rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${criterionHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"}`}>
+      <div ref={criterionRef} data-interview-criterion-id={criterion.id} className={`rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${criterionHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"}`}>
       <ErpSection title={`${criterion.order.toLocaleString("fa-IR")}. ${criterion.title}`}>
         <CriterionEditor
           criterion={criterion}
@@ -1437,13 +1437,29 @@ export function ProductionHrInterview({
       });
     } catch (error) {
       setCompletionError(error);
-      highlight("completion");
-      completionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      window.setTimeout(() => completionRef.current?.querySelector<HTMLElement>('[role="alert"] button')?.focus(), 0);
+      const focus = interviewCompletionFocus(
+        error,
+        criteria.map((criterion) => criterion.id),
+        customCriteria.map((criterion) => criterion.id),
+      );
+      if (focus.target === "criterion") {
+        setFocusCriterionRequest({ index: focus.index, key: Date.now() });
+      } else if (focus.target === "custom-criterion") {
+        highlight("custom");
+        const card = customCriteriaRef.current?.querySelector<HTMLElement>(`[data-custom-criterion-index="${focus.index}"]`);
+        card?.scrollIntoView({ behavior: "smooth", block: "center" });
+        window.setTimeout(() => card?.querySelector<HTMLElement>("button, input, textarea, select")?.focus(), 0);
+      } else if (focus.target === "summary") {
+        focusSummary();
+      } else {
+        highlight("completion");
+        completionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        window.setTimeout(() => completionRef.current?.querySelector<HTMLElement>('[role="alert"] button')?.focus(), 0);
+      }
     } finally {
       setCompleting(false);
     }
-  }, [highlight, onComplete, payload]);
+  }, [criteria, customCriteria, focusSummary, highlight, onComplete, payload]);
 
   useEffect(() => {
     if (initialPayload?.criteriaSnapshot?.length) return;

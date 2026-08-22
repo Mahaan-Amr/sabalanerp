@@ -2823,6 +2823,37 @@ const DECISION_WORK_ITEM_ACTION: Record<string, string> = {
   COMPANY_APPROVAL: 'APPROVE_PRE_IDENTITY',
 };
 
+export const initialInterviewCompletionErrorResponse = (error: any, trackingId: string) => {
+  if (error?.code !== 'HR_INTERVIEW_EVIDENCE_INVALID' || error?.isOperational !== true) return null;
+  const target = ['criterion', 'custom-criterion', 'summary', 'snapshot'].includes(error.target)
+    ? error.target
+    : 'snapshot';
+  const snapshotFailure = target === 'snapshot';
+  return {
+    success: false,
+    code: 'HR_INTERVIEW_EVIDENCE_INVALID',
+    error: snapshotFailure ? `${error.message} کد پیگیری: ${trackingId}` : error.message,
+    target,
+    ...(typeof error.criterionId === 'string' && error.criterionId ? { criterionId: error.criterionId } : {}),
+    ...(snapshotFailure ? { trackingId } : {}),
+  };
+};
+
+export const initialInterviewTrackingId = (candidate: unknown, fallback: string = crypto.randomUUID()) => {
+  const value = String(candidate || '');
+  return /^[A-Za-z0-9._:-]{8,80}$/.test(value) ? value : fallback;
+};
+
+export const initialInterviewCompletionTransactionError = (error: any) => (
+  error?.code === 'P2034'
+    ? Object.assign(new Error('پیش‌نویس هنگام تکمیل تغییر کرده است. اطلاعات حفظ شده است؛ دوباره تلاش کنید.'), {
+      code: 'HR_INTERVIEW_COMPLETION_CONFLICT',
+      statusCode: 409,
+      isOperational: true,
+    })
+    : error
+);
+
 router.get('/applications/:id/initial-interview', requireActionPermission('RECORD_INITIAL_INTERVIEW', 'VIEW_INITIAL_INTERVIEW_REPORT'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const [draft, history] = await Promise.all([
     prisma.hrInitialInterviewDraft.findUnique({ where: { applicationId: req.params.id } }),
@@ -2884,16 +2915,6 @@ router.post('/applications/:id/decisions/:kind', asyncHandler(async (req: AuthRe
   if (!['POSITIVE', 'NEGATIVE'].includes(outcome)) throw new Error('نتیجه تصمیم باید مثبت یا منفی باشد.');
   let explanation = String(req.body.explanation || '').trim();
   let guidedInterview = req.body.guidedInterview;
-  const interviewDraft = kind === 'HR_INTERVIEW'
-    ? await prisma.hrInitialInterviewDraft.findUnique({ where: { applicationId: req.params.id } })
-    : null;
-  if (kind === 'HR_INTERVIEW') {
-    if (!interviewDraft) throw new Error('پیش‌نویس مصاحبه برای تکمیل پیدا نشد.');
-    guidedInterview = interviewDraft.dataJson;
-    assertGuidedHrInterviewEvidence(guidedInterview);
-    outcome = String((guidedInterview as any)?.state?.decision || '');
-    explanation = String((guidedInterview as any)?.state?.decisionReason || '').trim();
-  }
   const previous = await prisma.hrApplicationDecision.findFirst({ where: { applicationId: req.params.id, kind: kind as any }, orderBy: { version: 'desc' } });
   if ((kind !== 'COMPANY_APPROVAL' || outcome === 'NEGATIVE') && !explanation) throw new Error('توضیح تصمیم الزامی است.');
   if (previous && !String(req.body.changeReason || '').trim()) throw new Error('دلیل تغییر تصمیم قبلی الزامی است.');
@@ -2920,6 +2941,26 @@ router.post('/applications/:id/decisions/:kind', asyncHandler(async (req: AuthRe
     if (application.preIdentityChecklistItems.some((item) => ['PENDING', 'IN_PROGRESS'].includes(item.status) || (item.status === 'NEGATIVE' && !item.managementResolution))) throw new Error('همه الزامات باید نتیجه نهایی یا تعیین تکلیف مدیریتی داشته باشند.');
   }
   const row = await prisma.$transaction(async (tx) => {
+    const transactionPrevious = await tx.hrApplicationDecision.findFirst({
+      where: { applicationId: req.params.id, kind: kind as any },
+      orderBy: { version: 'desc' },
+    });
+    let transactionOutcome = outcome;
+    let transactionExplanation = explanation;
+    let transactionGuidedInterview = guidedInterview;
+    let transactionInterviewDraft: Awaited<ReturnType<typeof tx.hrInitialInterviewDraft.findUnique>> = null;
+    if (kind === 'HR_INTERVIEW') {
+      transactionInterviewDraft = await tx.hrInitialInterviewDraft.findUnique({ where: { applicationId: req.params.id } });
+      if (!transactionInterviewDraft) throw new Error('پیش‌نویس مصاحبه برای تکمیل پیدا نشد.');
+      transactionGuidedInterview = transactionInterviewDraft.dataJson;
+      assertGuidedHrInterviewEvidence(transactionGuidedInterview, transactionInterviewDraft.criteriaTemplateVersion);
+      if ((transactionGuidedInterview as any)?.schemaVersion === 2) {
+        transactionOutcome = String((transactionGuidedInterview as any)?.state?.decision || '');
+        transactionExplanation = String((transactionGuidedInterview as any)?.state?.decisionReason || '').trim();
+      }
+    }
+    if ((kind !== 'COMPANY_APPROVAL' || transactionOutcome === 'NEGATIVE') && !transactionExplanation) throw new Error('توضیح تصمیم الزامی است.');
+    if (transactionPrevious && !String(req.body.changeReason || '').trim()) throw new Error('دلیل تغییر تصمیم قبلی الزامی است.');
     const transactionSource = kind === 'HR_PRELIMINARY_APPROVAL'
       ? await tx.hrApplicationDecision.findFirst({ where: { applicationId: req.params.id, kind: 'HR_INTERVIEW' }, orderBy: { version: 'desc' }, select: { decidedBy: true } })
       : kind === 'COMPANY_APPROVAL'
@@ -2936,32 +2977,37 @@ router.post('/applications/:id/decisions/:kind', asyncHandler(async (req: AuthRe
     const created = await tx.hrApplicationDecision.create({ data: {
       applicationId: req.params.id,
       kind: kind as any,
-      outcome: outcome as any,
-      explanation: explanation || null,
-      evidenceJson: kind === 'HR_INTERVIEW' ? guidedInterview as Prisma.InputJsonValue : Prisma.JsonNull,
-      criteriaTemplateVersion: kind === 'HR_INTERVIEW' ? interviewDraft?.criteriaTemplateVersion ?? Number(guidedInterview?.criteriaTemplateVersion || 0) : null,
-      changeReason: previous ? String(req.body.changeReason).trim() : null,
-      version: (previous?.version || 0) + 1,
+      outcome: transactionOutcome as any,
+      explanation: transactionExplanation || null,
+      evidenceJson: kind === 'HR_INTERVIEW' ? transactionGuidedInterview as Prisma.InputJsonValue : Prisma.JsonNull,
+      criteriaTemplateVersion: kind === 'HR_INTERVIEW' ? transactionInterviewDraft!.criteriaTemplateVersion : null,
+      changeReason: transactionPrevious ? String(req.body.changeReason).trim() : null,
+      version: (transactionPrevious?.version || 0) + 1,
       decidedBy: actorId(req)
     }});
-    if (kind === 'HR_PRELIMINARY_APPROVAL' && outcome === 'NEGATIVE') {
-      await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { disposition: 'INITIAL_REJECTED', dispositionReason: explanation, dispositionBy: actorId(req), dispositionAt: new Date(), preIdentityManagementApprovedBy: null, preIdentityManagementApprovedAt: null, preIdentityManagementApprovalNote: null, preIdentityReleasedBy: null, preIdentityReleasedAt: null } });
+    if (kind === 'HR_PRELIMINARY_APPROVAL' && transactionOutcome === 'NEGATIVE') {
+      await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { disposition: 'INITIAL_REJECTED', dispositionReason: transactionExplanation, dispositionBy: actorId(req), dispositionAt: new Date(), preIdentityManagementApprovedBy: null, preIdentityManagementApprovedAt: null, preIdentityManagementApprovalNote: null, preIdentityReleasedBy: null, preIdentityReleasedAt: null } });
     } else if (kind === 'HR_INTERVIEW' || kind === 'HR_PRELIMINARY_APPROVAL') {
       await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { preIdentityManagementApprovedBy: null, preIdentityManagementApprovedAt: null, preIdentityManagementApprovalNote: null, preIdentityReleasedBy: null, preIdentityReleasedAt: null } });
     }
-    if (kind === 'COMPANY_APPROVAL' && outcome === 'NEGATIVE') {
+    if (kind === 'COMPANY_APPROVAL' && transactionOutcome === 'NEGATIVE') {
       const application = await tx.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, select: { stage: true } });
       await tx.hrJobApplication.update({ where: { id: req.params.id }, data: {
-        stage: 'CLOSED', preClosureStage: application.stage, outcome: 'REJECTED', outcomeReason: explanation,
+        stage: 'CLOSED', preClosureStage: application.stage, outcome: 'REJECTED', outcomeReason: transactionExplanation,
         preIdentityManagementApprovedBy: null, preIdentityManagementApprovedAt: null,
         preIdentityManagementApprovalNote: null, preIdentityReleasedBy: null, preIdentityReleasedAt: null,
       } });
       await tx.hrCandidateInvitation.updateMany({ where: { applicationId: req.params.id, revokedAt: null }, data: { revokedAt: new Date() } });
     }
-    if (kind === 'COMPANY_APPROVAL' && outcome === 'POSITIVE') {
-      await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { preIdentityManagementApprovedBy: actorId(req), preIdentityManagementApprovedAt: new Date(), preIdentityManagementApprovalNote: explanation || null } });
+    if (kind === 'COMPANY_APPROVAL' && transactionOutcome === 'POSITIVE') {
+      await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { preIdentityManagementApprovedBy: actorId(req), preIdentityManagementApprovedAt: new Date(), preIdentityManagementApprovalNote: transactionExplanation || null } });
     }
-    if (kind === 'HR_INTERVIEW') await tx.hrInitialInterviewDraft.deleteMany({ where: { applicationId: req.params.id } });
+    if (kind === 'HR_INTERVIEW') {
+      const deleted = await tx.hrInitialInterviewDraft.deleteMany({
+        where: { id: transactionInterviewDraft!.id, version: transactionInterviewDraft!.version },
+      });
+      if (deleted.count !== 1) throw Object.assign(new Error('پیش‌نویس هنگام تکمیل تغییر کرده است. اطلاعات حفظ شده است؛ دوباره تلاش کنید.'), { statusCode: 409 });
+    }
     const workItemAction = DECISION_WORK_ITEM_ACTION[kind];
     if (workItemAction) {
       await tx.hrWorkItem.updateMany({
@@ -2972,8 +3018,13 @@ router.post('/applications/:id/decisions/:kind', asyncHandler(async (req: AuthRe
         data: { status: 'COMPLETE', completedAt: new Date(), completedByUserId: actorId(req) },
       });
     }
+    outcome = transactionOutcome;
+    explanation = transactionExplanation;
+    guidedInterview = transactionGuidedInterview;
     return created;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).catch((error) => {
+    throw kind === 'HR_INTERVIEW' ? initialInterviewCompletionTransactionError(error) : error;
+  });
   await audit(req.params.id, 'HIRING_DECISION_RECORDED', req, { decisionId: row.id, kind, outcome, version: row.version, guidedInterview: kind === 'HR_INTERVIEW' ? guidedInterview : null, selfApproval: sourceDecision?.decidedBy === actorId(req) });
   res.status(201).json({ success: true, data: row });
 }));
@@ -3628,10 +3679,19 @@ router.post('/applications/:id/close', requireActionPermission('MANAGE_RECRUITME
   res.json({ success: true });
 }));
 
-router.use((error: any, _req: express.Request, res: Response, _next: NextFunction) => {
+router.use((error: any, req: express.Request, res: Response, _next: NextFunction) => {
+  const trackingId = initialInterviewTrackingId(req.get('X-Correlation-Id'));
+  const interviewCompletionResponse = initialInterviewCompletionErrorResponse(error, trackingId);
+  if (interviewCompletionResponse) {
+    console.error('HR interview completion validation error:', { trackingId, target: error.target, criterionId: error.criterionId, error });
+    return res.status(400).json(interviewCompletionResponse);
+  }
   console.error('HR hiring route error:', error);
   if (error?.code === 'P2002') return res.status(409).json({ success: false, error: 'رکورد تکراری است.', details: error.meta });
   if (error instanceof multer.MulterError) return res.status(400).json({ success: false, error: error.message });
+  if (Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode <= 599) {
+    return res.status(error.statusCode).json({ success: false, error: error.message });
+  }
   res.status(400).json({ success: false, error: error?.message || 'عملیات استخدام ناموفق بود.' });
 });
 

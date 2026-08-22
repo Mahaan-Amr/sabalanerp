@@ -13,8 +13,10 @@ const fixture = {
   applicationId: "hr-e2e-application",
   releaseApplicationId: "hr-e2e-release-application",
   blockedApplicationId: "hr-e2e-blocked-application",
+  interviewApplicationId: "hr-e2e-interview-application",
   candidateId: "hr-e2e-candidate",
   releaseCandidateId: "hr-e2e-release-candidate",
+  interviewCandidateId: "hr-e2e-interview-candidate",
   invitationId: "hr-e2e-invitation",
   unitId: "hr-e2e-unit",
   jobId: "hr-e2e-job",
@@ -86,6 +88,23 @@ async function main() {
     update: { workspaceCode: "HUMAN_RESOURCES", isActive: true },
     create: { code: "RECRUITMENT_CASES", workspaceCode: "HUMAN_RESOURCES", displayName: "Recruitment Cases" },
   });
+  for (const feature of [
+    { code: "VIEW_INITIAL_INTERVIEW_CRITERIA", displayName: "View Initial Interview Criteria" },
+    { code: "RECORD_INITIAL_INTERVIEW", displayName: "Record Initial Interview" },
+    { code: "VIEW_FULL_APPLICANT_INFORMATION", displayName: "View Full Applicant Information" },
+    { code: "VIEW_INITIAL_INTERVIEW_REPORT", displayName: "View Initial Interview Report" },
+    { code: "VIEW_COMPANY_EVALUATION_RESULTS", displayName: "View Company Evaluation Results" },
+    { code: "RECORD_COMPANY_EVALUATION_RESULT", displayName: "Record Company Evaluation Result" },
+    { code: "MANAGE_RECRUITMENT_CASE", displayName: "Manage Recruitment Case" },
+    { code: "PERSONNEL", displayName: "Personnel" },
+    { code: "MANAGE_PERSONNEL_SCHEDULE", displayName: "Manage Personnel Schedule" },
+  ]) {
+    await prisma.hrFeatureCatalog.upsert({
+      where: { code: feature.code },
+      update: { workspaceCode: "HUMAN_RESOURCES", isActive: true },
+      create: { ...feature, workspaceCode: "HUMAN_RESOURCES" },
+    });
+  }
   await prisma.hrFeatureCatalog.upsert({
     where: { code: "ORGANIZATIONAL_STRUCTURE" },
     update: { workspaceCode: "HUMAN_RESOURCES", isActive: true },
@@ -127,6 +146,31 @@ async function main() {
       reason: "HR hiring E2E fixture",
     },
   });
+  for (const feature of [
+    { code: "VIEW_INITIAL_INTERVIEW_CRITERIA", level: "VIEW" as const },
+    { code: "RECORD_INITIAL_INTERVIEW", level: "EDIT" as const },
+    { code: "VIEW_FULL_APPLICANT_INFORMATION", level: "VIEW" as const },
+    { code: "VIEW_INITIAL_INTERVIEW_REPORT", level: "VIEW" as const },
+    { code: "VIEW_COMPANY_EVALUATION_RESULTS", level: "VIEW" as const },
+    { code: "RECORD_COMPANY_EVALUATION_RESULT", level: "EDIT" as const },
+    { code: "MANAGE_RECRUITMENT_CASE", level: "EDIT" as const },
+    { code: "PERSONNEL", level: "EDIT" as const },
+    { code: "MANAGE_PERSONNEL_SCHEDULE", level: "EDIT" as const },
+  ]) {
+    await prisma.hrFeatureAccessGrant.upsert({
+      where: { stableKey: `hr-e2e:feature:${user.id}:${feature.code}` },
+      update: { level: feature.level, status: "ACTIVE", effectiveTo: null },
+      create: {
+        stableKey: `hr-e2e:feature:${user.id}:${feature.code}`,
+        userId: user.id,
+        featureCode: feature.code,
+        level: feature.level,
+        effectiveFrom: authorizationEffectiveFrom,
+        grantedByUserId: user.id,
+        reason: "HR hiring E2E fixture",
+      },
+    });
+  }
   await prisma.hrFeatureAccessGrant.upsert({
     where: { stableKey: `hr-e2e:feature:${user.id}:ORGANIZATIONAL_STRUCTURE` },
     update: { level: "VIEW", status: "ACTIVE", effectiveTo: null },
@@ -268,6 +312,54 @@ async function main() {
       assessmentDecisionBy: user.id,
       assessmentDecisionAt: new Date(),
       preIdentityReleasedAt: new Date(),
+    },
+  });
+
+  await prisma.hrCandidate.upsert({
+    where: { id: fixture.interviewCandidateId },
+    update: {
+      firstName: "مصاحبه",
+      lastName: "آزمایشی",
+      mobile: "09120000003",
+    },
+    create: {
+      id: fixture.interviewCandidateId,
+      firstName: "مصاحبه",
+      lastName: "آزمایشی",
+      mobile: "09120000003",
+    },
+  });
+  await prisma.hrJobApplication.upsert({
+    where: { id: fixture.interviewApplicationId },
+    update: {
+      candidateId: fixture.interviewCandidateId,
+      positionId: fixture.positionId,
+      stage: "SCREENING",
+      outcome: null,
+      createdBy: user.id,
+    },
+    create: {
+      id: fixture.interviewApplicationId,
+      candidateId: fixture.interviewCandidateId,
+      positionId: fixture.positionId,
+      stage: "SCREENING",
+      createdBy: user.id,
+    },
+  });
+  await prisma.hrApplicationFormRevision.upsert({
+    where: {
+      applicationId_revisionNumber: {
+        applicationId: fixture.interviewApplicationId,
+        revisionNumber: 1,
+      },
+    },
+    update: { status: "SUBMITTED", dataJson: {}, submittedAt: new Date() },
+    create: {
+      applicationId: fixture.interviewApplicationId,
+      revisionNumber: 1,
+      status: "SUBMITTED",
+      dataJson: {},
+      submittedAt: new Date(),
     },
   });
 

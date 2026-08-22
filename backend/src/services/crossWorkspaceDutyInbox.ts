@@ -244,7 +244,9 @@ const authorizeLoadedDuty = async (
     requestedWorkspaceCode,
     isDestinationManager: knownManager ?? await isManager(database, actorUserId, requestedWorkspaceCode, now),
     envelopeIsCurrent: envelopeIsCurrent(duty),
-    sourceIsCurrent: source.sourceIsCurrent,
+    // Source-version currency gates mutable work. A completed duty is immutable
+    // history and remains readable after its successful transition advances the source.
+    sourceIsCurrent: duty.status === 'OPEN' ? source.sourceIsCurrent : true,
     assignmentIsCurrent,
   });
   if (!decision.allowed) throw new Error(decision.code);

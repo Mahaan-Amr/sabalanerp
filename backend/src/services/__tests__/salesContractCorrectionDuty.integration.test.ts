@@ -126,6 +126,14 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
       });
       assert.equal(approved.successor.currentAssigneeUserId, seller.id);
       assert.equal(approved.successor.sourceActionCode, 'SALES_EDIT_CONTRACT_CORRECTION');
+      const completedManagerDecision = await getCrossWorkspaceDutyDetail(tx, {
+        dutyId: created.duty.id,
+        actorUserId: accountingManager.id,
+        workspaceCode: 'ACCOUNTING',
+        now: new Date('2026-08-20T08:00:00.000Z'),
+      });
+      assert.equal(completedManagerDecision.status, 'COMPLETED');
+      assert.deepEqual(completedManagerDecision.allowedActionCodes, []);
 
       const queued = await requestAccountingSalesContractCorrection(tx, {
         contractId: contract.id, actorUserId: initiator.id, category: 'DELIVERY_SCHEDULE', priority: 'HIGH',

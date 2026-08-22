@@ -402,15 +402,15 @@ const initialHrReviewGate = (source: HiringLifecycleSource): Gate => {
   if (source.preIdentityGrandfatheredAt) {
     return completedGate(2);
   }
-  const interviewApproved = latestDecision(source, "HR_INTERVIEW")?.outcome === "POSITIVE";
+  const interviewRecorded = Boolean(latestDecision(source, "HR_INTERVIEW"));
   const hrApproved = latestDecision(source, "HR_PRELIMINARY_APPROVAL")?.outcome === "POSITIVE";
-  const completed = Number(interviewApproved) + Number(hrApproved);
+  const completed = Number(interviewRecorded) + Number(hrApproved);
   return {
     complete: completed === 2,
     requiredComplete: completed,
     requiredTotal: 2,
     blockers: [],
-    action: !interviewApproved
+    action: !interviewRecorded
       ? action("RECORD_HR_INTERVIEW", "ثبت نتیجه مصاحبه اولیه HR", "HR_PROCESSOR")
       : action("RECORD_HR_PRELIMINARY_APPROVAL", "ثبت تأیید اولیه HR", "HR_MANAGER"),
     secondaryActions: [],

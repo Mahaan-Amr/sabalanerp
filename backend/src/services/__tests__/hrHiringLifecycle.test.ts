@@ -196,6 +196,22 @@ const base = (
 }
 
 {
+  const result = projectHiringLifecycle(base({
+    preIdentityGrandfatheredAt: null,
+    formRevisions: [submitted],
+    stage: "SCREENING",
+    hiringDecisions: [
+      { kind: "HR_INTERVIEW", outcome: "NEGATIVE", version: 1 },
+    ],
+  }), ["HR_MANAGER"]);
+  assert.equal(result.currentPhaseId, "INITIAL_HR_REVIEW");
+  assert.equal(result.phases[1].requiredComplete, 1);
+  assert.equal(result.phases[1].primaryAction?.id, "RECORD_HR_PRELIMINARY_APPROVAL");
+  assert.deepEqual(result.phases[1].primaryAction?.authorities, ["HR_MANAGER"]);
+  assert.equal(result.phases[1].responsibleFunction, "مدیریت منابع انسانی");
+}
+
+{
   const result = projectHiringLifecycle(
     base({
       formRevisions: [submitted],

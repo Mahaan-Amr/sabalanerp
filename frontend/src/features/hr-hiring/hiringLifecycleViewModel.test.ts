@@ -6,6 +6,7 @@ import {
   hiringLifecycleStatusLabel,
   resolveSelectedHiringPhase,
   selectedHiringPhase,
+  shouldLoadCompanyEvaluationPlan,
   type HiringLifecycleProjection,
 } from "./hiringLifecycleViewModel";
 
@@ -101,5 +102,19 @@ assert.equal(
   "UPDATE_INSURANCE",
 );
 assert.equal(hiringTaskCapability(taskCapabilities, "UNKNOWN"), null);
+
+assert.equal(
+  shouldLoadCompanyEvaluationPlan("COMPANY_EVALUATION_PLAN", [
+    "VIEW_INITIAL_INTERVIEW_REPORT",
+    "RECORD_PRELIMINARY_DECISION",
+  ]),
+  false,
+);
+assert.equal(
+  shouldLoadCompanyEvaluationPlan("COMPANY_EVALUATION_PLAN", [
+    "VIEW_COMPANY_EVALUATION_RESULTS",
+  ]),
+  true,
+);
 
 console.log("HR hiring lifecycle view-model tests passed.");

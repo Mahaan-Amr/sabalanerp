@@ -95,3 +95,10 @@ export const selectedHiringPhase = (
     projection.phases[0]
   );
 };
+
+export const shouldLoadCompanyEvaluationPlan = (
+  phaseId: string | null | undefined,
+  actionPermissions: readonly string[],
+) =>
+  phaseId === "COMPANY_EVALUATION_PLAN" &&
+  actionPermissions.includes("VIEW_COMPANY_EVALUATION_RESULTS");

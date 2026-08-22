@@ -39,6 +39,7 @@ import { HiringLifecycle } from "@/features/hr-hiring/HiringLifecycle";
 import {
   hiringTaskDetailVisible,
   resolveSelectedHiringPhase,
+  shouldLoadCompanyEvaluationPlan,
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
@@ -2649,6 +2650,7 @@ type CaseActionOptions = {
 
 function CompanyEvaluationPlan({ applicationId, actionPermissions, busy, run, onPendingChange }: { applicationId: string; actionPermissions: string[]; busy: boolean; run: CaseActionRunner; onPendingChange: (pending: boolean) => void }) {
   const [items, setItems] = useState<any[]>([]);
+  const [loadError, setLoadError] = useState("");
   const [draft, setDraft] = useState({ type: "MANAGEMENT_INTERVIEW", subject: "", instructions: "", evidencePolicy: "EXPLANATION_REQUIRED" });
   const [results, setResults] = useState<Record<string, { effect: string; explanation: string; file?: File }>>({});
   const [cancelTarget, setCancelTarget] = useState<any>();
@@ -2664,14 +2666,23 @@ function CompanyEvaluationPlan({ applicationId, actionPermissions, busy, run, on
     anchor.click();
     URL.revokeObjectURL(href);
   };
-  const refresh = useCallback(() => hiringAPI.companyEvaluations(applicationId).then(({ data }) => {
-    const rows = data.data || [];
-    setItems(rows);
-    onPendingChange(rows.some((item: any) => item.status === "PLANNED"));
-  }), [applicationId, onPendingChange]);
+  const refresh = useCallback(async () => {
+    try {
+      const { data } = await hiringAPI.companyEvaluations(applicationId);
+      const rows = data.data || [];
+      setItems(rows);
+      setLoadError("");
+      onPendingChange(rows.some((item: any) => item.status === "PLANNED"));
+    } catch (cause) {
+      setItems([]);
+      onPendingChange(false);
+      setLoadError(hiringError(cause));
+    }
+  }, [applicationId, onPendingChange]);
   useEffect(() => { void refresh(); }, [refresh]);
   const types = [["MANAGEMENT_INTERVIEW", "مصاحبه با مدیریت"], ["HR_MANAGER_INTERVIEW", "مصاحبه با مدیر منابع انسانی"], ["DEPARTMENT_SUPERVISOR_INTERVIEW", "مصاحبه با سرپرست بخش"], ["THERAPIST_CONSULTATION", "مراجعه به مشاور و تراپیست"], ["OTHER", "سایر"]];
   return <ErpSection title="برنامه ارزیابی شرکت" description="هر ارزیابی یک نوبت پایدار دارد و نتیجه منفی به‌تنهایی پرونده را رد نمی‌کند.">
+    {loadError && <ErpInlineState kind="error" title={loadError} />}
     {canPlan && <ErpCard className="mb-4 space-y-3 p-4"><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4"><ErpSelect value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })}>{types.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</ErpSelect><ErpSelect value={draft.evidencePolicy} onChange={(event) => setDraft({ ...draft, evidencePolicy: event.target.value })}><option value="EXPLANATION_REQUIRED">توضیح الزامی</option><option value="FILE_REQUIRED">فایل الزامی</option><option value="FILE_OPTIONAL">فایل اختیاری</option><option value="NO_FILE">بدون فایل</option></ErpSelect>{draft.type === "OTHER" && <><ErpInput placeholder="موضوع" value={draft.subject} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} /><ErpInput placeholder="شرح و دستور پیگیری" value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} /></>}</div><ErpButton label="افزودن ارزیابی" variant="solid" disabled={busy || (draft.type === "OTHER" && (!draft.subject.trim() || !draft.instructions.trim()))} onClick={() => void run(() => hiringAPI.addCompanyEvaluation(applicationId, draft), "ارزیابی به برنامه افزوده شد.").then(refresh)} /></ErpCard>}
     <div className="space-y-3">{items.map((item) => { const result = results[item.id] || { effect: "NEUTRAL", explanation: "" }; const label = types.find(([value]) => value === item.type)?.[1] || item.type; return <ErpCard key={item.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><b>{label} · نوبت {Number(item.occurrenceNumber).toLocaleString("fa-IR")}</b>{item.subject && <p className="text-sm text-[var(--sds-text-secondary)]">{item.subject}</p>}</div><ErpBadge tone={item.status === "COMPLETED" ? "success" : item.status === "CANCELLED" ? "neutral" : "warning"}>{item.status === "COMPLETED" ? "تکمیل‌شده" : item.status === "CANCELLED" ? "لغوشده" : "در انتظار نتیجه"}</ErpBadge></div>{item.status === "PLANNED" && canResult && <div className="mt-3 grid gap-2 md:grid-cols-4"><ErpSelect value={result.effect} onChange={(event) => setResults({ ...results, [item.id]: { ...result, effect: event.target.value } })}><option value="POSITIVE">مثبت</option><option value="NEUTRAL">خنثی</option><option value="NEGATIVE">منفی</option></ErpSelect><ErpInput placeholder={item.evidencePolicy === "EXPLANATION_REQUIRED" ? "توضیح الزامی" : "توضیح اختیاری"} value={result.explanation} onChange={(event) => setResults({ ...results, [item.id]: { ...result, explanation: event.target.value } })} />{item.evidencePolicy !== "NO_FILE" && <ErpInput type="file" onChange={(event) => setResults({ ...results, [item.id]: { ...result, file: event.target.files?.[0] } })} />}<ErpButton label="ثبت نتیجه" disabled={busy || (item.evidencePolicy === "EXPLANATION_REQUIRED" && !result.explanation.trim()) || (item.evidencePolicy === "FILE_REQUIRED" && !result.file)} onClick={() => { const data = new FormData(); data.append("effect", result.effect); data.append("explanation", result.explanation); if (result.file) data.append("file", result.file); void run(() => hiringAPI.recordCompanyEvaluationResult(applicationId, item.id, data), "نتیجه ارزیابی ثبت شد.").then(refresh); }} /></div>}{item.status === "PLANNED" && canPlan && <div className="mt-3"><ErpButton label="لغو ارزیابی" tone="danger" variant="ghost" disabled={busy} onClick={() => setCancelTarget(item)} /></div>}{item.status === "COMPLETED" && <div className="mt-3 flex flex-wrap items-center gap-3 text-sm"><span><b>اثر: </b>{item.resultEffect === "POSITIVE" ? "مثبت" : item.resultEffect === "NEGATIVE" ? "منفی" : "خنثی"}{item.resultExplanation && ` · ${item.resultExplanation}`}</span>{item.resultOriginalName && canViewResults && <ErpButton label="دریافت مدرک نتیجه" variant="ghost" onClick={() => void downloadEvidence(item)} />}</div>}</ErpCard>; })}</div>
     <ErpSheet open={Boolean(cancelTarget)} onClose={() => { if (!busy) setCancelTarget(undefined); }} title="لغو ارزیابی" presentation="modal" dismissible={!busy}>
@@ -2878,7 +2889,7 @@ function PreIdentitySection({
         })}
       </div>
 
-      {phase === "COMPANY_EVALUATION_PLAN" && <CompanyEvaluationPlan applicationId={applicationId} actionPermissions={actionPermissions} busy={busy} run={run} onPendingChange={setHasPendingCompanyEvaluations} />}
+      {shouldLoadCompanyEvaluationPlan(phase, actionPermissions) && <CompanyEvaluationPlan applicationId={applicationId} actionPermissions={actionPermissions} busy={busy} run={run} onPendingChange={setHasPendingCompanyEvaluations} />}
       {phase === "COMPANY_EVALUATION_PLAN" && false && <ErpCard className="mt-4 space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <b>چک‌لیست الزامات مدیریت شرکت</b>

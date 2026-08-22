@@ -44,6 +44,19 @@ const base = (
 }
 
 {
+  const result = projectHiringLifecycle(
+    base({
+      formRevisions: [submitted], stage: "OFFER", identityClearance: "APPROVED",
+      assessmentCompletedAt: new Date(),
+      compensationSnapshots: [{ proposedBy: "company-manager", payrollReviewStatus: "RETURNED" }],
+    }),
+    ["COMPANY_MANAGER"],
+  );
+  assert.equal(result.phases[5].primaryAction?.id, "CREATE_OFFER");
+  assert.equal(result.phases[5].primaryAction?.label, "ثبت نسخه اصلاح‌شده پیشنهاد همکاری");
+}
+
+{
   const result = projectHiringLifecycle(base({
     preIdentityGrandfatheredAt: null,
     formRevisions: [submitted],
@@ -139,12 +152,12 @@ const base = (
       assessmentCompletedAt: new Date(),
       compensationSnapshots: [{ proposedBy: "hiring-manager" }],
     }),
-    ["HR_PAYROLL_PROCESSOR"],
+    ["HR_PAYROLL_MANAGER"],
   );
   assert.equal(result.phases[5].status, "ACTION_REQUIRED");
-  assert.equal(result.phases[5].primaryAction?.id, "PREPARE_OFFER_PAYROLL");
+  assert.equal(result.phases[5].primaryAction?.id, "VERIFY_OFFER_PAYROLL");
   assert.equal(result.phases[5].requiredComplete, 1);
-  assert.equal(result.phases[5].requiredTotal, 5);
+  assert.equal(result.phases[5].requiredTotal, 3);
 }
 
 {
@@ -221,17 +234,15 @@ const base = (
       compensationSnapshots: [
         {
           proposedBy: "hiring-manager",
-          preparedAt: new Date(),
           hrApprovedAt: new Date(),
-          financeApprovedAt: new Date(),
         },
       ],
     }),
   );
   assert.equal(result.currentPhaseId, "OFFER");
   assert.equal(result.phases[5].status, "WAITING");
-  assert.equal(result.phases[5].requiredComplete, 4);
-  assert.equal(result.phases[5].requiredTotal, 5);
+  assert.equal(result.phases[5].requiredComplete, 1);
+  assert.equal(result.phases[5].requiredTotal, 3);
   assert.equal(result.phases[5].primaryAction, null);
 }
 

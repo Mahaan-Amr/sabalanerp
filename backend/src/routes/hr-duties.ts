@@ -1,4 +1,8 @@
 import express, { type NextFunction, type Response } from 'express';
+import crypto from 'crypto';
+import path from 'path';
+import multer from 'multer';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { enforceMutationIdempotency } from '../middleware/idempotency';
@@ -17,8 +21,25 @@ import {
   listCrossWorkspaceDuties,
   markCrossWorkspaceDutyHistorySeen,
 } from '../services/crossWorkspaceDutyInbox';
+import {
+  HR_HIRING_ALLOWED_MIME, HR_HIRING_STORAGE_DIR, removeHiringFile, scanHiringFile,
+  safeHiringStoragePath, sha256File, validateHiringFileSignature,
+} from '../services/hrHiringFileStorage';
+import {
+  recordHrHiringCollateralOriginalReturn,
+  recordHrHiringCollateralReceipt,
+} from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
+import { normalizeHiringRial } from '../services/hrApplicantExperience';
 
 const router = express.Router();
+const hiringFinanceUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, callback) => callback(null, HR_HIRING_STORAGE_DIR),
+    filename: (_req, file, callback) => callback(null, `${Date.now()}-${crypto.randomBytes(16).toString('hex')}${path.extname(file.originalname).toLowerCase()}`),
+  }),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, callback) => callback(null, HR_HIRING_ALLOWED_MIME.has(file.mimetype)),
+});
 const manageHrWork = requireHrFeature('HR_WORK_MANAGEMENT', 'EDIT');
 const dutyOperationalMessage = (code: string) => ({
   SEPARATION_OF_DUTIES_CONFLICT: 'این درخواست را شما ثبت کرده‌اید؛ برای حفظ تفکیک وظایف، مدیر حسابداری دیگری باید آن را دریافت کند. مدیر سیستم می‌تواند با ثبت دلیل اقدام کند.',
@@ -121,6 +142,115 @@ router.get(
     res.json({ success: true, data });
   }),
 );
+
+router.get('/:id/hiring-finance/context', asyncHandler(async (req, res) => {
+  await getCrossWorkspaceDutyDetail(prisma, { dutyId: req.params.id, actorUserId: req.user!.id, workspaceCode: 'ACCOUNTING' });
+  const duty = await prisma.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: req.params.id } });
+  if (duty.sourceType !== 'HR_HIRING_FINANCE') throw new Error('DUTY_NOT_AVAILABLE');
+  const assigned = duty.currentAssigneeUserId === req.user!.id;
+  if (duty.sourceActionCode.includes('ORIGINAL_RETURN')) {
+    const source = await prisma.hrCollateralOriginalReturn.findUniqueOrThrow({ where: { id: duty.sourceId }, include: { collateralItem: true } });
+    return res.json({ success: true, data: {
+      actionCode: duty.sourceActionCode, type: source.collateralItem.type,
+      amountRials: source.collateralItem.amountRials?.toFixed(0) || null, status: source.status,
+      ...(assigned && duty.sourceActionCode === 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN' ? {
+        returnedAt: source.returnedAt, returnedTo: source.returnedTo,
+        evidenceNote: source.evidenceNote, evidenceOriginalName: source.evidenceOriginalName,
+      } : {}),
+    } });
+  }
+  const item = await prisma.hrCollateralItem.findUniqueOrThrow({ where: { id: duty.sourceId } });
+  res.json({ success: true, data: {
+    actionCode: duty.sourceActionCode, type: item.type,
+    amountRials: item.amountRials?.toFixed(0) || null,
+    status: item.status,
+    ...(assigned && duty.sourceActionCode === 'HIRING_COLLATERAL_VERIFY_RECEIPT' ? {
+      identifier: item.identifier, issuerOrGuarantor: item.issuerOrGuarantor,
+      custodyLocation: item.custodyLocation, receivedAt: item.receivedAt,
+      originalName: item.originalName,
+    } : {}),
+  } });
+}));
+
+router.get('/:id/hiring-finance/evidence', asyncHandler(async (req, res) => {
+  await getCrossWorkspaceDutyDetail(prisma, {
+    dutyId: req.params.id, actorUserId: req.user!.id, workspaceCode: 'ACCOUNTING',
+  });
+  const duty = await prisma.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: req.params.id } });
+  if (duty.sourceType !== 'HR_HIRING_FINANCE' || duty.currentAssigneeUserId !== req.user!.id) {
+    throw new Error('DUTY_NOT_ASSIGNED');
+  }
+  if (duty.sourceActionCode === 'HIRING_COLLATERAL_VERIFY_RECEIPT') {
+    const item = await prisma.hrCollateralItem.findUniqueOrThrow({ where: { id: duty.sourceId } });
+    if (!item.storageName || !item.originalName) throw new Error('DUTY_EVIDENCE_NOT_AVAILABLE');
+    await prisma.hrHiringAudit.create({ data: {
+      applicationId: item.applicationId, actorUserId: req.user!.id, actorKind: 'USER',
+      eventType: 'COLLATERAL_DOCUMENT_DOWNLOADED_FROM_ACCOUNTING_DUTY',
+      payloadJson: { dutyId: duty.id, collateralItemId: item.id },
+    } });
+    return res.download(safeHiringStoragePath(item.storageName), item.originalName);
+  }
+  if (duty.sourceActionCode === 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN') {
+    const source = await prisma.hrCollateralOriginalReturn.findUniqueOrThrow({
+      where: { id: duty.sourceId }, include: { collateralItem: true },
+    });
+    if (!source.evidenceStorageName || !source.evidenceOriginalName) throw new Error('DUTY_EVIDENCE_NOT_AVAILABLE');
+    await prisma.hrHiringAudit.create({ data: {
+      applicationId: source.collateralItem.applicationId, actorUserId: req.user!.id, actorKind: 'USER',
+      eventType: 'COLLATERAL_RETURN_EVIDENCE_DOWNLOADED_FROM_ACCOUNTING_DUTY',
+      payloadJson: { dutyId: duty.id, collateralReturnId: source.id },
+    } });
+    return res.download(safeHiringStoragePath(source.evidenceStorageName), source.evidenceOriginalName);
+  }
+  throw new Error('DUTY_EVIDENCE_NOT_AVAILABLE');
+}));
+
+router.post('/:id/hiring-finance/original-return', enforceMutationIdempotency, hiringFinanceUpload.single('file'), asyncHandler(async (req, res) => {
+  try {
+    if (!req.file) throw new Error('COLLATERAL_RETURN_PROOF_REQUIRED');
+    validateHiringFileSignature(req.file.path, req.file.mimetype);
+    const scanStatus = await scanHiringFile(req.file.path);
+    const digest = await sha256File(req.file.path);
+    const returnedTo = String(req.body.returnedTo || '').trim();
+    const evidenceNote = String(req.body.evidenceNote || '').trim();
+    if (!returnedTo || !evidenceNote) throw new Error('COLLATERAL_RETURN_FIELDS_REQUIRED');
+    const result = await prisma.$transaction((tx) => recordHrHiringCollateralOriginalReturn(tx, {
+      dutyId: req.params.id, actorUserId: req.user!.id, returnedTo, evidenceNote,
+      evidence: {
+        storageName: req.file!.filename, originalName: req.file!.originalname,
+        mimeType: req.file!.mimetype, size: req.file!.size, sha256: digest, malwareScanStatus: scanStatus,
+      },
+    }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    res.status(201).json({ success: true, data: result });
+  } catch (error) { removeHiringFile(req.file?.path); throw error; }
+}));
+
+router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFinanceUpload.single('file'), asyncHandler(async (req, res) => {
+  try {
+    if (!req.file) throw new Error('COLLATERAL_SCAN_REQUIRED');
+    validateHiringFileSignature(req.file.path, req.file.mimetype);
+    const scanStatus = await scanHiringFile(req.file.path);
+    const digest = await sha256File(req.file.path);
+    const receivedAt = new Date(String(req.body.receivedAt || ''));
+    const custodyLocation = String(req.body.custodyLocation || '').trim();
+    if (Number.isNaN(receivedAt.getTime()) || !custodyLocation) throw new Error('COLLATERAL_RECEIPT_FIELDS_REQUIRED');
+    const result = await prisma.$transaction((tx) => recordHrHiringCollateralReceipt(tx, {
+      dutyId: req.params.id, actorUserId: req.user!.id,
+      amountRials: req.body.amountRials ? normalizeHiringRial(req.body.amountRials) : null,
+      identifier: String(req.body.identifier || '').trim() || null,
+      issuerOrGuarantor: String(req.body.issuerOrGuarantor || '').trim() || null,
+      receivedAt, custodyLocation,
+      evidence: {
+        storageName: req.file!.filename, originalName: req.file!.originalname,
+        mimeType: req.file!.mimetype, size: req.file!.size, sha256: digest, malwareScanStatus: scanStatus,
+      },
+    }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    res.status(201).json({ success: true, data: result });
+  } catch (error) {
+    removeHiringFile(req.file?.path);
+    throw error;
+  }
+}));
 
 router.post(
   '/workspaces/:workspaceCode/history-seen',

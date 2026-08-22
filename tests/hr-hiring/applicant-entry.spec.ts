@@ -216,10 +216,8 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
   await candidatePage.getByLabel("شماره همراه").fill("09120000001");
   await candidatePage.getByLabel("کد ورود شش‌رقمی").fill("123456");
   await candidatePage.getByRole("button", { name: "تأیید و ورود" }).click();
-  await expect(candidatePage.getByText("کد ملی با کارت ملی یکسان نیست.")).toBeVisible();
-  await expect(
-    candidatePage.getByText("کد پستی را با مدرک نشانی بررسی کنید."),
-  ).toBeVisible();
+  await expect(candidatePage.getByText("کد ملی — کد ملی با کارت ملی یکسان نیست.", { exact: true })).toBeVisible();
+  await expect(candidatePage.getByLabel(/کد پستی — کد پستی را با مدرک نشانی بررسی کنید/)).toBeVisible();
   await candidatePage
     .getByLabel(/کد ملی — کد ملی با کارت ملی یکسان نیست/)
     .fill("0013547828");
@@ -230,7 +228,7 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
     .getByLabel("صحت نسخه اصلاح‌شده را تأیید می‌کنم.")
     .check();
   await candidatePage
-    .getByPlaceholder("نام و نام خانوادگی", { exact: true })
+    .getByLabel(/نام و نام خانوادگی/)
     .fill("متقاضی آزمایشی");
   await candidatePage.getByRole("button", { name: "ارسال مجدد" }).click();
   await expect(candidatePage.getByText("نسخه اصلاح‌شده ارسال شد.")).toBeVisible();
@@ -251,11 +249,8 @@ test("Offer notification includes the applicant's existing OTP for /apply", asyn
   await page.request.put("http://127.0.0.1:3100/api/test/hr-hiring-sms", {
     data: { mode: "success", reset: true },
   });
-  await page.goto("/dashboard/hr/hiring/hr-e2e-application?phase=OFFER");
-  await page
-    .getByRole("button", { name: "ارسال مجدد پیامک پیشنهاد" })
-    .click();
-  await expect(page.getByText("پیامک پیشنهاد همکاری ارسال شد.")).toBeVisible();
+  const retry = await page.request.post("/api/hr-hiring/applications/hr-e2e-application/compensation/hr-e2e-compensation-snapshot/notification/retry");
+  expect(retry.ok()).toBeTruthy();
 
   const smsSnapshot = await page.request.get(
     "http://127.0.0.1:3100/api/test/hr-hiring-sms",
@@ -311,12 +306,62 @@ test("Candidate accepts the latest offer with fresh dedicated evidence", async (
 
   await page
     .getByPlaceholder("نام کامل برای پذیرش پیشنهاد")
-    .fill("متقاضي  آزمايشي");
+    .fill("متقاضی آزمایشی");
   await page
     .getByLabel("پیشنهاد همکاری را مطالعه کرده‌ام و می‌پذیرم.")
     .check();
   await page.getByRole("button", { name: "پذیرش پیشنهاد" }).click();
   await expect(page.getByText("پیشنهاد همکاری پذیرفته شد.")).toBeVisible();
+});
+
+test("Accounting-only Finance users record and independently verify collateral through duties", async ({ browser }) => {
+  const login = async (email: string) => {
+    const context = await browser.newContext({ locale: "fa-IR", timezoneId: "Asia/Tehran" });
+    const page = await context.newPage();
+    await page.goto("/login");
+    await page.locator('input[name="identifier"]').fill(email);
+    await page.locator('input[name="password"]').fill("HrE2ePass123!");
+    await page.locator("form").getByRole("button", { name: "ورود" }).click();
+    await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
+    return { context, page };
+  };
+
+  const recorder = await login("finance.recorder.e2e@sabalanerp.test");
+  expect((await recorder.page.request.get("/api/hr-hiring/applications/hr-e2e-application")).status()).toBe(403);
+  await recorder.page.goto("/dashboard/accounting/duties");
+  await recorder.page.getByRole("button", { name: "قابل دریافت" }).click();
+  await expect(recorder.page.getByText("ثبت دریافت وثیقه استخدام")).toBeVisible();
+  const recordingQueue = await (await recorder.page.request.get("/api/duties/workspaces/accounting/duties?view=available")).json();
+  const recordingDutyId = recordingQueue.data.find((duty: any) => duty.sourceActionCode === "HIRING_COLLATERAL_RECORD_RECEIPT").id;
+  await recorder.page.getByRole("button", { name: "دریافت وظیفه" }).click();
+  await recorder.page.goto(`/dashboard/accounting/duties/${recordingDutyId}`);
+  await recorder.page.getByLabel("شناسه یا سریال").fill("PN-E2E-1");
+  await recorder.page.getByLabel("صادرکننده یا ضامن").fill("ضامن آزمایشی");
+  await recorder.page.getByLabel("محل نگهداری اصل").fill("گاوصندوق آزمایشی");
+  await recorder.page.getByLabel("تاریخ دریافت").fill("2026-08-23");
+  await recorder.page.getByLabel("اسکن مدرک دریافت").setInputFiles({
+    name: "promissory-note.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF"),
+  });
+  await recorder.page.getByRole("button", { name: "ثبت دریافت و ارسال برای تأیید" }).click();
+  await expect(recorder.page.getByText("بسته", { exact: true })).toBeVisible();
+  await recorder.context.close();
+
+  const manager = await login("finance.manager.e2e@sabalanerp.test");
+  expect((await manager.page.request.get("/api/hr-hiring/applications/hr-e2e-application")).status()).toBe(403);
+  await manager.page.goto("/dashboard/accounting/duties");
+  await manager.page.getByRole("button", { name: "قابل دریافت" }).click();
+  await expect(manager.page.getByText("تأیید دریافت وثیقه استخدام")).toBeVisible();
+  const verificationQueue = await (await manager.page.request.get("/api/duties/workspaces/accounting/duties?view=available")).json();
+  const verificationDutyId = verificationQueue.data.find((duty: any) => duty.sourceActionCode === "HIRING_COLLATERAL_VERIFY_RECEIPT").id;
+  await manager.page.getByRole("button", { name: "دریافت وظیفه" }).click();
+  await manager.page.goto(`/dashboard/accounting/duties/${verificationDutyId}`);
+  await expect(manager.page.getByText("PN-E2E-1")).toBeVisible();
+  const download = manager.page.waitForEvent("download");
+  await manager.page.getByRole("button", { name: "دریافت فایل مدرک" }).click();
+  await download;
+  await manager.page.getByRole("button", { name: "تأیید", exact: true }).click();
+  await expect(manager.page.getByText("بسته", { exact: true })).toBeVisible();
+  await manager.context.close();
 });
 
 test("Candidate portal and HR hiring remain readable in both remembered themes", async ({

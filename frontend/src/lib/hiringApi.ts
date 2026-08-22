@@ -137,17 +137,8 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/identity/approve`),
   createCompensation: (id: string, data: any) =>
     internal.post(`/applications/${id}/compensation`, data),
-  prepareCompensation: (id: string, snapshotId: string, data: any) =>
-    internal.put(
-      `/applications/${id}/compensation/${snapshotId}/prepare`,
-      data,
-    ),
-  approveCompensationHr: (id: string, snapshotId: string) =>
-    internal.post(`/applications/${id}/compensation/${snapshotId}/hr-approve`),
-  approveCompensationFinance: (id: string, snapshotId: string) =>
-    internal.post(
-      `/applications/${id}/compensation/${snapshotId}/finance-approve`,
-    ),
+  reviewCompensationPayroll: (id: string, snapshotId: string, data: any) =>
+    internal.post(`/applications/${id}/compensation/${snapshotId}/payroll-review`, data),
   retryOfferNotification: (id: string, snapshotId: string) =>
     internal.post(
       `/applications/${id}/compensation/${snapshotId}/notification/retry`,
@@ -204,6 +195,10 @@ export const hiringAPI = {
       `/applications/${id}/collateral/${itemId}/return-evidence/download`,
       { responseType: "blob" },
     ),
+  downloadCollateralReturnVersion: (id: string, returnId: string) =>
+    internal.get(`/applications/${id}/collateral-returns/${returnId}/download`, {
+      responseType: "blob",
+    }),
   convert: (id: string, data: any) =>
     internal.post(`/applications/${id}/convert`, data),
   uploadContract: (id: string, data: FormData) =>

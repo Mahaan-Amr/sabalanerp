@@ -6,6 +6,8 @@ import {
   ErpBadge,
   ErpButton,
   ErpFieldView,
+  ErpField,
+  ErpInput,
   ErpInlineState,
   ErpPage,
   ErpSection,
@@ -14,11 +16,14 @@ import {
   ErpSkeleton,
   ErpSummaryGrid,
   ErpTextarea,
+  ErpRialInput,
 } from '@/components/erp';
 import { hrDutyApi, type DestinationDuty } from './hrDutyApi';
 import { initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
 import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-duties/crossWorkspaceDutyApi';
 import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
+import { downloadBlobResponse } from '@/lib/downloadFile';
+import { formatNumericInputText } from '@/lib/numberFormat';
 
 const actionPresentation: Record<string, { label: string; icon: typeof FaCheck; tone: 'success' | 'danger' | 'warning' | 'info' }> = {
   APPROVE: { label: 'تأیید', icon: FaCheck, tone: 'success' },
@@ -33,6 +38,7 @@ const actionPresentation: Record<string, { label: string; icon: typeof FaCheck; 
 const fieldLabel: Record<string, string> = { title: 'عنوان', description: 'خلاصه لازم', dueAt: 'مهلت' };
 const evidenceLabel: Record<string, string> = {
   DOCUMENT: 'سند مجاز', NOTE: 'یادداشت مجاز', CHECKLIST: 'چک‌لیست مجاز',
+  COLLATERAL_SCAN: 'اسکن وثیقه', COLLATERAL_RETURN_PROOF: 'مدرک بازگرداندن اصل وثیقه',
 };
 const eventLabel: Record<string, string> = {
   ASSIGNED: 'واگذاری وظیفه', UNASSIGNED_TRIAGE: 'ارسال به صف تعیین مسئول',
@@ -72,11 +78,19 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
   const [eligibleAssignees, setEligibleAssignees] = useState<Array<{ id: string; displayName: string; username: string }>>([]);
   const [reassignmentTarget, setReassignmentTarget] = useState('');
   const [reassignmentReason, setReassignmentReason] = useState('');
+  const [financeContext, setFinanceContext] = useState<any>(null);
+  const [receipt, setReceipt] = useState({ amountRials: '', identifier: '', issuerOrGuarantor: '', custodyLocation: '', receivedAt: '', file: null as File | null });
+  const [originalReturn, setOriginalReturn] = useState({ returnedTo: '', evidenceNote: '', file: null as File | null });
   const load = useCallback(async () => {
     dispatch({ type: 'start' });
     try {
       const response = await hrDutyApi.detail(workspace, dutyId);
       dispatch({ type: 'success', data: response.data.data });
+      if (response.data.data.sourceActionCode.startsWith('HIRING_COLLATERAL_')) {
+        const context = await hrDutyApi.hiringFinanceContext(dutyId);
+        setFinanceContext(context.data.data);
+        setReceipt((current) => ({ ...current, amountRials: context.data.data.amountRials || '' }));
+      } else setFinanceContext(null);
       if (response.data.data.canReassign) {
         const eligible = await hrDutyApi.eligibleAssignees(workspace, dutyId);
         setEligibleAssignees(eligible.data.data);
@@ -143,6 +157,37 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
       setPendingAction(null);
     }
   };
+  const recordReceipt = async () => {
+    if (!state.data || !receipt.file || !receipt.receivedAt || !receipt.custodyLocation.trim()) return;
+    setPendingAction('RECORD_RECEIPT');
+    setActionError(null);
+    const body = new FormData();
+    Object.entries(receipt).forEach(([key, value]) => { if (value) body.append(key, value); });
+    try {
+      await hrDutyApi.recordHiringCollateralReceipt(state.data.id, body);
+      announceCrossWorkspaceDutyChanged();
+      await load();
+    } catch (error) { setActionError(failureMessage(error)); }
+    finally { setPendingAction(null); }
+  };
+  const recordOriginalReturn = async () => {
+    if (!state.data || !originalReturn.file || !originalReturn.returnedTo.trim() || !originalReturn.evidenceNote.trim()) return;
+    setPendingAction('RECORD_RETURN'); setActionError(null);
+    const body = new FormData();
+    body.append('returnedTo', originalReturn.returnedTo); body.append('evidenceNote', originalReturn.evidenceNote); body.append('file', originalReturn.file);
+    try { await hrDutyApi.recordHiringCollateralReturn(state.data.id, body); announceCrossWorkspaceDutyChanged(); await load(); }
+    catch (error) { setActionError(failureMessage(error)); }
+    finally { setPendingAction(null); }
+  };
+  const downloadFinanceEvidence = async () => {
+    if (!state.data || pendingAction) return;
+    setPendingAction('DOWNLOAD_EVIDENCE'); setActionError(null);
+    try {
+      const response = await hrDutyApi.downloadHiringFinanceEvidence(state.data.id);
+      downloadBlobResponse(response, financeContext?.evidenceOriginalName || financeContext?.originalName || 'finance-evidence');
+    } catch (error) { setActionError(failureMessage(error)); }
+    finally { setPendingAction(null); }
+  };
 
   if (!state.data && state.loading) {
     return <ErpPage title="وظیفه بین‌واحدی" backHref={`/dashboard/${workspace}/duties`}><ErpSkeleton lines={6} /></ErpPage>;
@@ -197,7 +242,49 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
           </div>
         </ErpSection>
       )}
-      {duty.allowedActionCodes.length > 0 && (
+      {['HIRING_COLLATERAL_VERIFY_RECEIPT', 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN'].includes(duty.sourceActionCode) && duty.access === 'ASSIGNEE' && duty.status === 'OPEN' && financeContext && (
+        <ErpSection title="جزئیات لازم برای تأیید" description="این اطلاعات فقط در محدوده همین وظیفه حسابداری نمایش داده می‌شود.">
+          <ErpSummaryGrid columns={2} items={[
+            { label: 'نوع وثیقه', value: financeContext.type || '—' },
+            { label: 'مبلغ', value: financeContext.amountRials ? `${formatNumericInputText(String(financeContext.amountRials)).displayText} ریال` : '—' },
+            ...(duty.sourceActionCode === 'HIRING_COLLATERAL_VERIFY_RECEIPT' ? [
+              { label: 'شناسه یا سریال', value: financeContext.identifier || '—' },
+              { label: 'صادرکننده یا ضامن', value: financeContext.issuerOrGuarantor || '—' },
+              { label: 'محل نگهداری اصل', value: financeContext.custodyLocation || '—' },
+              { label: 'تاریخ دریافت', value: financeContext.receivedAt ? new Date(financeContext.receivedAt).toLocaleDateString('fa-IR') : '—' },
+            ] : [
+              { label: 'تحویل‌گیرنده اصل', value: financeContext.returnedTo || '—' },
+              { label: 'شرح بازگرداندن', value: financeContext.evidenceNote || '—' },
+            ]),
+          ]} />
+          <ErpButton className="mt-4" label="دریافت فایل مدرک" variant="soft" disabled={Boolean(pendingAction)} onClick={() => void downloadFinanceEvidence()} />
+        </ErpSection>
+      )}
+      {duty.sourceActionCode === 'HIRING_COLLATERAL_RECORD_RECEIPT' && duty.access === 'ASSIGNEE' && duty.status === 'OPEN' && financeContext && (
+        <ErpSection title="ثبت دریافت وثیقه" description="فقط اطلاعات لازم برای تحویل و نگهداری اصل ثبت می‌شود؛ پرونده منابع انسانی در دسترس شما قرار نمی‌گیرد.">
+          <div className="grid gap-3 md:grid-cols-2">
+            <ErpField label="نوع وثیقه"><ErpFieldView label="نوع" value={financeContext.type} /></ErpField>
+            <ErpField label="مبلغ به ریال"><ErpRialInput value={receipt.amountRials} onValueChange={(amountRials) => setReceipt({ ...receipt, amountRials })} /></ErpField>
+            <ErpField label="شناسه یا سریال"><ErpInput value={receipt.identifier} onChange={(event) => setReceipt({ ...receipt, identifier: event.target.value })} /></ErpField>
+            <ErpField label="صادرکننده یا ضامن"><ErpInput value={receipt.issuerOrGuarantor} onChange={(event) => setReceipt({ ...receipt, issuerOrGuarantor: event.target.value })} /></ErpField>
+            <ErpField label="محل نگهداری اصل" required><ErpInput value={receipt.custodyLocation} onChange={(event) => setReceipt({ ...receipt, custodyLocation: event.target.value })} /></ErpField>
+            <ErpField label="تاریخ دریافت" required><ErpInput type="date" value={receipt.receivedAt} onChange={(event) => setReceipt({ ...receipt, receivedAt: event.target.value })} /></ErpField>
+            <ErpField label="اسکن مدرک دریافت" required><ErpInput type="file" onChange={(event) => setReceipt({ ...receipt, file: event.target.files?.[0] || null })} /></ErpField>
+          </div>
+          <ErpButton className="mt-4" label="ثبت دریافت و ارسال برای تأیید" disabled={Boolean(pendingAction) || !receipt.file || !receipt.receivedAt || !receipt.custodyLocation.trim()} onClick={() => void recordReceipt()} />
+        </ErpSection>
+      )}
+      {duty.sourceActionCode === 'HIRING_COLLATERAL_RECORD_ORIGINAL_RETURN' && duty.access === 'ASSIGNEE' && duty.status === 'OPEN' && financeContext && (
+        <ErpSection title="ثبت بازگرداندن اصل وثیقه" description="تحویل اصل و فایل مدرک در سابقه نسخه‌شده ثبت می‌شود.">
+          <div className="grid gap-3 md:grid-cols-2">
+            <ErpField label="اصل وثیقه به چه کسی تحویل شد؟" required><ErpInput value={originalReturn.returnedTo} onChange={(event) => setOriginalReturn({ ...originalReturn, returnedTo: event.target.value })} /></ErpField>
+            <ErpField label="شرح بازگرداندن اصل وثیقه" required><ErpTextarea value={originalReturn.evidenceNote} onChange={(event) => setOriginalReturn({ ...originalReturn, evidenceNote: event.target.value })} /></ErpField>
+            <ErpField label="فایل مدرک بازگرداندن" required><ErpInput type="file" onChange={(event) => setOriginalReturn({ ...originalReturn, file: event.target.files?.[0] || null })} /></ErpField>
+          </div>
+          <ErpButton className="mt-4" label="ثبت بازگرداندن و ارسال برای تأیید" disabled={Boolean(pendingAction) || !originalReturn.file || !originalReturn.returnedTo.trim() || !originalReturn.evidenceNote.trim()} onClick={() => void recordOriginalReturn()} />
+        </ErpSection>
+      )}
+      {duty.allowedActionCodes.length > 0 && duty.access === 'ASSIGNEE' && duty.status === 'OPEN' && (
         <ErpSection title="ثبت نتیجه" description="نتیجه مستقیماً و یک‌بار به فرایند مبدأ بازگردانده می‌شود.">
           <label className="sds-text-secondary mb-3 block text-sm font-semibold" htmlFor="duty-reason">دلیل برای رد، بازگرداندن یا درخواست توضیح</label>
           <ErpTextarea

@@ -77,4 +77,18 @@ export const crossWorkspaceDutyApi = {
       expectedEnvelopeVersion: duty.envelopeVersion,
     },
   ),
+  hiringFinanceContext: (dutyId: string) => api.get(`/duties/${dutyId}/hiring-finance/context`),
+  downloadHiringFinanceEvidence: (dutyId: string) => api.get(
+    `/duties/${dutyId}/hiring-finance/evidence`, { responseType: 'blob' },
+  ),
+  recordHiringCollateralReceipt: (dutyId: string, data: FormData) => api.post(
+    `/duties/${dutyId}/hiring-finance/receipt`,
+    data,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  ),
+  recordHiringCollateralReturn: (dutyId: string, data: FormData) => api.post(
+    `/duties/${dutyId}/hiring-finance/original-return`,
+    data,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  ),
 };

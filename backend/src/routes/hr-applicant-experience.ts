@@ -11,6 +11,7 @@ import {
   projectApplicantFullInformation,
   validateApplicantReturnContext,
 } from '../services/hrApplicantExperience';
+import { buildHiringDocumentIndex } from '../services/hrHiringDocumentIndex';
 
 const router = express.Router();
 const asyncHandler = (handler: (req: any, res: Response, next: NextFunction) => Promise<unknown>) =>
@@ -59,6 +60,9 @@ const informationGroupsForActionPermissions = (permissions: ReadonlySet<string>)
     groups.add('EDUCATION_SKILLS_LANGUAGES');
     groups.add('WORK_HISTORY');
     groups.add('APPLICATION_ANSWERS');
+  }
+  if (permissions.has('VIEW_COMPANY_EVALUATION_RESULTS') || permissions.has('MANAGE_FINANCE_EVIDENCE')) {
+    groups.add('DOCUMENTS_FILES');
   }
   return groups;
 };
@@ -114,11 +118,19 @@ router.get('/applications/:id/full-information', ...requireRecruitmentView, asyn
       identityChecks: { orderBy: { fieldKey: 'asc' } },
       assessments: { orderBy: { recordedAt: 'desc' } },
       preIdentityChecklistItems: { orderBy: { createdAt: 'asc' } },
+      contracts: { orderBy: { version: 'desc' } },
+      collateralItems: {
+        orderBy: { createdAt: 'desc' },
+        include: { returns: { orderBy: { version: 'desc' } } },
+      },
     },
   });
   if (!row) return res.status(404).json({ success: false, error: 'پرونده متقاضی پیدا نشد.' });
   const permittedGroups = informationGroupsForActionPermissions(actionPermissions);
-  return res.json({ success: true, data: projectApplicantFullInformation(row, permittedGroups) });
+  return res.json({ success: true, data: {
+    ...projectApplicantFullInformation(row, permittedGroups),
+    documentIndex: permittedGroups.has('DOCUMENTS_FILES') ? buildHiringDocumentIndex(row, actionPermissions) : [],
+  } });
 }));
 
 router.get('/applications/:id/closure-summary', ...requireRecruitmentView, asyncHandler(async (req: AuthRequest, res: Response) => {

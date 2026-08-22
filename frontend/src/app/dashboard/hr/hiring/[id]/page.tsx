@@ -1,6 +1,7 @@
 "use client";
 import {
   ErpInput,
+  ErpRialInput,
   ErpCheckbox,
   ErpField,
   ErpInlineState,
@@ -169,20 +170,11 @@ export default function HiringCasePage() {
   });
   const [components, setComponents] = useState([
     { label: "حقوق پایه", category: "BASE_SALARY", amountRials: "" },
-    { label: "مزایای ثابت", category: "FIXED_BENEFIT", amountRials: "" },
   ]);
-  const [collateral, setCollateral] = useState<any>({
-    itemId: "",
-    type: "PROMISSORY_NOTE",
-    amountRials: "",
-    identifier: "",
-    issuerOrGuarantor: "",
-    custodyLocation: "",
-    receivedAt: "",
-    file: null,
+  const [payrollReturn, setPayrollReturn] = useState({
+    reasonCode: "AMOUNT_INCORRECT",
+    reasonDetail: "",
   });
-  const [templates, setTemplates] = useState<any[]>([]);
-  const [templateId, setTemplateId] = useState("");
   const [assessment, setAssessment] = useState<any>({
     assessmentType: "DISC",
     scores: {},
@@ -202,12 +194,6 @@ export default function HiringCasePage() {
     confirmedCandidateInformation: "",
     note: "",
   });
-  const [handover, setHandover] = useState({
-    returnedTo: "",
-    returnEvidenceNote: "",
-    file: null as File | null,
-  });
-  const [collateralIssue, setCollateralIssue] = useState("");
   const [closure, setClosure] = useState({ outcome: "REJECTED", reason: "" });
   const [task, setTask] = useState({
     title: "",
@@ -279,13 +265,6 @@ export default function HiringCasePage() {
       .myActionPermissions()
       .then((result) => setActionPermissions(result.data.data))
       .catch(() => setActionPermissions([]));
-    void hiringAPI
-      .collateralTemplates()
-      .then((result) => {
-        setTemplates(result.data.data);
-        setTemplateId(result.data.data[0]?.id || "");
-      })
-      .catch(() => undefined);
     // `load` intentionally follows the route id; recreating it is harmless but would retrigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -404,7 +383,6 @@ export default function HiringCasePage() {
     !data.readOnlyArchived && values.some((value) => actionPermissions.includes(value));
   const canHrSensitive = hasActionPermission("MANAGE_RECRUITMENT_CASE");
   const canCompanyManager = hasActionPermission("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS", "MANAGE_COMPANY_EVALUATION_PLAN", "RECORD_FINAL_MANAGEMENT_DECISION");
-  const canFinance = hasActionPermission("MANAGE_FINANCE_EVIDENCE");
   const canViewContractTask = hiringTaskDetailVisible(
     data.taskCapabilities,
     "SIGNED_CONTRACT",
@@ -447,13 +425,14 @@ export default function HiringCasePage() {
           ({ key }) => assessmentScoreValidation[key]?.value !== undefined,
         );
   const compensationRowsValid =
-    components.length > 0 &&
+    components.filter((item) => item.category === "BASE_SALARY").length === 1 &&
     components.every(
       (item) =>
         Boolean(item.category) &&
         /^\d+$/.test(String(item.amountRials || "")) &&
+        BigInt(item.amountRials || "0") > BigInt(0) &&
         (item.category !== "OTHER" || Boolean(item.label.trim())),
-    );
+    ) && new Set(components.filter((item) => item.category !== "OTHER").map((item) => item.category)).size === components.filter((item) => item.category !== "OTHER").length;
   const uploadDocument = () => {
     const fd = new FormData();
     fd.append("category", document.category);
@@ -469,26 +448,6 @@ export default function HiringCasePage() {
         ? "مشاهده اصل سند ثبت شد."
         : "کپی سند ثبت شد.",
     );
-  };
-  const addCollateral = () => {
-    const fd = new FormData();
-    Object.entries(collateral).forEach(([key, value]) => {
-      if (key !== "file" && value != null) {
-        fd.append(
-          key,
-          key === "receivedAt" ? toIsoDate(String(value)) : String(value),
-        );
-      }
-    });
-    if (collateral.file) fd.append("file", collateral.file);
-    return run(() => hiringAPI.addCollateral(id, fd), "وثیقه ثبت شد.");
-  };
-  const returnCollateral = (itemId: string) => {
-    const fd = new FormData();
-    fd.append("returnedTo", handover.returnedTo);
-    fd.append("returnEvidenceNote", handover.returnEvidenceNote);
-    if (handover.file) fd.append("file", handover.file);
-    return hiringAPI.returnCollateral(id, itemId, fd);
   };
   const uploadContract = () => {
     const fd = new FormData();
@@ -644,53 +603,6 @@ export default function HiringCasePage() {
             </ErpCard>
           </ErpSection>
         )}
-      {(canHrSensitive || canCompanyManager || canFinance) && (
-        <ErpSection
-          title="فهرست اسناد و فایل‌های پرونده"
-          description="دسترسی هر فایل بر اساس مسئولیت سازمانی شما کنترل و ثبت می‌شود."
-        >
-          <div className="space-y-2">
-            {(data.documentIndex || []).length === 0 && (
-              <ErpCard className="p-4 text-sm text-[var(--sds-text-secondary)]">
-                هنوز سند یا فایل قابل نمایش برای این پرونده ثبت نشده است.
-              </ErpCard>
-            )}
-            {(data.documentIndex || []).map((item: any) => (
-              <ErpCard
-                key={`${item.category}-${item.id}-${item.version}`}
-                className="flex flex-wrap items-center justify-between gap-3 p-4"
-              >
-                <div>
-                  <p className="font-bold">{item.title}</p>
-                  <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
-                    {item.safeOwner} · نسخه {item.version} ·{" "}
-                    {hrDisplayLabel(item.reviewStatus)}
-                  </p>
-                  {!item.restricted && (
-                    <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
-                      {item.originalName || "بدون فایل پیوست"} ·{" "}
-                      {dateTimeFa(item.date)}
-                    </p>
-                  )}
-                </div>
-                {item.canOpen ? (
-                  <ErpPressable
-                    type="submit"
-                    className="rounded-lg border px-3 py-2 text-sm"
-                    onClick={() => downloadIndexedEvidence(item)}
-                  >
-                    دریافت فایل
-                  </ErpPressable>
-                ) : (
-                  <span className="rounded-lg bg-[var(--sds-surface-subtle)] px-3 py-2 text-xs dark:bg-[var(--sds-surface-raised)]">
-                    جزئیات برای نقش شما محدود است
-                  </span>
-                )}
-              </ErpCard>
-            ))}
-          </div>
-        </ErpSection>
-      )}
       {["INITIAL_HR_REVIEW", "COMPANY_EVALUATION_PLAN"].includes(selectedLifecyclePhase || "") &&
         (canHrSensitive || canCompanyManager) && (
           <PreIdentitySection
@@ -1422,22 +1334,14 @@ export default function HiringCasePage() {
                           }
                         />
                       )}
-                      <ErpInput
-                        inputMode="numeric"
+                      <ErpRialInput
+                        aria-label="مبلغ ردیف حقوق و مزایا به ریال"
                         placeholder="مبلغ ریال"
                         value={item.amountRials}
-                        onChange={(e) =>
+                        onValueChange={(amountRials) =>
                           setComponents(
                             components.map((x, j) =>
-                              j === i
-                                ? {
-                                    ...x,
-                                    amountRials: e.target.value.replace(
-                                      /\D/g,
-                                      "",
-                                    ),
-                                  }
-                                : x,
+                              j === i ? { ...x, amountRials } : x,
                             ),
                           )
                         }
@@ -1473,56 +1377,44 @@ export default function HiringCasePage() {
                       disabled={busy || !compensationRowsValid}
                     />
                   )}
-                  {hasActionPermission("MANAGE_PAYROLL") && (
+                  {hasActionPermission("MANAGE_PAYROLL") && compensation?.payrollReviewStatus === "PENDING" && (
                     <ErpButton
-                      label="آماده‌سازی منابع انسانی و حقوق و دستمزد"
+                      label="تأیید ردیف‌های حقوق و دستمزد"
                       onClick={() =>
                         run(
-                          () =>
-                            hiringAPI.prepareCompensation(id, compensation.id, {
-                              components,
-                            }),
-                          "نسخه توسط کارشناس حقوق و دستمزد آماده شد.",
-                        )
-                      }
-                      disabled={busy || !compensation || !compensationRowsValid}
-                    />
-                  )}
-                  {hasActionPermission("MANAGE_PAYROLL") && (
-                    <ErpButton
-                      label="تأیید مدیر حقوق و دستمزد"
-                      onClick={() =>
-                        run(
-                          () =>
-                            hiringAPI.approveCompensationHr(
-                              id,
-                              compensation.id,
-                            ),
-                          "تأیید منابع انسانی انجام شد.",
+                          () => hiringAPI.reviewCompensationPayroll(id, compensation.id, { decision: "APPROVE" }),
+                          "پیشنهاد تأیید و برای متقاضی ارسال شد.",
                         )
                       }
                       disabled={busy || !compensation}
                       tone="success"
                     />
                   )}
-                  {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
+                  {hasActionPermission("MANAGE_PAYROLL") && compensation?.payrollReviewStatus === "PENDING" && (
                     <ErpButton
-                      label="تأیید مدیر مالی"
+                      label="بازگرداندن برای اصلاح"
                       onClick={() =>
                         run(
-                          () =>
-                            hiringAPI.approveCompensationFinance(
-                              id,
-                              compensation.id,
-                            ),
-                          "تأیید مالی انجام شد.",
+                          () => hiringAPI.reviewCompensationPayroll(id, compensation.id, { decision: "RETURN", ...payrollReturn }),
+                          "پیشنهاد برای اصلاح بازگردانده شد.",
                         )
                       }
-                      disabled={busy || !compensation}
-                      tone="success"
+                      disabled={busy || !payrollReturn.reasonDetail.trim()}
+                      tone="warning"
                     />
                   )}
                 </div>
+                {hasActionPermission("MANAGE_PAYROLL") && compensation?.payrollReviewStatus === "PENDING" && (
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <ErpSelect aria-label="دسته علت بازگشت" value={payrollReturn.reasonCode} onChange={(event) => setPayrollReturn({ ...payrollReturn, reasonCode: event.target.value })}>
+                      <option value="AMOUNT_INCORRECT">مبلغ نادرست است</option>
+                      <option value="CATEGORY_INCORRECT">طبقه‌بندی نادرست است</option>
+                      <option value="POLICY_MISMATCH">با سیاست حقوق و دستمزد سازگار نیست</option>
+                      <option value="INCOMPLETE_INFORMATION">اطلاعات ناقص است</option>
+                    </ErpSelect>
+                    <ErpTextarea aria-label="شرح علت بازگشت" placeholder="شرح دقیق اصلاح موردنیاز" value={payrollReturn.reasonDetail} onChange={(event) => setPayrollReturn({ ...payrollReturn, reasonDetail: event.target.value })} />
+                  </div>
+                )}
                 {compensation && (
                   <>
                     <p className="mt-3 font-black">
@@ -1530,7 +1422,7 @@ export default function HiringCasePage() {
                       {Number(compensation.totalRials).toLocaleString("fa-IR")}{" "}
                       ریال
                     </p>
-                    <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                    <div className="mt-4 grid gap-2 md:grid-cols-3">
                       {[
                         {
                           title: "ثبت پیشنهاد",
@@ -1539,22 +1431,10 @@ export default function HiringCasePage() {
                           at: compensation.createdAt,
                         },
                         {
-                          title: "آماده‌سازی حقوق و مزایا",
-                          role: "کارشناس حقوق و دستمزد",
-                          actor: compensation.preparedBy,
-                          at: compensation.preparedAt,
-                        },
-                        {
-                          title: "تأیید منابع انسانی و حقوق",
-                          role: "مدیر حقوق و دستمزد",
-                          actor: compensation.hrApprovedBy,
-                          at: compensation.hrApprovedAt,
-                        },
-                        {
-                          title: "تأیید مالی",
-                          role: "مدیر امور مالی",
-                          actor: compensation.financeApprovedBy,
-                          at: compensation.financeApprovedAt,
+                          title: "بررسی حقوق و دستمزد",
+                          role: "دارنده مجوز بررسی حقوق و دستمزد",
+                          actor: compensation.payrollVerifiedBy || compensation.hrApprovedBy || compensation.financeApprovedBy,
+                          at: compensation.payrollVerifiedAt || compensation.hrApprovedAt || compensation.financeApprovedAt,
                         },
                         {
                           title: "تصمیم متقاضی",
@@ -1597,8 +1477,7 @@ export default function HiringCasePage() {
                       />
                     )}
                     {hasActionPermission("MANAGE_RECRUITMENT_CASE") &&
-                      compensation.hrApprovedAt &&
-                      compensation.financeApprovedAt &&
+                      (compensation.payrollVerifiedAt || compensation.hrApprovedAt || compensation.financeApprovedAt) &&
                       !compensation.candidateDecision && (
                         <div className="mt-4 grid gap-2 rounded-xl border p-3 md:grid-cols-2">
                           <h4 className="font-bold md:col-span-2">
@@ -1697,151 +1576,16 @@ export default function HiringCasePage() {
             </ErpSection>
           </>
         )}
-      {selectedLifecyclePhase === "CONVERSION" && canFinance && (
+      {selectedLifecyclePhase === "CONVERSION" &&
+        (data.collateralItems.length > 0 || data.collateralClearance === "IN_PROGRESS") && (
         <>
           <ErpSection title="وثیقه و تعهدات امور مالی">
-            {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
-              <ErpCard className="mb-4 grid gap-2 p-4 md:grid-cols-3">
-                <ErpSelect
-                  value={templateId}
-                  onChange={(e) => setTemplateId(e.target.value)}
-                >
-                  <option value="">انتخاب قالب چک‌لیست</option>
-                  {templates
-                    .filter((item) => item.isActive)
-                    .map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name} · نسخه {item.version}
-                      </option>
-                    ))}
-                </ErpSelect>
-                <ErpButton
-                  label="اعمال قالب پس از پذیرش پیشنهاد"
-                  disabled={
-                    !templateId || busy || data.collateralItems.length > 0
-                  }
-                  onClick={() =>
-                    run(
-                      () => hiringAPI.applyCollateralTemplate(id, templateId),
-                      "چک‌لیست وثیقه ایجاد شد.",
-                    )
-                  }
-                />
-              </ErpCard>
-            )}
+            <ErpInlineState
+              kind="permission"
+              title={<span>اقدام مالی از وظایف بین‌واحدی حسابداری انجام می‌شود<br /><small>این پرونده فقط وضعیت پیشرفت را نمایش می‌دهد و امکان ثبت یا تأیید مدرک مالی در فضای منابع انسانی وجود ندارد.</small></span>}
+            />
             <div className="grid gap-4 xl:grid-cols-2">
-              {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
-                <ErpCard className="grid gap-2 p-4 md:grid-cols-2">
-                  <ErpSelect
-                    value={collateral.type}
-                    onChange={(e) =>
-                      setCollateral({ ...collateral, type: e.target.value })
-                    }
-                  >
-                    <option value="PROMISSORY_NOTE">سفته</option>
-                    <option value="CHEQUE">چک</option>
-                    <option value="GUARANTEE">ضمانت‌نامه</option>
-                    <option value="UNDERTAKING">تعهدنامه</option>
-                    <option value="OTHER">سایر</option>
-                  </ErpSelect>
-                  <ErpInput
-                    placeholder="مبلغ ریال"
-                    value={collateral.amountRials}
-                    onChange={(e) =>
-                      setCollateral({
-                        ...collateral,
-                        amountRials: e.target.value.replace(/\D/g, ""),
-                      })
-                    }
-                  />
-                  <ErpInput
-                    placeholder="شناسه/سریال"
-                    value={collateral.identifier}
-                    onChange={(e) =>
-                      setCollateral({
-                        ...collateral,
-                        identifier: e.target.value,
-                      })
-                    }
-                  />
-                  <ErpInput
-                    placeholder="صادرکننده/ضامن"
-                    value={collateral.issuerOrGuarantor}
-                    onChange={(e) =>
-                      setCollateral({
-                        ...collateral,
-                        issuerOrGuarantor: e.target.value,
-                      })
-                    }
-                  />
-                  <ErpInput
-                    placeholder="محل نگهداری اصل"
-                    value={collateral.custodyLocation}
-                    onChange={(e) =>
-                      setCollateral({
-                        ...collateral,
-                        custodyLocation: e.target.value,
-                      })
-                    }
-                  />
-                  <ErpField label="تاریخ دریافت وثیقه" required>
-                    <HrPersianCalendar
-                      value={collateral.receivedAt}
-                      onChange={(receivedAt) =>
-                        setCollateral({
-                          ...collateral,
-                          receivedAt,
-                        })
-                      }
-                    />
-                  </ErpField>
-                  <ErpInput
-                    type="file"
-                    onChange={(e) =>
-                      setCollateral({
-                        ...collateral,
-                        file: e.target.files?.[0],
-                      })
-                    }
-                  />
-                  <ErpButton
-                    label="ثبت توسط امور مالی"
-                    onClick={addCollateral}
-                    disabled={
-                      busy ||
-                      !collateral.type ||
-                      !collateral.file ||
-                      !collateral.receivedAt ||
-                      !collateral.custodyLocation
-                    }
-                  />
-                </ErpCard>
-              )}
               <ErpCard className="p-4">
-                <div className="mb-3 grid gap-2 md:grid-cols-4">
-                  <ErpInput
-                    placeholder="دلیل هماهنگی قلم ناقص/ردشده"
-                    value={collateralIssue}
-                    onChange={(e) => setCollateralIssue(e.target.value)}
-                  />
-                  <ErpInput
-                    placeholder="تحویل‌گیرنده اصل وثیقه"
-                    value={handover.returnedTo}
-                    onChange={(e) =>
-                      setHandover({ ...handover, returnedTo: e.target.value })
-                    }
-                  />
-                  <ErpInput
-                    placeholder="مدرک/شرح تحویل"
-                    value={handover.returnEvidenceNote}
-                    onChange={(e) =>
-                      setHandover({
-                        ...handover,
-                        returnEvidenceNote: e.target.value,
-                      })
-                    }
-                  />
-                </div>
                 <div className="space-y-2">
                   {data.collateralItems.map((item: any) => (
                     <div key={item.id} className="rounded-lg border p-3">
@@ -1849,156 +1593,14 @@ export default function HiringCasePage() {
                         <b>{hrDisplayLabel(item.type)}</b>
                         <ErpBadge>{hrDisplayLabel(item.status)}</ErpBadge>
                       </div>
-                      <p className="text-xs">
-                        {item.identifier} · {item.custodyLocation}
-                      </p>
-                      {item.originalName && (
-                        <ErpPressable
-                          type="submit"
-                          className="mt-2 rounded bg-[var(--sds-surface-subtle)] px-2 py-1 text-xs"
-                          onClick={() =>
-                            download(
-                              () => hiringAPI.downloadCollateral(id, item.id),
-                              item.originalName,
-                            )
-                          }
-                        >
-                          دریافت اسکن
-                        </ErpPressable>
-                      )}
-                      {hasActionPermission("MANAGE_FINANCE_EVIDENCE") &&
-                        ["MISSING", "MISMATCH", "UNREADABLE"].includes(
-                          item.status,
-                        ) && (
-                          <ErpPressable
-                            type="submit"
-                            className="mt-2 rounded bg-[var(--sds-info-surface)] px-2 py-1 text-xs"
-                            onClick={() =>
-                              setCollateral({
-                                ...collateral,
-                                itemId: item.id,
-                                type: item.type,
-                                amountRials: item.amountRials || "",
-                              })
-                            }
-                          >
-                            {item.status === "MISSING"
-                              ? "ثبت دریافت این قلم"
-                              : "ثبت نسخه جایگزین"}
-                          </ErpPressable>
-                        )}
-                      {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
-                        <ErpPressable
-                          type="submit"
-                          className="mt-2 rounded bg-[var(--sds-success-surface)] px-2 py-1 text-xs"
-                          onClick={() =>
-                            run(
-                              () =>
-                                hiringAPI.reviewCollateral(id, item.id, {
-                                  status: "VERIFIED",
-                                }),
-                              "قلم وثیقه تأیید شد.",
-                            )
-                          }
-                        >
-                          تأیید مدیر مالی
-                        </ErpPressable>
-                      )}
-                      {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
-                        <ErpPressable
-                          type="submit"
-                          className="mr-2 mt-2 rounded bg-[var(--sds-danger-surface)] px-2 py-1 text-xs"
-                          disabled={!collateralIssue}
-                          onClick={() =>
-                            run(
-                              () =>
-                                hiringAPI.reviewCollateral(id, item.id, {
-                                  status: "MISMATCH",
-                                  coordinationReason: collateralIssue,
-                                }),
-                              "قلم برای پیگیری رد شد.",
-                            )
-                          }
-                        >
-                          نیازمند پیگیری
-                        </ErpPressable>
-                      )}
-                      {(hasActionPermission("MANAGE_FINANCE_EVIDENCE") ||
-                        hasActionPermission("MANAGE_FINANCE_EVIDENCE")) &&
-                        item.receivedAt &&
-                        !item.returnedAt && (
-                          <ErpPressable
-                            type="submit"
-                            className="mr-2 mt-2 rounded bg-[var(--sds-warning-surface)] px-2 py-1 text-xs"
-                            disabled={
-                              !handover.returnedTo ||
-                              !handover.returnEvidenceNote ||
-                              !handover.file
-                            }
-                            onClick={() =>
-                              run(
-                                () => returnCollateral(item.id),
-                                "بازگشت وثیقه ثبت شد.",
-                              )
-                            }
-                          >
-                            ثبت تحویل اصل
-                          </ErpPressable>
-                        )}
-                      {hasActionPermission("MANAGE_FINANCE_EVIDENCE") &&
-                        item.returnedAt &&
-                        !item.returnConfirmedAt && (
-                          <ErpPressable
-                            type="submit"
-                            className="mr-2 mt-2 rounded bg-[var(--sds-info-surface)] px-2 py-1 text-xs"
-                            onClick={() =>
-                              run(
-                                () =>
-                                  hiringAPI.confirmCollateralReturn(
-                                    id,
-                                    item.id,
-                                  ),
-                                "بازگشت توسط مدیر مالی تأیید شد.",
-                              )
-                            }
-                          >
-                            تأیید مدیر مالی بازگشت
-                          </ErpPressable>
-                        )}
-                      {item.returnEvidenceOriginalName && (
-                        <ErpPressable
-                          type="submit"
-                          className="mr-2 mt-2 rounded bg-[var(--sds-surface-subtle)] px-2 py-1 text-xs"
-                          onClick={() =>
-                            download(
-                              () =>
-                                hiringAPI.downloadCollateralReturnEvidence(
-                                  id,
-                                  item.id,
-                                ),
-                              item.returnEvidenceOriginalName,
-                            )
-                          }
-                        >
-                          دریافت مدرک تحویل
-                        </ErpPressable>
+                      {item.coordinationReason && (
+                        <p className="mt-2 text-xs text-[var(--sds-warning)]">
+                          علت نیاز به اصلاح یا پیگیری: {item.coordinationReason}
+                        </p>
                       )}
                     </div>
                   ))}
                 </div>
-                {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
-                  <ErpButton
-                    className="mt-3"
-                    label="تأیید نهایی وثیقه"
-                    onClick={() =>
-                      run(
-                        () => hiringAPI.approveCollateral(id),
-                        "وثیقه نهایی تأیید شد.",
-                      )
-                    }
-                    tone="success"
-                  />
-                )}
               </ErpCard>
             </div>
           </ErpSection>
@@ -3603,31 +3205,19 @@ function CollateralRequirementPanel({
           <option value="UNDERTAKING">تعهدنامه</option>
           <option value="OTHER">سایر</option>
         </ErpSelect>
-        <ErpInput
+        <ErpRialInput
+          aria-label="مبلغ وثیقه پیشنهادی به ریال"
           placeholder="مبلغ (ریال)"
           value={draft.amountRials}
-          onChange={(event) =>
-            setDraft({ ...draft, amountRials: event.target.value })
-          }
-        />
-        <ErpInput
-          placeholder="زمان تحویل"
-          value={draft.dueTiming}
-          onChange={(event) =>
-            setDraft({ ...draft, dueTiming: event.target.value })
-          }
-        />
-        <ErpInput
-          placeholder="توضیح قابل نمایش به متقاضی"
-          value={draft.candidateExplanation}
-          onChange={(event) =>
-            setDraft({ ...draft, candidateExplanation: event.target.value })
-          }
+          onValueChange={(amountRials) => setDraft({ ...draft, amountRials })}
         />
       </div>
+      <p className="text-sm text-[var(--sds-text-secondary)]">
+        متن اطلاع‌رسانی متقاضی پس از ثبت، به‌صورت خودکار از نوع وثیقه و مبلغ ساخته می‌شود.
+      </p>
       <ErpButton
         label={current ? "ثبت نسخه جدید الزام وثیقه" : "ثبت الزام وثیقه"}
-        disabled={busy || !draft.candidateExplanation.trim()}
+        disabled={busy}
         onClick={() =>
           run(
             () => hiringAPI.addCollateralRequirement(applicationId, draft),

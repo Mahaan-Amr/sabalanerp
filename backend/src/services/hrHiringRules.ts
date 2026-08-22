@@ -69,7 +69,7 @@ export type CompensationComponentInput = {
 
 export const normalizeCompensationComponents = (components: CompensationComponentInput[]) => {
   if (!Array.isArray(components) || !components.length) throw new Error('حداقل یک ردیف جبران خدمات لازم است.');
-  return components.map((component) => {
+  const normalized = components.map((component) => {
     const category = String(component.category || '');
     if (category === 'OTHER') {
       const label = String(component.label || '').trim();
@@ -80,16 +80,42 @@ export const normalizeCompensationComponents = (components: CompensationComponen
     if (!label) throw new Error('طبقه‌بندی ساختاریافته همه ردیف‌های جبران خدمات الزامی است.');
     return { category, label, amountRials: normalizeHiringRial(component.amountRials) };
   });
+  if (normalized.filter(({ category }) => category === 'BASE_SALARY').length !== 1) {
+    throw new Error('پیشنهاد باید دقیقاً یک ردیف حقوق پایه داشته باشد.');
+  }
+  const identities = new Set<string>();
+  for (const component of normalized) {
+    if (BigInt(component.amountRials) <= 0n) throw new Error('مبلغ هر ردیف باید بزرگ‌تر از صفر باشد.');
+    const identity = component.category === 'OTHER'
+      ? `OTHER:${component.label.replace(/\s+/g, ' ').toLocaleLowerCase('fa-IR')}`
+      : component.category;
+    if (identities.has(identity)) throw new Error('ردیف‌های جبران خدمات تکراری مجاز نیستند.');
+    identities.add(identity);
+  }
+  return normalized;
 };
 
 export const compensationTotalRials = (components: Array<{ label?: string; amountRials: string | number }>) => {
   if (!Array.isArray(components) || !components.length) throw new Error('حداقل یک ردیف جبران خدمات لازم است.');
-  return components.reduce((sum, item) => {
+  const total = components.reduce((sum, item) => {
     if (!String(item.label || '').trim()) throw new Error('عنوان هر ردیف جبران خدمات الزامی است.');
     const value = String(item.amountRials ?? '');
     if (!/^\d+$/.test(value)) throw new Error('مبلغ هر ردیف باید عدد صحیح ریال باشد.');
     return sum + BigInt(value);
   }, 0n);
+  if (total.toString().length > 18) throw new Error('جمع پیشنهاد حقوق از سقف مبلغ ریالی مجاز بیشتر است.');
+  return total;
+};
+
+const COLLATERAL_LABELS: Record<string, string> = {
+  PROMISSORY_NOTE: 'سفته', CHEQUE: 'چک ضمانت', GUARANTEE: 'ضامن',
+  UNDERTAKING: 'تعهدنامه', OTHER: 'وثیقه',
+};
+
+export const collateralCandidateExplanation = (type: string, amountRials: string | null) => {
+  const label = COLLATERAL_LABELS[type] || COLLATERAL_LABELS.OTHER;
+  const amount = amountRials ? ` به مبلغ ${BigInt(amountRials).toLocaleString('en-US')} ریال` : '';
+  return `پس از پذیرش پیشنهاد، امور مالی برای دریافت ${label}${amount} با شما هماهنگ می‌کند.`;
 };
 
 export const unresolvedActivationRequirements = (input: {

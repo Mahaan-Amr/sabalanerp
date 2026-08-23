@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PrismaClient } from '@prisma/client';
-import { getCrossWorkspaceDutyDetail, getCrossWorkspaceDutySummary, listCrossWorkspaceDuties } from '../crossWorkspaceDutyInbox';
+import { getCrossWorkspaceDutyDetail, getCrossWorkspaceDutySummary, listCrossWorkspaceDuties, markCrossWorkspaceDutyAvailableSeen } from '../crossWorkspaceDutyInbox';
 import { claimCrossWorkspaceDuty, reassignCrossWorkspaceDuty, respondToCrossWorkspaceDuty } from '../crossWorkspaceDutyModule';
 import {
   completeSalesContractCorrectionEdit,
@@ -51,12 +51,19 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
         createdBy: seller.id, responsibleSellerId: seller.id,
       } });
       await Promise.all([
+        tx.workspacePermission.create({ data: {
+          userId: initiator.id, workspace: 'accounting', permissionLevel: 'admin', grantedBy: accountingManager.id,
+        } }),
         tx.featurePermission.create({ data: {
           userId: initiator.id, workspace: 'accounting', feature: 'accounting_corrections_create',
           permissionLevel: 'edit', grantedBy: accountingManager.id,
         } }),
         tx.featurePermission.create({ data: {
           userId: initiator.id, workspace: 'accounting', feature: 'accounting_corrections_verify',
+          permissionLevel: 'edit', grantedBy: accountingManager.id,
+        } }),
+        tx.featurePermission.create({ data: {
+          userId: initiator.id, workspace: 'accounting', feature: 'accounting_corrections_approve',
           permissionLevel: 'edit', grantedBy: accountingManager.id,
         } }),
         tx.featurePermission.create({ data: {
@@ -104,20 +111,9 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
       });
       assert.equal(joined.joined, true);
 
-      await assert.rejects(claimCrossWorkspaceDuty(tx, {
-        dutyId: created.duty.id,
-        actorUserId: initiator.id,
-        policyVersion: 2,
-      }), /SEPARATION_OF_DUTIES_CONFLICT/);
-
-      await claimCrossWorkspaceDuty(tx, {
-        dutyId: created.duty.id,
-        actorUserId: accountingManager.id,
-        policyVersion: 2,
-      });
       const approved = await respondToCrossWorkspaceDuty(tx, {
         dutyId: created.duty.id,
-        actorUserId: accountingManager.id,
+        actorUserId: initiator.id,
         actionCode: 'APPROVE',
         expectedSourceVersion: 1,
         expectedEnvelopeVersion: 1,
@@ -126,9 +122,12 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
       });
       assert.equal(approved.successor.currentAssigneeUserId, seller.id);
       assert.equal(approved.successor.sourceActionCode, 'SALES_EDIT_CONTRACT_CORRECTION');
+      assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
+        dutyId: created.duty.id, eventCode: 'WORKSPACE_ADMIN_SELF_DECISION', actorUserId: initiator.id,
+      } }), 1);
       const completedManagerDecision = await getCrossWorkspaceDutyDetail(tx, {
         dutyId: created.duty.id,
-        actorUserId: accountingManager.id,
+        actorUserId: initiator.id,
         workspaceCode: 'ACCOUNTING',
         now: new Date('2026-08-20T08:00:00.000Z'),
       });
@@ -155,7 +154,7 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
         policyVersion: 2,
         now: new Date('2026-08-24T08:00:00.000Z'),
       });
-      assert.equal(edited.successor.currentAssigneeUserId, initiator.id);
+      assert.equal(edited.successor.currentAssigneeUserId, null);
       assert.equal(edited.successor.sourceActionCode, 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION');
 
       const verified = await respondToCrossWorkspaceDuty(tx, {
@@ -216,34 +215,27 @@ test('ADMIN may execute every correction stage through the audited workflow with
         envelopeVersion: created.duty.envelopeVersion,
         policyVersion: 2,
       } });
-      await claimCrossWorkspaceDuty(tx, {
-        dutyId: created.duty.id, actorUserId: admin.id, policyVersion: 2,
-        reason: 'مدیر سیستم مسئولیت تصمیم روی درخواست خود را می‌پذیرد.',
-        now: new Date('2026-08-22T10:01:00.000Z'),
-      });
-      assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
-        dutyId: created.duty.id, eventCode: 'ADMIN_OVERRIDE_CLAIM_SEPARATION_OF_DUTIES', actorUserId: admin.id,
-      } }), 1);
       const assignedDetail = await getCrossWorkspaceDutyDetail(tx, {
         dutyId: created.duty.id, actorUserId: admin.id, workspaceCode: 'ACCOUNTING',
         now: new Date('2026-08-22T10:01:30.000Z'),
       });
-      assert.equal(assignedDetail.responseRequiresReason, true);
+      assert.equal(assignedDetail.access, 'SHARED');
+      assert.equal(assignedDetail.responseRequiresReason, false);
       const approved = await respondToCrossWorkspaceDuty(tx, {
         dutyId: created.duty.id, actorUserId: admin.id, actionCode: 'APPROVE',
         expectedSourceVersion: 1, expectedEnvelopeVersion: 1,
-        reason: 'مدیر سیستم تصمیم خود بر درخواست را به‌صورت صریح تأیید می‌کند.', policyVersion: 2,
+        reason: null, policyVersion: 2,
         now: new Date('2026-08-22T10:02:00.000Z'),
       });
       assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
-        dutyId: created.duty.id, eventCode: 'ADMIN_OVERRIDE_DECISION_SEPARATION_OF_DUTIES', actorUserId: admin.id,
+        dutyId: created.duty.id, eventCode: 'SYSTEM_ADMIN_SELF_DECISION', actorUserId: admin.id,
       } }), 1);
       assert.equal(approved.successor.currentAssigneeUserId, seller.id);
       const edited = await completeSalesContractCorrectionEdit(tx, {
         contractId: contract.id, actorUserId: admin.id, note: 'ویرایش با Admin Override ثبت شد.', policyVersion: 2,
         now: new Date('2026-09-01T10:03:00.000Z'),
       });
-      assert.equal(edited.successor.currentAssigneeUserId, admin.id);
+      assert.equal(edited.successor.currentAssigneeUserId, null);
       const verified = await respondToCrossWorkspaceDuty(tx, {
         dutyId: edited.successor.id, actorUserId: admin.id, actionCode: 'VERIFY',
         expectedSourceVersion: 3, expectedEnvelopeVersion: 1,
@@ -302,12 +294,20 @@ test('Responsible Seller creates one correction request assigned to an eligible 
           userId: processor.id, workspace: 'accounting', feature: 'accounting_corrections_manage',
           permissionLevel: 'admin', grantedBy: seller.id,
         } }),
+        tx.featurePermission.create({ data: {
+          userId: processor.id, workspace: 'accounting', feature: 'accounting_corrections_approve',
+          permissionLevel: 'edit', grantedBy: seller.id,
+        } }),
+        tx.featurePermission.create({ data: {
+          userId: processor.id, workspace: 'accounting', feature: 'accounting_corrections_verify',
+          permissionLevel: 'edit', grantedBy: seller.id,
+        } }),
         tx.workspacePermission.create({ data: {
           userId: alternateManager.id, workspace: 'accounting', permissionLevel: 'admin', grantedBy: seller.id,
         } }),
         tx.featurePermission.create({ data: {
-          userId: alternateManager.id, workspace: 'accounting', feature: 'accounting_corrections_manage',
-          permissionLevel: 'admin', grantedBy: seller.id,
+          userId: alternateManager.id, workspace: 'accounting', feature: 'accounting_corrections_approve',
+          permissionLevel: 'edit', grantedBy: seller.id,
         } }),
       ]);
 
@@ -356,8 +356,21 @@ test('Responsible Seller creates one correction request assigned to an eligible 
       });
       assert.equal(summaryAfter.open, summaryBefore.open);
       assert.equal(summaryAfter.available, summaryBefore.available + 1);
+      assert.equal(summaryAfter.availableUnseen, summaryBefore.availableUnseen + 1);
+      assert.equal(summaryAfter.attention, summaryAfter.open + summaryAfter.availableUnseen);
       assert.equal(summaryAfter.triage, summaryBefore.triage + 1);
       assert.equal(summaryAfter.canManageTriage, true);
+      await markCrossWorkspaceDutyAvailableSeen(tx, {
+        actorUserId: processor.id,
+        workspaceCode: 'ACCOUNTING',
+        seenThrough: new Date('2026-08-24T08:02:00.000Z'),
+        now: new Date('2026-08-24T08:02:00.000Z'),
+      });
+      assert.equal((await getCrossWorkspaceDutySummary(tx, {
+        actorUserId: processor.id,
+        workspaceCode: 'ACCOUNTING',
+        now: new Date('2026-08-24T08:02:30.000Z'),
+      })).availableUnseen, 0);
 
       const claimed = await claimCrossWorkspaceDuty(tx, {
         dutyId: created.duty.id,
@@ -432,28 +445,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         assignee: null,
       });
 
-      await claimCrossWorkspaceDuty(tx, {
-        dutyId: forwarded.successor.id,
-        actorUserId: processor.id,
-        policyVersion: 1,
-        now: new Date('2026-08-16T09:05:00.000Z'),
-      });
-      const reassigned = await reassignCrossWorkspaceDuty(tx, {
-        dutyId: forwarded.successor.id,
-        actorUserId: processor.id,
-        targetUserId: alternateManager.id,
-        expectedAssigneeUserId: processor.id,
-        reason: 'مدیر جایگزین پرونده را بررسی می‌کند.',
-        policyVersion: 1,
-        now: new Date('2026-08-16T09:10:00.000Z'),
-      });
-      assert.deepEqual({
-        assignee: reassigned.currentAssigneeUserId,
-        dueAt: reassigned.dueAt.toISOString(),
-      }, {
-        assignee: alternateManager.id,
-        dueAt: forwarded.successor.dueAt.toISOString(),
-      });
+      assert.equal(forwarded.successor.currentAssigneeUserId, null);
 
       const approved = await respondToCrossWorkspaceDuty(tx, {
         dutyId: forwarded.successor.id,
@@ -495,7 +487,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         sourceStatus: 'SALES_EDITED',
         predecessorStatus: 'COMPLETED',
         dutyAction: 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION',
-        assignee: processor.id,
+        assignee: null,
       });
 
       await assert.rejects(completeSalesContractCorrectionEdit(tx, {
@@ -515,7 +507,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         reason: null,
         policyVersion: 1,
         now: new Date('2026-08-17T09:00:00.000Z'),
-      }), /ASSIGNEE_CHANGED|SEPARATION_OF_DUTIES_CONFLICT/);
+      }), /DUTY_ASSIGNEE_INELIGIBLE|SEPARATION_OF_DUTIES_CONFLICT/);
 
       const returned = await respondToCrossWorkspaceDuty(tx, {
         dutyId: edited.successor.id,
@@ -535,13 +527,6 @@ test('Responsible Seller creates one correction request assigned to an eligible 
         sourceStatus: 'ACKNOWLEDGED',
         dutyAction: 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION',
         sourceVersion: 5,
-      });
-
-      await claimCrossWorkspaceDuty(tx, {
-        dutyId: returned.successor.id,
-        actorUserId: processor.id,
-        policyVersion: 1,
-        now: new Date('2026-08-17T09:07:00.000Z'),
       });
 
       const reapproved = await respondToCrossWorkspaceDuty(tx, {
@@ -697,6 +682,19 @@ test('competing Sales saves consume an approved correction opportunity exactly o
       content: 'Contract content', customerId: customer.id, departmentId: department.id,
       createdBy: seller.id, responsibleSellerId: seller.id,
     } });
+    await Promise.all([
+      tx.workspacePermission.create({ data: {
+        userId: accountingAdmin.id, workspace: 'accounting', permissionLevel: 'admin', grantedBy: accountingAdmin.id,
+      } }),
+      tx.featurePermission.create({ data: {
+        userId: accountingAdmin.id, workspace: 'accounting', feature: 'accounting_corrections_manage',
+        permissionLevel: 'edit', grantedBy: accountingAdmin.id,
+      } }),
+      tx.featurePermission.create({ data: {
+        userId: accountingAdmin.id, workspace: 'accounting', feature: 'accounting_corrections_approve',
+        permissionLevel: 'edit', grantedBy: accountingAdmin.id,
+      } }),
+    ]);
     return { seller, accountingAdmin, department, customer, contract };
   }, { timeout: 120_000 });
   const first = new PrismaClient();
@@ -722,9 +720,6 @@ test('competing Sales saves consume an approved correction opportunity exactly o
       actionCode: 'FORWARD_TO_MANAGER',
       expectedSourceVersion: 1, expectedEnvelopeVersion: 1,
       reason: 'تصمیم مدیر لازم است.', policyVersion: 1,
-    });
-    await claimCrossWorkspaceDuty(prisma, {
-      dutyId: forwarded.successor.id, actorUserId: seeded.accountingAdmin.id, policyVersion: 1,
     });
     await respondToCrossWorkspaceDuty(prisma, {
       dutyId: forwarded.successor.id, actorUserId: seeded.accountingAdmin.id,

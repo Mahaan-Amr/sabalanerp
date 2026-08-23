@@ -60,6 +60,17 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
           // History remains readable; the badge stays until the acknowledgement succeeds.
         }
       }
+      if (view === 'available' && duties.data.data.length > 0) {
+        const seenThrough = duties.data.data.reduce((latest, duty) => (
+          duty.updatedAt > latest ? duty.updatedAt : latest
+        ), duties.data.data[0].updatedAt);
+        try {
+          await hrDutyApi.markAvailableSeen(workspace, seenThrough);
+          resolvedSummary = (await hrDutyApi.summary(workspace)).data.data;
+        } catch {
+          // Available work remains readable; the badge stays until acknowledgement succeeds.
+        }
+      }
       dispatch({ type: 'success', data: { summary: resolvedSummary, duties: duties.data.data, view } });
     } catch {
       dispatch({ type: 'failure', message: 'به‌روزرسانی وظایف انجام نشد.' });

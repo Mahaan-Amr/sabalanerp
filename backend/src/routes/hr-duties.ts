@@ -20,6 +20,7 @@ import {
   getCrossWorkspaceDutySummary,
   listCrossWorkspaceDuties,
   markCrossWorkspaceDutyHistorySeen,
+  markCrossWorkspaceDutyAvailableSeen,
 } from '../services/crossWorkspaceDutyInbox';
 import {
   HR_HIRING_ALLOWED_MIME, HR_HIRING_STORAGE_DIR, removeHiringFile, scanHiringFile,
@@ -42,8 +43,9 @@ const hiringFinanceUpload = multer({
 });
 const manageHrWork = requireHrFeature('HR_WORK_MANAGEMENT', 'EDIT');
 const dutyOperationalMessage = (code: string) => ({
-  SEPARATION_OF_DUTIES_CONFLICT: 'این درخواست را شما ثبت کرده‌اید؛ برای حفظ تفکیک وظایف، مدیر حسابداری دیگری باید آن را دریافت کند. مدیر سیستم می‌تواند با ثبت دلیل اقدام کند.',
-  REASON_REQUIRED: 'دریافت وظیفه متوقف شد؛ مدیر سیستم برای اقدام روی درخواست خودش باید دلیل کنترلی ثبت کند.',
+  SEPARATION_OF_DUTIES_CONFLICT: 'تفکیک وظایف این نوع درخواست اجازه اقدام توسط ثبت‌کننده را نمی‌دهد.',
+  REASON_REQUIRED: 'برای رد، بازگرداندن یا واگذاری مجدد، دلیل کوتاه و روشن وارد کنید.',
+  DUTY_ALREADY_DECIDED: 'این درخواست لحظاتی پیش توسط کاربر دیگری تعیین تکلیف شد.',
   DUTY_ALREADY_CLAIMED: 'این وظیفه قبلاً توسط کاربر دیگری دریافت شده است. فهرست را به‌روزرسانی کنید.',
   DUTY_CLAIM_CONFLICT: 'دریافت وظیفه متوقف شد؛ وضعیت آن هم‌زمان تغییر کرده است. فهرست را به‌روزرسانی کنید.',
   SOURCE_STATE_CHANGED: 'وضعیت درخواست اصلاح تغییر کرده است. فهرست را به‌روزرسانی و از مرحله جاری ادامه دهید.',
@@ -56,7 +58,7 @@ const asyncHandler = (
 ) => (req: AuthRequest, res: Response, next: NextFunction) => void handler(req, res, next).catch((error) => {
   if (!(error instanceof Error) || !/^(?:(?:HR_)?DUTY_|SOURCE_|ENVELOPE_|ASSIGNEE_|RESPONSIBILITY_|SEPARATION_OF_DUTIES_|CONTRACT_|RESPONSIBLE_SELLER_|ACTION_NOT_ALLOWED|REASON_REQUIRED)/.test(error.message)) return next(error);
   const conflictCodes = new Set([
-    'DUTY_NOT_OPEN', 'DUTY_RESPONSE_CONFLICT', 'SOURCE_VERSION_CHANGED',
+    'DUTY_NOT_OPEN', 'DUTY_ALREADY_DECIDED', 'DUTY_RESPONSE_CONFLICT', 'SOURCE_VERSION_CHANGED',
     'ENVELOPE_VERSION_CHANGED', 'SOURCE_STATE_CHANGED', 'RESPONSIBILITY_CHANGED',
     'DUTY_DESTINATION_CHANGED', 'DUTY_ENVELOPE_CHANGED', 'DUTY_SOURCE_CHANGED',
     'DUTY_ASSIGNMENT_CHANGED',
@@ -69,6 +71,7 @@ const asyncHandler = (
     'HR_DUTY_UNASSIGNED_REQUIRES_MANAGER_TRIAGE',
     'DUTY_ASSIGNEE_CHANGED', 'DUTY_MANAGER_TRIAGE_FORBIDDEN',
     'DUTY_ASSIGNEE_INELIGIBLE',
+    'DUTY_REASSIGN_FORBIDDEN',
   ]);
   const status = error.message === 'DUTY_NOT_AVAILABLE'
     ? 404
@@ -128,6 +131,14 @@ const requireDestinationWorkspace = (req: AuthRequest, res: Response, next: Next
     return next(error);
   }
 };
+const requireAccountingDutyAccess = asyncHandler(async (req, res, next) => {
+  res.locals.dutyDetail = await getCrossWorkspaceDutyDetail(prisma, {
+    dutyId: req.params.id,
+    actorUserId: req.user!.id,
+    workspaceCode: 'ACCOUNTING',
+  });
+  next();
+});
 
 router.use(protect);
 
@@ -143,11 +154,11 @@ router.get(
   }),
 );
 
-router.get('/:id/hiring-finance/context', asyncHandler(async (req, res) => {
-  await getCrossWorkspaceDutyDetail(prisma, { dutyId: req.params.id, actorUserId: req.user!.id, workspaceCode: 'ACCOUNTING' });
+router.get('/:id/hiring-finance/context', requireAccountingDutyAccess, asyncHandler(async (req, res) => {
+  const detail = res.locals.dutyDetail;
   const duty = await prisma.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: req.params.id } });
   if (duty.sourceType !== 'HR_HIRING_FINANCE') throw new Error('DUTY_NOT_AVAILABLE');
-  const assigned = duty.currentAssigneeUserId === req.user!.id;
+  const assigned = detail.access === 'ASSIGNEE' || detail.access === 'SHARED';
   if (duty.sourceActionCode.includes('ORIGINAL_RETURN')) {
     const source = await prisma.hrCollateralOriginalReturn.findUniqueOrThrow({ where: { id: duty.sourceId }, include: { collateralItem: true } });
     return res.json({ success: true, data: {
@@ -172,12 +183,10 @@ router.get('/:id/hiring-finance/context', asyncHandler(async (req, res) => {
   } });
 }));
 
-router.get('/:id/hiring-finance/evidence', asyncHandler(async (req, res) => {
-  await getCrossWorkspaceDutyDetail(prisma, {
-    dutyId: req.params.id, actorUserId: req.user!.id, workspaceCode: 'ACCOUNTING',
-  });
+router.get('/:id/hiring-finance/evidence', requireAccountingDutyAccess, asyncHandler(async (req, res) => {
+  const detail = res.locals.dutyDetail;
   const duty = await prisma.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: req.params.id } });
-  if (duty.sourceType !== 'HR_HIRING_FINANCE' || duty.currentAssigneeUserId !== req.user!.id) {
+  if (duty.sourceType !== 'HR_HIRING_FINANCE' || !['ASSIGNEE', 'SHARED'].includes(detail.access)) {
     throw new Error('DUTY_NOT_ASSIGNED');
   }
   if (duty.sourceActionCode === 'HIRING_COLLATERAL_VERIFY_RECEIPT') {
@@ -251,6 +260,22 @@ router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFin
     throw error;
   }
 }));
+
+router.post(
+  '/workspaces/:workspaceCode/available-seen',
+  enforceMutationIdempotency,
+  requireDestinationWorkspace,
+  asyncHandler(async (req, res) => {
+    const seenThrough = new Date(String(req.body.seenThrough ?? ''));
+    if (Number.isNaN(seenThrough.getTime())) throw new Error('DUTY_AVAILABLE_SEEN_THROUGH_REQUIRED');
+    const data = await markCrossWorkspaceDutyAvailableSeen(prisma, {
+      actorUserId: req.user!.id,
+      workspaceCode: res.locals.destinationWorkspaceCode,
+      seenThrough,
+    });
+    res.json({ success: true, data });
+  }),
+);
 
 router.post(
   '/workspaces/:workspaceCode/history-seen',

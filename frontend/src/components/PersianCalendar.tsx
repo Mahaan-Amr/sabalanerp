@@ -9,6 +9,7 @@ import moment from 'moment-jalaali';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianTimePicker from './PersianTimePicker';
 import { isCalendarOwnedInteraction } from './calendarOverlayPolicy';
+import { resolveDateTimeSelection } from './persianCalendarCommitPolicy';
 
 export interface PersianCalendarProps {
   id?: string;
@@ -20,6 +21,7 @@ export interface PersianCalendarProps {
   className?: string;
   disabled?: boolean;
   showTime?: boolean;
+  autoCommitDateTime?: boolean;
   enableYearSelection?: boolean;
   minYear?: number;
   maxYear?: number;
@@ -45,6 +47,7 @@ export default function PersianCalendarComponent({
   className = '',
   disabled = false,
   showTime = false,
+  autoCommitDateTime = false,
   enableYearSelection = false,
   minYear = 1300,
   maxYear = 1410,
@@ -133,8 +136,30 @@ export default function PersianCalendarComponent({
 
   const chooseDate = (date: string) => {
     if (isPast(date)) return;
+    if (showTime && autoCommitDateTime) {
+      const selection = resolveDateTimeSelection({
+        initialValue: value || '', draftDate, draftTime,
+        changedPart: 'date', nextValue: date,
+      });
+      setDraftDate(selection.date);
+      if (selection.commitValue) commit(selection.date, selection.time);
+      return;
+    }
     setDraftDate(date);
     if (!showTime) commit(date);
+  };
+
+  const chooseTime = (time: string) => {
+    if (!autoCommitDateTime) {
+      setDraftTime(time);
+      return;
+    }
+    const selection = resolveDateTimeSelection({
+      initialValue: value || '', draftDate, draftTime,
+      changedPart: 'time', nextValue: time,
+    });
+    setDraftTime(selection.time);
+    if (selection.commitValue) commit(selection.date, selection.time);
   };
 
   const moveMonth = (amount: number) => {
@@ -240,7 +265,7 @@ export default function PersianCalendarComponent({
         {showTime && (
           <div className="mt-4 border-t border-[var(--sds-border-subtle)] pt-4">
             <span className="mb-2 block text-xs font-semibold sds-text-muted">زمان</span>
-            <PersianTimePicker value={draftTime} onChange={setDraftTime} className="w-full" />
+            <PersianTimePicker value={draftTime} onChange={chooseTime} className="w-full" />
           </div>
         )}
 
@@ -249,7 +274,7 @@ export default function PersianCalendarComponent({
             <ErpPressable type="button" onClick={() => chooseDate(PersianCalendar.now())} disabled={isPast(PersianCalendar.now())} tone="primary" className="min-h-11 px-3 font-bold">امروز</ErpPressable>
             {clearable && <ErpPressable type="button" onClick={() => { setDraftDate(''); setDraftTime(''); onChange(''); setOpen(false); }} className="min-h-11 px-3 font-semibold">پاک‌کردن</ErpPressable>}
           </div>
-          {showTime ? (
+          {showTime && !autoCommitDateTime ? (
             <ErpPressable type="button" onClick={() => draftDate && commit(draftDate)} disabled={!draftDate} tone="primary" variant="solid" className="min-h-11 px-4 font-bold"><FaCheck />تأیید</ErpPressable>
           ) : (
             <ErpPressable type="button" onClick={() => setOpen(false)} className="h-11 w-11 p-0" aria-label="بستن"><FaTimes /></ErpPressable>

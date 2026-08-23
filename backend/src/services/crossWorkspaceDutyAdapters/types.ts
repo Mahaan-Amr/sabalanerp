@@ -94,6 +94,18 @@ export interface CrossWorkspaceDutySourceAdapter {
     database: CrossWorkspaceDutyDatabase,
     input: { dutyId: string; actorUserId: string },
   ): Promise<boolean>;
+  canAccessSharedDecision(
+    database: CrossWorkspaceDutyDatabase,
+    input: { dutyId: string; actorUserId: string; includeCompleted?: boolean; now?: Date },
+  ): Promise<boolean>;
+  sharedDecisionAccessProvenance?(
+    database: CrossWorkspaceDutyDatabase,
+    input: { dutyId: string; actorUserId: string; now?: Date },
+  ): Promise<string[]>;
+  canReassign(
+    database: CrossWorkspaceDutyDatabase,
+    input: { dutyId: string; actorUserId: string; now?: Date },
+  ): Promise<boolean>;
   reassign(
     database: CrossWorkspaceDutyDatabase,
     input: ReassignCrossWorkspaceDutyInput,

@@ -127,6 +127,14 @@ interface PreIdentityChecklistLike {
 interface CompanyEvaluationOccurrenceLike {
   status: string;
 }
+interface IdentityCheckLike { fieldKey: string; status: string }
+interface IdentityDocumentLike {
+  category: string;
+  side?: string | null;
+  customTitle?: string | null;
+  version: number;
+  status: string;
+}
 interface HiringDecisionLike {
   kind: string;
   outcome: string;
@@ -159,6 +167,9 @@ export interface HiringLifecycleSource {
   outcome?: string | null;
   formRevisions?: FormRevisionLike[];
   identityClearance?: string | null;
+  candidate?: { nationalCode?: string | null };
+  identityChecks?: IdentityCheckLike[];
+  documents?: IdentityDocumentLike[];
   assessments?: unknown[];
   assessmentCompletedAt?: Date | string | null;
   assessmentReviewRequired?: boolean;
@@ -368,8 +379,8 @@ export const actionPermissionForHiringLifecycleAction = (actionId: string) => {
     REVIEW_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
     APPROVE_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
     CONFIGURE_PAYROLL: "MANAGE_PAYROLL",
-    REVIEW_IDENTITY: "MANAGE_RECRUITMENT_CASE",
-    APPROVE_IDENTITY: "MANAGE_RECRUITMENT_CASE",
+    REVIEW_IDENTITY: "REVIEW_IDENTITY_DOCUMENTS",
+    APPROVE_IDENTITY: "APPROVE_IDENTITY_CLEARANCE",
     RECORD_ASSESSMENT: "MANAGE_RECRUITMENT_CASE",
     COMPLETE_ASSESSMENT: "MANAGE_RECRUITMENT_CASE",
     DECIDE_ASSESSMENT: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
@@ -548,6 +559,23 @@ const companyEvaluationPlanGate = (source: HiringLifecycleSource): Gate => {
 const identityGate = (source: HiringLifecycleSource): Gate => {
   const complete = source.identityClearance === "APPROVED";
   const rejected = source.identityClearance === "REJECTED";
+  const requiredChecks = ["firstName", "lastName", "birthDate", "birthPlace", "fatherName",
+    source.candidate?.nationalCode ? "nationalCode" : "foreignIdentity", "address", "postalCode", "mobile", "educationLevel", "maritalStatus"];
+  const checks = source.identityChecks || [];
+  const checksReady = requiredChecks.every((fieldKey) => checks.some((item) => item.fieldKey === fieldKey && item.status === "VERIFIED"))
+    && ["militaryStatus", "birthCertificateExplanations"].every((fieldKey) => checks.some((item) => item.fieldKey === fieldKey && ["VERIFIED", "NOT_APPLICABLE"].includes(item.status)));
+  const latestDocuments = Array.from((source.documents || []).reduce((latest, document) => {
+    const key = `${document.category}:${document.side || ""}:${document.customTitle || ""}`;
+    const current = latest.get(key);
+    if (!current || document.version > current.version) latest.set(key, document);
+    return latest;
+  }, new Map<string, IdentityDocumentLike>()).values());
+  const requiredCategories = source.candidate?.nationalCode
+    ? ["BIRTH_CERTIFICATE_ALL_PAGES", "NATIONAL_ID_FRONT", "NATIONAL_ID_BACK"] : [];
+  const documentsReady = latestDocuments.length > 0
+    && latestDocuments.every((item) => !["MISMATCH", "UNREADABLE"].includes(item.status))
+    && requiredCategories.every((category) => latestDocuments.some((item) => item.category === category));
+  const evidenceReady = checksReady && documentsReady;
   return {
     complete,
     requiredComplete: complete ? 1 : 0,
@@ -563,23 +591,14 @@ const identityGate = (source: HiringLifecycleSource): Gate => {
         ]
       : [],
     action:
-      source.identityClearance === "IN_PROGRESS"
+      source.identityClearance === "IN_PROGRESS" && evidenceReady
         ? action("APPROVE_IDENTITY", "تأیید نهایی احراز هویت", "HR_MANAGER")
         : action(
             "REVIEW_IDENTITY",
             "بررسی و تطبیق مدارک هویتی",
             "HR_PROCESSOR",
           ),
-    secondaryActions:
-      source.identityClearance === "IN_PROGRESS"
-        ? [
-            action(
-              "REVIEW_IDENTITY",
-              "ادامه بررسی و تطبیق مدارک هویتی",
-              "HR_PROCESSOR",
-            ),
-          ]
-        : [],
+    secondaryActions: [],
   };
 };
 

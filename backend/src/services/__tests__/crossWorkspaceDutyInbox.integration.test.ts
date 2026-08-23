@@ -32,7 +32,7 @@ test('generic destination Inbox returns the minimum HR Work Item projection to i
         sourceType: 'MANUAL', destinationHref: '/dashboard/accounting/duties',
         dueDate: new Date('2026-08-18T08:00:00.000Z'), createdByUserId: actor.id,
       } });
-      const definition = HR_DUTY_DEFINITIONS.FINANCE_APPROVAL;
+      const definition = HR_DUTY_DEFINITIONS.FINANCE_RECORDING;
       const duty = await tx.crossWorkspaceDuty.create({ data: {
         stableKey: suffix, sourceType: 'HR_WORK_ITEM', sourceId: source.id,
         sourceActionCode: definition.sourceActionCode, sourceVersion: 1,
@@ -67,7 +67,7 @@ test('generic destination Inbox returns the minimum HR Work Item projection to i
         id: duty.id,
         access: 'ASSIGNEE',
         workspace: 'accounting',
-        sourceActionCode: 'FINANCE_APPROVAL',
+        sourceActionCode: 'FINANCE_RECORDING',
         fields: {
           title: 'Approve protected finance handoff',
           description: 'Only this minimum description is allowed.',
@@ -124,7 +124,7 @@ test('opening duty History clears only the current User unseen count', async () 
         destinationHref: '/dashboard/accounting/duties', dueDate: changedAt,
         createdByUserId: actor.id, completedAt: changedAt, completedByUserId: actor.id,
       } });
-      const definition = HR_DUTY_DEFINITIONS.FINANCE_APPROVAL;
+      const definition = HR_DUTY_DEFINITIONS.FINANCE_RECORDING;
       const completedDuty = await tx.crossWorkspaceDuty.create({ data: {
         stableKey: suffix, sourceType: 'HR_WORK_ITEM', sourceId: source.id,
         sourceActionCode: definition.sourceActionCode, sourceVersion: 1,

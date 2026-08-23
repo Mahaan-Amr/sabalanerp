@@ -71,6 +71,7 @@ model User {
   grantedFeaturePermissions                  FeaturePermission[]                  @relation("FeaturePermissionGranter")
   featurePermissions                         FeaturePermission[]
   crossWorkspaceDutyHistoryReceipts          CrossWorkspaceDutyHistoryReceipt[]
+  crossWorkspaceDutyAvailableReceipts        CrossWorkspaceDutyAvailableReceipt[]
   ownedCrmCustomers                          CrmCustomer[]                        @relation("CrmCustomerOwner")
   createdCrmCustomers                        CrmCustomer[]                        @relation("CrmCustomerCreatedBy")
   updatedCrmCustomers                        CrmCustomer[]                        @relation("CrmCustomerUpdatedBy")
@@ -5646,6 +5647,7 @@ model HrCollateralRequirement {
   proposedAt           DateTime         @default(now())
   supersedesId         String?
   application          HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  collateralItems      HrCollateralItem[]
 
   @@unique([applicationId, version])
   @@index([applicationId, status])
@@ -5803,6 +5805,7 @@ model HrIdentityCheck {
 model HrCollateralItem {
   id                              String                             @id @default(cuid())
   applicationId                   String
+  collateralRequirementId         String?
   type                            String
   required                        Boolean                            @default(true)
   amountRials                     Decimal?                           @db.Decimal(18, 0)
@@ -5838,6 +5841,7 @@ model HrCollateralItem {
   createdAt                       DateTime                           @default(now())
   updatedAt                       DateTime                           @updatedAt
   application                     HrJobApplication                   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  collateralRequirement           HrCollateralRequirement?           @relation(fields: [collateralRequirementId], references: [id], onDelete: SetNull)
   templateItemId                  String?
   supersedesItemId                String?                            @unique
   templateItem                    HrCollateralChecklistTemplateItem? @relation(fields: [templateItemId], references: [id], onDelete: SetNull)
@@ -5846,6 +5850,7 @@ model HrCollateralItem {
   returns                         HrCollateralOriginalReturn[]
 
   @@index([applicationId, status])
+  @@index([collateralRequirementId])
   @@map("hr_collateral_items")
 }
 
@@ -6628,6 +6633,20 @@ model CrossWorkspaceDutyHistoryReceipt {
   @@unique([userId, destinationWorkspaceCode])
   @@index([destinationWorkspaceCode, lastSeenAt])
   @@map("cross_workspace_duty_history_receipts")
+}
+
+model CrossWorkspaceDutyAvailableReceipt {
+  id                       String   @id @default(cuid())
+  userId                   String
+  destinationWorkspaceCode String
+  lastSeenAt               DateTime
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, destinationWorkspaceCode])
+  @@index([destinationWorkspaceCode, lastSeenAt])
+  @@map("cross_workspace_duty_available_receipts")
 }
 
 model HrFormalAssessmentPlan {

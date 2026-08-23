@@ -105,7 +105,9 @@ import {
   normalizeCompensationReturnReason,
 } from '../services/hrCompensationWorkflow';
 import { tehranCivilDateKey } from '../services/tehranBusinessCalendar';
-import { createHrHiringCollateralReturnDuty, createHrHiringFinanceDuty } from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
+import { createHrHiringCollateralReturnDuty } from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
+import { reconcileAcceptedOfferFollowUp } from '../services/hrAcceptedOfferFollowUp';
+import { resolveWorkspaceDutyAuthority } from '../services/crossWorkspaceDutyAuthority';
 
 const router = express.Router();
 const ACCESS_TTL_DAYS = 7;
@@ -442,6 +444,19 @@ const requireActionPermission = (...actionPermissionCodes: string[]) => asyncHan
   const assigned = await authorizeHrUser(prisma, req.user!.id, { actionPermissionCodes });
   if (!assigned.allowed) {
     return res.status(403).json({ success: false, error: 'HR_ACTION_PERMISSION_REQUIRED', missingLayers: assigned.missingLayers });
+  }
+  await markBroadManagerOverride(req);
+  next();
+});
+
+const requireAnyActionPermission = (...actionPermissionCodes: string[]) => asyncHandler(async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  const active = await activeHrActionPermissionsForUser(prisma, req.user!.id);
+  if (!actionPermissionCodes.some((code) => active.includes(code))) {
+    return res.status(403).json({ success: false, error: 'HR_ACTION_PERMISSION_REQUIRED', requiredAnyOf: actionPermissionCodes });
   }
   await markBroadManagerOverride(req);
   next();
@@ -1022,20 +1037,9 @@ router.post('/public/application/compensation/accept', applicantSession, asyncHa
       where: { id: applicationId },
       data: { acceptedOfferAt: now, stage: 'OFFER', compensationClearance: 'APPROVED' }
     });
-    const requirement = await tx.hrCollateralRequirement.findFirst({
-      where: { applicationId, status: 'ACTIVE' }, orderBy: { version: 'desc' },
+    await reconcileAcceptedOfferFollowUp(tx, {
+      applicationId, actorUserId: snapshot.proposedBy, now,
     });
-    if (requirement && await tx.hrCollateralItem.count({ where: { applicationId } }) === 0) {
-      const item = await tx.hrCollateralItem.create({ data: {
-        applicationId, type: requirement.type, required: true, amountRials: requirement.amountRials,
-        status: 'MISSING', note: requirement.candidateExplanation, recordedBy: snapshot.proposedBy,
-      } });
-      await tx.hrJobApplication.update({ where: { id: applicationId }, data: { collateralClearance: 'IN_PROGRESS' } });
-      await createHrHiringFinanceDuty(tx, {
-        collateralItemId: item.id, actionCode: 'HIRING_COLLATERAL_RECORD_RECEIPT',
-        actorUserId: snapshot.proposedBy, now,
-      });
-    }
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   await audit(applicationId, 'OFFER_COMPENSATION_ACCEPTED', req, { snapshotId: snapshot.id }, 'CANDIDATE');
   res.json({ success: true });
@@ -1153,7 +1157,7 @@ const actionProtectedHiringMutationPaths = [
   /^\/applications\/[^/]+\/pre-identity\/(?:apply-template|finalize|release|items|items\/[^/]+\/(?:correct|result|resolve))$/,
   /^\/applications\/[^/]+\/disposition\/reactivate$/,
   /^\/applications\/[^/]+\/reopen\/(?:authorize|execute)$/,
-  /^\/applications\/[^/]+\/collateral-requirements$/,
+  /^\/applications\/[^/]+\/collateral-requirements(?:\/not-required)?$/,
   /^\/applications\/[^/]+\/collateral(?:\/apply-template|\/approve|\/[^/]+\/(?:review|return|return-confirm))?$/,
   /^\/applications\/[^/]+\/contracts(?:\/[^/]+\/(?:submit|approve|return))?$/,
   /^\/applications\/[^/]+\/(?:payroll-participation|insurance|onboarding-tasks)$/,
@@ -1175,14 +1179,18 @@ export const hrHiringBaseFeatureForRequest = (path: string) => {
   return 'RECRUITMENT_CASES';
 };
 
-router.use((req: AuthRequest, res: Response, next: NextFunction) => {
+router.use(asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (/^\/applications\/[^/]+(?:\/collateral(?:\/.*)?|\/collateral-returns\/[^/]+\/download)?$/.test(req.path)) {
+    const permissions = await activeHrActionPermissionsForUser(prisma, actorId(req));
+    if (permissions.includes('RECORD_COLLATERAL_CUSTODY') || permissions.includes('VERIFY_COLLATERAL_CUSTODY')) return next();
+  }
   const featureCode = hrHiringBaseFeatureForRequest(req.path);
   const level = hrHiringBaseFeatureLevelForRequest(req.method, req.path);
   if (!featureCode) {
     return requireHrAuthorization({ workspaceLevel: level })(req, res, next);
   }
   return requireHrFeature(featureCode, level)(req, res, next);
-});
+}));
 
 router.use('/authorities', (_req, res) => res.status(410).json({ success: false, error: 'HR_LEGACY_AUTHORIZATION_READ_ONLY' }));
 
@@ -1557,7 +1565,7 @@ router.post('/applications/:id/pre-identity/apply-template', requireActionPermis
   res.status(201).json({ success: true, data: { itemCount: items.length } });
 }));
 
-router.get('/collateral-templates', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.get('/collateral-templates', requireActionPermission('MANAGE_COLLATERAL_REQUIREMENTS'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const rows = await prisma.hrCollateralChecklistTemplate.findMany({
     where: String(req.query.view || '') === HR_HIRING_METRIC_VIEWS.activeCollateralTemplates ? { isActive: true } : undefined,
     include: { items: { orderBy: { sortOrder: 'asc' } } },
@@ -1566,7 +1574,7 @@ router.get('/collateral-templates', requireActionPermission('MANAGE_FINANCE_EVID
   res.json({ success: true, data: rows });
 }));
 
-router.post('/collateral-templates', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.post('/collateral-templates', requireActionPermission('MANAGE_COLLATERAL_REQUIREMENTS'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const name = String(req.body.name || '').trim();
   const items = Array.isArray(req.body.items) ? req.body.items : [];
   if (!name || !items.length || items.some((item: any) => !COLLATERAL_TYPES.has(item.type) || !String(item.label || '').trim())) throw new Error('نام قالب و حداقل یک قلم معتبر الزامی است.');
@@ -1578,7 +1586,7 @@ router.post('/collateral-templates', requireActionPermission('MANAGE_FINANCE_EVI
   res.status(201).json({ success: true, data: row });
 }));
 
-router.patch('/collateral-templates/:id/active', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.patch('/collateral-templates/:id/active', requireActionPermission('MANAGE_COLLATERAL_REQUIREMENTS'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const row = await prisma.hrCollateralChecklistTemplate.update({ where: { id: req.params.id }, data: { isActive: req.body.isActive === true } });
   res.json({ success: true, data: row });
 }));
@@ -1727,6 +1735,9 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const canSeeAssessmentEvidence = canSeeDecisionDetails
     || actionPermissions.has('VIEW_COMPANY_EVALUATION_RESULTS');
   const canSeeFinanceSensitive = actionPermissions.has('MANAGE_FINANCE_EVIDENCE');
+  const canSeeCollateralSensitive = canSeeFinanceSensitive
+    || actionPermissions.has('RECORD_COLLATERAL_CUSTODY')
+    || actionPermissions.has('VERIFY_COLLATERAL_CUSTODY');
   const canSeeCompensation = canSeeFinanceSensitive
     || actionPermissions.has('MANAGE_COMPENSATION')
     || actionPermissions.has('MANAGE_PAYROLL');
@@ -1787,7 +1798,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
     data.identityChecks = [];
   }
   if (!authorities.has('HR_PROCESSOR')) data.insuranceEnrollment = null;
-  if (canSeeFinanceSensitive) data.collateralItems = data.collateralItems.map(({ storageName: _storageName, sha256: _sha256, returnEvidenceStorageName: _returnStorage, returnEvidenceSha256: _returnSha, ...item }: any) => item);
+  if (canSeeCollateralSensitive) data.collateralItems = data.collateralItems.map(({ storageName: _storageName, sha256: _sha256, returnEvidenceStorageName: _returnStorage, returnEvidenceSha256: _returnSha, ...item }: any) => item);
   else data.collateralItems = data.collateralItems.map(({ id, type, required, status, coordinationReason, receivedAt, returnedAt, returnConfirmedAt }: any) => ({ id, type, required, status, coordinationReason, receivedAt, returnedAt, returnConfirmedAt }));
   if (!canSeeCompensation) data.compensationSnapshots = [];
   if (canSeeCompensation) {
@@ -2285,7 +2296,7 @@ router.post('/applications/:id/form/correction/retry', requireActionPermission('
   res.json({ success: true, data: updated });
 }));
 
-router.post('/applications/:id/documents', requireActionPermission('MANAGE_RECRUITMENT_CASE'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.post('/applications/:id/documents', requireActionPermission('REVIEW_IDENTITY_DOCUMENTS'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
   try {
     const gate = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, select: { preIdentityReleasedAt: true, preIdentityGrandfatheredAt: true } });
     if (!gate.preIdentityReleasedAt && !gate.preIdentityGrandfatheredAt) throw new Error('چک‌لیست پیش از احراز هویت هنوز آزاد نشده است.');
@@ -2305,6 +2316,7 @@ router.post('/applications/:id/documents', requireActionPermission('MANAGE_RECRU
       sha256: digest, malwareScanStatus: scanStatus, note: req.body.note || null, uploadedBy: actorId(req)
     }});
     await audit(req.params.id, copyReceived ? 'IDENTITY_DOCUMENT_UPLOADED' : 'IDENTITY_DOCUMENT_ORIGINAL_INSPECTED', req, { documentId: row.id, category: row.category, customTitle: row.customTitle, version: row.version });
+    await syncAutomaticHiringWorkItems();
     res.status(201).json({ success: true, data: row });
   } catch (error) { removeHiringFile(req.file?.path); throw error; }
 }));
@@ -2317,7 +2329,7 @@ router.get('/applications/:id/documents/:documentId/download', requireActionPerm
   res.download(safeHiringStoragePath(document.storageName), document.originalName);
 }));
 
-router.put('/applications/:id/identity-checks/:fieldKey', requireActionPermission('MANAGE_RECRUITMENT_CASE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.put('/applications/:id/identity-checks/:fieldKey', requireActionPermission('REVIEW_IDENTITY_DOCUMENTS'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const gate = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, select: { preIdentityReleasedAt: true, preIdentityGrandfatheredAt: true } });
   if (!gate.preIdentityReleasedAt && !gate.preIdentityGrandfatheredAt) throw new Error('چک‌لیست پیش از احراز هویت هنوز آزاد نشده است.');
   if (!['VERIFIED', 'MISMATCH', 'UNREADABLE', 'NOT_APPLICABLE'].includes(req.body.status)) throw new Error('وضعیت کنترل هویت نامعتبر است.');
@@ -2327,17 +2339,23 @@ router.put('/applications/:id/identity-checks/:fieldKey', requireActionPermissio
     update: { status: req.body.status, note: req.body.note || null, reviewedBy: actorId(req), reviewedAt: new Date() }
   });
   await prisma.hrJobApplication.update({ where: { id: req.params.id }, data: { identityClearance: 'IN_PROGRESS' } });
+  await syncAutomaticHiringWorkItems();
   res.json({ success: true, data: row });
 }));
 
-router.post('/applications/:id/identity/approve', requireActionPermission('MANAGE_RECRUITMENT_CASE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.post('/applications/:id/identity/approve', requireActionPermission('APPROVE_IDENTITY_CLEARANCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const [application, checks, docs] = await Promise.all([
     prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { candidate: true } }),
     prisma.hrIdentityCheck.findMany({ where: { applicationId: req.params.id } }),
     prisma.hrHiringDocument.findMany({ where: { applicationId: req.params.id } })
   ]);
   if (!application.preIdentityReleasedAt && !application.preIdentityGrandfatheredAt) throw new Error('چک‌لیست پیش از احراز هویت هنوز آزاد نشده است.');
-  if (checks.some((item) => item.reviewedBy === actorId(req)) || docs.some((item) => item.uploadedBy === actorId(req))) throw new Error('مدیر تأییدکننده نباید پردازش‌کننده اسناد یا تطبیق‌های همین پرونده باشد.');
+  const actorReviewedEvidence = checks.some((item) => item.reviewedBy === actorId(req)) || docs.some((item) => item.uploadedBy === actorId(req));
+  const actorPermissions = actorReviewedEvidence ? await activeHrActionPermissionsForUser(prisma, actorId(req)) : [];
+  const managerialSelfApproval = actorReviewedEvidence && Boolean((req as any).hrBroadManagerOverride)
+    && actorPermissions.includes('REVIEW_IDENTITY_DOCUMENTS')
+    && actorPermissions.includes('APPROVE_IDENTITY_CLEARANCE');
+  if (actorReviewedEvidence && !managerialSelfApproval) throw new Error('مدیر تأییدکننده نباید پردازش‌کننده اسناد یا تطبیق‌های همین پرونده باشد.');
   const requiredVerifiedChecks = ['firstName', 'lastName', 'birthDate', 'birthPlace', 'fatherName', application.candidate.nationalCode ? 'nationalCode' : 'foreignIdentity', 'address', 'postalCode', 'mobile', 'educationLevel', 'maritalStatus'];
   if (requiredVerifiedChecks.some((fieldKey) => !checks.some((item) => item.fieldKey === fieldKey && item.status === 'VERIFIED'))) throw new Error('همه کنترل‌های الزامی هویتی باید مطابق باشند.');
   if (['militaryStatus', 'birthCertificateExplanations'].some((fieldKey) => !checks.some((item) => item.fieldKey === fieldKey && ['VERIFIED', 'NOT_APPLICABLE'].includes(item.status)))) throw new Error('وضعیت نظام وظیفه و توضیحات شناسنامه باید تعیین تکلیف شوند.');
@@ -2354,7 +2372,9 @@ router.post('/applications/:id/identity/approve', requireActionPermission('MANAG
     if (missingDocuments.length) throw new Error(`اسناد هویتی الزامی ناقص‌اند: ${missingDocuments.join(', ')}`);
   }
   await prisma.hrJobApplication.update({ where: { id: req.params.id }, data: { identityClearance: 'APPROVED', stage: 'ASSESSMENT' } });
-  await audit(req.params.id, 'IDENTITY_CLEARANCE_APPROVED', req);
+  await audit(req.params.id, 'IDENTITY_CLEARANCE_APPROVED', req, managerialSelfApproval
+    ? { managerialSelfApproval: true, overrideLabel: 'استفاده از اختیار مدیریتی' } : undefined);
+  await syncAutomaticHiringWorkItems();
   res.json({ success: true });
 }));
 
@@ -2549,6 +2569,11 @@ router.post('/applications/:id/compensation/:snapshotId/offline-decision', requi
         ? { acceptedOfferAt: now, stage: 'OFFER', compensationClearance: 'APPROVED' }
         : { acceptedOfferAt: null, stage: 'OFFER', compensationClearance: 'REJECTED' }
     });
+    if (evidence.decision === 'ACCEPTED') {
+      await reconcileAcceptedOfferFollowUp(tx, {
+        applicationId: req.params.id, actorUserId: actorId(req), now,
+      });
+    }
     if (evidence.decision === 'DECLINED') await notifyOfferDecline(tx, req.params.id);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   await audit(req.params.id, 'OFFER_OFFLINE_DECISION_RECORDED', req, { snapshotId: snapshot.id, ...evidence, communicatedAt: evidence.communicatedAt.toISOString() });
@@ -3356,7 +3381,7 @@ router.post('/applications/:id/reopen/execute', requireActionPermission('MANAGE_
   });
 }));
 
-router.post('/applications/:id/collateral-requirements', requireActionPermission('MANAGE_PRE_EMPLOYMENT_REQUIREMENTS'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.post('/applications/:id/collateral-requirements', requireActionPermission('MANAGE_COLLATERAL_REQUIREMENTS'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const type = String(req.body.type || '');
   if (!COLLATERAL_TYPES.has(type)) throw new Error('نوع وثیقه الزامی است.');
   const amountRials = req.body.amountRials === '' || req.body.amountRials == null ? null : normalizeHiringRial(req.body.amountRials);
@@ -3376,6 +3401,63 @@ router.post('/applications/:id/collateral-requirements', requireActionPermission
   res.status(201).json({ success: true, data: row });
 }));
 
+router.post('/applications/:id/collateral-requirements/not-required', requireActionPermission('MANAGE_COLLATERAL_REQUIREMENTS'), asyncHandler(async (req: AuthRequest, res: Response) => {
+  const now = new Date();
+  const result = await prisma.$transaction(async (tx) => {
+    const latest = await tx.hrCollateralRequirement.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' } });
+    const replayed = latest?.status === 'ACTIVE' && latest.type === 'NO_PRE_HIRE_COLLATERAL';
+    const received = await tx.hrCollateralItem.count({ where: { applicationId: req.params.id, receivedAt: { not: null } } });
+    if (!replayed && latest?.status === 'ACTIVE') await tx.hrCollateralRequirement.update({ where: { id: latest.id }, data: { status: 'SUPERSEDED' } });
+    const requirement = replayed ? latest : await tx.hrCollateralRequirement.create({ data: {
+      applicationId: req.params.id, version: (latest?.version || 0) + 1, type: 'NO_PRE_HIRE_COLLATERAL',
+      candidateExplanation: 'برای این همکاری وثیقه پیش از استخدام لازم نیست.', proposedBy: actorId(req), supersedesId: latest?.id || null,
+    } });
+    {
+      const itemIds = (await tx.hrCollateralItem.findMany({ where: { applicationId: req.params.id }, select: { id: true } })).map(({ id }) => id);
+      const duties = itemIds.length ? await tx.crossWorkspaceDuty.findMany({
+        where: { sourceType: 'HR_HIRING_FINANCE', sourceId: { in: itemIds }, status: 'OPEN',
+          sourceActionCode: { in: ['HIRING_COLLATERAL_RECORD_RECEIPT', 'HIRING_COLLATERAL_VERIFY_RECEIPT'] } },
+      }) : [];
+      for (const duty of duties) {
+        await tx.crossWorkspaceDuty.update({ where: { id: duty.id }, data: {
+          status: 'CANCELLED', respondedAt: now, respondedByUserId: actorId(req),
+          structuredResultJson: { reason: 'COLLATERAL_REQUIREMENT_REVOKED' },
+        } });
+        await tx.crossWorkspaceDutyAssignmentHistory.updateMany({
+          where: { dutyId: duty.id, endedAt: null }, data: { endedAt: now, endReason: 'SOURCE_CHANGED', changedByUserId: actorId(req) },
+        });
+        const latestAudit = await tx.crossWorkspaceDutyAuditVersion.aggregate({ where: { dutyId: duty.id }, _max: { version: true } });
+        await tx.crossWorkspaceDutyAuditVersion.create({ data: {
+          dutyId: duty.id, version: (latestAudit._max.version || 0) + 1, eventCode: 'CANCELLED', actorUserId: actorId(req),
+          sourceVersion: duty.sourceVersion, envelopeVersion: duty.envelopeVersion, policyVersion: 1,
+          reason: 'COLLATERAL_REQUIREMENT_REVOKED', afterJson: { status: 'CANCELLED' },
+        } });
+      }
+    }
+    if (received) {
+      const heldItems = await tx.hrCollateralItem.findMany({
+        where: { applicationId: req.params.id, receivedAt: { not: null }, returnConfirmedAt: null }, select: { id: true },
+      });
+      for (const item of heldItems) {
+        const latestReturn = await tx.hrCollateralOriginalReturn.findFirst({ where: { collateralItemId: item.id }, orderBy: { version: 'desc' } });
+        if (latestReturn && ['DRAFT', 'SUBMITTED'].includes(latestReturn.status)) continue;
+        const source = await tx.hrCollateralOriginalReturn.create({ data: {
+          collateralItemId: item.id, version: (latestReturn?.version || 0) + 1, status: 'DRAFT',
+        } });
+        await createHrHiringCollateralReturnDuty(tx, {
+          returnId: source.id, actionCode: 'HIRING_COLLATERAL_RECORD_ORIGINAL_RETURN', actorUserId: actorId(req), now,
+        });
+      }
+    }
+    await reconcileAcceptedOfferFollowUp(tx, { applicationId: req.params.id, actorUserId: actorId(req), now });
+    return { requirement, replayed };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  await audit(req.params.id, 'COLLATERAL_EXPLICITLY_NOT_REQUIRED', req, {
+    requirementId: result.requirement.id, version: result.requirement.version, replayed: result.replayed,
+  });
+  res.status(result.replayed ? 200 : 201).json({ success: true, data: result.requirement });
+}));
+
 router.get('/applications/:id/assessments/:assessmentId/download', requireActionPermission('VIEW_FULL_APPLICANT_INFORMATION', 'VIEW_COMPANY_EVALUATION_RESULTS'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const row = await prisma.hrCandidateAssessment.findFirst({ where: { id: req.params.assessmentId, applicationId: req.params.id } });
   if (!row?.storageName || !row.originalName) return res.status(404).json({ success: false, error: 'فایل ارزیابی پیدا نشد.' });
@@ -3388,18 +3470,7 @@ router.get('/applications/:id/assessments/:assessmentId/download', requireAction
   res.download(safeHiringStoragePath(row.storageName), row.originalName);
 }));
 
-const retiredHiringFinanceMutation = (_req: express.Request, res: Response) => res.status(410).json({
-  success: false,
-  error: 'ثبت و تأیید وثیقه فقط از وظایف بین‌واحدی فضای حسابداری انجام می‌شود.',
-});
-router.post('/applications/:id/collateral/apply-template', retiredHiringFinanceMutation);
-router.post('/applications/:id/collateral', retiredHiringFinanceMutation);
-router.put('/applications/:id/collateral/:itemId/review', retiredHiringFinanceMutation);
-router.post('/applications/:id/collateral/approve', retiredHiringFinanceMutation);
-router.put('/applications/:id/collateral/:itemId/return', retiredHiringFinanceMutation);
-router.post('/applications/:id/collateral/:itemId/return-confirm', retiredHiringFinanceMutation);
-
-router.post('/applications/:id/collateral/apply-template', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.post('/applications/:id/collateral/apply-template', requireActionPermission('MANAGE_COLLATERAL_REQUIREMENTS'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const [application, requirement, existing] = await Promise.all([
     prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { position: true } }),
     prisma.hrCollateralRequirement.findFirst({ where: { applicationId: req.params.id, status: 'ACTIVE' }, orderBy: { version: 'desc' } }),
@@ -3416,7 +3487,7 @@ router.post('/applications/:id/collateral/apply-template', requireActionPermissi
   res.status(201).json({ success: true });
 }));
 
-router.post('/applications/:id/collateral', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.post('/applications/:id/collateral', requireActionPermission('RECORD_COLLATERAL_CUSTODY'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
   let scanStatus: string | undefined;
   let digest: string | undefined;
   try {
@@ -3452,7 +3523,7 @@ router.post('/applications/:id/collateral', requireActionPermission('MANAGE_FINA
   } catch (error) { removeHiringFile(req.file?.path); throw error; }
 }));
 
-router.get('/applications/:id/collateral/:itemId/download', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.get('/applications/:id/collateral/:itemId/download', requireAnyActionPermission('RECORD_COLLATERAL_CUSTODY', 'VERIFY_COLLATERAL_CUSTODY'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const row = await prisma.hrCollateralItem.findFirst({ where: { id: req.params.itemId, applicationId: req.params.id } });
   if (!row?.storageName || !row.originalName) return res.status(404).json({ success: false, error: 'فایل وثیقه پیدا نشد.' });
   await audit(req.params.id, 'COLLATERAL_DOCUMENT_DOWNLOADED', req, { itemId: row.id });
@@ -3460,31 +3531,49 @@ router.get('/applications/:id/collateral/:itemId/download', requireActionPermiss
   res.download(safeHiringStoragePath(row.storageName), row.originalName);
 }));
 
-router.put('/applications/:id/collateral/:itemId/review', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.put('/applications/:id/collateral/:itemId/review', requireActionPermission('VERIFY_COLLATERAL_CUSTODY'), asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!['VERIFIED', 'MISMATCH', 'UNREADABLE'].includes(req.body.status)) throw new Error('وضعیت بررسی وثیقه نامعتبر است.');
   const coordinationReason = String(req.body.coordinationReason || '').trim();
   if (req.body.status !== 'VERIFIED' && !coordinationReason) throw new Error('علت نیاز به اصلاح یا پیگیری الزامی است.');
   const item = await prisma.hrCollateralItem.findUniqueOrThrow({ where: { id: req.params.itemId } });
   if (await prisma.hrCollateralItem.findUnique({ where: { supersedesItemId: item.id }, select: { id: true } })) throw new Error('این قلم با نسخه جدید جایگزین شده است.');
-  if (item.applicationId !== req.params.id || item.recordedBy === actorId(req)) throw new Error('مدیر مالی ثبت‌کننده نمی‌تواند همان قلم را تأیید کند.');
+  const managerialSelfVerification = item.recordedBy === actorId(req) && (await resolveWorkspaceDutyAuthority(prisma, {
+    userId: actorId(req), workspace: 'accounting', feature: 'VERIFY_COLLATERAL_CUSTODY',
+  })).canSelfDecide && (await activeHrActionPermissionsForUser(prisma, actorId(req))).includes('RECORD_COLLATERAL_CUSTODY');
+  if (item.applicationId !== req.params.id || (item.recordedBy === actorId(req) && !managerialSelfVerification)) throw new Error('مدیر مالی ثبت‌کننده نمی‌تواند همان قلم را تأیید کند.');
   const row = await prisma.hrCollateralItem.update({ where: { id: item.id }, data: {
     status: req.body.status, note: req.body.note ?? item.note, coordinationReason: req.body.status === 'VERIFIED' ? null : coordinationReason,
     approvedBy: req.body.status === 'VERIFIED' ? actorId(req) : null, approvedAt: req.body.status === 'VERIFIED' ? new Date() : null
   }});
+  await audit(req.params.id, 'COLLATERAL_REVIEWED', req, { itemId: row.id, status: row.status,
+    ...(managerialSelfVerification ? { managerialSelfVerification: true, overrideLabel: 'استفاده از اختیار مدیریتی' } : {}) });
   res.json({ success: true, data: row });
 }));
 
-router.post('/applications/:id/collateral/approve', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.post('/applications/:id/collateral/approve', requireActionPermission('VERIFY_COLLATERAL_CUSTODY'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const items = await prisma.hrCollateralItem.findMany({ where: { applicationId: req.params.id } });
+  const explicitNoRequirement = await prisma.hrCollateralRequirement.findFirst({
+    where: { applicationId: req.params.id, status: 'ACTIVE', type: 'NO_PRE_HIRE_COLLATERAL' }, select: { id: true },
+  });
+  if (explicitNoRequirement && items.some((item) => item.receivedAt && !item.returnConfirmedAt)) {
+    throw new Error('تصمیم «وثیقه لازم نیست» پس از ثبت و تأیید بازگرداندن همه اصل‌ها مؤثر می‌شود.');
+  }
   const supersededIds = new Set(items.map((item) => item.supersedesItemId).filter(Boolean));
   const currentItems = items.filter((item) => !supersededIds.has(item.id));
-  if (!currentItems.length || currentItems.some((item) => item.required && (item.status !== 'VERIFIED' || !item.approvedBy || item.recordedBy === item.approvedBy))) throw new Error('همه اقلام جاری و الزامی وثیقه باید توسط مدیر مستقل تأیید شوند.');
+  const permissions = await activeHrActionPermissionsForUser(prisma, actorId(req));
+  const managerialFinalOverride = permissions.includes('RECORD_COLLATERAL_CUSTODY')
+    && (await resolveWorkspaceDutyAuthority(prisma, { userId: actorId(req), workspace: 'accounting', feature: 'VERIFY_COLLATERAL_CUSTODY' })).canSelfDecide;
+  const usedManagerialFinalOverride = managerialFinalOverride
+    && currentItems.some((item) => item.recordedBy === actorId(req) && item.approvedBy === actorId(req));
+  if (!currentItems.length || currentItems.some((item) => item.required && (item.status !== 'VERIFIED' || !item.approvedBy
+    || (item.recordedBy === item.approvedBy && !(managerialFinalOverride && item.approvedBy === actorId(req)))))) throw new Error('همه اقلام جاری و الزامی وثیقه باید توسط مدیر مستقل یا اختیار مدیریتی ممیزی‌شده تأیید شوند.');
   await prisma.hrJobApplication.update({ where: { id: req.params.id }, data: { collateralClearance: 'APPROVED' } });
-  await audit(req.params.id, 'COLLATERAL_CLEARANCE_APPROVED', req);
+  await audit(req.params.id, 'COLLATERAL_CLEARANCE_APPROVED', req, usedManagerialFinalOverride
+    ? { managerialSelfVerification: true, overrideLabel: 'استفاده از اختیار مدیریتی' } : undefined);
   res.json({ success: true });
 }));
 
-router.put('/applications/:id/collateral/:itemId/return', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.put('/applications/:id/collateral/:itemId/return', requireActionPermission('RECORD_COLLATERAL_CUSTODY'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file || !String(req.body.returnedTo || '').trim() || !String(req.body.returnEvidenceNote || '').trim()) throw new Error('تحویل‌گیرنده، شرح و فایل مدرک تحویل الزامی است.');
     const item = await prisma.hrCollateralItem.findFirstOrThrow({ where: { id: req.params.itemId, applicationId: req.params.id } });
@@ -3502,7 +3591,7 @@ router.put('/applications/:id/collateral/:itemId/return', requireActionPermissio
   } catch (error) { removeHiringFile(req.file?.path); throw error; }
 }));
 
-router.get('/applications/:id/collateral/:itemId/return-evidence/download', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.get('/applications/:id/collateral/:itemId/return-evidence/download', requireAnyActionPermission('RECORD_COLLATERAL_CUSTODY', 'VERIFY_COLLATERAL_CUSTODY'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const row = await prisma.hrCollateralItem.findFirst({ where: { id: req.params.itemId, applicationId: req.params.id } });
   if (!row?.returnEvidenceStorageName || !row.returnEvidenceOriginalName) return res.status(404).json({ success: false, error: 'مدرک تحویل پیدا نشد.' });
   await audit(req.params.id, 'COLLATERAL_RETURN_EVIDENCE_DOWNLOADED', req, { itemId: row.id });
@@ -3510,7 +3599,7 @@ router.get('/applications/:id/collateral/:itemId/return-evidence/download', requ
   res.download(safeHiringStoragePath(row.returnEvidenceStorageName), row.returnEvidenceOriginalName);
 }));
 
-router.get('/applications/:id/collateral-returns/:returnId/download', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.get('/applications/:id/collateral-returns/:returnId/download', requireAnyActionPermission('RECORD_COLLATERAL_CUSTODY', 'VERIFY_COLLATERAL_CUSTODY'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const row = await prisma.hrCollateralOriginalReturn.findFirst({
     where: { id: req.params.returnId, collateralItem: { applicationId: req.params.id } },
   });
@@ -3520,12 +3609,19 @@ router.get('/applications/:id/collateral-returns/:returnId/download', requireAct
   res.download(safeHiringStoragePath(row.evidenceStorageName), row.evidenceOriginalName);
 }));
 
-router.post('/applications/:id/collateral/:itemId/return-confirm', requireActionPermission('MANAGE_FINANCE_EVIDENCE'), asyncHandler(async (req: AuthRequest, res: Response) => {
+router.post('/applications/:id/collateral/:itemId/return-confirm', requireActionPermission('VERIFY_COLLATERAL_CUSTODY'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const item = await prisma.hrCollateralItem.findFirstOrThrow({ where: { id: req.params.itemId, applicationId: req.params.id } });
   if (!item.returnedAt || !item.returnedTo || !item.returnEvidenceNote || !item.returnEvidenceStorageName) throw new Error('جزئیات و مدرک تحویل باید کامل باشد.');
-  if (item.returnedBy === actorId(req)) throw new Error('ثبت‌کننده تحویل نمی‌تواند همان بازگشت را تأیید کند.');
+  const managerialSelfVerification = item.returnedBy === actorId(req) && (await resolveWorkspaceDutyAuthority(prisma, {
+    userId: actorId(req), workspace: 'accounting', feature: 'VERIFY_COLLATERAL_CUSTODY',
+  })).canSelfDecide && (await activeHrActionPermissionsForUser(prisma, actorId(req))).includes('RECORD_COLLATERAL_CUSTODY');
+  if (item.returnedBy === actorId(req) && !managerialSelfVerification) throw new Error('ثبت‌کننده تحویل نمی‌تواند همان بازگشت را تأیید کند.');
   const row = await prisma.hrCollateralItem.update({ where: { id: item.id }, data: { returnConfirmedBy: actorId(req), returnConfirmedAt: new Date() } });
-  await audit(req.params.id, 'COLLATERAL_RETURN_CONFIRMED', req, { itemId: row.id });
+  await prisma.$transaction((tx) => reconcileAcceptedOfferFollowUp(tx, {
+    applicationId: req.params.id, actorUserId: actorId(req),
+  }));
+  await audit(req.params.id, 'COLLATERAL_RETURN_CONFIRMED', req, { itemId: row.id,
+    ...(managerialSelfVerification ? { managerialSelfVerification: true, overrideLabel: 'استفاده از اختیار مدیریتی' } : {}) });
   res.json({ success: true, data: row });
 }));
 

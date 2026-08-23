@@ -28,6 +28,28 @@ const base = (
 });
 
 {
+  const incomplete = projectHiringLifecycle(base({
+    stage: "SCREENING", formRevisions: [submitted], identityClearance: "IN_PROGRESS",
+    identityChecks: [{ fieldKey: "firstName", status: "VERIFIED" }],
+    documents: [],
+  }), ["HR_PROCESSOR"]);
+  assert.equal(incomplete.phases[4].primaryAction?.id, "REVIEW_IDENTITY");
+
+  const requiredChecks = ["firstName", "lastName", "birthDate", "birthPlace", "fatherName", "foreignIdentity", "address", "postalCode", "mobile", "educationLevel", "maritalStatus"];
+  const ready = projectHiringLifecycle(base({
+    stage: "SCREENING", formRevisions: [submitted], identityClearance: "IN_PROGRESS", candidate: { nationalCode: null },
+    identityChecks: [
+      ...requiredChecks.map((fieldKey) => ({ fieldKey, status: "VERIFIED" })),
+      { fieldKey: "militaryStatus", status: "NOT_APPLICABLE" },
+      { fieldKey: "birthCertificateExplanations", status: "NOT_APPLICABLE" },
+    ],
+    documents: [{ category: "FOREIGN_IDENTITY", side: null, customTitle: null, version: 1, status: "VERIFIED" }],
+  }), ["HR_MANAGER"]);
+  assert.equal(ready.phases[4].primaryAction?.id, "APPROVE_IDENTITY");
+  assert.equal(ready.phases[4].secondaryActions.length, 0);
+}
+
+{
   const result = projectHiringLifecycle(base());
   assert.equal(result.totalPhases, 9);
   assert.deepEqual(result.phases.map(({ id }) => id), [

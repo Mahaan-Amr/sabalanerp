@@ -121,6 +121,8 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/reopen/execute`, data),
   addCollateralRequirement: (id: string, data: any) =>
     internal.post(`/applications/${id}/collateral-requirements`, data),
+  markCollateralNotRequired: (id: string) =>
+    internal.post(`/applications/${id}/collateral-requirements/not-required`),
   returnForm: (id: string, data: any) =>
     internal.post(`/applications/${id}/form/return`, data),
   retryCorrectionNotification: (id: string) =>

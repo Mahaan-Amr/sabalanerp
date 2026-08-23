@@ -6,6 +6,7 @@
   "scripts": {
     "duty:baseline": "tsx src/scripts/report-hr-duty-baseline.ts",
     "duty:reconcile:sales-contract-corrections": "tsx src/scripts/report-sales-contract-correction-duty-reconciliation.ts",
+    "duty:migrate:shared-decisions:dry": "tsx src/scripts/migrate-open-shared-decision-duties.ts",
     "dispatch-document:recovery": "tsx scripts/dispatch-document-recovery.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -61,6 +62,8 @@
     "verify:security-attendance-migration": "tsx scripts/verify-security-attendance-migration.ts",
     "hr-redesign:backfill:dry": "tsx src/scripts/hr-redesign-data-backfill.ts",
     "hr-redesign:backfill:apply": "tsx src/scripts/hr-redesign-data-backfill.ts --apply",
+    "hr-hiring:accepted-offer-follow-up:dry": "tsx src/scripts/reconcileAcceptedOfferCollateralFollowUp.ts",
+    "hr-hiring:accepted-offer-follow-up:apply": "tsx src/scripts/reconcileAcceptedOfferCollateralFollowUp.ts --apply",
     "hr-redesign:cutover:verify": "tsx src/scripts/verify-hr-redesign-cutover.ts",
     "preview:security-shift-pdf": "tsx scripts/render-security-completed-shift-preview.ts",
     "verify:dispatch-master-data": "tsx scripts/verify-dispatch-master-data.ts",

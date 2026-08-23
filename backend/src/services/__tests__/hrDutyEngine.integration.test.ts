@@ -40,6 +40,16 @@ const grantFinanceAction = async (
       update: { isActive: true },
       create: { code: 'MANAGE_FINANCE_EVIDENCE', workspaceCode: 'HUMAN_RESOURCES', displayName: 'Manage finance evidence' },
     }),
+    tx.hrFeatureCatalog.upsert({
+      where: { code: 'RECORD_COLLATERAL_CUSTODY' },
+      update: { isActive: true },
+      create: { code: 'RECORD_COLLATERAL_CUSTODY', workspaceCode: 'HUMAN_RESOURCES', displayName: 'Record collateral custody' },
+    }),
+    tx.hrFeatureCatalog.upsert({
+      where: { code: 'VERIFY_COLLATERAL_CUSTODY' },
+      update: { isActive: true },
+      create: { code: 'VERIFY_COLLATERAL_CUSTODY', workspaceCode: 'HUMAN_RESOURCES', displayName: 'Verify collateral custody' },
+    }),
   ]);
   await tx.hrWorkspaceAccessGrant.create({ data: {
     stableKey: `${input.suffix}:workspace`, userId: input.userId,
@@ -51,11 +61,13 @@ const grantFinanceAction = async (
     featureCode: 'RECRUITMENT_CASES', level: 'VIEW', effectiveFrom: input.effectiveFrom,
     grantedByUserId: input.actorUserId, reason: 'Duty engine action-permission prerequisite',
   } });
-  return tx.hrFeatureAccessGrant.create({ data: {
-    stableKey: `${input.suffix}:finance-action`, userId: input.userId,
-    featureCode: 'MANAGE_FINANCE_EVIDENCE', level: 'EDIT', effectiveFrom: input.effectiveFrom,
+  const [grant] = await Promise.all(['MANAGE_FINANCE_EVIDENCE', 'RECORD_COLLATERAL_CUSTODY', 'VERIFY_COLLATERAL_CUSTODY']
+    .map((featureCode) => tx.hrFeatureAccessGrant.create({ data: {
+    stableKey: `${input.suffix}:finance-action:${featureCode}`, userId: input.userId,
+    featureCode, level: 'EDIT', effectiveFrom: input.effectiveFrom,
     grantedByUserId: input.actorUserId, reason: 'Duty engine action-permission test',
-  } });
+  } })));
+  return grant;
 };
 
 const run = async () => {
@@ -151,18 +163,18 @@ const run = async () => {
       sourceActionCode: 'FINANCE_APPROVAL', actorUserId: sourceActor.id, policyVersion: 1,
       now: new Date('2026-08-09T08:00:00.000Z'),
     });
-    assert.equal(created.currentAssigneeUserId, assignee.id);
-    assert.equal(created.responsibilityId, responsibility.id);
+    assert.equal(created.currentAssigneeUserId, null);
+    assert.equal(created.responsibilityId, null);
     assert.equal(created.destinationWorkspaceCode, 'ACCOUNTING');
     assert.equal(created.status, 'OPEN');
     assert.equal((await tx.crossWorkspaceDutyAssignmentHistory.count({ where: { dutyId: created.id } })), 1);
-    assert.equal((await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: created.id, eventCode: 'ASSIGNED' } })), 1);
+    assert.equal((await tx.crossWorkspaceDutyAuditVersion.count({ where: { dutyId: created.id, eventCode: 'QUEUED' } })), 1);
 
     const assignedDetail = await getDestinationDutyDetail(tx, {
       dutyId: created.id, actorUserId: assignee.id, workspaceCode: 'accounting',
       now: new Date('2026-08-09T08:05:00.000Z'),
     });
-    assert.equal(assignedDetail.access, 'ASSIGNEE');
+    assert.equal(assignedDetail.access, 'SHARED');
     assert.equal(assignedDetail.fields.title, source.title);
     assert.equal(JSON.stringify(assignedDetail).includes(source.id), false, 'surface cannot expose the HR source id');
     assert.equal(JSON.stringify(assignedDetail).includes(sourceActor.id), false, 'surface cannot expose source actor identity');
@@ -172,7 +184,7 @@ const run = async () => {
     await assert.rejects(getDestinationDutyDetail(tx, {
       dutyId: created.id, actorUserId: sourceActor.id, workspaceCode: 'ACCOUNTING',
       now: new Date('2026-08-09T08:05:00.000Z'),
-    }), /DUTY_ASSIGNEE_CHANGED/);
+    }), /DUTY_ASSIGNEE_INELIGIBLE/);
     await assert.rejects(getDestinationDutyDetail(tx, {
       dutyId: created.id, actorUserId: assignee.id, workspaceCode: 'SALES',
       now: new Date('2026-08-09T08:05:00.000Z'),
@@ -207,29 +219,15 @@ const run = async () => {
       dutyId: created.id, actorUserId: sourceActor.id, policyVersion: 1,
       now: new Date('2026-08-09T08:31:00.000Z'),
     });
-    assert.ok(reassigned);
-    assert.ok(reassigned.successor);
-    const successorDuty = reassigned.successor;
-    assert.equal(reassigned.predecessor.status, 'WAIVED');
-    assert.equal(successorDuty.predecessorDutyId, created.id);
-    assert.equal(successorDuty.currentAssigneeUserId, successorOwner.id);
-    assert.equal(successorDuty.responsibilityId, successorResponsibility.id);
-    assert.equal(successorDuty.dueAt.toISOString(), created.dueAt.toISOString());
-    const formerAssigneeHistory = await listDestinationDuties(tx, {
-      actorUserId: assignee.id, workspaceCode: 'ACCOUNTING', view: 'history',
-      now: new Date('2026-08-09T08:32:00.000Z'),
-    });
-    const predecessorHistory = formerAssigneeHistory.find((item) => item.id === created.id);
-    assert.ok(predecessorHistory, 'former assignee retains a bounded terminal history record');
-    assert.equal(predecessorHistory.detailAvailable, false, 'stale terminal records are not actionable deep links');
-    assert.deepEqual(predecessorHistory.fields, {}, 'terminal fallback cannot re-read changed source fields');
-    assert.deepEqual(predecessorHistory.evidence, [], 'terminal fallback cannot reuse stale evidence declarations');
-    assert.equal(predecessorHistory.result, null, 'terminal fallback cannot expose a stale structured result');
-    assert.ok(predecessorHistory.history.every((event) => event.reason === null), 'terminal fallback exposes event metadata without reasons');
-    await assert.rejects(getDestinationDutyDetail(tx, {
+    assert.equal(reassigned, null, 'shared decisions remain one unassigned duty when responsibility changes');
+    const successorDuty = created;
+    assert.equal(successorDuty.currentAssigneeUserId, null);
+    assert.equal(successorDuty.responsibilityId, null);
+    const successorSharedDetail = await getDestinationDutyDetail(tx, {
       dutyId: successorDuty.id, actorUserId: assignee.id, workspaceCode: 'ACCOUNTING',
       now: new Date('2026-08-09T08:32:00.000Z'),
-    }), /DUTY_ASSIGNEE_CHANGED/);
+    });
+    assert.equal(successorSharedDetail.access, 'SHARED');
 
     const completed = await respondToHrDuty(tx, {
       dutyId: successorDuty.id, actorUserId: successorOwner.id, actionCode: 'APPROVE',
@@ -252,7 +250,8 @@ const run = async () => {
       actorUserId: sourceActor.id, workspaceCode: 'ACCOUNTING', view: 'history',
       now: new Date('2026-08-09T09:00:30.000Z'),
     });
-    assert.ok(managerHistory.some((item) => item.id === successorDuty.id));
+    assert.equal(managerHistory.some((item) => item.id === successorDuty.id), false,
+      'shared History remains limited to users who are currently eligible to decide');
 
     const responseReplay = await respondToHrDuty(tx, {
       dutyId: successorDuty.id, actorUserId: successorOwner.id, actionCode: 'APPROVE',
@@ -267,7 +266,7 @@ const run = async () => {
     const safeIdentities = await tx.crossWorkspaceDutyNotificationIdentity.findMany({
       where: { dutyId: { in: [created.id, successorDuty.id] } },
     });
-    assert.ok(safeIdentities.length >= 2);
+    assert.ok(safeIdentities.length >= 1);
     for (const identity of safeIdentities) {
       const payload = JSON.stringify(identity.safePayloadJson);
       assert.equal(payload.includes(source.title), false, 'notification identity cannot contain protected source fields');

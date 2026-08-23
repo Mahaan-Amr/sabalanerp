@@ -20,6 +20,7 @@ import {
   getCrossWorkspaceDutySummary,
   listCrossWorkspaceDuties,
   markCrossWorkspaceDutyHistorySeen,
+  markCrossWorkspaceDutyAvailableSeen,
 } from '../services/crossWorkspaceDutyInbox';
 import {
   HR_HIRING_ALLOWED_MIME, HR_HIRING_STORAGE_DIR, removeHiringFile, scanHiringFile,
@@ -30,6 +31,8 @@ import {
   recordHrHiringCollateralReceipt,
 } from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
 import { normalizeHiringRial } from '../services/hrApplicantExperience';
+import { parseCollateralReceiptDate } from '../services/hrCollateralReceiptDate';
+import { ensureCandidatePersonnelIdentityConsistent } from '../services/hrCandidatePersonnelIdentityConflict';
 
 const router = express.Router();
 const hiringFinanceUpload = multer({
@@ -42,21 +45,25 @@ const hiringFinanceUpload = multer({
 });
 const manageHrWork = requireHrFeature('HR_WORK_MANAGEMENT', 'EDIT');
 const dutyOperationalMessage = (code: string) => ({
-  SEPARATION_OF_DUTIES_CONFLICT: 'این درخواست را شما ثبت کرده‌اید؛ برای حفظ تفکیک وظایف، مدیر حسابداری دیگری باید آن را دریافت کند. مدیر سیستم می‌تواند با ثبت دلیل اقدام کند.',
-  REASON_REQUIRED: 'دریافت وظیفه متوقف شد؛ مدیر سیستم برای اقدام روی درخواست خودش باید دلیل کنترلی ثبت کند.',
+  SEPARATION_OF_DUTIES_CONFLICT: 'تفکیک وظایف این نوع درخواست اجازه اقدام توسط ثبت‌کننده را نمی‌دهد.',
+  REASON_REQUIRED: 'برای رد، بازگرداندن یا واگذاری مجدد، دلیل کوتاه و روشن وارد کنید.',
+  DUTY_ALREADY_DECIDED: 'این درخواست لحظاتی پیش توسط کاربر دیگری تعیین تکلیف شد.',
   DUTY_ALREADY_CLAIMED: 'این وظیفه قبلاً توسط کاربر دیگری دریافت شده است. فهرست را به‌روزرسانی کنید.',
   DUTY_CLAIM_CONFLICT: 'دریافت وظیفه متوقف شد؛ وضعیت آن هم‌زمان تغییر کرده است. فهرست را به‌روزرسانی کنید.',
   SOURCE_STATE_CHANGED: 'وضعیت درخواست اصلاح تغییر کرده است. فهرست را به‌روزرسانی و از مرحله جاری ادامه دهید.',
   CONTRACT_INACTIVE: 'تصمیم‌گیری متوقف شد؛ قرارداد غیرفعال است. مدیر مجاز باید ابتدا آن را از مسیر رسمی فعال‌سازی مجدد بازگرداند.',
   RESPONSIBLE_SELLER_REQUIRED: 'تأیید اصلاح متوقف شد؛ فروشنده مسئول قرارداد مشخص نیست. مدیر فروش باید ابتدا مسئول قرارداد را تعیین کند.',
   DUTY_HISTORY_SEEN_THROUGH_REQUIRED: 'ثبت مشاهده تاریخچه انجام نشد؛ صفحه را دوباره باز کنید.',
+  COLLATERAL_RECEIPT_DATE_ISO_REQUIRED: 'تاریخ دریافت باید با تقویم شمسی انتخاب و در مرز API به تاریخ ISO تبدیل شود.',
+  COLLATERAL_RECEIPT_DATE_INVALID: 'تاریخ دریافت معتبر نیست.',
+  COLLATERAL_RECEIPT_DATE_FUTURE: 'تاریخ دریافت نمی‌تواند در آینده باشد.',
 }[code] || 'عملیات وظیفه متوقف شد. صفحه را به‌روزرسانی کنید و در صورت تکرار با مدیر همان فضای کاری تماس بگیرید.');
 const asyncHandler = (
   handler: (req: AuthRequest, res: Response, next: NextFunction) => Promise<unknown>,
 ) => (req: AuthRequest, res: Response, next: NextFunction) => void handler(req, res, next).catch((error) => {
-  if (!(error instanceof Error) || !/^(?:(?:HR_)?DUTY_|SOURCE_|ENVELOPE_|ASSIGNEE_|RESPONSIBILITY_|SEPARATION_OF_DUTIES_|CONTRACT_|RESPONSIBLE_SELLER_|ACTION_NOT_ALLOWED|REASON_REQUIRED)/.test(error.message)) return next(error);
+  if (!(error instanceof Error) || !/^(?:(?:HR_)?DUTY_|SOURCE_|ENVELOPE_|ASSIGNEE_|RESPONSIBILITY_|SEPARATION_OF_DUTIES_|CONTRACT_|COLLATERAL_|RESPONSIBLE_SELLER_|ACTION_NOT_ALLOWED|REASON_REQUIRED)/.test(error.message)) return next(error);
   const conflictCodes = new Set([
-    'DUTY_NOT_OPEN', 'DUTY_RESPONSE_CONFLICT', 'SOURCE_VERSION_CHANGED',
+    'DUTY_NOT_OPEN', 'DUTY_ALREADY_DECIDED', 'DUTY_RESPONSE_CONFLICT', 'SOURCE_VERSION_CHANGED',
     'ENVELOPE_VERSION_CHANGED', 'SOURCE_STATE_CHANGED', 'RESPONSIBILITY_CHANGED',
     'DUTY_DESTINATION_CHANGED', 'DUTY_ENVELOPE_CHANGED', 'DUTY_SOURCE_CHANGED',
     'DUTY_ASSIGNMENT_CHANGED',
@@ -69,6 +76,7 @@ const asyncHandler = (
     'HR_DUTY_UNASSIGNED_REQUIRES_MANAGER_TRIAGE',
     'DUTY_ASSIGNEE_CHANGED', 'DUTY_MANAGER_TRIAGE_FORBIDDEN',
     'DUTY_ASSIGNEE_INELIGIBLE',
+    'DUTY_REASSIGN_FORBIDDEN',
   ]);
   const status = error.message === 'DUTY_NOT_AVAILABLE'
     ? 404
@@ -128,6 +136,14 @@ const requireDestinationWorkspace = (req: AuthRequest, res: Response, next: Next
     return next(error);
   }
 };
+const requireAccountingDutyAccess = asyncHandler(async (req, res, next) => {
+  res.locals.dutyDetail = await getCrossWorkspaceDutyDetail(prisma, {
+    dutyId: req.params.id,
+    actorUserId: req.user!.id,
+    workspaceCode: 'ACCOUNTING',
+  });
+  next();
+});
 
 router.use(protect);
 
@@ -143,11 +159,27 @@ router.get(
   }),
 );
 
-router.get('/:id/hiring-finance/context', asyncHandler(async (req, res) => {
-  await getCrossWorkspaceDutyDetail(prisma, { dutyId: req.params.id, actorUserId: req.user!.id, workspaceCode: 'ACCOUNTING' });
+router.get('/:id/hiring-finance/context', requireAccountingDutyAccess, asyncHandler(async (req, res) => {
+  const detail = res.locals.dutyDetail;
   const duty = await prisma.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: req.params.id } });
   if (duty.sourceType !== 'HR_HIRING_FINANCE') throw new Error('DUTY_NOT_AVAILABLE');
-  const assigned = duty.currentAssigneeUserId === req.user!.id;
+  const assigned = detail.access === 'ASSIGNEE' || detail.access === 'SHARED';
+  if (duty.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
+    const contract = await prisma.hrEmploymentContractDocument.findUniqueOrThrow({
+      where: { id: duty.sourceId }, include: { application: { include: { candidate: true } } },
+    });
+    const recorder = contract.submittedBy ? await prisma.user.findUnique({ where: { id: contract.submittedBy }, select: { firstName: true, lastName: true } }) : null;
+    return res.json({ success: true, data: {
+      actionCode: duty.sourceActionCode,
+      candidateName: `${contract.application.candidate.firstName} ${contract.application.candidate.lastName}`.trim(),
+      caseReference: contract.applicationId,
+      contractNumber: contract.contractNumber, version: contract.version,
+      effectiveFrom: contract.effectiveFrom, effectiveTo: contract.effectiveTo,
+      submittedAt: contract.submittedAt,
+      recorderName: recorder ? `${recorder.firstName} ${recorder.lastName}`.trim() : 'کاربر ثبت‌کننده',
+      originalName: assigned ? contract.originalName : null,
+    } });
+  }
   if (duty.sourceActionCode.includes('ORIGINAL_RETURN')) {
     const source = await prisma.hrCollateralOriginalReturn.findUniqueOrThrow({ where: { id: duty.sourceId }, include: { collateralItem: true } });
     return res.json({ success: true, data: {
@@ -172,12 +204,10 @@ router.get('/:id/hiring-finance/context', asyncHandler(async (req, res) => {
   } });
 }));
 
-router.get('/:id/hiring-finance/evidence', asyncHandler(async (req, res) => {
-  await getCrossWorkspaceDutyDetail(prisma, {
-    dutyId: req.params.id, actorUserId: req.user!.id, workspaceCode: 'ACCOUNTING',
-  });
+router.get('/:id/hiring-finance/evidence', requireAccountingDutyAccess, asyncHandler(async (req, res) => {
+  const detail = res.locals.dutyDetail;
   const duty = await prisma.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: req.params.id } });
-  if (duty.sourceType !== 'HR_HIRING_FINANCE' || duty.currentAssigneeUserId !== req.user!.id) {
+  if (duty.sourceType !== 'HR_HIRING_FINANCE' || !['ASSIGNEE', 'SHARED'].includes(detail.access)) {
     throw new Error('DUTY_NOT_ASSIGNED');
   }
   if (duty.sourceActionCode === 'HIRING_COLLATERAL_VERIFY_RECEIPT') {
@@ -201,6 +231,15 @@ router.get('/:id/hiring-finance/evidence', asyncHandler(async (req, res) => {
       payloadJson: { dutyId: duty.id, collateralReturnId: source.id },
     } });
     return res.download(safeHiringStoragePath(source.evidenceStorageName), source.evidenceOriginalName);
+  }
+  if (duty.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
+    const contract = await prisma.hrEmploymentContractDocument.findUniqueOrThrow({ where: { id: duty.sourceId } });
+    await prisma.hrHiringAudit.create({ data: {
+      applicationId: contract.applicationId, actorUserId: req.user!.id, actorKind: 'USER',
+      eventType: 'SIGNED_CONTRACT_DOWNLOADED_FROM_ACCOUNTING_DUTY',
+      payloadJson: { dutyId: duty.id, contractId: contract.id },
+    } });
+    return res.download(safeHiringStoragePath(contract.storageName), contract.originalName);
   }
   throw new Error('DUTY_EVIDENCE_NOT_AVAILABLE');
 }));
@@ -231,9 +270,9 @@ router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFin
     validateHiringFileSignature(req.file.path, req.file.mimetype);
     const scanStatus = await scanHiringFile(req.file.path);
     const digest = await sha256File(req.file.path);
-    const receivedAt = new Date(String(req.body.receivedAt || ''));
+    const receivedAt = parseCollateralReceiptDate(req.body.receivedAt);
     const custodyLocation = String(req.body.custodyLocation || '').trim();
-    if (Number.isNaN(receivedAt.getTime()) || !custodyLocation) throw new Error('COLLATERAL_RECEIPT_FIELDS_REQUIRED');
+    if (!custodyLocation) throw new Error('COLLATERAL_RECEIPT_FIELDS_REQUIRED');
     const result = await prisma.$transaction((tx) => recordHrHiringCollateralReceipt(tx, {
       dutyId: req.params.id, actorUserId: req.user!.id,
       amountRials: req.body.amountRials ? normalizeHiringRial(req.body.amountRials) : null,
@@ -251,6 +290,22 @@ router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFin
     throw error;
   }
 }));
+
+router.post(
+  '/workspaces/:workspaceCode/available-seen',
+  enforceMutationIdempotency,
+  requireDestinationWorkspace,
+  asyncHandler(async (req, res) => {
+    const seenThrough = new Date(String(req.body.seenThrough ?? ''));
+    if (Number.isNaN(seenThrough.getTime())) throw new Error('DUTY_AVAILABLE_SEEN_THROUGH_REQUIRED');
+    const data = await markCrossWorkspaceDutyAvailableSeen(prisma, {
+      actorUserId: req.user!.id,
+      workspaceCode: res.locals.destinationWorkspaceCode,
+      seenThrough,
+    });
+    res.json({ success: true, data });
+  }),
+);
 
 router.post(
   '/workspaces/:workspaceCode/history-seen',
@@ -350,6 +405,25 @@ router.post(
   '/:id/respond',
   dutyResponseRequest,
   asyncHandler(async (req, res) => {
+    const duty = await prisma.crossWorkspaceDuty.findUnique({
+      where: { id: req.params.id },
+      select: { sourceActionCode: true, sourceId: true, destinationWorkspaceCode: true },
+    });
+    if (duty?.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
+      await getCrossWorkspaceDutyDetail(prisma, {
+        dutyId: req.params.id,
+        actorUserId: req.user!.id,
+        workspaceCode: duty.destinationWorkspaceCode,
+      });
+      const contract = await prisma.hrEmploymentContractDocument.findUniqueOrThrow({
+        where: { id: duty.sourceId },
+        include: { application: { include: { candidate: { include: { linkedPersonnel: true } } } } },
+      });
+      await ensureCandidatePersonnelIdentityConsistent(prisma, {
+        applicationId: contract.applicationId,
+        candidate: contract.application.candidate,
+      });
+    }
     const result = await respondToCrossWorkspaceDuty(prisma, {
       dutyId: req.params.id,
       actorUserId: req.user!.id,

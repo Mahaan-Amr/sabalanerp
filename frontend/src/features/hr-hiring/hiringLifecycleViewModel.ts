@@ -54,6 +54,45 @@ export const hiringTaskDetailVisible = (
   id: string,
 ) => Boolean(hiringTaskCapability(tasks, id)?.detailVisible);
 
+export interface StartPreparationStatusItem {
+  id: "SIGNED_CONTRACT" | "PAYROLL_PARTICIPATION" | "INSURANCE";
+  label: string;
+  status: string;
+  ownerAuthorities: string[];
+  activationEffect: string;
+}
+
+const startPreparationStatusDefinitions = [
+  {
+    id: "SIGNED_CONTRACT",
+    activationEffect: "الزامی برای فعال‌سازی",
+  },
+  {
+    id: "PAYROLL_PARTICIPATION",
+    activationEffect: "الزامی برای فعال‌سازی",
+  },
+  {
+    id: "INSURANCE",
+    activationEffect: "پیگیری پس از شروع مجاز است",
+  },
+] as const;
+
+export const startPreparationStatusItems = (
+  tasks: HiringTaskCapability[] | null | undefined,
+): StartPreparationStatusItem[] => startPreparationStatusDefinitions.flatMap(
+  (definition) => {
+    const capability = hiringTaskCapability(tasks, definition.id);
+    return capability
+      ? [{
+          ...definition,
+          label: capability.title,
+          status: capability.status,
+          ownerAuthorities: capability.ownerAuthorities,
+        }]
+      : [];
+  },
+);
+
 export const hiringLifecycleStatusLabel: Record<HiringLifecycleStatus, string> =
   {
     COMPLETED: "تکمیل‌شده",

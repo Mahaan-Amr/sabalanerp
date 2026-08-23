@@ -11,7 +11,7 @@ assert.equal(featureForPath('/operational-reference/personnel'), 'PERSONNEL', 'P
 assert.equal(featureForPath('/operational-reference/recruitment'), 'RECRUITMENT_CASES', 'Recruitment operational reference must use the Recruitment Cases feature boundary');
 assert.equal(hrBaseFeatureLevelForRequest('POST', '/personnel/person-1/archive'), 'VIEW');
 assert.equal(hrBaseFeatureLevelForRequest('POST', '/personnel/exceptional'), 'VIEW');
-assert.equal(hrBaseFeatureLevelForRequest('POST', '/personnel/person-1/work-schedule/changes/change-1/approve'), 'VIEW');
+assert.equal(hrBaseFeatureLevelForRequest('PUT', '/personnel/person-1/work-schedule'), 'VIEW');
 assert.equal(hrBaseFeatureLevelForRequest('PUT', '/personnel/person-1'), 'EDIT');
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications'), 'VIEW');
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications/app-1/decisions/HR_PRELIMINARY_APPROVAL'), 'VIEW');
@@ -88,23 +88,24 @@ for (const legacyRoute of [
   'POST /migration/apply',
 ]) assert.ok(registeredRoutes.includes(legacyRoute), `legacy HR compatibility route changed: ${legacyRoute}`);
 
-for (const governedRoute of [
-  '/personnel/:id/archive',
-  '/personnel/:id/restore',
-  '/personnel/exceptional',
-  '/personnel/:id/work-schedule/changes/:changeId/prepare',
-  '/personnel/:id/work-schedule/changes/:changeId/submit',
-  '/personnel/:id/work-schedule/changes/:changeId/return',
-  '/personnel/:id/work-schedule/changes/:changeId/approve',
+for (const [method, governedRoute] of [
+  ['post', '/personnel/:id/archive'],
+  ['post', '/personnel/:id/restore'],
+  ['post', '/personnel/exceptional'],
+  ['put', '/personnel/:id/work-schedule'],
 ]) {
-  const route = (router as unknown as { stack: Array<{ route?: { path: string; stack: unknown[] } }> }).stack
-    .find((layer) => layer.route?.path === governedRoute)?.route;
+  const route = (router as unknown as { stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: unknown[] } }> }).stack
+    .find((layer) => layer.route?.path === governedRoute && layer.route.methods[method])?.route;
   assert.ok(route && route.stack.length >= 3, `${governedRoute} must enforce authority/responsibility server-side`);
 }
 
 assert.ok(
   registeredRoutes.includes('GET /personnel/:id/work-schedule'),
   'schedule details must be fetched only from the explicit disclosure route',
+);
+assert.ok(
+  registeredRoutes.includes('PUT /personnel/:id/work-schedule'),
+  'authorized HR and company managers must be able to save a schedule directly',
 );
 
 const dataContractsLayer = (router as unknown as {

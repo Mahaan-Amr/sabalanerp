@@ -205,16 +205,44 @@ export const projectApplicantFullInformation = (
 export const projectApplicantClosureSummary = (
   source: any,
   closureAudit: any,
-  access: { canViewExplanation: boolean; actorDisplayName?: string | null },
+  access: {
+    canViewExplanation: boolean;
+    actorDisplayName?: string | null;
+    activationActorDisplayName?: string | null;
+    canViewPersonnel?: boolean;
+  },
 ) => {
-  if (source.stage !== 'CLOSED' || !source.outcome || !closureAudit) return { available: false };
+  const isAuditedHireConversion = source.outcome === 'HIRED' && closureAudit?.eventType === 'HIRE_CONVERTED';
+  if ((!isAuditedHireConversion && source.stage !== 'CLOSED') || !source.outcome || !closureAudit) return { available: false };
   const payload = closureAudit.payloadJson || {};
-  return {
+  const summary = {
     available: true,
     outcome: payload.outcome || source.outcome,
-    previousStage: source.preClosureStage ?? null,
+    previousStage: source.preClosureStage ?? payload.previousStage ?? null,
     closedAt: new Date(closureAudit.createdAt).toISOString(),
     closedBy: access.actorDisplayName || closureAudit.actorUserId || 'SYSTEM',
+  };
+  if (source.outcome === 'HIRED') {
+    const relationship = source.employmentRelationship;
+    const personnel = relationship?.personnel;
+    return {
+      ...summary,
+      completionKind: 'HIRE_CONVERSION',
+      personnel: personnel ? {
+        displayName: `${personnel.firstName} ${personnel.lastName}`.trim(),
+        ...(access.canViewPersonnel ? { href: `/dashboard/hr/personnel?focus=${personnel.id}` } : {}),
+      } : null,
+      scheduledStartDate: source.scheduledStartDate ? new Date(source.scheduledStartDate).toISOString() : null,
+      relationshipEffectiveFrom: relationship?.effectiveFrom ? new Date(relationship.effectiveFrom).toISOString() : null,
+      relationshipStatus: relationship?.status ?? null,
+      activatedAt: source.activatedAt ? new Date(source.activatedAt).toISOString() : null,
+      activatedBy: source.activatedAt
+        ? access.activationActorDisplayName || source.activatedBy || 'SYSTEM'
+        : null,
+    };
+  }
+  return {
+    ...summary,
     ...(access.canViewExplanation
       ? { explanation: payload.reason || source.outcomeReason || null, explanationRestricted: false }
       : { explanationRestricted: true }),

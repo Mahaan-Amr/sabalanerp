@@ -40,7 +40,10 @@ export const buildHiringDocumentIndex = (
 ) => {
   const canHr = permissions.has('VIEW_FULL_APPLICANT_INFORMATION');
   const canCompanyManagement = permissions.has('VIEW_COMPANY_EVALUATION_RESULTS');
-  const canFinance = permissions.has('MANAGE_FINANCE_EVIDENCE');
+  const canFinance = permissions.has('RECORD_COLLATERAL_CUSTODY')
+    || permissions.has('VERIFY_COLLATERAL_CUSTODY')
+    || permissions.has('RECORD_SIGNED_EMPLOYMENT_CONTRACT')
+    || permissions.has('VERIFY_SIGNED_EMPLOYMENT_CONTRACT');
   const entries: any[] = [];
 
   for (const row of application.preIdentityChecklistItems || []) {

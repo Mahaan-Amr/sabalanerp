@@ -117,6 +117,16 @@ export const crossWorkspaceDutyResponseRequiresReason = async (
   input: { dutyId: string; actorUserId: string },
 ) => (await adapterForDuty(database, input.dutyId)).responseRequiresReason(database, input);
 
+export const canAccessSharedCrossWorkspaceDuty = async (
+  database: CrossWorkspaceDutyDatabase,
+  input: { dutyId: string; actorUserId: string; includeCompleted?: boolean; now?: Date },
+) => (await adapterForDuty(database, input.dutyId)).canAccessSharedDecision(database, input);
+
+export const sharedCrossWorkspaceDutyAccessProvenance = async (
+  database: CrossWorkspaceDutyDatabase,
+  input: { dutyId: string; actorUserId: string; now?: Date },
+) => (await adapterForDuty(database, input.dutyId)).sharedDecisionAccessProvenance?.(database, input) ?? [];
+
 export const reassignCrossWorkspaceDuty = async (
   database: CrossWorkspaceDutyDatabase,
   input: ReassignCrossWorkspaceDutyInput,
@@ -128,6 +138,11 @@ export const reassignCrossWorkspaceDuty = async (
   }
   return (await adapterForDuty(database, input.dutyId)).reassign(database, input);
 };
+
+export const canReassignCrossWorkspaceDuty = async (
+  database: CrossWorkspaceDutyDatabase,
+  input: { dutyId: string; actorUserId: string; now?: Date },
+) => (await adapterForDuty(database, input.dutyId)).canReassign(database, input);
 
 export const listEligibleCrossWorkspaceDutyAssignees = async (
   database: CrossWorkspaceDutyDatabase,

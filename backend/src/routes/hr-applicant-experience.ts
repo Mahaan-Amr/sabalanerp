@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, protect } from '../middleware/auth';
 import { requireHrFeature } from '../middleware/hrAuthorization';
-import { activeHrActionPermissionsForUser } from '../services/hrAuthorizationService';
+import { activeHrActionPermissionsForUser, authorizeHrUser } from '../services/hrAuthorizationService';
 import {
   ApplicantInformationGroup,
   buildCandidateClosedState,
@@ -61,7 +61,7 @@ const informationGroupsForActionPermissions = (permissions: ReadonlySet<string>)
     groups.add('WORK_HISTORY');
     groups.add('APPLICATION_ANSWERS');
   }
-  if (permissions.has('VIEW_COMPANY_EVALUATION_RESULTS') || permissions.has('MANAGE_FINANCE_EVIDENCE')) {
+  if (permissions.has('VIEW_COMPANY_EVALUATION_RESULTS')) {
     groups.add('DOCUMENTS_FILES');
   }
   return groups;
@@ -141,8 +141,18 @@ router.get('/applications/:id/closure-summary', ...requireRecruitmentView, async
       outcome: true,
       outcomeReason: true,
       preClosureStage: true,
+      scheduledStartDate: true,
+      activatedAt: true,
+      activatedBy: true,
+      employmentRelationship: {
+        select: {
+          status: true,
+          effectiveFrom: true,
+          personnel: { select: { id: true, firstName: true, lastName: true } },
+        },
+      },
       audits: {
-        where: { eventType: { in: ['APPLICATION_CLOSED', 'ASSESSMENT_DECISION_RECORDED'] } },
+        where: { eventType: { in: ['APPLICATION_CLOSED', 'ASSESSMENT_DECISION_RECORDED', 'HIRE_CONVERTED'] } },
         orderBy: { createdAt: 'desc' },
         take: 20,
         select: { eventType: true, actorUserId: true, createdAt: true, payloadJson: true },
@@ -152,22 +162,34 @@ router.get('/applications/:id/closure-summary', ...requireRecruitmentView, async
   if (!row) return res.status(404).json({ success: false, error: 'پرونده متقاضی پیدا نشد.' });
   const closureAudit = row.audits.find((event) => {
     if (event.eventType === 'APPLICATION_CLOSED') return true;
+    if (event.eventType === 'HIRE_CONVERTED' && row.outcome === 'HIRED') return true;
     const payload = event.payloadJson as Record<string, unknown> | null;
     return payload?.decision === 'REJECTED';
   }) || null;
-  const [actionPermissions, actor] = await Promise.all([
+  const [actionPermissions, actor, activationActor, personnelAccess] = await Promise.all([
     activeHrActionPermissionsForUser(prisma, req.user!.id),
     closureAudit?.actorUserId
       ? prisma.user.findUnique({ where: { id: closureAudit.actorUserId }, select: { firstName: true, lastName: true, username: true } })
       : null,
+    row.activatedBy
+      ? prisma.user.findUnique({ where: { id: row.activatedBy }, select: { firstName: true, lastName: true, username: true } })
+      : null,
+    authorizeHrUser(prisma, req.user!.id, {
+      workspaceLevel: 'VIEW', feature: { code: 'PERSONNEL', level: 'VIEW' },
+    }),
   ]);
   const permissionSet = new Set(actionPermissions);
   const actorDisplayName = actor ? `${actor.firstName} ${actor.lastName}`.trim() || actor.username : null;
+  const activationActorDisplayName = activationActor
+    ? `${activationActor.firstName} ${activationActor.lastName}`.trim() || activationActor.username
+    : null;
   return res.json({
     success: true,
     data: projectApplicantClosureSummary(row, closureAudit, {
       canViewExplanation: permissionSet.has('VIEW_INITIAL_INTERVIEW_REPORT') || permissionSet.has('VIEW_COMPANY_EVALUATION_RESULTS'),
       actorDisplayName,
+      activationActorDisplayName,
+      canViewPersonnel: personnelAccess.allowed,
     }),
   });
 }));

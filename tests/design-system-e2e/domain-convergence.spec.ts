@@ -89,7 +89,8 @@ test('HR work schedule and Persian time selection are RTL, keyboard, mobile, and
   await expect(page.getByRole('heading', { name: 'ساعت کاری' })).toBeVisible();
 
   await setViewportAndZoom(page, { width: 390, height: 844 });
-  await page.getByRole('button', { name: 'شنبه', exact: true }).click();
+  const saturday = page.getByRole('button', { name: 'شنبه', exact: true });
+  if (await saturday.getAttribute('aria-pressed') !== 'true') await saturday.click();
   const opener = page.getByRole('button', { name: 'زمان شروع شنبه' });
   await opener.click();
   const dialog = page.getByRole('dialog', { name: 'انتخاب ساعت' });

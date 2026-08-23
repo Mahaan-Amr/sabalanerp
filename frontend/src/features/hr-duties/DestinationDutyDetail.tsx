@@ -17,6 +17,7 @@ import {
   ErpSummaryGrid,
   ErpTextarea,
   ErpRialInput,
+  ErpPersianDateField,
 } from '@/components/erp';
 import { hrDutyApi, type DestinationDuty } from './hrDutyApi';
 import { initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
@@ -24,6 +25,7 @@ import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-du
 import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatNumericInputText } from '@/lib/numberFormat';
+import { collateralReceiptDatePayload } from './collateralReceiptDate';
 
 const actionPresentation: Record<string, { label: string; icon: typeof FaCheck; tone: 'success' | 'danger' | 'warning' | 'info' }> = {
   APPROVE: { label: 'تأیید', icon: FaCheck, tone: 'success' },
@@ -39,11 +41,15 @@ const fieldLabel: Record<string, string> = { title: 'عنوان', description: '
 const evidenceLabel: Record<string, string> = {
   DOCUMENT: 'سند مجاز', NOTE: 'یادداشت مجاز', CHECKLIST: 'چک‌لیست مجاز',
   COLLATERAL_SCAN: 'اسکن وثیقه', COLLATERAL_RETURN_PROOF: 'مدرک بازگرداندن اصل وثیقه',
+  SIGNED_EMPLOYMENT_CONTRACT: 'اسکن قرارداد امضاشده',
 };
 const eventLabel: Record<string, string> = {
   ASSIGNED: 'واگذاری وظیفه', UNASSIGNED_TRIAGE: 'ارسال به صف تعیین مسئول',
   REASSIGNED: 'واگذاری مجدد', WAIVED: 'جایگزینی وظیفه', COMPLETED: 'تکمیل وظیفه',
   CANCELLED: 'لغو وظیفه', OVERDUE: 'عبور از مهلت', MANAGER_ESCALATION: 'ارجاع به مدیر',
+  QUEUED: 'ارسال به صف مشترک', MIGRATED_TO_SHARED_DECISION: 'تبدیل به تصمیم مشترک',
+  WORKSPACE_ADMIN_SELF_DECISION: 'تصمیم مدیر فضای کاری روی درخواست خود',
+  SYSTEM_ADMIN_SELF_DECISION: 'تصمیم مدیر سیستم روی درخواست خود',
 };
 const systemReasonLabel: Record<string, string> = {
   SOURCE_CHANGED: 'تغییر وضعیت منبع', RESPONSIBILITY_CHANGED: 'تغییر مسئولیت سازمانی',
@@ -57,6 +63,7 @@ const displayHistoryReason = (reason: string | null) => {
 };
 const failureMessage = (error: any) => {
   const code = String(error?.response?.data?.error || '');
+  if (code === 'این درخواست لحظاتی پیش توسط کاربر دیگری تعیین تکلیف شد.') return code;
   if (code.includes('ASSIGNEE') || code.includes('ASSIGNMENT')) return 'این وظیفه دیگر به شما محول نیست.';
   if (code.includes('SOURCE')) return 'وضعیت منبع تغییر کرده است. فهرست را به‌روزرسانی کنید.';
   if (code.includes('ENVELOPE')) return 'نسخه وظیفه تغییر کرده است. فهرست را به‌روزرسانی کنید.';
@@ -71,13 +78,14 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
     initialDestinationDutyState as typeof initialDestinationDutyState & { data: DestinationDuty | null },
   );
   const [reason, setReason] = useState('');
+  const [correctionAction, setCorrectionAction] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reasonError, setReasonError] = useState<string | null>(null);
-  const [overrideAction, setOverrideAction] = useState<string | null>(null);
   const [eligibleAssignees, setEligibleAssignees] = useState<Array<{ id: string; displayName: string; username: string }>>([]);
   const [reassignmentTarget, setReassignmentTarget] = useState('');
   const [reassignmentReason, setReassignmentReason] = useState('');
+  const [reassignmentConfirmationOpen, setReassignmentConfirmationOpen] = useState(false);
   const [financeContext, setFinanceContext] = useState<any>(null);
   const [receipt, setReceipt] = useState({ amountRials: '', identifier: '', issuerOrGuarantor: '', custodyLocation: '', receivedAt: '', file: null as File | null });
   const [originalReturn, setOriginalReturn] = useState({ returnedTo: '', evidenceNote: '', file: null as File | null });
@@ -86,7 +94,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
     try {
       const response = await hrDutyApi.detail(workspace, dutyId);
       dispatch({ type: 'success', data: response.data.data });
-      if (response.data.data.sourceActionCode.startsWith('HIRING_COLLATERAL_')) {
+      if (response.data.data.sourceActionCode.startsWith('HIRING_COLLATERAL_') || response.data.data.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
         const context = await hrDutyApi.hiringFinanceContext(dutyId);
         setFinanceContext(context.data.data);
         setReceipt((current) => ({ ...current, amountRials: context.data.data.amountRials || '' }));
@@ -112,7 +120,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
       await hrDutyApi.respond(state.data, actionCode, reason.trim() || null);
       announceCrossWorkspaceDutyChanged();
       setReason('');
-      setOverrideAction(null);
+      setCorrectionAction(null);
       await load();
     } catch (error) {
       setActionError(failureMessage(error));
@@ -124,15 +132,11 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
 
   const respond = (actionCode: string) => {
     if (!state.data || pendingAction) return;
-    if ((state.data.responseRequiresReason || !['APPROVE', 'FORWARD_TO_MANAGER'].includes(actionCode)) && reason.trim().length < 3) {
+    if (!['APPROVE', 'FORWARD_TO_MANAGER', 'VERIFY'].includes(actionCode) && reason.trim().length < 3) {
       setReasonError('برای این اقدام، دلیل کوتاه و روشن وارد کنید.');
       return;
     }
     setReasonError(null);
-    if (state.data.responseRequiresReason) {
-      setOverrideAction(actionCode);
-      return;
-    }
     void submitResponse(actionCode);
   };
 
@@ -149,6 +153,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
       announceCrossWorkspaceDutyChanged();
       setReassignmentTarget('');
       setReassignmentReason('');
+      setReassignmentConfirmationOpen(false);
       await load();
     } catch (error) {
       setActionError(failureMessage(error));
@@ -157,12 +162,23 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
       setPendingAction(null);
     }
   };
+  const requestReassignment = () => {
+    if (!reassignmentTarget || reassignmentReason.trim().length < 3) {
+      setActionError('کاربر مقصد و دلیل واگذاری مجدد را مشخص کنید.');
+      return;
+    }
+    setActionError(null);
+    setReassignmentConfirmationOpen(true);
+  };
   const recordReceipt = async () => {
     if (!state.data || !receipt.file || !receipt.receivedAt || !receipt.custodyLocation.trim()) return;
     setPendingAction('RECORD_RECEIPT');
     setActionError(null);
     const body = new FormData();
-    Object.entries(receipt).forEach(([key, value]) => { if (value) body.append(key, value); });
+    Object.entries(receipt).forEach(([key, value]) => {
+      if (!value) return;
+      body.append(key, key === 'receivedAt' ? collateralReceiptDatePayload(String(value)) : value);
+    });
     try {
       await hrDutyApi.recordHiringCollateralReceipt(state.data.id, body);
       announceCrossWorkspaceDutyChanged();
@@ -204,6 +220,9 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
   }
 
   const duty = state.data;
+  const structuredResult = duty.result && typeof duty.result === 'object' && !Array.isArray(duty.result)
+    ? duty.result as { actionCode?: string; reason?: string | null }
+    : null;
   return (
     <ErpPage
       eyebrow="دسترسی محدود به همین وظیفه"
@@ -221,6 +240,15 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
           { label: 'نسخه', value: `${duty.sourceVersion.toLocaleString('fa-IR')} / ${duty.envelopeVersion.toLocaleString('fa-IR')}` },
         ]} />
       </ErpSection>
+      {duty.status !== 'OPEN' && structuredResult && (
+        <ErpSection title="نتیجه ثبت‌شده">
+          <ErpSummaryGrid columns={2} items={[
+            { label: 'نتیجه', value: structuredResult.actionCode ? (actionPresentation[structuredResult.actionCode]?.label || structuredResult.actionCode) : '—' },
+            { label: 'تعیین تکلیف توسط', value: duty.resultActor ? `${duty.resultActor.displayName} · @${duty.resultActor.username}` : 'سامانه' },
+            ...(structuredResult.reason ? [{ label: 'دلیل', value: structuredResult.reason }] : []),
+          ]} />
+        </ErpSection>
+      )}
       {duty.access === 'AVAILABLE' && (
         <ErpSection title="دریافت مسئولیت" description="پس از دریافت، تصمیم و نتیجه این درخواست به نام شما ثبت می‌شود.">
           <DestinationDutyClaimAction duty={duty} disabled={state.loading || state.stale} onClaimed={load} />
@@ -242,7 +270,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
           </div>
         </ErpSection>
       )}
-      {['HIRING_COLLATERAL_VERIFY_RECEIPT', 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN'].includes(duty.sourceActionCode) && duty.access === 'ASSIGNEE' && duty.status === 'OPEN' && financeContext && (
+      {['HIRING_COLLATERAL_VERIFY_RECEIPT', 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN'].includes(duty.sourceActionCode) && ['ASSIGNEE', 'SHARED'].includes(duty.access) && duty.status === 'OPEN' && financeContext && (
         <ErpSection title="جزئیات لازم برای تأیید" description="این اطلاعات فقط در محدوده همین وظیفه حسابداری نمایش داده می‌شود.">
           <ErpSummaryGrid columns={2} items={[
             { label: 'نوع وثیقه', value: financeContext.type || '—' },
@@ -260,6 +288,21 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
           <ErpButton className="mt-4" label="دریافت فایل مدرک" variant="soft" disabled={Boolean(pendingAction)} onClick={() => void downloadFinanceEvidence()} />
         </ErpSection>
       )}
+      {duty.sourceActionCode === 'HIRING_CONTRACT_REVIEW' && ['ASSIGNEE', 'SHARED'].includes(duty.access) && duty.status === 'OPEN' && financeContext && (
+        <ErpSection title="جزئیات لازم برای بررسی قرارداد" description="این پاکت فقط اطلاعات همین قرارداد را نمایش می‌دهد و دسترسی به پرونده منابع انسانی ایجاد نمی‌کند.">
+          <ErpSummaryGrid columns={2} items={[
+            { label: 'نام شخص', value: financeContext.candidateName || '—' },
+            { label: 'مرجع امن پرونده', value: financeContext.caseReference || '—' },
+            { label: 'شماره قرارداد', value: financeContext.contractNumber || '—' },
+            { label: 'نسخه', value: Number(financeContext.version || 0).toLocaleString('fa-IR') },
+            { label: 'شروع اعتبار', value: financeContext.effectiveFrom ? new Date(financeContext.effectiveFrom).toLocaleDateString('fa-IR') : '—' },
+            { label: 'پایان اعتبار', value: financeContext.effectiveTo ? new Date(financeContext.effectiveTo).toLocaleDateString('fa-IR') : '—' },
+            { label: 'ثبت‌کننده', value: financeContext.recorderName || '—' },
+            { label: 'زمان ارسال', value: financeContext.submittedAt ? new Date(financeContext.submittedAt).toLocaleString('fa-IR') : '—' },
+          ]} />
+          <ErpButton className="mt-4" label="دریافت اسکن قرارداد" variant="soft" disabled={Boolean(pendingAction)} onClick={() => void downloadFinanceEvidence()} />
+        </ErpSection>
+      )}
       {duty.sourceActionCode === 'HIRING_COLLATERAL_RECORD_RECEIPT' && duty.access === 'ASSIGNEE' && duty.status === 'OPEN' && financeContext && (
         <ErpSection title="ثبت دریافت وثیقه" description="فقط اطلاعات لازم برای تحویل و نگهداری اصل ثبت می‌شود؛ پرونده منابع انسانی در دسترس شما قرار نمی‌گیرد.">
           <div className="grid gap-3 md:grid-cols-2">
@@ -268,7 +311,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
             <ErpField label="شناسه یا سریال"><ErpInput value={receipt.identifier} onChange={(event) => setReceipt({ ...receipt, identifier: event.target.value })} /></ErpField>
             <ErpField label="صادرکننده یا ضامن"><ErpInput value={receipt.issuerOrGuarantor} onChange={(event) => setReceipt({ ...receipt, issuerOrGuarantor: event.target.value })} /></ErpField>
             <ErpField label="محل نگهداری اصل" required><ErpInput value={receipt.custodyLocation} onChange={(event) => setReceipt({ ...receipt, custodyLocation: event.target.value })} /></ErpField>
-            <ErpField label="تاریخ دریافت" required><ErpInput type="date" value={receipt.receivedAt} onChange={(event) => setReceipt({ ...receipt, receivedAt: event.target.value })} /></ErpField>
+            <ErpPersianDateField label="تاریخ دریافت" required disableFutureDates value={receipt.receivedAt} onChange={(receivedAt) => setReceipt({ ...receipt, receivedAt })} />
             <ErpField label="اسکن مدرک دریافت" required><ErpInput type="file" onChange={(event) => setReceipt({ ...receipt, file: event.target.files?.[0] || null })} /></ErpField>
           </div>
           <ErpButton className="mt-4" label="ثبت دریافت و ارسال برای تأیید" disabled={Boolean(pendingAction) || !receipt.file || !receipt.receivedAt || !receipt.custodyLocation.trim()} onClick={() => void recordReceipt()} />
@@ -284,23 +327,27 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
           <ErpButton className="mt-4" label="ثبت بازگرداندن و ارسال برای تأیید" disabled={Boolean(pendingAction) || !originalReturn.file || !originalReturn.returnedTo.trim() || !originalReturn.evidenceNote.trim()} onClick={() => void recordOriginalReturn()} />
         </ErpSection>
       )}
-      {duty.allowedActionCodes.length > 0 && duty.access === 'ASSIGNEE' && duty.status === 'OPEN' && (
+      {duty.allowedActionCodes.length > 0 && ['ASSIGNEE', 'SHARED'].includes(duty.access) && duty.status === 'OPEN' && (
         <ErpSection title="ثبت نتیجه" description="نتیجه مستقیماً و یک‌بار به فرایند مبدأ بازگردانده می‌شود.">
-          <label className="sds-text-secondary mb-3 block text-sm font-semibold" htmlFor="duty-reason">دلیل برای رد، بازگرداندن یا درخواست توضیح</label>
-          <ErpTextarea
-            id="duty-reason"
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            disabled={Boolean(pendingAction) || state.loading || state.stale}
-            aria-invalid={Boolean(reasonError)}
-            aria-describedby={reasonError ? 'duty-reason-hint duty-reason-error' : 'duty-reason-hint'}
-          />
-          <p id="duty-reason-hint" className="sds-text-muted mt-2 text-xs">
-            {duty.responseRequiresReason
-              ? 'به‌دلیل اقدام مدیر سیستم روی درخواست خودش، ثبت دلیل برای همه نتیجه‌ها الزامی است.'
-              : 'برای تأیید اختیاری و برای سایر نتیجه‌ها الزامی است.'}
-          </p>
-          {reasonError && <p id="duty-reason-error" role="alert" className="mt-2 text-sm font-semibold text-[var(--sds-danger)]">{reasonError}</p>}
+          {correctionAction && (
+            <div className="mb-4">
+              <label className="sds-text-secondary mb-3 block text-sm font-semibold" htmlFor="duty-reason">دلیل بازگشت برای اصلاح</label>
+              <ErpTextarea
+                id="duty-reason"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                disabled={Boolean(pendingAction) || state.loading || state.stale}
+                aria-invalid={Boolean(reasonError)}
+                aria-describedby={reasonError ? 'duty-reason-hint duty-reason-error' : 'duty-reason-hint'}
+              />
+              <p id="duty-reason-hint" className="sds-text-muted mt-2 text-xs">مشکل و اقدام اصلاحی لازم را کوتاه و روشن بنویسید.</p>
+              {reasonError && <p id="duty-reason-error" role="alert" className="mt-2 text-sm font-semibold text-[var(--sds-danger)]">{reasonError}</p>}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <ErpButton label="ثبت بازگشت برای اصلاح" tone="warning" disabled={Boolean(pendingAction) || state.loading || state.stale} onClick={() => respond(correctionAction)} />
+                <ErpButton label="انصراف" variant="soft" disabled={Boolean(pendingAction)} onClick={() => { setCorrectionAction(null); setReason(''); setReasonError(null); }} />
+              </div>
+            </div>
+          )}
           <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {duty.allowedActionCodes.map((actionCode) => {
               const presentation = actionPresentation[actionCode];
@@ -312,38 +359,21 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
                   icon={presentation.icon}
                   tone={presentation.tone}
                   variant={actionCode === 'APPROVE' ? 'solid' : 'soft'}
-                  disabled={Boolean(pendingAction) || state.loading || state.stale}
-                  onClick={() => respond(actionCode)}
+                  disabled={Boolean(pendingAction) || state.loading || state.stale || Boolean(correctionAction && correctionAction === actionCode)}
+                  onClick={() => ['APPROVE', 'FORWARD_TO_MANAGER', 'VERIFY'].includes(actionCode)
+                    ? respond(actionCode) : setCorrectionAction(actionCode)}
                 />
               );
             })}
           </div>
         </ErpSection>
       )}
-      <ErpSheet
-        open={Boolean(overrideAction)}
-        onClose={() => { if (!pendingAction) setOverrideAction(null); }}
-        title="تأیید اقدام مدیر سیستم"
-        presentation="modal"
-        dismissible={!pendingAction}
-        footer={(
-          <div className="flex flex-wrap justify-end gap-2">
-            <ErpButton label="انصراف" variant="ghost" disabled={Boolean(pendingAction)} onClick={() => setOverrideAction(null)} />
-            <ErpButton
-              label="تأیید و ثبت تصمیم"
-              tone="danger"
-              disabled={Boolean(pendingAction)}
-              onClick={() => { if (overrideAction) void submitResponse(overrideAction); }}
-            />
-          </div>
-        )}
-      >
-        <p className="text-sm text-[var(--sds-text-secondary)]">
-          شما ایجادکننده این درخواست هستید. تصمیم با دلیل ثبت‌شده و رویداد حسابرسی مستقل به نام مدیر سیستم ذخیره می‌شود.
-        </p>
-      </ErpSheet>
       {duty.canReassign && (
         <ErpSection title="واگذاری مجدد" description="مهلت و نسخه پرونده تغییر نمی‌کند و این اقدام در تاریخچه ثبت می‌شود.">
+          <ErpFieldView
+            label="مسئول فعلی"
+            value={duty.currentAssignee ? `${duty.currentAssignee.displayName} · @${duty.currentAssignee.username}` : 'بدون مسئول'}
+          />
           {eligibleAssignees.length > 0 ? (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div>
@@ -372,12 +402,38 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
                 tone="warning"
                 variant="solid"
                 disabled={Boolean(pendingAction)}
-                onClick={() => void reassign()}
+                onClick={requestReassignment}
               />
             </div>
           ) : <ErpInlineState kind="empty" title="کاربر واجد شرایط دیگری وجود ندارد" />}
         </ErpSection>
       )}
+      {duty.accessProvenance.length > 0 && (
+        <ErpSection title="منشأ دسترسی مؤثر" description="این تصمیم با نتیجه متمرکز دسترسی و منشأ مجوزهای فعلی کنترل می‌شود.">
+          <div className="space-y-2">
+            {duty.accessProvenance.map((item) => <ErpFieldView key={item} label="مجوز مؤثر" value={item} />)}
+          </div>
+        </ErpSection>
+      )}
+      <ErpSheet
+        open={reassignmentConfirmationOpen}
+        onClose={() => setReassignmentConfirmationOpen(false)}
+        title="تأیید انتقال مسئولیت"
+        presentation="modal"
+        pending={pendingAction === 'REASSIGN'}
+        footer={(
+          <div className="flex gap-2">
+            <ErpButton label="انصراف" variant="soft" onClick={() => setReassignmentConfirmationOpen(false)} disabled={Boolean(pendingAction)} />
+            <ErpButton label="تأیید و انتقال مسئولیت" tone="warning" variant="solid" onClick={() => void reassign()} disabled={Boolean(pendingAction)} />
+          </div>
+        )}
+      >
+        <ErpSummaryGrid columns={2} items={[
+          { label: 'مسئول فعلی', value: duty.currentAssignee?.displayName || 'بدون مسئول' },
+          { label: 'مسئول جدید', value: eligibleAssignees.find((user) => user.id === reassignmentTarget)?.displayName || '—' },
+          { label: 'دلیل واگذاری', value: reassignmentReason },
+        ]} />
+      </ErpSheet>
       {duty.history.length > 0 && (
         <ErpSection title="تاریخچه وظیفه">
           <div className="space-y-3">

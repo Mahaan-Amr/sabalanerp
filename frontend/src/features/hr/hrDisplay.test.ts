@@ -7,6 +7,8 @@ import {
 
 assert.equal(authorityLabel("HR_PROCESSOR"), "کارشناس منابع انسانی");
 assert.equal(hrDisplayLabel("APPROVED"), "تأییدشده");
+assert.equal(hrDisplayLabel("ASSESSMENT"), "ارزیابی");
+assert.equal(hrDisplayLabel("CLOSED"), "بسته‌شده");
 assert.equal(
   assessmentTypeLabel("BIG_FIVE"),
   "BIG FIVE (ارزیابی پنج عامل بزرگ شخصیت)",

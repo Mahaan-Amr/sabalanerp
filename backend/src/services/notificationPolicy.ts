@@ -280,6 +280,16 @@ const REGISTERED_NOTIFICATION_EVENTS = {
     allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
     allowedRecipientResolvers: ['RESOURCE_OWNER'],
   },
+  ACCOUNTING_CONTRACT_CORRECTION_EDITED: {
+    type: 'ACCOUNTING_CONTRACT_CORRECTION_EDITED',
+    mandatory: true,
+    titleTemplate: 'اصلاح قرارداد ثبت شد',
+    messageTemplate: 'اصلاح قرارداد {{contractNumber}} ثبت و برای بررسی حسابداری آماده شد.',
+    priority: 'HIGH',
+    allowedVariables: ['contractNumber'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
 } as const satisfies Record<string, RegisteredNotificationEvent>;
 
 export type RegisteredNotificationEventType = keyof typeof REGISTERED_NOTIFICATION_EVENTS;

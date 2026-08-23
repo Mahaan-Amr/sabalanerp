@@ -642,6 +642,9 @@ mkdir -p "${DEPLOYMENT_REPORT_DIR_HOST}"
 audit_name="contract-product-graph-${DEPLOYMENT_ID}.json"
 remaining="$(remaining_mutation_seconds)" || exit 1
 run_backend_timed "${remaining}" node dist/scripts/dry-run-contract-product-graph-migration.js --output="/app/deployment-reports/${audit_name}"
+onboarding_audit_name="hr-onboarding-retirement-${DEPLOYMENT_ID}.json"
+remaining="$(remaining_mutation_seconds)" || exit 1
+run_backend_timed "${remaining}" node dist/scripts/audit-hr-onboarding-task-retirement.js --output=/app/deployment-reports/${onboarding_audit_name}
 
 remaining="$(remaining_mutation_seconds)" || exit 1
 run_backend_timed "${remaining}" node dist/scripts/migrate-all-contract-product-graphs.js --apply --deployment-checkpoint

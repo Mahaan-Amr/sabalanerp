@@ -127,6 +127,14 @@ interface PreIdentityChecklistLike {
 interface CompanyEvaluationOccurrenceLike {
   status: string;
 }
+interface IdentityCheckLike { fieldKey: string; status: string }
+interface IdentityDocumentLike {
+  category: string;
+  side?: string | null;
+  customTitle?: string | null;
+  version: number;
+  status: string;
+}
 interface HiringDecisionLike {
   kind: string;
   outcome: string;
@@ -159,6 +167,9 @@ export interface HiringLifecycleSource {
   outcome?: string | null;
   formRevisions?: FormRevisionLike[];
   identityClearance?: string | null;
+  candidate?: { nationalCode?: string | null };
+  identityChecks?: IdentityCheckLike[];
+  documents?: IdentityDocumentLike[];
   assessments?: unknown[];
   assessmentCompletedAt?: Date | string | null;
   assessmentReviewRequired?: boolean;
@@ -216,11 +227,7 @@ export const projectHiringTaskCapabilities = (
     contractClearance: source.contractClearance || "NOT_STARTED",
     compensationClearance: source.compensationClearance || "NOT_STARTED",
     payrollParticipation: source.payrollParticipation,
-    onboardingTasks: (source.onboardingTasks || []).map((task) => ({
-      ...task,
-      title: task.title || "وظیفه آماده‌سازی",
-      activationBlocker: Boolean(task.activationBlocker),
-    })),
+    onboardingTasks: [],
     insuranceEnrollment: source.insuranceEnrollment,
   }).ready;
   const employmentActive = source.employmentRelationship?.status === "ACTIVE";
@@ -302,21 +309,6 @@ export const projectHiringTaskCapabilities = (
     },
   ];
 
-  for (const task of source.onboardingTasks || []) {
-    const ownerAuthorities = task.ownerAuthority
-      ? [task.ownerAuthority]
-      : [];
-    const detailVisible = visibleTo(...ownerAuthorities);
-    tasks.push({
-      id: "ONBOARDING_TASK",
-      title: task.title || "وظیفه آماده‌سازی شروع همکاری",
-      status: task.status,
-      ownerAuthorities,
-      detailVisible,
-      actionIds: detailVisible ? ["UPDATE_ONBOARDING_TASK"] : [],
-    });
-  }
-
   return tasks;
 };
 
@@ -362,19 +354,19 @@ export const actionPermissionForHiringLifecycleAction = (actionId: string) => {
     RELEASE_PRE_IDENTITY: "MANAGE_RECRUITMENT_CASE",
     CREATE_OFFER: "MANAGE_COMPENSATION",
     VERIFY_OFFER_PAYROLL: "MANAGE_PAYROLL",
-    RECORD_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
-    UPLOAD_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
-    SUBMIT_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
-    REVIEW_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
-    APPROVE_CONTRACT: "MANAGE_FINANCE_EVIDENCE",
+    RECORD_CONTRACT: "RECORD_SIGNED_EMPLOYMENT_CONTRACT",
+    UPLOAD_CONTRACT: "RECORD_SIGNED_EMPLOYMENT_CONTRACT",
+    SUBMIT_CONTRACT: "RECORD_SIGNED_EMPLOYMENT_CONTRACT",
+    REVIEW_CONTRACT: "VERIFY_SIGNED_EMPLOYMENT_CONTRACT",
+    APPROVE_CONTRACT: "VERIFY_SIGNED_EMPLOYMENT_CONTRACT",
     CONFIGURE_PAYROLL: "MANAGE_PAYROLL",
-    REVIEW_IDENTITY: "MANAGE_RECRUITMENT_CASE",
-    APPROVE_IDENTITY: "MANAGE_RECRUITMENT_CASE",
+    REVIEW_IDENTITY: "REVIEW_IDENTITY_DOCUMENTS",
+    APPROVE_IDENTITY: "APPROVE_IDENTITY_CLEARANCE",
     RECORD_ASSESSMENT: "MANAGE_RECRUITMENT_CASE",
     COMPLETE_ASSESSMENT: "MANAGE_RECRUITMENT_CASE",
     DECIDE_ASSESSMENT: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
     CONVERT_TO_PERSONNEL: "MANAGE_RECRUITMENT_CASE",
-    COMPLETE_COLLATERAL: "MANAGE_FINANCE_EVIDENCE",
+    COMPLETE_COLLATERAL: "RECORD_COLLATERAL_CUSTODY",
     UPDATE_INSURANCE: "MANAGE_RECRUITMENT_CASE",
     UPDATE_ONBOARDING_TASK: "MANAGE_RECRUITMENT_CASE",
     COMPLETE_ONBOARDING_TASK: "MANAGE_RECRUITMENT_CASE",
@@ -397,8 +389,6 @@ const canPerform = (
       )
     ),
   );
-const isCompleteTask = (status: string) =>
-  status === "COMPLETE" || status === "WAIVED";
 const authorityLabels: Record<string, string> = {
   HR_PROCESSOR: "کارشناس منابع انسانی",
   HR_MANAGER: "مدیریت منابع انسانی",
@@ -548,6 +538,23 @@ const companyEvaluationPlanGate = (source: HiringLifecycleSource): Gate => {
 const identityGate = (source: HiringLifecycleSource): Gate => {
   const complete = source.identityClearance === "APPROVED";
   const rejected = source.identityClearance === "REJECTED";
+  const requiredChecks = ["firstName", "lastName", "birthDate", "birthPlace", "fatherName",
+    source.candidate?.nationalCode ? "nationalCode" : "foreignIdentity", "address", "postalCode", "mobile", "educationLevel", "maritalStatus"];
+  const checks = source.identityChecks || [];
+  const checksReady = requiredChecks.every((fieldKey) => checks.some((item) => item.fieldKey === fieldKey && item.status === "VERIFIED"))
+    && ["militaryStatus", "birthCertificateExplanations"].every((fieldKey) => checks.some((item) => item.fieldKey === fieldKey && ["VERIFIED", "NOT_APPLICABLE"].includes(item.status)));
+  const latestDocuments = Array.from((source.documents || []).reduce((latest, document) => {
+    const key = `${document.category}:${document.side || ""}:${document.customTitle || ""}`;
+    const current = latest.get(key);
+    if (!current || document.version > current.version) latest.set(key, document);
+    return latest;
+  }, new Map<string, IdentityDocumentLike>()).values());
+  const requiredCategories = source.candidate?.nationalCode
+    ? ["BIRTH_CERTIFICATE_ALL_PAGES", "NATIONAL_ID_FRONT", "NATIONAL_ID_BACK"] : [];
+  const documentsReady = latestDocuments.length > 0
+    && latestDocuments.every((item) => !["MISMATCH", "UNREADABLE"].includes(item.status))
+    && requiredCategories.every((category) => latestDocuments.some((item) => item.category === category));
+  const evidenceReady = checksReady && documentsReady;
   return {
     complete,
     requiredComplete: complete ? 1 : 0,
@@ -563,23 +570,14 @@ const identityGate = (source: HiringLifecycleSource): Gate => {
         ]
       : [],
     action:
-      source.identityClearance === "IN_PROGRESS"
+      source.identityClearance === "IN_PROGRESS" && evidenceReady
         ? action("APPROVE_IDENTITY", "تأیید نهایی احراز هویت", "HR_MANAGER")
         : action(
             "REVIEW_IDENTITY",
             "بررسی و تطبیق مدارک هویتی",
             "HR_PROCESSOR",
           ),
-    secondaryActions:
-      source.identityClearance === "IN_PROGRESS"
-        ? [
-            action(
-              "REVIEW_IDENTITY",
-              "ادامه بررسی و تطبیق مدارک هویتی",
-              "HR_PROCESSOR",
-            ),
-          ]
-        : [],
+    secondaryActions: [],
   };
 };
 
@@ -732,14 +730,8 @@ const onboardingGate = (source: HiringLifecycleSource, viewerUserId?: string): G
     Boolean(source.contracts?.[0]?.approvedAt) &&
     source.contractClearance === "APPROVED";
   const payrollReady = Boolean(source.payrollParticipation);
-  const blockingTasks =
-    source.onboardingTasks?.filter((task) => task.activationBlocker) || [];
-  const completedTasks = blockingTasks.filter((task) =>
-    isCompleteTask(task.status),
-  ).length;
-  const completed =
-    Number(contractApproved) + Number(payrollReady) + completedTasks;
-  const total = 2 + blockingTasks.length;
+  const completed = Number(contractApproved) + Number(payrollReady);
+  const total = 2;
   const missingEmployment =
     Boolean(source.convertedAt || source.outcome === "HIRED") &&
     !source.employmentRelationship;
@@ -783,18 +775,6 @@ const onboardingGate = (source: HiringLifecycleSource, viewerUserId?: string): G
       "تنظیم مشارکت حقوق و دستمزد",
       "HR_PAYROLL_MANAGER",
     );
-  else if (
-    contractApproved &&
-    payrollReady &&
-    completedTasks < blockingTasks.length
-  ) {
-    const pending = blockingTasks.find((task) => !isCompleteTask(task.status));
-    nextAction = action(
-      "COMPLETE_ONBOARDING_TASK",
-      pending?.title || "تکمیل وظیفه مسدودکننده شروع همکاری",
-      pending?.ownerAuthority || "HR_MANAGER",
-    );
-  }
   return {
     complete: !missingEmployment && completed === total,
     requiredComplete: completed,
@@ -834,19 +814,12 @@ const activationGate = (source: HiringLifecycleSource): Gate => {
     contractClearance: source.contractClearance || "NOT_STARTED",
     compensationClearance: source.compensationClearance || "NOT_STARTED",
     payrollParticipation: source.payrollParticipation,
-    onboardingTasks: (source.onboardingTasks || []).map((task) => ({
-      ...task,
-      title: task.title || "وظیفه آماده‌سازی",
-      activationBlocker: Boolean(task.activationBlocker),
-    })),
+    onboardingTasks: [],
     insuranceEnrollment: source.insuranceEnrollment,
   });
-  const blockers = readiness.blockers.map((item) => {
-    const task = source.onboardingTasks?.find(
-      (candidate) => `ONBOARDING_TASK:${candidate.id || candidate.title}` === item.id,
-    );
-    return blocker(item.id, item.message, task?.ownerAuthority || "HR_MANAGER");
-  });
+  const blockers = readiness.blockers.map((item) =>
+    blocker(item.id, item.message, "HR_MANAGER"),
+  );
   if (source.employmentRelationship?.status === "ENDED") blockers.push(blocker("EMPLOYMENT_ENDED", "رابطه استخدامی پایان یافته است.", "HR_MANAGER"));
   return {
     complete,

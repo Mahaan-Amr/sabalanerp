@@ -34,6 +34,7 @@ import {
   ErpPage,
   ErpSection,
   ErpSheet,
+  ErpSummaryGrid,
 } from "@/components/erp";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { HiringLifecycle } from "@/features/hr-hiring/HiringLifecycle";
@@ -41,13 +42,15 @@ import {
   hiringTaskDetailVisible,
   resolvePhaseAfterLifecycleAdvance,
   resolveSelectedHiringPhase,
+  startPreparationStatusItems,
   shouldLoadCompanyEvaluationPlan,
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import { ApplicantCaseOverview } from "@/features/hr-hiring/ApplicantCaseOverview";
 import { FinalHiringRejection } from "@/features/hr-hiring/FinalHiringRejection";
-import { ProductionHrInterview, ProductionInterviewReport, type ProductionInterviewPayload } from "@/features/hr-hiring/prototype/HrInterviewPrototype";
+import { ProductionHrInterview, ProductionInterviewReport } from "@/features/hr-hiring/prototype/HrInterviewPrototype";
+import type { InterviewEvidencePayload } from "@/features/hr-hiring/prototype/interviewEvidence";
 import { validateHiringQueueReturnHref } from "@/features/hr-hiring/hiringQueueViewModel";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
@@ -59,6 +62,7 @@ import {
   fromIsoDateTime,
   toIsoDate,
   toIsoDateTime,
+  isCompletePersianDateTime,
 } from "@/features/hr/hrUi";
 import {
   assessmentTypeLabel,
@@ -160,6 +164,12 @@ export default function HiringCasePage() {
   const [correctionExplanations, setCorrectionExplanations] = useState<
     Record<string, string>
   >({});
+  const [identityCorrectionOpen, setIdentityCorrectionOpen] = useState(false);
+  const [identityResolution, setIdentityResolution] = useState({
+    resolutionCode: "CREATE_NEW",
+    evidenceIds: [] as string[],
+    correctionReason: "",
+  });
   const [document, setDocument] = useState<any>({
     category: "BIRTH_CERTIFICATE_ALL_PAGES",
     side: "",
@@ -195,13 +205,6 @@ export default function HiringCasePage() {
     note: "",
   });
   const [closure, setClosure] = useState({ outcome: "REJECTED", reason: "" });
-  const [task, setTask] = useState({
-    title: "",
-    ownerAuthority: "HR_MANAGER",
-    dueDate: "",
-    activationBlocker: false,
-    assignToHire: true,
-  });
   const [conversion, setConversion] = useState({
     scheduledStartDate: "",
   });
@@ -379,11 +382,25 @@ export default function HiringCasePage() {
     toIsoDate(insurance.dueDate) < new Date().toISOString().slice(0, 10),
   );
   const latestContract = data.contracts?.[0];
+  const openIdentityConflict = data.identityConflicts?.find((item: any) => item.status === "OPEN");
+  const currentCollateralItems = (data.collateralItems || []).filter((item: any) => !item.supersededBy);
+  const collateralExplicitlyNotRequired = data.collateralRequirements?.[0]?.type === "NO_PRE_HIRE_COLLATERAL";
+  const collateralRecorded = collateralExplicitlyNotRequired || currentCollateralItems.length > 0
+    && currentCollateralItems.every((item: any) => item.status !== "MISSING");
+  const collateralVerified = data.collateralClearance === "APPROVED";
+  const offerAccepted = Boolean(data.acceptedOfferAt && compensation?.candidateAcceptedAt);
+  const conversionStatuses = [
+    { label: "احراز هویت", complete: data.identityClearance === "APPROVED", pending: "منتظر اقدام منابع انسانی" },
+    { label: "پذیرش پیشنهاد", complete: offerAccepted, pending: "منتظر پذیرش متقاضی" },
+    { label: "ثبت وثیقه", complete: collateralRecorded, pending: "منتظر اقدام امور مالی" },
+    { label: "تأیید وثیقه", complete: collateralVerified, pending: collateralRecorded ? "منتظر اقدام تأییدکننده امور مالی" : "منتظر تکمیل ثبت" },
+  ];
+  const conversionReady = conversionStatuses.every((item) => item.complete);
   const hasActionPermission = (...values: string[]) =>
     !data.readOnlyArchived && values.some((value) => actionPermissions.includes(value));
   const canHrSensitive = hasActionPermission("MANAGE_RECRUITMENT_CASE");
   const canCompanyManager = hasActionPermission("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS", "MANAGE_COMPANY_EVALUATION_PLAN", "RECORD_FINAL_MANAGEMENT_DECISION");
-  const canViewContractTask = hiringTaskDetailVisible(
+  const canViewContractTask = hasActionPermission("RECORD_SIGNED_EMPLOYMENT_CONTRACT") || hiringTaskDetailVisible(
     data.taskCapabilities,
     "SIGNED_CONTRACT",
   );
@@ -398,6 +415,9 @@ export default function HiringCasePage() {
   const canViewActivationTask = hiringTaskDetailVisible(
     data.taskCapabilities,
     "EMPLOYMENT_ACTIVATION",
+  );
+  const startPreparationStatuses = startPreparationStatusItems(
+    data.taskCapabilities,
   );
   const selectedLifecyclePhase = data.lifecycle
     ? resolveSelectedHiringPhase(
@@ -580,6 +600,61 @@ export default function HiringCasePage() {
           onSelect={selectLifecyclePhase}
         />
       )}
+      {openIdentityConflict && (
+        <ErpSection
+          title="مغایرت هویت متقاضی و پرسنل"
+          description="تا ثبت تصمیم مستقل و شواهد معتبر، تأیید نهایی هویت، تبدیل و فعال‌سازی مسدود می‌مانند."
+        >
+          <ErpSummaryGrid columns={3} items={[
+            { label: "هویت ادعاشده", value: `${openIdentityConflict.claimedIdentityJson?.firstName || ""} ${openIdentityConflict.claimedIdentityJson?.lastName || ""}`.trim() || "—" },
+            { label: "هویت متعارض", value: `${openIdentityConflict.matchedIdentityJson?.firstName || ""} ${openIdentityConflict.matchedIdentityJson?.lastName || ""}`.trim() || "—" },
+            { label: "مهلت", value: new Date(openIdentityConflict.dueAt).toLocaleString("fa-IR") },
+          ]} />
+          {hasActionPermission("RESOLVE_CANDIDATE_PERSONNEL_IDENTITY_CONFLICT") && (
+            <div className="mt-4 space-y-4">
+              <ErpField label="نتیجه تعیین تکلیف" required>
+                <ErpSelect value={identityResolution.resolutionCode} onChange={(event) => setIdentityResolution({ ...identityResolution, resolutionCode: event.target.value })}>
+                  <option value="CREATE_NEW">ساخت Personnel جدید از هویت تأییدشده</option>
+                  <option value="LINK_EXISTING">پیوند به Personnel موجود</option>
+                  <option value="CORRECT_CANDIDATE_CLAIM">اصلاح ادعای هویت Candidate</option>
+                </ErpSelect>
+              </ErpField>
+              {identityResolution.resolutionCode !== "CREATE_NEW" && (
+                <ErpInlineState kind="empty" title={`Personnel متعارض همین پرونده انتخاب می‌شود: ${openIdentityConflict.matchedIdentityJson?.firstName || ""} ${openIdentityConflict.matchedIdentityJson?.lastName || ""}`} />
+              )}
+              {identityResolution.resolutionCode === "CORRECT_CANDIDATE_CLAIM" && (
+                <ErpField label="دلیل اصلاح ادعای هویت" required>
+                  <ErpTextarea value={identityResolution.correctionReason} onChange={(event) => setIdentityResolution({ ...identityResolution, correctionReason: event.target.value })} />
+                </ErpField>
+              )}
+              <div>
+                <p className="mb-2 text-sm font-semibold text-[var(--sds-text-secondary)]">شواهد معتبر مبنای تصمیم</p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {(data.documents || []).map((item: any) => (
+                    <ErpCheckbox
+                      key={item.id}
+                      label={`${hrDisplayLabel(item.category)} · نسخه ${Number(item.version).toLocaleString("fa-IR")}`}
+                      checked={identityResolution.evidenceIds.includes(item.id)}
+                      onChange={(event) => setIdentityResolution({ ...identityResolution, evidenceIds: event.target.checked
+                        ? [...identityResolution.evidenceIds, item.id]
+                        : identityResolution.evidenceIds.filter((id) => id !== item.id) })}
+                    />
+                  ))}
+                </div>
+              </div>
+              <ErpButton
+                label="ثبت تصمیم هویتی"
+                tone="success"
+                disabled={busy || !identityResolution.evidenceIds.length || (identityResolution.resolutionCode !== "CREATE_NEW" && !openIdentityConflict.potentialPersonnelId)}
+                onClick={() => run(
+                  () => hiringAPI.resolveIdentityConflict(id, openIdentityConflict.id, identityResolution),
+                  "مغایرت هویت تعیین تکلیف شد؛ تأیید هویت باید دوباره انجام شود.",
+                )}
+              />
+            </div>
+          )}
+        </ErpSection>
+      )}
       {data.employmentRelationship?.personnel &&
         selectedLifecyclePhase &&
         ["ONBOARDING", "ACTIVATION"].includes(selectedLifecyclePhase) && (
@@ -725,7 +800,7 @@ export default function HiringCasePage() {
               <div className="grid gap-4 xl:grid-cols-2">
                 <ErpCard className="p-4">
                   <h3 className="font-black">بررسی منابع انسانی</h3>
-                  {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
+                  {hasActionPermission("REVIEW_IDENTITY_DOCUMENTS") && (
                     <div className="mt-3 grid gap-2 md:grid-cols-2">
                       <ErpSelect
                         value={document.category}
@@ -859,7 +934,7 @@ export default function HiringCasePage() {
                         >
                           <span>{identityFieldLabels[key]}</span>
                           <div className="flex gap-1">
-                            {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
+                            {hasActionPermission("REVIEW_IDENTITY_DOCUMENTS") && (
                               <>
                                 <ErpPressable
                                   type="submit"
@@ -930,11 +1005,11 @@ export default function HiringCasePage() {
                       );
                     })}
                   </div>
-                  {hasActionPermission("MANAGE_RECRUITMENT_CASE") &&
+                  {hasActionPermission("REVIEW_IDENTITY_DOCUMENTS") &&
                     data.identityChecks.some((check: any) =>
                       ["MISMATCH", "UNREADABLE"].includes(check.status),
                     ) && (
-                      <ErpCard className="mt-4 p-3">
+                      identityCorrectionOpen ? <ErpCard className="mt-4 p-3">
                         <ErpInlineState kind="stale" title="درخواست اصلاح یکپارچه — برای هر مورد، توضیح فارسی قابل نمایش به متقاضی را وارد کنید. با ثبت نهایی فقط یک پیامک ارسال می‌شود." />
                         <div className="mt-3 space-y-2">
                           {data.identityChecks
@@ -1003,9 +1078,23 @@ export default function HiringCasePage() {
                           }
                           tone="warning"
                         />
-                      </ErpCard>
+                        <ErpButton
+                          className="mt-3"
+                          label="انصراف"
+                          variant="soft"
+                          disabled={busy}
+                          onClick={() => setIdentityCorrectionOpen(false)}
+                        />
+                      </ErpCard> : <ErpButton
+                        className="mt-4"
+                        label="بازگشت برای اصلاح"
+                        tone="warning"
+                        variant="soft"
+                        disabled={busy}
+                        onClick={() => setIdentityCorrectionOpen(true)}
+                      />
                     )}
-                  {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
+                  {hasActionPermission("APPROVE_IDENTITY_CLEARANCE") && (
                     <ErpButton
                       className="mt-3"
                       label="تأیید نهایی مدیر منابع انسانی"
@@ -1280,12 +1369,13 @@ export default function HiringCasePage() {
           "MANAGE_COMPENSATION",
           "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
           "MANAGE_PAYROLL",
-          "MANAGE_FINANCE_EVIDENCE",
+          "RECORD_SIGNED_EMPLOYMENT_CONTRACT",
+          "MANAGE_COLLATERAL_REQUIREMENTS",
           "MANAGE_RECRUITMENT_CASE",
         ) && (
           <>
             <ErpSection title="پیشنهاد حقوق و مزایا">
-              {hasActionPermission("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS") && (
+              {hasActionPermission("MANAGE_COLLATERAL_REQUIREMENTS") && (
                 <CollateralRequirementPanel
                   applicationId={id}
                   current={data.collateralRequirements?.[0]}
@@ -1512,6 +1602,7 @@ export default function HiringCasePage() {
                           <ErpField label="زمان اعلام تصمیم متقاضی" required>
                             <HrPersianCalendar
                               showTime
+                              autoCommitDateTime
                               value={offlineDecision.communicatedAt}
                               onChange={(communicatedAt) =>
                                 setOfflineDecision({
@@ -1545,7 +1636,7 @@ export default function HiringCasePage() {
                             label="ثبت نهایی تصمیم آفلاین"
                             disabled={
                               busy ||
-                              !offlineDecision.communicatedAt ||
+                              !isCompletePersianDateTime(offlineDecision.communicatedAt) ||
                               !offlineDecision.offlineReason.trim() ||
                               !offlineDecision.confirmedCandidateInformation.trim() ||
                               !offlineDecision.note.trim()
@@ -1611,6 +1702,15 @@ export default function HiringCasePage() {
           <>
             <ErpSection title="تبدیل به پرسنل برنامه‌ریزی‌شده">
               <ErpCard className="grid gap-3 p-4 md:grid-cols-3">
+                <div className="space-y-2 md:col-span-3" aria-live="polite">
+                  {conversionStatuses.map((status) => (
+                    <div key={status.label} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span>{status.label}</span>
+                      <ErpBadge>{status.complete ? "تکمیل‌شده" : status.pending}</ErpBadge>
+                    </div>
+                  ))}
+                  <p className="sds-text-muted text-xs">منابع انسانی فقط وضعیت و واحد مسئول را می‌بیند؛ جزئیات محرمانه وثیقه نمایش داده نمی‌شود.</p>
+                </div>
                 <ErpField
                   label="تاریخ برنامه‌ریزی‌شده شروع همکاری"
                   required
@@ -1627,9 +1727,10 @@ export default function HiringCasePage() {
                   />
                 </ErpField>
                 <ErpButton
+                  className="self-end justify-self-start px-2 text-xs"
                   label="تبدیل متقاضی به پرسنل"
                   disabled={
-                    busy || !conversion.scheduledStartDate || !!data.convertedAt
+                    busy || !conversion.scheduledStartDate || !!data.convertedAt || !conversionReady
                   }
                   onClick={() =>
                     run(
@@ -1649,101 +1750,34 @@ export default function HiringCasePage() {
             </ErpSection>
           </>
         )}
-      {selectedLifecyclePhase === "ONBOARDING" && (
-        <ErpSection
-          title="وظایف موقت پیش از فعال‌سازی"
-          description="وظیفه به پرسنل برنامه‌ریزی‌شده متصل می‌شود و هیچ کاربر یا شناسه ورود ایجاد نمی‌کند."
-        >
-          {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
-            <ErpCard className="grid gap-2 p-4 md:grid-cols-4">
-              <ErpInput
-                placeholder="عنوان وظیفه"
-                value={task.title}
-                onChange={(e) => setTask({ ...task, title: e.target.value })}
-              />
-              <ErpSelect
-                value={task.ownerAuthority}
-                onChange={(e) =>
-                  setTask({ ...task, ownerAuthority: e.target.value })
-                }
-              >
-                <option value="HR_MANAGER">مدیر منابع انسانی</option>
-                <option value="COMPANY_MANAGER">مدیریت شرکت</option>
-                <option value="HR_PROCESSOR">کارشناس منابع انسانی</option>
-                <option value="FINANCE_MANAGER">مدیر مالی</option>
-              </ErpSelect>
-              <ErpField label="مهلت انجام وظیفه" hint="اختیاری">
-                <HrPersianCalendar
-                  value={task.dueDate}
-                  onChange={(dueDate) => setTask({ ...task, dueDate })}
-                />
-              </ErpField>
-              <ErpButton
-                label="واگذاری وظیفه"
-                disabled={!task.title || !data.convertedAt}
-                onClick={() =>
-                  run(
-                    () =>
-                      hiringAPI.addOnboardingTask(id, {
-                        ...task,
-                        dueDate: toIsoDate(task.dueDate),
-                      }),
-                    "وظیفه به پرسنل برنامه‌ریزی‌شده واگذار شد.",
-                  )
-                }
-              />
-            </ErpCard>
-          )}
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {(data.onboardingTasks || []).map((item: any) => (
-              <ErpCard
-                key={item.id}
-                className="flex items-center justify-between p-3"
-              >
-                <span>
-                  <b>{item.title}</b>
-                  <small className="block text-[var(--sds-text-secondary)]">
-                    {authorityLabel(item.ownerAuthority)} ·{" "}
-                    {hrDisplayLabel(item.status)}
-                  </small>
-                </span>
-                {item.status !== "COMPLETE" &&
-                  hasActionPermission(({
-                    HR_PROCESSOR: "MANAGE_RECRUITMENT_CASE",
-                    HR_MANAGER: "MANAGE_RECRUITMENT_CASE",
-                    COMPANY_MANAGER: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
-                    HR_PAYROLL_PROCESSOR: "MANAGE_PAYROLL",
-                    HR_PAYROLL_MANAGER: "MANAGE_PAYROLL",
-                    FINANCE_RECORDER: "MANAGE_FINANCE_EVIDENCE",
-                    FINANCE_MANAGER: "MANAGE_FINANCE_EVIDENCE",
-                  } as Record<string, string>)[item.ownerAuthority] || item.ownerAuthority) && (
-                    <ErpPressable
-                      type="submit"
-                      className="rounded bg-[var(--sds-success-surface)] px-2 py-1 text-xs"
-                      onClick={() =>
-                        run(
-                          () =>
-                            hiringAPI.updateOnboardingTask(id, item.id, {
-                              status: "COMPLETE",
-                              evidenceNote: "تکمیل و مشاهده شد",
-                            }),
-                          "وظیفه تکمیل شد.",
-                        )
-                      }
-                    >
-                      تکمیل
-                    </ErpPressable>
-                  )}
-              </ErpCard>
-            ))}
-          </div>
-        </ErpSection>
-      )}
+      {selectedLifecyclePhase &&
+        ["ONBOARDING", "ACTIVATION"].includes(selectedLifecyclePhase) &&
+        startPreparationStatuses.length > 0 && (
+          <ErpSection title="وضعیت آماده‌سازی شروع همکاری">
+            <ErpSummaryGrid
+              columns={3}
+              items={startPreparationStatuses.map((item) => ({
+                label: item.label,
+                value: hrDisplayLabel(item.status),
+                hint: `${item.ownerAuthorities.map(authorityLabel).join("، ")} · ${item.activationEffect}`,
+                tone: ["COMPLETE", "APPROVED", "ACTIVE", "EXEMPT"].includes(
+                  item.status,
+                )
+                  ? "success"
+                  : item.status === "REJECTED"
+                    ? "danger"
+                    : item.status === "IN_PROGRESS"
+                      ? "info"
+                      : "warning",
+              }))}
+            />
+          </ErpSection>
+        )}
       {selectedLifecyclePhase === "ONBOARDING" && canViewContractTask && (
         <>
           <ErpSection title="قرارداد کاغذی">
             <div className="grid gap-3 md:grid-cols-4">
-              {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
+              {hasActionPermission("RECORD_SIGNED_EMPLOYMENT_CONTRACT") && (
                 <>
                   <ErpField label="شماره قرارداد" required>
                     <ErpInput
@@ -1811,49 +1845,38 @@ export default function HiringCasePage() {
                       tone="success"
                     />
                   )}
-                </>
-              )}
-              {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && latestContract?.canReview && (
-                <div className="space-y-2 md:col-span-2">
-                  <div className="flex flex-wrap gap-2">
+                  {latestContract?.canWithdraw && contractReturnReason === "" && (
                     <ErpButton
-                      label="تأیید قرارداد"
+                      label="پس گرفتن نسخه برای اصلاح"
+                      variant="soft"
+                      tone="warning"
                       disabled={busy}
-                      onClick={() =>
-                        run(
-                          () =>
-                            hiringAPI.approveContract(id, latestContract.id),
-                          "قرارداد تأیید شد.",
-                        )
-                      }
-                      tone="success"
+                      onClick={() => setContractReturnReason(" ")}
                     />
-                  </div>
-                  <ErpField label="دلیل بازگرداندن قرارداد">
-                    <ErpTextarea
-                      value={contractReturnReason}
-                      onChange={(event) =>
-                        setContractReturnReason(event.target.value)
-                      }
-                    />
-                  </ErpField>
-                  <ErpButton
-                    label="بازگرداندن برای اصلاح"
-                    disabled={busy || !contractReturnReason.trim()}
-                    onClick={() =>
-                      run(
-                        () =>
-                          hiringAPI.returnContract(
-                            id,
-                            latestContract.id,
-                            contractReturnReason.trim(),
-                          ),
-                        "قرارداد برای اصلاح بازگردانده شد.",
-                      )
-                    }
-                    tone="danger"
-                  />
-                </div>
+                  )}
+                  {latestContract?.canWithdraw && contractReturnReason !== "" && (
+                    <div className="space-y-2 md:col-span-2">
+                      <ErpField label="دلیل پس گرفتن نسخه" required>
+                        <ErpTextarea
+                          value={contractReturnReason.trimStart()}
+                          onChange={(event) => setContractReturnReason(event.target.value)}
+                        />
+                      </ErpField>
+                      <div className="flex flex-wrap gap-2">
+                        <ErpButton
+                          label="ثبت پس گرفتن و ایجاد وظیفه اصلاح"
+                          tone="warning"
+                          disabled={busy || contractReturnReason.trim().length < 3}
+                          onClick={() => run(
+                            () => hiringAPI.withdrawContract(id, latestContract.id, contractReturnReason.trim()),
+                            "نسخه قرارداد پس گرفته شد و وظیفه اصلاح ایجاد شد.",
+                          )}
+                        />
+                        <ErpButton label="انصراف" variant="soft" disabled={busy} onClick={() => setContractReturnReason("")} />
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
               {latestContract && (
                 <ErpCard className="p-3 text-sm md:col-span-2">
@@ -1862,6 +1885,7 @@ export default function HiringCasePage() {
                     {{
                       DRAFT: "ثبت‌شده؛ در انتظار ارسال",
                       SUBMITTED: "ارسال‌شده؛ در انتظار بررسی مدیر مالی",
+                      WITHDRAWN: "پس‌گرفته‌شده؛ در انتظار نسخه اصلاح‌شده",
                       RETURNED: "برای اصلاح بازگردانده شده",
                       APPROVED: "تأییدشده",
                     }[latestContract.reviewState as string] ||
@@ -2375,8 +2399,10 @@ function PreIdentitySection({
     >
       {(phase === "INITIAL_HR_REVIEW" || phase === "COMPANY_EVALUATION_PLAN") && hasAction("VIEW_INITIAL_INTERVIEW_REPORT") && latestInterview?.evidenceJson && (
         <ProductionInterviewReport
-          payload={latestInterview.evidenceJson as ProductionInterviewPayload}
+          payload={latestInterview.evidenceJson as InterviewEvidencePayload}
           version={latestInterview.version}
+          outcome={latestInterview.outcome}
+          explanation={latestInterview.explanation}
           history={decisions.filter((item: any) => item.kind === "HR_INTERVIEW" && item.version !== latestInterview.version)}
         />
       )}
@@ -2391,7 +2417,7 @@ function PreIdentitySection({
       )}
       {phase === "INITIAL_HR_REVIEW" && hasAction("RECORD_INITIAL_INTERVIEW") && (!latestInterview || editingInterviewRevision) && (
         <ProductionHrInterview
-          initialPayload={application.initialInterviewDraft?.dataJson as ProductionInterviewPayload | null}
+          initialPayload={application.initialInterviewDraft?.dataJson as InterviewEvidencePayload | null}
           initialVersion={application.initialInterviewDraft?.version || 0}
           history={decisions.filter((item: any) => item.kind === "HR_INTERVIEW")}
           busy={busy}
@@ -2403,7 +2429,7 @@ function PreIdentitySection({
             const response = await hiringAPI.getInitialInterview(applicationId);
             const draft = response.data.data.draft;
             return {
-              payload: draft.dataJson as ProductionInterviewPayload,
+              payload: draft.dataJson as InterviewEvidencePayload,
               version: draft.version as number,
             };
           }}
@@ -3224,6 +3250,17 @@ function CollateralRequirementPanel({
             current
               ? "نسخه جدید الزام وثیقه ثبت شد؛ پیشنهاد باید دوباره پذیرفته شود."
               : "الزام وثیقه ثبت شد.",
+          )
+        }
+      />
+      <ErpButton
+        label="وثیقه پیش از استخدام لازم نیست"
+        variant="soft"
+        disabled={busy || current?.type === "NO_PRE_HIRE_COLLATERAL"}
+        onClick={() =>
+          run(
+            () => hiringAPI.markCollateralNotRequired(applicationId),
+            "تصمیم «وثیقه لازم نیست» به‌صورت نسخه‌شده ثبت شد.",
           )
         }
       />

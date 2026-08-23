@@ -100,6 +100,7 @@ Before public traffic opens, all of the following pass:
 - frontend, Inquiry, Nginx, and ClamAV health;
 - contract-product-graph migration audit and every release-specific acceptance command;
 - a retained contract-by-contract financial-evidence preflight report with zero unresolved results; case resolution is atomic and is skipped entirely when any contract is unresolved;
+- while legacy Hiring onboarding rows remain, the read-only Start Preparation retirement audit proving zero open manual tasks, zero missing or duplicate system rows, and zero drift from contract, Payroll Participation, and insurance evidence;
 - isolated read/write smoke tests with deterministic cleanup;
 - checkpoint and release manifest integrity;
 - protected file counts, checksums, and database-to-file reference validation;

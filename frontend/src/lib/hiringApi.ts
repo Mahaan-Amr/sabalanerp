@@ -121,6 +121,8 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/reopen/execute`, data),
   addCollateralRequirement: (id: string, data: any) =>
     internal.post(`/applications/${id}/collateral-requirements`, data),
+  markCollateralNotRequired: (id: string) =>
+    internal.post(`/applications/${id}/collateral-requirements/not-required`),
   returnForm: (id: string, data: any) =>
     internal.post(`/applications/${id}/form/return`, data),
   retryCorrectionNotification: (id: string) =>
@@ -133,6 +135,8 @@ export const hiringAPI = {
     }),
   setIdentityCheck: (id: string, field: string, data: any) =>
     internal.put(`/applications/${id}/identity-checks/${field}`, data),
+  resolveIdentityConflict: (id: string, conflictId: string, data: any) =>
+    internal.post(`/applications/${id}/identity-conflicts/${conflictId}/resolve`, data),
   approveIdentity: (id: string) =>
     internal.post(`/applications/${id}/identity/approve`),
   createCompensation: (id: string, data: any) =>
@@ -211,6 +215,8 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/contracts/${contractId}/approve`),
   submitContract: (id: string, contractId: string) =>
     internal.post(`/applications/${id}/contracts/${contractId}/submit`),
+  withdrawContract: (id: string, contractId: string, reason: string) =>
+    internal.post(`/applications/${id}/contracts/${contractId}/withdraw`, { reason }),
   returnContract: (id: string, contractId: string, reason: string) =>
     internal.post(`/applications/${id}/contracts/${contractId}/return`, {
       reason,
@@ -219,10 +225,6 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/payroll-participation`, data),
   setInsurance: (id: string, data: any) =>
     internal.put(`/applications/${id}/insurance`, data),
-  addOnboardingTask: (id: string, data: any) =>
-    internal.post(`/applications/${id}/onboarding-tasks`, data),
-  updateOnboardingTask: (id: string, taskId: string, data: any) =>
-    internal.put(`/applications/${id}/onboarding-tasks/${taskId}`, data),
   activate: (id: string) => internal.post(`/applications/${id}/activate`),
   close: (id: string, data: any) =>
     internal.post(`/applications/${id}/close`, data),

@@ -75,23 +75,17 @@ test.describe('cross-role HR operational journeys', () => {
     await Promise.all([processor.dispose(), payroll.dispose(), manager.dispose()]);
   });
 
-  test('responsible supervisor proposal reaches canonical schedule only after HR approval', async () => {
-    test.skip(!env('HR_E2E_PERSONNEL_ID') || !env('HR_E2E_SUPERVISOR_TOKEN') || !env('HR_E2E_HR_PROCESSOR_TOKEN') || !env('HR_E2E_HR_MANAGER_TOKEN'));
+  test('HR Processor saves a canonical work schedule directly without approval', async () => {
+    test.skip(!env('HR_E2E_PERSONNEL_ID') || !env('HR_E2E_HR_PROCESSOR_TOKEN'));
     const personnelId = env('HR_E2E_PERSONNEL_ID');
-    const supervisor = await roleRequest(env('HR_E2E_SUPERVISOR_TOKEN'));
     const processor = await roleRequest(env('HR_E2E_HR_PROCESSOR_TOKEN'));
-    const manager = await roleRequest(env('HR_E2E_HR_MANAGER_TOKEN'));
     const payload = { effectiveDate: env('HR_E2E_SCHEDULE_DATE') || futureDate(), days: [{ weekday: 0, startTime: '08:00', endTime: '17:00' }] };
-    const proposalResponse = await supervisor.post(`/hr/personnel/${personnelId}/work-schedule/proposals`, { data: { ...payload, proposalNote: 'E2E schedule change' } });
-    expect(proposalResponse.ok()).toBeTruthy();
-    const change = (await proposalResponse.json()).data;
-    expect((await processor.put(`/hr/personnel/${personnelId}/work-schedule/changes/${change.id}/prepare`, { data: payload })).ok()).toBeTruthy();
-    const beforeApproval = await processor.get(`/hr/personnel/${personnelId}/work-schedule`);
-    const scheduleBeforeApproval = (await beforeApproval.json()).data;
-    expect(scheduleBeforeApproval.workSchedules.some((item: any) => String(item.effectiveFrom).startsWith(payload.effectiveDate))).toBe(false);
-    expect((await processor.post(`/hr/personnel/${personnelId}/work-schedule/changes/${change.id}/submit`)).ok()).toBeTruthy();
-    expect((await manager.post(`/hr/personnel/${personnelId}/work-schedule/changes/${change.id}/approve`)).ok()).toBeTruthy();
-    await Promise.all([supervisor.dispose(), processor.dispose(), manager.dispose()]);
+    expect((await processor.put(`/hr/personnel/${personnelId}/work-schedule`, { data: payload })).ok()).toBeTruthy();
+    const detail = await processor.get(`/hr/personnel/${personnelId}/work-schedule`);
+    const schedule = (await detail.json()).data.workSchedules[0];
+    expect(String(schedule.effectiveFrom)).toContain(payload.effectiveDate);
+    expect(schedule.days).toEqual(payload.days);
+    await processor.dispose();
   });
 
   test('generic workspace access cannot substitute for HR business authority', async () => {
@@ -252,26 +246,27 @@ test.describe('browser-visible cross-role workflow controls', () => {
     await manager.close();
   });
 
-  test('schedule journey exposes only the projected action for each actor', async ({ browser }) => {
+  test('schedule is read-only for a supervisor and directly editable by HR roles', async ({ browser }) => {
     const supervisor = await browser.newContext({ storageState: env('HR_E2E_SUPERVISOR_STORAGE') });
     const supervisorPage = await supervisor.newPage();
     await supervisorPage.goto(`/dashboard/hr/personnel?focus=${env('HR_E2E_PERSONNEL_ID')}`);
     await supervisorPage.getByRole('button', { name: 'مشاهده برنامه کاری' }).click();
-    await expect(supervisorPage.getByRole('button', { name: 'ثبت پیشنهاد توسط سرپرست مسئول' })).toBeVisible();
+    await expect(supervisorPage.getByText(/برای تغییر برنامه کاری، مجوز مدیریت برنامه کار پرسنل لازم است|برنامه کاری ثبت نشده است/)).toBeVisible();
+    await expect(supervisorPage.getByRole('button', { name: 'ذخیره برنامه کاری' })).toHaveCount(0);
     await supervisor.close();
 
     const processor = await browser.newContext({ storageState: env('HR_E2E_HR_PROCESSOR_STORAGE') });
     const processorPage = await processor.newPage();
     await processorPage.goto(`/dashboard/hr/personnel?focus=${env('HR_E2E_PERSONNEL_ID')}`);
     await processorPage.getByRole('button', { name: 'مشاهده برنامه کاری' }).click();
-    await expect(processorPage.getByRole('button', { name: /ذخیره پیش‌نویس|ارسال برای تأیید/ })).toBeVisible();
+    await expect(processorPage.getByRole('button', { name: 'ذخیره برنامه کاری' })).toBeVisible();
     await processor.close();
 
     const manager = await browser.newContext({ storageState: env('HR_E2E_HR_MANAGER_STORAGE') });
     const managerPage = await manager.newPage();
     await managerPage.goto(`/dashboard/hr/personnel?focus=${env('HR_E2E_PERSONNEL_ID')}`);
     await managerPage.getByRole('button', { name: 'مشاهده برنامه کاری' }).click();
-    await expect(managerPage.getByRole('button', { name: /تأیید و ایجاد نسخه اجرایی|بازگرداندن/ })).toBeVisible();
+    await expect(managerPage.getByRole('button', { name: 'ذخیره برنامه کاری' })).toBeVisible();
     await manager.close();
   });
 
@@ -292,19 +287,18 @@ test.describe('browser-visible cross-role workflow controls', () => {
     await context.close();
   });
 
-  test('schedule draft survives browser navigation and direct panel recovery', async ({ browser }) => {
-    const context = await browser.newContext({ storageState: env('HR_E2E_SUPERVISOR_STORAGE') });
+  test('direct schedule draft survives browser navigation and panel recovery', async ({ browser }) => {
+    const context = await browser.newContext({ storageState: env('HR_E2E_HR_PROCESSOR_STORAGE') });
     const page = await context.newPage();
     const personnelId = env('HR_E2E_PERSONNEL_ID');
     await page.goto('/dashboard/hr/personnel');
     await page.goto(`/dashboard/hr/personnel?focus=${personnelId}`);
     await page.getByRole('button', { name: 'مشاهده برنامه کاری' }).click();
-    const note = page.getByPlaceholder('دلیل پیشنهاد سرپرست مسئول');
-    await note.fill('پیش‌نویس برنامه کاری آزمون');
-    await expect.poll(() => page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.includes(':schedule:'))?.[1] || '')).toContain('پیش‌نویس برنامه کاری آزمون');
+    await page.getByRole('button', { name: 'جمعه', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.includes(':schedule:'))?.[1] || '')).toContain('"weekday":6');
     await page.goBack();
     await page.goto(`/dashboard/hr/personnel?focus=${personnelId}&panel=schedule`);
-    await expect(page.getByPlaceholder('دلیل پیشنهاد سرپرست مسئول')).toHaveValue('پیش‌نویس برنامه کاری آزمون');
+    await expect(page.getByRole('button', { name: 'جمعه', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await context.close();
   });
 

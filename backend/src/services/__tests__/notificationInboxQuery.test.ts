@@ -15,5 +15,6 @@ assert.equal(notificationCategory('HIRING_CHECKLIST_OVERDUE'), 'HIRING');
 assert.equal(notificationCategory('RECOVERY_BACKUP_STALE'), 'RECOVERY');
 assert.equal(notificationCategory('SALES_CONTRACT_READY_FOR_ACCOUNTING'), 'SALES');
 assert.equal(notificationCategory('ACCOUNTING_RECORD_SUBMITTED'), 'ACCOUNTING');
+assert.equal(notificationCategory('ACCOUNTING_CONTRACT_CORRECTION_EDITED'), 'ACCOUNTING');
 
 console.log('notification inbox query tests passed');

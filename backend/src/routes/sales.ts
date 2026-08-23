@@ -17,6 +17,7 @@ import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import { createDelivery, getDeliveries } from '../services/deliveryService';
 import { createPayment, getPayments, validatePaymentData } from '../services/paymentService';
 import {
+  ContractItemSynchronizationError,
   ContractProductGraphValidationError,
   createContract,
   updateContract,
@@ -1229,6 +1230,9 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
     }
     if (error instanceof ContractPartyIdentityValidationError) {
       return res.status(422).json({ success: false, code: error.code, error: error.message });
+    }
+    if (error instanceof ContractItemSynchronizationError) {
+      return res.status(error.status).json({ success: false, code: error.code, error: error.message });
     }
     if (error.message === 'Contract not found') {
       return res.status(404).json({

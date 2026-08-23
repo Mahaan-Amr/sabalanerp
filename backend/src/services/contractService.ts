@@ -543,6 +543,26 @@ export interface UpdateContractData {
   };
 }
 
+type ContractRelationItem = NonNullable<
+  NonNullable<UpdateContractData['_relations']>['items']
+>[number];
+
+export class ContractItemSynchronizationError extends Error {
+  readonly code: 'contract-item-stable-identity-required' | 'contract-item-has-downstream-evidence';
+  readonly status: 409 | 422;
+
+  constructor(
+    code: ContractItemSynchronizationError['code'],
+    message: string,
+    status: ContractItemSynchronizationError['status'],
+  ) {
+    super(message);
+    this.name = 'ContractItemSynchronizationError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
 const toDecimalNumber = (value: unknown, fallback = 0): number => {
   const parsed = parseFloat(String(value ?? ''));
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -570,6 +590,76 @@ const toNullableDecimalNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === '') return null;
   const parsed = parseFloat(String(value));
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const contractItemWriteData = (
+  item: ContractRelationItem,
+  calculationPolicy: typeof CURRENT_CONTRACT_PRODUCT_POLICY,
+) => ({
+  productId: item.productId,
+  productRowId: item.productRowId,
+  productType: item.productType || null,
+  quantity: persistContractQuantityAtPolicyScale(item.quantity, calculationPolicy),
+  unitPrice: toDecimalNumber(item.unitPrice),
+  totalPrice: toDecimalNumber(item.totalPrice),
+  description: item.description || null,
+  isMandatory: item.isMandatory || false,
+  mandatoryPercentage: toNullableDecimalNumber(item.mandatoryPercentage),
+  originalTotalPrice: toNullableDecimalNumber(item.originalTotalPrice),
+  stairSystemId: item.stairSystemId || null,
+  stairPartType: item.stairPartType || null,
+});
+
+export const synchronizeContractItems = async (
+  tx: Prisma.TransactionClient,
+  contractId: string,
+  items: readonly ContractRelationItem[],
+  calculationPolicy: typeof CURRENT_CONTRACT_PRODUCT_POLICY,
+) => {
+  const productRowIds = items.map(item => item.productRowId?.trim()).filter(Boolean) as string[];
+  if (productRowIds.length !== items.length || new Set(productRowIds).size !== productRowIds.length) {
+    throw new ContractItemSynchronizationError(
+      'contract-item-stable-identity-required',
+      'شناسه پایدار یکی از ردیف‌های محصول معتبر نیست؛ محصولات قرارداد را بازبینی و دوباره ذخیره کنید.',
+      422,
+    );
+  }
+
+  const existingItems = await tx.contractItem.findMany({
+    where: { contractId },
+    select: { id: true, productRowId: true },
+  });
+  const existingByProductRowId = new Map(
+    existingItems.flatMap(item => item.productRowId ? [[item.productRowId, item] as const] : []),
+  );
+
+  for (const item of items) {
+    const productRowId = item.productRowId!.trim();
+    const existing = existingByProductRowId.get(productRowId);
+    const data = contractItemWriteData({ ...item, productRowId }, calculationPolicy);
+    if (existing) {
+      await tx.contractItem.update({ where: { id: existing.id }, data });
+    } else {
+      await tx.contractItem.create({ data: { contractId, ...data } });
+    }
+  }
+
+  const retainedProductRowIds = new Set(productRowIds);
+  for (const existing of existingItems) {
+    if (existing.productRowId && retainedProductRowIds.has(existing.productRowId)) continue;
+    try {
+      await tx.contractItem.delete({ where: { id: existing.id } });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+        throw new ContractItemSynchronizationError(
+          'contract-item-has-downstream-evidence',
+          'این ردیف محصول دارای سابقه مالی یا عملیاتی است و حذف آن مجاز نیست؛ ردیف را اصلاح کنید یا ابتدا فرایند اصلاح مرتبط را انجام دهید.',
+          409,
+        );
+      }
+      throw error;
+    }
+  }
 };
 
 const toNullableDate = (value: unknown): Date | null => {
@@ -963,27 +1053,7 @@ export async function updateContract(
         }
       });
       await tx.payment.deleteMany({ where: { contractId } });
-      await tx.contractItem.deleteMany({ where: { contractId } });
-
-      if (relations.items?.length) {
-        await tx.contractItem.createMany({
-          data: relations.items.map((item) => ({
-            contractId,
-            productId: item.productId,
-            productRowId: item.productRowId || null,
-            productType: item.productType || null,
-            quantity: persistContractQuantityAtPolicyScale(item.quantity, calculationPolicy),
-            unitPrice: toDecimalNumber(item.unitPrice),
-            totalPrice: toDecimalNumber(item.totalPrice),
-            description: item.description || null,
-            isMandatory: item.isMandatory || false,
-            mandatoryPercentage: toNullableDecimalNumber(item.mandatoryPercentage),
-            originalTotalPrice: toNullableDecimalNumber(item.originalTotalPrice),
-            stairSystemId: item.stairSystemId || null,
-            stairPartType: item.stairPartType || null
-          }))
-        });
-      }
+      await synchronizeContractItems(tx, contractId, relations.items || [], calculationPolicy);
 
       for (const delivery of relations.deliveries || []) {
         await tx.delivery.create({

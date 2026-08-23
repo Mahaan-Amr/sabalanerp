@@ -3,6 +3,7 @@ import {
   hiringLifecyclePhaseOptions,
   hiringTaskCapability,
   hiringTaskDetailVisible,
+  startPreparationStatusItems,
   hiringLifecycleStatusLabel,
   resolvePhaseAfterLifecycleAdvance,
   resolveSelectedHiringPhase,
@@ -136,6 +137,48 @@ assert.equal(
   "UPDATE_INSURANCE",
 );
 assert.equal(hiringTaskCapability(taskCapabilities, "UNKNOWN"), null);
+
+assert.deepEqual(startPreparationStatusItems([
+  ...taskCapabilities,
+  {
+    id: "PAYROLL_PARTICIPATION",
+    title: "تنظیم مشارکت حقوق و دستمزد",
+    status: "COMPLETE",
+    ownerAuthorities: ["HR_PAYROLL_MANAGER"],
+    detailVisible: false,
+    actionIds: [],
+  },
+  {
+    id: "ONBOARDING_TASK",
+    title: "وظیفه دستی قدیمی",
+    status: "PENDING",
+    ownerAuthorities: ["HR_MANAGER"],
+    detailVisible: true,
+    actionIds: ["UPDATE_ONBOARDING_TASK"],
+  },
+]), [
+  {
+    id: "SIGNED_CONTRACT",
+    label: "قرارداد کاغذی",
+    status: "IN_PROGRESS",
+    ownerAuthorities: ["FINANCE_RECORDER", "FINANCE_MANAGER"],
+    activationEffect: "الزامی برای فعال‌سازی",
+  },
+  {
+    id: "PAYROLL_PARTICIPATION",
+    label: "تنظیم مشارکت حقوق و دستمزد",
+    status: "COMPLETE",
+    ownerAuthorities: ["HR_PAYROLL_MANAGER"],
+    activationEffect: "الزامی برای فعال‌سازی",
+  },
+  {
+    id: "INSURANCE",
+    label: "پیگیری ثبت بیمه",
+    status: "IN_PROGRESS",
+    ownerAuthorities: ["HR_PROCESSOR"],
+    activationEffect: "پیگیری پس از شروع مجاز است",
+  },
+]);
 
 assert.equal(
   shouldLoadCompanyEvaluationPlan("COMPANY_EVALUATION_PLAN", [

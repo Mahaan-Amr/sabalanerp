@@ -52,6 +52,7 @@
     "text:scan": "node scripts/text-corruption-inventory.mjs",
     "text:check": "npm run text:scan && node scripts/check-text-corruption.mjs",
     "architecture:check": "node scripts/check-database-client-ownership.mjs",
+    "audit:hr-onboarding-retirement": "npm --prefix backend run audit:hr-onboarding-retirement",
     "design-system:report": "node scripts/design-system-adoption.mjs report",
     "design-system:baseline": "node scripts/design-system-adoption.mjs baseline",
     "design-system:check": "node scripts/design-system-adoption.mjs check --changed",

@@ -18,5 +18,15 @@ assert.deepEqual(
   "ACCEPTED",
 );
 assert.throws(() => validateOfflineOfferDecision({ decision: "ACCEPTED" }), /الزامی/);
+for (const communicatedAt of ["2026-07-23", "1405/05/01", "1405/05/01 12:30"]) {
+  assert.throws(() => validateOfflineOfferDecision({
+    decision: "ACCEPTED",
+    communicationMethod: "PHONE",
+    communicatedAt,
+    offlineReason: "عدم دسترسی متقاضی به اینترنت",
+    confirmedCandidateInformation: "متقاضی آزمایشی",
+    note: "پیشنهاد کامل برای متقاضی خوانده شد.",
+  }), /الزامی/);
+}
 
 console.log("HR offer decision policy tests passed.");

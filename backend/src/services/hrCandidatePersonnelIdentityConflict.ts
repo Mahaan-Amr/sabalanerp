@@ -60,12 +60,17 @@ export const ensureCandidatePersonnelIdentityConsistent = async (database: any, 
   if (!input.candidate.linkedPersonnel) return;
   assertLinkedPersonnelComplete(input);
   if (!candidatePersonnelIdentityMismatch(input)) return;
-  await createIdentityConflictIfNeeded(database, {
+  const createConflict = (transaction: any) => createIdentityConflictIfNeeded(transaction, {
     applicationId: input.applicationId,
     candidateId: input.candidate.id,
     claim: input.candidate,
     potentialPersonnel: input.candidate.linkedPersonnel,
   });
+  if (typeof database.$transaction === 'function') {
+    await database.$transaction(createConflict);
+  } else {
+    await createConflict(database);
+  }
   throw new Error('مغایرت هویت Candidate و Personnel باید پیش از ادامه تعیین تکلیف شود.');
 };
 

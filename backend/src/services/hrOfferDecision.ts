@@ -16,10 +16,13 @@ export type OfflineOfferDecision = {
   note: string;
 };
 
+const COMPLETE_ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
 export const validateOfflineOfferDecision = (input: any): OfflineOfferDecision => {
   const decision = input?.decision;
   const communicationMethod = input?.communicationMethod;
-  const communicatedAt = new Date(input?.communicatedAt);
+  const communicatedAtInput = String(input?.communicatedAt || '').trim();
+  const communicatedAt = new Date(communicatedAtInput);
   const offlineReason = String(input?.offlineReason || "").trim();
   const confirmedCandidateInformation = String(
     input?.confirmedCandidateInformation || "",
@@ -30,6 +33,7 @@ export const validateOfflineOfferDecision = (input: any): OfflineOfferDecision =
     !["PHONE", "IN_PERSON", "VIDEO_CALL", "OTHER"].includes(
       communicationMethod,
     ) ||
+    !COMPLETE_ISO_TIMESTAMP.test(communicatedAtInput) ||
     Number.isNaN(communicatedAt.getTime()) ||
     !offlineReason ||
     !confirmedCandidateInformation ||

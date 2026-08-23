@@ -61,6 +61,7 @@ import {
   fromIsoDateTime,
   toIsoDate,
   toIsoDateTime,
+  isCompletePersianDateTime,
 } from "@/features/hr/hrUi";
 import {
   assessmentTypeLabel,
@@ -1634,7 +1635,7 @@ export default function HiringCasePage() {
                             label="ثبت نهایی تصمیم آفلاین"
                             disabled={
                               busy ||
-                              !offlineDecision.communicatedAt ||
+                              !isCompletePersianDateTime(offlineDecision.communicatedAt) ||
                               !offlineDecision.offlineReason.trim() ||
                               !offlineDecision.confirmedCandidateInformation.trim() ||
                               !offlineDecision.note.trim()

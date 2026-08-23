@@ -46,7 +46,6 @@ import {
   ErpSection,
 } from "@/components/erp";
 import { hrAPI, hrAuthorizationAPI, usersAPI } from "@/lib/api";
-import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
 import RetentionAction from "@/features/hr/RetentionActionSheet";
 import {
@@ -983,7 +982,7 @@ export default function HrPersonnelPage() {
         {scheduleLoading && !scheduleData ? <ErpLoading /> : null}
         {scheduleData && scheduleTarget ? (
           <PersonnelScheduleEditor
-            key={`${scheduleData.workSchedules?.[0]?.id || "new-schedule"}-${scheduleData.workScheduleChanges?.[0]?.id || "no-change"}`}
+            key={`${scheduleData.workSchedules?.[0]?.id || "new-schedule"}-${scheduleData.workSchedules?.[0]?.updatedAt || "unsaved"}`}
             person={{ ...scheduleTarget, ...scheduleData }}
             saving={saving}
             run={run}
@@ -1311,192 +1310,90 @@ function PersonnelCard(props: any) {
 
 function PersonnelScheduleEditor({ person, saving, run, onDirtyChange, userId }: any) {
   const schedule = person.workSchedules?.[0];
-  const change = person.workScheduleChanges?.[0];
-  const initialValue = useMemo(
-    () => workScheduleFromApi(
-      change?.effectiveFrom && Array.isArray(change.daysJson)
-        ? { effectiveFrom: change.effectiveFrom, days: change.daysJson }
-        : schedule,
-    ),
-    [change?.daysJson, change?.effectiveFrom, schedule],
-  );
+  const canEdit = Boolean(person.workScheduleCapabilities?.canEdit);
+  const initialValue = useMemo(() => workScheduleFromApi(schedule), [schedule]);
   const [value, setValue] = useState<WorkScheduleValue>(() =>
     initialValue,
   );
-  const [proposalNote, setProposalNote] = useState("");
-  const [returnReason, setReturnReason] = useState("");
   const [draftReady, setDraftReady] = useState(false);
-  const capabilities = person.workScheduleCapabilities || {};
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !canEdit) {
+      setDraftReady(true);
+      return;
+    }
     const saved = window.sessionStorage.getItem(personnelScheduleDraftKey(userId, person.id));
     if (saved) {
       try {
         const draft = JSON.parse(saved);
         if (draft.value) setValue(draft.value);
-        setProposalNote(String(draft.proposalNote || ""));
-        setReturnReason(String(draft.returnReason || ""));
       } catch { window.sessionStorage.removeItem(personnelScheduleDraftKey(userId, person.id)); }
     }
     setDraftReady(true);
-  }, [person.id, userId]);
+  }, [canEdit, person.id, userId]);
 
-  const dirty = JSON.stringify(value) !== JSON.stringify(initialValue) || Boolean(proposalNote.trim()) || Boolean(returnReason.trim());
+  const dirty = canEdit && JSON.stringify(value) !== JSON.stringify(initialValue);
 
   useEffect(() => {
-    if (!draftReady || !dirty || !userId) return;
+    if (!draftReady || !dirty || !userId || !canEdit) return;
     window.sessionStorage.setItem(
       personnelScheduleDraftKey(userId, person.id),
-      JSON.stringify({ value, proposalNote, returnReason }),
+      JSON.stringify({ value }),
     );
-  }, [dirty, draftReady, person.id, proposalNote, returnReason, userId, value]);
+  }, [canEdit, dirty, draftReady, person.id, userId, value]);
 
-  const runSchedule = (action: () => Promise<any>, message: string) => run(action, message, () => {
-    setDraftReady(false);
-    if (userId) window.sessionStorage.removeItem(personnelScheduleDraftKey(userId, person.id));
-    setProposalNote("");
-    setReturnReason("");
-    onDirtyChange?.(false);
-  });
+  const saveSchedule = () => run(
+    () => hrAPI.updatePersonnelWorkSchedule(person.id, workSchedulePayload(value)),
+    "برنامه کاری ذخیره شد.",
+    (response?: any) => {
+      if (response?.data?.data) setValue(workScheduleFromApi(response.data.data));
+      setDraftReady(false);
+      if (userId) window.sessionStorage.removeItem(personnelScheduleDraftKey(userId, person.id));
+      onDirtyChange?.(false);
+    },
+  );
 
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
-  return (
-    <div className="mt-4">
-      <div className="rounded-xl border border-[var(--sds-border-default)] p-3 text-sm dark:border-[var(--sds-border-strong)]">
-        <p className="font-bold">گردش تغییر ساعت کاری</p>
-        <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
-          سرپرست مسئول پیشنهاد می‌دهد؛ کارشناس منابع انسانی آماده و ارسال
-          می‌کند؛ مدیر منابع انسانی دیگری تأیید می‌کند.
-        </p>
-        <p className="mt-2">
-          وضعیت آخرین درخواست:{" "}
-          {change ? hrDisplayLabel(change.status) : "بدون درخواست باز"}
-        </p>
-        {change?.returnReason && (
-          <p className="mt-1 text-[var(--sds-danger)]">
-            دلیل بازگشت: {change.returnReason}
-          </p>
-        )}
+  if (!canEdit) {
+    if (!schedule) {
+      return (
+        <ErpInlineState
+          kind="empty"
+          title={<><span className="block font-semibold">برنامه کاری ثبت نشده است</span><span className="mt-1 block text-xs font-normal">برای این شخص هنوز روز و ساعت کاری تعریف نشده است.</span></>}
+        />
+      );
+    }
+    return (
+      <div className="mt-4 space-y-3">
+        <ErpInlineState
+          kind="permission"
+          title={<><span className="block font-semibold">نمایش برنامه کاری</span><span className="mt-1 block text-xs font-normal">برای تغییر برنامه کاری، مجوز مدیریت برنامه کار پرسنل لازم است.</span></>}
+        />
+        <WorkScheduleEditor value={workScheduleFromApi(schedule)} onChange={() => undefined} readOnly />
       </div>
-      {capabilities.canPropose && (
-        <div className="mt-3 space-y-3">
-          <WorkScheduleEditor value={value} onChange={setValue} />
-          <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-            <ErpInput
+    );
+  }
 
-              placeholder="دلیل پیشنهاد سرپرست مسئول"
-              value={proposalNote}
-              onChange={(event) => setProposalNote(event.target.value)}
-            />
-            <ErpButton
-              label="ثبت پیشنهاد توسط سرپرست مسئول"
-              disabled={saving || !proposalNote.trim() || !value.effectiveDate}
-              onClick={() =>
-                runSchedule(
-                  () =>
-                    hrAPI.proposePersonnelWorkSchedule(person.id, {
-                      ...workSchedulePayload(value),
-                      proposalNote: proposalNote.trim(),
-                    }),
-                  "پیشنهاد تغییر ساعت کاری ثبت شد.",
-                )
-              }
-            />
-          </div>
-        </div>
+  return (
+    <div className="mt-4 space-y-4">
+      {!schedule && (
+        <ErpInlineState
+          kind="empty"
+          title={<><span className="block font-semibold">برنامه کاری ثبت نشده است</span><span className="mt-1 block text-xs font-normal">روزها و ساعت کاری را تعیین و ذخیره کنید.</span></>}
+        />
       )}
-      {change && capabilities.canPrepare && (
-        <div className="mt-3">
-          <WorkScheduleEditor value={value} onChange={setValue} />
-          <div className="mt-3 flex flex-wrap gap-2">
-            <ErpButton
-              label="ذخیره پیش‌نویس توسط کارشناس منابع انسانی"
-              icon={FaSync}
-              disabled={saving || !value.effectiveDate}
-              onClick={() =>
-                runSchedule(
-                  () =>
-                    hrAPI.preparePersonnelWorkSchedule(
-                      person.id,
-                      change.id,
-                      workSchedulePayload(value),
-                    ),
-                  "پیش‌نویس برنامه کاری ذخیره شد.",
-                )
-              }
-            />
-            {capabilities.canSubmit && (
-              <ErpButton
-                label="ارسال برای تأیید مدیر منابع انسانی"
-                disabled={saving}
-                onClick={() =>
-                  runSchedule(
-                    () =>
-                      hrAPI.submitPersonnelWorkSchedule(person.id, change.id),
-                    "برنامه کاری برای تأیید ارسال شد.",
-                  )
-                }
-                tone="success"
-              />
-            )}
-          </div>
-        </div>
-      )}
-      {change?.status === "SUBMITTED" &&
-        (capabilities.canApprove || capabilities.canReturn) && (
-          <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_auto]">
-            <ErpInput
-
-              placeholder="دلیل بازگرداندن برای اصلاح"
-              value={returnReason}
-              onChange={(event) => setReturnReason(event.target.value)}
-            />
-            {capabilities.canReturn && (
-              <ErpButton
-                label="بازگرداندن"
-                disabled={saving || !returnReason.trim()}
-                onClick={() =>
-                  runSchedule(
-                    () =>
-                      hrAPI.returnPersonnelWorkSchedule(
-                        person.id,
-                        change.id,
-                        returnReason,
-                      ),
-                    "برنامه کاری برای اصلاح بازگردانده شد.",
-                  )
-                }
-                tone="warning"
-              />
-            )}
-            {capabilities.canApprove && (
-              <ErpButton
-                label="تأیید و ایجاد نسخه اجرایی"
-                disabled={saving}
-                onClick={() =>
-                  runSchedule(
-                    () =>
-                      hrAPI.approvePersonnelWorkSchedule(person.id, change.id),
-                    "نسخه اجرایی برنامه کاری تأیید شد.",
-                  )
-                }
-                tone="success"
-              />
-            )}
-          </div>
-        )}
-      {!change && schedule && (
-        <div className="mt-3">
-          <WorkScheduleEditor
-            value={workScheduleFromApi(schedule)}
-            onChange={() => undefined}
-          />
-        </div>
-      )}
+      <WorkScheduleEditor value={value} onChange={setValue} />
+      <div className="flex justify-end">
+        <ErpButton
+          label="ذخیره برنامه کاری"
+          tone="success"
+          disabled={saving || !dirty || !value.effectiveDate}
+          onClick={saveSchedule}
+        />
+      </div>
     </div>
   );
 }

@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import Decimal from 'decimal.js';
 import {
   calculateLongitudinalProduct,
   createNewLongitudinalProductInput,
+  longitudinalOperationsQuantity,
+  parseLongitudinalQuantityEntry,
   transitionLongitudinalQuantity,
   type LongitudinalProductInput
 } from '../longitudinalPolicy';
+import { calculateProductOperations } from '../operationsPolicy';
 import { parseCanonicalDecimal } from '../canonicalDecimal';
 import { parseStableIdentity } from '../stableIdentity';
 
@@ -104,6 +108,77 @@ if (optimizedTotalMeters.ok) {
   assert.equal(optimizedTotalMeters.result.baseAmountToman, '1933750');
   assert.equal(optimizedTotalMeters.result.longitudinalCutAmountToman, '130000');
   assert.equal(optimizedTotalMeters.result.totalAmountToman, '2063750');
+}
+
+const authoredZeroTotalMeters = calculateLongitudinalProduct(baseInput({
+  motherWidthMeters: c('0.35'),
+  widthMeters: c('0.1'),
+  lengthMeters: c('10'),
+  requestedAreaSquareMeters: c('1'),
+  quantity: 0,
+  baseRateToman: c('1650000'),
+  longitudinalCutRateToman: c('20000'),
+  calibrationEnabled: false,
+  calibrationSelection: 'manual'
+}));
+assert.equal(authoredZeroTotalMeters.ok, true);
+if (authoredZeroTotalMeters.ok) {
+  assert.equal(authoredZeroTotalMeters.result.quantityMode, 'total-linear-meters');
+  assert.equal(authoredZeroTotalMeters.result.quantity, 0);
+  assert.equal(authoredZeroTotalMeters.result.sourcePiecesConsumed, 1);
+  assert.equal(authoredZeroTotalMeters.result.packingPlan.placements.length, 3);
+  assert.equal(authoredZeroTotalMeters.result.packingPlan.placements[0]?.lengthMeters, '3.3333333333333333333');
+  assert.equal(authoredZeroTotalMeters.result.remainders[0]?.widthMeters, '0.05');
+  assert.equal(authoredZeroTotalMeters.result.remainders[0]?.lengthMeters, '3.3333333333333333333');
+  assert.equal(
+    authoredZeroTotalMeters.result.packingPlan.longitudinalCutMeters,
+    '9.9999999999999999999'
+  );
+  assert.equal(authoredZeroTotalMeters.result.billableLongitudinalCutMeters, '10');
+  const physicalCutTotal = authoredZeroTotalMeters.result.packingPlan.cuts
+    .filter(cut => cut.axis === 'longitudinal')
+    .reduce((sum, cut) => sum.plus(cut.meters), new Decimal(0));
+  assert.equal(
+    c(physicalCutTotal.toString()),
+    authoredZeroTotalMeters.result.packingPlan.longitudinalCutMeters
+  );
+  assert.equal(
+    c(physicalCutTotal.times(
+      authoredZeroTotalMeters.result.packingPlan.cuts[0]?.kerfMeters ?? c('0')
+    ).toString()),
+    authoredZeroTotalMeters.result.packingPlan.kerfWasteSquareMeters
+  );
+  const operationQuantity = longitudinalOperationsQuantity(authoredZeroTotalMeters.result);
+  assert.equal(operationQuantity, undefined);
+  const operations = calculateProductOperations({
+    policyVersion: 'operations-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'half-up-v1',
+    productRowId: parseStableIdentity('product-row', 'authored-zero-tools'),
+    lengthMeters: authoredZeroTotalMeters.result.lengthMeters,
+    widthMeters: authoredZeroTotalMeters.result.widthMeters,
+    quantity: operationQuantity,
+    groups: [{
+      operationGroupId: parseStableIdentity('operation-group', 'all-authored-zero'),
+      scope: authoredZeroTotalMeters.result.lengthMeters
+    }],
+    tools: [{
+      toolSelectionId: parseStableIdentity('tool-selection', 'half-bullnose-authored-zero'),
+      operationGroupId: parseStableIdentity('operation-group', 'all-authored-zero'),
+      catalogItemId: 'half-bullnose',
+      catalogSnapshotVersion: 'inventory-1',
+      name: 'نیم لول',
+      unit: 'meter',
+      rateToman: c('50000'),
+      edges: ['front', 'back']
+    }],
+    finishings: []
+  });
+  assert.equal(operations.ok, true);
+  if (operations.ok) {
+    assert.equal(operations.result.basis, 'linear-meters');
+    assert.equal(operations.result.tools[0]?.automaticQuantity, '20');
+  }
 }
 
 const areaFirst = calculateLongitudinalProduct(baseInput({
@@ -350,6 +425,21 @@ assert.deepEqual(
     rememberedMandatoryPercentage: c('25')
   }
 );
+assert.deepEqual(
+  transitionLongitudinalQuantity({
+    previousQuantity: 0,
+    nextQuantity: 2,
+    mandatoryEnabled: false,
+    mandatoryPercentage: c('25'),
+    rememberedMandatoryPercentage: c('25')
+  }),
+  {
+    quantity: 2,
+    mandatoryEnabled: true,
+    mandatoryPercentage: c('25'),
+    rememberedMandatoryPercentage: c('25')
+  }
+);
 
 assert.deepEqual(
   transitionLongitudinalQuantity({
@@ -361,6 +451,39 @@ assert.deepEqual(
   }),
   {
     quantity: undefined,
+    mandatoryEnabled: false,
+    mandatoryPercentage: c('25'),
+    rememberedMandatoryPercentage: c('25')
+  }
+);
+
+assert.deepEqual(
+  parseLongitudinalQuantityEntry('0'),
+  { accepted: true, quantity: 0 },
+  'literal zero must switch an edited longitudinal row back to automatic quantity mode'
+);
+assert.deepEqual(
+  parseLongitudinalQuantityEntry(''),
+  { accepted: true, quantity: undefined }
+);
+assert.deepEqual(
+  parseLongitudinalQuantityEntry('3'),
+  { accepted: true, quantity: 3 }
+);
+assert.deepEqual(
+  parseLongitudinalQuantityEntry('1.5'),
+  { accepted: false }
+);
+assert.deepEqual(
+  transitionLongitudinalQuantity({
+    previousQuantity: 1,
+    nextQuantity: 0,
+    mandatoryEnabled: true,
+    mandatoryPercentage: c('25'),
+    rememberedMandatoryPercentage: c('25')
+  }),
+  {
+    quantity: 0,
     mandatoryEnabled: false,
     mandatoryPercentage: c('25'),
     rememberedMandatoryPercentage: c('25')

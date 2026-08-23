@@ -103,6 +103,7 @@ export interface LongitudinalProductResult {
   readonly remainders: readonly PackedRemainder[];
   readonly baseAmountToman: CanonicalDecimal;
   readonly mandatoryAmountToman: CanonicalDecimal;
+  readonly billableLongitudinalCutMeters: CanonicalDecimal;
   readonly longitudinalCutAmountToman: CanonicalDecimal;
   readonly calibrationCutAmountToman: CanonicalDecimal;
   readonly totalAmountToman: CanonicalDecimal;
@@ -239,8 +240,8 @@ export const parseLongitudinalProductInput = (
     return record[key] as Value;
   };
   const quantity = record.quantity;
-  if (quantity !== undefined && (!Number.isSafeInteger(quantity) || Number(quantity) <= 0)) {
-    throw new TypeError('Longitudinal quantity must be a positive integer or omitted.');
+  if (quantity !== undefined && (!Number.isSafeInteger(quantity) || Number(quantity) < 0)) {
+    throw new TypeError('Longitudinal quantity must be a non-negative integer or omitted.');
   }
   return {
     calculationPolicyVersion: requiredString('calculationPolicyVersion'),
@@ -345,11 +346,11 @@ export const calculateLongitudinalProduct = (
     });
   }
   if (input.quantity !== undefined &&
-      (!Number.isSafeInteger(input.quantity) || input.quantity <= 0)) {
+      (!Number.isSafeInteger(input.quantity) || input.quantity < 0)) {
     conflicts.push({
       code: 'invalid-quantity',
       field: 'quantity',
-      message: 'Quantity must be a positive integer or blank.'
+      message: 'Quantity must be a non-negative integer or blank.'
     });
   }
   const paidSourceMaterial = input.baseMaterialPricing === 'paid-source-zero';
@@ -410,7 +411,8 @@ export const calculateLongitudinalProduct = (
       }]
     };
   }
-  const multiplier = new Decimal(input.quantity ?? 1);
+  const totalLinearMetersMode = input.quantity === undefined || input.quantity === 0;
+  const multiplier = new Decimal(totalLinearMetersMode ? 1 : input.quantity);
   let length = suppliedLength;
   let area = suppliedArea;
 
@@ -440,14 +442,13 @@ export const calculateLongitudinalProduct = (
   const piecesAcross = Decimal.floor(
     motherWidth.plus(packingKerf).div(width.plus(packingKerf))
   ).toNumber();
-  const totalLinearMetersMode = input.quantity === undefined;
   const packingQuantity = totalLinearMetersMode
     ? Math.max(1, piecesAcross)
     : input.quantity;
   const packingLength = totalLinearMetersMode
     ? length.div(packingQuantity)
     : length;
-  const requiredSourcePieces = input.quantity === undefined
+  const requiredSourcePieces = totalLinearMetersMode
     ? 1
     : Math.ceil(input.quantity / Math.max(1, piecesAcross));
   const packing = calculatePackingPlan({
@@ -478,6 +479,9 @@ export const calculateLongitudinalProduct = (
     };
   }
 
+  const billableLongitudinalCutMeters = totalLinearMetersMode
+    ? canonical(length.times(packing.plan.cuts.length).div(packingQuantity))
+    : packing.plan.longitudinalCutMeters;
   const hasLongitudinalCut = d(packing.plan.longitudinalCutMeters).gt(0);
   const hasWidthRemainder = packing.plan.remainders.some(remainder =>
     d(remainder.widthMeters).gt(0)
@@ -532,7 +536,7 @@ export const calculateLongitudinalProduct = (
     ...(hasLongitudinalCut
       ? [{
           lineId: 'longitudinal-cut',
-          quantity: packing.plan.longitudinalCutMeters,
+          quantity: billableLongitudinalCutMeters,
           rateToman: canonical(longitudinalCutRate!)
         }]
       : []),
@@ -555,7 +559,7 @@ export const calculateLongitudinalProduct = (
   const resultWithoutHash = {
     calculationPolicyVersion: input.calculationPolicyVersion,
     inputHash: hashCanonicalValue(withoutUndefined(input)),
-    quantityMode: input.quantity === undefined
+    quantityMode: totalLinearMetersMode
       ? 'total-linear-meters' as const
       : 'piece-count' as const,
     lengthMeters: canonical(length),
@@ -580,6 +584,7 @@ export const calculateLongitudinalProduct = (
     remainders: packing.plan.remainders,
     baseAmountToman: amountFor('base-material'),
     mandatoryAmountToman: amountFor('mandatory'),
+    billableLongitudinalCutMeters,
     longitudinalCutAmountToman: amountFor('longitudinal-cut'),
     calibrationCutAmountToman: amountFor('calibration-cut'),
     totalAmountToman: pricing.totalAmountToman,
@@ -588,7 +593,7 @@ export const calculateLongitudinalProduct = (
       {
         key: 'layout' as const,
         label: 'چیدمان',
-        value: input.quantity === undefined
+        value: totalLinearMetersMode
           ? `${display(canonical(length))}m × ${display(canonical(width.times(100)))}cm`
           : `${input.quantity} × ${display(canonical(length))}m × ${display(canonical(width.times(100)))}cm`
       },
@@ -608,7 +613,7 @@ export const calculateLongitudinalProduct = (
         key: 'cutting' as const,
         label: 'برش',
         value: hasLongitudinalCut
-          ? `عادی ${packing.plan.longitudinalCutMeters}m · کالیبر ${calibrationMeters}m`
+          ? `عادی ${billableLongitudinalCutMeters}m · کالیبر ${calibrationMeters}m`
           : emDash
       },
       {
@@ -644,15 +649,15 @@ export const transitionLongitudinalQuantity = ({
   mandatoryPercentage?: CanonicalDecimal;
   rememberedMandatoryPercentage: CanonicalDecimal;
 }) => {
-  if (nextQuantity === undefined) {
+  if (nextQuantity === undefined || nextQuantity === 0) {
     return {
-      quantity: undefined,
+      quantity: nextQuantity,
       mandatoryEnabled: false,
       mandatoryPercentage: mandatoryPercentage ?? rememberedMandatoryPercentage,
       rememberedMandatoryPercentage
     };
   }
-  if (previousQuantity === undefined) {
+  if (previousQuantity === undefined || previousQuantity === 0) {
     return {
       quantity: nextQuantity,
       mandatoryEnabled: true,
@@ -666,4 +671,39 @@ export const transitionLongitudinalQuantity = ({
     mandatoryPercentage: mandatoryPercentage ?? rememberedMandatoryPercentage,
     rememberedMandatoryPercentage
   };
+};
+
+export const longitudinalOperationsQuantity = ({
+  quantityMode,
+  quantity
+}: Pick<LongitudinalProductResult, 'quantityMode' | 'quantity'>): number | undefined =>
+  quantityMode === 'total-linear-meters' ? undefined : quantity;
+
+export type LongitudinalQuantityEntry =
+  | { accepted: true; quantity: number | undefined }
+  | { accepted: false };
+
+export const parseLongitudinalQuantityEntry = (
+  value: string
+): LongitudinalQuantityEntry => {
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    return { accepted: true, quantity: undefined };
+  }
+
+  try {
+    const normalized = parseCanonicalDecimal(trimmed);
+    if (normalized === '0') {
+      return { accepted: true, quantity: 0 };
+    }
+    if (!/^[1-9]\d*$/.test(normalized)) {
+      return { accepted: false };
+    }
+    const quantity = Number(normalized);
+    return Number.isSafeInteger(quantity)
+      ? { accepted: true, quantity }
+      : { accepted: false };
+  } catch {
+    return { accepted: false };
+  }
 };

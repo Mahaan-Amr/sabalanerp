@@ -12,7 +12,7 @@ export const HR_HIRING_FINANCE_DUTY_DEFINITIONS = {
     sourceActionCode: 'HIRING_COLLATERAL_RECORD_RECEIPT',
     envelopeCode: 'HIRING_COLLATERAL_RECEIPT_RECORDING',
     envelopeVersion: 1, responsibilityTypeCode: 'FINANCE_RECORDER', actionPermissionCode: 'RECORD_COLLATERAL_CUSTODY', destinationWorkspaceCode: 'ACCOUNTING', routingScope: 'GLOBAL' as const,
-    accountabilityModel: 'INDIVIDUAL_EXECUTION' as const, workspaceAdminOverrideDenied: false,
+    accountabilityModel: 'INDIVIDUAL_EXECUTION' as const, workspaceAdminOverrideDenied: true,
     allowedFields: ['title', 'description', 'dueAt'] as const,
     allowedActionCodes: [] as string[],
     allowedEvidence: ['COLLATERAL_SCAN'],
@@ -22,7 +22,7 @@ export const HR_HIRING_FINANCE_DUTY_DEFINITIONS = {
     sourceActionCode: 'HIRING_COLLATERAL_VERIFY_RECEIPT',
     envelopeCode: 'HIRING_COLLATERAL_RECEIPT_VERIFICATION',
     envelopeVersion: 1, responsibilityTypeCode: 'FINANCE_MANAGER', actionPermissionCode: 'VERIFY_COLLATERAL_CUSTODY', destinationWorkspaceCode: 'ACCOUNTING', routingScope: 'GLOBAL' as const,
-    accountabilityModel: 'SHARED_DECISION' as const, workspaceAdminOverrideDenied: false,
+    accountabilityModel: 'SHARED_DECISION' as const, workspaceAdminOverrideDenied: true,
     allowedFields: ['title', 'description', 'dueAt'] as const,
     allowedActionCodes: ['APPROVE', 'RETURN'],
     allowedEvidence: ['COLLATERAL_SCAN'],
@@ -31,20 +31,19 @@ export const HR_HIRING_FINANCE_DUTY_DEFINITIONS = {
   HIRING_COLLATERAL_RECORD_ORIGINAL_RETURN: {
     sourceActionCode: 'HIRING_COLLATERAL_RECORD_ORIGINAL_RETURN', envelopeCode: 'HIRING_COLLATERAL_ORIGINAL_RETURN_RECORDING', envelopeVersion: 1,
     responsibilityTypeCode: 'FINANCE_RECORDER', actionPermissionCode: 'RECORD_COLLATERAL_CUSTODY', destinationWorkspaceCode: 'ACCOUNTING', routingScope: 'GLOBAL' as const,
-    accountabilityModel: 'INDIVIDUAL_EXECUTION' as const, workspaceAdminOverrideDenied: false,
+    accountabilityModel: 'INDIVIDUAL_EXECUTION' as const, workspaceAdminOverrideDenied: true,
     allowedFields: ['title', 'description', 'dueAt'] as const, allowedActionCodes: [] as string[], allowedEvidence: ['COLLATERAL_RETURN_PROOF'],
     responseSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN: {
     sourceActionCode: 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN', envelopeCode: 'HIRING_COLLATERAL_ORIGINAL_RETURN_VERIFICATION', envelopeVersion: 1,
     responsibilityTypeCode: 'FINANCE_MANAGER', actionPermissionCode: 'VERIFY_COLLATERAL_CUSTODY', destinationWorkspaceCode: 'ACCOUNTING', routingScope: 'GLOBAL' as const,
-    accountabilityModel: 'SHARED_DECISION' as const, workspaceAdminOverrideDenied: false,
+    accountabilityModel: 'SHARED_DECISION' as const, workspaceAdminOverrideDenied: true,
     allowedFields: ['title', 'description', 'dueAt'] as const, allowedActionCodes: ['APPROVE', 'RETURN'], allowedEvidence: ['COLLATERAL_RETURN_PROOF'],
     responseSchema: { type: 'object', properties: { actionCode: { type: 'string', enum: ['APPROVE', 'RETURN'] }, reason: { type: ['string', 'null'], minLength: 3 } }, required: ['actionCode'], additionalProperties: false },
   },
 } as const;
 const definitions = HR_HIRING_FINANCE_DUTY_DEFINITIONS;
-const MANAGERIAL_OVERRIDE_LABEL = 'استفاده از اختیار مدیریتی';
 
 type ActionCode = keyof typeof definitions;
 const definitionFor = (value: string) => {
@@ -244,21 +243,11 @@ const assertEligible = async (database: any, userId: string, dutyId: string, now
 const synchronize: CrossWorkspaceDutySourceAdapter['synchronize'] = async (database, input) =>
   createHrHiringFinanceDuty(database, { collateralItemId: input.sourceId, actionCode: input.dutyTypeCode as ActionCode, actorUserId: input.actorUserId, policyVersion: input.policyVersion, now: input.now });
 
-const canUseManagerialCollateralOverride = async (database: any, userId: string, now: Date) => {
-  const permissions = await activeHrActionPermissionsForUser(database, userId, now);
-  if (!permissions.includes('RECORD_COLLATERAL_CUSTODY') || !permissions.includes('VERIFY_COLLATERAL_CUSTODY')) return false;
-  return (await resolveWorkspaceDutyAuthority(database, {
-    userId, workspace: 'accounting', feature: 'VERIFY_COLLATERAL_CUSTODY', at: now,
-  })).canSelfDecide;
-};
-
 const canClaim: CrossWorkspaceDutySourceAdapter['canClaim'] = async (database, input) => {
   const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
   const permissions = await activeHrActionPermissionsForUser(database, input.actorUserId, input.now ?? new Date());
-  const sourceActorAllowed = duty?.sourceActorUserId !== input.actorUserId
-    || await canUseManagerialCollateralOverride(database, input.actorUserId, input.now ?? new Date());
   const allowed = Boolean(duty && duty.sourceType === 'HR_HIRING_FINANCE' && duty.status === 'OPEN'
-    && !duty.currentAssigneeUserId && sourceActorAllowed
+    && !duty.currentAssigneeUserId && duty.sourceActorUserId !== input.actorUserId
     && definitionFor(duty.sourceActionCode).accountabilityModel !== 'SHARED_DECISION'
     && permissions.includes(definitionFor(duty.sourceActionCode).actionPermissionCode));
   return allowed;
@@ -273,9 +262,7 @@ const canAccessSharedDecision: CrossWorkspaceDutySourceAdapter['canAccessSharedD
   const permitted = (await activeHrActionPermissionsForUser(database, input.actorUserId, input.now ?? new Date()))
     .includes(definition.actionPermissionCode);
   if (!permitted) return false;
-  if (duty.sourceActorUserId !== input.actorUserId) return true;
-  if (definition.workspaceAdminOverrideDenied) return false;
-  return canUseManagerialCollateralOverride(database, input.actorUserId, input.now ?? new Date());
+  return duty.sourceActorUserId !== input.actorUserId;
 };
 
 const claim: CrossWorkspaceDutySourceAdapter['claim'] = async (database, input) => {
@@ -316,12 +303,10 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
   const reason = String(input.reason || '').trim();
   if (input.actionCode === 'RETURN' && reason.length < 3) throw new Error('REASON_REQUIRED');
   await assertEligible(database, input.actorUserId, duty.id, now);
-  const managerialSelfVerification = duty.sourceActorUserId === input.actorUserId
-    && await canUseManagerialCollateralOverride(database, input.actorUserId, now);
   if (duty.sourceActionCode === 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN') {
     const source = await database.hrCollateralOriginalReturn.findUniqueOrThrow({ where: { id: duty.sourceId }, include: { collateralItem: true } });
     if (source.status !== 'SUBMITTED' || source.version !== duty.sourceVersion
-      || (source.returnedBy === input.actorUserId && !managerialSelfVerification)) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
+      || source.returnedBy === input.actorUserId) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
     await database.hrCollateralOriginalReturn.update({ where: { id: source.id }, data: input.actionCode === 'APPROVE'
       ? { status: 'CONFIRMED', confirmedBy: input.actorUserId, confirmedAt: now, returnedReason: null }
       : { status: 'RETURNED', returnedReason: reason } });
@@ -387,14 +372,13 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
       });
     }
     await database.crossWorkspaceDutyAuditVersion.create({ data: { dutyId: duty.id, version: await nextAuditVersion(database, duty.id), eventCode: input.actionCode === 'APPROVE' ? 'APPROVED' : 'RETURNED', actorUserId: input.actorUserId, sourceVersion: duty.sourceVersion, envelopeVersion: duty.envelopeVersion, policyVersion: input.policyVersion, reason: reason || null,
-      afterJson: managerialSelfVerification ? asJson({ managerialSelfVerification: true, overrideLabel: MANAGERIAL_OVERRIDE_LABEL }) : undefined,
     } });
     return { duty: await database.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } }), replayed: false };
   }
   if (duty.sourceActionCode !== 'HIRING_COLLATERAL_VERIFY_RECEIPT') throw new Error('DUTY_RESPONSE_NOT_SUPPORTED');
   const item = await database.hrCollateralItem.findUniqueOrThrow({ where: { id: duty.sourceId } });
   if (item.version !== duty.sourceVersion || item.status !== 'RECEIVED'
-    || (item.recordedBy === input.actorUserId && !managerialSelfVerification)) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
+    || item.recordedBy === input.actorUserId) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
   const itemChange = await database.hrCollateralItem.updateMany({
     where: { id: item.id, status: 'RECEIVED', version: duty.sourceVersion },
     data: input.actionCode === 'APPROVE'
@@ -433,13 +417,13 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
     actorUserId: input.actorUserId, sourceVersion: duty.sourceVersion, envelopeVersion: duty.envelopeVersion,
     policyVersion: input.policyVersion, beforeJson: asJson({ status: item.status }),
     afterJson: asJson({ status: input.actionCode === 'APPROVE' ? 'VERIFIED' : 'MISMATCH',
-      ...(managerialSelfVerification ? { managerialSelfVerification: true, overrideLabel: MANAGERIAL_OVERRIDE_LABEL } : {}) }), reason: reason || null,
+      }), reason: reason || null,
   } });
   await database.hrHiringAudit.create({ data: {
     applicationId: item.applicationId, actorUserId: input.actorUserId, actorKind: 'USER',
     eventType: input.actionCode === 'APPROVE' ? 'COLLATERAL_VERIFIED_FROM_ACCOUNTING_DUTY' : 'COLLATERAL_RETURNED_FOR_CORRECTION_FROM_ACCOUNTING_DUTY',
     payloadJson: asJson({ collateralItemId: item.id, dutyId: duty.id, reason: reason || null,
-      ...(managerialSelfVerification ? { managerialSelfVerification: true, overrideLabel: MANAGERIAL_OVERRIDE_LABEL } : {}) }),
+      }),
   } });
   return { duty: await database.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } }), replayed: false };
 };

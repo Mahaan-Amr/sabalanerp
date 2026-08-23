@@ -168,34 +168,10 @@ test('Accounting duties record and verify collateral atomically without granting
           receivedAt: new Date('2026-08-23T09:01:00Z'), custodyLocation: 'Safe B',
           identifier: `PN-${actor.id}`, evidence: evidence(`protected-${actor.id}`),
         });
-        await respondToCrossWorkspaceDuty(tx, {
+        await assert.rejects(respondToCrossWorkspaceDuty(tx, {
           dutyId: protectedRecorded.successorDutyId, actorUserId: actor.id, actionCode: 'APPROVE',
           expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
-        });
-        const privilegedAudit = await tx.crossWorkspaceDutyAuditVersion.findFirstOrThrow({
-          where: { dutyId: protectedRecorded.successorDutyId, eventCode: 'APPROVED' }, orderBy: { version: 'desc' },
-        });
-        assert.equal((privilegedAudit.afterJson as any)?.managerialSelfVerification, true);
-        assert.equal((privilegedAudit.afterJson as any)?.overrideLabel, 'استفاده از اختیار مدیریتی');
-        const privilegedReturn = await tx.hrCollateralOriginalReturn.create({ data: {
-          collateralItemId: protectedItem.id, version: 1, status: 'DRAFT',
-        } });
-        const privilegedReturnRecordingDuty = await createHrHiringCollateralReturnDuty(tx, {
-          returnId: privilegedReturn.id, actionCode: 'HIRING_COLLATERAL_RECORD_ORIGINAL_RETURN', actorUserId: initiator.id,
-        });
-        await claimCrossWorkspaceDuty(tx, { dutyId: privilegedReturnRecordingDuty.id, actorUserId: actor.id, policyVersion: 1 });
-        const privilegedReturned = await recordHrHiringCollateralOriginalReturn(tx, {
-          dutyId: privilegedReturnRecordingDuty.id, actorUserId: actor.id, returnedTo: 'Candidate',
-          evidenceNote: 'Privileged return proof', evidence: evidence(`privileged-return-${actor.id}`),
-        });
-        await respondToCrossWorkspaceDuty(tx, {
-          dutyId: privilegedReturned.successorDutyId, actorUserId: actor.id, actionCode: 'APPROVE',
-          expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
-        });
-        const privilegedReturnAudit = await tx.crossWorkspaceDutyAuditVersion.findFirstOrThrow({
-          where: { dutyId: privilegedReturned.successorDutyId, eventCode: 'APPROVED' }, orderBy: { version: 'desc' },
-        });
-        assert.equal((privilegedReturnAudit.afterJson as any)?.managerialSelfVerification, true);
+        }), /DUTY_ASSIGNEE_INELIGIBLE/);
       }
       throw rollback;
     }, { timeout: 120_000 }), (error: unknown) => error === rollback);

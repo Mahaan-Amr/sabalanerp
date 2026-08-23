@@ -2519,7 +2519,10 @@ router.post('/applications/:id/identity/approve', requireActionPermission('APPRO
     const missingDocuments = ['BIRTH_CERTIFICATE_ALL_PAGES', 'NATIONAL_ID_FRONT', 'NATIONAL_ID_BACK'].filter((category) => !categories.has(category));
     if (missingDocuments.length) throw new Error(`اسناد هویتی الزامی ناقص‌اند: ${missingDocuments.join(', ')}`);
   }
-  await prisma.hrJobApplication.update({ where: { id: req.params.id }, data: { identityClearance: 'APPROVED', stage: 'ASSESSMENT' } });
+  await prisma.hrJobApplication.update({ where: { id: req.params.id }, data: {
+    identityClearance: 'APPROVED',
+    ...(!application.convertedAt && !application.outcome ? { stage: 'ASSESSMENT' as const } : {}),
+  } });
   await audit(req.params.id, 'IDENTITY_CLEARANCE_APPROVED', req, managerialSelfApproval
     ? { managerialSelfApproval: true, overrideLabel: 'استفاده از اختیار مدیریتی' } : undefined);
   await syncAutomaticHiringWorkItems();
@@ -3813,10 +3816,16 @@ router.post('/applications/:id/convert', requireActionPermission('MANAGE_RECRUIT
       })),
     ] });
     await tx.hrCandidateInvitation.updateMany({ where: { applicationId: application.id, revokedAt: null }, data: { revokedAt: new Date() } });
-    await tx.hrJobApplication.update({ where: { id: application.id }, data: { convertedAt: new Date(), scheduledStartDate: startDate, stage: 'CLOSED', outcome: 'HIRED' } });
+    await tx.hrJobApplication.update({ where: { id: application.id }, data: {
+      convertedAt: new Date(), scheduledStartDate: startDate,
+      preClosureStage: application.stage, stage: 'CLOSED', outcome: 'HIRED',
+    } });
     return { personnel, relationship };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  await audit(application.id, 'HIRE_CONVERTED', req, { personnelId: result.personnel!.id, relationshipId: result.relationship.id });
+  await audit(application.id, 'HIRE_CONVERTED', req, {
+    personnelId: result.personnel!.id, relationshipId: result.relationship.id,
+    outcome: 'HIRED', previousStage: application.stage,
+  });
   res.json({ success: true, data: result });
 }));
 

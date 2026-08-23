@@ -54,7 +54,7 @@ export function ApplicantCaseOverview({ applicationId, returnTo }: { application
         </div>
         <div className="flex flex-wrap gap-2">
           {overview?.outcome && (
-            <ErpButton label="خلاصه بسته‌شدن" variant="soft" tone="warning" onClick={openClosure} />
+            <ErpButton label="جزئیات پایان پرونده" variant="soft" tone="warning" onClick={openClosure} />
           )}
           <ErpButton
             label="اطلاعات کامل متقاضی"
@@ -85,7 +85,7 @@ export function ApplicantCaseOverview({ applicationId, returnTo }: { application
           </div>
         </>
       )}
-      <ErpSheet open={closureOpen} onClose={() => setClosureOpen(false)} title="خلاصه بسته‌شدن پرونده" presentation="modal">
+      <ErpSheet open={closureOpen} onClose={() => setClosureOpen(false)} title="جزئیات پایان پرونده" presentation="modal">
         {!closure?.available ? (
           <ErpInlineState kind="empty" title="شاهد بسته‌شدن برای این پرونده ثبت نشده است." />
         ) : (

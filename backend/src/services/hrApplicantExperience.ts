@@ -207,12 +207,13 @@ export const projectApplicantClosureSummary = (
   closureAudit: any,
   access: { canViewExplanation: boolean; actorDisplayName?: string | null },
 ) => {
-  if (source.stage !== 'CLOSED' || !source.outcome || !closureAudit) return { available: false };
+  const isAuditedHireConversion = source.outcome === 'HIRED' && closureAudit?.eventType === 'HIRE_CONVERTED';
+  if ((!isAuditedHireConversion && source.stage !== 'CLOSED') || !source.outcome || !closureAudit) return { available: false };
   const payload = closureAudit.payloadJson || {};
   return {
     available: true,
     outcome: payload.outcome || source.outcome,
-    previousStage: source.preClosureStage ?? null,
+    previousStage: source.preClosureStage ?? payload.previousStage ?? null,
     closedAt: new Date(closureAudit.createdAt).toISOString(),
     closedBy: access.actorDisplayName || closureAudit.actorUserId || 'SYSTEM',
     ...(access.canViewExplanation

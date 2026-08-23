@@ -139,6 +139,26 @@ assert.deepEqual(projectApplicantClosureSummary(source, closureAudit, { canViewE
 });
 assert.equal((projectApplicantClosureSummary(source, closureAudit, { canViewExplanation: true, actorDisplayName: 'مدیر منابع انسانی' }) as any).explanation, 'immutable reason');
 
+const convertedAudit = {
+  eventType: 'HIRE_CONVERTED',
+  actorUserId: 'hr-manager-1',
+  createdAt: new Date('2026-08-09T08:00:00.000Z'),
+  payloadJson: { personnelId: 'personnel-1', relationshipId: 'relationship-1' },
+};
+assert.deepEqual(projectApplicantClosureSummary(
+  { ...source, stage: 'ASSESSMENT', outcome: 'HIRED', outcomeReason: null, preClosureStage: null },
+  convertedAudit,
+  { canViewExplanation: true, actorDisplayName: 'مدیر منابع انسانی' },
+), {
+  available: true,
+  outcome: 'HIRED',
+  previousStage: null,
+  closedAt: '2026-08-09T08:00:00.000Z',
+  closedBy: 'مدیر منابع انسانی',
+  explanation: null,
+  explanationRestricted: false,
+});
+
 assert.deepEqual(buildCandidateClosedState(source), {
   closed: true,
   outcome: 'REJECTED',

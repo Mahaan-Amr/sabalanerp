@@ -142,7 +142,7 @@ router.get('/applications/:id/closure-summary', ...requireRecruitmentView, async
       outcomeReason: true,
       preClosureStage: true,
       audits: {
-        where: { eventType: { in: ['APPLICATION_CLOSED', 'ASSESSMENT_DECISION_RECORDED'] } },
+        where: { eventType: { in: ['APPLICATION_CLOSED', 'ASSESSMENT_DECISION_RECORDED', 'HIRE_CONVERTED'] } },
         orderBy: { createdAt: 'desc' },
         take: 20,
         select: { eventType: true, actorUserId: true, createdAt: true, payloadJson: true },
@@ -152,6 +152,7 @@ router.get('/applications/:id/closure-summary', ...requireRecruitmentView, async
   if (!row) return res.status(404).json({ success: false, error: 'پرونده متقاضی پیدا نشد.' });
   const closureAudit = row.audits.find((event) => {
     if (event.eventType === 'APPLICATION_CLOSED') return true;
+    if (event.eventType === 'HIRE_CONVERTED' && row.outcome === 'HIRED') return true;
     const payload = event.payloadJson as Record<string, unknown> | null;
     return payload?.decision === 'REJECTED';
   }) || null;

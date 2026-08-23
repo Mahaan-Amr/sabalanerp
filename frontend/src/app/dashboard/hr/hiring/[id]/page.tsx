@@ -165,7 +165,6 @@ export default function HiringCasePage() {
   const [identityCorrectionOpen, setIdentityCorrectionOpen] = useState(false);
   const [identityResolution, setIdentityResolution] = useState({
     resolutionCode: "CREATE_NEW",
-    personnelId: "",
     evidenceIds: [] as string[],
     correctionReason: "",
   });
@@ -619,9 +618,7 @@ export default function HiringCasePage() {
                 </ErpSelect>
               </ErpField>
               {identityResolution.resolutionCode !== "CREATE_NEW" && (
-                <ErpField label="شناسه Personnel انتخاب‌شده" required>
-                  <ErpInput value={identityResolution.personnelId} onChange={(event) => setIdentityResolution({ ...identityResolution, personnelId: event.target.value })} />
-                </ErpField>
+                <ErpInlineState kind="empty" title={`Personnel متعارض همین پرونده انتخاب می‌شود: ${openIdentityConflict.matchedIdentityJson?.firstName || ""} ${openIdentityConflict.matchedIdentityJson?.lastName || ""}`} />
               )}
               {identityResolution.resolutionCode === "CORRECT_CANDIDATE_CLAIM" && (
                 <ErpField label="دلیل اصلاح ادعای هویت" required>
@@ -646,7 +643,7 @@ export default function HiringCasePage() {
               <ErpButton
                 label="ثبت تصمیم هویتی"
                 tone="success"
-                disabled={busy || !identityResolution.evidenceIds.length || (identityResolution.resolutionCode !== "CREATE_NEW" && !identityResolution.personnelId)}
+                disabled={busy || !identityResolution.evidenceIds.length || (identityResolution.resolutionCode !== "CREATE_NEW" && !openIdentityConflict.potentialPersonnelId)}
                 onClick={() => run(
                   () => hiringAPI.resolveIdentityConflict(id, openIdentityConflict.id, identityResolution),
                   "مغایرت هویت تعیین تکلیف شد؛ تأیید هویت باید دوباره انجام شود.",

@@ -32,6 +32,7 @@ import {
 } from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
 import { normalizeHiringRial } from '../services/hrApplicantExperience';
 import { parseCollateralReceiptDate } from '../services/hrCollateralReceiptDate';
+import { ensureCandidatePersonnelIdentityConsistent } from '../services/hrCandidatePersonnelIdentityConflict';
 
 const router = express.Router();
 const hiringFinanceUpload = multer({
@@ -404,6 +405,25 @@ router.post(
   '/:id/respond',
   dutyResponseRequest,
   asyncHandler(async (req, res) => {
+    const duty = await prisma.crossWorkspaceDuty.findUnique({
+      where: { id: req.params.id },
+      select: { sourceActionCode: true, sourceId: true, destinationWorkspaceCode: true },
+    });
+    if (duty?.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
+      await getCrossWorkspaceDutyDetail(prisma, {
+        dutyId: req.params.id,
+        actorUserId: req.user!.id,
+        workspaceCode: duty.destinationWorkspaceCode,
+      });
+      const contract = await prisma.hrEmploymentContractDocument.findUniqueOrThrow({
+        where: { id: duty.sourceId },
+        include: { application: { include: { candidate: { include: { linkedPersonnel: true } } } } },
+      });
+      await ensureCandidatePersonnelIdentityConsistent(prisma, {
+        applicationId: contract.applicationId,
+        candidate: contract.application.candidate,
+      });
+    }
     const result = await respondToCrossWorkspaceDuty(prisma, {
       dutyId: req.params.id,
       actorUserId: req.user!.id,

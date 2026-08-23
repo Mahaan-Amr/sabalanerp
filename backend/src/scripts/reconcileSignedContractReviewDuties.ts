@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { createHrHiringContractReviewDuty } from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
-import { assertCandidatePersonnelIdentityConsistent } from '../services/hrCandidatePersonnelIdentityConflict';
+import { assertCandidatePersonnelIdentityConsistent, ensureCandidatePersonnelIdentityConsistent } from '../services/hrCandidatePersonnelIdentityConflict';
 
 const prisma = new PrismaClient();
 const apply = process.argv.includes('--apply');
@@ -42,6 +42,13 @@ async function main() {
   if (!manifest || manifest !== reviewed.manifest) throw new Error('REVIEWED_MANIFEST_REQUIRED');
   for (const row of reviewed.output.rows) {
     if (row.action !== 'CREATE') continue;
+    const identityContract = await prisma.hrEmploymentContractDocument.findUniqueOrThrow({
+      where: { id: String(row.contractId) }, include: { application: { include: { candidate: { include: { linkedPersonnel: true } } } } },
+    });
+    await ensureCandidatePersonnelIdentityConsistent(prisma, {
+      applicationId: identityContract.applicationId,
+      candidate: identityContract.application.candidate,
+    });
     await prisma.$transaction(async (tx) => {
       const contract = await tx.hrEmploymentContractDocument.findUniqueOrThrow({
         where: { id: String(row.contractId) }, include: { application: { include: { candidate: { include: { linkedPersonnel: true } } } } },

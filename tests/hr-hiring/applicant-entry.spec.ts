@@ -188,6 +188,7 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
     data: { mode: "success", reset: true },
   });
   await page.goto("/dashboard/hr/hiring/hr-e2e-application?phase=IDENTITY");
+  await page.getByRole("button", { name: "بازگشت برای اصلاح" }).click();
   const explanations = page.getByPlaceholder("توضیح مشکل و روش اصلاح");
   await explanations.nth(0).fill("کد ملی با کارت ملی یکسان نیست.");
   await explanations.nth(1).fill("کد پستی را با مدرک نشانی بررسی کنید.");
@@ -331,14 +332,13 @@ test("Accounting-only Finance users record and independently verify collateral t
   await recorder.page.goto("/dashboard/accounting/duties");
   await recorder.page.getByRole("button", { name: "قابل دریافت" }).click();
   await expect(recorder.page.getByText("ثبت دریافت وثیقه استخدام")).toBeVisible();
-  const recordingQueue = await (await recorder.page.request.get("/api/duties/workspaces/accounting/duties?view=available")).json();
-  const recordingDutyId = recordingQueue.data.find((duty: any) => duty.sourceActionCode === "HIRING_COLLATERAL_RECORD_RECEIPT").id;
   await recorder.page.getByRole("button", { name: "دریافت وظیفه" }).click();
-  await recorder.page.goto(`/dashboard/accounting/duties/${recordingDutyId}`);
+  await recorder.page.getByRole("link", { name: "مشاهده وظیفه" }).click();
   await recorder.page.getByLabel("شناسه یا سریال").fill("PN-E2E-1");
   await recorder.page.getByLabel("صادرکننده یا ضامن").fill("ضامن آزمایشی");
   await recorder.page.getByLabel("محل نگهداری اصل").fill("گاوصندوق آزمایشی");
-  await recorder.page.getByLabel("تاریخ دریافت").fill("2026-08-23");
+  await recorder.page.getByLabel("تاریخ دریافت").click();
+  await recorder.page.getByRole("button", { name: "امروز" }).click();
   await recorder.page.getByLabel("اسکن مدرک دریافت").setInputFiles({
     name: "promissory-note.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF"),
   });
@@ -349,12 +349,8 @@ test("Accounting-only Finance users record and independently verify collateral t
   const manager = await login("finance.manager.e2e@sabalanerp.test");
   expect((await manager.page.request.get("/api/hr-hiring/applications/hr-e2e-application")).status()).toBe(403);
   await manager.page.goto("/dashboard/accounting/duties");
-  await manager.page.getByRole("button", { name: "قابل دریافت" }).click();
   await expect(manager.page.getByText("تأیید دریافت وثیقه استخدام")).toBeVisible();
-  const verificationQueue = await (await manager.page.request.get("/api/duties/workspaces/accounting/duties?view=available")).json();
-  const verificationDutyId = verificationQueue.data.find((duty: any) => duty.sourceActionCode === "HIRING_COLLATERAL_VERIFY_RECEIPT").id;
-  await manager.page.getByRole("button", { name: "دریافت وظیفه" }).click();
-  await manager.page.goto(`/dashboard/accounting/duties/${verificationDutyId}`);
+  await manager.page.getByRole("link", { name: "مشاهده وظیفه" }).click();
   await expect(manager.page.getByText("PN-E2E-1")).toBeVisible();
   const download = manager.page.waitForEvent("download");
   await manager.page.getByRole("button", { name: "دریافت فایل مدرک" }).click();

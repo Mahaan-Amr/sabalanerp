@@ -1,0 +1,3 @@
+# Allow audited managerial collateral self-verification
+
+Collateral receipt and original-return recording remain separate from their verification in the ordinary Accounting path, but an Accounting Workspace Administrator or global `ADMIN` holding both explicit collateral permissions may perform the second action after completing the first. This privileged path avoids stalled custody work while preserving separation as the default: it uses the same independent successor duty and records the actual actor, action time, and `استفاده از اختیار مدیریتی` label without requiring a free-text explanation; ordinary Users remain unable to verify their own action.

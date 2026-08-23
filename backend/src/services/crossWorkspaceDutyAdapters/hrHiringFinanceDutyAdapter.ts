@@ -282,12 +282,18 @@ const synchronize: CrossWorkspaceDutySourceAdapter['synchronize'] = async (datab
     ? createHrHiringContractReviewDuty(database, { contractId: input.sourceId, actorUserId: input.actorUserId, now: input.now })
     : createHrHiringFinanceDuty(database, { collateralItemId: input.sourceId, actionCode: input.dutyTypeCode as ActionCode, actorUserId: input.actorUserId, policyVersion: input.policyVersion, now: input.now });
 
-const managerialContractSelfDecision = async (database: any, duty: any, actorUserId: string, now: Date) => {
-  if (duty.sourceActionCode !== 'HIRING_CONTRACT_REVIEW' || duty.sourceActorUserId !== actorUserId) return false;
+const managerialHiringFinanceSelfDecision = async (database: any, duty: any, actorUserId: string, now: Date) => {
+  if (duty.sourceActorUserId !== actorUserId) return false;
+  const contractDecision = duty.sourceActionCode === 'HIRING_CONTRACT_REVIEW';
+  const collateralDecision = ['HIRING_COLLATERAL_VERIFY_RECEIPT', 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN']
+    .includes(duty.sourceActionCode);
+  if (!contractDecision && !collateralDecision) return false;
   const permissions = await activeHrActionPermissionsForUser(database, actorUserId, now);
-  if (!permissions.includes('RECORD_SIGNED_EMPLOYMENT_CONTRACT') || !permissions.includes('VERIFY_SIGNED_EMPLOYMENT_CONTRACT')) return false;
+  const recordPermission = contractDecision ? 'RECORD_SIGNED_EMPLOYMENT_CONTRACT' : 'RECORD_COLLATERAL_CUSTODY';
+  const verifyPermission = contractDecision ? 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT' : 'VERIFY_COLLATERAL_CUSTODY';
+  if (!permissions.includes(recordPermission) || !permissions.includes(verifyPermission)) return false;
   return (await resolveWorkspaceDutyAuthority(database, {
-    userId: actorUserId, workspace: 'accounting', feature: 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT', at: now,
+    userId: actorUserId, workspace: 'accounting', feature: verifyPermission, at: now,
   })).canSelfDecide;
 };
 
@@ -311,7 +317,7 @@ const canAccessSharedDecision: CrossWorkspaceDutySourceAdapter['canAccessSharedD
     .includes(definition.actionPermissionCode);
   if (!permitted) return false;
   return duty.sourceActorUserId !== input.actorUserId
-    || managerialContractSelfDecision(database, duty, input.actorUserId, input.now ?? new Date());
+    || managerialHiringFinanceSelfDecision(database, duty, input.actorUserId, input.now ?? new Date());
 };
 
 const claim: CrossWorkspaceDutySourceAdapter['claim'] = async (database, input) => {
@@ -352,13 +358,14 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
   const reason = String(input.reason || '').trim();
   if (input.actionCode === 'RETURN' && reason.length < 3) throw new Error('REASON_REQUIRED');
   await assertEligible(database, input.actorUserId, duty.id, now);
+  const managerialSelfDecision = sharedDecision
+    && await managerialHiringFinanceSelfDecision(database, duty, input.actorUserId, now);
+  const managerialActor = managerialSelfDecision
+    ? await database.user.findUnique({ where: { id: input.actorUserId }, select: { role: true, firstName: true, lastName: true } })
+    : null;
   if (duty.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
     const contract = await database.hrEmploymentContractDocument.findUniqueOrThrow({ where: { id: duty.sourceId } });
     if (contract.version !== duty.sourceVersion || !contract.submittedAt || contract.approvedAt || contract.returnedAt || contract.withdrawnAt) throw new Error('DUTY_SOURCE_CHANGED');
-    const managerialSelfDecision = await managerialContractSelfDecision(database, duty, input.actorUserId, now);
-    const managerialActor = managerialSelfDecision
-      ? await database.user.findUnique({ where: { id: input.actorUserId }, select: { role: true, firstName: true, lastName: true } })
-      : null;
     if (contract.submittedBy === input.actorUserId && !managerialSelfDecision) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
     const application = await database.hrJobApplication.findUniqueOrThrow({
       where: { id: contract.applicationId }, include: { candidate: { include: { linkedPersonnel: true } } },
@@ -421,11 +428,11 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
   if (duty.sourceActionCode === 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN') {
     const source = await database.hrCollateralOriginalReturn.findUniqueOrThrow({ where: { id: duty.sourceId }, include: { collateralItem: true } });
     if (source.status !== 'SUBMITTED' || source.version !== duty.sourceVersion
-      || source.returnedBy === input.actorUserId) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
+      || (source.returnedBy === input.actorUserId && !managerialSelfDecision)) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
     await database.hrCollateralOriginalReturn.update({ where: { id: source.id }, data: input.actionCode === 'APPROVE'
       ? { status: 'CONFIRMED', confirmedBy: input.actorUserId, confirmedAt: now, returnedReason: null }
       : { status: 'RETURNED', returnedReason: reason } });
-    await database.crossWorkspaceDuty.update({ where: { id: duty.id }, data: { status: 'COMPLETED', respondedByUserId: input.actorUserId, respondedAt: now, structuredResultJson: asJson({ actionCode: input.actionCode, reason: reason || null }) } });
+    await database.crossWorkspaceDuty.update({ where: { id: duty.id }, data: { status: 'COMPLETED', respondedByUserId: input.actorUserId, respondedAt: now, structuredResultJson: asJson({ actionCode: input.actionCode, reason: reason || null, managerialSelfDecision, overrideLabel: managerialSelfDecision ? 'استفاده از اختیار مدیریتی' : null }) } });
     if (input.actionCode === 'APPROVE') {
       await database.hrCollateralItem.update({ where: { id: source.collateralItemId }, data: {
         returnedAt: source.returnedAt, returnedTo: source.returnedTo, returnedBy: source.returnedBy,
@@ -486,14 +493,15 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
         actorUserId: input.actorUserId, now,
       });
     }
-    await database.crossWorkspaceDutyAuditVersion.create({ data: { dutyId: duty.id, version: await nextAuditVersion(database, duty.id), eventCode: input.actionCode === 'APPROVE' ? 'APPROVED' : 'RETURNED', actorUserId: input.actorUserId, sourceVersion: duty.sourceVersion, envelopeVersion: duty.envelopeVersion, policyVersion: input.policyVersion, reason: reason || null,
+    await database.crossWorkspaceDutyAuditVersion.create({ data: { dutyId: duty.id, version: await nextAuditVersion(database, duty.id), eventCode: managerialSelfDecision ? (managerialActor?.role === 'ADMIN' ? 'SYSTEM_ADMIN_SELF_DECISION' : 'WORKSPACE_ADMIN_SELF_DECISION') : input.actionCode === 'APPROVE' ? 'APPROVED' : 'RETURNED', actorUserId: input.actorUserId, sourceVersion: duty.sourceVersion, envelopeVersion: duty.envelopeVersion, policyVersion: input.policyVersion, reason: reason || null,
+      afterJson: asJson({ actionCode: input.actionCode, managerialSelfDecision, overrideLabel: managerialSelfDecision ? 'استفاده از اختیار مدیریتی' : null, actorName: managerialActor ? `${managerialActor.firstName} ${managerialActor.lastName}`.trim() : null, actedAt: now }),
     } });
     return { duty: await database.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } }), replayed: false };
   }
   if (duty.sourceActionCode !== 'HIRING_COLLATERAL_VERIFY_RECEIPT') throw new Error('DUTY_RESPONSE_NOT_SUPPORTED');
   const item = await database.hrCollateralItem.findUniqueOrThrow({ where: { id: duty.sourceId } });
   if (item.version !== duty.sourceVersion || item.status !== 'RECEIVED'
-    || item.recordedBy === input.actorUserId) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
+    || (item.recordedBy === input.actorUserId && !managerialSelfDecision)) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
   const itemChange = await database.hrCollateralItem.updateMany({
     where: { id: item.id, status: 'RECEIVED', version: duty.sourceVersion },
     data: input.actionCode === 'APPROVE'
@@ -503,7 +511,7 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
   if (!itemChange.count) throw new Error('DUTY_SOURCE_CHANGED');
   const completed = await database.crossWorkspaceDuty.updateMany({ where: { id: duty.id, status: 'OPEN' }, data: {
     status: 'COMPLETED', respondedByUserId: input.actorUserId, respondedAt: now,
-    structuredResultJson: asJson({ actionCode: input.actionCode, reason: reason || null }),
+    structuredResultJson: asJson({ actionCode: input.actionCode, reason: reason || null, managerialSelfDecision, overrideLabel: managerialSelfDecision ? 'استفاده از اختیار مدیریتی' : null }),
   } });
   if (!completed.count) throw new Error('DUTY_RESPONSE_CONFLICT');
   if (input.actionCode === 'APPROVE') {
@@ -528,17 +536,18 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
     });
   }
   await database.crossWorkspaceDutyAuditVersion.create({ data: {
-    dutyId: duty.id, version: await nextAuditVersion(database, duty.id), eventCode: input.actionCode === 'APPROVE' ? 'APPROVED' : 'RETURNED',
+    dutyId: duty.id, version: await nextAuditVersion(database, duty.id), eventCode: managerialSelfDecision ? (managerialActor?.role === 'ADMIN' ? 'SYSTEM_ADMIN_SELF_DECISION' : 'WORKSPACE_ADMIN_SELF_DECISION') : input.actionCode === 'APPROVE' ? 'APPROVED' : 'RETURNED',
     actorUserId: input.actorUserId, sourceVersion: duty.sourceVersion, envelopeVersion: duty.envelopeVersion,
     policyVersion: input.policyVersion, beforeJson: asJson({ status: item.status }),
-    afterJson: asJson({ status: input.actionCode === 'APPROVE' ? 'VERIFIED' : 'MISMATCH',
-      }), reason: reason || null,
+    afterJson: asJson({ status: input.actionCode === 'APPROVE' ? 'VERIFIED' : 'MISMATCH', managerialSelfDecision,
+      overrideLabel: managerialSelfDecision ? 'استفاده از اختیار مدیریتی' : null,
+      actorName: managerialActor ? `${managerialActor.firstName} ${managerialActor.lastName}`.trim() : null, actedAt: now }), reason: reason || null,
   } });
   await database.hrHiringAudit.create({ data: {
     applicationId: item.applicationId, actorUserId: input.actorUserId, actorKind: 'USER',
     eventType: input.actionCode === 'APPROVE' ? 'COLLATERAL_VERIFIED_FROM_ACCOUNTING_DUTY' : 'COLLATERAL_RETURNED_FOR_CORRECTION_FROM_ACCOUNTING_DUTY',
     payloadJson: asJson({ collateralItemId: item.id, dutyId: duty.id, reason: reason || null,
-      }),
+      managerialSelfDecision, overrideLabel: managerialSelfDecision ? 'استفاده از اختیار مدیریتی' : null }),
   } });
   return { duty: await database.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } }), replayed: false };
 };

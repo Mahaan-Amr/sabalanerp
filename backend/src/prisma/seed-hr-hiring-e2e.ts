@@ -116,6 +116,11 @@ async function main() {
     { code: "PERSONNEL", displayName: "Personnel" },
     { code: "MANAGE_PERSONNEL_SCHEDULE", displayName: "Manage Personnel Schedule" },
     { code: "MANAGE_FINANCE_EVIDENCE", displayName: "Manage Finance Evidence" },
+    { code: "REVIEW_IDENTITY_DOCUMENTS", displayName: "Review Identity Documents" },
+    { code: "RECORD_COLLATERAL_CUSTODY", displayName: "Record Collateral Custody" },
+    { code: "VERIFY_COLLATERAL_CUSTODY", displayName: "Verify Collateral Custody" },
+    { code: "RECORD_SIGNED_EMPLOYMENT_CONTRACT", displayName: "Record Signed Employment Contract" },
+    { code: "VERIFY_SIGNED_EMPLOYMENT_CONTRACT", displayName: "Verify Signed Employment Contract" },
   ]) {
     await prisma.hrFeatureCatalog.upsert({
       where: { code: feature.code },
@@ -123,16 +128,21 @@ async function main() {
       create: { ...feature, workspaceCode: "HUMAN_RESOURCES" },
     });
   }
-  for (const financeUser of [financeRecorder, financeManager]) {
+  for (const [financeUser, featureCodes] of [
+    [financeRecorder, ["RECORD_COLLATERAL_CUSTODY"]],
+    [financeManager, ["VERIFY_COLLATERAL_CUSTODY", "VERIFY_SIGNED_EMPLOYMENT_CONTRACT"]],
+  ] as const) {
+    for (const featureCode of featureCodes) {
     await prisma.hrFeatureAccessGrant.upsert({
-      where: { stableKey: `hr-e2e:feature:${financeUser.id}:MANAGE_FINANCE_EVIDENCE` },
+      where: { stableKey: `hr-e2e:feature:${financeUser.id}:${featureCode}` },
       update: { level: "EDIT", status: "ACTIVE", effectiveTo: null },
       create: {
-        stableKey: `hr-e2e:feature:${financeUser.id}:MANAGE_FINANCE_EVIDENCE`, userId: financeUser.id,
-        featureCode: "MANAGE_FINANCE_EVIDENCE", level: "EDIT", effectiveFrom: authorizationEffectiveFrom,
+        stableKey: `hr-e2e:feature:${financeUser.id}:${featureCode}`, userId: financeUser.id,
+        featureCode, level: "EDIT", effectiveFrom: authorizationEffectiveFrom,
         grantedByUserId: user.id, reason: "Accounting-only hiring Finance E2E fixture",
       },
     });
+    }
   }
   await prisma.hrFeatureCatalog.upsert({
     where: { code: "ORGANIZATIONAL_STRUCTURE" },
@@ -185,6 +195,7 @@ async function main() {
     { code: "MANAGE_RECRUITMENT_CASE", level: "EDIT" as const },
     { code: "PERSONNEL", level: "EDIT" as const },
     { code: "MANAGE_PERSONNEL_SCHEDULE", level: "EDIT" as const },
+    { code: "REVIEW_IDENTITY_DOCUMENTS", level: "EDIT" as const },
   ]) {
     await prisma.hrFeatureAccessGrant.upsert({
       where: { stableKey: `hr-e2e:feature:${user.id}:${feature.code}` },

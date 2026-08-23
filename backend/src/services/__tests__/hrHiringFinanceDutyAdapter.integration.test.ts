@@ -135,6 +135,10 @@ test('Accounting duties record and verify collateral atomically without granting
         claimCrossWorkspaceDuty(tx, { dutyId: verificationDuty.id, actorUserId: verifier.id, policyVersion: 1 }),
         /DUTY_CLAIM_NOT_ALLOWED/,
       );
+      await assert.rejects(respondToCrossWorkspaceDuty(tx, {
+        dutyId: verificationDuty.id, actorUserId: verifier.id, actionCode: 'APPROVE',
+        expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
+      }), /DUTY_ASSIGNEE_INELIGIBLE|SEPARATION_OF_DUTIES_CONFLICT/);
       await respondToCrossWorkspaceDuty(tx, {
         dutyId: verificationDuty.id, actorUserId: recorder.id, actionCode: 'APPROVE',
         expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
@@ -203,10 +207,34 @@ test('Accounting duties record and verify collateral atomically without granting
           receivedAt: new Date('2026-08-23T09:01:00Z'), custodyLocation: 'Safe B',
           identifier: `PN-${actor.id}`, evidence: evidence(`protected-${actor.id}`),
         });
-        await assert.rejects(respondToCrossWorkspaceDuty(tx, {
+        await respondToCrossWorkspaceDuty(tx, {
           dutyId: protectedRecorded.successorDutyId, actorUserId: actor.id, actionCode: 'APPROVE',
           expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
-        }), /DUTY_ASSIGNEE_INELIGIBLE/);
+        });
+        assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
+          dutyId: protectedRecorded.successorDutyId,
+          eventCode: actor.role === 'ADMIN' ? 'SYSTEM_ADMIN_SELF_DECISION' : 'WORKSPACE_ADMIN_SELF_DECISION',
+        } }), 1);
+        const returnDraft = await tx.hrCollateralOriginalReturn.create({ data: {
+          collateralItemId: protectedItem.id, version: 1, status: 'DRAFT',
+        } });
+        const returnRecordingDuty = await createHrHiringCollateralReturnDuty(tx, {
+          returnId: returnDraft.id, actionCode: 'HIRING_COLLATERAL_RECORD_ORIGINAL_RETURN', actorUserId: initiator.id,
+        });
+        await claimCrossWorkspaceDuty(tx, { dutyId: returnRecordingDuty.id, actorUserId: actor.id, policyVersion: 1 });
+        const returned = await recordHrHiringCollateralOriginalReturn(tx, {
+          dutyId: returnRecordingDuty.id, actorUserId: actor.id,
+          returnedTo: 'Applicant', now: new Date('2026-08-23T10:00:00Z'),
+          evidenceNote: 'Original returned', evidence: evidence(`return-${actor.id}`),
+        });
+        await respondToCrossWorkspaceDuty(tx, {
+          dutyId: returned.successorDutyId, actorUserId: actor.id, actionCode: 'APPROVE',
+          expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
+        });
+        assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
+          dutyId: returned.successorDutyId,
+          eventCode: actor.role === 'ADMIN' ? 'SYSTEM_ADMIN_SELF_DECISION' : 'WORKSPACE_ADMIN_SELF_DECISION',
+        } }), 1);
       }
       throw rollback;
     }, { timeout: 120_000 }), (error: unknown) => error === rollback);

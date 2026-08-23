@@ -50,7 +50,7 @@ import {
 } from '../services/hrOfferDecision';
 import { candidateIdentityMatches } from '../services/hrCandidateIdentityPolicy';
 import {
-  assertCandidatePersonnelIdentityConsistent,
+  ensureCandidatePersonnelIdentityConsistent,
   createIdentityConflictIfNeeded,
   openIdentityConflictForApplication,
 } from '../services/hrCandidatePersonnelIdentityConflict';
@@ -1212,7 +1212,7 @@ export const hrHiringBaseFeatureForRequest = (path: string) => {
 };
 
 router.use(asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
-  if (/^\/applications\/[^/]+(?:\/collateral(?:\/.*)?|\/collateral-returns\/[^/]+\/download)?$/.test(req.path)) {
+  if (/^\/applications\/[^/]+(?:\/collateral(?:\/.*)?|\/collateral-returns\/[^/]+\/download)$/.test(req.path)) {
     const permissions = await activeHrActionPermissionsForUser(prisma, actorId(req));
     if (permissions.includes('RECORD_COLLATERAL_CUSTODY') || permissions.includes('VERIFY_COLLATERAL_CUSTODY')
       || permissions.includes('RECORD_SIGNED_EMPLOYMENT_CONTRACT')) return next();
@@ -2410,10 +2410,19 @@ router.post('/applications/:id/identity-conflicts/:conflictId/resolve', requireA
     const claim = conflict.claimedIdentityJson as any;
     let selectedPersonnelId: string | null = null;
     if (resolutionCode === 'LINK_EXISTING') {
-      const personnelId = String(req.body.personnelId || conflict.potentialPersonnelId || '');
+      const personnelId = String(conflict.potentialPersonnelId || '');
+      if (!personnelId || (req.body.personnelId && String(req.body.personnelId) !== personnelId)) {
+        throw new Error('Personnel انتخاب‌شده خارج از دامنه همین مغایرت است.');
+      }
       const personnel = await tx.personnel.findUniqueOrThrow({ where: { id: personnelId } });
+      if (personnel.identityCompletionStatus !== 'COMPLETE') throw new Error('هویت Personnel انتخاب‌شده هنوز نیازمند تکمیل است.');
       if (!candidateIdentityMatches({ ...personnel, mobile: candidate.mobile }, claim)) throw new Error('نام هویت انتخاب‌شده با شواهد و ادعای تأییدشده مطابق نیست.');
-      await tx.hrCandidate.update({ where: { id: candidate.id }, data: { linkedPersonnelId: personnel.id } });
+      const claimedNationalCode = String(claim.nationalCode || '').trim() || null;
+      if (claimedNationalCode && personnel.nationalCode !== claimedNationalCode) throw new Error('کد ملی Personnel انتخاب‌شده با هویت تأییدشده مطابق نیست.');
+      await tx.hrCandidate.update({ where: { id: candidate.id }, data: {
+        firstName: String(claim.firstName), lastName: String(claim.lastName),
+        nationalCode: claimedNationalCode, linkedPersonnelId: personnel.id,
+      } });
       selectedPersonnelId = personnel.id;
     } else if (resolutionCode === 'CREATE_NEW') {
       const nationalCode = String(claim.nationalCode || '').trim() || null;
@@ -2442,8 +2451,12 @@ router.post('/applications/:id/identity-conflicts/:conflictId/resolve', requireA
       } });
       selectedPersonnelId = personnel.id;
     } else {
-      const personnelId = String(req.body.personnelId || conflict.potentialPersonnelId || '');
+      const personnelId = String(conflict.potentialPersonnelId || '');
+      if (!personnelId || (req.body.personnelId && String(req.body.personnelId) !== personnelId)) {
+        throw new Error('Personnel انتخاب‌شده خارج از دامنه همین مغایرت است.');
+      }
       const personnel = await tx.personnel.findUniqueOrThrow({ where: { id: personnelId } });
+      if (personnel.identityCompletionStatus !== 'COMPLETE') throw new Error('هویت Personnel انتخاب‌شده هنوز نیازمند تکمیل است.');
       await tx.hrCandidate.update({ where: { id: candidate.id }, data: {
         firstName: personnel.firstName, lastName: personnel.lastName,
         nationalCode: personnel.nationalCode, linkedPersonnelId: personnel.id,
@@ -2483,7 +2496,7 @@ router.post('/applications/:id/identity/approve', requireActionPermission('APPRO
     prisma.hrHiringDocument.findMany({ where: { applicationId: req.params.id } })
   ]);
   const candidateWithPersonnel = await prisma.hrCandidate.findUniqueOrThrow({ where: { id: application.candidateId }, include: { linkedPersonnel: true } });
-  await assertCandidatePersonnelIdentityConsistent(prisma, { applicationId: application.id, candidate: candidateWithPersonnel });
+  await ensureCandidatePersonnelIdentityConsistent(prisma, { applicationId: application.id, candidate: candidateWithPersonnel });
   if (!application.preIdentityReleasedAt && !application.preIdentityGrandfatheredAt) throw new Error('چک‌لیست پیش از احراز هویت هنوز آزاد نشده است.');
   const actorReviewedEvidence = checks.some((item) => item.reviewedBy === actorId(req)) || docs.some((item) => item.uploadedBy === actorId(req));
   const actorPermissions = actorReviewedEvidence ? await activeHrActionPermissionsForUser(prisma, actorId(req)) : [];
@@ -3755,7 +3768,7 @@ router.post('/applications/:id/collateral/:itemId/return-confirm', requireAction
 router.post('/applications/:id/convert', requireActionPermission('MANAGE_RECRUITMENT_CASE'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { candidate: { include: { linkedPersonnel: true } }, position: true, compensationSnapshots: { orderBy: { version: 'desc' }, take: 1 } } });
   if (application.convertedAt) return res.status(409).json({ success: false, error: 'این پرونده قبلاً به پرسنل تبدیل شده است.' });
-  await assertCandidatePersonnelIdentityConsistent(prisma, { applicationId: application.id, candidate: application.candidate });
+  await ensureCandidatePersonnelIdentityConsistent(prisma, { applicationId: application.id, candidate: application.candidate });
   if (!application.candidate.linkedPersonnelId && application.candidate.nationalCode) {
     const potentialPersonnel = await prisma.personnel.findUnique({ where: { nationalCode: application.candidate.nationalCode } });
     if (potentialPersonnel) {
@@ -3857,11 +3870,25 @@ router.post('/applications/:id/contracts/:contractId/submit', requireActionPermi
   const identityApplication = await prisma.hrJobApplication.findUniqueOrThrow({
     where: { id: req.params.id }, include: { candidate: { include: { linkedPersonnel: true } } },
   });
-  await assertCandidatePersonnelIdentityConsistent(prisma, { applicationId: identityApplication.id, candidate: identityApplication.candidate });
+  await ensureCandidatePersonnelIdentityConsistent(prisma, { applicationId: identityApplication.id, candidate: identityApplication.candidate });
   const result = await prisma.$transaction(async (tx) => {
-    const row = await tx.hrEmploymentContractDocument.update({
-      where: { id: contract.id }, data: { submittedBy: actorId(req), submittedAt: new Date() },
+    const current = await tx.hrEmploymentContractDocument.findFirstOrThrow({
+      where: { id: req.params.contractId, applicationId: req.params.id },
     });
+    const currentLatest = await tx.hrEmploymentContractDocument.findFirst({
+      where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true },
+    });
+    if (currentLatest?.id !== current.id) throw new Error('فقط آخرین نسخه قرارداد قابل ارسال است.');
+    const submittedAt = new Date();
+    const submitted = await tx.hrEmploymentContractDocument.updateMany({
+      where: {
+        id: current.id, uploadedBy: actorId(req), submittedAt: null,
+        approvedAt: null, returnedAt: null, withdrawnAt: null,
+      },
+      data: { submittedBy: actorId(req), submittedAt },
+    });
+    if (submitted.count !== 1) throw new Error('این نسخه قرارداد هم‌زمان تغییر کرده یا قبلاً ارسال شده است.');
+    const row = await tx.hrEmploymentContractDocument.findUniqueOrThrow({ where: { id: current.id } });
     const duty = await createHrHiringContractReviewDuty(tx, { contractId: row.id, actorUserId: actorId(req) });
     await tx.hrHiringAudit.create({ data: {
       applicationId: req.params.id, actorUserId: actorId(req), actorKind: 'USER', eventType: 'SIGNED_CONTRACT_SUBMITTED',
@@ -4062,7 +4089,7 @@ router.put('/applications/:id/onboarding-tasks/:taskId', asyncHandler(async (req
 
 router.post('/applications/:id/activate', requireActionPermission('MANAGE_RECRUITMENT_CASE'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { candidate: { include: { linkedPersonnel: true } }, employmentRelationship: true, onboardingTasks: true, payrollParticipation: true } });
-  await assertCandidatePersonnelIdentityConsistent(prisma, { applicationId: application.id, candidate: application.candidate });
+  await ensureCandidatePersonnelIdentityConsistent(prisma, { applicationId: application.id, candidate: application.candidate });
   if (!application.employmentRelationship || application.employmentRelationship.status !== 'PLANNED') throw new Error('رابطه استخدامی برنامه‌ریزی‌شده پیدا نشد.');
   const readiness = buildEmploymentActivationReadiness({
     scheduledStartDate: application.scheduledStartDate,

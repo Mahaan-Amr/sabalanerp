@@ -8,10 +8,13 @@ export const resolveDateTimeSelection = (input: {
   nextValue: string;
 }) => {
   const date = input.changedPart === "date" ? input.nextValue : input.draftDate;
-  const time = input.changedPart === "time" ? input.nextValue : input.draftTime;
+  const committedTime = input.initialValue.match(/(?:^|\s)(\d{2}:\d{2})$/)?.[1] || "";
+  const time = input.changedPart === "time" ? input.nextValue : committedTime;
   return {
     date,
     time,
-    commitValue: date && time ? `${date} ${time}` : null,
+    commitValue: input.changedPart === "date"
+      ? date ? (time ? `${date} ${time}` : date) : null
+      : date && time ? `${date} ${time}` : null,
   };
 };

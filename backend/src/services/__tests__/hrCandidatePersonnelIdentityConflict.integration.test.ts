@@ -36,6 +36,20 @@ test('a candidate/personnel name conflict is preserved, audited, tasked, and blo
       await assert.rejects(assertCandidatePersonnelIdentityConsistent(tx, {
         applicationId: application.id, candidate: { ...candidate, linkedPersonnel: personnel },
       }), /مغایرت هویت/);
+      const incompletePersonnel = await tx.personnel.create({ data: {
+        firstName: 'علی', lastName: 'رضایی', identityCompletionStatus: 'NEEDS_COMPLETION',
+      } });
+      const incompleteCandidate = await tx.hrCandidate.create({ data: {
+        firstName: 'علی', lastName: 'رضایی', mobile: `08${suffix.replace(/\D/g, '').slice(-9).padStart(9, '0')}`,
+        linkedPersonnelId: incompletePersonnel.id,
+      } });
+      const incompleteApplication = await tx.hrJobApplication.create({ data: {
+        candidateId: incompleteCandidate.id, positionId: position.id, createdBy: 'SYSTEM', identityClearance: 'APPROVED',
+      } });
+      await assert.rejects(assertCandidatePersonnelIdentityConsistent(tx, {
+        applicationId: incompleteApplication.id,
+        candidate: { ...incompleteCandidate, linkedPersonnel: incompletePersonnel },
+      }), /نیازمند تکمیل/);
       throw rollback;
     }), (error: unknown) => error === rollback);
   } finally {

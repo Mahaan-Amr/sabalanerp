@@ -25,19 +25,41 @@ export const assertIdentityConflictResolved = async (database: any, applicationI
   }
 };
 
-export const assertCandidatePersonnelIdentityConsistent = async (database: any, input: {
+type CandidatePersonnelIdentityInput = {
   applicationId: string;
-  candidate: { id: string; firstName: unknown; lastName: unknown; mobile: unknown; nationalCode?: unknown; linkedPersonnel?: { id: string; firstName: unknown; lastName: unknown; nationalCode?: string | null } | null };
-}) => {
-  await assertIdentityConflictResolved(database, input.applicationId);
-  if (!input.candidate.linkedPersonnel) return;
+  candidate: { id: string; firstName: unknown; lastName: unknown; mobile: unknown; nationalCode?: unknown; linkedPersonnel?: { id: string; firstName: unknown; lastName: unknown; nationalCode?: string | null; identityCompletionStatus?: string | null } | null };
+};
+
+const candidatePersonnelIdentityMismatch = (input: CandidatePersonnelIdentityInput) => {
+  if (!input.candidate.linkedPersonnel) return false;
   const classification = classifyCandidateIdentity(
     { ...input.candidate.linkedPersonnel, mobile: input.candidate.mobile },
     input.candidate,
   );
   const nationalCodeMismatch = Boolean(input.candidate.nationalCode
     && input.candidate.linkedPersonnel.nationalCode !== input.candidate.nationalCode);
-  if (classification.kind !== 'HARD_CONFLICT' && !nationalCodeMismatch) return;
+  return classification.kind === 'HARD_CONFLICT' || nationalCodeMismatch;
+};
+
+const assertLinkedPersonnelComplete = (input: CandidatePersonnelIdentityInput) => {
+  if (input.candidate.linkedPersonnel?.identityCompletionStatus !== 'COMPLETE') {
+    throw new Error('هویت Personnel پیوندشده هنوز نیازمند تکمیل است.');
+  }
+};
+
+export const assertCandidatePersonnelIdentityConsistent = async (database: any, input: CandidatePersonnelIdentityInput) => {
+  await assertIdentityConflictResolved(database, input.applicationId);
+  if (!input.candidate.linkedPersonnel) return;
+  assertLinkedPersonnelComplete(input);
+  if (!candidatePersonnelIdentityMismatch(input)) return;
+  throw new Error('مغایرت هویت Candidate و Personnel باید پیش از ادامه تعیین تکلیف شود.');
+};
+
+export const ensureCandidatePersonnelIdentityConsistent = async (database: any, input: CandidatePersonnelIdentityInput) => {
+  await assertIdentityConflictResolved(database, input.applicationId);
+  if (!input.candidate.linkedPersonnel) return;
+  assertLinkedPersonnelComplete(input);
+  if (!candidatePersonnelIdentityMismatch(input)) return;
   await createIdentityConflictIfNeeded(database, {
     applicationId: input.applicationId,
     candidateId: input.candidate.id,

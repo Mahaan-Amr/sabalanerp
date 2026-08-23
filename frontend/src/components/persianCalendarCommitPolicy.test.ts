@@ -11,7 +11,7 @@ assert.deepEqual(
     changedPart: "date",
     nextValue: "1405/06/01",
   }),
-  { date: "1405/06/01", time: "", commitValue: null },
+  { date: "1405/06/01", time: "", commitValue: "1405/06/01" },
 );
 
 assert.deepEqual(
@@ -33,7 +33,7 @@ assert.deepEqual(
   resolveDateTimeSelection({
     initialValue: "1405/06/01 14:30",
     draftDate: "1405/06/01",
-    draftTime: "14:30",
+    draftTime: "15:45",
     changedPart: "date",
     nextValue: "1405/06/02",
   }),

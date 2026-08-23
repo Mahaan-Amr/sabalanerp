@@ -9,7 +9,7 @@ import {
   ErpInlineState,
   ErpSheet,
 } from "@/components/erp";
-import { dateTimeFa } from "@/features/hr/hrUi";
+import { dateFa, dateTimeFa } from "@/features/hr/hrUi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 
@@ -89,18 +89,40 @@ export function ApplicantCaseOverview({ applicationId, returnTo }: { application
         {!closure?.available ? (
           <ErpInlineState kind="empty" title="شاهد بسته‌شدن برای این پرونده ثبت نشده است." />
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ErpFieldView label="نتیجه نهایی" value={hrDisplayLabel(closure.outcome)} />
-            <ErpFieldView label="مرحله پیش از بسته‌شدن" value={hrDisplayLabel(closure.previousStage)} />
-            <ErpFieldView label="ثبت‌کننده" value={closure.closedBy} />
-            <ErpFieldView label="زمان ثبت" value={dateTimeFa(closure.closedAt)} />
-            <div className="sm:col-span-2">
-              {closure.explanationRestricted ? (
-                <ErpInlineState kind="permission" title="شرح تصمیم برای مجوز فعلی قابل مشاهده نیست." />
+          <div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ErpFieldView label="نتیجه نهایی" value={hrDisplayLabel(closure.outcome)} />
+              {closure.outcome === "HIRED" ? (
+                <>
+                  <ErpFieldView label="نوع پایان" value="تبدیل متقاضی به پرسنل" />
+                  <ErpFieldView label="ثبت‌کننده تبدیل" value={closure.closedBy} />
+                  <ErpFieldView label="زمان تبدیل" value={dateTimeFa(closure.closedAt)} />
+                  <ErpFieldView label="پرسنل متصل‌شده" value={closure.personnel?.displayName || "—"} />
+                  <ErpFieldView label="تاریخ برنامه‌ریزی‌شده شروع" value={closure.scheduledStartDate ? dateFa(closure.scheduledStartDate) : "—"} />
+                  <ErpFieldView label="وضعیت رابطه استخدامی" value={hrDisplayLabel(closure.relationshipStatus)} />
+                  {closure.previousStage && <ErpFieldView label="مرحله پیش از تبدیل" value={hrDisplayLabel(closure.previousStage)} />}
+                  {closure.activatedAt && (
+                    <>
+                      <ErpFieldView label="زمان فعال‌سازی" value={dateTimeFa(closure.activatedAt)} />
+                      <ErpFieldView label="فعال‌کننده" value={closure.activatedBy} />
+                    </>
+                  )}
+                </>
               ) : (
-                <ErpFieldView label="شرح تصمیم" value={closure.explanation || "بدون شرح"} />
+                <>
+                  <ErpFieldView label="مرحله پیش از بسته‌شدن" value={hrDisplayLabel(closure.previousStage)} />
+                  <ErpFieldView label="ثبت‌کننده" value={closure.closedBy} />
+                  <ErpFieldView label="زمان ثبت" value={dateTimeFa(closure.closedAt)} />
+                </>
               )}
             </div>
+            {closure.outcome === "HIRED" ? (
+              closure.personnel?.href && <ErpButton label="مشاهده پرونده پرسنلی" href={closure.personnel.href} tone="success" variant="outline" />
+            ) : closure.explanationRestricted ? (
+              <ErpInlineState kind="permission" title="شرح تصمیم برای مجوز فعلی قابل مشاهده نیست." />
+            ) : (
+              <ErpFieldView label="شرح تصمیم" value={closure.explanation || "بدون شرح"} />
+            )}
           </div>
         )}
       </ErpSheet>

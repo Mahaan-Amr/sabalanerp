@@ -31,6 +31,7 @@ import {
   recordHrHiringCollateralReceipt,
 } from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
 import { normalizeHiringRial } from '../services/hrApplicantExperience';
+import { parseCollateralReceiptDate } from '../services/hrCollateralReceiptDate';
 
 const router = express.Router();
 const hiringFinanceUpload = multer({
@@ -52,11 +53,14 @@ const dutyOperationalMessage = (code: string) => ({
   CONTRACT_INACTIVE: 'تصمیم‌گیری متوقف شد؛ قرارداد غیرفعال است. مدیر مجاز باید ابتدا آن را از مسیر رسمی فعال‌سازی مجدد بازگرداند.',
   RESPONSIBLE_SELLER_REQUIRED: 'تأیید اصلاح متوقف شد؛ فروشنده مسئول قرارداد مشخص نیست. مدیر فروش باید ابتدا مسئول قرارداد را تعیین کند.',
   DUTY_HISTORY_SEEN_THROUGH_REQUIRED: 'ثبت مشاهده تاریخچه انجام نشد؛ صفحه را دوباره باز کنید.',
+  COLLATERAL_RECEIPT_DATE_ISO_REQUIRED: 'تاریخ دریافت باید با تقویم شمسی انتخاب و در مرز API به تاریخ ISO تبدیل شود.',
+  COLLATERAL_RECEIPT_DATE_INVALID: 'تاریخ دریافت معتبر نیست.',
+  COLLATERAL_RECEIPT_DATE_FUTURE: 'تاریخ دریافت نمی‌تواند در آینده باشد.',
 }[code] || 'عملیات وظیفه متوقف شد. صفحه را به‌روزرسانی کنید و در صورت تکرار با مدیر همان فضای کاری تماس بگیرید.');
 const asyncHandler = (
   handler: (req: AuthRequest, res: Response, next: NextFunction) => Promise<unknown>,
 ) => (req: AuthRequest, res: Response, next: NextFunction) => void handler(req, res, next).catch((error) => {
-  if (!(error instanceof Error) || !/^(?:(?:HR_)?DUTY_|SOURCE_|ENVELOPE_|ASSIGNEE_|RESPONSIBILITY_|SEPARATION_OF_DUTIES_|CONTRACT_|RESPONSIBLE_SELLER_|ACTION_NOT_ALLOWED|REASON_REQUIRED)/.test(error.message)) return next(error);
+  if (!(error instanceof Error) || !/^(?:(?:HR_)?DUTY_|SOURCE_|ENVELOPE_|ASSIGNEE_|RESPONSIBILITY_|SEPARATION_OF_DUTIES_|CONTRACT_|COLLATERAL_|RESPONSIBLE_SELLER_|ACTION_NOT_ALLOWED|REASON_REQUIRED)/.test(error.message)) return next(error);
   const conflictCodes = new Set([
     'DUTY_NOT_OPEN', 'DUTY_ALREADY_DECIDED', 'DUTY_RESPONSE_CONFLICT', 'SOURCE_VERSION_CHANGED',
     'ENVELOPE_VERSION_CHANGED', 'SOURCE_STATE_CHANGED', 'RESPONSIBILITY_CHANGED',
@@ -159,6 +163,22 @@ router.get('/:id/hiring-finance/context', requireAccountingDutyAccess, asyncHand
   const duty = await prisma.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: req.params.id } });
   if (duty.sourceType !== 'HR_HIRING_FINANCE') throw new Error('DUTY_NOT_AVAILABLE');
   const assigned = detail.access === 'ASSIGNEE' || detail.access === 'SHARED';
+  if (duty.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
+    const contract = await prisma.hrEmploymentContractDocument.findUniqueOrThrow({
+      where: { id: duty.sourceId }, include: { application: { include: { candidate: true } } },
+    });
+    const recorder = contract.submittedBy ? await prisma.user.findUnique({ where: { id: contract.submittedBy }, select: { firstName: true, lastName: true } }) : null;
+    return res.json({ success: true, data: {
+      actionCode: duty.sourceActionCode,
+      candidateName: `${contract.application.candidate.firstName} ${contract.application.candidate.lastName}`.trim(),
+      caseReference: contract.applicationId,
+      contractNumber: contract.contractNumber, version: contract.version,
+      effectiveFrom: contract.effectiveFrom, effectiveTo: contract.effectiveTo,
+      submittedAt: contract.submittedAt,
+      recorderName: recorder ? `${recorder.firstName} ${recorder.lastName}`.trim() : 'کاربر ثبت‌کننده',
+      originalName: assigned ? contract.originalName : null,
+    } });
+  }
   if (duty.sourceActionCode.includes('ORIGINAL_RETURN')) {
     const source = await prisma.hrCollateralOriginalReturn.findUniqueOrThrow({ where: { id: duty.sourceId }, include: { collateralItem: true } });
     return res.json({ success: true, data: {
@@ -211,6 +231,15 @@ router.get('/:id/hiring-finance/evidence', requireAccountingDutyAccess, asyncHan
     } });
     return res.download(safeHiringStoragePath(source.evidenceStorageName), source.evidenceOriginalName);
   }
+  if (duty.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
+    const contract = await prisma.hrEmploymentContractDocument.findUniqueOrThrow({ where: { id: duty.sourceId } });
+    await prisma.hrHiringAudit.create({ data: {
+      applicationId: contract.applicationId, actorUserId: req.user!.id, actorKind: 'USER',
+      eventType: 'SIGNED_CONTRACT_DOWNLOADED_FROM_ACCOUNTING_DUTY',
+      payloadJson: { dutyId: duty.id, contractId: contract.id },
+    } });
+    return res.download(safeHiringStoragePath(contract.storageName), contract.originalName);
+  }
   throw new Error('DUTY_EVIDENCE_NOT_AVAILABLE');
 }));
 
@@ -240,9 +269,9 @@ router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFin
     validateHiringFileSignature(req.file.path, req.file.mimetype);
     const scanStatus = await scanHiringFile(req.file.path);
     const digest = await sha256File(req.file.path);
-    const receivedAt = new Date(String(req.body.receivedAt || ''));
+    const receivedAt = parseCollateralReceiptDate(req.body.receivedAt);
     const custodyLocation = String(req.body.custodyLocation || '').trim();
-    if (Number.isNaN(receivedAt.getTime()) || !custodyLocation) throw new Error('COLLATERAL_RECEIPT_FIELDS_REQUIRED');
+    if (!custodyLocation) throw new Error('COLLATERAL_RECEIPT_FIELDS_REQUIRED');
     const result = await prisma.$transaction((tx) => recordHrHiringCollateralReceipt(tx, {
       dutyId: req.params.id, actorUserId: req.user!.id,
       amountRials: req.body.amountRials ? normalizeHiringRial(req.body.amountRials) : null,

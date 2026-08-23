@@ -135,6 +135,8 @@ export const hiringAPI = {
     }),
   setIdentityCheck: (id: string, field: string, data: any) =>
     internal.put(`/applications/${id}/identity-checks/${field}`, data),
+  resolveIdentityConflict: (id: string, conflictId: string, data: any) =>
+    internal.post(`/applications/${id}/identity-conflicts/${conflictId}/resolve`, data),
   approveIdentity: (id: string) =>
     internal.post(`/applications/${id}/identity/approve`),
   createCompensation: (id: string, data: any) =>
@@ -213,6 +215,8 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/contracts/${contractId}/approve`),
   submitContract: (id: string, contractId: string) =>
     internal.post(`/applications/${id}/contracts/${contractId}/submit`),
+  withdrawContract: (id: string, contractId: string, reason: string) =>
+    internal.post(`/applications/${id}/contracts/${contractId}/withdraw`, { reason }),
   returnContract: (id: string, contractId: string, reason: string) =>
     internal.post(`/applications/${id}/contracts/${contractId}/return`, {
       reason,

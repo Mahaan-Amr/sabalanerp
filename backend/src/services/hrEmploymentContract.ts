@@ -1,6 +1,7 @@
 export type PaperContractReviewState =
   | "DRAFT"
   | "SUBMITTED"
+  | "WITHDRAWN"
   | "RETURNED"
   | "APPROVED";
 
@@ -9,6 +10,7 @@ export interface PaperContractEvidenceState {
   submittedAt?: Date | string | null;
   returnedAt?: Date | string | null;
   approvedAt?: Date | string | null;
+  withdrawnAt?: Date | string | null;
 }
 
 export const paperContractReviewState = (
@@ -16,6 +18,7 @@ export const paperContractReviewState = (
 ): PaperContractReviewState => {
   if (contract.approvedAt) return "APPROVED";
   if (contract.returnedAt) return "RETURNED";
+  if (contract.withdrawnAt) return "WITHDRAWN";
   if (contract.submittedAt) return "SUBMITTED";
   return "DRAFT";
 };

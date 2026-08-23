@@ -41,9 +41,12 @@ export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
       { code: 'MANAGE_HR_WORK', labelFa: 'مدیریت کارهای منابع انسانی', level: 'EDIT', prerequisites: ['HR_WORK_MANAGEMENT'] },
       { code: 'MANAGE_COMPENSATION', labelFa: 'مدیریت پیشنهاد و جبران خدمت', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
       { code: 'MANAGE_PAYROLL', labelFa: 'ثبت و تأیید اطلاعات حقوق', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
-      { code: 'MANAGE_FINANCE_EVIDENCE', labelFa: 'ثبت و تأیید شواهد مالی', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'MANAGE_FINANCE_EVIDENCE', labelFa: 'مجوز قدیمی شواهد مالی (غیرفعال در استخدام)', level: 'EDIT', prerequisites: [] },
       { code: 'REVIEW_IDENTITY_DOCUMENTS', labelFa: 'دریافت و تطبیق اسناد هویتی', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_FULL_APPLICANT_INFORMATION'] },
       { code: 'APPROVE_IDENTITY_CLEARANCE', labelFa: 'تأیید نهایی احراز هویت', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_FULL_APPLICANT_INFORMATION'] },
+      { code: 'RESOLVE_CANDIDATE_PERSONNEL_IDENTITY_CONFLICT', labelFa: 'تعیین تکلیف مغایرت هویت متقاضی و پرسنل', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_FULL_APPLICANT_INFORMATION'] },
+      { code: 'RECORD_SIGNED_EMPLOYMENT_CONTRACT', labelFa: 'ثبت قرارداد کاغذی استخدام', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT', labelFa: 'بررسی قرارداد کاغذی استخدام', level: 'EDIT', prerequisites: [] },
       { code: 'MANAGE_COLLATERAL_REQUIREMENTS', labelFa: 'تعیین الزامات وثیقه متقاضی', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
       { code: 'RECORD_COLLATERAL_CUSTODY', labelFa: 'ثبت دریافت و نگهداری وثیقه', level: 'EDIT', prerequisites: [] },
       { code: 'VERIFY_COLLATERAL_CUSTODY', labelFa: 'بررسی و تأیید وثیقه', level: 'EDIT', prerequisites: [] },
@@ -62,8 +65,8 @@ const LEGACY_AUTHORITY_ACTION_BUNDLES: Record<string, string[]> = {
   COMPANY_MANAGER: ['MANAGE_COMPANY_EVALUATION_PLAN', 'RECORD_FINAL_MANAGEMENT_DECISION', 'MANAGE_COMPENSATION', 'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS', 'MANAGE_COLLATERAL_REQUIREMENTS'],
   HR_PAYROLL_PROCESSOR: ['MANAGE_PAYROLL'],
   HR_PAYROLL_MANAGER: ['MANAGE_PAYROLL'],
-  FINANCE_RECORDER: ['MANAGE_FINANCE_EVIDENCE', 'RECORD_COLLATERAL_CUSTODY'],
-  FINANCE_MANAGER: ['MANAGE_FINANCE_EVIDENCE', 'VERIFY_COLLATERAL_CUSTODY'],
+  FINANCE_RECORDER: ['RECORD_COLLATERAL_CUSTODY'],
+  FINANCE_MANAGER: ['VERIFY_COLLATERAL_CUSTODY', 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT'],
 };
 
 export const expandHrActionPermissionSelection = (selectedCodes: readonly string[]) => {

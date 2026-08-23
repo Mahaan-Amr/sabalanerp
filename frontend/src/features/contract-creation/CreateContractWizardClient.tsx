@@ -1878,6 +1878,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     const deliveryReferences = reconcileDeliveryProductReferences(products, data.deliveries || []);
     return {
       ...data,
+      customer: data.customer ? {
+        ...data.customer,
+        projectAddresses: data.customer.projectAddresses || []
+      } : data.customer,
       serviceRows: data.serviceRows || [],
       products,
       deliveries: deliveryReferences.deliveries

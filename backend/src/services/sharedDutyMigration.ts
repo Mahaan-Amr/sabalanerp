@@ -65,6 +65,7 @@ export const migrateOpenSharedDecisionDuties = async (
         sourceIsCurrent = (await loadCrossWorkspaceDutySourceProjection(database, {
           sourceType: duty.sourceType,
           sourceId: duty.sourceId,
+          sourceActionCode: duty.sourceActionCode,
           sourceVersion: duty.sourceVersion,
         })).sourceIsCurrent;
       } catch {
@@ -97,6 +98,7 @@ export const migrateOpenSharedDecisionDuties = async (
       const source = await loadCrossWorkspaceDutySourceProjection(tx, {
         sourceType: duty.sourceType,
         sourceId: duty.sourceId,
+        sourceActionCode: duty.sourceActionCode,
         sourceVersion: duty.sourceVersion,
       });
       if (!source.sourceIsCurrent) return 'replayed' as const;

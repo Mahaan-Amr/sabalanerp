@@ -12,6 +12,11 @@ const newBrowser = notificationEventDefinition('NEW_BROWSER_LOGIN');
 assert.equal(newBrowser.mandatory, true);
 assert.deepEqual(newBrowser.allowedRecipientResolvers, ['DIRECT_USER']);
 
+const correctionEdited = notificationEventDefinition('ACCOUNTING_CONTRACT_CORRECTION_EDITED');
+assert.equal(correctionEdited.titleTemplate, 'اصلاح قرارداد ثبت شد');
+assert.equal(correctionEdited.messageTemplate, 'اصلاح قرارداد {{contractNumber}} ثبت و برای بررسی حسابداری آماده شد.');
+assert.deepEqual(correctionEdited.allowedRecipientResolvers, ['DIRECT_USER']);
+
 const rendered = renderNotificationPolicy({
   definition: newBrowser,
   payload: {
@@ -82,6 +87,7 @@ assert.deepEqual(privacySafeWebPushPayload('/dashboard/support/tickets/ticket-1'
 assert.equal(JSON.stringify(privacySafeWebPushPayload('/dashboard')).includes('ticket-1'), false);
 
 assert.deepEqual(registeredNotificationEventTypes(), [
+  'ACCOUNTING_CONTRACT_CORRECTION_EDITED',
   'ACCOUNTING_CORRECTION_REQUIRED',
   'ACCOUNTING_RECORD_SUBMITTED',
   'DEPLOYMENT_COMPLETED',

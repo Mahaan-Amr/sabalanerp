@@ -19,7 +19,7 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
   try {
     await assert.rejects(prisma.$transaction(async (tx) => {
       const suffix = `accounting-origin-${Date.now()}`;
-      const [initiator, accountingManager, seller, salesManager, delegateSeller] = await Promise.all([
+      const [initiator, accountingManager, accountingVerifier, seller, salesManager, delegateSeller] = await Promise.all([
         tx.user.create({ data: {
           email: `${suffix}-initiator@example.invalid`, username: `${suffix}-initiator`, password: 'not-a-login-secret',
           firstName: 'Accounting', lastName: 'Initiator',
@@ -27,6 +27,10 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
         tx.user.create({ data: {
           email: `${suffix}-manager@example.invalid`, username: `${suffix}-manager`, password: 'not-a-login-secret',
           firstName: 'Accounting', lastName: 'Manager',
+        } }),
+        tx.user.create({ data: {
+          email: `${suffix}-verifier@example.invalid`, username: `${suffix}-verifier`, password: 'not-a-login-secret',
+          firstName: 'Accounting', lastName: 'Processor',
         } }),
         tx.user.create({ data: {
           email: `${suffix}-seller@example.invalid`, username: `${suffix}-seller`, password: 'not-a-login-secret',
@@ -68,6 +72,13 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
         } }),
         tx.featurePermission.create({ data: {
           userId: accountingManager.id, workspace: 'accounting', feature: 'accounting_corrections_approve',
+          permissionLevel: 'edit', grantedBy: accountingManager.id,
+        } }),
+        tx.workspacePermission.create({ data: {
+          userId: accountingVerifier.id, workspace: 'accounting', permissionLevel: 'edit', grantedBy: accountingManager.id,
+        } }),
+        tx.featurePermission.create({ data: {
+          userId: accountingVerifier.id, workspace: 'accounting', feature: 'accounting_corrections_verify',
           permissionLevel: 'edit', grantedBy: accountingManager.id,
         } }),
         tx.workspacePermission.create({ data: {
@@ -122,6 +133,13 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
       });
       assert.equal(approved.successor.currentAssigneeUserId, seller.id);
       assert.equal(approved.successor.sourceActionCode, 'SALES_EDIT_CONTRACT_CORRECTION');
+      const sellerEditDuty = await getCrossWorkspaceDutyDetail(tx, {
+        dutyId: approved.successor.id,
+        actorUserId: seller.id,
+        workspaceCode: 'SALES',
+        now: new Date('2026-08-20T08:00:00.000Z'),
+      });
+      assert.equal(sellerEditDuty.destinationHref, `/dashboard/sales/contracts/${contract.id}/edit`);
       assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
         dutyId: created.duty.id, eventCode: 'WORKSPACE_ADMIN_SELF_DECISION', actorUserId: initiator.id,
       } }), 1);
@@ -156,6 +174,23 @@ test('Accounting creates a manager-approved correction for the Responsible Selle
       });
       assert.equal(edited.successor.currentAssigneeUserId, null);
       assert.equal(edited.successor.sourceActionCode, 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION');
+      const editNotifications = await tx.notificationEvent.findMany({
+        where: { deduplicationKey: { startsWith: `sales-contract-correction-edited:${created.correction.id}:3:` } },
+        include: { notifications: { select: { userId: true, title: true, message: true, actionUrl: true } } },
+      });
+      const materializedNotifications = editNotifications.flatMap(event => event.notifications);
+      const notifiedUserIds = materializedNotifications.map(({ userId }) => userId);
+      assert.equal(notifiedUserIds.includes(initiator.id), true, 'the Accounting workspace manager is notified');
+      assert.equal(notifiedUserIds.includes(accountingVerifier.id), true, 'the Accounting processor is notified');
+      assert.equal(notifiedUserIds.includes(accountingManager.id), true, 'the Accounting decision manager is notified');
+      assert.equal(notifiedUserIds.includes(seller.id), false, 'the Sales requester is excluded');
+      assert.equal(new Set(notifiedUserIds).size, notifiedUserIds.length, 'each eligible user receives one notification');
+      assert.equal(materializedNotifications.every(({ title }) => title === 'اصلاح قرارداد ثبت شد'), true);
+      assert.equal(materializedNotifications.every(({ message }) => message.includes(contract.contractNumber)), true);
+      assert.equal(materializedNotifications.find(({ userId }) => userId === accountingVerifier.id)?.actionUrl,
+        `/dashboard/accounting/duties/${edited.successor.id}`);
+      assert.equal(materializedNotifications.find(({ userId }) => userId === accountingManager.id)?.actionUrl,
+        '/dashboard/accounting/correction-requests');
 
       const verified = await respondToCrossWorkspaceDuty(tx, {
         dutyId: edited.successor.id,

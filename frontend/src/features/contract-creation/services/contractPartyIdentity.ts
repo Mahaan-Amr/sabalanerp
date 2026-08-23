@@ -57,9 +57,22 @@ export const validateContractPartyIdentity = (wizardData: ContractPartySelection
   if (!wizardData.projectId || !wizardData.project || wizardData.project.id !== wizardData.projectId) {
     return 'هویت مشتری و پروژه قرارداد یکپارچه نیست؛ مشتری و پروژه را دوباره انتخاب کنید.';
   }
-  const projectBelongsToCustomer =
-    wizardData.project.customerId === wizardData.customerId ||
-    wizardData.customer.projectAddresses.some(project => project.id === wizardData.projectId);
+  const projectAddresses = Array.isArray(wizardData.customer.projectAddresses)
+    ? wizardData.customer.projectAddresses
+    : [];
+  let projectBelongsToCustomer = wizardData.project.customerId === wizardData.customerId;
+  for (const project of projectAddresses) {
+    if (project.id === wizardData.projectId) {
+      projectBelongsToCustomer = true;
+      break;
+    }
+  }
+  const ownershipEvidenceAvailable = Boolean(wizardData.project.customerId) || projectAddresses.length > 0;
+  if (!ownershipEvidenceAvailable) {
+    // Persisted contract snapshots deliberately omit live CRM navigation collections.
+    // The write boundary validates project ownership against authoritative CRM rows.
+    return null;
+  }
   return projectBelongsToCustomer
     ? null
     : 'هویت مشتری و پروژه قرارداد یکپارچه نیست؛ مشتری و پروژه را دوباره انتخاب کنید.';

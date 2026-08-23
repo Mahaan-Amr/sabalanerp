@@ -32,6 +32,7 @@ export type CrossWorkspaceDuty = {
   dueAtDisplay: string;
   overdue: boolean;
   fields: Record<string, string | null>;
+  destinationHref: string | null;
   evidence: Array<{ kind: string }>;
   allowedActionCodes: string[];
   result: unknown;

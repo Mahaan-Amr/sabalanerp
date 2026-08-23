@@ -7,6 +7,10 @@ import { ErpInlineState, ErpLoading } from '@/components/erp';
 import { dashboardAPI, salesAPI } from '@/lib/api';
 import { getContractPermissions, type User } from '@/lib/permissions';
 import type { ContractWizardData } from '@/features/contract-creation/types/contract.types';
+import {
+  contractCorrectionBannerTitle,
+  contractCorrectionCategoryLabel,
+} from '@/features/contract-creation/services/contractCorrectionPresentation';
 
 const CreateContractWizardClient = dynamic(
   () => import('@/features/contract-creation/CreateContractWizardClient'),
@@ -133,9 +137,9 @@ export default function SalesContractEditPage() {
           kind="stale"
           title={
             <span>
-              اصلاح قرارداد با تایید حسابداری — {contract.activeCorrectionRequest.accountantNote}
+              {contractCorrectionBannerTitle(contract.activeCorrectionRequest.accountantNote)}
               <span className="mr-2 text-xs opacity-80">
-                دسته اصلاح: {contract.activeCorrectionRequest.category}
+                دسته: {contractCorrectionCategoryLabel(contract.activeCorrectionRequest.category)}
               </span>
             </span>
           }

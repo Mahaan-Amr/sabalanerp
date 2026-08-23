@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { candidateIdentityMatches } from '../hrCandidateIdentityPolicy';
+import { candidateIdentityMatches, classifyCandidateIdentity } from '../hrCandidateIdentityPolicy';
 
 const existing = {
   firstName: 'امیر',
@@ -33,8 +33,26 @@ assert.equal(
     lastName: 'ماهانیان',
     mobile: '09120000000',
   }),
-  false,
-  'an existing national code with another mobile must be rejected',
+  true,
+  'mobile-only differences must not be treated as a hard identity conflict',
+);
+
+assert.deepEqual(
+  classifyCandidateIdentity(existing, {
+    firstName: 'امیر',
+    lastName: 'ماهانیان',
+    mobile: '09120000000',
+  }),
+  { kind: 'MATCH_WITH_MOBILE_WARNING', mobileMismatch: true },
+);
+
+assert.deepEqual(
+  classifyCandidateIdentity(existing, {
+    firstName: 'علی',
+    lastName: 'رضایی',
+    mobile: '09398373570',
+  }),
+  { kind: 'HARD_CONFLICT', mobileMismatch: false },
 );
 
 console.log('HR candidate identity policy tests passed.');

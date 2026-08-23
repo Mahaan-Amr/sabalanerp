@@ -59,12 +59,14 @@ export type ReconcileCrossWorkspaceDutyAssignmentInput = {
 export type CrossWorkspaceDutySourceProjectionInput = {
   sourceType: string;
   sourceId: string;
+  sourceActionCode: string;
   sourceVersion: number;
 };
 
 export type CrossWorkspaceDutySourceProjection = {
   title: string;
   description: string | null;
+  destinationHref?: string;
   sourceIsCurrent: boolean;
 };
 

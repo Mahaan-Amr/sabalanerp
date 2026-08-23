@@ -1,10 +1,11 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type UserRole } from '@prisma/client';
 import type { CrossWorkspaceDutySourceAdapter } from './types';
 import { addTehranWorkingDays } from '../tehranBusinessCalendar';
 import { resolveNarrowFeatureAccess } from '../narrowFeatureAccess';
 import { getEffectiveUserAccess } from '../effectiveAccessService';
 import { lockCrossWorkspaceDuty } from '../crossWorkspaceDutyLock';
 import { resolveWorkspaceDutyAuthority } from '../crossWorkspaceDutyAuthority';
+import { publishNotificationEvent } from '../notificationService';
 
 const ACCOUNTING_CORRECTION_FEATURES = Object.freeze({
   PROCESS: ['accounting_corrections_manage'],
@@ -135,6 +136,48 @@ const isSystemAdmin = async (
   database: Parameters<CrossWorkspaceDutySourceAdapter['respond']>[0],
   userId: string,
 ) => (await database.user.findUnique({ where: { id: userId }, select: { role: true } }))?.role === 'ADMIN';
+
+const resolveCorrectionEditedNotificationRecipients = async (
+  database: Parameters<CrossWorkspaceDutySourceAdapter['respond']>[0],
+  now: Date,
+) => {
+  const features = [
+    ACCOUNTING_CORRECTION_FEATURES.VERIFY[0],
+    ACCOUNTING_CORRECTION_FEATURES.DECIDE[0],
+    ACCOUNTING_CORRECTION_FEATURES.PROCESS[0],
+  ];
+  const roleFeatureRows = await database.roleFeaturePermission.findMany({
+    where: { workspace: 'accounting', feature: { in: features }, isActive: true },
+    select: { role: true, feature: true },
+  });
+  const candidates = await database.user.findMany({
+    where: {
+      isActive: true,
+      erasedAt: null,
+      OR: [
+        { role: 'ADMIN' },
+        { role: { in: roleFeatureRows.map(({ role }) => role as UserRole) } },
+        { featurePermissions: { some: {
+          workspace: 'accounting', feature: { in: features }, isActive: true,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        } } },
+      ],
+    },
+    select: { id: true },
+  });
+  const recipients = new Map<string, string[]>();
+  for (const { id } of candidates) {
+    for (const feature of features) {
+      const access = await resolveWorkspaceDutyAuthority(database, {
+        userId: id, workspace: 'accounting', feature, at: now,
+      });
+      if (!access.hasFeatureEdit) continue;
+      recipients.set(feature, [...(recipients.get(feature) || []), id]);
+      break;
+    }
+  }
+  return recipients;
+};
 
 const assertSalesActor = async (
   database: Parameters<CrossWorkspaceDutySourceAdapter['respond']>[0],
@@ -867,6 +910,28 @@ export const completeSalesCorrectionEditDuty = async (
     dueAt: addTehranWorkingDays(input.now, 1),
     predecessorDutyId: salesDuty.id, policyVersion: input.policyVersion, now: input.now,
   });
+  const [contract, recipientsByFeature] = await Promise.all([
+    database.salesContract.findUnique({ where: { id: input.contractId }, select: { contractNumber: true } }),
+    resolveCorrectionEditedNotificationRecipients(database, input.now),
+  ]);
+  if (contract) await Promise.all(Array.from(recipientsByFeature.entries()).map(([feature, recipientIds]) =>
+    publishNotificationEvent(database, {
+      type: 'ACCOUNTING_CONTRACT_CORRECTION_EDITED',
+      deduplicationKey: `sales-contract-correction-edited:${correction.id}:${updatedCorrection.dutySourceVersion}:${feature}`,
+      recipientIds,
+      recipientGroups: { DIRECT_USER: recipientIds },
+      actorId: input.actorUserId,
+      workspace: 'accounting',
+      feature,
+      resourceType: 'sales-contract',
+      resourceId: input.contractId,
+      referenceId: contract.contractNumber,
+      actionUrl: feature === ACCOUNTING_CORRECTION_FEATURES.VERIFY[0]
+        ? `/dashboard/accounting/duties/${successor.id}`
+        : '/dashboard/accounting/correction-requests',
+      payload: { contractNumber: contract.contractNumber },
+    })
+  ));
   return {
     correction: updatedCorrection,
     predecessor: await database.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: salesDuty.id } }),
@@ -916,6 +981,9 @@ export const salesContractCorrectionDutyAdapter = {
     return {
       title: `اصلاح قرارداد ${contract.contractNumber}`,
       description: correction.accountantNote,
+      ...(input.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION'
+        ? { destinationHref: `/dashboard/sales/contracts/${correction.contractId}/edit` }
+        : {}),
       sourceIsCurrent: input.sourceVersion === correction.dutySourceVersion,
     };
   },

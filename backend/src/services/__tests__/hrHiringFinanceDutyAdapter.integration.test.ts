@@ -3,6 +3,7 @@ import test from 'node:test';
 import { PrismaClient } from '@prisma/client';
 import {
   createHrHiringCollateralReturnDuty,
+  createHrHiringContractReviewDuty,
   createHrHiringFinanceDuty,
   recordHrHiringCollateralOriginalReturn,
   recordHrHiringCollateralReceipt,
@@ -31,12 +32,12 @@ test('Accounting duties record and verify collateral atomically without granting
         where: { code: 'HUMAN_RESOURCES' }, update: { isActive: true },
         create: { code: 'HUMAN_RESOURCES', displayName: 'Human Resources' },
       });
-      for (const code of ['RECORD_COLLATERAL_CUSTODY', 'VERIFY_COLLATERAL_CUSTODY']) await tx.hrFeatureCatalog.upsert({
+      for (const code of ['RECORD_COLLATERAL_CUSTODY', 'VERIFY_COLLATERAL_CUSTODY', 'RECORD_SIGNED_EMPLOYMENT_CONTRACT', 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT']) await tx.hrFeatureCatalog.upsert({
         where: { code }, update: { isActive: true },
         create: { code, workspaceCode: 'HUMAN_RESOURCES', displayName: code },
       });
       for (const user of [recorder, verifier, manager, systemAdmin]) {
-        for (const featureCode of ['RECORD_COLLATERAL_CUSTODY', 'VERIFY_COLLATERAL_CUSTODY']) await tx.hrFeatureAccessGrant.create({ data: {
+        for (const featureCode of ['RECORD_COLLATERAL_CUSTODY', 'VERIFY_COLLATERAL_CUSTODY', 'RECORD_SIGNED_EMPLOYMENT_CONTRACT', 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT']) await tx.hrFeatureAccessGrant.create({ data: {
           stableKey: `${suffix}:${user.id}:${featureCode}`, userId: user.id,
           featureCode, level: 'EDIT', effectiveFrom: new Date('2026-01-01T00:00:00Z'),
           grantedByUserId: initiator.id, reason: 'Independent Accounting duty action',
@@ -46,7 +47,7 @@ test('Accounting duties record and verify collateral atomically without granting
         userId: manager.id, workspace: 'accounting', permissionLevel: 'admin', grantedBy: initiator.id,
       } });
       assert.deepEqual((await activeHrActionPermissionsForUser(tx, recorder.id)).sort(),
-        ['RECORD_COLLATERAL_CUSTODY', 'VERIFY_COLLATERAL_CUSTODY']);
+        ['RECORD_COLLATERAL_CUSTODY', 'RECORD_SIGNED_EMPLOYMENT_CONTRACT', 'VERIFY_COLLATERAL_CUSTODY', 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT']);
       assert.equal(await tx.hrWorkspaceAccessGrant.count({ where: { userId: { in: [recorder.id, verifier.id] } } }), 0);
 
       const unit = await tx.hrOrganizationalUnit.create({ data: {
@@ -69,6 +70,40 @@ test('Accounting duties record and verify collateral atomically without granting
         status: 'MISSING', recordedBy: initiator.id,
       } });
 
+      const ordinaryContract = await tx.hrEmploymentContractDocument.create({ data: {
+        applicationId: application.id, version: 1, contractNumber: 'PAPER-1',
+        effectiveFrom: new Date('2026-08-23T00:00:00Z'), effectiveTo: new Date('2027-08-23T00:00:00Z'),
+        storageName: 'paper-1.pdf', originalName: 'paper-1.pdf', mimeType: 'application/pdf', size: 12,
+        sha256: 'c'.repeat(64), malwareScanStatus: 'CLEAN', uploadedBy: recorder.id,
+        submittedBy: recorder.id, submittedAt: new Date('2026-08-23T08:00:00Z'),
+      } });
+      const ordinaryContractDuty = await createHrHiringContractReviewDuty(tx, { contractId: ordinaryContract.id, actorUserId: recorder.id });
+      await assert.rejects(respondToCrossWorkspaceDuty(tx, {
+        dutyId: ordinaryContractDuty.id, actorUserId: recorder.id, actionCode: 'APPROVE',
+        expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
+      }), /DUTY_ASSIGNEE_INELIGIBLE|SEPARATION_OF_DUTIES_CONFLICT/);
+      await respondToCrossWorkspaceDuty(tx, {
+        dutyId: ordinaryContractDuty.id, actorUserId: verifier.id, actionCode: 'APPROVE',
+        expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
+      });
+      assert.ok((await tx.hrEmploymentContractDocument.findUniqueOrThrow({ where: { id: ordinaryContract.id } })).approvedAt);
+
+      const managerialContract = await tx.hrEmploymentContractDocument.create({ data: {
+        applicationId: application.id, version: 2, contractNumber: 'PAPER-2',
+        effectiveFrom: new Date('2026-08-23T00:00:00Z'), effectiveTo: new Date('2027-08-23T00:00:00Z'),
+        storageName: 'paper-2.pdf', originalName: 'paper-2.pdf', mimeType: 'application/pdf', size: 12,
+        sha256: 'd'.repeat(64), malwareScanStatus: 'CLEAN', uploadedBy: manager.id,
+        submittedBy: manager.id, submittedAt: new Date('2026-08-23T08:01:00Z'),
+      } });
+      const managerialContractDuty = await createHrHiringContractReviewDuty(tx, { contractId: managerialContract.id, actorUserId: manager.id });
+      await respondToCrossWorkspaceDuty(tx, {
+        dutyId: managerialContractDuty.id, actorUserId: manager.id, actionCode: 'APPROVE',
+        expectedSourceVersion: 2, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
+      });
+      assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
+        dutyId: managerialContractDuty.id, eventCode: 'WORKSPACE_ADMIN_SELF_DECISION',
+      } }), 1);
+
       const recordingDuty = await createHrHiringFinanceDuty(tx, {
         collateralItemId: item.id, actionCode: 'HIRING_COLLATERAL_RECORD_RECEIPT', actorUserId: initiator.id,
       });
@@ -78,7 +113,7 @@ test('Accounting duties record and verify collateral atomically without granting
       assert.equal(replayedCreation.id, recordingDuty.id, 'stable key makes synchronization replay-safe');
       assert.equal(recordingDuty.currentAssigneeUserId, null);
       assert.deepEqual((await activeHrActionPermissionsForUser(tx, recorder.id)).sort(),
-        ['RECORD_COLLATERAL_CUSTODY', 'VERIFY_COLLATERAL_CUSTODY']);
+        ['RECORD_COLLATERAL_CUSTODY', 'RECORD_SIGNED_EMPLOYMENT_CONTRACT', 'VERIFY_COLLATERAL_CUSTODY', 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT']);
       assert.equal(await canClaimCrossWorkspaceDuty(tx, {
         dutyId: recordingDuty.id, actorUserId: recorder.id, policyVersion: 1,
       }), true, JSON.stringify(await tx.crossWorkspaceDuty.findUnique({ where: { id: recordingDuty.id } })));
@@ -151,7 +186,7 @@ test('Accounting duties record and verify collateral atomically without granting
       assert.deepEqual({ stage: closed.stage, outcome: closed.outcome, pending: closed.pendingClosureOutcome }, {
         stage: 'CLOSED', outcome: 'REJECTED', pending: null,
       });
-      assert.equal(await tx.hrHiringAudit.count({ where: { applicationId: application.id } }), 5);
+      assert.ok(await tx.hrHiringAudit.count({ where: { applicationId: application.id } }) >= 7);
       for (const actor of [manager, systemAdmin]) {
         const protectedItem = await tx.hrCollateralItem.create({ data: {
           applicationId: application.id, type: 'PROMISSORY_NOTE', required: false,

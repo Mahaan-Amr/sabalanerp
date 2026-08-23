@@ -142,6 +142,7 @@ export const projectCrossWorkspaceDuty = (input: {
     dueAtDisplay: formatCrossWorkspaceDutyDeadlineTehran(input.duty.dueAt),
     overdue: input.duty.status === 'OPEN' && input.duty.dueAt < input.now,
     fields,
+    destinationHref: input.source.destinationHref ?? null,
     // Evidence is deliberately a type-only capability descriptor. The duty schema stores no
     // evidence snapshot/reference, so projecting source-case evidence here would cross the boundary.
     evidence: stringList(input.envelope.allowedEvidenceJson).map((kind) => ({ kind })),
@@ -221,6 +222,7 @@ const authorizeLoadedDuty = async (
   const source = await loadCrossWorkspaceDutySourceProjection(database, {
     sourceType: duty.sourceType,
     sourceId: duty.sourceId,
+    sourceActionCode: duty.sourceActionCode,
     sourceVersion: duty.sourceVersion,
   });
   const resultActorUser = duty.respondedByUserId ? await database.user.findUnique({

@@ -26,6 +26,7 @@ export interface PersianCalendarProps {
   minYear?: number;
   maxYear?: number;
   disablePastDates?: boolean;
+  disableFutureDates?: boolean;
   clearable?: boolean;
 }
 
@@ -52,6 +53,7 @@ export default function PersianCalendarComponent({
   minYear = 1300,
   maxYear = 1410,
   disablePastDates = false,
+  disableFutureDates = false,
   clearable = false,
 }: PersianCalendarProps) {
   const overlayPortalContainer = useErpOverlayPortalContainer();
@@ -78,6 +80,7 @@ export default function PersianCalendarComponent({
   })();
 
   const isPast = useCallback((date: string) => disablePastDates && moment(date, 'jYYYY/jMM/jDD').isBefore(moment().startOf('day'), 'day'), [disablePastDates]);
+  const isFuture = useCallback((date: string) => disableFutureDates && moment(date, 'jYYYY/jMM/jDD').isAfter(moment().startOf('day'), 'day'), [disableFutureDates]);
 
   useEffect(() => {
     if (open) return;
@@ -135,7 +138,7 @@ export default function PersianCalendarComponent({
   };
 
   const chooseDate = (date: string) => {
-    if (isPast(date)) return;
+    if (isPast(date) || isFuture(date)) return;
     if (showTime && autoCommitDateTime) {
       const selection = resolveDateTimeSelection({
         initialValue: value || '', draftDate, draftTime,
@@ -236,14 +239,14 @@ export default function PersianCalendarComponent({
             const date = dateOnly(year, month, day);
             const selected = draftDate === date;
             const today = PersianCalendar.now() === date;
-            const past = isPast(date);
+            const unavailable = isPast(date) || isFuture(date);
             return (
               <ErpPressable
                 key={date}
                 data-date={date}
                 type="button"
                 role="gridcell"
-                disabled={past}
+                disabled={unavailable}
                 aria-selected={selected}
                 aria-label={PersianCalendar.formatForDisplay(date)}
                 onClick={() => chooseDate(date)}
@@ -254,7 +257,7 @@ export default function PersianCalendarComponent({
                 }}
                 tone={selected ? 'primary' : 'neutral'}
                 variant={selected ? 'solid' : 'ghost'}
-                className={`relative min-h-11 p-0 font-semibold ${past ? 'cursor-not-allowed' : ''} ${today && !selected ? 'ring-1 ring-inset ring-[var(--sds-focus-ring)]' : ''}`}
+                className={`relative min-h-11 p-0 font-semibold ${unavailable ? 'cursor-not-allowed' : ''} ${today && !selected ? 'ring-1 ring-inset ring-[var(--sds-focus-ring)]' : ''}`}
               >
                 {day.toLocaleString('fa-IR')}
               </ErpPressable>
@@ -265,7 +268,7 @@ export default function PersianCalendarComponent({
         {showTime && (
           <div className="mt-4 border-t border-[var(--sds-border-subtle)] pt-4">
             <span className="mb-2 block text-xs font-semibold sds-text-muted">زمان</span>
-            <PersianTimePicker value={draftTime} onChange={chooseTime} className="w-full" />
+            <PersianTimePicker value={draftTime} onChange={chooseTime} className="w-full" presentation="inline" />
           </div>
         )}
 

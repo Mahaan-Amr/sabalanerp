@@ -18,6 +18,7 @@ import { hrDutyApi, type DestinationDuty, type DestinationDutySummary, type Dest
 import { initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
 import { buildDutyQueueTabs, dutyQueueEmptyTitle } from '@/features/cross-workspace-duties/dutyQueuePresentation';
 import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
+import { destinationDutyHref } from '@/features/cross-workspace-duties/dutyDestination';
 
 const statusLabel: Record<string, string> = {
   OPEN: 'باز', COMPLETED: 'تکمیل‌شده', WAIVED: 'جایگزین‌شده', CANCELLED: 'لغوشده',
@@ -138,7 +139,7 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
               {duty.access === 'AVAILABLE' ? (
                 <DestinationDutyClaimAction duty={duty} disabled={state.loading} onClaimed={() => setView('assigned')} />
               ) : duty.detailAvailable ? (
-                <ErpButton label="مشاهده وظیفه" href={`/dashboard/${workspace}/duties/${duty.id}`} tone="primary" variant="solid" />
+                <ErpButton label="مشاهده وظیفه" href={destinationDutyHref(workspace, duty)} tone="primary" variant="solid" />
               ) : (
                 <p className="sds-text-muted text-sm">این سابقه بسته شده و دیگر پیوند عملیاتی ندارد.</p>
               )}

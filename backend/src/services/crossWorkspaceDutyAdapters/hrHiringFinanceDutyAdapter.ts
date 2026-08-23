@@ -6,6 +6,7 @@ import { lockCrossWorkspaceDuty } from '../crossWorkspaceDutyLock';
 import { reassignIndividualDuty } from '../crossWorkspaceDutyReassignment';
 import { getEffectiveUserAccess } from '../effectiveAccessService';
 import { resolveWorkspaceDutyAuthority } from '../crossWorkspaceDutyAuthority';
+import { assertCandidatePersonnelIdentityConsistent } from '../hrCandidatePersonnelIdentityConflict';
 
 export const HR_HIRING_FINANCE_DUTY_DEFINITIONS = {
   HIRING_COLLATERAL_RECORD_RECEIPT: {
@@ -40,6 +41,13 @@ export const HR_HIRING_FINANCE_DUTY_DEFINITIONS = {
     responsibilityTypeCode: 'FINANCE_MANAGER', actionPermissionCode: 'VERIFY_COLLATERAL_CUSTODY', destinationWorkspaceCode: 'ACCOUNTING', routingScope: 'GLOBAL' as const,
     accountabilityModel: 'SHARED_DECISION' as const, workspaceAdminOverrideDenied: true,
     allowedFields: ['title', 'description', 'dueAt'] as const, allowedActionCodes: ['APPROVE', 'RETURN'], allowedEvidence: ['COLLATERAL_RETURN_PROOF'],
+    responseSchema: { type: 'object', properties: { actionCode: { type: 'string', enum: ['APPROVE', 'RETURN'] }, reason: { type: ['string', 'null'], minLength: 3 } }, required: ['actionCode'], additionalProperties: false },
+  },
+  HIRING_CONTRACT_REVIEW: {
+    sourceActionCode: 'HIRING_CONTRACT_REVIEW', envelopeCode: 'HIRING_SIGNED_CONTRACT_REVIEW', envelopeVersion: 1,
+    responsibilityTypeCode: 'FINANCE_MANAGER', actionPermissionCode: 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT', destinationWorkspaceCode: 'ACCOUNTING', routingScope: 'GLOBAL' as const,
+    accountabilityModel: 'SHARED_DECISION' as const, workspaceAdminOverrideDenied: false,
+    allowedFields: ['title', 'description', 'dueAt'] as const, allowedActionCodes: ['APPROVE', 'RETURN'], allowedEvidence: ['SIGNED_EMPLOYMENT_CONTRACT'],
     responseSchema: { type: 'object', properties: { actionCode: { type: 'string', enum: ['APPROVE', 'RETURN'] }, reason: { type: ['string', 'null'], minLength: 3 } }, required: ['actionCode'], additionalProperties: false },
   },
 } as const;
@@ -150,6 +158,35 @@ export const createHrHiringCollateralReturnDuty = async (database: any, input: {
   return duty;
 };
 
+export const createHrHiringContractReviewDuty = async (database: any, input: {
+  contractId: string; actorUserId: string; now?: Date;
+}) => {
+  const now = input.now || new Date();
+  const contract = await database.hrEmploymentContractDocument.findUniqueOrThrow({ where: { id: input.contractId } });
+  if (!contract.submittedAt || contract.approvedAt || contract.returnedAt || contract.withdrawnAt) throw new Error('DUTY_SOURCE_NOT_ACTIONABLE');
+  const actionCode: ActionCode = 'HIRING_CONTRACT_REVIEW';
+  const definition = definitionFor(actionCode);
+  const holidays = await activeTehranHolidays(database);
+  await upsertEnvelope(database, actionCode, input.actorUserId);
+  const stableKey = `HR_HIRING_FINANCE:${contract.id}:${actionCode}:${contract.version}`;
+  const duty = await database.crossWorkspaceDuty.upsert({ where: { stableKey }, update: {}, create: {
+    stableKey, sourceType: 'HR_HIRING_FINANCE', sourceId: contract.id, sourceActionCode: actionCode,
+    sourceVersion: contract.version, envelopeCode: definition.envelopeCode, envelopeVersion: 1,
+    destinationWorkspaceCode: 'ACCOUNTING', destinationQueueCode: actionCode,
+    sourceActorUserId: contract.submittedBy, dueAt: addTehranWorkingDays(now, 3, holidays), createdByUserId: input.actorUserId,
+  } });
+  await database.crossWorkspaceDutyAssignmentHistory.upsert({ where: { dutyId_sequence: { dutyId: duty.id, sequence: 1 } }, update: {}, create: {
+    dutyId: duty.id, sequence: 1, assignedUserId: null, destinationWorkspaceCode: 'ACCOUNTING', destinationQueueCode: actionCode,
+    startedAt: now, changedByUserId: input.actorUserId, policyVersion: 1,
+  } });
+  await database.crossWorkspaceDutyAuditVersion.upsert({ where: { dutyId_version: { dutyId: duty.id, version: 1 } }, update: {}, create: {
+    dutyId: duty.id, version: 1, eventCode: 'QUEUED', actorUserId: input.actorUserId,
+    sourceVersion: contract.version, envelopeVersion: 1, policyVersion: 1,
+    afterJson: asJson({ status: 'OPEN', source: 'SIGNED_EMPLOYMENT_CONTRACT' }),
+  } });
+  return duty;
+};
+
 export const recordHrHiringCollateralReceipt = async (database: any, input: {
   dutyId: string; actorUserId: string; amountRials?: string | null; identifier?: string | null;
   issuerOrGuarantor?: string | null; receivedAt: Date; custodyLocation: string;
@@ -241,7 +278,18 @@ const assertEligible = async (database: any, userId: string, dutyId: string, now
 };
 
 const synchronize: CrossWorkspaceDutySourceAdapter['synchronize'] = async (database, input) =>
-  createHrHiringFinanceDuty(database, { collateralItemId: input.sourceId, actionCode: input.dutyTypeCode as ActionCode, actorUserId: input.actorUserId, policyVersion: input.policyVersion, now: input.now });
+  input.dutyTypeCode === 'HIRING_CONTRACT_REVIEW'
+    ? createHrHiringContractReviewDuty(database, { contractId: input.sourceId, actorUserId: input.actorUserId, now: input.now })
+    : createHrHiringFinanceDuty(database, { collateralItemId: input.sourceId, actionCode: input.dutyTypeCode as ActionCode, actorUserId: input.actorUserId, policyVersion: input.policyVersion, now: input.now });
+
+const managerialContractSelfDecision = async (database: any, duty: any, actorUserId: string, now: Date) => {
+  if (duty.sourceActionCode !== 'HIRING_CONTRACT_REVIEW' || duty.sourceActorUserId !== actorUserId) return false;
+  const permissions = await activeHrActionPermissionsForUser(database, actorUserId, now);
+  if (!permissions.includes('RECORD_SIGNED_EMPLOYMENT_CONTRACT') || !permissions.includes('VERIFY_SIGNED_EMPLOYMENT_CONTRACT')) return false;
+  return (await resolveWorkspaceDutyAuthority(database, {
+    userId: actorUserId, workspace: 'accounting', feature: 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT', at: now,
+  })).canSelfDecide;
+};
 
 const canClaim: CrossWorkspaceDutySourceAdapter['canClaim'] = async (database, input) => {
   const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
@@ -262,7 +310,8 @@ const canAccessSharedDecision: CrossWorkspaceDutySourceAdapter['canAccessSharedD
   const permitted = (await activeHrActionPermissionsForUser(database, input.actorUserId, input.now ?? new Date()))
     .includes(definition.actionPermissionCode);
   if (!permitted) return false;
-  return duty.sourceActorUserId !== input.actorUserId;
+  return duty.sourceActorUserId !== input.actorUserId
+    || managerialContractSelfDecision(database, duty, input.actorUserId, input.now ?? new Date());
 };
 
 const claim: CrossWorkspaceDutySourceAdapter['claim'] = async (database, input) => {
@@ -303,6 +352,72 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
   const reason = String(input.reason || '').trim();
   if (input.actionCode === 'RETURN' && reason.length < 3) throw new Error('REASON_REQUIRED');
   await assertEligible(database, input.actorUserId, duty.id, now);
+  if (duty.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
+    const contract = await database.hrEmploymentContractDocument.findUniqueOrThrow({ where: { id: duty.sourceId } });
+    if (contract.version !== duty.sourceVersion || !contract.submittedAt || contract.approvedAt || contract.returnedAt || contract.withdrawnAt) throw new Error('DUTY_SOURCE_CHANGED');
+    const managerialSelfDecision = await managerialContractSelfDecision(database, duty, input.actorUserId, now);
+    const managerialActor = managerialSelfDecision
+      ? await database.user.findUnique({ where: { id: input.actorUserId }, select: { role: true, firstName: true, lastName: true } })
+      : null;
+    if (contract.submittedBy === input.actorUserId && !managerialSelfDecision) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
+    const application = await database.hrJobApplication.findUniqueOrThrow({
+      where: { id: contract.applicationId }, include: { candidate: { include: { linkedPersonnel: true } } },
+    });
+    await assertCandidatePersonnelIdentityConsistent(database, { applicationId: application.id, candidate: application.candidate });
+    await database.hrEmploymentContractDocument.update({ where: { id: contract.id }, data: input.actionCode === 'APPROVE'
+      ? { approvedBy: input.actorUserId, approvedAt: now }
+      : { returnedBy: input.actorUserId, returnedAt: now, returnReason: reason } });
+    await database.hrJobApplication.update({ where: { id: application.id }, data: {
+      contractClearance: input.actionCode === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+    } });
+    if (input.actionCode === 'APPROVE') {
+      await database.hrOnboardingTask.updateMany({
+        where: { applicationId: application.id, title: 'تأیید قرارداد امضاشده', ownerAuthority: 'FINANCE_MANAGER', activationBlocker: true },
+        data: { status: 'COMPLETE', completedBy: input.actorUserId, completedAt: now },
+      });
+    } else {
+      const holidays = await activeTehranHolidays(database);
+      const dueAt = addTehranWorkingDays(now, 3, holidays);
+      const sourceKey = `HIRING:${application.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED`;
+      const correction = await database.hrWorkItem.upsert({ where: { sourceKey }, update: {
+        status: 'PENDING', dueDate: dueAt, description: reason, completedAt: null, completedByUserId: null,
+      }, create: {
+        title: `اصلاح قرارداد کاغذی — ${application.candidate.firstName} ${application.candidate.lastName}`,
+        description: reason, sourceType: 'HIRING_ACTION', sourceKey,
+        destinationHref: `/dashboard/hr/hiring/${application.id}`, assignedToUserId: null,
+        dueDate: dueAt, createdByUserId: null,
+      } });
+      await database.hrWorkItemAudit.create({ data: {
+        workItemId: correction.id, eventType: 'CONTRACT_CORRECTION_TASK_CREATED', actorUserId: input.actorUserId,
+        beforeJson: Prisma.JsonNull, afterJson: asJson({ contractId: contract.id, version: contract.version + 1, dueAt, reason }),
+      } });
+    }
+    const completed = await database.crossWorkspaceDuty.updateMany({ where: { id: duty.id, status: 'OPEN' }, data: {
+      status: 'COMPLETED', respondedByUserId: input.actorUserId, respondedAt: now,
+      structuredResultJson: asJson({ actionCode: input.actionCode, reason: reason || null,
+        managerialSelfDecision, overrideLabel: managerialSelfDecision ? 'استفاده از اختیار مدیریتی' : null }),
+    } });
+    if (!completed.count) throw new Error('DUTY_RESPONSE_CONFLICT');
+    await database.crossWorkspaceDutyAuditVersion.create({ data: {
+      dutyId: duty.id, version: await nextAuditVersion(database, duty.id),
+      eventCode: managerialSelfDecision
+        ? managerialActor?.role === 'ADMIN' ? 'SYSTEM_ADMIN_SELF_DECISION' : 'WORKSPACE_ADMIN_SELF_DECISION'
+        : input.actionCode === 'APPROVE' ? 'APPROVED' : 'RETURNED',
+      actorUserId: input.actorUserId, sourceVersion: duty.sourceVersion, envelopeVersion: duty.envelopeVersion,
+      policyVersion: input.policyVersion, reason: reason || null,
+      afterJson: asJson({ actionCode: input.actionCode, managerialSelfDecision,
+        overrideLabel: managerialSelfDecision ? 'استفاده از اختیار مدیریتی' : null,
+        actorName: managerialActor ? `${managerialActor.firstName} ${managerialActor.lastName}`.trim() : null,
+        actedAt: now }),
+    } });
+    await database.hrHiringAudit.create({ data: {
+      applicationId: application.id, actorUserId: input.actorUserId, actorKind: 'USER',
+      eventType: input.actionCode === 'APPROVE' ? 'SIGNED_CONTRACT_APPROVED_FROM_ACCOUNTING_DUTY' : 'SIGNED_CONTRACT_RETURNED_FROM_ACCOUNTING_DUTY',
+      payloadJson: asJson({ contractId: contract.id, dutyId: duty.id, reason: reason || null,
+        managerialSelfDecision, overrideLabel: managerialSelfDecision ? 'استفاده از اختیار مدیریتی' : null }),
+    } });
+    return { duty: await database.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } }), replayed: false };
+  }
   if (duty.sourceActionCode === 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN') {
     const source = await database.hrCollateralOriginalReturn.findUniqueOrThrow({ where: { id: duty.sourceId }, include: { collateralItem: true } });
     if (source.status !== 'SUBMITTED' || source.version !== duty.sourceVersion
@@ -429,6 +544,16 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
 };
 
 const loadInboxProjection: CrossWorkspaceDutySourceAdapter['loadInboxProjection'] = async (database, input) => {
+  if (input.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
+    const contract = await database.hrEmploymentContractDocument.findUnique({
+      where: { id: input.sourceId }, include: { application: { include: { candidate: true } } },
+    });
+    return {
+      title: contract ? `بررسی قرارداد کاغذی — ${contract.application.candidate.firstName} ${contract.application.candidate.lastName}` : 'وظیفه منسوخ بررسی قرارداد',
+      description: contract ? `شماره قرارداد: ${contract.contractNumber} · نسخه ${contract.version}` : null,
+      sourceIsCurrent: Boolean(contract && contract.version === input.sourceVersion && contract.submittedAt && !contract.approvedAt && !contract.returnedAt && !contract.withdrawnAt),
+    };
+  }
   const returnSource = await database.hrCollateralOriginalReturn.findUnique({ where: { id: input.sourceId }, include: { collateralItem: true } });
   if (returnSource) return {
     title: returnSource.status === 'DRAFT' ? 'ثبت بازگرداندن اصل وثیقه استخدام' : 'تأیید بازگرداندن اصل وثیقه استخدام',

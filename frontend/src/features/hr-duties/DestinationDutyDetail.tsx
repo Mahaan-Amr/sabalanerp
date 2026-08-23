@@ -17,6 +17,7 @@ import {
   ErpSummaryGrid,
   ErpTextarea,
   ErpRialInput,
+  ErpPersianDateField,
 } from '@/components/erp';
 import { hrDutyApi, type DestinationDuty } from './hrDutyApi';
 import { initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
@@ -24,6 +25,7 @@ import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-du
 import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { formatNumericInputText } from '@/lib/numberFormat';
+import { collateralReceiptDatePayload } from './collateralReceiptDate';
 
 const actionPresentation: Record<string, { label: string; icon: typeof FaCheck; tone: 'success' | 'danger' | 'warning' | 'info' }> = {
   APPROVE: { label: 'تأیید', icon: FaCheck, tone: 'success' },
@@ -39,6 +41,7 @@ const fieldLabel: Record<string, string> = { title: 'عنوان', description: '
 const evidenceLabel: Record<string, string> = {
   DOCUMENT: 'سند مجاز', NOTE: 'یادداشت مجاز', CHECKLIST: 'چک‌لیست مجاز',
   COLLATERAL_SCAN: 'اسکن وثیقه', COLLATERAL_RETURN_PROOF: 'مدرک بازگرداندن اصل وثیقه',
+  SIGNED_EMPLOYMENT_CONTRACT: 'اسکن قرارداد امضاشده',
 };
 const eventLabel: Record<string, string> = {
   ASSIGNED: 'واگذاری وظیفه', UNASSIGNED_TRIAGE: 'ارسال به صف تعیین مسئول',
@@ -91,7 +94,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
     try {
       const response = await hrDutyApi.detail(workspace, dutyId);
       dispatch({ type: 'success', data: response.data.data });
-      if (response.data.data.sourceActionCode.startsWith('HIRING_COLLATERAL_')) {
+      if (response.data.data.sourceActionCode.startsWith('HIRING_COLLATERAL_') || response.data.data.sourceActionCode === 'HIRING_CONTRACT_REVIEW') {
         const context = await hrDutyApi.hiringFinanceContext(dutyId);
         setFinanceContext(context.data.data);
         setReceipt((current) => ({ ...current, amountRials: context.data.data.amountRials || '' }));
@@ -172,7 +175,10 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
     setPendingAction('RECORD_RECEIPT');
     setActionError(null);
     const body = new FormData();
-    Object.entries(receipt).forEach(([key, value]) => { if (value) body.append(key, value); });
+    Object.entries(receipt).forEach(([key, value]) => {
+      if (!value) return;
+      body.append(key, key === 'receivedAt' ? collateralReceiptDatePayload(String(value)) : value);
+    });
     try {
       await hrDutyApi.recordHiringCollateralReceipt(state.data.id, body);
       announceCrossWorkspaceDutyChanged();
@@ -282,6 +288,21 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
           <ErpButton className="mt-4" label="دریافت فایل مدرک" variant="soft" disabled={Boolean(pendingAction)} onClick={() => void downloadFinanceEvidence()} />
         </ErpSection>
       )}
+      {duty.sourceActionCode === 'HIRING_CONTRACT_REVIEW' && ['ASSIGNEE', 'SHARED'].includes(duty.access) && duty.status === 'OPEN' && financeContext && (
+        <ErpSection title="جزئیات لازم برای بررسی قرارداد" description="این پاکت فقط اطلاعات همین قرارداد را نمایش می‌دهد و دسترسی به پرونده منابع انسانی ایجاد نمی‌کند.">
+          <ErpSummaryGrid columns={2} items={[
+            { label: 'نام شخص', value: financeContext.candidateName || '—' },
+            { label: 'مرجع امن پرونده', value: financeContext.caseReference || '—' },
+            { label: 'شماره قرارداد', value: financeContext.contractNumber || '—' },
+            { label: 'نسخه', value: Number(financeContext.version || 0).toLocaleString('fa-IR') },
+            { label: 'شروع اعتبار', value: financeContext.effectiveFrom ? new Date(financeContext.effectiveFrom).toLocaleDateString('fa-IR') : '—' },
+            { label: 'پایان اعتبار', value: financeContext.effectiveTo ? new Date(financeContext.effectiveTo).toLocaleDateString('fa-IR') : '—' },
+            { label: 'ثبت‌کننده', value: financeContext.recorderName || '—' },
+            { label: 'زمان ارسال', value: financeContext.submittedAt ? new Date(financeContext.submittedAt).toLocaleString('fa-IR') : '—' },
+          ]} />
+          <ErpButton className="mt-4" label="دریافت اسکن قرارداد" variant="soft" disabled={Boolean(pendingAction)} onClick={() => void downloadFinanceEvidence()} />
+        </ErpSection>
+      )}
       {duty.sourceActionCode === 'HIRING_COLLATERAL_RECORD_RECEIPT' && duty.access === 'ASSIGNEE' && duty.status === 'OPEN' && financeContext && (
         <ErpSection title="ثبت دریافت وثیقه" description="فقط اطلاعات لازم برای تحویل و نگهداری اصل ثبت می‌شود؛ پرونده منابع انسانی در دسترس شما قرار نمی‌گیرد.">
           <div className="grid gap-3 md:grid-cols-2">
@@ -290,7 +311,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
             <ErpField label="شناسه یا سریال"><ErpInput value={receipt.identifier} onChange={(event) => setReceipt({ ...receipt, identifier: event.target.value })} /></ErpField>
             <ErpField label="صادرکننده یا ضامن"><ErpInput value={receipt.issuerOrGuarantor} onChange={(event) => setReceipt({ ...receipt, issuerOrGuarantor: event.target.value })} /></ErpField>
             <ErpField label="محل نگهداری اصل" required><ErpInput value={receipt.custodyLocation} onChange={(event) => setReceipt({ ...receipt, custodyLocation: event.target.value })} /></ErpField>
-            <ErpField label="تاریخ دریافت" required><ErpInput type="date" value={receipt.receivedAt} onChange={(event) => setReceipt({ ...receipt, receivedAt: event.target.value })} /></ErpField>
+            <ErpPersianDateField label="تاریخ دریافت" required disableFutureDates value={receipt.receivedAt} onChange={(receivedAt) => setReceipt({ ...receipt, receivedAt })} />
             <ErpField label="اسکن مدرک دریافت" required><ErpInput type="file" onChange={(event) => setReceipt({ ...receipt, file: event.target.files?.[0] || null })} /></ErpField>
           </div>
           <ErpButton className="mt-4" label="ثبت دریافت و ارسال برای تأیید" disabled={Boolean(pendingAction) || !receipt.file || !receipt.receivedAt || !receipt.custodyLocation.trim()} onClick={() => void recordReceipt()} />

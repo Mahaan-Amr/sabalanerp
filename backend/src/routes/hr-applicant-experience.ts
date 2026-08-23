@@ -61,7 +61,7 @@ const informationGroupsForActionPermissions = (permissions: ReadonlySet<string>)
     groups.add('WORK_HISTORY');
     groups.add('APPLICATION_ANSWERS');
   }
-  if (permissions.has('VIEW_COMPANY_EVALUATION_RESULTS') || permissions.has('MANAGE_FINANCE_EVIDENCE')) {
+  if (permissions.has('VIEW_COMPANY_EVALUATION_RESULTS')) {
     groups.add('DOCUMENTS_FILES');
   }
   return groups;

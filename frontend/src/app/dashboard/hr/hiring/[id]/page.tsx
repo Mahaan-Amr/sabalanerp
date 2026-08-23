@@ -163,6 +163,12 @@ export default function HiringCasePage() {
     Record<string, string>
   >({});
   const [identityCorrectionOpen, setIdentityCorrectionOpen] = useState(false);
+  const [identityResolution, setIdentityResolution] = useState({
+    resolutionCode: "CREATE_NEW",
+    personnelId: "",
+    evidenceIds: [] as string[],
+    correctionReason: "",
+  });
   const [document, setDocument] = useState<any>({
     category: "BIRTH_CERTIFICATE_ALL_PAGES",
     side: "",
@@ -375,6 +381,7 @@ export default function HiringCasePage() {
     toIsoDate(insurance.dueDate) < new Date().toISOString().slice(0, 10),
   );
   const latestContract = data.contracts?.[0];
+  const openIdentityConflict = data.identityConflicts?.find((item: any) => item.status === "OPEN");
   const currentCollateralItems = (data.collateralItems || []).filter((item: any) => !item.supersededBy);
   const collateralExplicitlyNotRequired = data.collateralRequirements?.[0]?.type === "NO_PRE_HIRE_COLLATERAL";
   const collateralRecorded = collateralExplicitlyNotRequired || currentCollateralItems.length > 0
@@ -392,7 +399,7 @@ export default function HiringCasePage() {
     !data.readOnlyArchived && values.some((value) => actionPermissions.includes(value));
   const canHrSensitive = hasActionPermission("MANAGE_RECRUITMENT_CASE");
   const canCompanyManager = hasActionPermission("MANAGE_PRE_EMPLOYMENT_REQUIREMENTS", "MANAGE_COMPANY_EVALUATION_PLAN", "RECORD_FINAL_MANAGEMENT_DECISION");
-  const canViewContractTask = hiringTaskDetailVisible(
+  const canViewContractTask = hasActionPermission("RECORD_SIGNED_EMPLOYMENT_CONTRACT") || hiringTaskDetailVisible(
     data.taskCapabilities,
     "SIGNED_CONTRACT",
   );
@@ -591,6 +598,63 @@ export default function HiringCasePage() {
           selectedPhaseId={selectedLifecyclePhase}
           onSelect={selectLifecyclePhase}
         />
+      )}
+      {openIdentityConflict && (
+        <ErpSection
+          title="مغایرت هویت متقاضی و پرسنل"
+          description="تا ثبت تصمیم مستقل و شواهد معتبر، تأیید نهایی هویت، تبدیل و فعال‌سازی مسدود می‌مانند."
+        >
+          <ErpSummaryGrid columns={3} items={[
+            { label: "هویت ادعاشده", value: `${openIdentityConflict.claimedIdentityJson?.firstName || ""} ${openIdentityConflict.claimedIdentityJson?.lastName || ""}`.trim() || "—" },
+            { label: "هویت متعارض", value: `${openIdentityConflict.matchedIdentityJson?.firstName || ""} ${openIdentityConflict.matchedIdentityJson?.lastName || ""}`.trim() || "—" },
+            { label: "مهلت", value: new Date(openIdentityConflict.dueAt).toLocaleString("fa-IR") },
+          ]} />
+          {hasActionPermission("RESOLVE_CANDIDATE_PERSONNEL_IDENTITY_CONFLICT") && (
+            <div className="mt-4 space-y-4">
+              <ErpField label="نتیجه تعیین تکلیف" required>
+                <ErpSelect value={identityResolution.resolutionCode} onChange={(event) => setIdentityResolution({ ...identityResolution, resolutionCode: event.target.value })}>
+                  <option value="CREATE_NEW">ساخت Personnel جدید از هویت تأییدشده</option>
+                  <option value="LINK_EXISTING">پیوند به Personnel موجود</option>
+                  <option value="CORRECT_CANDIDATE_CLAIM">اصلاح ادعای هویت Candidate</option>
+                </ErpSelect>
+              </ErpField>
+              {identityResolution.resolutionCode !== "CREATE_NEW" && (
+                <ErpField label="شناسه Personnel انتخاب‌شده" required>
+                  <ErpInput value={identityResolution.personnelId} onChange={(event) => setIdentityResolution({ ...identityResolution, personnelId: event.target.value })} />
+                </ErpField>
+              )}
+              {identityResolution.resolutionCode === "CORRECT_CANDIDATE_CLAIM" && (
+                <ErpField label="دلیل اصلاح ادعای هویت" required>
+                  <ErpTextarea value={identityResolution.correctionReason} onChange={(event) => setIdentityResolution({ ...identityResolution, correctionReason: event.target.value })} />
+                </ErpField>
+              )}
+              <div>
+                <p className="mb-2 text-sm font-semibold text-[var(--sds-text-secondary)]">شواهد معتبر مبنای تصمیم</p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {(data.documents || []).map((item: any) => (
+                    <ErpCheckbox
+                      key={item.id}
+                      label={`${hrDisplayLabel(item.category)} · نسخه ${Number(item.version).toLocaleString("fa-IR")}`}
+                      checked={identityResolution.evidenceIds.includes(item.id)}
+                      onChange={(event) => setIdentityResolution({ ...identityResolution, evidenceIds: event.target.checked
+                        ? [...identityResolution.evidenceIds, item.id]
+                        : identityResolution.evidenceIds.filter((id) => id !== item.id) })}
+                    />
+                  ))}
+                </div>
+              </div>
+              <ErpButton
+                label="ثبت تصمیم هویتی"
+                tone="success"
+                disabled={busy || !identityResolution.evidenceIds.length || (identityResolution.resolutionCode !== "CREATE_NEW" && !identityResolution.personnelId)}
+                onClick={() => run(
+                  () => hiringAPI.resolveIdentityConflict(id, openIdentityConflict.id, identityResolution),
+                  "مغایرت هویت تعیین تکلیف شد؛ تأیید هویت باید دوباره انجام شود.",
+                )}
+              />
+            </div>
+          )}
+        </ErpSection>
       )}
       {data.employmentRelationship?.personnel &&
         selectedLifecyclePhase &&
@@ -1306,7 +1370,7 @@ export default function HiringCasePage() {
           "MANAGE_COMPENSATION",
           "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
           "MANAGE_PAYROLL",
-          "MANAGE_FINANCE_EVIDENCE",
+          "RECORD_SIGNED_EMPLOYMENT_CONTRACT",
           "MANAGE_COLLATERAL_REQUIREMENTS",
           "MANAGE_RECRUITMENT_CASE",
         ) && (
@@ -1714,7 +1778,7 @@ export default function HiringCasePage() {
         <>
           <ErpSection title="قرارداد کاغذی">
             <div className="grid gap-3 md:grid-cols-4">
-              {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && (
+              {hasActionPermission("RECORD_SIGNED_EMPLOYMENT_CONTRACT") && (
                 <>
                   <ErpField label="شماره قرارداد" required>
                     <ErpInput
@@ -1782,49 +1846,38 @@ export default function HiringCasePage() {
                       tone="success"
                     />
                   )}
-                </>
-              )}
-              {hasActionPermission("MANAGE_FINANCE_EVIDENCE") && latestContract?.canReview && (
-                <div className="space-y-2 md:col-span-2">
-                  <div className="flex flex-wrap gap-2">
+                  {latestContract?.canWithdraw && contractReturnReason === "" && (
                     <ErpButton
-                      label="تأیید قرارداد"
+                      label="پس گرفتن نسخه برای اصلاح"
+                      variant="soft"
+                      tone="warning"
                       disabled={busy}
-                      onClick={() =>
-                        run(
-                          () =>
-                            hiringAPI.approveContract(id, latestContract.id),
-                          "قرارداد تأیید شد.",
-                        )
-                      }
-                      tone="success"
+                      onClick={() => setContractReturnReason(" ")}
                     />
-                  </div>
-                  <ErpField label="دلیل بازگرداندن قرارداد">
-                    <ErpTextarea
-                      value={contractReturnReason}
-                      onChange={(event) =>
-                        setContractReturnReason(event.target.value)
-                      }
-                    />
-                  </ErpField>
-                  <ErpButton
-                    label="بازگرداندن برای اصلاح"
-                    disabled={busy || !contractReturnReason.trim()}
-                    onClick={() =>
-                      run(
-                        () =>
-                          hiringAPI.returnContract(
-                            id,
-                            latestContract.id,
-                            contractReturnReason.trim(),
-                          ),
-                        "قرارداد برای اصلاح بازگردانده شد.",
-                      )
-                    }
-                    tone="danger"
-                  />
-                </div>
+                  )}
+                  {latestContract?.canWithdraw && contractReturnReason !== "" && (
+                    <div className="space-y-2 md:col-span-2">
+                      <ErpField label="دلیل پس گرفتن نسخه" required>
+                        <ErpTextarea
+                          value={contractReturnReason.trimStart()}
+                          onChange={(event) => setContractReturnReason(event.target.value)}
+                        />
+                      </ErpField>
+                      <div className="flex flex-wrap gap-2">
+                        <ErpButton
+                          label="ثبت پس گرفتن و ایجاد وظیفه اصلاح"
+                          tone="warning"
+                          disabled={busy || contractReturnReason.trim().length < 3}
+                          onClick={() => run(
+                            () => hiringAPI.withdrawContract(id, latestContract.id, contractReturnReason.trim()),
+                            "نسخه قرارداد پس گرفته شد و وظیفه اصلاح ایجاد شد.",
+                          )}
+                        />
+                        <ErpButton label="انصراف" variant="soft" disabled={busy} onClick={() => setContractReturnReason("")} />
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
               {latestContract && (
                 <ErpCard className="p-3 text-sm md:col-span-2">
@@ -1833,6 +1886,7 @@ export default function HiringCasePage() {
                     {{
                       DRAFT: "ثبت‌شده؛ در انتظار ارسال",
                       SUBMITTED: "ارسال‌شده؛ در انتظار بررسی مدیر مالی",
+                      WITHDRAWN: "پس‌گرفته‌شده؛ در انتظار نسخه اصلاح‌شده",
                       RETURNED: "برای اصلاح بازگردانده شده",
                       APPROVED: "تأییدشده",
                     }[latestContract.reviewState as string] ||

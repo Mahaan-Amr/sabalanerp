@@ -227,11 +227,7 @@ export const projectHiringTaskCapabilities = (
     contractClearance: source.contractClearance || "NOT_STARTED",
     compensationClearance: source.compensationClearance || "NOT_STARTED",
     payrollParticipation: source.payrollParticipation,
-    onboardingTasks: (source.onboardingTasks || []).map((task) => ({
-      ...task,
-      title: task.title || "وظیفه آماده‌سازی",
-      activationBlocker: Boolean(task.activationBlocker),
-    })),
+    onboardingTasks: [],
     insuranceEnrollment: source.insuranceEnrollment,
   }).ready;
   const employmentActive = source.employmentRelationship?.status === "ACTIVE";
@@ -313,21 +309,6 @@ export const projectHiringTaskCapabilities = (
     },
   ];
 
-  for (const task of source.onboardingTasks || []) {
-    const ownerAuthorities = task.ownerAuthority
-      ? [task.ownerAuthority]
-      : [];
-    const detailVisible = visibleTo(...ownerAuthorities);
-    tasks.push({
-      id: "ONBOARDING_TASK",
-      title: task.title || "وظیفه آماده‌سازی شروع همکاری",
-      status: task.status,
-      ownerAuthorities,
-      detailVisible,
-      actionIds: detailVisible ? ["UPDATE_ONBOARDING_TASK"] : [],
-    });
-  }
-
   return tasks;
 };
 
@@ -408,8 +389,6 @@ const canPerform = (
       )
     ),
   );
-const isCompleteTask = (status: string) =>
-  status === "COMPLETE" || status === "WAIVED";
 const authorityLabels: Record<string, string> = {
   HR_PROCESSOR: "کارشناس منابع انسانی",
   HR_MANAGER: "مدیریت منابع انسانی",
@@ -751,14 +730,8 @@ const onboardingGate = (source: HiringLifecycleSource, viewerUserId?: string): G
     Boolean(source.contracts?.[0]?.approvedAt) &&
     source.contractClearance === "APPROVED";
   const payrollReady = Boolean(source.payrollParticipation);
-  const blockingTasks =
-    source.onboardingTasks?.filter((task) => task.activationBlocker) || [];
-  const completedTasks = blockingTasks.filter((task) =>
-    isCompleteTask(task.status),
-  ).length;
-  const completed =
-    Number(contractApproved) + Number(payrollReady) + completedTasks;
-  const total = 2 + blockingTasks.length;
+  const completed = Number(contractApproved) + Number(payrollReady);
+  const total = 2;
   const missingEmployment =
     Boolean(source.convertedAt || source.outcome === "HIRED") &&
     !source.employmentRelationship;
@@ -802,18 +775,6 @@ const onboardingGate = (source: HiringLifecycleSource, viewerUserId?: string): G
       "تنظیم مشارکت حقوق و دستمزد",
       "HR_PAYROLL_MANAGER",
     );
-  else if (
-    contractApproved &&
-    payrollReady &&
-    completedTasks < blockingTasks.length
-  ) {
-    const pending = blockingTasks.find((task) => !isCompleteTask(task.status));
-    nextAction = action(
-      "COMPLETE_ONBOARDING_TASK",
-      pending?.title || "تکمیل وظیفه مسدودکننده شروع همکاری",
-      pending?.ownerAuthority || "HR_MANAGER",
-    );
-  }
   return {
     complete: !missingEmployment && completed === total,
     requiredComplete: completed,
@@ -853,19 +814,12 @@ const activationGate = (source: HiringLifecycleSource): Gate => {
     contractClearance: source.contractClearance || "NOT_STARTED",
     compensationClearance: source.compensationClearance || "NOT_STARTED",
     payrollParticipation: source.payrollParticipation,
-    onboardingTasks: (source.onboardingTasks || []).map((task) => ({
-      ...task,
-      title: task.title || "وظیفه آماده‌سازی",
-      activationBlocker: Boolean(task.activationBlocker),
-    })),
+    onboardingTasks: [],
     insuranceEnrollment: source.insuranceEnrollment,
   });
-  const blockers = readiness.blockers.map((item) => {
-    const task = source.onboardingTasks?.find(
-      (candidate) => `ONBOARDING_TASK:${candidate.id || candidate.title}` === item.id,
-    );
-    return blocker(item.id, item.message, task?.ownerAuthority || "HR_MANAGER");
-  });
+  const blockers = readiness.blockers.map((item) =>
+    blocker(item.id, item.message, "HR_MANAGER"),
+  );
   if (source.employmentRelationship?.status === "ENDED") blockers.push(blocker("EMPLOYMENT_ENDED", "رابطه استخدامی پایان یافته است.", "HR_MANAGER"));
   return {
     complete,

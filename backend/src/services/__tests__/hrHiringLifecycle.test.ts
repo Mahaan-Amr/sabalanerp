@@ -297,8 +297,9 @@ const base = (
       payrollParticipation: {},
       onboardingTasks: [
         {
+          title: "وظیفه دستی قدیمی نباید در projection نمایش داده شود",
           activationBlocker: true,
-          status: "WAIVED",
+          status: "PENDING",
           ownerAuthority: "HR_MANAGER",
         },
       ],
@@ -636,7 +637,6 @@ const base = (
       { id: "INSURANCE", status: "IN_PROGRESS", detailVisible: false, actionIds: [] },
       { id: "PAYROLL_PARTICIPATION", status: "PENDING", detailVisible: false, actionIds: [] },
       { id: "EMPLOYMENT_ACTIVATION", status: "BLOCKED", detailVisible: true, actionIds: [] },
-      { id: "ONBOARDING_TASK", status: "PENDING", detailVisible: false, actionIds: [] },
     ],
   );
 

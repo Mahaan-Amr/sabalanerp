@@ -107,7 +107,10 @@ import {
 import { tehranCivilDateKey } from '../services/tehranBusinessCalendar';
 import { createHrHiringCollateralReturnDuty } from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
 import { reconcileAcceptedOfferFollowUp } from '../services/hrAcceptedOfferFollowUp';
-import { isSystemOnboardingTaskTitle } from '../services/hrOnboardingTaskRetirementAudit';
+import {
+  legacyOnboardingTaskCompletionDecision,
+  SYSTEM_ONBOARDING_TASK_DEFINITIONS,
+} from '../services/hrOnboardingTaskRetirementAudit';
 
 const router = express.Router();
 const ACCESS_TTL_DAYS = 7;
@@ -3648,9 +3651,11 @@ router.post('/applications/:id/convert', requireActionPermission('MANAGE_RECRUIT
     }});
     await tx.hrInsuranceEnrollment.upsert({ where: { applicationId: application.id }, create: { applicationId: application.id, status: 'NOT_STARTED', updatedBy: actorId(req) }, update: { updatedBy: actorId(req) } });
     await tx.hrOnboardingTask.createMany({ data: [
-      { applicationId: application.id, title: 'تأیید قرارداد امضاشده', ownerAuthority: 'FINANCE_MANAGER', activationBlocker: true, createdBy: actorId(req) },
-      { applicationId: application.id, title: 'تنظیم مشارکت حقوق و دستمزد', ownerAuthority: 'HR_PAYROLL_MANAGER', activationBlocker: true, createdBy: actorId(req) },
-      { applicationId: application.id, title: 'پیگیری ثبت بیمه', ownerAuthority: 'HR_PROCESSOR', activationBlocker: false, createdBy: actorId(req) }
+      ...Object.values(SYSTEM_ONBOARDING_TASK_DEFINITIONS).map((definition) => ({
+        applicationId: application.id,
+        ...definition,
+        createdBy: actorId(req),
+      })),
     ] });
     await tx.hrCandidateInvitation.updateMany({ where: { applicationId: application.id, revokedAt: null }, data: { revokedAt: new Date() } });
     await tx.hrJobApplication.update({ where: { id: application.id }, data: { convertedAt: new Date(), scheduledStartDate: startDate, stage: 'CLOSED', outcome: 'HIRED' } });
@@ -3685,7 +3690,7 @@ router.post('/applications/:id/contracts', requireActionPermission('MANAGE_FINAN
       }});
       await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { contractClearance: 'IN_PROGRESS' } });
       await tx.hrOnboardingTask.updateMany({
-        where: { applicationId: req.params.id, title: 'تأیید قرارداد امضاشده' },
+        where: { applicationId: req.params.id, ...SYSTEM_ONBOARDING_TASK_DEFINITIONS.SIGNED_CONTRACT },
         data: { status: 'PENDING', completedBy: null, completedAt: null }
       });
       return created;
@@ -3719,7 +3724,7 @@ router.post('/applications/:id/contracts/:contractId/approve', requireActionPerm
   await prisma.$transaction([
     prisma.hrEmploymentContractDocument.update({ where: { id: contract.id }, data: { approvedBy: actorId(req), approvedAt: new Date() } }),
     prisma.hrJobApplication.update({ where: { id: req.params.id }, data: { contractClearance: 'APPROVED' } }),
-    prisma.hrOnboardingTask.updateMany({ where: { applicationId: req.params.id, title: 'تأیید قرارداد امضاشده' }, data: { status: 'COMPLETE', completedBy: actorId(req), completedAt: new Date() } })
+    prisma.hrOnboardingTask.updateMany({ where: { applicationId: req.params.id, ...SYSTEM_ONBOARDING_TASK_DEFINITIONS.SIGNED_CONTRACT }, data: { status: 'COMPLETE', completedBy: actorId(req), completedAt: new Date() } })
   ]);
   await audit(req.params.id, 'SIGNED_CONTRACT_APPROVED', req, { contractId: contract.id });
   res.json({ success: true });
@@ -3762,7 +3767,7 @@ router.post('/applications/:id/payroll-participation', requireActionPermission('
     create: { applicationId: req.params.id, effectiveFrom: command.effectiveFrom, startMismatchReason: command.startMismatchReason, configuredBy: actorId(req) },
     update: { effectiveFrom: command.effectiveFrom, startMismatchReason: command.startMismatchReason, configuredBy: actorId(req), configuredAt: new Date() }
   });
-  await prisma.hrOnboardingTask.updateMany({ where: { applicationId: req.params.id, title: 'تنظیم مشارکت حقوق و دستمزد' }, data: { status: 'COMPLETE', completedBy: actorId(req), completedAt: new Date() } });
+  await prisma.hrOnboardingTask.updateMany({ where: { applicationId: req.params.id, ...SYSTEM_ONBOARDING_TASK_DEFINITIONS.PAYROLL_PARTICIPATION }, data: { status: 'COMPLETE', completedBy: actorId(req), completedAt: new Date() } });
   await audit(req.params.id, 'PAYROLL_PARTICIPATION_CONFIRMED', req, { effectiveFrom: command.effectiveFrom, differsFromPlannedStart: Boolean(command.startMismatchReason) });
   res.json({ success: true, data: row });
 }));
@@ -3798,7 +3803,7 @@ router.put('/applications/:id/insurance', requireActionPermission('MANAGE_RECRUI
   });
   const resolved = ['ACTIVE', 'EXEMPT'].includes(row.status);
   await prisma.hrOnboardingTask.updateMany({
-    where: { applicationId: req.params.id, title: 'پیگیری ثبت بیمه' },
+    where: { applicationId: req.params.id, ...SYSTEM_ONBOARDING_TASK_DEFINITIONS.INSURANCE },
     data: resolved
       ? { status: 'COMPLETE', completedBy: actorId(req), completedAt: new Date() }
       : { status: 'PENDING', completedBy: null, completedAt: null }
@@ -3842,10 +3847,17 @@ router.post(
 router.put('/applications/:id/onboarding-tasks/:taskId', asyncHandler(async (req: AuthRequest, res: Response) => {
   const task = await prisma.hrOnboardingTask.findUniqueOrThrow({ where: { id: req.params.taskId } });
   if (task.applicationId !== req.params.id) return res.status(404).json({ success: false, error: 'وظیفه در این پرونده پیدا نشد.' });
-  if (isSystemOnboardingTaskTitle(task.title)) {
+  const completionDecision = legacyOnboardingTaskCompletionDecision(task, req.body.status);
+  if (completionDecision === 'SYSTEM_MANAGED') {
     return res.status(409).json({
       success: false,
       error: 'وضعیت قرارداد، حقوق و بیمه فقط از فرایند اصلی همان بخش به‌روزرسانی می‌شود.',
+    });
+  }
+  if (completionDecision === 'INVALID_STATUS') {
+    return res.status(400).json({
+      success: false,
+      error: 'مسیر سازگاری قدیمی فقط تکمیل نهایی وظیفه دستی را می‌پذیرد.',
     });
   }
   const actionPermission = ({
@@ -3862,8 +3874,8 @@ router.put('/applications/:id/onboarding-tasks/:taskId', asyncHandler(async (req
     : { allowed: false };
   if (!assigned.allowed) return res.status(403).json({ success: false, error: 'فقط مالک سازمانی وظیفه مجاز به تکمیل است.' });
   const row = await prisma.hrOnboardingTask.update({ where: { id: task.id }, data: {
-    status: req.body.status, evidenceNote: req.body.evidenceNote || null,
-    completedBy: req.body.status === 'COMPLETE' ? actorId(req) : null, completedAt: req.body.status === 'COMPLETE' ? new Date() : null
+    status: 'COMPLETE', evidenceNote: req.body.evidenceNote || null,
+    completedBy: actorId(req), completedAt: new Date()
   }});
   res.json({ success: true, data: row });
 }));

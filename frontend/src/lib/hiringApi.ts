@@ -221,10 +221,6 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/payroll-participation`, data),
   setInsurance: (id: string, data: any) =>
     internal.put(`/applications/${id}/insurance`, data),
-  addOnboardingTask: (id: string, data: any) =>
-    internal.post(`/applications/${id}/onboarding-tasks`, data),
-  updateOnboardingTask: (id: string, taskId: string, data: any) =>
-    internal.put(`/applications/${id}/onboarding-tasks/${taskId}`, data),
   activate: (id: string) => internal.post(`/applications/${id}/activate`),
   close: (id: string, data: any) =>
     internal.post(`/applications/${id}/close`, data),

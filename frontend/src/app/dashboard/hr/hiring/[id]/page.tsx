@@ -34,6 +34,7 @@ import {
   ErpPage,
   ErpSection,
   ErpSheet,
+  ErpSummaryGrid,
 } from "@/components/erp";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { HiringLifecycle } from "@/features/hr-hiring/HiringLifecycle";
@@ -41,6 +42,7 @@ import {
   hiringTaskDetailVisible,
   resolvePhaseAfterLifecycleAdvance,
   resolveSelectedHiringPhase,
+  startPreparationStatusItems,
   shouldLoadCompanyEvaluationPlan,
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
@@ -196,13 +198,6 @@ export default function HiringCasePage() {
     note: "",
   });
   const [closure, setClosure] = useState({ outcome: "REJECTED", reason: "" });
-  const [task, setTask] = useState({
-    title: "",
-    ownerAuthority: "HR_MANAGER",
-    dueDate: "",
-    activationBlocker: false,
-    assignToHire: true,
-  });
   const [conversion, setConversion] = useState({
     scheduledStartDate: "",
   });
@@ -412,6 +407,9 @@ export default function HiringCasePage() {
   const canViewActivationTask = hiringTaskDetailVisible(
     data.taskCapabilities,
     "EMPLOYMENT_ACTIVATION",
+  );
+  const startPreparationStatuses = startPreparationStatusItems(
+    data.taskCapabilities,
   );
   const selectedLifecyclePhase = data.lifecycle
     ? resolveSelectedHiringPhase(
@@ -1689,111 +1687,29 @@ export default function HiringCasePage() {
             </ErpSection>
           </>
         )}
-      {selectedLifecyclePhase === "ONBOARDING" && (
-        <ErpSection
-          title="وظایف موقت پیش از فعال‌سازی"
-          description="وظیفه به پرسنل برنامه‌ریزی‌شده متصل می‌شود و هیچ کاربر یا شناسه ورود ایجاد نمی‌کند."
-        >
-          {hasActionPermission("MANAGE_RECRUITMENT_CASE") && (
-            <ErpCard className="grid items-end gap-3 p-3 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,2fr)_minmax(11rem,1.4fr)_minmax(12rem,1.4fr)_auto]">
-              <ErpInput
-                aria-label="عنوان وظیفه"
-                placeholder="عنوان وظیفه"
-                className="px-3 py-2"
-                value={task.title}
-                onChange={(e) => setTask({ ...task, title: e.target.value })}
-              />
-              <ErpSelect
-                aria-label="مسئول وظیفه"
-                className="px-3 py-2"
-                value={task.ownerAuthority}
-                onChange={(e) =>
-                  setTask({ ...task, ownerAuthority: e.target.value })
-                }
-              >
-                <option value="HR_MANAGER">مدیر منابع انسانی</option>
-                <option value="COMPANY_MANAGER">مدیریت شرکت</option>
-                <option value="HR_PROCESSOR">کارشناس منابع انسانی</option>
-                <option value="FINANCE_MANAGER">مدیر مالی</option>
-              </ErpSelect>
-              <ErpField
-                className="space-y-1"
-                label={
-                  <>
-                    مهلت انجام وظیفه{" "}
-                    <span className="sds-text-muted text-xs font-normal">
-                      (اختیاری)
-                    </span>
-                  </>
-                }
-              >
-                <HrPersianCalendar
-                  value={task.dueDate}
-                  onChange={(dueDate) => setTask({ ...task, dueDate })}
-                />
-              </ErpField>
-              <ErpButton
-                label="واگذاری وظیفه"
-                className="w-full px-4 sm:w-auto sm:justify-self-start"
-                disabled={!task.title || !data.convertedAt}
-                onClick={() =>
-                  run(
-                    () =>
-                      hiringAPI.addOnboardingTask(id, {
-                        ...task,
-                        dueDate: toIsoDate(task.dueDate),
-                      }),
-                    "وظیفه به پرسنل برنامه‌ریزی‌شده واگذار شد.",
-                  )
-                }
-              />
-            </ErpCard>
-          )}
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {(data.onboardingTasks || []).map((item: any) => (
-              <ErpCard
-                key={item.id}
-                className="flex items-center justify-between p-3"
-              >
-                <span>
-                  <b>{item.title}</b>
-                  <small className="block text-[var(--sds-text-secondary)]">
-                    {authorityLabel(item.ownerAuthority)} ·{" "}
-                    {hrDisplayLabel(item.status)}
-                  </small>
-                </span>
-                {item.status !== "COMPLETE" &&
-                  hasActionPermission(({
-                    HR_PROCESSOR: "MANAGE_RECRUITMENT_CASE",
-                    HR_MANAGER: "MANAGE_RECRUITMENT_CASE",
-                    COMPANY_MANAGER: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
-                    HR_PAYROLL_PROCESSOR: "MANAGE_PAYROLL",
-                    HR_PAYROLL_MANAGER: "MANAGE_PAYROLL",
-                    FINANCE_RECORDER: "MANAGE_FINANCE_EVIDENCE",
-                    FINANCE_MANAGER: "MANAGE_FINANCE_EVIDENCE",
-                  } as Record<string, string>)[item.ownerAuthority] || item.ownerAuthority) && (
-                    <ErpPressable
-                      type="submit"
-                      className="rounded bg-[var(--sds-success-surface)] px-2 py-1 text-xs"
-                      onClick={() =>
-                        run(
-                          () =>
-                            hiringAPI.updateOnboardingTask(id, item.id, {
-                              status: "COMPLETE",
-                              evidenceNote: "تکمیل و مشاهده شد",
-                            }),
-                          "وظیفه تکمیل شد.",
-                        )
-                      }
-                    >
-                      تکمیل
-                    </ErpPressable>
-                  )}
-              </ErpCard>
-            ))}
-          </div>
-        </ErpSection>
-      )}
+      {selectedLifecyclePhase &&
+        ["ONBOARDING", "ACTIVATION"].includes(selectedLifecyclePhase) &&
+        startPreparationStatuses.length > 0 && (
+          <ErpSection title="وضعیت آماده‌سازی شروع همکاری">
+            <ErpSummaryGrid
+              columns={3}
+              items={startPreparationStatuses.map((item) => ({
+                label: item.label,
+                value: hrDisplayLabel(item.status),
+                hint: `${item.ownerAuthorities.map(authorityLabel).join("، ")} · ${item.activationEffect}`,
+                tone: ["COMPLETE", "APPROVED", "ACTIVE", "EXEMPT"].includes(
+                  item.status,
+                )
+                  ? "success"
+                  : item.status === "REJECTED"
+                    ? "danger"
+                    : item.status === "IN_PROGRESS"
+                      ? "info"
+                      : "warning",
+              }))}
+            />
+          </ErpSection>
+        )}
       {selectedLifecyclePhase === "ONBOARDING" && canViewContractTask && (
         <>
           <ErpSection title="قرارداد کاغذی">

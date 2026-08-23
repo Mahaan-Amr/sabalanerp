@@ -18,6 +18,11 @@ assert.match(
 );
 assert.match(
   deployScript,
+  /run_backend_timed "\$\{remaining\}" node dist\/scripts\/audit-hr-onboarding-task-retirement\.js --output=\/app\/deployment-reports\/\$\{onboarding_audit_name\}/,
+  'release promotion must fail closed on the read-only onboarding retirement audit',
+);
+assert.match(
+  deployScript,
   /run_backend\(\)[\s\S]*docker compose[^\n]* run -T --rm --no-deps/,
   'deployment control jobs must disable Compose TTY allocation',
 );

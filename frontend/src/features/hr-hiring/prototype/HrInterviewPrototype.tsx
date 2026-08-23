@@ -42,66 +42,27 @@ import {
   type NumericScore,
   type Score,
 } from "./interviewPrototypeData";
+import {
+  customCriteriaAreComplete,
+  customCriterionIsComplete,
+  hydrateInterviewState,
+  InterviewSnapshotError,
+  normalizeInitialInterviewPayload,
+  publishedCriteriaForInterview,
+  type CustomCriterion,
+  type InterviewEvidencePayload,
+  type LegacyInterviewPayload,
+  type ProductionInterviewPayload,
+  type PublishedInterviewCriterion,
+} from "./interviewEvidence";
 import { interviewCompletionFocusTarget, shouldShowNextCriterion } from "../guidedInterviewState";
 import { InterviewDraftSaveCoordinator, type InterviewDraftSaveSnapshot } from "../interviewDraftSaveCoordinator";
 import { completeHrInterview, HrInterviewCompletionError, interviewCompletionFocus } from "../hrInterviewCompletion";
 
+export type { ProductionInterviewPayload } from "./interviewEvidence";
+
 type Variant = "A" | "B" | "C";
 type Surface = "interview" | "checklist" | "defaults" | "history";
-export type CustomCriterion = {
-  id: string;
-  title: string;
-  kind: "score" | "text" | "yes-no";
-  score: Score;
-  text: string;
-  yesNo: "YES" | "NO" | null;
-};
-
-export type ProductionInterviewPayload = {
-  schemaVersion: 2;
-  state: InterviewState;
-  customCriteria: CustomCriterion[];
-  criteriaTemplateVersion?: number;
-  criteriaSnapshot?: PublishedInterviewCriterion[];
-};
-
-type PublishedInterviewCriterion = {
-  stableId: string;
-  title: string;
-  description?: string | null;
-  answerType: string;
-  isActive?: boolean;
-  order?: number;
-  allowUnassessed?: boolean;
-};
-
-const publishedCriteriaForInterview = (snapshot?: PublishedInterviewCriterion[]) => {
-  if (!snapshot?.length) return interviewCriteria;
-  const kindByAnswerType: Record<string, InterviewCriterion["kind"]> = {
-    TEXT: "text",
-    SCORE_1_TO_5: "score",
-    YES_NO: "yesNo",
-    ADDRESS: "address",
-    STRENGTHS_WEAKNESSES: "strengthsWeaknesses",
-    COMPANION: "companion",
-  };
-  return snapshot
-    .filter((criterion) => criterion.isActive !== false)
-    .map((criterion, index) => ({
-      id: criterion.stableId,
-      order: criterion.order ?? index + 1,
-      title: criterion.title,
-      prompt: criterion.description || undefined,
-      kind: kindByAnswerType[criterion.answerType] ?? "text",
-      allowUnassessed: criterion.allowUnassessed === true,
-    }));
-};
-
-const hydrateInterviewState = (state: InterviewState | undefined, criteria: InterviewCriterion[]) => {
-  const empty = createInitialInterviewState(criteria);
-  if (!state) return empty;
-  return { ...state, answers: { ...empty.answers, ...state.answers } };
-};
 
 const variantNames: Record<Variant, string> = {
   A: "مسیر هدایت‌شده",
@@ -272,6 +233,12 @@ function CriterionEditor({
 
   return (
     <div className={compact ? "space-y-3" : "space-y-5"}>
+      {answer.legacyScore !== undefined || answer.legacyNote ? (
+        <ErpInlineState
+          kind="stale"
+          title={`پاسخ نسخه قدیمی حفظ شده است${answer.legacyScore !== undefined && answer.legacyScore !== null ? `؛ امتیاز قبلی: ${answer.legacyScore === "UNASSESSED" ? "ارزیابی‌نشده" : answer.legacyScore.toLocaleString("fa-IR")}` : ""}${answer.legacyNote ? `؛ یادداشت قبلی: ${answer.legacyNote}` : ""}. برای ساختار جدید، پاسخ این بخش را تکمیل کنید.`}
+        />
+      ) : null}
       {criterion.prompt ? (
         <p className="text-sm leading-6 text-[var(--sds-text-secondary)]">
           {criterion.prompt}
@@ -961,12 +928,6 @@ function CaseSpecificCriteria({
   );
 }
 
-function customCriterionIsComplete(criterion: CustomCriterion) {
-  if (criterion.kind === "score") return criterion.score !== null;
-  if (criterion.kind === "yes-no") return criterion.yesNo !== null;
-  return criterion.text.trim().length > 0;
-}
-
 function InterviewCompletion({
   state,
   customCriteria,
@@ -981,7 +942,7 @@ function InterviewCompletion({
   const defaultsComplete = interviewCriteria.every((criterion) =>
     criterionIsComplete(criterion, state.answers[criterion.id]),
   );
-  const extrasComplete = customCriteria.every(customCriterionIsComplete);
+  const extrasComplete = customCriteriaAreComplete(customCriteria);
   const canComplete =
     defaultsComplete &&
     extrasComplete &&
@@ -1319,6 +1280,30 @@ function PrototypeSwitcher({
   );
 }
 
+const initialProductionInterviewModel = (initialPayload?: InterviewEvidencePayload | null) => {
+  if (!initialPayload) {
+    return {
+      payload: null,
+      criteria: interviewCriteria,
+      error: undefined as unknown,
+    };
+  }
+  try {
+    const payload = normalizeInitialInterviewPayload(initialPayload)!;
+    return {
+      payload,
+      criteria: publishedCriteriaForInterview(payload.criteriaSnapshot),
+      error: undefined as unknown,
+    };
+  } catch (error) {
+    return {
+      payload: null,
+      criteria: [] as InterviewCriterion[],
+      error,
+    };
+  }
+};
+
 export function ProductionHrInterview({
   initialPayload,
   initialVersion = 0,
@@ -1328,19 +1313,21 @@ export function ProductionHrInterview({
   onComplete,
   onReloadDraft,
 }: {
-  initialPayload?: ProductionInterviewPayload | null;
+  initialPayload?: InterviewEvidencePayload | null;
   initialVersion?: number;
   history?: Array<{ version: number; decidedAt?: string; outcome?: string }>;
   busy: boolean;
   onSaveDraft: (payload: ProductionInterviewPayload, expectedVersion: number) => Promise<{ version: number }>;
   onComplete: (payload: ProductionInterviewPayload) => Promise<void>;
-  onReloadDraft?: () => Promise<{ payload: ProductionInterviewPayload; version: number }>;
+  onReloadDraft?: () => Promise<{ payload: InterviewEvidencePayload; version: number }>;
 }) {
-  const [criteriaSnapshot, setCriteriaSnapshot] = useState<PublishedInterviewCriterion[] | undefined>(() => initialPayload?.criteriaSnapshot);
-  const [criteriaTemplateVersion, setCriteriaTemplateVersion] = useState(initialPayload?.criteriaTemplateVersion ?? 0);
-  const [criteria, setCriteria] = useState<InterviewCriterion[]>(() => publishedCriteriaForInterview(initialPayload?.criteriaSnapshot));
-  const [state, setState] = useState<InterviewState>(() => hydrateInterviewState(initialPayload?.state, publishedCriteriaForInterview(initialPayload?.criteriaSnapshot)));
-  const [customCriteria, setCustomCriteria] = useState<CustomCriterion[]>(() => initialPayload?.customCriteria || []);
+  const [initialModel] = useState(() => initialProductionInterviewModel(initialPayload));
+  const [criteriaSnapshot, setCriteriaSnapshot] = useState<PublishedInterviewCriterion[] | undefined>(() => initialModel.payload?.criteriaSnapshot);
+  const [criteriaTemplateVersion, setCriteriaTemplateVersion] = useState(initialModel.payload?.criteriaTemplateVersion ?? 0);
+  const [criteria, setCriteria] = useState<InterviewCriterion[]>(initialModel.criteria);
+  const [state, setState] = useState<InterviewState>(() => initialModel.payload?.state || createInitialInterviewState(initialModel.criteria));
+  const [customCriteria, setCustomCriteria] = useState<CustomCriterion[]>(() => initialModel.payload?.customCriteria || []);
+  const [snapshotError, setSnapshotError] = useState<unknown>(initialModel.error);
   const saveDraftRef = useRef(onSaveDraft);
   const [saveSnapshot, setSaveSnapshot] = useState<InterviewDraftSaveSnapshot>({ status: initialVersion ? "saved" : "idle", version: initialVersion });
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1359,9 +1346,9 @@ export function ProductionHrInterview({
   const attentionTimer = useRef<number | null>(null);
   const payload = useMemo<ProductionInterviewPayload>(() => ({ schemaVersion: 2, state, customCriteria, criteriaTemplateVersion, criteriaSnapshot }), [criteriaSnapshot, criteriaTemplateVersion, customCriteria, state]);
   const criteriaComplete = criteria.every((criterion) => criterionIsComplete(criterion, state.answers[criterion.id]));
-  const customCriteriaComplete = customCriteria.every(customCriterionIsComplete);
+  const customCriteriaComplete = customCriteriaAreComplete(customCriteria);
   const summaryComplete = state.decision !== null && state.decisionReason.trim().length > 0;
-  const canComplete = criteriaComplete && customCriteriaComplete && summaryComplete;
+  const canComplete = !snapshotError && Boolean(criteriaSnapshot?.length) && criteriaComplete && customCriteriaComplete && summaryComplete;
   const coordinatorRef = useRef<InterviewDraftSaveCoordinator<ProductionInterviewPayload> | null>(null);
   if (!coordinatorRef.current) {
     coordinatorRef.current = new InterviewDraftSaveCoordinator({
@@ -1462,7 +1449,7 @@ export function ProductionHrInterview({
   }, [criteria, customCriteria, focusSummary, highlight, onComplete, payload]);
 
   useEffect(() => {
-    if (initialPayload?.criteriaSnapshot?.length) return;
+    if (initialPayload) return;
     let active = true;
     void hiringAPI.interviewCriteria().then(({ data }) => {
       if (!active) return;
@@ -1472,11 +1459,13 @@ export function ProductionHrInterview({
       setCriteriaTemplateVersion(Number(data.data.version || 0));
       setCriteria(nextCriteria);
       setState((current) => hydrateInterviewState(current, nextCriteria));
+      setSnapshotError(undefined);
     }).catch((error) => setSaveSnapshot((current) => ({ ...current, status: "error", error })));
     return () => { active = false; };
-  }, [initialPayload?.criteriaSnapshot]);
+  }, [initialPayload]);
 
   useEffect(() => {
+    if (snapshotError || !criteriaSnapshot?.length) return;
     if (initialRender.current) {
       initialRender.current = false;
       return;
@@ -1489,7 +1478,7 @@ export function ProductionHrInterview({
       coordinatorRef.current?.queue(payload);
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [payload]);
+  }, [criteriaSnapshot?.length, payload, snapshotError]);
 
   return (
     <div className="space-y-4">
@@ -1517,15 +1506,30 @@ export function ProductionHrInterview({
             if (!onReloadDraft) return;
             const latest = await onReloadDraft();
             suppressNextAutosave.current = true;
-            const nextCriteria = publishedCriteriaForInterview(latest.payload.criteriaSnapshot);
-            setCriteriaSnapshot(latest.payload.criteriaSnapshot);
-            setCriteriaTemplateVersion(latest.payload.criteriaTemplateVersion || 0);
-            setCriteria(nextCriteria);
-            setState(hydrateInterviewState(latest.payload.state, nextCriteria));
-            setCustomCriteria(latest.payload.customCriteria || []);
-            coordinatorRef.current?.reset(latest.version);
+            try {
+              const normalized = normalizeInitialInterviewPayload(latest.payload)!;
+              const nextCriteria = publishedCriteriaForInterview(normalized.criteriaSnapshot);
+              setCriteriaSnapshot(normalized.criteriaSnapshot);
+              setCriteriaTemplateVersion(normalized.criteriaTemplateVersion || 0);
+              setCriteria(nextCriteria);
+              setState(normalized.state);
+              setCustomCriteria(normalized.customCriteria);
+              setSnapshotError(undefined);
+              coordinatorRef.current?.reset(latest.version);
+            } catch (error) {
+              setSnapshotError(error);
+            }
           }} /></ErpCard>
       )}
+      {snapshotError ? (
+        <ErpInlineState
+          kind="error"
+          title={snapshotError instanceof InterviewSnapshotError
+            ? snapshotError.message
+            : "نسخه معیارهای این مصاحبه قابل بازیابی نیست. اطلاعات شما حفظ شده است؛ با پشتیبانی تماس بگیرید."}
+        />
+      ) : null}
+      {!snapshotError ? <>
       <GuidedVariant
         state={state}
         onChange={setState}
@@ -1574,6 +1578,7 @@ export function ProductionHrInterview({
           </div>}
         </ErpSection>
       )}
+      </> : null}
     </div>
   );
 }
@@ -1581,15 +1586,53 @@ export function ProductionHrInterview({
 export function ProductionInterviewReport({
   payload,
   version,
+  outcome,
+  explanation,
   history = [],
 }: {
-  payload: ProductionInterviewPayload;
+  payload: InterviewEvidencePayload;
   version: number;
-  history?: Array<{ version: number; outcome?: string; evidenceJson?: ProductionInterviewPayload }>;
+  outcome?: string;
+  explanation?: string | null;
+  history?: Array<{ version: number; outcome?: string; explanation?: string | null; evidenceJson?: InterviewEvidencePayload }>;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
-  const criteria = publishedCriteriaForInterview(payload.criteriaSnapshot);
-  const state = hydrateInterviewState(payload.state, criteria);
+  if ((payload as ProductionInterviewPayload).schemaVersion !== 2) {
+    const legacy = payload as LegacyInterviewPayload;
+    const legacyById = new Map((legacy.criteria || []).map((criterion) => [criterion.criterionId, criterion]));
+    return <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ErpBadge tone={outcome === "POSITIVE" ? "success" : "danger"}>{outcome === "POSITIVE" ? "نتیجه مثبت" : "نتیجه منفی"}</ErpBadge>
+        <span className="text-sm text-[var(--sds-text-secondary)]">گزارش قدیمی نسخه {version.toLocaleString("fa-IR")}</span>
+      </div>
+      <ErpInlineState kind="stale" title="این گزارش با ساختار نسخه قدیمی ثبت شده و بدون تغییر در داده‌های اصلی نمایش داده می‌شود." />
+      <div className="grid gap-3 md:grid-cols-2">
+        {interviewCriteria.map((criterion) => {
+          const answer = legacyById.get(criterion.id);
+          return <ErpCard key={criterion.id} className="space-y-2 p-4">
+            <b>{criterion.order.toLocaleString("fa-IR")}. {criterion.title}</b>
+            <p>{answer?.score === "UNASSESSED" ? "ارزیابی نشد" : answer?.score ? `امتیاز ${answer.score.toLocaleString("fa-IR")}` : "ثبت نشده"}</p>
+            {answer?.note ? <p className="whitespace-pre-wrap text-sm text-[var(--sds-text-secondary)]">یادداشت: {answer.note}</p> : null}
+          </ErpCard>;
+        })}
+      </div>
+      <ErpSection title="جمع‌بندی مصاحبه"><p className="whitespace-pre-wrap">{explanation || "بدون توضیح"}</p></ErpSection>
+    </div>;
+  }
+  let criteria: InterviewCriterion[];
+  let state: InterviewState;
+  try {
+    const normalized = normalizeInitialInterviewPayload(payload)!;
+    criteria = publishedCriteriaForInterview(normalized.criteriaSnapshot);
+    state = normalized.state;
+  } catch (error) {
+    return <ErpInlineState
+      kind="error"
+      title={error instanceof InterviewSnapshotError
+        ? error.message
+        : "گزارش مصاحبه به‌دلیل نامعتبر بودن نسخه معیارها قابل نمایش نیست. با پشتیبانی تماس بگیرید."}
+    />;
+  }
   const judgment = (value: Judgment) => value ? judgmentLabels[value] : "ثبت نشده";
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1615,7 +1658,7 @@ export function ProductionInterviewReport({
     <ErpSection title="جمع‌بندی مصاحبه"><p className="whitespace-pre-wrap">{state.decisionReason}</p></ErpSection>
     {history.length > 0 && <ErpSection title="تاریخچه نسخه‌ها">
       <ErpButton label={historyOpen ? "بستن تاریخچه" : "نمایش نسخه‌های قبلی"} variant="ghost" onClick={() => setHistoryOpen((open) => !open)} />
-      {historyOpen && <div className="mt-3 space-y-4">{history.map((item) => <ErpCard key={item.version} className="p-4">{item.evidenceJson ? <ProductionInterviewReport payload={item.evidenceJson} version={item.version} /> : <div className="flex items-center justify-between gap-3"><b>نسخه {item.version.toLocaleString("fa-IR")}</b><ErpBadge tone={item.outcome === "POSITIVE" ? "success" : "danger"}>{item.outcome === "POSITIVE" ? "مثبت" : "منفی"}</ErpBadge></div>}</ErpCard>)}</div>}
+      {historyOpen && <div className="mt-3 space-y-4">{history.map((item) => <ErpCard key={item.version} className="p-4">{item.evidenceJson ? <ProductionInterviewReport payload={item.evidenceJson} version={item.version} outcome={item.outcome} explanation={item.explanation} /> : <div className="flex items-center justify-between gap-3"><b>نسخه {item.version.toLocaleString("fa-IR")}</b><ErpBadge tone={item.outcome === "POSITIVE" ? "success" : "danger"}>{item.outcome === "POSITIVE" ? "مثبت" : "منفی"}</ErpBadge></div>}</ErpCard>)}</div>}
     </ErpSection>}
   </div>;
 }

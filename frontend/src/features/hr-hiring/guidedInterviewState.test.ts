@@ -43,5 +43,14 @@ const stability = interviewCriteria.find((criterion) => criterion.id === "stabil
 const stabilityAnswer = createInitialInterviewState().answers.stability;
 assert.equal(criterionIsComplete(stability, { ...stabilityAnswer, score: 4, note: "" }), true);
 assert.equal(criterionIsComplete(stability, { ...stabilityAnswer, score: "UNASSESSED", note: "" }), true);
+assert.equal(criterionIsComplete(stability, { ...stabilityAnswer, score: 6 as any }), false);
+
+const selfView = interviewCriteria.find((criterion) => criterion.id === "selfView")!;
+const selfViewAnswer = createInitialInterviewState().answers.selfView;
+assert.equal(criterionIsComplete(selfView, {
+  ...selfViewAnswer,
+  strengths: ["یک"],
+  weaknesses: ["یک"],
+}), false);
 
 console.log("Guided HR interview state tests passed.");

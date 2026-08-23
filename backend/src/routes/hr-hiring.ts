@@ -101,7 +101,11 @@ import {
 } from '../services/hrFormalAssessmentPolicy';
 import { DEFAULT_INTERVIEW_CRITERIA, normalizeInterviewCriteriaPublication } from '../services/hrInterviewCriteriaPolicy';
 import { ensureInitialInterviewCriteriaSet } from '../services/hrInitialInterviewCriteriaSet';
-import { initialInterviewDraftSaveError } from '../services/hrInitialInterviewDraftPersistence';
+import {
+  initialInterviewDraftSaveError,
+  mergeInitialInterviewDraftWithFrozenCriteria,
+  withFrozenInitialInterviewCriteria,
+} from '../services/hrInitialInterviewDraftPersistence';
 import { nextEvaluationOccurrenceNumber, normalizeCompanyEvaluationPlanItem, validateCompanyEvaluationResult } from '../services/hrCompanyEvaluationPolicy';
 import { buildHiringCandidateSearchConditions } from '../services/hrHiringSearch';
 import {
@@ -1756,13 +1760,19 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
 router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Response) => {
   const row = await prisma.hrJobApplication.findUnique({ where: { id: req.params.id }, include: applicationInclude });
   if (!row) return res.status(404).json({ success: false, error: 'پرونده استخدام پیدا نشد.' });
-  const [authorityCodes, actionPermissionCodes, companyEvaluationOccurrences] = await Promise.all([
+  const [authorityCodes, actionPermissionCodes, companyEvaluationOccurrences, initialInterviewCriteriaVersion] = await Promise.all([
     activeHiringAuthoritiesForUser(actorId(req)),
     activeHrActionPermissionsForUser(prisma, actorId(req)),
     prisma.hrCompanyEvaluationOccurrence.findMany({
       where: { applicationId: row.id },
       select: { status: true },
     }),
+    row.initialInterviewDraft
+      ? prisma.hrInterviewCriteriaVersion.findUnique({
+          where: { version: row.initialInterviewDraft.criteriaTemplateVersion },
+          select: { criteriaJson: true },
+        })
+      : Promise.resolve(null),
   ]);
   const authorities = new Set(authorityCodes);
   const actionPermissions = new Set(actionPermissionCodes);
@@ -1811,6 +1821,16 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
     data.preIdentityChecklistItems = data.preIdentityChecklistItems.map(({ storageName: _storageName, sha256: _sha256, malwareScanStatus: _scan, ...item }: any) => item);
   }
   if (!actionPermissions.has('RECORD_INITIAL_INTERVIEW')) data.initialInterviewDraft = null;
+  else if (data.initialInterviewDraft && initialInterviewCriteriaVersion) {
+    data.initialInterviewDraft = {
+      ...data.initialInterviewDraft,
+      dataJson: withFrozenInitialInterviewCriteria(
+        data.initialInterviewDraft.dataJson,
+        data.initialInterviewDraft.criteriaTemplateVersion,
+        initialInterviewCriteriaVersion.criteriaJson,
+      ),
+    };
+  }
   data.documents = canSeeHrSensitive ? data.documents.map(({ storageName: _storageName, sha256: _sha256, ...document }: any) => document) : [];
   data.assessments = canSeeAssessmentEvidence ? data.assessments.map(({ storageName: _storageName, sha256: _sha256, ...assessment }: any) => assessment) : [];
   data.formalAssessmentPlans = canSeeAssessmentEvidence
@@ -3132,7 +3152,23 @@ router.get('/applications/:id/initial-interview', requireActionPermission('RECOR
       select: { version: true, outcome: true, explanation: true, evidenceJson: true, criteriaTemplateVersion: true, decidedBy: true, decidedAt: true },
     }),
   ]);
-  res.json({ success: true, data: { draft, history } });
+  const criteriaVersion = draft
+    ? await prisma.hrInterviewCriteriaVersion.findUnique({
+        where: { version: draft.criteriaTemplateVersion },
+        select: { criteriaJson: true },
+      })
+    : null;
+  const hydratedDraft = draft && criteriaVersion
+    ? {
+        ...draft,
+        dataJson: withFrozenInitialInterviewCriteria(
+          draft.dataJson,
+          draft.criteriaTemplateVersion,
+          criteriaVersion.criteriaJson,
+        ),
+      }
+    : draft;
+  res.json({ success: true, data: { draft: hydratedDraft, history } });
 }));
 
 router.put('/applications/:id/initial-interview/draft', requireActionPermission('RECORD_INITIAL_INTERVIEW'), asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -3161,10 +3197,19 @@ router.put('/applications/:id/initial-interview/draft', requireActionPermission(
       updatedByUserId: actorId(req),
     } });
     }
-    const { criteriaTemplateVersion: _ignoredVersion, criteriaSnapshot: _ignoredSnapshot, ...mutablePayload } = payload as Record<string, unknown>;
+    const frozenCriteria = await tx.hrInterviewCriteriaVersion.findUnique({
+      where: { version: current.criteriaTemplateVersion },
+      select: { criteriaJson: true },
+    });
+    const nextPayload = mergeInitialInterviewDraftWithFrozenCriteria(
+      current.dataJson,
+      payload,
+      current.criteriaTemplateVersion,
+      frozenCriteria?.criteriaJson,
+    );
     return tx.hrInitialInterviewDraft.update({ where: { id: current.id }, data: {
       version: { increment: 1 },
-      dataJson: { ...(current.dataJson as Record<string, unknown>), ...mutablePayload } as Prisma.InputJsonValue,
+      dataJson: nextPayload as Prisma.InputJsonValue,
       updatedByUserId: actorId(req),
     } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).catch((error) => {

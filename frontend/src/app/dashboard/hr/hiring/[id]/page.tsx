@@ -49,7 +49,8 @@ import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewMo
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import { ApplicantCaseOverview } from "@/features/hr-hiring/ApplicantCaseOverview";
 import { FinalHiringRejection } from "@/features/hr-hiring/FinalHiringRejection";
-import { ProductionHrInterview, ProductionInterviewReport, type ProductionInterviewPayload } from "@/features/hr-hiring/prototype/HrInterviewPrototype";
+import { ProductionHrInterview, ProductionInterviewReport } from "@/features/hr-hiring/prototype/HrInterviewPrototype";
+import type { InterviewEvidencePayload } from "@/features/hr-hiring/prototype/interviewEvidence";
 import { validateHiringQueueReturnHref } from "@/features/hr-hiring/hiringQueueViewModel";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
@@ -2398,8 +2399,10 @@ function PreIdentitySection({
     >
       {(phase === "INITIAL_HR_REVIEW" || phase === "COMPANY_EVALUATION_PLAN") && hasAction("VIEW_INITIAL_INTERVIEW_REPORT") && latestInterview?.evidenceJson && (
         <ProductionInterviewReport
-          payload={latestInterview.evidenceJson as ProductionInterviewPayload}
+          payload={latestInterview.evidenceJson as InterviewEvidencePayload}
           version={latestInterview.version}
+          outcome={latestInterview.outcome}
+          explanation={latestInterview.explanation}
           history={decisions.filter((item: any) => item.kind === "HR_INTERVIEW" && item.version !== latestInterview.version)}
         />
       )}
@@ -2414,7 +2417,7 @@ function PreIdentitySection({
       )}
       {phase === "INITIAL_HR_REVIEW" && hasAction("RECORD_INITIAL_INTERVIEW") && (!latestInterview || editingInterviewRevision) && (
         <ProductionHrInterview
-          initialPayload={application.initialInterviewDraft?.dataJson as ProductionInterviewPayload | null}
+          initialPayload={application.initialInterviewDraft?.dataJson as InterviewEvidencePayload | null}
           initialVersion={application.initialInterviewDraft?.version || 0}
           history={decisions.filter((item: any) => item.kind === "HR_INTERVIEW")}
           busy={busy}
@@ -2426,7 +2429,7 @@ function PreIdentitySection({
             const response = await hiringAPI.getInitialInterview(applicationId);
             const draft = response.data.data.draft;
             return {
-              payload: draft.dataJson as ProductionInterviewPayload,
+              payload: draft.dataJson as InterviewEvidencePayload,
               version: draft.version as number,
             };
           }}

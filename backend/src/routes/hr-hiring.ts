@@ -107,7 +107,7 @@ import {
 import { tehranCivilDateKey } from '../services/tehranBusinessCalendar';
 import { createHrHiringCollateralReturnDuty } from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
 import { reconcileAcceptedOfferFollowUp } from '../services/hrAcceptedOfferFollowUp';
-import { resolveWorkspaceDutyAuthority } from '../services/crossWorkspaceDutyAuthority';
+import { isSystemOnboardingTaskTitle } from '../services/hrOnboardingTaskRetirementAudit';
 
 const router = express.Router();
 const ACCESS_TTL_DAYS = 7;
@@ -3541,16 +3541,12 @@ router.put('/applications/:id/collateral/:itemId/review', requireActionPermissio
   if (req.body.status !== 'VERIFIED' && !coordinationReason) throw new Error('علت نیاز به اصلاح یا پیگیری الزامی است.');
   const item = await prisma.hrCollateralItem.findUniqueOrThrow({ where: { id: req.params.itemId } });
   if (await prisma.hrCollateralItem.findUnique({ where: { supersedesItemId: item.id }, select: { id: true } })) throw new Error('این قلم با نسخه جدید جایگزین شده است.');
-  const managerialSelfVerification = item.recordedBy === actorId(req) && (await resolveWorkspaceDutyAuthority(prisma, {
-    userId: actorId(req), workspace: 'accounting', feature: 'VERIFY_COLLATERAL_CUSTODY',
-  })).canSelfDecide && (await activeHrActionPermissionsForUser(prisma, actorId(req))).includes('RECORD_COLLATERAL_CUSTODY');
-  if (item.applicationId !== req.params.id || (item.recordedBy === actorId(req) && !managerialSelfVerification)) throw new Error('مدیر مالی ثبت‌کننده نمی‌تواند همان قلم را تأیید کند.');
+  if (item.applicationId !== req.params.id || item.recordedBy === actorId(req)) throw new Error('مدیر مالی ثبت‌کننده نمی‌تواند همان قلم را تأیید کند.');
   const row = await prisma.hrCollateralItem.update({ where: { id: item.id }, data: {
     status: req.body.status, note: req.body.note ?? item.note, coordinationReason: req.body.status === 'VERIFIED' ? null : coordinationReason,
     approvedBy: req.body.status === 'VERIFIED' ? actorId(req) : null, approvedAt: req.body.status === 'VERIFIED' ? new Date() : null
   }});
-  await audit(req.params.id, 'COLLATERAL_REVIEWED', req, { itemId: row.id, status: row.status,
-    ...(managerialSelfVerification ? { managerialSelfVerification: true, overrideLabel: 'استفاده از اختیار مدیریتی' } : {}) });
+  await audit(req.params.id, 'COLLATERAL_REVIEWED', req, { itemId: row.id, status: row.status });
   res.json({ success: true, data: row });
 }));
 
@@ -3564,16 +3560,12 @@ router.post('/applications/:id/collateral/approve', requireActionPermission('VER
   }
   const supersededIds = new Set(items.map((item) => item.supersedesItemId).filter(Boolean));
   const currentItems = items.filter((item) => !supersededIds.has(item.id));
-  const permissions = await activeHrActionPermissionsForUser(prisma, actorId(req));
-  const managerialFinalOverride = permissions.includes('RECORD_COLLATERAL_CUSTODY')
-    && (await resolveWorkspaceDutyAuthority(prisma, { userId: actorId(req), workspace: 'accounting', feature: 'VERIFY_COLLATERAL_CUSTODY' })).canSelfDecide;
-  const usedManagerialFinalOverride = managerialFinalOverride
-    && currentItems.some((item) => item.recordedBy === actorId(req) && item.approvedBy === actorId(req));
-  if (!currentItems.length || currentItems.some((item) => item.required && (item.status !== 'VERIFIED' || !item.approvedBy
-    || (item.recordedBy === item.approvedBy && !(managerialFinalOverride && item.approvedBy === actorId(req)))))) throw new Error('همه اقلام جاری و الزامی وثیقه باید توسط مدیر مستقل یا اختیار مدیریتی ممیزی‌شده تأیید شوند.');
+  if (!currentItems.length || currentItems.some((item) => item.required
+    && (item.status !== 'VERIFIED' || !item.approvedBy || item.recordedBy === item.approvedBy))) {
+    throw new Error('همه اقلام جاری و الزامی وثیقه باید توسط مدیر مستقل تأیید شوند.');
+  }
   await prisma.hrJobApplication.update({ where: { id: req.params.id }, data: { collateralClearance: 'APPROVED' } });
-  await audit(req.params.id, 'COLLATERAL_CLEARANCE_APPROVED', req, usedManagerialFinalOverride
-    ? { managerialSelfVerification: true, overrideLabel: 'استفاده از اختیار مدیریتی' } : undefined);
+  await audit(req.params.id, 'COLLATERAL_CLEARANCE_APPROVED', req);
   res.json({ success: true });
 }));
 
@@ -3616,16 +3608,12 @@ router.get('/applications/:id/collateral-returns/:returnId/download', requireAny
 router.post('/applications/:id/collateral/:itemId/return-confirm', requireActionPermission('VERIFY_COLLATERAL_CUSTODY'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const item = await prisma.hrCollateralItem.findFirstOrThrow({ where: { id: req.params.itemId, applicationId: req.params.id } });
   if (!item.returnedAt || !item.returnedTo || !item.returnEvidenceNote || !item.returnEvidenceStorageName) throw new Error('جزئیات و مدرک تحویل باید کامل باشد.');
-  const managerialSelfVerification = item.returnedBy === actorId(req) && (await resolveWorkspaceDutyAuthority(prisma, {
-    userId: actorId(req), workspace: 'accounting', feature: 'VERIFY_COLLATERAL_CUSTODY',
-  })).canSelfDecide && (await activeHrActionPermissionsForUser(prisma, actorId(req))).includes('RECORD_COLLATERAL_CUSTODY');
-  if (item.returnedBy === actorId(req) && !managerialSelfVerification) throw new Error('ثبت‌کننده تحویل نمی‌تواند همان بازگشت را تأیید کند.');
+  if (item.returnedBy === actorId(req)) throw new Error('ثبت‌کننده تحویل نمی‌تواند همان بازگشت را تأیید کند.');
   const row = await prisma.hrCollateralItem.update({ where: { id: item.id }, data: { returnConfirmedBy: actorId(req), returnConfirmedAt: new Date() } });
   await prisma.$transaction((tx) => reconcileAcceptedOfferFollowUp(tx, {
     applicationId: req.params.id, actorUserId: actorId(req),
   }));
-  await audit(req.params.id, 'COLLATERAL_RETURN_CONFIRMED', req, { itemId: row.id,
-    ...(managerialSelfVerification ? { managerialSelfVerification: true, overrideLabel: 'استفاده از اختیار مدیریتی' } : {}) });
+  await audit(req.params.id, 'COLLATERAL_RETURN_CONFIRMED', req, { itemId: row.id });
   res.json({ success: true, data: row });
 }));
 
@@ -3823,21 +3811,43 @@ router.put('/applications/:id/insurance', requireActionPermission('MANAGE_RECRUI
   res.json({ success: true, data: row });
 }));
 
-router.post('/applications/:id/onboarding-tasks', requireActionPermission('MANAGE_RECRUITMENT_CASE'), asyncHandler(async (req: AuthRequest, res: Response) => {
-  const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { employmentRelationship: true } });
-  if (!application.employmentRelationship || application.employmentRelationship.status !== 'PLANNED') throw new Error('وظیفه موقت فقط برای پرسنل برنامه‌ریزی‌شده قابل ثبت است.');
-  if (!String(req.body.title || '').trim() || !['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HR_PAYROLL_PROCESSOR', 'HR_PAYROLL_MANAGER', 'FINANCE_RECORDER', 'FINANCE_MANAGER'].includes(req.body.ownerAuthority)) throw new Error('عنوان و مالک سازمانی معتبر وظیفه الزامی است.');
-  const row = await prisma.hrOnboardingTask.create({ data: {
-    applicationId: req.params.id, title: req.body.title, ownerAuthority: req.body.ownerAuthority,
-    activationBlocker: !!req.body.activationBlocker, dueDate: req.body.dueDate ? parseDate(req.body.dueDate, 'مهلت') : null, createdBy: actorId(req),
-    assigneePersonnelId: req.body.assignToHire === false ? null : application.employmentRelationship.personnelId
-  }});
-  res.status(201).json({ success: true, data: row });
-}));
+type HiringAuditWriter = (
+  applicationId: string,
+  eventType: string,
+  req: AuthRequest | express.Request,
+  payload?: unknown,
+) => Promise<unknown>;
+
+export const createRetiredOnboardingTaskCreationHandler = (
+  writeAudit: HiringAuditWriter = audit,
+) => async (req: AuthRequest, res: Response) => {
+  await writeAudit(
+    req.params.id,
+    'MANUAL_ONBOARDING_TASK_CREATION_RETIRED',
+    req,
+    { method: 'POST', route: '/applications/:id/onboarding-tasks' },
+  );
+  return res.status(410).json({
+    success: false,
+    error: 'ایجاد وظیفه دستی شروع همکاری متوقف شده است؛ وضعیت قرارداد، حقوق و بیمه به‌صورت خودکار پیگیری می‌شود.',
+  });
+};
+
+router.post(
+  '/applications/:id/onboarding-tasks',
+  requireActionPermission('MANAGE_RECRUITMENT_CASE'),
+  asyncHandler(createRetiredOnboardingTaskCreationHandler()),
+);
 
 router.put('/applications/:id/onboarding-tasks/:taskId', asyncHandler(async (req: AuthRequest, res: Response) => {
   const task = await prisma.hrOnboardingTask.findUniqueOrThrow({ where: { id: req.params.taskId } });
   if (task.applicationId !== req.params.id) return res.status(404).json({ success: false, error: 'وظیفه در این پرونده پیدا نشد.' });
+  if (isSystemOnboardingTaskTitle(task.title)) {
+    return res.status(409).json({
+      success: false,
+      error: 'وضعیت قرارداد، حقوق و بیمه فقط از فرایند اصلی همان بخش به‌روزرسانی می‌شود.',
+    });
+  }
   const actionPermission = ({
     HR_PROCESSOR: 'MANAGE_RECRUITMENT_CASE',
     HR_MANAGER: 'MANAGE_RECRUITMENT_CASE',

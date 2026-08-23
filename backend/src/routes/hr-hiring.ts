@@ -3481,7 +3481,7 @@ router.post('/applications/:id/collateral/apply-template', requireActionPermissi
   if (existing) throw new Error('پرونده وثیقه قبلاً برای دریافت توسط امور مالی ساخته شده است.');
   await prisma.$transaction([
     prisma.hrJobApplication.update({ where: { id: application.id }, data: { collateralTemplateId: null, collateralClearance: 'IN_PROGRESS' } }),
-    prisma.hrCollateralItem.create({ data: { applicationId: application.id, type: requirement.type, required: true, amountRials: requirement.amountRials, status: 'MISSING', note: requirement.candidateExplanation, recordedBy: actorId(req) } })
+    prisma.hrCollateralItem.create({ data: { applicationId: application.id, collateralRequirementId: requirement.id, type: requirement.type, required: true, amountRials: requirement.amountRials, status: 'MISSING', note: requirement.candidateExplanation, recordedBy: actorId(req) } })
   ]);
   await audit(req.params.id, 'COLLATERAL_RECEIPT_OPENED', req, { requirementId: requirement.id, requirementVersion: requirement.version });
   res.status(201).json({ success: true });
@@ -3491,7 +3491,10 @@ router.post('/applications/:id/collateral', requireActionPermission('RECORD_COLL
   let scanStatus: string | undefined;
   let digest: string | undefined;
   try {
-    const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } });
+    const [application, activeRequirement] = await Promise.all([
+      prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } }),
+      prisma.hrCollateralRequirement.findFirst({ where: { applicationId: req.params.id, status: 'ACTIVE' }, orderBy: { version: 'desc' } }),
+    ]);
     if (!application.acceptedOfferAt) throw new Error('دریافت وثیقه فقط پس از پذیرش پیشنهاد مجاز است.');
     if (!COLLATERAL_TYPES.has(req.body.type)) throw new Error('نوع وثیقه نامعتبر است.');
     if (!req.file || !req.body.receivedAt || !String(req.body.custodyLocation || '').trim()) throw new Error('اسکن، تاریخ دریافت و محل نگهداری اصل وثیقه الزامی است.');
@@ -3510,10 +3513,11 @@ router.post('/applications/:id/collateral', requireActionPermission('RECORD_COLL
     };
     const previous = req.body.itemId ? await prisma.hrCollateralItem.findFirst({ where: { id: req.body.itemId, applicationId: req.params.id, status: { in: ['MISSING', 'MISMATCH', 'UNREADABLE'] } } }) : null;
     if (req.body.itemId && !previous) throw new Error('قلم چک‌لیست قابل ثبت یا جایگزینی پیدا نشد.');
+    const collateralRequirementId = previous?.collateralRequirementId ?? activeRequirement?.id;
     const row = previous?.status === 'MISSING'
-      ? await prisma.hrCollateralItem.update({ where: { id: previous.id }, data: itemData })
+      ? await prisma.hrCollateralItem.update({ where: { id: previous.id }, data: { ...itemData, collateralRequirementId } })
       : await prisma.hrCollateralItem.create({ data: {
-        applicationId: req.params.id, templateItemId: previous?.templateItemId, supersedesItemId: previous?.id,
+        applicationId: req.params.id, collateralRequirementId, templateItemId: previous?.templateItemId, supersedesItemId: previous?.id,
         version: previous ? previous.version + 1 : 1, ...itemData,
         type: previous?.type || itemData.type, required: previous?.required ?? itemData.required
       }});

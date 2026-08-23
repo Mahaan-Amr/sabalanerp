@@ -8,6 +8,7 @@ export const reconcileAcceptedOfferFollowUp = async (
   input: { applicationId: string; actorUserId: string; actorKind?: 'USER' | 'SYSTEM'; now?: Date },
 ) => {
   const now = input.now ?? new Date();
+  const systemActor = input.actorKind === 'SYSTEM';
   const requirement = await database.hrCollateralRequirement.findFirst({
     where: { applicationId: input.applicationId, status: "ACTIVE" },
     orderBy: { version: "desc" },
@@ -54,18 +55,25 @@ export const reconcileAcceptedOfferFollowUp = async (
       });
       for (const duty of staleDuties) {
         await database.crossWorkspaceDuty.update({ where: { id: duty.id }, data: {
-          status: 'CANCELLED', respondedAt: now, respondedByUserId: input.actorUserId,
-          structuredResultJson: { reason: 'COLLATERAL_REQUIREMENT_SUPERSEDED' },
+          status: 'CANCELLED', respondedAt: null, respondedByUserId: null,
+          structuredResultJson: {
+            reason: 'COLLATERAL_REQUIREMENT_SUPERSEDED',
+            actorKind: systemActor ? 'SYSTEM' : 'USER',
+            ...(systemActor ? { technicalActorUserId: input.actorUserId, source: 'ACCEPTED_OFFER_COLLATERAL_BACKFILL' } : {}),
+          },
         } });
         await database.crossWorkspaceDutyAssignmentHistory.updateMany({
           where: { dutyId: duty.id, endedAt: null },
-          data: { endedAt: now, endReason: 'SOURCE_CHANGED', changedByUserId: input.actorUserId },
+          data: { endedAt: now, endReason: 'SOURCE_CHANGED', changedByUserId: systemActor ? null : input.actorUserId },
         });
         const latestAudit = await database.crossWorkspaceDutyAuditVersion.aggregate({ where: { dutyId: duty.id }, _max: { version: true } });
         await database.crossWorkspaceDutyAuditVersion.create({ data: {
           dutyId: duty.id, version: (latestAudit._max.version || 0) + 1, eventCode: 'CANCELLED',
-          actorUserId: input.actorUserId, sourceVersion: duty.sourceVersion, envelopeVersion: duty.envelopeVersion,
-          policyVersion: 1, reason: 'COLLATERAL_REQUIREMENT_SUPERSEDED', afterJson: { status: 'CANCELLED' },
+          actorUserId: systemActor ? null : input.actorUserId, sourceVersion: duty.sourceVersion, envelopeVersion: duty.envelopeVersion,
+          policyVersion: 1, reason: 'COLLATERAL_REQUIREMENT_SUPERSEDED', afterJson: {
+            status: 'CANCELLED', actorKind: systemActor ? 'SYSTEM' : 'USER',
+            ...(systemActor ? { technicalActorUserId: input.actorUserId, source: 'ACCEPTED_OFFER_COLLATERAL_BACKFILL' } : {}),
+          },
         } });
       }
     }

@@ -72,6 +72,7 @@ import {
   resolveTaxRecordPopulation,
   taxRecordPopulationWhere,
 } from './accountingPopulations';
+import { createFinancialApprovalTransactionRunner } from './financialApprovalTransaction';
 
 
 const ELIGIBLE_CONTRACT_STATUSES: ContractStatus[] = [
@@ -1651,7 +1652,8 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
   const sepidarAmount = toDecimal(command.sepidarAmount);
   if (sepidarAmount.lte(0)) throw new Error('Sepidar amount is required');
 
-  const result = await prisma.$transaction(async (tx) => {
+  const runFinancialApprovalTransaction = createFinancialApprovalTransactionRunner(prisma);
+  const result = await runFinancialApprovalTransaction(async (tx) => {
     await lockFinancialApprovalRecord(tx, invoiceId);
     let before = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
     if (!before) throw new Error('Invoice record not found');
@@ -1883,7 +1885,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       if (contract) await publishAccountingActionWithinTransaction(notificationHook, tx, command.kind, contract, updated.id);
     }
     return updated;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  });
 
   return actionResponse('APPLIED', 'تایید مالی ثبت شد', { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
 };

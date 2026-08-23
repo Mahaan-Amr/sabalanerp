@@ -76,7 +76,7 @@
     "shipment-statement:cutover:activate": "tsx scripts/shipment-statement-cutover.ts activate",
     "test:dispatch-cutover": "tsx src/services/__tests__/dispatchCutoverPolicy.test.ts && tsx src/services/__tests__/dispatchCaseTimeline.test.ts",
     "test:dispatch-document-contracts": "tsx src/services/__tests__/dispatchDocumentContracts.test.ts && tsx src/services/__tests__/shipmentStatementMigration.test.ts",
-    "test:approved-pricing": "tsx src/services/__tests__/approvedPricing.test.ts",
+    "test:approved-pricing": "tsx src/services/__tests__/approvedPricing.test.ts && tsx src/services/__tests__/accountingFinancialApprovalTransactionPolicy.test.ts",
     "test:approved-pricing:db": "tsx src/services/__tests__/approvedPricingPrisma.test.ts",
     "test:approved-pricing:concurrency": "tsx src/services/__tests__/approvedPricingConcurrency.test.ts",
     "audit:contract-financial-evidence": "tsx src/scripts/audit-contract-financial-evidence.ts",

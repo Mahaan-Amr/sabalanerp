@@ -45,7 +45,7 @@ export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
       { code: 'REVIEW_IDENTITY_DOCUMENTS', labelFa: 'دریافت و تطبیق اسناد هویتی', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_FULL_APPLICANT_INFORMATION'] },
       { code: 'APPROVE_IDENTITY_CLEARANCE', labelFa: 'تأیید نهایی احراز هویت', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_FULL_APPLICANT_INFORMATION'] },
       { code: 'RESOLVE_CANDIDATE_PERSONNEL_IDENTITY_CONFLICT', labelFa: 'تعیین تکلیف مغایرت هویت متقاضی و پرسنل', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES', 'VIEW_FULL_APPLICANT_INFORMATION'] },
-      { code: 'RECORD_SIGNED_EMPLOYMENT_CONTRACT', labelFa: 'ثبت قرارداد کاغذی استخدام', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
+      { code: 'RECORD_SIGNED_EMPLOYMENT_CONTRACT', labelFa: 'ثبت قرارداد کاغذی استخدام', level: 'EDIT', prerequisites: [] },
       { code: 'VERIFY_SIGNED_EMPLOYMENT_CONTRACT', labelFa: 'بررسی قرارداد کاغذی استخدام', level: 'EDIT', prerequisites: [] },
       { code: 'MANAGE_COLLATERAL_REQUIREMENTS', labelFa: 'تعیین الزامات وثیقه متقاضی', level: 'EDIT', prerequisites: ['RECRUITMENT_CASES'] },
       { code: 'RECORD_COLLATERAL_CUSTODY', labelFa: 'ثبت دریافت و نگهداری وثیقه', level: 'EDIT', prerequisites: [] },

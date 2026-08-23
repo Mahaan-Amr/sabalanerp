@@ -1214,7 +1214,12 @@ export const hrHiringBaseFeatureForRequest = (path: string) => {
 router.use(asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (/^\/applications\/[^/]+(?:\/collateral(?:\/.*)?|\/collateral-returns\/[^/]+\/download)?$/.test(req.path)) {
     const permissions = await activeHrActionPermissionsForUser(prisma, actorId(req));
-    if (permissions.includes('RECORD_COLLATERAL_CUSTODY') || permissions.includes('VERIFY_COLLATERAL_CUSTODY')) return next();
+    if (permissions.includes('RECORD_COLLATERAL_CUSTODY') || permissions.includes('VERIFY_COLLATERAL_CUSTODY')
+      || permissions.includes('RECORD_SIGNED_EMPLOYMENT_CONTRACT')) return next();
+  }
+  if (/^\/applications\/[^/]+\/contracts(?:\/[^/]+\/(?:submit|withdraw|approve|return|download))?$/.test(req.path)) {
+    const permissions = await activeHrActionPermissionsForUser(prisma, actorId(req));
+    if (permissions.includes('RECORD_SIGNED_EMPLOYMENT_CONTRACT')) return next();
   }
   const featureCode = hrHiringBaseFeatureForRequest(req.path);
   const level = hrHiringBaseFeatureLevelForRequest(req.method, req.path);

@@ -440,6 +440,47 @@ export const reconstructLegacyV1Pricing = (input: {
   };
 };
 
+type ProjectedLegacyV1Pricing = {
+  baseAmountToman: string | null;
+  totalAmountToman: string;
+  pricingComponents: ReadonlyArray<{ id: string; kind: string; amountToman: string }>;
+};
+
+export const resolveLegacyV1PricingProjection = (input: {
+  canReconstructLegacyV1: boolean;
+  productRowId: string;
+  productSnapshot: Record<string, any> | null;
+  pricing: ProjectedLegacyV1Pricing;
+}) => {
+  const projectedTotal = new Prisma.Decimal(input.pricing.totalAmountToman ?? 0);
+  let snapshotRawTotal: Prisma.Decimal | null = null;
+  if (input.productSnapshot?.totalPrice != null && input.productSnapshot.totalPrice !== '') {
+    try {
+      const candidate = new Prisma.Decimal(String(input.productSnapshot.totalPrice));
+      if (candidate.isFinite() && candidate.gte(0) && !candidate.eq(projectedTotal) &&
+        candidate.toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP).eq(projectedTotal)) {
+        snapshotRawTotal = candidate;
+      }
+    } catch {
+      snapshotRawTotal = null;
+    }
+  }
+  const needsLegacyProjection = input.pricing.baseAmountToman == null ||
+    !projectedTotal.isInteger() || snapshotRawTotal != null;
+  if (!input.canReconstructLegacyV1 || !needsLegacyProjection) {
+    return { pricing: input.pricing, normalization: null };
+  }
+  if (!input.productSnapshot) {
+    throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} legacy pricing snapshot is missing`);
+  }
+  const reconstructed = reconstructLegacyV1Pricing({
+    productRowId: input.productRowId,
+    productSnapshot: input.productSnapshot,
+    rawTotalAmountToman: snapshotRawTotal?.toString() ?? String(input.pricing.totalAmountToman ?? ''),
+  });
+  return { pricing: reconstructed, normalization: reconstructed.normalization };
+};
+
 export const reconstructLegacyV1Quantity = (input: {
   productRowId: string;
   productType: string;
@@ -681,19 +722,15 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
           totalAmountToman: row.totalAmountToman ?? null,
           pricingComponents: row.pricingComponents,
         };
-        let legacyRawTotalAmountToman: string | null = null;
-        if (canReconstructLegacyV1 &&
-          (pricing.baseAmountToman == null || !new Prisma.Decimal(pricing.totalAmountToman ?? 0).isInteger())) {
-          if (!productSnapshot) throw new ApprovedPricingEvidenceError(`Product ${row.productRowId} legacy pricing snapshot is missing`);
-          const reconstructed = reconstructLegacyV1Pricing({
-            productRowId: row.productRowId,
-            productSnapshot,
-            rawTotalAmountToman: String(pricing.totalAmountToman ?? ''),
-          });
-          pricing = reconstructed;
-          legacyRawTotalAmountToman = reconstructed.normalization.rawTotalAmountToman;
-          monetaryNormalizations.push(reconstructed.normalization);
-        }
+        const resolvedPricing = resolveLegacyV1PricingProjection({
+          canReconstructLegacyV1,
+          productRowId: row.productRowId,
+          productSnapshot,
+          pricing,
+        });
+        pricing = resolvedPricing.pricing;
+        const legacyRawTotalAmountToman = resolvedPricing.normalization?.rawTotalAmountToman ?? null;
+        if (resolvedPricing.normalization) monetaryNormalizations.push(resolvedPricing.normalization);
         let requestedQuantity = row.quantity ?? null;
         let requestedLengthMeters = canonicalOptimizerDerivedLengthWitness(canonicalRow, row.lengthMeters) ?? null;
         let requestedAreaSquareMeters = row.areaSquareMeters ?? null;

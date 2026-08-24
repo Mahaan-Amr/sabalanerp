@@ -29,6 +29,7 @@ import {
   reconstructLegacyV1DiscountEligibility,
   reconstructLegacyV1Pricing,
   reconstructLegacyV1Quantity,
+  resolveLegacyV1PricingProjection,
   rebindFrozenContractItemIdentities,
   resolveFinancialApprovalGraphEvidence,
 } from '../approvedPricing/prismaRepository';
@@ -298,6 +299,67 @@ test('reconstructs legacy v1 monetary components with audited half-up Toman conv
       isMandatory: false, mandatoryPercentage: '20', appliedSubServices: [],
     },
   }), /do not reconcile/);
+});
+
+test('preserves a fractional graph-v1 source total when it seals exactly to the canonical whole Toman', () => {
+  const resolved = resolveLegacyV1PricingProjection({
+    canReconstructLegacyV1: true,
+    productRowId: 'contract-row-16ba23bf-810b-4f59-85f0-10e5d47145b1',
+    productSnapshot: {
+      currency: 'تومان',
+      originalTotalPrice: '42666666.67',
+      totalPrice: '46666666.67',
+      cuttingCost: '4000000',
+      totalSubServiceCost: '0',
+      finishingId: null,
+      finishingCost: null,
+      isMandatory: false,
+      mandatoryPercentage: '20',
+      appliedSubServices: [],
+    },
+    pricing: {
+      baseAmountToman: '42666667',
+      totalAmountToman: '46666667',
+      pricingComponents: [
+        { id: 'base-material', kind: 'base-material', amountToman: '42666667' },
+        { id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '4000000' },
+      ],
+    },
+  });
+
+  assert.equal(resolved.normalization?.rawTotalAmountToman, '46666666.67');
+  assert.equal(resolved.normalization?.sealedTotalAmountToman, '46666667');
+  assert.equal(resolved.normalization?.difference, '0.33');
+  assert.equal(resolved.pricing.totalAmountToman, '46666667');
+});
+
+test('keeps unmatched or unproven fractional source totals fail-closed', () => {
+  const pricing = {
+    baseAmountToman: '42666667',
+    totalAmountToman: '46666667',
+    pricingComponents: [
+      { id: 'base-material', kind: 'base-material', amountToman: '42666667' },
+      { id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '4000000' },
+    ],
+  };
+  const snapshot = {
+    currency: 'تومان', originalTotalPrice: '42666666.49', totalPrice: '46666666.49',
+    cuttingCost: '4000000', totalSubServiceCost: '0', finishingId: null, finishingCost: null,
+    isMandatory: false, mandatoryPercentage: '20', appliedSubServices: [],
+  };
+
+  assert.equal(resolveLegacyV1PricingProjection({
+    canReconstructLegacyV1: true,
+    productRowId: 'legacy-row-unmatched',
+    productSnapshot: snapshot,
+    pricing,
+  }).normalization, null, 'a source total that rounds to another whole Toman must remain unresolved');
+  assert.equal(resolveLegacyV1PricingProjection({
+    canReconstructLegacyV1: false,
+    productRowId: 'canonical-row-without-legacy-provenance',
+    productSnapshot: { ...snapshot, originalTotalPrice: '42666666.67', totalPrice: '46666666.67' },
+    pricing,
+  }).normalization, null, 'the graph-v1 rule must not apply without matching legacy provenance');
 });
 
 test('reconstructs graph-v1 stair cutting from its duplicated physical and tool lines', () => {

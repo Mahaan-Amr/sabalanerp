@@ -30,6 +30,7 @@ import {
   ErpBadge,
   ErpButton,
   ErpCard,
+  ErpFieldView,
   ErpLoading,
   ErpPage,
   ErpSection,
@@ -62,11 +63,11 @@ import {
   fromIsoDateTime,
   toIsoDate,
   toIsoDateTime,
-  isCompletePersianDateTime,
 } from "@/features/hr/hrUi";
 import {
   assessmentTypeLabel,
   authorityLabel,
+  hrCandidateDocumentStatusLabel,
   hrDisplayLabel,
 } from "@/features/hr/hrDisplay";
 import { normalizeIdentifierDigits, normalizeNumericText } from "@/lib/numberFormat";
@@ -162,10 +163,12 @@ export default function HiringCasePage() {
   const [deletionTarget, setDeletionTarget] = useState<any>(null);
   const [retentionTarget, setRetentionTarget] = useState<any>(null);
   const [actionPermissions, setActionPermissions] = useState<string[]>([]);
+  const [applicantOtp, setApplicantOtp] = useState<any>(null);
   const [correctionExplanations, setCorrectionExplanations] = useState<
     Record<string, string>
   >({});
   const [identityCorrectionOpen, setIdentityCorrectionOpen] = useState(false);
+  const [identityMismatchDraft, setIdentityMismatchDraft] = useState({ fieldKey: "", note: "" });
   const [identityResolution, setIdentityResolution] = useState({
     resolutionCode: "CREATE_NEW",
     evidenceIds: [] as string[],
@@ -200,11 +203,12 @@ export default function HiringCasePage() {
   const [offlineDecision, setOfflineDecision] = useState({
     decision: "ACCEPTED",
     communicationMethod: "PHONE",
-    communicatedAt: "",
+    communicatedOn: "",
     offlineReason: "",
-    confirmedCandidateInformation: "",
+    declineCategory: "",
     note: "",
   });
+  const [offlineDecisionAttempted, setOfflineDecisionAttempted] = useState(false);
   const [closure, setClosure] = useState({ outcome: "REJECTED", reason: "" });
   const [conversion, setConversion] = useState({
     scheduledStartDate: "",
@@ -378,6 +382,10 @@ export default function HiringCasePage() {
   };
   if (!data) return <ErpLoading />;
   const form = data.formRevisions?.[0]?.dataJson || {};
+  const latestSubmittedForm = data.formRevisions?.find((revision: any) => revision.status === "SUBMITTED")?.dataJson || null;
+  const latestSubmittedName = latestSubmittedForm
+    ? `${latestSubmittedForm.firstName || ""} ${latestSubmittedForm.lastName || ""}`.trim()
+    : "";
   const compensation = data.compensationSnapshots?.find(
     (snapshot: any) => !snapshot.obsoleteAt,
   );
@@ -749,14 +757,42 @@ export default function HiringCasePage() {
                     tone="neutral"
                     variant="outline"
                     disabled={busy || data.stage === "CLOSED"}
-                    onClick={() =>
-                      run(
+                    onClick={() => {
+                      setApplicantOtp(null);
+                      return run(
                         () => hiringAPI.invite(id),
                         "OTP جدید ارسال شد؛ OTP قبلی تا اولین استفاده موفق از کد جدید، پایان اعتبار خودش یا ۳۰ دقیقه موقتاً معتبر می‌ماند.",
-                      )
-                    }
+                      );
+                    }}
                   />
                 </div>
+                {applicantOtp && (
+                  <div className="mt-3">
+                    <ErpFieldView
+                      label="کد ورود جاری متقاضی"
+                      value={<span dir="ltr" className="font-mono text-base tracking-[0.2em]">{applicantOtp.code}</span>}
+                      hint={`معتبر تا ${dateTimeFa(applicantOtp.expiresAt)}`}
+                      tone="info"
+                    />
+                  </div>
+                )}
+                {!applicantOtp && actionPermissions.includes("MANAGE_RECRUITMENT_CASE") && actionPermissions.includes("VIEW_FULL_APPLICANT_INFORMATION") && (
+                  <ErpButton
+                    className="mt-3"
+                    label="نمایش کد ورود جاری"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => run(
+                      async () => {
+                        const response = await hiringAPI.revealApplicantOtp(id);
+                        setApplicantOtp(response.data.data);
+                        return response;
+                      },
+                      "نمایش کد ورود در ممیزی ثبت شد.",
+                      { awaitRefresh: false },
+                    )}
+                  />
+                )}
                 <div className="mt-3 space-y-2">
                   {(data.invitations || []).map((invitation: any) => (
                     <div
@@ -915,7 +951,7 @@ export default function HiringCasePage() {
                               دریافت
                             </ErpPressable>
                           )}
-                          <ErpBadge>{hrDisplayLabel(doc.status)}</ErpBadge>
+                          <ErpBadge tone={doc.inspectionSource === "ORIGINAL_SEEN" ? "success" : "info"}>{hrCandidateDocumentStatusLabel(doc)}</ErpBadge>
                         </span>
                       </div>
                     ))}
@@ -938,16 +974,21 @@ export default function HiringCasePage() {
                         (x: any) => x.fieldKey === key,
                       );
                       return (
-                        <div
-                          key={key}
-                          className="flex items-center justify-between rounded-lg border p-2 text-sm"
-                        >
-                          <span>{identityFieldLabels[key]}</span>
-                          <div className="flex gap-1">
+                        <div key={key} className="rounded-xl border border-[var(--sds-border-default)] p-3 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-bold">{identityFieldLabels[key]}</span>
+                            <ErpBadge tone={check?.status === "VERIFIED" ? "success" : check?.status === "MISMATCH" ? "danger" : check?.status === "NOT_APPLICABLE" ? "neutral" : "warning"}>
+                              {check?.status === "VERIFIED" ? "مطابق" : check?.status === "MISMATCH" ? "مغایرت" : check?.status === "UNREADABLE" ? "ناخوانا" : check?.status === "NOT_APPLICABLE" ? "نامرتبط" : "بررسی‌نشده"}
+                            </ErpBadge>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
                             {hasActionPermission("REVIEW_IDENTITY_DOCUMENTS") && (
                               <>
-                                <ErpPressable
-                                  type="submit"
+                                <ErpButton
+                                  label="مطابق"
+                                  tone="success"
+                                  variant="soft"
+                                  disabled={busy}
                                   onClick={() =>
                                     run(
                                       () =>
@@ -957,32 +998,17 @@ export default function HiringCasePage() {
                                       `${identityFieldLabels[key]} تأیید شد.`,
                                     )
                                   }
-                                  className="rounded bg-[var(--sds-success-surface)] px-2 py-1"
-                                >
-                                  مطابق
-                                </ErpPressable>
-                                <ErpPressable
-                                  type="submit"
-                                  onClick={() =>
-                                    run(
-                                      () =>
-                                        hiringAPI.setIdentityCheck(id, key, {
-                                          status: "MISMATCH",
-                                          note: "نیازمند اصلاح متقاضی",
-                                        }),
-                                      `${identityFieldLabels[key]} مغایر ثبت شد.`,
-                                    )
-                                  }
-                                  className="rounded bg-[var(--sds-danger-surface)] px-2 py-1"
-                                >
-                                  مغایرت
-                                </ErpPressable>
+                                />
+                                <ErpButton label="مغایرت" tone="danger" variant="soft" disabled={busy} onClick={() => setIdentityMismatchDraft({ fieldKey: key, note: check?.status === "MISMATCH" ? check.note || "" : "" })} />
                                 {[
                                   "militaryStatus",
                                   "birthCertificateExplanations",
                                 ].includes(key) && (
-                                  <ErpPressable
-                                    type="submit"
+                                  <ErpButton
+                                    label="نامرتبط"
+                                    tone="neutral"
+                                    variant="soft"
+                                    disabled={busy}
                                     onClick={() =>
                                       run(
                                         () =>
@@ -992,25 +1018,30 @@ export default function HiringCasePage() {
                                         `${identityFieldLabels[key]} غیرقابل اعمال ثبت شد.`,
                                       )
                                     }
-                                    className="rounded bg-[var(--sds-surface-subtle)] px-2 py-1"
-                                  >
-                                    ندارد/نامرتبط
-                                  </ErpPressable>
+                                  />
                                 )}
                               </>
                             )}
-                            <small>
-                              {check?.status === "VERIFIED"
-                                ? "مطابق"
-                                : check?.status === "MISMATCH"
-                                  ? "مغایرت"
-                                  : check?.status === "UNREADABLE"
-                                    ? "ناخوانا"
-                                    : check?.status === "NOT_APPLICABLE"
-                                      ? "نامرتبط"
-                                      : "بررسی‌نشده"}
-                            </small>
                           </div>
+                          {identityMismatchDraft.fieldKey === key && (
+                            <div className="mt-3 space-y-2">
+                              <ErpField label="شرح مغایرت" required>
+                                <ErpTextarea value={identityMismatchDraft.note} onChange={(event) => setIdentityMismatchDraft({ fieldKey: key, note: event.target.value })} />
+                              </ErpField>
+                              <div className="flex flex-wrap gap-2">
+                                <ErpButton
+                                  label="ثبت مغایرت"
+                                  tone="danger"
+                                  disabled={busy || !identityMismatchDraft.note.trim()}
+                                  onClick={() => run(
+                                    () => hiringAPI.setIdentityCheck(id, key, { status: "MISMATCH", note: identityMismatchDraft.note.trim() }),
+                                    `${identityFieldLabels[key]} مغایر ثبت شد.`,
+                                  ).then(() => setIdentityMismatchDraft({ fieldKey: "", note: "" }))}
+                                />
+                                <ErpButton label="انصراف" variant="ghost" onClick={() => setIdentityMismatchDraft({ fieldKey: "", note: "" })} />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1609,66 +1640,56 @@ export default function HiringCasePage() {
                             <option value="VIDEO_CALL">تماس تصویری</option>
                             <option value="OTHER">روش دیگر</option>
                           </ErpSelect>
-                          <ErpField label="زمان اعلام تصمیم متقاضی" required>
+                          <ErpField label="تاریخ اعلام تصمیم متقاضی" required error={offlineDecisionAttempted && !offlineDecision.communicatedOn ? "انتخاب تاریخ اعلام تصمیم الزامی است." : undefined}>
                             <HrPersianCalendar
-                              showTime
-                              autoCommitDateTime
-                              value={offlineDecision.communicatedAt}
-                              onChange={(communicatedAt) =>
+                              disableFutureDates
+                              value={offlineDecision.communicatedOn}
+                              onChange={(communicatedOn) =>
                                 setOfflineDecision({
                                   ...offlineDecision,
-                                  communicatedAt,
+                                  communicatedOn,
                                 })
                               }
                             />
                           </ErpField>
-                          {[
-                            ["offlineReason", "دلیل استفاده از مسیر آفلاین"],
-                            [
-                              "confirmedCandidateInformation",
-                              "نام کامل متقاضی که تأیید شد",
-                            ],
-                            ["note", "شرح گفت‌وگو و تصمیم"],
-                          ].map(([key, placeholder]) => (
-                            <ErpInput
-                              key={key}
-                              placeholder={placeholder}
-                              value={(offlineDecision as any)[key]}
-                              onChange={(event) =>
-                                setOfflineDecision({
-                                  ...offlineDecision,
-                                  [key]: event.target.value,
-                                })
-                              }
-                            />
-                          ))}
+                          <ErpField label="نام متقاضی در آخرین فرم ارسال‌شده">
+                            <ErpInput value={latestSubmittedName} readOnly aria-readonly="true" />
+                          </ErpField>
+                          <ErpField label="دلیل استفاده از مسیر آفلاین" required error={offlineDecisionAttempted && !offlineDecision.offlineReason.trim() ? "دلیل استفاده از مسیر آفلاین الزامی است." : undefined}>
+                            <ErpInput value={offlineDecision.offlineReason} onChange={(event) => setOfflineDecision({ ...offlineDecision, offlineReason: event.target.value })} />
+                          </ErpField>
+                          {offlineDecision.decision === "DECLINED" && (
+                            <ErpField label="دسته‌بندی دلیل رد" required error={offlineDecisionAttempted && !offlineDecision.declineCategory ? "انتخاب دسته‌بندی دلیل رد الزامی است." : undefined}>
+                              <ErpSelect value={offlineDecision.declineCategory} onChange={(event) => setOfflineDecision({ ...offlineDecision, declineCategory: event.target.value })}>
+                                <option value="">انتخاب کنید</option>
+                                <option value="COMPENSATION">حقوق و مزایا</option>
+                                <option value="ROLE">شرح نقش یا مسئولیت‌ها</option>
+                                <option value="START_DATE">تاریخ شروع همکاری</option>
+                                <option value="PERSONAL">شرایط شخصی</option>
+                                <option value="OTHER">سایر</option>
+                              </ErpSelect>
+                            </ErpField>
+                          )}
+                          <ErpField label="توضیح تکمیلی" required={false}>
+                            <ErpInput value={offlineDecision.note} onChange={(event) => setOfflineDecision({ ...offlineDecision, note: event.target.value })} />
+                          </ErpField>
                           <ErpButton
                             label="ثبت نهایی تصمیم آفلاین"
-                            disabled={
-                              busy ||
-                              !isCompletePersianDateTime(offlineDecision.communicatedAt) ||
-                              !offlineDecision.offlineReason.trim() ||
-                              !offlineDecision.confirmedCandidateInformation.trim() ||
-                              !offlineDecision.note.trim()
-                            }
-                            onClick={() =>
+                            disabled={busy || !latestSubmittedName}
+                            onClick={() => {
+                              setOfflineDecisionAttempted(true);
+                              if (!offlineDecision.communicatedOn || !offlineDecision.offlineReason.trim() || (offlineDecision.decision === "DECLINED" && !offlineDecision.declineCategory)) return;
                               run(
-                                () =>
-                                  hiringAPI.recordOfflineOfferDecision(
-                                    id,
-                                    compensation.id,
-                                    {
-                                      ...offlineDecision,
-                                      communicatedAt: toIsoDateTime(
-                                        offlineDecision.communicatedAt,
-                                      ),
-                                    },
-                                  ),
+                                () => hiringAPI.recordOfflineOfferDecision(id, compensation.id, {
+                                  ...offlineDecision,
+                                  communicatedOn: toIsoDate(offlineDecision.communicatedOn),
+                                }),
                                 "تصمیم آفلاین متقاضی با سابقه حسابرسی ثبت شد.",
-                              )
-                            }
+                              );
+                            }}
                             tone="warning"
                           />
+                          {!latestSubmittedName && <ErpInlineState className="md:col-span-2" kind="stale" title="ابتدا اصلاحات فرم متقاضی را ذخیره و ارسال کنید." />}
                         </div>
                       )}
                   </>

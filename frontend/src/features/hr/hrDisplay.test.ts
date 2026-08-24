@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   assessmentTypeLabel,
   authorityLabel,
+  hrCandidateDocumentStatusLabel,
   hrDisplayLabel,
 } from "./hrDisplay";
 
@@ -15,5 +16,8 @@ assert.equal(
 );
 assert.equal(hrDisplayLabel("UNKNOWN_INTERNAL_VALUE"), "خطای طبقه‌بندی");
 assert.equal(assessmentTypeLabel("OTHER"), "سایر");
+assert.equal(hrCandidateDocumentStatusLabel({ inspectionSource: "ORIGINAL_SEEN", status: "RECEIVED" }), "مشاهده‌شده");
+assert.equal(hrCandidateDocumentStatusLabel({ inspectionSource: "COPY_RECEIVED", status: "RECEIVED" }), "دریافت‌شده");
+assert.equal(hrDisplayLabel("RECEIVED"), "دریافت‌شده");
 
 console.log("HR Persian display tests passed.");

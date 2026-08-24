@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { ErpBadge, ErpButton, ErpCard, ErpInput, ErpSection, ErpTextarea } from "@/components/erp";
+import { ErpBadge, ErpButton, ErpCard, ErpField, ErpInput, ErpSection, ErpTextarea } from "@/components/erp";
 import { applicantHiringAPI } from "@/lib/hiringApi";
 import { normalizeNumericText } from "@/lib/numberFormat";
+import { parseLocalizedAssessmentScore } from "./assessmentScore";
 
 type AssessmentKind = "DISC" | "EQ" | "BIG_FIVE";
 type Draft = Record<string, string> & { notes: string };
@@ -37,6 +38,8 @@ export function ApplicantFormalAssessments({
   assessments,
   busy,
   run,
+  showValidationErrors = false,
+  onAssessmentValid,
 }: {
   assessments?: {
     planVersion: number;
@@ -44,18 +47,21 @@ export function ApplicantFormalAssessments({
   } | null;
   busy: boolean;
   run: (action: () => Promise<unknown>, success: string) => Promise<void | boolean>;
+  showValidationErrors?: boolean;
+  onAssessmentValid?: (kind: AssessmentKind) => void;
 }) {
   const [drafts, setDrafts] = useState<Partial<Record<AssessmentKind, Draft>>>({});
   const [attachments, setAttachments] = useState<Partial<Record<AssessmentKind, File[]>>>({});
   if (!assessments?.selections.length) return null;
 
   const update = (kind: AssessmentKind, key: string, value: string) => {
-    setDrafts((current) => ({
-      ...current,
-      [kind]: { ...(current[kind] || emptyDraft()), [key]: value },
-    }));
+    setDrafts((current) => {
+      const next = { ...(current[kind] || emptyDraft()), [key]: value };
+      if (fields[kind].every((field) => !parseLocalizedAssessmentScore(next[field.key]).error)) onAssessmentValid?.(kind);
+      return { ...current, [kind]: next };
+    });
   };
-  const complete = (kind: AssessmentKind) => fields[kind].every(({ key }) => (drafts[kind]?.[key] || "").trim());
+  const complete = (kind: AssessmentKind) => fields[kind].every(({ key }) => !parseLocalizedAssessmentScore(drafts[kind]?.[key]).error);
 
   const submit = async (kind: AssessmentKind) => {
     await applicantHiringAPI.submitFormalAssessmentResult(kind, drafts[kind] || {});
@@ -80,18 +86,21 @@ export function ApplicantFormalAssessments({
             {!selection.completed && (
               <>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {fields[selection.assessmentKind].map((item) => (
-                    <label key={item.key} className="space-y-1 text-sm font-semibold">
-                      <span>{item.label}</span>
+                  {fields[selection.assessmentKind].map((item, index) => {
+                    const value = drafts[selection.assessmentKind]?.[item.key] || "";
+                    const scoreError = parseLocalizedAssessmentScore(value).error;
+                    return (
+                    <ErpField key={item.key} label={item.label} error={(showValidationErrors || value.trim().length > 0) ? scoreError : undefined}>
                       <ErpInput
+                        id={index === 0 ? `applicant-field-assessment-${selection.assessmentKind}` : `applicant-field-assessment-${selection.assessmentKind}-${item.key}`}
                         inputMode="decimal"
-                        value={drafts[selection.assessmentKind]?.[item.key] || ""}
-                        onChange={(event) => update(selection.assessmentKind, item.key, normalizeNumericText(event.target.value, 2))}
+                        value={value}
+                        onChange={(event) => update(selection.assessmentKind, item.key, normalizeNumericText(event.target.value))}
                         aria-label={`امتیاز ${item.label}`}
                         placeholder="۰ تا ۱۰۰"
                       />
-                    </label>
-                  ))}
+                    </ErpField>
+                  );})}
                 </div>
                 <ErpTextarea
                   value={drafts[selection.assessmentKind]?.notes || ""}

@@ -5426,6 +5426,7 @@ model HrJobApplication {
   audits                             HrHiringAudit[]
   identityConflicts                  HrCandidatePersonnelIdentityConflict[]
   assessments                        HrCandidateAssessment[]
+  companyEvaluationOccurrences       HrCompanyEvaluationOccurrence[]
   formalAssessmentPlans              HrFormalAssessmentPlan[]
   formalAssessmentResults            HrFormalAssessmentResult[]
   initialInterviewDraft              HrInitialInterviewDraft?
@@ -5658,6 +5659,7 @@ model HrCompanyEvaluationOccurrence {
   cancelledByUserId       String?
   cancelledAt             DateTime?
   evaluatorPersonnel      Personnel?                             @relation(fields: [evaluatorPersonnelId], references: [id], onDelete: Restrict)
+  application             HrJobApplication                       @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   assignmentHistory       HrCompanyEvaluationAssignmentHistory[]
 
   @@unique([applicationId, type, occurrenceNumber])

@@ -14,7 +14,7 @@ import {
   ErpSelect,
 } from "@/components/erp";
 import { dateTimeFa } from "@/features/hr/hrUi";
-import { hrDisplayLabel } from "@/features/hr/hrDisplay";
+import { hrCandidateDocumentStatusLabel, hrDisplayLabel } from "@/features/hr/hrDisplay";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { formatDisplayNumber } from "@/lib/numberFormat";
 
@@ -123,7 +123,7 @@ function EvidenceGroup({ entries, onDownload }: { entries: any[]; onDownload: (i
         <ErpCard key={`${item.category}-${item.id}-${item.version}`} className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div>
             <p className="font-bold">{item.title}</p>
-            <p className="text-xs text-[var(--sds-text-secondary)]">{item.safeOwner} · نسخه {Number(item.version || 1).toLocaleString("fa-IR")} · {hrDisplayLabel(item.reviewStatus)}</p>
+            <p className="text-xs text-[var(--sds-text-secondary)]">{item.safeOwner} · نسخه {Number(item.version || 1).toLocaleString("fa-IR")} · {item.category === "IDENTITY" ? hrCandidateDocumentStatusLabel({ inspectionSource: item.inspectionSource, status: item.reviewStatus }) : hrDisplayLabel(item.reviewStatus)}</p>
             {!item.restricted && <p className="text-xs text-[var(--sds-text-secondary)]">{item.originalName || "بدون فایل پیوست"}</p>}
           </div>
           {item.canOpen ? <ErpButton label="دریافت فایل" variant="soft" onClick={() => onDownload(item)} /> : <ErpBadge>دسترسی مستقل لازم است</ErpBadge>}

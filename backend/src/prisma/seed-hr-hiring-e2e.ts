@@ -646,31 +646,50 @@ async function main() {
   });
 
   for (const applicationId of [fixture.applicationId, fixture.releaseApplicationId, fixture.blockedApplicationId]) {
-    const companyExecutedDisc = applicationId === fixture.applicationId;
+    const applicantExecutedDisc = applicationId === fixture.applicationId;
     const plan = await prisma.hrFormalAssessmentPlan.upsert({
       where: { stableKey: `hr-e2e:formal-assessment-plan:${applicationId}:1` },
       update: {
         status: "ACTIVE",
-        explicitlyNoAssessment: !companyExecutedDisc,
-        executionMethod: companyExecutedDisc ? "COMPANY" : null,
+        explicitlyNoAssessment: !applicantExecutedDisc,
+        executionMethod: applicantExecutedDisc ? "APPLICANT" : null,
       },
       create: {
         stableKey: `hr-e2e:formal-assessment-plan:${applicationId}:1`,
         applicationId,
         version: 1,
-        explicitlyNoAssessment: !companyExecutedDisc,
-        executionMethod: companyExecutedDisc ? "COMPANY" : null,
+        explicitlyNoAssessment: !applicantExecutedDisc,
+        executionMethod: applicantExecutedDisc ? "APPLICANT" : null,
         finalizedByUserId: user.id,
-        reason: companyExecutedDisc
-          ? "Company-executed DISC for localized score acceptance"
+        reason: applicantExecutedDisc
+          ? "Applicant-executed DISC for localized score acceptance"
           : "Explicit no-assessment decision for the HR hiring E2E fixture",
       },
     });
-    if (companyExecutedDisc) {
-      await prisma.hrFormalAssessmentPlanSelection.upsert({
+    if (applicantExecutedDisc) {
+      const selection = await prisma.hrFormalAssessmentPlanSelection.upsert({
         where: { planId_assessmentKind: { planId: plan.id, assessmentKind: "DISC" } },
-        update: { selected: true, executionMethod: "COMPANY" },
-        create: { planId: plan.id, assessmentKind: "DISC", selected: true, executionMethod: "COMPANY" },
+        update: { selected: true, executionMethod: "APPLICANT" },
+        create: { planId: plan.id, assessmentKind: "DISC", selected: true, executionMethod: "APPLICANT" },
+      });
+      await prisma.hrFormalAssessmentResult.upsert({
+        where: { stableKey: `hr-e2e:formal-assessment-result:${applicationId}:DISC:1` },
+        update: {
+          planId: plan.id,
+          planSelectionId: selection.id,
+          status: "PENDING",
+          resultJson: undefined,
+          recordedAt: null,
+        },
+        create: {
+          stableKey: `hr-e2e:formal-assessment-result:${applicationId}:DISC:1`,
+          applicationId,
+          planId: plan.id,
+          planSelectionId: selection.id,
+          assessmentKind: "DISC",
+          resultVersion: 1,
+          status: "PENDING",
+        },
       });
     }
   }

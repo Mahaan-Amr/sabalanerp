@@ -31,7 +31,8 @@ import {
   generateApplicantOtp,
   normalizeApplicantDigits,
   normalizeApplicantMobile,
-  normalizeApplicantOtp
+  normalizeApplicantOtp,
+  projectCurrentApplicantOtp
 } from '../services/hrCandidateAccess';
 import {
   actionPermissionForHiringLifecycleAction,
@@ -947,7 +948,9 @@ router.put('/public/application/draft', applicantSession, asyncHandler(async (re
   const allowedCorrectionFields = Array.isArray(latest?.correctionFieldsJson) ? latest.correctionFieldsJson.map(String) : [];
   if (latest && allowedCorrectionFields.length) {
     const previous = latest.dataJson as Record<string, unknown>;
-    const attempted = Object.keys(normalizedBody).filter((key) => !allowedCorrectionFields.includes(key) && JSON.stringify(normalizedBody[key]) !== JSON.stringify(previous[key]));
+    const atomicCorrectionFields = new Set(allowedCorrectionFields);
+    if (atomicCorrectionFields.has('educationLevel')) atomicCorrectionFields.add('educationLevelOther');
+    const attempted = Object.keys(normalizedBody).filter((key) => !atomicCorrectionFields.has(key) && JSON.stringify(normalizedBody[key]) !== JSON.stringify(previous[key]));
     if (attempted.length) return res.status(422).json({ success: false, error: `فقط فیلدهای مشخص‌شده قابل اصلاح‌اند: ${allowedCorrectionFields.join(', ')}` });
   }
   let revision;
@@ -991,12 +994,10 @@ router.post('/public/application/submit', applicantSession, asyncHandler(async (
   const packageExecutionMethod = activeAssessmentPlan?.executionMethod
     || activeAssessmentPlan?.selections.find((selection) => selection.selected)?.executionMethod
     || null;
-  if (packageExecutionMethod === 'APPLICANT' && !applicantAssessmentState.evidence.complete) {
+  if (!correctionFields.length && packageExecutionMethod === 'APPLICANT' && !applicantAssessmentState.evidence.complete) {
     throw new Error('پیش از ارسال نهایی فرم، امتیازهای همه ارزیابی‌های انتخاب‌شده را تکمیل کنید.');
   }
-  const declarationFullName = normalizedName(req.body.declarationFullName);
-  if (!req.body.declarationAccepted || !declarationFullName) throw new Error('پذیرش اظهارنامه و نام کامل الزامی است.');
-  if (declarationFullName !== normalizedName(`${data.firstName} ${data.lastName}`)) throw new Error('نام اظهارنامه باید با نام و نام خانوادگی فرم یکسان باشد.');
+  if (req.body.declarationAccepted !== true) throw new Error('پذیرش اظهارنامه الزامی است.');
   await prisma.$transaction(async (tx) => {
     const application = await tx.hrJobApplication.findUniqueOrThrow({
       where: { id: applicationId },
@@ -1015,7 +1016,7 @@ router.post('/public/application/submit', applicantSession, asyncHandler(async (
       potentialPersonnel,
     });
     await tx.hrApplicationFormRevision.update({ where: { id: latest.id }, data: {
-      status: 'SUBMITTED', declarationAccepted: true, declarationFullName,
+      status: 'SUBMITTED', declarationAccepted: true, declarationFullName: null,
       submittedAt: new Date(), submittedIp: req.ip, submittedUserAgent: req.get('user-agent')
     }});
     await tx.hrCandidate.update({ where: { id: application.candidateId }, data: {
@@ -1041,9 +1042,9 @@ router.post('/public/application/submit', applicantSession, asyncHandler(async (
 
 router.post('/public/application/compensation/accept', applicantSession, asyncHandler(async (req: ApplicantRequest, res: Response) => {
   const applicationId = req.applicant!.applicationId;
-  const [snapshot, application, submittedFullName] = await Promise.all([
+  const [snapshot, latestRevision, submittedFullName] = await Promise.all([
     prisma.hrCompensationSnapshot.findFirst({ where: { applicationId }, orderBy: { version: 'desc' } }),
-    prisma.hrJobApplication.findUniqueOrThrow({ where: { id: applicationId } }),
+    prisma.hrApplicationFormRevision.findFirst({ where: { applicationId }, orderBy: { revisionNumber: 'desc' }, select: { status: true } }),
     latestSubmittedFullName(applicationId)
   ]);
   const formalAssessmentGate = await formalAssessmentEvidenceFor(applicationId);
@@ -1051,8 +1052,7 @@ router.post('/public/application/compensation/accept', applicantSession, asyncHa
   if (!snapshot || !isCompensationPayrollVerified(snapshot) || snapshot.obsoleteAt) return res.status(409).json({ success: false, error: 'پیشنهاد جبران خدمات هنوز بررسی نشده یا منسوخ شده است.' });
   if (snapshot.candidateDecision) return res.status(409).json({ success: false, error: 'برای این نسخه قبلاً تصمیم ثبت شده است.' });
   if (req.body.accepted !== true) throw new Error('تأیید صریح پذیرش پیشنهاد الزامی است.');
-  const acceptedName = normalizedName(req.body.fullName);
-  if (!acceptedName || acceptedName !== submittedFullName) throw new Error('نام کامل باید با آخرین فرم ثبت‌شده متقاضی یکسان باشد.');
+  if (latestRevision?.status !== 'SUBMITTED' || !submittedFullName) return res.status(409).json({ success: false, error: 'ابتدا اصلاحات فرم را ذخیره و ارسال کنید.' });
   await prisma.$transaction(async (tx) => {
     const latest = await tx.hrCompensationSnapshot.findFirst({
       where: { applicationId },
@@ -1060,6 +1060,12 @@ router.post('/public/application/compensation/accept', applicantSession, asyncHa
       select: { id: true }
     });
     if (latest?.id !== snapshot.id) throw new Error('نسخه جدیدتری از پیشنهاد ثبت شده است. صفحه را دوباره بارگذاری کنید.');
+    const latestForm = await tx.hrApplicationFormRevision.findFirst({
+      where: { applicationId }, orderBy: { revisionNumber: 'desc' }, select: { status: true, dataJson: true },
+    });
+    const latestFormData = latestForm?.dataJson as Record<string, unknown> | undefined;
+    const acceptedName = normalizedName(`${latestFormData?.firstName || ''} ${latestFormData?.lastName || ''}`);
+    if (latestForm?.status !== 'SUBMITTED' || !acceptedName) throw new Error('ابتدا اصلاحات فرم را ذخیره و ارسال کنید.');
     const now = new Date();
     const decision = await tx.hrCompensationSnapshot.updateMany({
       where: { id: snapshot.id, candidateDecision: null },
@@ -1086,11 +1092,12 @@ router.post('/public/application/compensation/accept', applicantSession, asyncHa
 
 router.post('/public/application/compensation/decline', applicantSession, asyncHandler(async (req: ApplicantRequest, res: Response) => {
   const applicationId = req.applicant!.applicationId;
-  const [snapshot, application] = await Promise.all([
+  const [snapshot, latestRevision] = await Promise.all([
     prisma.hrCompensationSnapshot.findFirst({ where: { applicationId }, orderBy: { version: 'desc' } }),
-    prisma.hrJobApplication.findUniqueOrThrow({ where: { id: applicationId } })
+    prisma.hrApplicationFormRevision.findFirst({ where: { applicationId }, orderBy: { revisionNumber: 'desc' }, select: { status: true } })
   ]);
   if (!snapshot || !isCompensationPayrollVerified(snapshot) || snapshot.obsoleteAt) return res.status(409).json({ success: false, error: 'پیشنهاد همکاری هنوز بررسی نشده یا منسوخ شده است.' });
+  if (latestRevision?.status !== 'SUBMITTED') return res.status(409).json({ success: false, error: 'ابتدا اصلاحات فرم را ذخیره و ارسال کنید.' });
   const formalAssessmentGate = await formalAssessmentEvidenceFor(applicationId);
   if (!formalAssessmentGate.evidence.complete) return res.status(409).json({ success: false, error: 'ارزیابی‌های رسمی انتخاب‌شده هنوز تکمیل نشده‌اند.' });
   if (snapshot.candidateDecision) return res.status(409).json({ success: false, error: 'برای این نسخه قبلاً تصمیم ثبت شده است.' });
@@ -1104,6 +1111,10 @@ router.post('/public/application/compensation/decline', applicantSession, asyncH
       select: { id: true }
     });
     if (latest?.id !== snapshot.id) throw new Error('نسخه جدیدتری از پیشنهاد ثبت شده است. صفحه را دوباره بارگذاری کنید.');
+    const latestForm = await tx.hrApplicationFormRevision.findFirst({
+      where: { applicationId }, orderBy: { revisionNumber: 'desc' }, select: { status: true },
+    });
+    if (latestForm?.status !== 'SUBMITTED') throw new Error('ابتدا اصلاحات فرم را ذخیره و ارسال کنید.');
     const decision = await tx.hrCompensationSnapshot.updateMany({
       where: { id: snapshot.id, candidateDecision: null },
       data: {
@@ -1951,6 +1962,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   data.activationReadiness = actionPermissions.has('MANAGE_RECRUITMENT_CASE')
     ? buildEmploymentActivationReadiness(row)
     : null;
+  data.invitations = data.invitations.map(({ otpHash: _otpHash, otpCiphertext: _otpCiphertext, ...invitation }: any) => invitation);
   if (!canSeeDecisionDetails) {
     data.hiringDecisions = data.hiringDecisions.map(({ kind, outcome, version, decidedAt }: any) => ({ kind, outcome, version, decidedAt }));
     data.preIdentityChecklistItems = data.preIdentityChecklistItems.map(({ id, title, status, dueAt, managementResolution }: any) => ({ id, title, status, dueAt, managementResolution }));
@@ -2055,8 +2067,28 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   });
   if (!authorities.has('HR_MANAGER')) data.audits = [];
   await audit(row.id, 'HIRING_CASE_VIEWED', req, undefined);
+  res.set('Cache-Control', 'private, no-store');
   res.json({ success: true, data });
 }));
+
+router.get(
+  '/applications/:id/applicant-otp',
+  requireActionPermission('MANAGE_RECRUITMENT_CASE'),
+  requireActionPermission('VIEW_FULL_APPLICANT_INFORMATION'),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const application = await prisma.hrJobApplication.findUniqueOrThrow({
+      where: { id: req.params.id },
+      select: {
+        candidate: { select: { mobile: true } },
+        invitations: { select: { id: true, mobileSnapshot: true, otpCiphertext: true, createdAt: true, expiresAt: true, revokedAt: true, overlapExpiresAt: true } },
+      },
+    });
+    const current = projectCurrentApplicantOtp(application.invitations, application.candidate.mobile);
+    await audit(req.params.id, 'APPLICANT_OTP_REVEALED', req, { invitationId: current?.invitationId || null });
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ success: true, data: current });
+  }),
+);
 
 router.post('/applications/:id/archive', requireArchiveManager, asyncHandler(async (req: AuthRequest, res: Response) => {
   const reason = assertArchiveReason(req.body.reason);
@@ -2857,18 +2889,16 @@ router.post('/applications/:id/compensation/:snapshotId/notification/retry', req
 
 router.post('/applications/:id/compensation/:snapshotId/offline-decision', requireActionPermission('MANAGE_RECRUITMENT_CASE'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const evidence = validateOfflineOfferDecision(req.body);
-  const [snapshot, latest, application, submittedFullName] = await Promise.all([
+  const [snapshot, latest, latestRevision, submittedFullName] = await Promise.all([
     prisma.hrCompensationSnapshot.findUniqueOrThrow({ where: { id: req.params.snapshotId } }),
     prisma.hrCompensationSnapshot.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true } }),
-    prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } }),
+    prisma.hrApplicationFormRevision.findFirst({ where: { applicationId: req.params.id }, orderBy: { revisionNumber: 'desc' }, select: { status: true } }),
     latestSubmittedFullName(req.params.id)
   ]);
   if (latest?.id !== snapshot.id || !isCompensationPayrollVerified(snapshot) || snapshot.obsoleteAt) throw new Error('تصمیم آفلاین فقط برای آخرین پیشنهاد بررسی‌شده و غیرمنسوخ قابل ثبت است.');
   await assertFormalAssessmentEvidenceComplete(req.params.id);
   if (snapshot.candidateDecision) throw new Error('برای این نسخه قبلاً تصمیم ثبت شده است.');
-  if (normalizedName(evidence.confirmedCandidateInformation) !== submittedFullName) {
-    throw new Error('نام کامل تأییدشده باید با آخرین فرم ثبت‌شده متقاضی یکسان باشد.');
-  }
+  if (latestRevision?.status !== 'SUBMITTED' || !submittedFullName) throw new Error('ابتدا اصلاحات فرم را ذخیره و ارسال کنید.');
   const now = new Date();
   await prisma.$transaction(async (tx) => {
     const latestInTransaction = await tx.hrCompensationSnapshot.findFirst({
@@ -2877,6 +2907,12 @@ router.post('/applications/:id/compensation/:snapshotId/offline-decision', requi
       select: { id: true }
     });
     if (latestInTransaction?.id !== snapshot.id) throw new Error('نسخه جدیدتری از پیشنهاد ثبت شده است. صفحه را دوباره بارگذاری کنید.');
+    const latestForm = await tx.hrApplicationFormRevision.findFirst({
+      where: { applicationId: req.params.id }, orderBy: { revisionNumber: 'desc' }, select: { status: true, dataJson: true },
+    });
+    const latestFormData = latestForm?.dataJson as Record<string, unknown> | undefined;
+    const confirmedName = normalizedName(`${latestFormData?.firstName || ''} ${latestFormData?.lastName || ''}`);
+    if (latestForm?.status !== 'SUBMITTED' || !confirmedName) throw new Error('ابتدا اصلاحات فرم را ذخیره و ارسال کنید.');
     const decision = await tx.hrCompensationSnapshot.updateMany({
       where: { id: snapshot.id, candidateDecision: null },
       data: {
@@ -2886,14 +2922,14 @@ router.post('/applications/:id/compensation/:snapshotId/offline-decision', requi
         candidateDecisionBy: actorId(req),
         candidateAcceptedAt: evidence.decision === 'ACCEPTED' ? now : null,
         candidateAcceptedName:
-          evidence.decision === 'ACCEPTED' ? submittedFullName : null,
+          evidence.decision === 'ACCEPTED' ? confirmedName : null,
         candidateDeclineCategory:
-          evidence.decision === 'DECLINED' ? 'OFFLINE_CONFIRMED' : null,
+          evidence.decision === 'DECLINED' ? evidence.declineCategory : null,
         candidateDecisionNote: evidence.note,
         offlineCommunicationMethod: evidence.communicationMethod,
         offlineCommunicatedAt: evidence.communicatedAt,
         offlineReason: evidence.offlineReason,
-        offlineConfirmedInformation: submittedFullName
+        offlineConfirmedInformation: confirmedName
       }
     });
     if (decision.count !== 1) throw new Error('برای این نسخه قبلاً تصمیم ثبت شده است.');
@@ -3673,7 +3709,7 @@ router.post('/applications/:id/assessments/decision', requireActionPermission('M
     dispositionReason: decision === 'RESERVE' ? reason : application.dispositionReason,
     dispositionBy: decision === 'RESERVE' ? actorId(req) : application.dispositionBy,
     dispositionAt: decision === 'RESERVE' ? now : application.dispositionAt,
-    stage: decision === 'APPROVED' ? 'OFFER' : decision === 'REJECTED' ? 'CLOSED' : application.stage,
+    stage: decision === 'REJECTED' ? 'CLOSED' : application.stage,
     preClosureStage: decision === 'REJECTED' ? application.stage : application.preClosureStage,
     outcome: decision === 'REJECTED' ? 'REJECTED' : application.outcome,
     outcomeReason: decision === 'REJECTED' ? reason : application.outcomeReason

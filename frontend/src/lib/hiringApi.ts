@@ -35,6 +35,7 @@ export const hiringAPI = {
   permanentlyDelete: (id: string, data: any) =>
     internal.post(`/applications/${id}/permanent-delete`, data),
   get: (id: string) => internal.get(`/applications/${id}`),
+  revealApplicantOtp: (id: string) => internal.get(`/applications/${id}/applicant-otp`),
   getOverview: (id: string, returnTo?: string) =>
     internal.get(`/applications/${id}/overview`, { params: returnTo ? { returnTo } : undefined }),
   getFullInformation: (id: string) =>
@@ -251,9 +252,8 @@ export const applicantHiringAPI = {
   getClosedState: () => applicant.get("/public/application/closed-state"),
   saveDraft: (data: any) => applicant.put("/public/application/draft", data),
   submit: (data: any) => applicant.post("/public/application/submit", data),
-  acceptCompensation: (fullName: string) =>
+  acceptCompensation: () =>
     applicant.post("/public/application/compensation/accept", {
-      fullName,
       accepted: true,
     }),
   declineCompensation: (category: string, note: string) =>

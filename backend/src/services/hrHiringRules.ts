@@ -29,11 +29,38 @@ export const validateHiringQuestionnaire = (data: any) => {
   if (iranian && !isValidIranianNationalCode(data?.nationalCode)) throw new Error('کد ملی معتبر نیست.');
   if (!iranian && (!data?.foreignIdentityType || !data?.foreignIdentityNumber)) missing.push('foreignIdentity');
   if (!/^09\d{9}$/.test(String(data?.mobile || ''))) throw new Error('شماره همراه معتبر نیست.');
+  const educationLevels = ['PRIMARY', 'LOWER_SECONDARY', 'DIPLOMA', 'ASSOCIATE', 'BACHELOR', 'MASTER', 'DOCTORATE', 'SEMINARY', 'OTHER'];
+  if (!educationLevels.includes(String(data?.educationLevel || ''))) throw new Error('آخرین مقطع تحصیلی نامعتبر است.');
+  if (data?.educationLevel === 'OTHER' && !String(data?.educationLevelOther || '').trim()) throw new Error('عنوان مقطع برای گزینه سایر الزامی است.');
+  const currentJalaliYear = Number(new Intl.DateTimeFormat('en-US-u-ca-persian', { year: 'numeric', timeZone: 'Asia/Tehran' }).formatToParts(new Date()).find((part) => part.type === 'year')?.value);
+  if (!/^\d{4}$/.test(String(data?.graduationYear || '')) || Number(data.graduationYear) < 1300 || Number(data.graduationYear) > currentJalaliYear) {
+    throw new Error(`سال اخذ مدرک باید بین ۱۳۰۰ تا ${currentJalaliYear.toLocaleString('fa-IR', { useGrouping: false })} باشد.`);
+  }
+  validateHiringRepeaters(data);
   if (missing.length) throw new Error(`پاسخ فیلدهای الزامی ناقص است: ${Array.from(new Set(missing)).join(', ')}`);
   return true;
 };
 
+const validateHiringRepeaters = (data: any, requestedFields?: Set<string>) => {
+  const repeaters = [
+    { key: 'workHistory', label: 'سابقه کاری', fields: ['organization', 'duration', 'lastPosition', 'lastSalaryBenefits'] },
+    { key: 'skills', label: 'مهارت', fields: ['name', 'familiarity', 'proficiency'] },
+    { key: 'languages', label: 'زبان خارجی', fields: ['name', 'level', 'proficiency'] },
+  ];
+  for (const repeater of repeaters) {
+    if (requestedFields && !requestedFields.has(repeater.key)) continue;
+    const rows = Array.isArray(data?.[repeater.key]) ? data[repeater.key] : [];
+    rows.forEach((row: any, index: number) => {
+      const filled = repeater.fields.filter((field) => String(row?.[field] ?? '').trim() !== '');
+      if (filled.length > 0 && filled.length < repeater.fields.length) {
+        throw new Error(`ردیف ${repeater.label} ${index + 1} باید کامل یا حذف شود.`);
+      }
+    });
+  }
+};
+
 export const validateHiringCorrection = (data: any, fields: string[]) => {
+  const requestedFields = new Set(fields);
   const missing = fields.filter((key) =>
     data?.[key] === undefined ||
     data?.[key] === null ||
@@ -51,6 +78,18 @@ export const validateHiringCorrection = (data: any, fields: string[]) => {
   if (fields.includes('mobile') && !/^09\d{9}$/.test(String(data?.mobile || ''))) {
     throw new Error('شماره همراه معتبر نیست.');
   }
+  if (fields.includes('educationLevel')) {
+    const educationLevels = ['PRIMARY', 'LOWER_SECONDARY', 'DIPLOMA', 'ASSOCIATE', 'BACHELOR', 'MASTER', 'DOCTORATE', 'SEMINARY', 'OTHER'];
+    if (!educationLevels.includes(String(data?.educationLevel || ''))) throw new Error('آخرین مقطع تحصیلی نامعتبر است.');
+    if (data?.educationLevel === 'OTHER' && !String(data?.educationLevelOther || '').trim()) throw new Error('عنوان مقطع برای گزینه سایر الزامی است.');
+  }
+  if (fields.includes('graduationYear')) {
+    const currentJalaliYear = Number(new Intl.DateTimeFormat('en-US-u-ca-persian', { year: 'numeric', timeZone: 'Asia/Tehran' }).formatToParts(new Date()).find((part) => part.type === 'year')?.value);
+    if (!/^\d{4}$/.test(String(data?.graduationYear || '')) || Number(data.graduationYear) < 1300 || Number(data.graduationYear) > currentJalaliYear) {
+      throw new Error(`سال اخذ مدرک باید بین ۱۳۰۰ تا ${currentJalaliYear.toLocaleString('fa-IR', { useGrouping: false })} باشد.`);
+    }
+  }
+  validateHiringRepeaters(data, requestedFields);
   return true;
 };
 

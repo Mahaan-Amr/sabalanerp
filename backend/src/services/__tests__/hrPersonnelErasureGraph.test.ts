@@ -15,6 +15,18 @@ const models = [
     { name: 'personnelId', kind: 'scalar' },
     { name: 'personnel', kind: 'object', type: 'Personnel', relationFromFields: ['personnelId'], relationToFields: ['id'] },
   ] },
+  { name: 'AssessmentSelection', fields: [
+    { name: 'id', kind: 'scalar' },
+    { name: 'planId', kind: 'scalar' },
+    { name: 'kind', kind: 'scalar' },
+  ] },
+  { name: 'AssessmentResult', fields: [
+    { name: 'id', kind: 'scalar' },
+    { name: 'selectionId', kind: 'scalar', isRequired: true },
+    { name: 'planId', kind: 'scalar', isRequired: true },
+    { name: 'kind', kind: 'scalar', isRequired: true },
+    { name: 'selection', kind: 'object', type: 'AssessmentSelection', relationFromFields: ['selectionId', 'planId', 'kind'], relationToFields: ['id', 'planId', 'kind'] },
+  ] },
   { name: 'Session', fields: [
     { name: 'id', kind: 'scalar' },
     { name: 'userId', kind: 'scalar' },
@@ -33,11 +45,16 @@ const models = [
 const relations = buildDeletionRelationIndex(models as any);
 assert.deepEqual(relations.map((item) => `${item.childModel}.${item.childField}->${item.parentModel}`).sort(), [
   'AccountingFinancialRecord.createdBy->User',
+  'AssessmentResult.selectionId->AssessmentSelection',
   'Attendance.personnelId->Personnel',
   'OperationalAudit.approvedBy->User',
   'Session.userId->User',
   'User.personnelId->Personnel',
 ]);
+assert.deepEqual(
+  deletionModelOrder(new Set(['AssessmentSelection', 'AssessmentResult']), relations),
+  ['AssessmentResult', 'AssessmentSelection'],
+);
 assert.deepEqual(deletionModelOrder(new Set(['Personnel', 'User', 'Attendance', 'Session']), relations), ['Attendance', 'Session', 'User', 'Personnel']);
 assert.throws(() => deletionModelOrder(new Set(['A', 'B']), [
   { childModel: 'A', childField: 'bId', parentModel: 'B', childRequired: true },

@@ -10,23 +10,37 @@ assert.deepEqual(
   validateOfflineOfferDecision({
     decision: "ACCEPTED",
     communicationMethod: "PHONE",
-    communicatedAt: "2026-07-23T08:00:00.000Z",
+    communicatedOn: "2026-07-23",
     offlineReason: "عدم دسترسی متقاضی به اینترنت",
-    confirmedCandidateInformation: "متقاضی آزمایشی",
-    note: "پیشنهاد کامل برای متقاضی خوانده و تأیید شد.",
-  }).decision,
+    note: "",
+  }, new Date("2026-07-24T08:00:00.000Z")).decision,
   "ACCEPTED",
 );
 assert.throws(() => validateOfflineOfferDecision({ decision: "ACCEPTED" }), /الزامی/);
-for (const communicatedAt of ["2026-07-23", "1405/05/01", "1405/05/01 12:30"]) {
+for (const communicatedOn of ["2026-07-25", "2026-02-31", "1405/05/01", "2026-07-23T12:30:00Z"]) {
   assert.throws(() => validateOfflineOfferDecision({
     decision: "ACCEPTED",
     communicationMethod: "PHONE",
-    communicatedAt,
+    communicatedOn,
     offlineReason: "عدم دسترسی متقاضی به اینترنت",
-    confirmedCandidateInformation: "متقاضی آزمایشی",
-    note: "پیشنهاد کامل برای متقاضی خوانده شد.",
-  }), /الزامی/);
+    note: "",
+  }, new Date("2026-07-24T08:00:00.000Z")), /تاریخ/);
 }
+
+assert.equal(validateOfflineOfferDecision({
+  decision: "DECLINED",
+  communicationMethod: "IN_PERSON",
+  communicatedOn: "2026-07-23",
+  offlineReason: "ثبت حضوری",
+  declineCategory: "ROLE",
+  note: "",
+}, new Date("2026-07-24T08:00:00.000Z")).declineCategory, "ROLE");
+assert.throws(() => validateOfflineOfferDecision({
+  decision: "DECLINED",
+  communicationMethod: "PHONE",
+  communicatedOn: "2026-07-23",
+  offlineReason: "تماس تلفنی",
+  note: "",
+}, new Date("2026-07-24T08:00:00.000Z")), /دلیل رد/);
 
 console.log("HR offer decision policy tests passed.");

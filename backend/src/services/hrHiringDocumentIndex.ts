@@ -29,6 +29,7 @@ const restricted = (entry: any) => ({
   category: entry.category,
   version: entry.version,
   reviewStatus: entry.reviewStatus,
+  inspectionSource: entry.inspectionSource,
   safeOwner: entry.safeOwner,
   restricted: true,
   canOpen: false,
@@ -60,7 +61,7 @@ export const buildHiringDocumentIndex = (
   for (const row of application.documents || []) {
     const entry = {
       id: row.id, title: identityTitle(row), category: 'IDENTITY', version: row.version,
-      uploader: row.uploadedBy, date: row.createdAt, reviewStatus: row.status,
+      uploader: row.uploadedBy, date: row.createdAt, reviewStatus: row.status, inspectionSource: row.inspectionSource,
       safeOwner: 'منابع انسانی', originalName: row.originalName,
       downloadKind: 'DOCUMENT', canOpen: canHr && Boolean(row.originalName), restricted: !canHr,
     };

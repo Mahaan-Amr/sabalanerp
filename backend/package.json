@@ -66,6 +66,8 @@
     "hr-hiring:accepted-offer-follow-up:apply": "tsx src/scripts/reconcileAcceptedOfferCollateralFollowUp.ts --apply",
     "hr-hiring:numeric-normalization:dry": "tsx src/scripts/hr-hiring-numeric-normalization.ts",
     "hr-hiring:numeric-normalization:apply": "tsx src/scripts/hr-hiring-numeric-normalization.ts --apply",
+    "hr-hiring:questionnaire-migration:dry": "tsx src/scripts/hr-hiring-questionnaire-migration.ts",
+    "hr-hiring:questionnaire-migration:apply": "tsx src/scripts/hr-hiring-questionnaire-migration.ts --apply",
     "hr-redesign:cutover:verify": "tsx src/scripts/verify-hr-redesign-cutover.ts",
     "preview:security-shift-pdf": "tsx scripts/render-security-completed-shift-preview.ts",
     "verify:dispatch-master-data": "tsx scripts/verify-dispatch-master-data.ts",

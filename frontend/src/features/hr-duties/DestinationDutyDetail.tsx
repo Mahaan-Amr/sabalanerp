@@ -79,6 +79,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
   );
   const [reason, setReason] = useState('');
   const [correctionAction, setCorrectionAction] = useState<string | null>(null);
+  const [collateralDecisionAction, setCollateralDecisionAction] = useState('');
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reasonError, setReasonError] = useState<string | null>(null);
@@ -220,6 +221,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
   }
 
   const duty = state.data;
+  const isCollateralVerificationDecision = ['HIRING_COLLATERAL_VERIFY_RECEIPT', 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN'].includes(duty.sourceActionCode);
   const structuredResult = duty.result && typeof duty.result === 'object' && !Array.isArray(duty.result)
     ? duty.result as { actionCode?: string; reason?: string | null }
     : null;
@@ -327,7 +329,37 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
           <ErpButton className="mt-4" label="ثبت بازگرداندن و ارسال برای تأیید" disabled={Boolean(pendingAction) || !originalReturn.file || !originalReturn.returnedTo.trim() || !originalReturn.evidenceNote.trim()} onClick={() => void recordOriginalReturn()} />
         </ErpSection>
       )}
-      {duty.allowedActionCodes.length > 0 && ['ASSIGNEE', 'SHARED'].includes(duty.access) && duty.status === 'OPEN' && (
+      {isCollateralVerificationDecision && duty.allowedActionCodes.length > 0 && ['ASSIGNEE', 'SHARED'].includes(duty.access) && duty.status === 'OPEN' && (
+        <ErpSection title="ثبت نتیجه" description="ابتدا تصمیم را انتخاب کنید؛ نتیجه فقط با ارسال صریح ثبت می‌شود.">
+          <div className="space-y-3">
+            <ErpField label="تصمیم" required>
+              <ErpSelect value={collateralDecisionAction} onChange={(event) => { setCollateralDecisionAction(event.target.value); setReason(''); setReasonError(null); }} disabled={Boolean(pendingAction) || state.loading || state.stale}>
+                <option value="">انتخاب کنید</option>
+                {duty.allowedActionCodes.includes('APPROVE') && <option value="APPROVE">تأیید</option>}
+                {duty.allowedActionCodes.includes('RETURN') && <option value="RETURN">بازگرداندن برای اصلاح</option>}
+              </ErpSelect>
+            </ErpField>
+            {collateralDecisionAction === 'RETURN' && (
+              <ErpField label="دلیل بازگرداندن برای اصلاح" required error={reasonError}>
+                <ErpTextarea value={reason} onChange={(event) => { setReason(event.target.value); setReasonError(null); }} disabled={Boolean(pendingAction) || state.loading || state.stale} />
+              </ErpField>
+            )}
+            <ErpButton
+              label={pendingAction ? 'در حال ارسال…' : 'ارسال تصمیم'}
+              tone={collateralDecisionAction === 'RETURN' ? 'warning' : 'success'}
+              disabled={Boolean(pendingAction) || state.loading || state.stale || !collateralDecisionAction}
+              onClick={() => {
+                if (collateralDecisionAction === 'RETURN' && reason.trim().length < 3) {
+                  setReasonError('دلیل کوتاه و روشن بازگرداندن را وارد کنید.');
+                  return;
+                }
+                respond(collateralDecisionAction);
+              }}
+            />
+          </div>
+        </ErpSection>
+      )}
+      {!isCollateralVerificationDecision && duty.allowedActionCodes.length > 0 && ['ASSIGNEE', 'SHARED'].includes(duty.access) && duty.status === 'OPEN' && (
         <ErpSection title="ثبت نتیجه" description="نتیجه مستقیماً و یک‌بار به فرایند مبدأ بازگردانده می‌شود.">
           {correctionAction && (
             <div className="mb-4">

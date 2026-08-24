@@ -84,6 +84,12 @@ export const authorityLabel = (value?: string | null) =>
 
 export const hrDisplayLabel = authorityLabel;
 
+export const hrCandidateDocumentStatusLabel = (document: { inspectionSource?: string | null; status?: string | null }) => {
+  if (document.inspectionSource === "ORIGINAL_SEEN") return "مشاهده‌شده";
+  if (document.inspectionSource === "COPY_RECEIVED") return "دریافت‌شده";
+  return hrDisplayLabel(document.status);
+};
+
 export const assessmentTypeLabel = (value?: string | null) => {
   const assessmentLabels: Record<string, string> = {
     DISC: "DISC (ارزیابی الگوی رفتاری دیسک)",

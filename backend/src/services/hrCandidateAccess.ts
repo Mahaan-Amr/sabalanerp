@@ -67,6 +67,33 @@ export const decryptApplicantOtp = (mobile: string, ciphertext: unknown): string
   }
 };
 
+type ApplicantInvitationForOtpProjection = {
+  id: string;
+  mobileSnapshot: string;
+  otpCiphertext: unknown;
+  createdAt: Date;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  overlapExpiresAt: Date | null;
+};
+
+export const projectCurrentApplicantOtp = (
+  invitations: ApplicantInvitationForOtpProjection[],
+  mobile: string,
+  now = new Date(),
+): { invitationId: string; code: string; expiresAt: Date } | null => {
+  const current = invitations
+    .filter((invitation) =>
+      invitation.mobileSnapshot === mobile
+      && !invitation.revokedAt
+      && invitation.expiresAt > now
+      && (!invitation.overlapExpiresAt || invitation.overlapExpiresAt > now))
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
+  if (!current) return null;
+  const code = decryptApplicantOtp(mobile, current.otpCiphertext);
+  return code ? { invitationId: current.id, code, expiresAt: current.expiresAt } : null;
+};
+
 export const applicantSubjectHash = (kind: 'PHONE' | 'IP', value: string): string =>
   crypto.createHmac('sha256', accessSecret()).update(`HR_APPLICANT_${kind}:${value}`).digest('hex');
 

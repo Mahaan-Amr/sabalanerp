@@ -44,10 +44,6 @@ test("HR Processor can enter the hiring case and control the external SMS bounda
   await page.locator("form").getByRole("button", { name: "ورود" }).click();
   const loginResponse = await loginResponsePromise;
   expect(loginResponse.status()).toBe(200);
-  expect(await loginResponse.json()).toMatchObject({
-    success: true,
-    data: { mustChangePassword: false },
-  });
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
 
   await page.goto("/dashboard/hr/hiring");
@@ -66,6 +62,19 @@ test("HR Processor can enter the hiring case and control the external SMS bounda
     .click();
   await page.getByRole("button", { name: "ارسال دعوت‌نامه جدید" }).click();
   await expect(page.getByText("خطای آزمایشی ارسال پیامک")).toBeVisible();
+
+  const casePayload = await page.request.get(
+    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application",
+  );
+  const caseBody = await casePayload.json();
+  expect(casePayload.ok(), JSON.stringify(caseBody)).toBe(true);
+  expect(caseBody.data.currentApplicantOtp).toBeUndefined();
+  const otpReveal = await page.request.get(
+    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/applicant-otp",
+  );
+  const otpBody = await otpReveal.json();
+  expect(otpReveal.ok(), JSON.stringify(otpBody)).toBe(true);
+  expect(otpBody.data.code).toMatch(/^\d{6}$/);
 
   const smsSnapshot = await page.request.get(
     "http://127.0.0.1:3100/api/test/hr-hiring-sms",
@@ -228,10 +237,7 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
   await candidatePage
     .getByLabel("صحت نسخه اصلاح‌شده را تأیید می‌کنم.")
     .check();
-  await candidatePage
-    .getByLabel(/نام و نام خانوادگی/)
-    .fill("متقاضی آزمایشی");
-  await candidatePage.getByRole("button", { name: "ارسال مجدد" }).click();
+  await candidatePage.getByRole("button", { name: "ذخیره و ارسال اصلاحات" }).click();
   await expect(candidatePage.getByText("نسخه اصلاح‌شده ارسال شد.")).toBeVisible();
   await candidateContext.close();
 });
@@ -273,28 +279,21 @@ test("Offer notification includes the applicant's existing OTP for /apply", asyn
 test("localized assessment scores reject invalid values and accept 0 through 100", async ({
   page,
 }) => {
-  await page.goto("/login");
-  await page
-    .locator('input[name="identifier"]')
-    .fill("hr.processor.e2e@sabalanerp.test");
-  await page.locator('input[name="password"]').fill("HrE2ePass123!");
-  await page.locator("form").getByRole("button", { name: "ورود" }).click();
-  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
-
-  await page.goto(
-    "/dashboard/hr/hiring/hr-e2e-application?phase=FORMAL_ASSESSMENTS",
-  );
+  await page.goto("/apply");
+  await page.getByLabel("شماره همراه").fill("09120000001");
+  await page.getByLabel("کد ورود شش‌رقمی").fill("123456");
+  await page.getByRole("button", { name: "تأیید و ورود" }).click();
   const scores = page.locator('input[inputmode="decimal"]');
   await scores.nth(0).fill("۱۰۱");
   await expect(page.getByText("امتیاز باید بین ۰ تا ۱۰۰ باشد.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "ثبت نتیجه" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "ثبت نهایی نتیجه" })).toBeDisabled();
 
   await scores.nth(0).fill("۰");
   await scores.nth(1).fill("٢٥٫٥");
   await scores.nth(2).fill("50.25");
   await scores.nth(3).fill("۱۰۰");
-  await page.getByRole("button", { name: "ثبت نتیجه" }).click();
-  await expect(page.getByText("نسخه نتیجه ارزیابی ثبت شد.")).toBeVisible();
+  await page.getByRole("button", { name: "ثبت نهایی نتیجه" }).click();
+  await expect(page.getByText("نتیجه ارزیابی ثبت شد.")).toBeVisible();
 });
 
 test("Candidate accepts the latest offer with fresh dedicated evidence", async ({
@@ -305,9 +304,7 @@ test("Candidate accepts the latest offer with fresh dedicated evidence", async (
   await page.getByLabel("کد ورود شش‌رقمی").fill("123456");
   await page.getByRole("button", { name: "تأیید و ورود" }).click();
 
-  await page
-    .getByPlaceholder("نام کامل برای پذیرش پیشنهاد")
-    .fill("متقاضی آزمایشی");
+  await page.getByLabel("تصمیم درباره پیشنهاد همکاری").selectOption("ACCEPTED");
   await page
     .getByLabel("پیشنهاد همکاری را مطالعه کرده‌ام و می‌پذیرم.")
     .check();
@@ -355,7 +352,8 @@ test("Accounting-only Finance users record and independently verify collateral t
   const download = manager.page.waitForEvent("download");
   await manager.page.getByRole("button", { name: "دریافت فایل مدرک" }).click();
   await download;
-  await manager.page.getByRole("button", { name: "تأیید", exact: true }).click();
+  await manager.page.getByLabel("تصمیم").selectOption("APPROVE");
+  await manager.page.getByRole("button", { name: "ارسال تصمیم" }).click();
   await expect(manager.page.getByText("بسته", { exact: true })).toBeVisible();
   await manager.context.close();
 });

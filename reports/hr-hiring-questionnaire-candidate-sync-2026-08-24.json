@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 2,
+  "currentJalaliYear": 1405,
+  "scanned": {
+    "revisions": 3,
+    "candidates": 7
+  },
+  "changes": [],
+  "candidateChanges": [
+    {
+      "candidateId": "cmrukjo3g000n1088not7solz",
+      "field": "educationLevel",
+      "before": "کارشناسی ارشد",
+      "after": "MASTER",
+      "educationLevelOther": "",
+      "legacyRaw": "کارشناسی ارشد"
+    },
+    {
+      "candidateId": "cms0224ya00f5gye90wil7wu0",
+      "field": "educationLevel",
+      "before": "یی",
+      "after": "OTHER",
+      "educationLevelOther": "یی",
+      "legacyRaw": "یی"
+    },
+    {
+      "candidateId": "cmsftncwz00fuwrtpc8jjcisb",
+      "field": "educationLevel",
+      "before": "دیپلم",
+      "after": "DIPLOMA",
+      "educationLevelOther": "",
+      "legacyRaw": "دیپلم"
+    },
+    {
+      "candidateId": "cmt72iv9l00h7e5y0v8n5r6uu",
+      "field": "educationLevel",
+      "before": "کارشناسی ارشد",
+      "after": "MASTER",
+      "educationLevelOther": "",
+      "legacyRaw": "کارشناسی ارشد"
+    }
+  ],
+  "reviews": [
+    {
+      "recordType": "CANDIDATE",
+      "recordId": "cms0224ya00f5gye90wil7wu0",
+      "field": "graduationYear",
+      "value": "73",
+      "reason": "AMBIGUOUS_YEAR"
+    },
+    {
+      "recordType": "CANDIDATE",
+      "recordId": "cmsftncwz00fuwrtpc8jjcisb",
+      "field": "graduationYear",
+      "value": "98",
+      "reason": "AMBIGUOUS_YEAR"
+    }
+  ]
+}

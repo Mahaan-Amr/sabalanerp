@@ -671,7 +671,7 @@ export default function ApplicantFormPage() {
                 </ErpSelect>
               </ErpField>
               {data.identityKind === "IRANIAN" ? (
-                <ErpField label="کد ملی" error={isCorrection ? undefined : nationalCodeError}>
+                <ErpField label="کد ملی" error={submitted || isCorrection ? undefined : nationalCodeError}>
                   <ErpInput
                     id="applicant-field-nationalCode"
                     inputMode="numeric"
@@ -824,37 +824,34 @@ export default function ApplicantFormPage() {
             }
             render={(row: any, i: number) => (
               <div className="grid gap-3 md:grid-cols-4">
-                <ErpInput
-                  id={`applicant-field-workHistory.${i}.organization`}
-                  placeholder="نام سازمان/شرکت"
-                  value={row.organization}
-                  onChange={(e) =>
-                    updateList("workHistory", i, "organization", e.target.value)
-                  }
-                />
-                <ErpInput
-                  id={`applicant-field-workHistory.${i}.duration`}
-                  placeholder="مدت همکاری"
-                  value={row.duration}
-                  onChange={(e) =>
-                    updateList("workHistory", i, "duration", e.target.value)
-                  }
-                />
-                <ErpInput
-                  id={`applicant-field-workHistory.${i}.lastPosition`}
-                  placeholder="آخرین سمت"
-                  value={row.lastPosition}
-                  onChange={(e) =>
-                    updateList("workHistory", i, "lastPosition", e.target.value)
-                  }
-                />
-                <ErpRialInput
-                  id={`applicant-field-workHistory.${i}.lastSalaryBenefits`}
-                  aria-label="آخرین حقوق و مزایا به ریال"
-                  placeholder="آخرین حقوق و مزایا (ریال)"
-                  value={row.lastSalaryBenefits}
-                  onValueChange={(lastSalaryBenefits) => updateList("workHistory", i, "lastSalaryBenefits", lastSalaryBenefits)}
-                />
+                <ErpField label="نام سازمان/شرکت">
+                  <ErpInput
+                    id={`applicant-field-workHistory.${i}.organization`}
+                    value={row.organization}
+                    onChange={(e) => updateList("workHistory", i, "organization", e.target.value)}
+                  />
+                </ErpField>
+                <ErpField label="مدت همکاری">
+                  <ErpInput
+                    id={`applicant-field-workHistory.${i}.duration`}
+                    value={row.duration}
+                    onChange={(e) => updateList("workHistory", i, "duration", e.target.value)}
+                  />
+                </ErpField>
+                <ErpField label="آخرین سمت">
+                  <ErpInput
+                    id={`applicant-field-workHistory.${i}.lastPosition`}
+                    value={row.lastPosition}
+                    onChange={(e) => updateList("workHistory", i, "lastPosition", e.target.value)}
+                  />
+                </ErpField>
+                <ErpField label="آخرین حقوق و مزایا (ریال)">
+                  <ErpRialInput
+                    id={`applicant-field-workHistory.${i}.lastSalaryBenefits`}
+                    value={row.lastSalaryBenefits}
+                    onValueChange={(lastSalaryBenefits) => updateList("workHistory", i, "lastSalaryBenefits", lastSalaryBenefits)}
+                  />
+                </ErpField>
               </div>
             )}
           />
@@ -865,34 +862,32 @@ export default function ApplicantFormPage() {
             add={() => set("skills", [...data.skills, blank.skills[0]])}
             render={(row: any, i: number) => (
               <div className="grid gap-3 md:grid-cols-3">
-                <ErpInput
-                  id={`applicant-field-skills.${i}.name`}
-                  placeholder="نام مهارت"
-                  value={row.name}
-                  onChange={(e) =>
-                    updateList("skills", i, "name", e.target.value)
-                  }
-                />
-                <ErpInput
-                  id={`applicant-field-skills.${i}.familiarity`}
-                  placeholder="مدت آشنایی"
-                  value={row.familiarity}
-                  onChange={(e) =>
-                    updateList("skills", i, "familiarity", e.target.value)
-                  }
-                />
-                <ErpSelect
-                  id={`applicant-field-skills.${i}.proficiency`}
-                  value={row.proficiency}
-                  onChange={(e) =>
-                    updateList("skills", i, "proficiency", e.target.value)
-                  }
-                >
-                  <option value="">سطح تسلط</option>
-                  <option value="BEGINNER">مقدماتی</option>
-                  <option value="INTERMEDIATE">متوسط</option>
-                  <option value="ADVANCED">پیشرفته</option>
-                </ErpSelect>
+                <ErpField label="نام مهارت">
+                  <ErpInput
+                    id={`applicant-field-skills.${i}.name`}
+                    value={row.name}
+                    onChange={(e) => updateList("skills", i, "name", e.target.value)}
+                  />
+                </ErpField>
+                <ErpField label="مدت آشنایی">
+                  <ErpInput
+                    id={`applicant-field-skills.${i}.familiarity`}
+                    value={row.familiarity}
+                    onChange={(e) => updateList("skills", i, "familiarity", e.target.value)}
+                  />
+                </ErpField>
+                <ErpField label="سطح تسلط">
+                  <ErpSelect
+                    id={`applicant-field-skills.${i}.proficiency`}
+                    value={row.proficiency}
+                    onChange={(e) => updateList("skills", i, "proficiency", e.target.value)}
+                  >
+                    <option value="">انتخاب</option>
+                    <option value="BEGINNER">مقدماتی</option>
+                    <option value="INTERMEDIATE">متوسط</option>
+                    <option value="ADVANCED">پیشرفته</option>
+                  </ErpSelect>
+                </ErpField>
               </div>
             )}
           />
@@ -905,38 +900,37 @@ export default function ApplicantFormPage() {
             }
             render={(row: any, i: number) => (
               <div className="grid gap-3 md:grid-cols-3">
-                <ErpInput
-                  id={`applicant-field-languages.${i}.name`}
-                  placeholder="نام زبان"
-                  value={row.name}
-                  onChange={(e) =>
-                    updateList("languages", i, "name", e.target.value)
-                  }
-                />
-                <ErpSelect
-                  id={`applicant-field-languages.${i}.level`}
-                  value={row.level}
-                  onChange={(e) =>
-                    updateList("languages", i, "level", e.target.value)
-                  }
-                >
-                  <option value="">سطح خواندن/نوشتن</option>
-                  <option value="BEGINNER">مقدماتی</option>
-                  <option value="INTERMEDIATE">متوسط</option>
-                  <option value="ADVANCED">پیشرفته</option>
-                </ErpSelect>
-                <ErpSelect
-                  id={`applicant-field-languages.${i}.proficiency`}
-                  value={row.proficiency}
-                  onChange={(e) =>
-                    updateList("languages", i, "proficiency", e.target.value)
-                  }
-                >
-                  <option value="">سطح مکالمه</option>
-                  <option value="BEGINNER">مقدماتی</option>
-                  <option value="INTERMEDIATE">متوسط</option>
-                  <option value="ADVANCED">پیشرفته</option>
-                </ErpSelect>
+                <ErpField label="نام زبان">
+                  <ErpInput
+                    id={`applicant-field-languages.${i}.name`}
+                    value={row.name}
+                    onChange={(e) => updateList("languages", i, "name", e.target.value)}
+                  />
+                </ErpField>
+                <ErpField label="سطح خواندن/نوشتن">
+                  <ErpSelect
+                    id={`applicant-field-languages.${i}.level`}
+                    value={row.level}
+                    onChange={(e) => updateList("languages", i, "level", e.target.value)}
+                  >
+                    <option value="">انتخاب</option>
+                    <option value="BEGINNER">مقدماتی</option>
+                    <option value="INTERMEDIATE">متوسط</option>
+                    <option value="ADVANCED">پیشرفته</option>
+                  </ErpSelect>
+                </ErpField>
+                <ErpField label="سطح مکالمه">
+                  <ErpSelect
+                    id={`applicant-field-languages.${i}.proficiency`}
+                    value={row.proficiency}
+                    onChange={(e) => updateList("languages", i, "proficiency", e.target.value)}
+                  >
+                    <option value="">انتخاب</option>
+                    <option value="BEGINNER">مقدماتی</option>
+                    <option value="INTERMEDIATE">متوسط</option>
+                    <option value="ADVANCED">پیشرفته</option>
+                  </ErpSelect>
+                </ErpField>
               </div>
             )}
           />

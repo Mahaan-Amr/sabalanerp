@@ -226,6 +226,18 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
   await candidatePage.getByLabel("شماره همراه").fill("09120000001");
   await candidatePage.getByLabel("کد ورود شش‌رقمی").fill("123456");
   await candidatePage.getByRole("button", { name: "تأیید و ورود" }).click();
+  for (const [sectionTitle, fieldLabels] of [
+    ["سوابق کار حرفه‌ای", ["نام سازمان/شرکت", "مدت همکاری", "آخرین سمت", "آخرین حقوق و مزایا (ریال)"]],
+    ["مهارت‌های فنی، حرفه‌ای و عمومی", ["نام مهارت", "مدت آشنایی", "سطح تسلط"]],
+    ["زبان‌های خارجی", ["نام زبان", "سطح خواندن/نوشتن", "سطح مکالمه"]],
+  ] as const) {
+    const section = candidatePage.locator("section").filter({
+      has: candidatePage.getByRole("heading", { name: sectionTitle, exact: true }),
+    });
+    for (const fieldLabel of fieldLabels) {
+      await expect(section.getByLabel(fieldLabel, { exact: true })).toBeVisible();
+    }
+  }
   await expect(candidatePage.getByText("کد ملی — کد ملی با کارت ملی یکسان نیست.", { exact: true })).toBeVisible();
   await expect(candidatePage.getByLabel(/کد پستی — کد پستی را با مدرک نشانی بررسی کنید/)).toBeVisible();
   const nationalCodeInput = candidatePage.getByLabel(/کد ملی — کد ملی با کارت ملی یکسان نیست/);
@@ -243,6 +255,7 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
     .check();
   await candidatePage.getByRole("button", { name: "ذخیره و ارسال اصلاحات" }).click();
   await expect(candidatePage.getByText("نسخه اصلاح‌شده ارسال شد.")).toBeVisible();
+  await expect(candidatePage.getByText("کد ملی معتبر نیست.", { exact: true })).toHaveCount(0);
   await candidateContext.close();
 });
 

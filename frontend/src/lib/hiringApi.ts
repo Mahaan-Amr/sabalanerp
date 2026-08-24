@@ -46,7 +46,9 @@ export const hiringAPI = {
   interviewCriteria: () => internal.get("/interview-criteria"),
   publishInterviewCriteria: (criteria: any[]) => internal.post("/interview-criteria/publish", { criteria }),
   companyEvaluations: (id: string) => internal.get(`/applications/${id}/company-evaluations`),
+  eligibleCompanyEvaluationPersonnel: (id: string, type: string) => internal.get(`/applications/${id}/company-evaluations/eligible-personnel`, { params: { type } }),
   addCompanyEvaluation: (id: string, data: any) => internal.post(`/applications/${id}/company-evaluations`, data),
+  reassignCompanyEvaluation: (id: string, occurrenceId: string, evaluatorPersonnelId: string) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/reassign`, { evaluatorPersonnelId }),
   cancelCompanyEvaluation: (id: string, occurrenceId: string) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/cancel`),
   recordCompanyEvaluationResult: (id: string, occurrenceId: string, data: FormData) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/result`, data),
   downloadCompanyEvaluationEvidence: (id: string, occurrenceId: string) => internal.get(`/applications/${id}/company-evaluations/${occurrenceId}/evidence/download`, { responseType: "blob" }),
@@ -111,6 +113,8 @@ export const hiringAPI = {
     files.forEach((file) => data.append("files", file));
     return internal.post(`/applications/${id}/formal-assessments/${kind}/evidence`, data);
   },
+  downloadFormalAssessmentEvidence: (id: string, linkId: string) =>
+    internal.get(`/applications/${id}/formal-assessments/evidence/${linkId}/download`, { responseType: 'blob' }),
   finallyReject: (id: string, data: any) =>
     internal.post(`/applications/${id}/final-rejection`, data),
   reactivateDisposition: (id: string, reason: string) =>
@@ -225,6 +229,11 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/payroll-participation`, data),
   setInsurance: (id: string, data: any) =>
     internal.put(`/applications/${id}/insurance`, data),
+  revisePlannedStart: (id: string, data: any) =>
+    internal.post(`/applications/${id}/planned-start-revision`, data),
+  companyEvaluationSettings: () => internal.get('/company-evaluation-settings'),
+  saveCompanyEvaluationSettings: (type: string, positionIds: string[], reason?: string) =>
+    internal.put(`/company-evaluation-settings/${type}`, { positionIds, reason }),
   activate: (id: string) => internal.post(`/applications/${id}/activate`),
   close: (id: string, data: any) =>
     internal.post(`/applications/${id}/close`, data),

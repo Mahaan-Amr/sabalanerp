@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { formatNumericInputText } from '../numberFormat';
+import { formatNumericInputText, normalizeIdentifierDigits, normalizeNumericText } from '../numberFormat';
 
 assert.deepEqual(formatNumericInputText('12'), {
   canonicalText: '12',
@@ -46,5 +46,10 @@ assert.deepEqual(formatNumericInputText('', 0, 0), {
   displayText: '',
   caretPosition: 0
 });
+
+assert.equal(normalizeIdentifierDigits('۰۹1٢- ۳۴'), '091234');
+assert.equal(normalizeIdentifierDigits('۰۰۱۲۳'), '00123', 'identifier normalization preserves leading zeroes');
+assert.equal(normalizeNumericText('۱۲٬۳۴۵٫۶۷', 2), '12345.67');
+assert.equal(normalizeNumericText('۰۹1٢.۳', 2), '0912.3');
 
 console.log('numeric input formatting tests passed');

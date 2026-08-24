@@ -8,7 +8,7 @@ import PersianCalendarComponent from "@/components/PersianCalendar";
 import PersianCalendar from "@/lib/persian-calendar";
 import { toIsoDate } from "@/features/hr/hrUi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
-import { formatPrice } from '@/lib/numberFormat';
+import { formatPrice, normalizeIdentifierDigits } from '@/lib/numberFormat';
 import { ApplicantFormalAssessments } from "@/features/hr-hiring/ApplicantFormalAssessments";
 
 const questions = [
@@ -81,6 +81,13 @@ const blank = {
   questions: snapshotAnswers([]),
 };
 
+const normalizeApplicantNumericDraft = (value: Record<string, any>) => ({
+  ...value,
+  ...Object.fromEntries([
+    "childrenCount", "postalCode", "mobile", "homePhone", "graduationYear", "nationalCode",
+  ].filter((field) => field in value).map((field) => [field, normalizeIdentifierDigits(String(value[field] ?? ""))])),
+});
+
 export default function ApplicantFormPage() {
   const [mobile, setMobile] = useState("");
   const [otp, setOtp] = useState("");
@@ -141,7 +148,7 @@ export default function ApplicantFormPage() {
     if (revisionData)
       setData({
         ...blank,
-        ...revisionData,
+        ...normalizeApplicantNumericDraft(revisionData),
         birthDate: revisionData.birthDate
           ? PersianCalendar.toPersian(revisionData.birthDate)
           : "",
@@ -272,7 +279,7 @@ export default function ApplicantFormPage() {
                 autoComplete="tel"
                 placeholder="09123456789"
                 value={mobile}
-                onChange={(e) => setMobile(e.target.value)}
+                onChange={(e) => setMobile(normalizeIdentifierDigits(e.target.value))}
               />
             </ErpField>
             <ErpField className="mt-4" label="کد ورود شش‌رقمی">
@@ -283,7 +290,7 @@ export default function ApplicantFormPage() {
               autoComplete="one-time-code"
               maxLength={6}
               value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/[^0-9۰-۹٠-٩]/g, ""))}
+              onChange={(e) => setOtp(normalizeIdentifierDigits(e.target.value))}
             />
             </ErpField>
             <ErpButton
@@ -510,10 +517,10 @@ export default function ApplicantFormPage() {
                 <>
                   <ErpField label="تعداد فرزندان">
                     <ErpInput
-                      type="number"
+                      inputMode="numeric"
                       min="0"
                       value={data.childrenCount}
-                      onChange={(e) => set("childrenCount", e.target.value)}
+                      onChange={(e) => set("childrenCount", normalizeIdentifierDigits(e.target.value))}
                     />
                   </ErpField>
                   <ErpField label="شغل همسر">
@@ -540,7 +547,7 @@ export default function ApplicantFormPage() {
                     maxLength={10}
                     value={data.nationalCode}
                     onChange={(e) =>
-                      set("nationalCode", e.target.value.replace(/\D/g, ""))
+                      set("nationalCode", normalizeIdentifierDigits(e.target.value))
                     }
                   />
                 </ErpField>
@@ -580,20 +587,20 @@ export default function ApplicantFormPage() {
                   maxLength={10}
                   value={data.postalCode}
                   onChange={(e) =>
-                    set("postalCode", e.target.value.replace(/\D/g, ""))
+                    set("postalCode", normalizeIdentifierDigits(e.target.value))
                   }
                 />
               </ErpField>
               <ErpField label="شماره همراه">
                 <ErpInput
                   value={data.mobile}
-                  onChange={(e) => set("mobile", e.target.value)}
+                  onChange={(e) => set("mobile", normalizeIdentifierDigits(e.target.value))}
                 />
               </ErpField>
               <ErpField label="تلفن منزل یا ندارم">
                 <ErpInput
                   value={data.homePhone}
-                  onChange={(e) => set("homePhone", e.target.value)}
+                  onChange={(e) => set("homePhone", normalizeIdentifierDigits(e.target.value))}
                 />
               </ErpField>
               <ErpField label="ایمیل" required={false}>
@@ -628,7 +635,7 @@ export default function ApplicantFormPage() {
               <ErpField label="سال اخذ مدرک">
                 <ErpInput
                   value={data.graduationYear}
-                  onChange={(e) => set("graduationYear", e.target.value)}
+                  onChange={(e) => set("graduationYear", normalizeIdentifierDigits(e.target.value))}
                 />
               </ErpField>
               <ErpField label="سابقه بیمه تأمین اجتماعی">

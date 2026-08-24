@@ -18,17 +18,25 @@ const GROUPS: ApplicantInformationGroup[] = [
 const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
 const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
 
+const normalizeLocalizedDigits = (input: unknown): string => [...String(input ?? '').trim()]
+  .map((character) => {
+    const persianIndex = persianDigits.indexOf(character);
+    if (persianIndex >= 0) return String(persianIndex);
+    const arabicIndex = arabicDigits.indexOf(character);
+    return arabicIndex >= 0 ? String(arabicIndex) : character;
+  })
+  .join('');
+
+const normalizeHiringDigitString = (input: unknown): string => {
+  const normalized = normalizeLocalizedDigits(input).replace(/[\s\-()]/g, '');
+  if (normalized && !/^\d+$/.test(normalized)) throw new Error('مقدار عددی فرم استخدام نامعتبر است.');
+  return normalized;
+};
+
 export const normalizeHiringRial = (input: unknown): string => {
   const raw = String(input ?? '').trim();
   if (!raw) return '';
-  const normalized = [...raw]
-    .map((character) => {
-      const persianIndex = persianDigits.indexOf(character);
-      if (persianIndex >= 0) return String(persianIndex);
-      const arabicIndex = arabicDigits.indexOf(character);
-      return arabicIndex >= 0 ? String(arabicIndex) : character;
-    })
-    .join('')
+  const normalized = normalizeLocalizedDigits(raw)
     .replace(/[٬,،\s]/g, '');
   if (!/^\d+$/.test(normalized)) throw new Error('Hiring amount must be a non-negative whole Rial value.');
   return normalized.replace(/^0+(?=\d)/, '');
@@ -44,6 +52,25 @@ export const normalizeCoveredHiringAmounts = <T extends Record<string, any>>(dat
       }))
     : data.workHistory } : {}),
 });
+
+const hiringDigitStringFields = [
+  'nationalCode',
+  'postalCode',
+  'mobile',
+  'homePhone',
+  'childrenCount',
+  'graduationYear',
+] as const;
+
+export const normalizeHiringNumericFields = <T extends Record<string, any>>(data: T): T => {
+  const amounts = normalizeCoveredHiringAmounts(data);
+  return {
+    ...amounts,
+    ...Object.fromEntries(hiringDigitStringFields
+      .filter((field) => field in amounts)
+      .map((field) => [field, normalizeHiringDigitString(amounts[field])])),
+  } as T;
+};
 
 const revisionIdentity = (revision: any) => ({
   id: revision.id,

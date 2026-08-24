@@ -41,6 +41,7 @@ import { getHrReconciliationWorkspace, recordHrReconciliationReview } from '../s
 import { buildPersonnelCollection, personnelOriginFeature } from '../services/hrPersonnelCollection';
 import { publishRealtime } from '../services/realtimePublisher';
 import { loadHrOperationalReference } from '../services/hrOperationalReferenceProjection';
+import { normalizeApplicantDigits } from '../services/hrCandidateAccess';
 
 const router = express.Router();
 
@@ -650,7 +651,7 @@ router.post('/positions/:id/capacity-changes', editAccess, async (req: Workspace
       if (!position) throw new Error('جایگاه پیدا نشد.');
       assertFreshVersion(position.updatedAt, req.body.expectedUpdatedAt);
       const effectiveAt = parseDate(req.body.effectiveAt, 'تاریخ اثر');
-      const newCapacity = Number(req.body.newCapacity);
+      const newCapacity = Number(normalizeApplicantDigits(req.body.newCapacity));
       const assignmentRows = await tx.hrEmploymentAssignment.findMany({
         where: {
           positionId: position.id,
@@ -1029,7 +1030,7 @@ router.put('/jobs/:id', editAccess, async (req: WorkspaceRequest, res) => {
 
 router.post('/positions', editAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const code = textValue(req.body.code).toUpperCase(); const title = textValue(req.body.title); const capacity = Number(req.body.capacity);
+    const code = textValue(req.body.code).toUpperCase(); const title = textValue(req.body.title); const capacity = Number(normalizeApplicantDigits(req.body.capacity));
     if (!code || !title || !Number.isInteger(capacity) || capacity < 1) throw new Error('کد، عنوان و ظرفیت مثبت جایگاه الزامی است.');
     const jobId = textValue(req.body.jobId); const organizationalUnitId = textValue(req.body.organizationalUnitId);
     const effectiveFrom = req.body.effectiveFrom ? parseDate(req.body.effectiveFrom, 'تاریخ فعال‌سازی') : new Date();
@@ -1050,7 +1051,7 @@ router.put('/positions/:id', editAccess, async (req: WorkspaceRequest, res) => {
       const current = await tx.hrPosition.findUnique({ where: { id: req.params.id }, include: { capacityChanges: true } });
       if (!current) throw new Error('جایگاه پیدا نشد.');
       assertFreshVersion(current.updatedAt, req.body.expectedUpdatedAt);
-      if (req.body.capacity != null && Number(req.body.capacity) !== capacityAt(current.capacity, current.capacityChanges, new Date())) throw new Error('تغییر ظرفیت فقط از مسیر تغییر ظرفیت مؤثر-تاریخ‌دار مجاز است.');
+      if (req.body.capacity != null && Number(normalizeApplicantDigits(req.body.capacity)) !== capacityAt(current.capacity, current.capacityChanges, new Date())) throw new Error('تغییر ظرفیت فقط از مسیر تغییر ظرفیت مؤثر-تاریخ‌دار مجاز است.');
       const jobId = textValue(req.body.jobId) || current.jobId;
       const organizationalUnitId = textValue(req.body.organizationalUnitId) || current.organizationalUnitId;
       const workplaceId = req.body.workplaceId === undefined ? current.workplaceId : nullableText(req.body.workplaceId);
@@ -1483,7 +1484,7 @@ router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, req
     const reason = textValue(req.body.reason);
     if (!EXCEPTIONAL_PERSONNEL_SOURCES.has(sourceCategory)) throw new Error('دسته منبع ثبت استثنایی معتبر نیست.');
     if (reason.length < 10) throw new Error('دلیل ثبت استثنایی باید روشن و حداقل ۱۰ نویسه باشد.');
-    const nationalCode = nullableText(req.body.nationalCode);
+    const nationalCode = nullableText(normalizeApplicantDigits(req.body.nationalCode));
     if (nationalCode && !isValidIranianNationalCode(nationalCode)) throw new Error('کد ملی معتبر نیست.');
     const duplicate = await prisma.personnel.findFirst({ where: { firstName: { equals: firstName, mode: 'insensitive' }, lastName: { equals: lastName, mode: 'insensitive' } }, select: { id: true, firstName: true, lastName: true, employeeNumber: true } });
     if (duplicate && !req.body.confirmDuplicate) return res.status(409).json({ success: false, code: 'DUPLICATE_PERSONNEL_CONFIRMATION_REQUIRED', error: 'فردی با نام مشابه وجود دارد؛ پرونده موجود را بررسی کنید و فقط در صورت تفاوت واقعی ثبت را تأیید کنید.', duplicate });
@@ -1492,7 +1493,7 @@ router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, req
     if (status === 'ACTIVE' && effectiveFrom > new Date()) throw new Error('استخدام با تاریخ شروع آینده باید برنامه‌ریزی‌شده باشد.');
     const positionId = textValue(req.body.positionId); if (!positionId) throw new Error('تخصیص اصلی اولیه الزامی است.');
     const result = await prisma.$transaction(async (tx) => {
-      const personnel = await tx.personnel.create({ data: { firstName, lastName, nationalCode, employeeNumber: nullableText(req.body.employeeNumber), isActive: status === 'ACTIVE' } });
+      const personnel = await tx.personnel.create({ data: { firstName, lastName, nationalCode, employeeNumber: nullableText(normalizeApplicantDigits(req.body.employeeNumber)), isActive: status === 'ACTIVE' } });
       if (req.body.userId) {
         const user = await tx.user.findUnique({ where: { id: textValue(req.body.userId) }, select: { personnelId: true } });
         if (!user || user.personnelId) throw new Error('کاربر انتخاب‌شده پیدا نشد یا قبلاً به پرسنل متصل است.');
@@ -1523,8 +1524,8 @@ router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, req
 
 router.put('/personnel/:id', editAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const nationalCode = nullableText(req.body.nationalCode); if (nationalCode && !isValidIranianNationalCode(nationalCode)) throw new Error('کد ملی معتبر نیست.');
-    const record = await prisma.personnel.update({ where: { id: req.params.id }, data: { firstName: textValue(req.body.firstName), lastName: textValue(req.body.lastName), nationalCode, employeeNumber: nullableText(req.body.employeeNumber) }, include: personnelInclude });
+    const nationalCode = nullableText(normalizeApplicantDigits(req.body.nationalCode)); if (nationalCode && !isValidIranianNationalCode(nationalCode)) throw new Error('کد ملی معتبر نیست.');
+    const record = await prisma.personnel.update({ where: { id: req.params.id }, data: { firstName: textValue(req.body.firstName), lastName: textValue(req.body.lastName), nationalCode, employeeNumber: nullableText(normalizeApplicantDigits(req.body.employeeNumber)) }, include: personnelInclude });
     res.json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Update HR personnel'); }
 });

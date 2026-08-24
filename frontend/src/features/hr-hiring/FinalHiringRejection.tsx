@@ -11,7 +11,7 @@ export function FinalHiringRejection({
 }: {
   applicationId: string;
   busy: boolean;
-  run: (action: () => Promise<unknown>, success: string) => Promise<void>;
+  run: (action: () => Promise<unknown>, success: string) => Promise<void | boolean>;
 }) {
   const [reason, setReason] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);

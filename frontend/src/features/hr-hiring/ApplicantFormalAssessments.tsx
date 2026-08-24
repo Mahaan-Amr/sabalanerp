@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ErpBadge, ErpButton, ErpCard, ErpInput, ErpSection, ErpTextarea } from "@/components/erp";
 import { applicantHiringAPI } from "@/lib/hiringApi";
+import { normalizeNumericText } from "@/lib/numberFormat";
 
 type AssessmentKind = "DISC" | "EQ" | "BIG_FIVE";
 type Draft = Record<string, string> & { notes: string };
@@ -42,7 +43,7 @@ export function ApplicantFormalAssessments({
     selections: Array<{ assessmentKind: AssessmentKind; completed: boolean }>;
   } | null;
   busy: boolean;
-  run: (action: () => Promise<unknown>, success: string) => Promise<void>;
+  run: (action: () => Promise<unknown>, success: string) => Promise<void | boolean>;
 }) {
   const [drafts, setDrafts] = useState<Partial<Record<AssessmentKind, Draft>>>({});
   const [attachments, setAttachments] = useState<Partial<Record<AssessmentKind, File[]>>>({});
@@ -85,7 +86,7 @@ export function ApplicantFormalAssessments({
                       <ErpInput
                         inputMode="decimal"
                         value={drafts[selection.assessmentKind]?.[item.key] || ""}
-                        onChange={(event) => update(selection.assessmentKind, item.key, event.target.value)}
+                        onChange={(event) => update(selection.assessmentKind, item.key, normalizeNumericText(event.target.value, 2))}
                         aria-label={`امتیاز ${item.label}`}
                         placeholder="۰ تا ۱۰۰"
                       />

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   buildCandidateClosedState,
   normalizeCoveredHiringAmounts,
+  normalizeHiringNumericFields,
   normalizeHiringRial,
   projectApplicantClosureSummary,
   projectApplicantFullInformation,
@@ -122,6 +123,25 @@ assert.deepEqual(normalizeCoveredHiringAmounts({
   desiredSalary: '12345',
   workHistory: [{ organization: 'Sabalan', lastSalaryBenefits: '10000' }],
   untouched: 'value',
+});
+assert.deepEqual(normalizeHiringNumericFields({
+  nationalCode: '۰۰۱۲۳۴۵۶۷۸',
+  postalCode: '١٢٣٤٥٦٧٨٩٠',
+  mobile: '۰۹1٢ ۳۴۵-۶۷۸۹',
+  homePhone: '۰۲۱۱۲۳۴۵۶۷۸',
+  childrenCount: '۲',
+  graduationYear: '۱۴۰۴',
+  desiredSalary: '۱۲٬۳۴۵',
+  workHistory: [{ lastSalaryBenefits: '١٠,٠٠٠' }],
+}), {
+  nationalCode: '0012345678',
+  postalCode: '1234567890',
+  mobile: '09123456789',
+  homePhone: '02112345678',
+  childrenCount: '2',
+  graduationYear: '1404',
+  desiredSalary: '12345',
+  workHistory: [{ lastSalaryBenefits: '10000' }],
 });
 
 const closureAudit = {

@@ -13,7 +13,9 @@ assert.deepEqual(
 );
 assert.ok(actionPermissionsForLegacyAuthority('HR_PROCESSOR').includes('RECORD_INITIAL_INTERVIEW'));
 assert.ok(actionPermissionsForLegacyAuthority('HR_MANAGER').includes('RECORD_PRELIMINARY_DECISION'));
+assert.ok(actionPermissionsForLegacyAuthority('HR_MANAGER').includes('VIEW_FORMAL_ASSESSMENT_RESULTS'));
 assert.ok(actionPermissionsForLegacyAuthority('COMPANY_MANAGER').includes('RECORD_FINAL_MANAGEMENT_DECISION'));
+assert.ok(actionPermissionsForLegacyAuthority('COMPANY_MANAGER').includes('VIEW_FORMAL_ASSESSMENT_RESULTS'));
 assert.ok(actionPermissionsForLegacyAuthority('COMPANY_MANAGER').includes('MANAGE_PERSONNEL_SCHEDULE'));
 assert.deepEqual(actionPermissionsForLegacyAuthority('UNKNOWN'), []);
 console.log('HR action permission catalog tests passed.');

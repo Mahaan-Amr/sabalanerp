@@ -11,6 +11,7 @@ import {
 } from "@/components/erp";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import moment from "moment-jalaali";
+import { normalizeIdentifierDigits } from "@/lib/numberFormat";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -671,7 +672,7 @@ export default function HrPersonnelPage() {
                   inputMode="numeric"
                   value={form.nationalCode}
                   onChange={(e) =>
-                    setForm({ ...form, nationalCode: e.target.value })
+                    setForm({ ...form, nationalCode: normalizeIdentifierDigits(e.target.value) })
                   }
                 />
               </ErpField>
@@ -680,7 +681,7 @@ export default function HrPersonnelPage() {
 
                   value={form.employeeNumber}
                   onChange={(e) =>
-                    setForm({ ...form, employeeNumber: e.target.value })
+                    setForm({ ...form, employeeNumber: normalizeIdentifierDigits(e.target.value) })
                   }
                 />
               </ErpField>

@@ -24,6 +24,7 @@ import {
 } from "@/components/erp";
 import { hrAPI, hrAuthorizationAPI } from "@/lib/api";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
+import { normalizeIdentifierDigits } from "@/lib/numberFormat";
 import { dateTimeFa } from "@/features/hr/hrUi";
 import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import {
@@ -113,13 +114,26 @@ export default function HiringCasesPage() {
   const [createError, setCreateError] = useState("");
   const [createDiscardOpen, setCreateDiscardOpen] = useState(false);
   const [inviteTarget, setInviteTarget] = useState<any>(null);
+  const [evaluationSettingsOpen, setEvaluationSettingsOpen] = useState(false);
+  const [evaluationSettings, setEvaluationSettings] = useState<{ positions: any[]; selected: Record<string, string[]> }>({ positions: [], selected: {} });
   const requestSequence = useRef(0);
   const foundationLoaded = useRef(false);
   const programmaticHref = useRef("");
   const canManageFormalAssessmentPlan = actionPermissions.includes("MANAGE_COMPANY_EVALUATION_PLAN");
   const canManageRecruitmentCases = actionPermissions.includes("MANAGE_RECRUITMENT_CASE");
   const canViewInterviewCriteria = actionPermissions.includes("VIEW_INITIAL_INTERVIEW_CRITERIA");
+  const canManageEvaluatorSettings = actionPermissions.includes("MANAGE_RECRUITMENT_EVALUATOR_SETTINGS");
   const createDirty = Boolean(form.firstName || form.lastName || form.mobile || form.nationalCode || form.positionId || assessmentDecision || assessmentKinds.length);
+  const openEvaluationSettings = async () => {
+    try {
+      setBusy(true); setError("");
+      const response = await hiringAPI.companyEvaluationSettings();
+      const selected: Record<string, string[]> = { MANAGEMENT_INTERVIEW: [], HR_MANAGER_INTERVIEW: [] };
+      for (const item of response.data.data.eligibilities || []) selected[item.evaluationType] = [...(selected[item.evaluationType] || []), item.positionId];
+      setEvaluationSettings({ positions: response.data.data.positions || [], selected });
+      setEvaluationSettingsOpen(true);
+    } catch (cause) { setError(hiringError(cause)); } finally { setBusy(false); }
+  };
 
   const load = async (nextFilters: HiringQueueFilters = filters, nextArchiveView = archiveView) => {
     const sequence = ++requestSequence.current;
@@ -316,12 +330,30 @@ export default function HiringCasesPage() {
           icon: FaClipboardList,
           href: "/dashboard/hr/interview-criteria",
         } as const] : []),
+        ...(canManageEvaluatorSettings ? [{ label: "تنظیم جایگاه‌های ارزیاب", icon: FaClipboardList, onClick: openEvaluationSettings } as const] : []),
         { label: "به‌روزرسانی", icon: FaSync, onClick: () => load() },
       ]}
     >
       {error && <ErpInlineState kind="error" title={error} />}
       {referenceIssue && <ErpInlineState kind="stale" title={referenceIssue} />}
       {createOutcome && <ErpInlineState kind={createOutcome.kind} title={createOutcome.title} />}
+
+      <ErpSheet open={evaluationSettingsOpen} onClose={() => setEvaluationSettingsOpen(false)} title="جایگاه‌های مجاز ارزیاب جذب" presentation="modal" dismissible={!busy}>
+        <div className="space-y-4 p-4">
+          {[["MANAGEMENT_INTERVIEW", "مصاحبه مدیریت"], ["HR_MANAGER_INTERVIEW", "مصاحبه مدیر منابع انسانی"]].map(([type, label]) => (
+            <ErpCard key={type} className="space-y-3 p-4">
+              <b>{label}</b>
+              <p className="text-xs text-[var(--sds-text-secondary)]">Personnel فعالِ جایگاه‌های انتخاب‌شده در فهرست ارزیابان این نوع نمایش داده می‌شوند.</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {evaluationSettings.positions.map((position) => <ErpCheckbox key={position.id} label={`${position.title} · ${position.code}`} checked={(evaluationSettings.selected[type] || []).includes(position.id)} onChange={(event) => setEvaluationSettings((current) => ({ ...current, selected: { ...current.selected, [type]: event.target.checked ? [...(current.selected[type] || []), position.id] : (current.selected[type] || []).filter((id) => id !== position.id) } }))} />)}
+              </div>
+              <ErpButton label="ذخیره جایگاه‌های مجاز" disabled={busy} onClick={async () => {
+                try { setBusy(true); setError(""); await hiringAPI.saveCompanyEvaluationSettings(type, evaluationSettings.selected[type] || []); setCreateOutcome({ kind: "success", title: "تنظیمات ارزیابان ذخیره شد." }); } catch (cause) { setError(hiringError(cause)); } finally { setBusy(false); }
+              }} />
+            </ErpCard>
+          ))}
+        </div>
+      </ErpSheet>
 
       <ErpSheet
         open={createOpen}
@@ -356,7 +388,7 @@ export default function HiringCasesPage() {
             placeholder="شماره همراه"
             value={form.mobile}
             onChange={(event) =>
-              setForm({ ...form, mobile: event.target.value })
+              setForm({ ...form, mobile: normalizeIdentifierDigits(event.target.value) })
             }
           />
           <ErpInput
@@ -364,7 +396,7 @@ export default function HiringCasesPage() {
             placeholder="کد ملی (اختیاری در دعوت)"
             value={form.nationalCode}
             onChange={(event) =>
-              setForm({ ...form, nationalCode: event.target.value })
+              setForm({ ...form, nationalCode: normalizeIdentifierDigits(event.target.value) })
             }
           />
           <ErpSelect

@@ -69,6 +69,7 @@ import {
   authorityLabel,
   hrDisplayLabel,
 } from "@/features/hr/hrDisplay";
+import { normalizeIdentifierDigits, normalizeNumericText } from "@/lib/numberFormat";
 
 const identityFields = [
   "firstName",
@@ -208,6 +209,7 @@ export default function HiringCasePage() {
   const [conversion, setConversion] = useState({
     scheduledStartDate: "",
   });
+  const [plannedStartRevision, setPlannedStartRevision] = useState({ open: false, scheduledStartDate: "", reason: "" });
   const [contract, setContract] = useState<any>({
     contractNumber: "",
     effectiveFrom: "",
@@ -215,6 +217,7 @@ export default function HiringCasePage() {
     file: null,
   });
   const [contractReturnReason, setContractReturnReason] = useState("");
+  const [contractWithdrawOpen, setContractWithdrawOpen] = useState(false);
   const [insurance, setInsurance] = useState({
     registrationPath: "COMPANY",
     status: "NOT_STARTED",
@@ -232,6 +235,10 @@ export default function HiringCasePage() {
       setError("");
       const result = await hiringAPI.get(id);
       setData(result.data.data);
+      setPlannedStartRevision((current) => ({
+        ...current,
+        scheduledStartDate: current.open ? current.scheduledStartDate : fromIsoDate(result.data.data.scheduledStartDate),
+      }));
       setPayrollDate(
         fromIsoDate(
           result.data.data.payrollParticipation?.effectiveFrom ||
@@ -250,6 +257,8 @@ export default function HiringCasePage() {
         setInsurance({
           ...insurance,
           ...result.data.data.insuranceEnrollment,
+          communicationMethod: result.data.data.insuranceEnrollment.communicationMethod ?? "PHONE",
+          note: result.data.data.insuranceEnrollment.note ?? "",
           effectiveDate: fromIsoDate(
             result.data.data.insuranceEnrollment.effectiveDate,
           ),
@@ -308,17 +317,18 @@ export default function HiringCasePage() {
     try {
       setBusy(true);
       setError("");
-      await action();
+      const response = await action();
+      setMessage(response?.data?.meta?.warning || success);
     } catch (e) {
       if (propagateActionError) throw e;
       setError(hiringError(e));
-      return;
+      return false;
     } finally {
       setBusy(false);
     }
-    setMessage(success);
     if (awaitRefresh) await load();
     else void load();
+    return true;
   };
   const confirmRetentionAction = async ({ reason }: { reason: string }) => {
     if (!retentionTarget) return;
@@ -502,7 +512,7 @@ export default function HiringCasePage() {
       return run(
         () => hiringAPI.reviseAssessment(id, editingAssessmentId, result),
         "نسخه جدید ارزیابی ثبت شد.",
-      ).then(() => setEditingAssessmentId(""));
+      ).then((succeeded) => { if (succeeded) setEditingAssessmentId(""); });
     }
     return run(() => hiringAPI.addAssessment(id, fd), "نتیجه ارزیابی ثبت شد.");
   };
@@ -691,7 +701,7 @@ export default function HiringCasePage() {
           />
         )}
       {selectedLifecyclePhase === "FORMAL_ASSESSMENTS" &&
-        (canHrSensitive || canCompanyManager) && (
+        actionPermissions.includes("VIEW_FORMAL_ASSESSMENT_RESULTS") && (
           <>
             <FormalAssessmentPlanPanel
               application={data}
@@ -1114,7 +1124,7 @@ export default function HiringCasePage() {
             </ErpSection>
           )}
           {selectedLifecyclePhase === "ASSESSMENT" && (
-            <ErpSection title="ارزیابی‌های DISC / BIG FIVE / EQ">
+            <ErpSection title={data.formalAssessmentPlans?.length ? "سابقه قدیمی ارزیابی‌ها" : "ارزیابی‌های DISC / BIG FIVE / EQ"} description={data.formalAssessmentPlans?.length ? "این داده‌ها برای حفظ سابقه نمایش داده می‌شوند و نتیجهٔ رسمی جاری نیستند." : undefined}>
               <ErpCard className="p-4">
                 {(hasActionPermission("MANAGE_RECRUITMENT_CASE") ||
                   (hasActionPermission("MANAGE_RECRUITMENT_CASE") && editingAssessmentId)) && (
@@ -1160,7 +1170,7 @@ export default function HiringCasePage() {
                                 ...assessment,
                                 scores: {
                                   ...assessment.scores,
-                                  [key]: e.target.value,
+                                  [key]: normalizeNumericText(e.target.value, 2),
                                 },
                               })
                             }
@@ -1256,7 +1266,7 @@ export default function HiringCasePage() {
                       className="flex flex-wrap items-center gap-2 rounded-lg border p-2"
                     >
                       <ErpBadge>
-                        {assessmentTypeLabel(item.assessmentType)} · نسخه{" "}
+                        {data.formalAssessmentPlans?.length && "سابقه قدیمی · "}{assessmentTypeLabel(item.assessmentType)} · نسخه{" "}
                         {item.version || 1} ·{" "}
                         {item.status === "ACTIVE"
                           ? "فعال"
@@ -1773,6 +1783,16 @@ export default function HiringCasePage() {
             />
           </ErpSection>
         )}
+      {selectedLifecyclePhase === "ONBOARDING" && data?.employmentRelationship?.status === "PLANNED" && hasActionPermission("REVISE_PLANNED_EMPLOYMENT_START") && (
+        <ErpSection title="تاریخ برنامه‌ریزی‌شده شروع همکاری" description="فقط امروز یا آینده قابل ثبت است؛ تغییر با دلیل ممیزی می‌شود و ظرفیت جایگاه دوباره بررسی خواهد شد.">
+          {!plannedStartRevision.open ? <div className="flex flex-wrap items-center gap-3"><b>{data.scheduledStartDate ? dateFa(data.scheduledStartDate) : "تعیین نشده"}</b><ErpButton label="تغییر تاریخ" variant="soft" onClick={() => setPlannedStartRevision({ open: true, scheduledStartDate: fromIsoDate(data.scheduledStartDate), reason: "" })} /></div> : <ErpCard className="grid gap-3 p-4 md:grid-cols-2">
+            <ErpField label="تاریخ جدید" required><HrPersianCalendar value={plannedStartRevision.scheduledStartDate} onChange={(scheduledStartDate) => setPlannedStartRevision({ ...plannedStartRevision, scheduledStartDate })} /></ErpField>
+            <ErpField label="دلیل تغییر" required><ErpTextarea value={plannedStartRevision.reason} onChange={(event) => setPlannedStartRevision({ ...plannedStartRevision, reason: event.target.value })} /></ErpField>
+            <div className="flex gap-2 md:col-span-2"><ErpButton label="ثبت تغییر تاریخ" tone="warning" disabled={busy || !plannedStartRevision.scheduledStartDate || plannedStartRevision.reason.trim().length < 5} onClick={() => void run(() => hiringAPI.revisePlannedStart(id, { scheduledStartDate: toIsoDate(plannedStartRevision.scheduledStartDate), reason: plannedStartRevision.reason.trim() }), "تاریخ شروع تغییر کرد و موارد وابسته برای بازبینی علامت‌گذاری شدند.").then((succeeded) => { if (succeeded) setPlannedStartRevision({ open: false, scheduledStartDate: "", reason: "" }); })} /><ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => setPlannedStartRevision({ open: false, scheduledStartDate: "", reason: "" })} /></div>
+          </ErpCard>}
+          {data.plannedStartRevisions?.length > 0 && <div className="mt-3 space-y-2">{data.plannedStartRevisions.map((revision: any) => <ErpCard key={revision.id} className="p-3 text-sm"><b>{dateFa(revision.priorScheduledStartDate)} ← {dateFa(revision.revisedScheduledStartDate)}</b><p className="text-[var(--sds-text-secondary)]">دلیل: {revision.reason}</p></ErpCard>)}</div>}
+        </ErpSection>
+      )}
       {selectedLifecyclePhase === "ONBOARDING" && canViewContractTask && (
         <>
           <ErpSection title="قرارداد کاغذی">
@@ -1822,6 +1842,7 @@ export default function HiringCasePage() {
                     />
                   </ErpField>
                   <ErpButton
+                    className="w-fit self-end px-3 py-1.5"
                     label="ثبت نسخه قرارداد"
                     disabled={
                       busy ||
@@ -1845,16 +1866,16 @@ export default function HiringCasePage() {
                       tone="success"
                     />
                   )}
-                  {latestContract?.canWithdraw && contractReturnReason === "" && (
+                  {latestContract?.canWithdraw && !contractWithdrawOpen && (
                     <ErpButton
                       label="پس گرفتن نسخه برای اصلاح"
                       variant="soft"
                       tone="warning"
                       disabled={busy}
-                      onClick={() => setContractReturnReason(" ")}
+                      onClick={() => setContractWithdrawOpen(true)}
                     />
                   )}
-                  {latestContract?.canWithdraw && contractReturnReason !== "" && (
+                  {latestContract?.canWithdraw && contractWithdrawOpen && (
                     <div className="space-y-2 md:col-span-2">
                       <ErpField label="دلیل پس گرفتن نسخه" required>
                         <ErpTextarea
@@ -1870,9 +1891,17 @@ export default function HiringCasePage() {
                           onClick={() => run(
                             () => hiringAPI.withdrawContract(id, latestContract.id, contractReturnReason.trim()),
                             "نسخه قرارداد پس گرفته شد و وظیفه اصلاح ایجاد شد.",
-                          )}
+                          ).then((succeeded) => {
+                            if (succeeded) {
+                              setContractWithdrawOpen(false);
+                              setContractReturnReason("");
+                            }
+                          })}
                         />
-                        <ErpButton label="انصراف" variant="soft" disabled={busy} onClick={() => setContractReturnReason("")} />
+                        <ErpButton label="انصراف" variant="soft" disabled={busy} onClick={() => {
+                          setContractWithdrawOpen(false);
+                          setContractReturnReason("");
+                        }} />
                       </div>
                     </div>
                   )}
@@ -1925,6 +1954,7 @@ export default function HiringCasePage() {
                   <ErpCard
                     className={`space-y-2 p-4 ${insuranceOverdue ? "ring-2 ring-[var(--sds-focus-ring)]" : ""}`}
                   >
+                    {data.insuranceEnrollment?.startRevisionReviewRequired && <ErpInlineState kind="stale" title="تاریخ شروع تغییر کرده است؛ شواهد بیمه بازنویسی نشده‌اند و نیاز به بازبینی دارند." />}
                     {insuranceOverdue && (
                       <ErpInlineState kind="stale" title="مهلت پیگیری ثبت بیمه توسط شرکت گذشته است." />
                     )}
@@ -2053,6 +2083,7 @@ export default function HiringCasePage() {
                 {canViewPayrollTask && (
                   <ErpCard className="space-y-2 p-4">
                     <p className="font-bold">مشارکت حقوق و دستمزد</p>
+                    {data.payrollParticipation?.startRevisionReviewRequired && <ErpInlineState kind="stale" title="مسئول حقوق و دستمزد باید تاریخ را دوباره تأیید یا اصلاح کند؛ تا آن زمان فعال‌سازی مسدود است." />}
                     <div className="rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-sm dark:bg-[var(--sds-surface-raised)]">
                       <p>
                         تاریخ شروع برنامه‌ریزی‌شده:{" "}
@@ -2253,7 +2284,7 @@ export default function HiringCasePage() {
         title="حذف ارزیابی با حفظ سابقه"
         presentation="modal"
         pending={busy}
-        footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => { setAssessmentVoidTarget(null); setAssessmentVoidReason(""); }} /><ErpButton label="تأیید حذف" tone="danger" variant="solid" disabled={busy || !assessmentVoidReason.trim()} onClick={() => void run(() => hiringAPI.voidAssessment(id, assessmentVoidTarget.id, assessmentVoidReason.trim()), "ارزیابی با حفظ سابقه باطل شد.").then(() => { setAssessmentVoidTarget(null); setAssessmentVoidReason(""); })} /></div>}
+        footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => { setAssessmentVoidTarget(null); setAssessmentVoidReason(""); }} /><ErpButton label="تأیید حذف" tone="danger" variant="solid" disabled={busy || !assessmentVoidReason.trim()} onClick={() => void run(() => hiringAPI.voidAssessment(id, assessmentVoidTarget.id, assessmentVoidReason.trim()), "ارزیابی با حفظ سابقه باطل شد.").then((succeeded) => { if (succeeded) { setAssessmentVoidTarget(null); setAssessmentVoidReason(""); } })} /></div>}
       >
         <ErpField label="دلیل حذف ارزیابی" required><ErpTextarea value={assessmentVoidReason} onChange={(event) => setAssessmentVoidReason(event.target.value)} /></ErpField>
       </ErpSheet>
@@ -2298,7 +2329,7 @@ type CaseActionRunner = (
   action: () => Promise<any>,
   success: string,
   options?: CaseActionOptions,
-) => Promise<void>;
+) => Promise<boolean>;
 
 type CaseActionOptions = {
   propagateActionError?: boolean;
@@ -2306,45 +2337,72 @@ type CaseActionOptions = {
 };
 
 function CompanyEvaluationPlan({ applicationId, actionPermissions, busy, run, onPendingChange }: { applicationId: string; actionPermissions: string[]; busy: boolean; run: CaseActionRunner; onPendingChange: (pending: boolean) => void }) {
+  const types = [["MANAGEMENT_INTERVIEW", "مصاحبه با مدیریت"], ["HR_MANAGER_INTERVIEW", "مصاحبه با مدیر منابع انسانی"], ["DEPARTMENT_SUPERVISOR_INTERVIEW", "مصاحبه با سرپرست بخش"], ["THERAPIST_CONSULTATION", "ارجاع مشاور/روان‌شناس"], ["OTHER", "سایر"]];
   const [items, setItems] = useState<any[]>([]);
+  const [eligible, setEligible] = useState<Record<string, any[]>>({});
   const [loadError, setLoadError] = useState("");
-  const [draft, setDraft] = useState({ type: "MANAGEMENT_INTERVIEW", subject: "", instructions: "", evidencePolicy: "EXPLANATION_REQUIRED" });
-  const [results, setResults] = useState<Record<string, { effect: string; explanation: string; file?: File }>>({});
+  const [draft, setDraft] = useState<any>({ type: "MANAGEMENT_INTERVIEW", subject: "", instructions: "", evidencePolicy: "EXPLANATION_REQUIRED", scorePolicy: "REQUIRED", evaluatorPersonnelId: "", externalProviderName: "", externalProviderType: "", externalProviderPhone: "", externalProviderNote: "", plannedAt: "", reportDueAt: "" });
+  const [results, setResults] = useState<Record<string, { effect: string; score: string; explanation: string; file?: File }>>({});
   const [cancelTarget, setCancelTarget] = useState<any>();
   const canPlan = actionPermissions.includes("MANAGE_COMPANY_EVALUATION_PLAN");
   const canResult = actionPermissions.includes("RECORD_COMPANY_EVALUATION_RESULT");
   const canViewResults = actionPermissions.includes("VIEW_COMPANY_EVALUATION_RESULTS");
-  const downloadEvidence = async (item: any) => {
-    const response = await hiringAPI.downloadCompanyEvaluationEvidence(applicationId, item.id);
-    const href = URL.createObjectURL(response.data);
-    const anchor = document.createElement("a");
-    anchor.href = href;
-    anchor.download = item.resultOriginalName || "company-evaluation-evidence";
-    anchor.click();
-    URL.revokeObjectURL(href);
-  };
+  const isExternal = draft.type === "THERAPIST_CONSULTATION";
+  const personnel = eligible[draft.type] || [];
   const refresh = useCallback(async () => {
     try {
-      const { data } = await hiringAPI.companyEvaluations(applicationId);
+      const personnelTypes = canPlan
+        ? types.filter(([value]) => value !== "THERAPIST_CONSULTATION")
+        : [];
+      const [{ data }, ...personnelResponses] = await Promise.all([
+        hiringAPI.companyEvaluations(applicationId),
+        ...personnelTypes.map(([value]) => hiringAPI.eligibleCompanyEvaluationPersonnel(applicationId, value)),
+      ]);
       const rows = data.data || [];
-      setItems(rows);
-      setLoadError("");
+      const map: Record<string, any[]> = {};
+      personnelTypes.forEach(([value], index) => { map[value] = personnelResponses[index]?.data?.data || []; });
+      setItems(rows); setEligible(map); setLoadError("");
       onPendingChange(rows.some((item: any) => item.status === "PLANNED"));
-    } catch (cause) {
-      setItems([]);
-      onPendingChange(false);
-      setLoadError(hiringError(cause));
-    }
-  }, [applicationId, onPendingChange]);
+    } catch (cause) { setItems([]); onPendingChange(false); setLoadError(hiringError(cause)); }
+  }, [applicationId, canPlan, onPendingChange]);
   useEffect(() => { void refresh(); }, [refresh]);
-  const types = [["MANAGEMENT_INTERVIEW", "مصاحبه با مدیریت"], ["HR_MANAGER_INTERVIEW", "مصاحبه با مدیر منابع انسانی"], ["DEPARTMENT_SUPERVISOR_INTERVIEW", "مصاحبه با سرپرست بخش"], ["THERAPIST_CONSULTATION", "مراجعه به مشاور و تراپیست"], ["OTHER", "سایر"]];
-  return <ErpSection title="برنامه ارزیابی شرکت" description="هر ارزیابی یک نوبت پایدار دارد و نتیجه منفی به‌تنهایی پرونده را رد نمی‌کند.">
+  useEffect(() => {
+    const required = ["MANAGEMENT_INTERVIEW", "HR_MANAGER_INTERVIEW", "DEPARTMENT_SUPERVISOR_INTERVIEW"].includes(draft.type);
+    setDraft((current: any) => ({ ...current, evaluatorPersonnelId: "", scorePolicy: required ? "REQUIRED" : "OPTIONAL" }));
+  }, [draft.type]);
+  const downloadEvidence = async (item: any) => { const response = await hiringAPI.downloadCompanyEvaluationEvidence(applicationId, item.id); const href = URL.createObjectURL(response.data); const anchor = document.createElement("a"); anchor.href = href; anchor.download = item.resultOriginalName || "company-evaluation-evidence"; anchor.click(); URL.revokeObjectURL(href); };
+  const cannotCreate = busy || (!isExternal && !draft.evaluatorPersonnelId) || (isExternal && !draft.externalProviderName.trim()) || (draft.type === "OTHER" && (!draft.subject.trim() || !draft.instructions.trim()));
+  return <ErpSection title="برنامه ارزیابی شرکت" description="مسئول ارزیابی از Personnel انتخاب می‌شود؛ ثبت گزارش و پیگیری همچنان بر عهده منابع انسانی است.">
     {loadError && <ErpInlineState kind="error" title={loadError} />}
-    {canPlan && <ErpCard className="mb-4 space-y-3 p-4"><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4"><ErpSelect value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })}>{types.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</ErpSelect><ErpSelect value={draft.evidencePolicy} onChange={(event) => setDraft({ ...draft, evidencePolicy: event.target.value })}><option value="EXPLANATION_REQUIRED">توضیح الزامی</option><option value="FILE_REQUIRED">فایل الزامی</option><option value="FILE_OPTIONAL">فایل اختیاری</option><option value="NO_FILE">بدون فایل</option></ErpSelect>{draft.type === "OTHER" && <><ErpInput placeholder="موضوع" value={draft.subject} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} /><ErpInput placeholder="شرح و دستور پیگیری" value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} /></>}</div><ErpButton label="افزودن ارزیابی" variant="solid" disabled={busy || (draft.type === "OTHER" && (!draft.subject.trim() || !draft.instructions.trim()))} onClick={() => void run(() => hiringAPI.addCompanyEvaluation(applicationId, draft), "ارزیابی به برنامه افزوده شد.").then(refresh)} /></ErpCard>}
-    <div className="space-y-3">{items.map((item) => { const result = results[item.id] || { effect: "NEUTRAL", explanation: "" }; const label = types.find(([value]) => value === item.type)?.[1] || item.type; return <ErpCard key={item.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><b>{label} · نوبت {Number(item.occurrenceNumber).toLocaleString("fa-IR")}</b>{item.subject && <p className="text-sm text-[var(--sds-text-secondary)]">{item.subject}</p>}</div><ErpBadge tone={item.status === "COMPLETED" ? "success" : item.status === "CANCELLED" ? "neutral" : "warning"}>{item.status === "COMPLETED" ? "تکمیل‌شده" : item.status === "CANCELLED" ? "لغوشده" : "در انتظار نتیجه"}</ErpBadge></div>{item.status === "PLANNED" && canResult && <div className="mt-3 grid gap-2 md:grid-cols-4"><ErpSelect value={result.effect} onChange={(event) => setResults({ ...results, [item.id]: { ...result, effect: event.target.value } })}><option value="POSITIVE">مثبت</option><option value="NEUTRAL">خنثی</option><option value="NEGATIVE">منفی</option></ErpSelect><ErpInput placeholder={item.evidencePolicy === "EXPLANATION_REQUIRED" ? "توضیح الزامی" : "توضیح اختیاری"} value={result.explanation} onChange={(event) => setResults({ ...results, [item.id]: { ...result, explanation: event.target.value } })} />{item.evidencePolicy !== "NO_FILE" && <ErpInput type="file" onChange={(event) => setResults({ ...results, [item.id]: { ...result, file: event.target.files?.[0] } })} />}<ErpButton label="ثبت نتیجه" disabled={busy || (item.evidencePolicy === "EXPLANATION_REQUIRED" && !result.explanation.trim()) || (item.evidencePolicy === "FILE_REQUIRED" && !result.file)} onClick={() => { const data = new FormData(); data.append("effect", result.effect); data.append("explanation", result.explanation); if (result.file) data.append("file", result.file); void run(() => hiringAPI.recordCompanyEvaluationResult(applicationId, item.id, data), "نتیجه ارزیابی ثبت شد.").then(refresh); }} /></div>}{item.status === "PLANNED" && canPlan && <div className="mt-3"><ErpButton label="لغو ارزیابی" tone="danger" variant="ghost" disabled={busy} onClick={() => setCancelTarget(item)} /></div>}{item.status === "COMPLETED" && <div className="mt-3 flex flex-wrap items-center gap-3 text-sm"><span><b>اثر: </b>{item.resultEffect === "POSITIVE" ? "مثبت" : item.resultEffect === "NEGATIVE" ? "منفی" : "خنثی"}{item.resultExplanation && ` · ${item.resultExplanation}`}</span>{item.resultOriginalName && canViewResults && <ErpButton label="دریافت مدرک نتیجه" variant="ghost" onClick={() => void downloadEvidence(item)} />}</div>}</ErpCard>; })}</div>
-    <ErpSheet open={Boolean(cancelTarget)} onClose={() => { if (!busy) setCancelTarget(undefined); }} title="لغو ارزیابی" presentation="modal" dismissible={!busy}>
-      <ErpCard className="space-y-4 p-5"><p>لغو این نوبت بازگشت‌پذیر نیست و در سابقه پرونده ثبت می‌شود.</p><div className="flex gap-2"><ErpButton label="تأیید لغو" tone="danger" disabled={busy} onClick={() => { if (!cancelTarget) return; void run(() => hiringAPI.cancelCompanyEvaluation(applicationId, cancelTarget.id), "ارزیابی لغو شد.").then(() => { setCancelTarget(undefined); return refresh(); }); }} /><ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => setCancelTarget(undefined)} /></div></ErpCard>
-    </ErpSheet>
+    {canPlan && <ErpCard className="mb-4 space-y-3 p-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <ErpField label="نوع ارزیابی"><ErpSelect value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })}>{types.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</ErpSelect></ErpField>
+        {!isExternal ? <ErpField label="Personnel ارزیاب" required><ErpSelect value={draft.evaluatorPersonnelId} onChange={(event) => setDraft({ ...draft, evaluatorPersonnelId: event.target.value })}><option value="">انتخاب کنید</option>{personnel.map((person: any) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName}{person.position?.title ? ` · ${person.position.title}` : ""}</option>)}</ErpSelect></ErpField> : <ErpField label="نام شخص یا مرکز" required><ErpInput value={draft.externalProviderName} onChange={(event) => setDraft({ ...draft, externalProviderName: event.target.value })} /></ErpField>}
+        <ErpField label="سیاست امتیاز"><ErpSelect value={draft.scorePolicy} onChange={(event) => setDraft({ ...draft, scorePolicy: event.target.value })}><option value="REQUIRED">اجباری</option><option value="OPTIONAL">اختیاری</option><option value="NONE">بدون امتیاز</option></ErpSelect></ErpField>
+        <ErpField label="شواهد"><ErpSelect value={draft.evidencePolicy} onChange={(event) => setDraft({ ...draft, evidencePolicy: event.target.value })}><option value="EXPLANATION_REQUIRED">توضیح الزامی</option><option value="FILE_REQUIRED">فایل الزامی</option><option value="FILE_OPTIONAL">فایل اختیاری</option><option value="NO_FILE">بدون فایل</option></ErpSelect></ErpField>
+        <ErpField label="تاریخ برنامه‌ریزی‌شده"><HrPersianCalendar value={draft.plannedAt} onChange={(plannedAt) => setDraft({ ...draft, plannedAt })} clearable /></ErpField>
+        <ErpField label="مهلت دریافت گزارش"><HrPersianCalendar value={draft.reportDueAt} onChange={(reportDueAt) => setDraft({ ...draft, reportDueAt })} clearable /></ErpField>
+        {isExternal && <><ErpField label="نوع مرجع"><ErpInput value={draft.externalProviderType} onChange={(event) => setDraft({ ...draft, externalProviderType: event.target.value })} /></ErpField><ErpField label="شماره تماس"><ErpInput inputMode="numeric" value={draft.externalProviderPhone} onChange={(event) => setDraft({ ...draft, externalProviderPhone: normalizeIdentifierDigits(event.target.value) })} /></ErpField></>}
+        {draft.type === "OTHER" && <><ErpField label="موضوع" required><ErpInput value={draft.subject} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} /></ErpField><ErpField label="شرح پیگیری" required><ErpInput value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} /></ErpField></>}
+      </div>
+      {!isExternal && personnel.length === 0 && <ErpInlineState kind="stale" title={draft.type === "DEPARTMENT_SUPERVISOR_INTERVIEW" ? "ابتدا سرپرست جایگاه را در ساختار سازمانی تعیین کنید." : "برای این نوع ارزیابی، جایگاه مجاز و Personnel فعال پیدا نشد."} />}
+      <ErpButton label="افزودن ارزیابی" variant="solid" disabled={cannotCreate} onClick={() => void run(() => hiringAPI.addCompanyEvaluation(applicationId, { ...draft, plannedAt: draft.plannedAt ? toIsoDate(draft.plannedAt) : null, reportDueAt: draft.reportDueAt ? toIsoDate(draft.reportDueAt) : null }), "ارزیابی به برنامه افزوده شد.").then(refresh)} />
+    </ErpCard>}
+    <div className="space-y-3">{items.map((item) => {
+      const result = results[item.id] || { effect: "NEUTRAL", score: "", explanation: "" };
+      const label = types.find(([value]) => value === item.type)?.[1] || item.type;
+      const itemPersonnel = eligible[item.type] || [];
+      const late = item.status === "PLANNED" && item.reportDueAt && new Date(item.reportDueAt) < new Date();
+      const resultBlocked = busy || (item.scorePolicy === "REQUIRED" && !result.score) || (item.evidencePolicy === "EXPLANATION_REQUIRED" && !result.explanation.trim()) || (item.evidencePolicy === "FILE_REQUIRED" && !result.file);
+      return <ErpCard key={item.id} className="p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2"><div><b>{label} · نوبت {Number(item.occurrenceNumber).toLocaleString("fa-IR")}</b><p className="text-sm text-[var(--sds-text-secondary)]">منبع گزارش: {item.evaluatorPersonnel ? `${item.evaluatorPersonnel.firstName} ${item.evaluatorPersonnel.lastName}` : item.externalProviderName || "—"}</p>{item.assignmentHistory?.length > 1 && <p className="text-xs text-[var(--sds-text-muted)]">سابقه مسئولان: {item.assignmentHistory.map((entry: any) => `${entry.evaluatorPersonnel.firstName} ${entry.evaluatorPersonnel.lastName}`).join(" ← ")}</p>}</div><div className="flex gap-2"><ErpBadge tone={late ? "danger" : item.status === "COMPLETED" ? "success" : item.status === "CANCELLED" ? "neutral" : "warning"}>{late ? "گزارش دیرکرد دارد" : item.status === "COMPLETED" ? "تکمیل‌شده" : item.status === "CANCELLED" ? "لغوشده" : "در انتظار نتیجه"}</ErpBadge></div></div>
+        {item.status === "PLANNED" && canPlan && item.evaluatorPersonnelId && <ErpField className="mt-3 max-w-md" label="تغییر مسئول"><ErpSelect value={item.evaluatorPersonnelId} onChange={(event) => void run(() => hiringAPI.reassignCompanyEvaluation(applicationId, item.id, event.target.value), "مسئول ارزیابی تغییر کرد.").then(refresh)}>{itemPersonnel.map((person: any) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName}{person.position?.title ? ` · ${person.position.title}` : ""}</option>)}</ErpSelect></ErpField>}
+        {item.status === "PLANNED" && canResult && <div className="mt-3 grid gap-2 md:grid-cols-4"><ErpSelect value={result.effect} onChange={(event) => setResults({ ...results, [item.id]: { ...result, effect: event.target.value } })}><option value="POSITIVE">مثبت</option><option value="NEUTRAL">خنثی</option><option value="NEGATIVE">منفی</option></ErpSelect>{item.scorePolicy !== "NONE" && <ErpSelect value={result.score} onChange={(event) => setResults({ ...results, [item.id]: { ...result, score: event.target.value } })}><option value="">{item.scorePolicy === "REQUIRED" ? "امتیاز اجباری" : "بدون امتیاز"}</option><option value="1">۱ — خیلی ضعیف</option><option value="2">۲ — ضعیف</option><option value="3">۳ — متوسط</option><option value="4">۴ — خوب</option><option value="5">۵ — خیلی خوب</option></ErpSelect>}<ErpInput placeholder={item.evidencePolicy === "EXPLANATION_REQUIRED" ? "توضیح الزامی" : "توضیح اختیاری"} value={result.explanation} onChange={(event) => setResults({ ...results, [item.id]: { ...result, explanation: event.target.value } })} />{item.evidencePolicy !== "NO_FILE" && <ErpInput type="file" onChange={(event) => setResults({ ...results, [item.id]: { ...result, file: event.target.files?.[0] } })} />}<ErpButton label="ثبت نتیجه" disabled={resultBlocked} onClick={() => { const data = new FormData(); data.append("effect", result.effect); data.append("score", result.score); data.append("explanation", result.explanation); if (result.file) data.append("file", result.file); void run(() => hiringAPI.recordCompanyEvaluationResult(applicationId, item.id, data), "نتیجه ارزیابی ثبت شد.").then(refresh); }} /></div>}
+        {item.status === "PLANNED" && canPlan && <div className="mt-3"><ErpButton label="لغو ارزیابی" tone="danger" variant="ghost" disabled={busy} onClick={() => setCancelTarget(item)} /></div>}
+        {item.status === "COMPLETED" && <div className="mt-3 flex flex-wrap items-center gap-3 text-sm"><span><b>اثر: </b>{item.resultEffect === "POSITIVE" ? "مثبت" : item.resultEffect === "NEGATIVE" ? "منفی" : "خنثی"} · <b>امتیاز: </b>{item.resultScore ? `${item.resultScore} از ۵` : item.legacyWithoutScore ? "نسخه قدیمی — بدون امتیاز" : "بدون امتیاز"}{item.resultExplanation && ` · ${item.resultExplanation}`}</span>{item.resultOriginalName && canViewResults && <ErpButton label="دریافت مدرک نتیجه" variant="ghost" onClick={() => void downloadEvidence(item)} />}</div>}
+      </ErpCard>;
+    })}</div>
+    <ErpSheet open={Boolean(cancelTarget)} onClose={() => { if (!busy) setCancelTarget(undefined); }} title="لغو ارزیابی" presentation="modal" dismissible={!busy}><ErpCard className="space-y-4 p-5"><p>لغو این نوبت بازگشت‌پذیر نیست و در سابقه پرونده ثبت می‌شود.</p><div className="flex gap-2"><ErpButton label="تأیید لغو" tone="danger" disabled={busy} onClick={() => { if (!cancelTarget) return; void run(() => hiringAPI.cancelCompanyEvaluation(applicationId, cancelTarget.id), "ارزیابی لغو شد.").then((succeeded) => { if (succeeded) setCancelTarget(undefined); return refresh(); }); }} /><ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => setCancelTarget(undefined)} /></div></ErpCard></ErpSheet>
   </ErpSection>;
 }
 
@@ -2433,7 +2491,7 @@ function PreIdentitySection({
               version: draft.version as number,
             };
           }}
-          onComplete={(payload) => run(
+          onComplete={async (payload) => { await run(
             () => hiringAPI.recordDecision(applicationId, "HR_INTERVIEW", {
               outcome: payload.state.decision,
               explanation: payload.state.decisionReason,
@@ -2442,7 +2500,7 @@ function PreIdentitySection({
             }),
             "نسخه مصاحبه هدایت‌شده ثبت شد.",
             { propagateActionError: true, awaitRefresh: false },
-          )}
+          ); }}
         />
       )}
       <div className="grid gap-3 xl:grid-cols-3">
@@ -2895,7 +2953,7 @@ function PreIdentitySection({
         title={preIdentityAction?.kind === "correct" ? "ایجاد نسخه اصلاحی نتیجه" : "تعیین تکلیف نتیجه منفی"}
         presentation="modal"
         pending={busy}
-        footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => { setPreIdentityAction(null); setPreIdentityActionReason(""); }} /><ErpButton label="تأیید و ثبت" tone="warning" variant="solid" disabled={busy || !preIdentityActionReason.trim()} onClick={() => { if (!preIdentityAction) return; const request = preIdentityAction.kind === "correct" ? () => hiringAPI.correctPreIdentityItem(applicationId, preIdentityAction.item.id, preIdentityActionReason.trim()) : () => hiringAPI.resolvePreIdentityNegative(applicationId, preIdentityAction.item.id, { resolution: preIdentityAction.resolution, reason: preIdentityActionReason.trim() }); void run(request, preIdentityAction.kind === "correct" ? "نسخه اصلاحی جدید ایجاد شد." : "نتیجه منفی توسط مدیریت شرکت تعیین تکلیف شد.").then(() => { setPreIdentityAction(null); setPreIdentityActionReason(""); }); }} /></div>}
+        footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="ghost" disabled={busy} onClick={() => { setPreIdentityAction(null); setPreIdentityActionReason(""); }} /><ErpButton label="تأیید و ثبت" tone="warning" variant="solid" disabled={busy || !preIdentityActionReason.trim()} onClick={() => { if (!preIdentityAction) return; const request = preIdentityAction.kind === "correct" ? () => hiringAPI.correctPreIdentityItem(applicationId, preIdentityAction.item.id, preIdentityActionReason.trim()) : () => hiringAPI.resolvePreIdentityNegative(applicationId, preIdentityAction.item.id, { resolution: preIdentityAction.resolution, reason: preIdentityActionReason.trim() }); void run(request, preIdentityAction.kind === "correct" ? "نسخه اصلاحی جدید ایجاد شد." : "نتیجه منفی توسط مدیریت شرکت تعیین تکلیف شد.").then((succeeded) => { if (succeeded) { setPreIdentityAction(null); setPreIdentityActionReason(""); } }); }} /></div>}
       >
         <ErpField label="دلیل اقدام" required><ErpTextarea value={preIdentityActionReason} onChange={(event) => setPreIdentityActionReason(event.target.value)} /></ErpField>
       </ErpSheet>
@@ -2957,11 +3015,28 @@ function FormalAssessmentPlanPanel({
   const [repeatKinds, setRepeatKinds] = useState<string[]>([]);
   const [reason, setReason] = useState("");
   const [resultDrafts, setResultDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [resultExplanations, setResultExplanations] = useState<Record<string, string>>({});
   const [resultFiles, setResultFiles] = useState<Record<string, File[]>>({});
   const [correctionReasons, setCorrectionReasons] = useState<Record<string, string>>({});
+  const [historyKind, setHistoryKind] = useState<string | null>(null);
   const canManagePlan = actionPermissions.includes("MANAGE_COMPANY_EVALUATION_PLAN");
   const canRecord = actionPermissions.includes("RECORD_COMPANY_EVALUATION_RESULT");
   const selected = Object.entries(selections).filter(([, value]) => value);
+  const resultsForKind = (kind: string) => plans.flatMap((plan: any) => plan.results || [])
+    .filter((result: any) => result.assessmentKind === kind)
+    .sort((left: any, right: any) => right.resultVersion - left.resultVersion);
+  const latestValidResultForKind = (kind: string) => resultsForKind(kind)
+    .find((result: any) => result.status === "COMPLETED" && !result.invalidatedAt);
+  const isKindActive = (kind: string) => Boolean(activePlan?.selections?.some((selection: any) => selection.selected && selection.assessmentKind === kind));
+  const downloadFormalEvidence = async (link: any) => {
+    const response = await hiringAPI.downloadFormalAssessmentEvidence(applicationId, link.id);
+    const href = URL.createObjectURL(response.data);
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = link.hiringDocument.originalName;
+    anchor.click();
+    URL.revokeObjectURL(href);
+  };
 
   return (
     <ErpSection
@@ -3051,8 +3126,9 @@ function FormalAssessmentPlanPanel({
             </p>
             {plan.reason && <p className="mt-2 text-xs text-[var(--sds-text-muted)]">دلیل: {plan.reason}</p>}
             {plan.status === "ACTIVE" && plan.selections.filter((item: any) => item.selected).map((selection: any) => {
-              const results = plans.flatMap((item: any) => item.results || []).filter((item: any) => item.assessmentKind === selection.assessmentKind).sort((a: any, b: any) => b.resultVersion - a.resultVersion);
-              const latest = results[0];
+              const results = resultsForKind(selection.assessmentKind);
+              const latest = latestValidResultForKind(selection.assessmentKind);
+              const pending = results.find((result: any) => result.status === "PENDING");
               const maySubmit = canRecord && selection.executionMethod === "COMPANY";
               const resultValidation = Object.fromEntries(
                 formalAssessmentFields[selection.assessmentKind].map(({ key }) => [
@@ -3064,8 +3140,23 @@ function FormalAssessmentPlanPanel({
                 <div key={selection.assessmentKind} className="mt-3 rounded-xl border border-[var(--sds-border-default)] p-3">
                   <div className="flex items-center justify-between gap-2">
                     <b>{formalAssessmentLabels[selection.assessmentKind]}</b>
-                    <ErpBadge tone={latest?.status === "COMPLETED" ? "success" : "warning"}>{latest?.status === "COMPLETED" ? `تکمیل‌شده · نسخه ${latest.resultVersion}` : selection.executionMethod === "APPLICANT" ? "در انتظار متقاضی" : "در انتظار ثبت شرکت"}</ErpBadge>
+                    <ErpBadge tone={pending ? "warning" : latest ? "success" : "warning"}>{pending ? (selection.executionMethod === "APPLICANT" ? "نسخه جدید در انتظار متقاضی" : "نسخه جدید در انتظار ثبت شرکت") : latest ? `تکمیل‌شده · نسخه ${latest.resultVersion}` : selection.executionMethod === "APPLICANT" ? "در انتظار متقاضی" : "در انتظار ثبت شرکت"}</ErpBadge>
                   </div>
+                  {latest?.status === "COMPLETED" && (
+                    <ErpCard className="mt-3 space-y-2 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <b>آخرین نتیجهٔ معتبر · نسخه {latest.resultVersion}</b>
+                        {results.length > 1 && <ErpButton label={`تاریخچه نسخه‌ها (${results.length})`} variant="ghost" onClick={() => setHistoryKind(selection.assessmentKind)} />}
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {Object.entries(latest.resultJson || {}).map(([key, value]) => <Metric key={key} label={formalAssessmentFields[selection.assessmentKind]?.find((field) => field.key === key)?.label || key} value={String(value)} />)}
+                      </div>
+                      {latest.resultExplanation && <p className="text-sm text-[var(--sds-text-secondary)]"><b>توضیحات: </b>{latest.resultExplanation}</p>}
+                      {latest.attempts?.flatMap((attempt: any) => attempt.evidenceLinks || []).map((link: any) => link.hiringDocument && (
+                        <ErpButton key={link.id} label={`دریافت ${link.hiringDocument.originalName}`} variant="ghost" onClick={() => void downloadFormalEvidence(link)} />
+                      ))}
+                    </ErpCard>
+                  )}
                   {maySubmit && (
                     <div className="mt-3 grid gap-2 md:grid-cols-2">
                       {formalAssessmentFields[selection.assessmentKind].map((item) => (
@@ -3077,7 +3168,7 @@ function FormalAssessmentPlanPanel({
                               ...resultDrafts,
                               [selection.assessmentKind]: {
                                 ...(resultDrafts[selection.assessmentKind] || {}),
-                                [item.key]: event.target.value,
+                                [item.key]: normalizeNumericText(event.target.value, 2),
                               },
                             })}
                             placeholder={`${item.label} · ۰ تا ۱۰۰`}
@@ -3088,13 +3179,19 @@ function FormalAssessmentPlanPanel({
                           )}
                         </label>
                       ))}
-                      {latest?.status === "COMPLETED" && canRecord && (
+                      {latest && canRecord && (
                         <ErpInput
                           value={correctionReasons[selection.assessmentKind] || ""}
                           onChange={(event) => setCorrectionReasons({ ...correctionReasons, [selection.assessmentKind]: event.target.value })}
                           placeholder="دلیل نسخه اصلاحی"
                         />
                       )}
+                      <ErpTextarea
+                        className="md:col-span-2"
+                        value={resultExplanations[selection.assessmentKind] || ""}
+                        onChange={(event) => setResultExplanations({ ...resultExplanations, [selection.assessmentKind]: event.target.value })}
+                        placeholder="توضیحات و جمع‌بندی نتیجه (اختیاری)"
+                      />
                       <label className="space-y-1 text-sm font-semibold md:col-span-2">
                         <span>نمودارها و گزارش‌ها (اختیاری، حداکثر ۵ فایل)</span>
                         <ErpInput
@@ -3108,11 +3205,12 @@ function FormalAssessmentPlanPanel({
                         />
                       </label>
                       <ErpButton
-                        label={latest?.status === "COMPLETED" ? "ثبت نسخه اصلاحی" : "ثبت نتیجه"}
-                        disabled={busy || !formalAssessmentFields[selection.assessmentKind].every(({ key }) => resultValidation[key]?.value !== undefined) || Boolean(latest?.status === "COMPLETED" && !(correctionReasons[selection.assessmentKind] || "").trim())}
+                        label={latest ? "ثبت نسخه اصلاحی" : "ثبت نتیجه"}
+                        disabled={busy || !formalAssessmentFields[selection.assessmentKind].every(({ key }) => resultValidation[key]?.value !== undefined) || Boolean(latest && !pending && !(correctionReasons[selection.assessmentKind] || "").trim())}
                         onClick={() => run(async () => {
                           await hiringAPI.recordFormalAssessmentResult(applicationId, selection.assessmentKind, {
                             result: Object.fromEntries(formalAssessmentFields[selection.assessmentKind].map(({ key }) => [key, resultValidation[key].value])),
+                            explanation: resultExplanations[selection.assessmentKind] || "",
                             correctionReason: correctionReasons[selection.assessmentKind] || "",
                           });
                           if (resultFiles[selection.assessmentKind]?.length) {
@@ -3128,6 +3226,24 @@ function FormalAssessmentPlanPanel({
           </ErpCard>
         ))}
       </div>
+      {(["DISC", "EQ", "BIG_FIVE"] as const).some((kind) => resultsForKind(kind).length > 0) && (
+        <ErpCard className="mt-4 flex flex-wrap items-center gap-2 p-4">
+          <b className="w-full">تاریخچه نتایج رسمی</b>
+          {(["DISC", "EQ", "BIG_FIVE"] as const).filter((kind) => resultsForKind(kind).length > 0).map((kind) => (
+            <ErpButton key={kind} label={`${formalAssessmentLabels[kind]} · ${resultsForKind(kind).length.toLocaleString("fa-IR")} نسخه`} variant="ghost" onClick={() => setHistoryKind(kind)} />
+          ))}
+        </ErpCard>
+      )}
+      <ErpSheet open={Boolean(historyKind)} onClose={() => setHistoryKind(null)} title={`تاریخچه ${historyKind ? formalAssessmentLabels[historyKind] : "ارزیابی"}`} presentation="modal">
+        <div className="space-y-3 p-4">
+          {historyKind && resultsForKind(historyKind).map((result: any) => (
+            <ErpCard key={result.id} className="p-3">
+              <div className="flex items-center justify-between gap-2"><b>نسخه {result.resultVersion}</b><ErpBadge tone={isKindActive(historyKind) && latestValidResultForKind(historyKind)?.id === result.id ? "success" : "neutral"}>{isKindActive(historyKind) && latestValidResultForKind(historyKind)?.id === result.id ? "نتیجه جاری" : "سابقه قدیمی"}</ErpBadge></div>
+              {result.status === "COMPLETED" ? <><div className="mt-2 grid gap-2 sm:grid-cols-2">{Object.entries(result.resultJson || {}).map(([key, value]) => <Metric key={key} label={formalAssessmentFields[historyKind]?.find((field) => field.key === key)?.label || key} value={String(value)} />)}</div>{result.resultExplanation && <p className="mt-2 text-sm"><b>توضیحات: </b>{result.resultExplanation}</p>}{result.correctionReason && <p className="mt-1 text-xs text-[var(--sds-text-muted)]"><b>دلیل نسخه اصلاحی: </b>{result.correctionReason}</p>}{result.attempts?.flatMap((attempt: any) => attempt.evidenceLinks || []).map((link: any) => link.hiringDocument && <ErpButton key={link.id} label={`دریافت ${link.hiringDocument.originalName}`} variant="ghost" onClick={() => void downloadFormalEvidence(link)} />)}</> : <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">نتیجه این نسخه تکمیل نشده است.</p>}
+            </ErpCard>
+          ))}
+        </div>
+      </ErpSheet>
     </ErpSection>
   );
 }

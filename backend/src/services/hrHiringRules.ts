@@ -75,7 +75,9 @@ export const validateHiringCorrection = (data: any, fields: string[]) => {
   if (missing.length) {
     throw new Error(`فیلدهای درخواستی برای اصلاح ناقص‌اند: ${missing.join(', ')}`);
   }
-  if (fields.includes('nationalCode') && data?.identityKind !== 'FOREIGN') validateIranianNationalCode(data?.nationalCode);
+  if (fields.includes('nationalCode') && data?.identityKind !== 'FOREIGN' && !/^\d{10}$/.test(String(data?.nationalCode ?? ''))) {
+    throw new Error('کد ملی باید دقیقاً ۱۰ رقم باشد.');
+  }
   if (fields.includes('postalCode') && !/^\d{10}$/.test(String(data?.postalCode || ''))) {
     throw new Error('کد پستی باید ۱۰ رقم باشد.');
   }

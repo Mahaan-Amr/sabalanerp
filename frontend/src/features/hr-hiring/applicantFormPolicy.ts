@@ -82,6 +82,9 @@ export const nationalCodeValidationError = (value: unknown) => {
   return undefined;
 };
 
+export const nationalCodeCorrectionValidationError = (value: unknown) =>
+  /^\d{10}$/.test(String(value ?? "")) ? undefined : "کد ملی باید دقیقاً ۱۰ رقم باشد.";
+
 const repeaters: Array<{ key: string; label: string; fields: string[] }> = [
   { key: "workHistory", label: "سابقه کاری", fields: ["organization", "duration", "lastPosition", "lastSalaryBenefits"] },
   { key: "skills", label: "مهارت", fields: ["name", "familiarity", "proficiency"] },

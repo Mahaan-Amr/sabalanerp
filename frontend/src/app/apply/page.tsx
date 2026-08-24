@@ -15,6 +15,7 @@ import {
   EDUCATION_LEVEL_OPTIONS,
   applicantFormErrors,
   currentJalaliYear,
+  nationalCodeCorrectionValidationError,
   nationalCodeValidationError,
   normalizeLegacyEducation,
 } from "@/features/hr-hiring/applicantFormPolicy";
@@ -278,8 +279,14 @@ export default function ApplicantFormPage() {
   const validationErrors = () => {
     const base = applicantFormErrors(data, jalaliYear);
     const scoped = isCorrection
-      ? base.filter((item) => correctionFields.some((field) => item.field === field || item.field.startsWith(`${field}.`) || (field === "educationLevel" && item.field === "educationLevelOther")))
+      ? base
+        .filter((item) => correctionFields.some((field) => item.field === field || item.field.startsWith(`${field}.`) || (field === "educationLevel" && item.field === "educationLevelOther")))
+        .filter((item) => item.field !== "nationalCode")
       : base;
+    if (isCorrection && correctionFields.includes("nationalCode")) {
+      const correctionError = nationalCodeCorrectionValidationError(data.nationalCode);
+      if (correctionError) scoped.push({ field: "nationalCode", message: correctionError });
+    }
     const assessmentErrors: ApplicantFieldError[] = (isCorrection ? [] : application?.formalAssessments?.selections || [])
       .filter((selection: any) => !selection.completed)
       .map((selection: any) => ({
@@ -312,7 +319,9 @@ export default function ApplicantFormPage() {
     ? "شماره همراه باید دقیقاً ۱۱ رقم باشد و با 09 شروع شود."
     : inlineError("mobile");
   const nationalCodeError = data.identityKind !== "FOREIGN" && data.nationalCode
-    ? nationalCodeValidationError(data.nationalCode)
+    ? isCorrection
+      ? nationalCodeCorrectionValidationError(data.nationalCode)
+      : nationalCodeValidationError(data.nationalCode)
     : inlineError("nationalCode");
 
   const endSession = () => {

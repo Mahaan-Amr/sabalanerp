@@ -453,6 +453,7 @@ export const resolveLegacyV1PricingProjection = (input: {
   pricing: ProjectedLegacyV1Pricing;
 }) => {
   const projectedTotal = new Prisma.Decimal(input.pricing.totalAmountToman ?? 0);
+  const requiresPricingReconstruction = input.pricing.baseAmountToman == null || !projectedTotal.isInteger();
   let snapshotRawTotal: Prisma.Decimal | null = null;
   if (input.productSnapshot?.totalPrice != null && input.productSnapshot.totalPrice !== '') {
     try {
@@ -465,8 +466,7 @@ export const resolveLegacyV1PricingProjection = (input: {
       snapshotRawTotal = null;
     }
   }
-  const needsLegacyProjection = input.pricing.baseAmountToman == null ||
-    !projectedTotal.isInteger() || snapshotRawTotal != null;
+  const needsLegacyProjection = requiresPricingReconstruction || snapshotRawTotal != null;
   if (!input.canReconstructLegacyV1 || !needsLegacyProjection) {
     return { pricing: input.pricing, normalization: null };
   }
@@ -478,6 +478,12 @@ export const resolveLegacyV1PricingProjection = (input: {
     productSnapshot: input.productSnapshot,
     rawTotalAmountToman: snapshotRawTotal?.toString() ?? String(input.pricing.totalAmountToman ?? ''),
   });
+  if (snapshotRawTotal != null && !requiresPricingReconstruction) {
+    if (!new Prisma.Decimal(reconstructed.baseAmountToman).eq(input.pricing.baseAmountToman!)) {
+      throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} legacy material amount conflicts with canonical pricing`);
+    }
+    return { pricing: input.pricing, normalization: reconstructed.normalization };
+  }
   return { pricing: reconstructed, normalization: reconstructed.normalization };
 };
 

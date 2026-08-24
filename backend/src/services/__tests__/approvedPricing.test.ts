@@ -302,6 +302,14 @@ test('reconstructs legacy v1 monetary components with audited half-up Toman conv
 });
 
 test('preserves a fractional graph-v1 source total when it seals exactly to the canonical whole Toman', () => {
+  const pricing = {
+    baseAmountToman: '42666667',
+    totalAmountToman: '46666667',
+    pricingComponents: [
+      { id: 'base-material', kind: 'base-material', amountToman: '42666667' },
+      { id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '4000000' },
+    ],
+  };
   const resolved = resolveLegacyV1PricingProjection({
     canReconstructLegacyV1: true,
     productRowId: 'contract-row-16ba23bf-810b-4f59-85f0-10e5d47145b1',
@@ -317,20 +325,13 @@ test('preserves a fractional graph-v1 source total when it seals exactly to the 
       mandatoryPercentage: '20',
       appliedSubServices: [],
     },
-    pricing: {
-      baseAmountToman: '42666667',
-      totalAmountToman: '46666667',
-      pricingComponents: [
-        { id: 'base-material', kind: 'base-material', amountToman: '42666667' },
-        { id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '4000000' },
-      ],
-    },
+    pricing,
   });
 
   assert.equal(resolved.normalization?.rawTotalAmountToman, '46666666.67');
   assert.equal(resolved.normalization?.sealedTotalAmountToman, '46666667');
   assert.equal(resolved.normalization?.difference, '0.33');
-  assert.equal(resolved.pricing.totalAmountToman, '46666667');
+  assert.deepEqual(resolved.pricing, pricing, 'raw-value compatibility must not replace canonical component evidence');
 });
 
 test('keeps unmatched or unproven fractional source totals fail-closed', () => {
@@ -360,6 +361,62 @@ test('keeps unmatched or unproven fractional source totals fail-closed', () => {
     productSnapshot: { ...snapshot, originalTotalPrice: '42666666.67', totalPrice: '46666666.67' },
     pricing,
   }).normalization, null, 'the graph-v1 rule must not apply without matching legacy provenance');
+
+  assert.throws(() => resolveLegacyV1PricingProjection({
+    canReconstructLegacyV1: true,
+    productRowId: 'legacy-row-conflicting-base',
+    productSnapshot: { ...snapshot, originalTotalPrice: '42666666.67', totalPrice: '46666666.67' },
+    pricing: {
+      baseAmountToman: '42000000',
+      totalAmountToman: '46666667',
+      pricingComponents: [
+        { id: 'base-material', kind: 'base-material', amountToman: '42000000' },
+        { id: 'other-allocation', kind: 'other-allocation', amountToman: '4666667' },
+      ],
+    },
+  }), /legacy material amount conflicts/, 'equal grand totals must not hide a conflicting canonical base allocation');
+});
+
+test('reconciles a mixed legacy-fractional and canonical invoice without rewriting either row', () => {
+  const source = approvedPricingSourceFixture();
+  (source.contract.contractData as any).discount = {
+    enabled: false, baseSubtotal: '1500', percent: '0', amount: '0', currency: 'تومان',
+  };
+  (source.contract.contractData as any).products.push({
+    rowId: 'row-2', productId: 'product-2', productType: 'longitudinal',
+    length: '1', lengthUnit: 'm', quantity: '1', meta: { isLayer: false },
+  });
+  source.contract.items = [
+    { ...source.contract.items[0]!, totalPrice: '1250.40' },
+    { id: 'item-2', productId: 'product-2', productRowId: 'row-2', productType: 'longitudinal', quantity: '1', totalPrice: '500' },
+  ];
+  source.contract.currentItems = source.contract.items.map(item => ({ ...item }));
+  source.contract.productGraph = {
+    ...source.contract.productGraph!,
+    totalAmountToman: '1750',
+    rows: [
+      { ...source.contract.productGraph!.rows[0]!, legacyRawTotalAmountToman: '1250.40' },
+      {
+        productRowId: 'row-2', catalogProductId: 'product-2', productType: 'longitudinal', contractualTitle: 'Canonical row',
+        baseAmountToman: '500', totalAmountToman: '500', requestedQuantity: '1', requestedLengthMeters: '1',
+        requestedAreaSquareMeters: null, operations: [], pricingComponents: [
+          { id: 'base-material', kind: 'base-material', amountToman: '500' },
+        ],
+      },
+    ],
+  };
+  source.leaf.invoiceItems = [
+    { ...source.leaf.invoiceItems[0]!, totalPrice: '12504' },
+    { id: 'invoice-item-2', contractItemId: 'item-2', productId: 'product-2', quantity: '1', totalPrice: '5000' },
+  ];
+  source.leaf.amount = '17504';
+
+  const version = buildApprovedPricingVersion(source, 1, 'mixed-legacy-canonical-version');
+  assert.equal(version.grossAmount, '1750.000000000000');
+  assert.equal(version.netAmount, '1750.000000000000');
+  assert.equal(version.sourceEvidence.financialAmountNormalizations.length, 2);
+  assert.equal(source.contract.items[0]!.totalPrice, '1250.40');
+  assert.equal(source.leaf.amount, '17504');
 });
 
 test('reconstructs graph-v1 stair cutting from its duplicated physical and tool lines', () => {

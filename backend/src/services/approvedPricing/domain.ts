@@ -614,9 +614,9 @@ export const buildApprovedPricingVersion = (
   }
   const expectedInvoiceAmount = new Prisma.Decimal(netAmount).mul(currencyFactor);
   const leafAmount = new Prisma.Decimal(source.leaf.amount);
-  const legacyRawSelectedGross = selectedGraphRows.every(row => row.legacyRawTotalAmountToman != null)
+  const legacyRawSelectedGross = selectedGraphRows.some(row => row.legacyRawTotalAmountToman != null)
     ? selectedGraphRows.reduce((sum, row) => sum.plus(
-        new Prisma.Decimal(row.legacyRawTotalAmountToman!).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),
+        new Prisma.Decimal(row.legacyRawTotalAmountToman ?? row.totalAmountToman!).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),
       ), new Prisma.Decimal(0))
     : null;
   const legacyExpectedInvoiceAmount = !discount.enabled && legacyRawSelectedGross

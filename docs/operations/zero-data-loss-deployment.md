@@ -84,7 +84,7 @@ Failure before `MUTATION_STARTED` removes maintenance and resumes the unchanged 
 ## Timeouts and retries
 
 - Target total normal maintenance: less than five minutes.
-- Checkpoint creation and remote verification before mutation: at most ten minutes, then abort without rollback.
+- Checkpoint creation and remote verification before mutation: a configurable 10-minute to 4-hour fail-closed window (1 hour by default), sized for the independent off-server store; expiry aborts without rollback.
 - Migration, startup, and mandatory gates after mutation: at most fifteen minutes, then begin rollback.
 - Transient idempotent operations may retry three times with bounded exponential backoff.
 - Migration, promotion, database rename, filesystem swap, and restore are never blindly repeated; the durable journal determines resume or rollback.

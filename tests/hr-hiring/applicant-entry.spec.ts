@@ -228,9 +228,13 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
   await candidatePage.getByRole("button", { name: "تأیید و ورود" }).click();
   await expect(candidatePage.getByText("کد ملی — کد ملی با کارت ملی یکسان نیست.", { exact: true })).toBeVisible();
   await expect(candidatePage.getByLabel(/کد پستی — کد پستی را با مدرک نشانی بررسی کنید/)).toBeVisible();
-  await candidatePage
-    .getByLabel(/کد ملی — کد ملی با کارت ملی یکسان نیست/)
-    .fill("0013547828");
+  const nationalCodeInput = candidatePage.getByLabel(/کد ملی — کد ملی با کارت ملی یکسان نیست/);
+  await expect(nationalCodeInput).toHaveAttribute("maxlength", "10");
+  await nationalCodeInput.fill("۱۲۳۴۵۶۷۸۹");
+  await expect(nationalCodeInput).toHaveValue("123456789");
+  await expect(candidatePage.getByText("کد ملی باید دقیقاً ۱۰ رقم باشد.", { exact: true })).toBeVisible();
+  await nationalCodeInput.fill("۰۰۱۳۵۴۷۸۲۸");
+  await expect(nationalCodeInput).toHaveValue("0013547828");
   await candidatePage
     .getByLabel(/کد پستی — کد پستی را با مدرک نشانی بررسی کنید/)
     .fill("1234567890");

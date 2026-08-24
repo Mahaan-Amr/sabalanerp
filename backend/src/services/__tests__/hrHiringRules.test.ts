@@ -24,6 +24,8 @@ assert.throws(() => validateHiringQuestionnaire({ ...complete, graduationYear: '
 assert.throws(() => validateHiringQuestionnaire({ ...complete, graduationYear: '9999' }), /سال اخذ مدرک/);
 assert.throws(() => validateHiringQuestionnaire({ ...complete, workHistory: [{ organization: 'سبلان', duration: '', lastPosition: '', lastSalaryBenefits: '' }] }), /ردیف سابقه کاری/);
 assert.throws(() => validateHiringCorrection({ workHistory: [{ organization: 'سبلان', duration: '' }] }, ['workHistory']), /ردیف سابقه کاری/);
+assert.throws(() => validateHiringCorrection({ nationalCode: '123456789' }, ['nationalCode']), /دقیقاً ۱۰ رقم/);
+assert.throws(() => validateHiringCorrection({ nationalCode: '2293456789' }, ['nationalCode']), /کد ملی معتبر نیست/);
 
 assert.equal(compensationTotalRials([{ label: 'حقوق پایه', amountRials: '1000' }, { label: 'مزایا', amountRials: 250 }]), 1250n);
 assert.throws(() => compensationTotalRials([{ label: 'حقوق پایه', amountRials: '12.5' }]), /عدد صحیح ریال/);

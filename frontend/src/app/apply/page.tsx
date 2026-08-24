@@ -15,6 +15,7 @@ import {
   EDUCATION_LEVEL_OPTIONS,
   applicantFormErrors,
   currentJalaliYear,
+  nationalCodeValidationError,
   normalizeLegacyEducation,
 } from "@/features/hr-hiring/applicantFormPolicy";
 
@@ -310,6 +311,9 @@ export default function ApplicantFormPage() {
   const mobileError = data.mobile && !/^09\d{9}$/.test(String(data.mobile))
     ? "شماره همراه باید دقیقاً ۱۱ رقم باشد و با 09 شروع شود."
     : inlineError("mobile");
+  const nationalCodeError = data.identityKind !== "FOREIGN" && data.nationalCode
+    ? nationalCodeValidationError(data.nationalCode)
+    : inlineError("nationalCode");
 
   const endSession = () => {
     sessionStorage.removeItem("hrApplicantSession");
@@ -474,10 +478,10 @@ export default function ApplicantFormPage() {
                 return (
                 <ErpField
                   key={key}
-                  error={key === "mobile" ? mobileError : key === "postalCode" ? postalCodeError : formErrors.find((item) => item.field === key)?.message}
+                  error={key === "mobile" ? mobileError : key === "postalCode" ? postalCodeError : key === "nationalCode" ? nationalCodeError : formErrors.find((item) => item.field === key)?.message}
                   label={`${detail?.label || "فیلد نیازمند اصلاح"}${detail?.explanation ? ` — ${detail.explanation}` : ""}`}
                 >
-                  {key === "mobile" || key === "postalCode" ? (
+                  {key === "nationalCode" || key === "mobile" || key === "postalCode" ? (
                     <ErpInput
                       id={`applicant-field-${key}`}
                       inputMode={key === "mobile" ? "tel" : "numeric"}
@@ -658,7 +662,7 @@ export default function ApplicantFormPage() {
                 </ErpSelect>
               </ErpField>
               {data.identityKind === "IRANIAN" ? (
-                <ErpField label="کد ملی">
+                <ErpField label="کد ملی" error={isCorrection ? undefined : nationalCodeError}>
                   <ErpInput
                     id="applicant-field-nationalCode"
                     inputMode="numeric"

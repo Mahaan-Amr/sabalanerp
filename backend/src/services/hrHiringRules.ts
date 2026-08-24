@@ -6,6 +6,12 @@ export const isValidIranianNationalCode = (value: unknown) => {
   return Number(code[9]) === (remainder < 2 ? remainder : 11 - remainder);
 };
 
+const validateIranianNationalCode = (value: unknown) => {
+  const code = String(value ?? '');
+  if (!/^\d{10}$/.test(code)) throw new Error('کد ملی باید دقیقاً ۱۰ رقم باشد.');
+  if (!isValidIranianNationalCode(code)) throw new Error('کد ملی معتبر نیست.');
+};
+
 export const validateHiringQuestionnaire = (data: any) => {
   const required = [
     'firstName', 'lastName', 'alias', 'birthDate', 'birthPlace', 'militaryStatus', 'fatherName',
@@ -26,7 +32,7 @@ export const validateHiringQuestionnaire = (data: any) => {
   if (typeof data?.hasSocialSecurityHistory !== 'boolean') throw new Error('وضعیت سابقه بیمه باید انتخاب شود.');
   if (data?.maritalStatus === 'MARRIED' && (!Number.isInteger(Number(data.childrenCount)) || Number(data.childrenCount) < 0)) throw new Error('تعداد فرزندان نامعتبر است.');
   const iranian = data?.identityKind !== 'FOREIGN';
-  if (iranian && !isValidIranianNationalCode(data?.nationalCode)) throw new Error('کد ملی معتبر نیست.');
+  if (iranian) validateIranianNationalCode(data?.nationalCode);
   if (!iranian && (!data?.foreignIdentityType || !data?.foreignIdentityNumber)) missing.push('foreignIdentity');
   if (!/^09\d{9}$/.test(String(data?.mobile || ''))) throw new Error('شماره همراه معتبر نیست.');
   const educationLevels = ['PRIMARY', 'LOWER_SECONDARY', 'DIPLOMA', 'ASSOCIATE', 'BACHELOR', 'MASTER', 'DOCTORATE', 'SEMINARY', 'OTHER'];
@@ -69,9 +75,7 @@ export const validateHiringCorrection = (data: any, fields: string[]) => {
   if (missing.length) {
     throw new Error(`فیلدهای درخواستی برای اصلاح ناقص‌اند: ${missing.join(', ')}`);
   }
-  if (fields.includes('nationalCode') && data?.identityKind !== 'FOREIGN' && !isValidIranianNationalCode(data?.nationalCode)) {
-    throw new Error('کد ملی معتبر نیست.');
-  }
+  if (fields.includes('nationalCode') && data?.identityKind !== 'FOREIGN') validateIranianNationalCode(data?.nationalCode);
   if (fields.includes('postalCode') && !/^\d{10}$/.test(String(data?.postalCode || ''))) {
     throw new Error('کد پستی باید ۱۰ رقم باشد.');
   }

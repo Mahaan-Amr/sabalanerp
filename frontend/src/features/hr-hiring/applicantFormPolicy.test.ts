@@ -37,6 +37,8 @@ const complete = {
 assert.deepEqual(applicantFormErrors(complete, 1405), []);
 assert.match(applicantFormErrors({ ...complete, mobile: "0912" }, 1405)[0].message, /۱۱ رقم/);
 assert.match(applicantFormErrors({ ...complete, postalCode: "123" }, 1405)[0].message, /۱۰ رقم/);
+assert.match(applicantFormErrors({ ...complete, nationalCode: "123456789" }, 1405)[0].message, /دقیقاً ۱۰ رقم/);
+assert.match(applicantFormErrors({ ...complete, nationalCode: "2293456789" }, 1405)[0].message, /کد ملی معتبر نیست/);
 assert.match(applicantFormErrors({ ...complete, graduationYear: "1406" }, 1405)[0].message, /۱۳۰۰ تا ۱۴۰۵/);
 assert.match(applicantFormErrors({ ...complete, educationLevel: "OTHER" }, 1405)[0].message, /عنوان مقطع/);
 assert.match(applicantFormErrors({

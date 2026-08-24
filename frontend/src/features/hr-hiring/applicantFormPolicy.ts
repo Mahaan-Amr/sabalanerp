@@ -64,6 +64,24 @@ const educationRequiredFields: Array<[string, string]> = [
 
 const empty = (value: unknown) => value === undefined || value === null || String(value).trim() === "";
 
+export const isValidIranianNationalCode = (value: unknown) => {
+  const code = String(value ?? "");
+  if (!/^\d{10}$/.test(code) || /^(\d)\1{9}$/.test(code)) return false;
+  const sum = code
+    .slice(0, 9)
+    .split("")
+    .reduce((total, digit, index) => total + Number(digit) * (10 - index), 0);
+  const remainder = sum % 11;
+  return Number(code[9]) === (remainder < 2 ? remainder : 11 - remainder);
+};
+
+export const nationalCodeValidationError = (value: unknown) => {
+  const code = String(value ?? "");
+  if (!/^\d{10}$/.test(code)) return "کد ملی باید دقیقاً ۱۰ رقم باشد.";
+  if (!isValidIranianNationalCode(code)) return "کد ملی معتبر نیست.";
+  return undefined;
+};
+
 const repeaters: Array<{ key: string; label: string; fields: string[] }> = [
   { key: "workHistory", label: "سابقه کاری", fields: ["organization", "duration", "lastPosition", "lastSalaryBenefits"] },
   { key: "skills", label: "مهارت", fields: ["name", "familiarity", "proficiency"] },
@@ -84,6 +102,9 @@ export const applicantFormErrors = (data: Record<string, any>, jalaliYear = curr
     if (empty(data.foreignIdentityNumber)) errors.push({ field: "foreignIdentityNumber", message: "شماره مدرک هویتی الزامی است." });
   } else if (empty(data?.nationalCode)) {
     errors.push({ field: "nationalCode", message: "کد ملی الزامی است." });
+  } else {
+    const nationalCodeError = nationalCodeValidationError(data.nationalCode);
+    if (nationalCodeError) errors.push({ field: "nationalCode", message: nationalCodeError });
   }
   for (const [field, message] of contactRequiredFields) if (empty(data?.[field])) errors.push({ field, message });
   if (!empty(data?.postalCode) && !/^\d{10}$/.test(String(data.postalCode))) {

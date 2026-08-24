@@ -414,7 +414,8 @@ test('reconciles a mixed legacy-fractional and canonical invoice without rewriti
   const version = buildApprovedPricingVersion(source, 1, 'mixed-legacy-canonical-version');
   assert.equal(version.grossAmount, '1750.000000000000');
   assert.equal(version.netAmount, '1750.000000000000');
-  assert.equal(version.sourceEvidence.financialAmountNormalizations.length, 2);
+  const normalizations = version.sourceEvidence.financialAmountNormalizations as readonly unknown[];
+  assert.equal(normalizations.length, 2);
   assert.equal(source.contract.items[0]!.totalPrice, '1250.40');
   assert.equal(source.leaf.amount, '17504');
 });

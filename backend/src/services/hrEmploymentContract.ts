@@ -13,6 +13,31 @@ export interface PaperContractEvidenceState {
   withdrawnAt?: Date | string | null;
 }
 
+export interface PaperContractCorrectionTaskState {
+  status: string;
+  assignedToUserId: string | null;
+}
+
+export interface PaperContractWorkflowCapabilities {
+  canClaimCorrectionTask: boolean;
+  canRecordNewVersion: boolean;
+  canSubmitLatestDraft: boolean;
+  canWithdraw: boolean;
+}
+
+export const projectPaperContractCorrectionTask = <T extends {
+  assignedToUserId: string | null;
+}>(input: {
+  canSeeContracts: boolean;
+  task?: T | null;
+  capabilities: PaperContractWorkflowCapabilities;
+  actorId: string;
+}) => input.canSeeContracts && input.task ? {
+  ...input.task,
+  canClaim: input.capabilities.canClaimCorrectionTask,
+  isClaimant: input.task.assignedToUserId === input.actorId,
+} : null;
+
 export const paperContractReviewState = (
   contract: PaperContractEvidenceState,
 ): PaperContractReviewState => {
@@ -21,6 +46,50 @@ export const paperContractReviewState = (
   if (contract.withdrawnAt) return "WITHDRAWN";
   if (contract.submittedAt) return "SUBMITTED";
   return "DRAFT";
+};
+
+export const projectPaperContractWorkflowCapabilities = (input: {
+  actorId: string;
+  actorCanRecord: boolean;
+  employmentStatus?: string | null;
+  latestContract?: PaperContractEvidenceState | null;
+  correctionTask?: PaperContractCorrectionTaskState | null;
+}): PaperContractWorkflowCapabilities => {
+  const isPlanned = input.employmentStatus === "PLANNED";
+  if (!input.actorCanRecord || !isPlanned) {
+    return {
+      canClaimCorrectionTask: false,
+      canRecordNewVersion: false,
+      canSubmitLatestDraft: false,
+      canWithdraw: false,
+    };
+  }
+
+  if (!input.latestContract) {
+    return {
+      canClaimCorrectionTask: false,
+      canRecordNewVersion: true,
+      canSubmitLatestDraft: false,
+      canWithdraw: false,
+    };
+  }
+
+  const reviewState = paperContractReviewState(input.latestContract);
+  const correctionTask = input.correctionTask;
+  const correctionNeeded = reviewState === "RETURNED" || reviewState === "WITHDRAWN";
+  return {
+    canClaimCorrectionTask:
+      correctionNeeded &&
+      correctionTask?.status === "PENDING" &&
+      correctionTask.assignedToUserId === null,
+    canRecordNewVersion:
+      correctionNeeded &&
+      correctionTask?.status === "IN_PROGRESS" &&
+      correctionTask.assignedToUserId === input.actorId,
+    canSubmitLatestDraft:
+      reviewState === "DRAFT" && input.latestContract.uploadedBy === input.actorId,
+    canWithdraw: reviewState === "SUBMITTED",
+  };
 };
 
 export const assertPaperContractDraft = (input: {

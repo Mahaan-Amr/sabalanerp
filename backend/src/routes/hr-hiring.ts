@@ -58,7 +58,9 @@ import {
 import {
   assertPaperContractDraft,
   assertPaperContractReviewable,
-  paperContractReviewState
+  paperContractReviewState,
+  projectPaperContractCorrectionTask,
+  projectPaperContractWorkflowCapabilities,
 } from '../services/hrEmploymentContract';
 import { normalizeInsuranceEnrollmentCommand } from '../services/hrInsuranceEnrollment';
 import { normalizePayrollParticipationCommand } from '../services/hrPayrollParticipation';
@@ -117,6 +119,8 @@ import {
 import { addTehranWorkingDays, tehranCivilDateKey } from '../services/tehranBusinessCalendar';
 import { createHrHiringCollateralReturnDuty, createHrHiringContractReviewDuty } from '../services/crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
 import { reconcileAcceptedOfferFollowUp } from '../services/hrAcceptedOfferFollowUp';
+import { cancelOpenCrossWorkspaceDuty } from '../services/crossWorkspaceDutyCancellation';
+import { claimContractCorrectionTask } from '../services/hrContractCorrectionTask';
 import { normalizePlannedStartRevision, projectPlannedStartRevisionEffects } from '../services/hrPlannedStartRevision';
 import {
   legacyOnboardingTaskCompletionDecision,
@@ -1190,7 +1194,7 @@ router.get('/dashboard-metrics', asyncHandler(async (req: AuthRequest, res: Resp
 // decisions are intentionally evaluated as separate layers.
 const actionProtectedHiringMutationPaths = [
   /^\/interview-criteria\/publish$/,
-  /^\/work-items(?:\/[^/]+)?$/,
+  /^\/work-items(?:\/[^/]+(?:\/claim)?)?$/,
   /^\/pre-identity\/templates$/,
   /^\/collateral-templates(?:\/[^/]+\/active)?$/,
   /^\/deletion-receipts\/[^/]+\/retry-files$/,
@@ -1235,6 +1239,10 @@ export const hrHiringBaseFeatureForRequest = (path: string) => {
 };
 
 router.use(asyncHandler(async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (/^\/work-items\/[^/]+\/claim$/.test(req.path)) {
+    const permissions = await activeHrActionPermissionsForUser(prisma, actorId(req));
+    if (permissions.includes('RECORD_SIGNED_EMPLOYMENT_CONTRACT')) return next();
+  }
   if (/^\/applications\/[^/]+(?:\/collateral(?:\/.*)?|\/collateral-returns\/[^/]+\/download)$/.test(req.path)) {
     const permissions = await activeHrActionPermissionsForUser(prisma, actorId(req));
     if (permissions.includes('RECORD_COLLATERAL_CUSTODY') || permissions.includes('VERIFY_COLLATERAL_CUSTODY')
@@ -1556,7 +1564,15 @@ router.get('/work-items', asyncHandler(async (req: AuthRequest, res: Response) =
   };
   const candidates = await prisma.hrWorkItem.findMany({ where, include: workItemInclude, orderBy: [{ status: 'asc' }, { dueDate: 'asc' }, { createdAt: 'desc' }], take: 250 });
   const rows = scope === 'mine' ? await filterHrWorkItemsForUser(candidates, actorId(req)) : candidates;
-  res.json({ success: true, data: rows, meta: { scope, status, canManage: manager, currentUserId: actorId(req) } });
+  const actionPermissions = new Set(await activeHrActionPermissionsForUser(prisma, actorId(req)));
+  const projectedRows = rows.map((item) => ({
+    ...item,
+    canClaim: actionPermissions.has('RECORD_SIGNED_EMPLOYMENT_CONTRACT')
+      && item.status === 'PENDING'
+      && item.assignedToUserId === null
+      && /^HIRING:[^:]+:RECORD_CONTRACT_CORRECTION:UNASSIGNED$/.test(item.sourceKey || ''),
+  }));
+  res.json({ success: true, data: projectedRows, meta: { scope, status, canManage: manager, currentUserId: actorId(req) } });
 }));
 
 router.get('/work-items/users', requireHrWorkManager, asyncHandler(async (_req: AuthRequest, res: Response) => {
@@ -1631,6 +1647,37 @@ router.patch('/work-items/:id', asyncHandler(async (req: AuthRequest, res: Respo
     waiverReason: waived ? reason : null
   }, include: workItemInclude });
   await auditWorkItem(row.id, reassigned ? 'TASK_REASSIGNED' : `TASK_${requestedStatus}`, actorId(req), current, row);
+  res.json({ success: true, data: row });
+}));
+
+router.post('/work-items/:id/claim', asyncHandler(async (req: AuthRequest, res: Response) => {
+  const current = await prisma.hrWorkItem.findUniqueOrThrow({ where: { id: req.params.id } });
+  const match = current.sourceKey?.match(/^HIRING:([^:]+):RECORD_CONTRACT_CORRECTION:UNASSIGNED$/);
+  if (current.sourceType !== 'HIRING_ACTION' || !match) {
+    return res.status(409).json({ success: false, error: 'این وظیفه قابل دریافت شخصی نیست.' });
+  }
+  const authorization = await authorizeHrUser(prisma, actorId(req), {
+    actionPermissionCodes: ['RECORD_SIGNED_EMPLOYMENT_CONTRACT'],
+  });
+  if (!authorization.allowed) {
+    return res.status(403).json({ success: false, error: 'HR_ACTION_PERMISSION_REQUIRED' });
+  }
+  if (current.assignedToUserId === actorId(req) && current.status === 'IN_PROGRESS') {
+    const row = await prisma.hrWorkItem.findUniqueOrThrow({ where: { id: current.id }, include: workItemInclude });
+    return res.json({ success: true, data: row });
+  }
+  const row = await prisma.$transaction(async (tx) => {
+    await claimContractCorrectionTask(tx, { workItemId: current.id, actorUserId: actorId(req) });
+    const claimed = await tx.hrWorkItem.findUniqueOrThrow({ where: { id: current.id }, include: workItemInclude });
+    await tx.hrWorkItemAudit.create({ data: {
+      workItemId: claimed.id,
+      eventType: 'TASK_CLAIMED',
+      actorUserId: actorId(req),
+      beforeJson: JSON.parse(JSON.stringify(current)),
+      afterJson: JSON.parse(JSON.stringify(claimed)),
+    } });
+    return claimed;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   res.json({ success: true, data: row });
 }));
 
@@ -1907,7 +1954,7 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
 router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Response) => {
   const row = await prisma.hrJobApplication.findUnique({ where: { id: req.params.id }, include: applicationInclude });
   if (!row) return res.status(404).json({ success: false, error: 'پرونده استخدام پیدا نشد.' });
-  const [authorityCodes, actionPermissionCodes, companyEvaluationOccurrences, initialInterviewCriteriaVersion] = await Promise.all([
+  const [authorityCodes, actionPermissionCodes, companyEvaluationOccurrences, initialInterviewCriteriaVersion, contractCorrectionTask] = await Promise.all([
     activeHiringAuthoritiesForUser(actorId(req)),
     activeHrActionPermissionsForUser(prisma, actorId(req)),
     prisma.hrCompanyEvaluationOccurrence.findMany({
@@ -1920,6 +1967,10 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
           select: { criteriaJson: true },
         })
       : Promise.resolve(null),
+    prisma.hrWorkItem.findUnique({
+      where: { sourceKey: `HIRING:${row.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED` },
+      include: { assignedTo: { select: workItemUserSelect } },
+    }),
   ]);
   const authorities = new Set(authorityCodes);
   const actionPermissions = new Set(actionPermissionCodes);
@@ -2032,6 +2083,21 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
       ])
     );
   }
+  const latestContract = row.contracts[0] || null;
+  const contractWorkflowCapabilities = projectPaperContractWorkflowCapabilities({
+    actorId: actorId(req),
+    actorCanRecord: actionPermissions.has('RECORD_SIGNED_EMPLOYMENT_CONTRACT'),
+    employmentStatus: row.employmentRelationship?.status,
+    latestContract,
+    correctionTask: contractCorrectionTask,
+  });
+  data.contractWorkflowCapabilities = contractWorkflowCapabilities;
+  data.contractCorrectionTask = projectPaperContractCorrectionTask({
+    canSeeContracts,
+    task: contractCorrectionTask,
+    capabilities: contractWorkflowCapabilities,
+    actorId: actorId(req),
+  });
   data.contracts = canSeeContracts
     ? data.contracts.map(({ storageName: _storageName, sha256: _sha256, ...contract }: any, index: number) => {
         const reviewState = paperContractReviewState(contract);
@@ -2040,14 +2106,10 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
           reviewState,
           canSubmit:
             index === 0 &&
-            actionPermissions.has('RECORD_SIGNED_EMPLOYMENT_CONTRACT') &&
-            contract.uploadedBy === actorId(req) &&
-            reviewState === 'DRAFT',
+            contractWorkflowCapabilities.canSubmitLatestDraft,
           canWithdraw:
             index === 0 &&
-            contract.submittedBy === actorId(req) &&
-            reviewState === 'SUBMITTED' &&
-            !contract.withdrawnAt,
+            contractWorkflowCapabilities.canWithdraw,
           canReview: false,
         };
       })
@@ -3831,10 +3893,10 @@ router.post('/applications/:id/collateral-requirements/not-required', requireAct
           sourceActionCode: { in: ['HIRING_COLLATERAL_RECORD_RECEIPT', 'HIRING_COLLATERAL_VERIFY_RECEIPT'] } },
       }) : [];
       for (const duty of duties) {
-        await tx.crossWorkspaceDuty.update({ where: { id: duty.id }, data: {
-          status: 'CANCELLED', respondedAt: now, respondedByUserId: actorId(req),
-          structuredResultJson: { reason: 'COLLATERAL_REQUIREMENT_REVOKED' },
-        } });
+        const cancelled = await cancelOpenCrossWorkspaceDuty(tx, {
+          dutyId: duty.id, structuredResult: { reason: 'COLLATERAL_REQUIREMENT_REVOKED' },
+        });
+        if (cancelled.count !== 1) throw Object.assign(new Error('وظیفه مالی هم‌زمان تعیین تکلیف شده است.'), { statusCode: 409 });
         await tx.crossWorkspaceDutyAssignmentHistory.updateMany({
           where: { dutyId: duty.id, endedAt: null }, data: { endedAt: now, endReason: 'SOURCE_CHANGED', changedByUserId: actorId(req) },
         });
@@ -4093,8 +4155,24 @@ router.post('/applications/:id/convert', requireActionPermission('MANAGE_RECRUIT
 router.post('/applications/:id/contracts', requireActionPermission('RECORD_SIGNED_EMPLOYMENT_CONTRACT'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
   if (!req.file) throw new Error('اسکن قرارداد الزامی است.');
   try {
-    const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id } });
+    const application = await prisma.hrJobApplication.findUniqueOrThrow({
+      where: { id: req.params.id }, include: { employmentRelationship: true },
+    });
     if (!application.convertedAt) throw new Error('قرارداد پس از تبدیل به پرسنل برنامه‌ریزی‌شده ثبت می‌شود.');
+    if (application.employmentRelationship?.status !== 'PLANNED') throw new Error('ثبت نسخه قرارداد در این مسیر فقط پیش از شروع واقعی همکاری مجاز است.');
+    const [latestContract, correctionTask] = await Promise.all([
+      prisma.hrEmploymentContractDocument.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' } }),
+      prisma.hrWorkItem.findUnique({ where: { sourceKey: `HIRING:${req.params.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED` } }),
+    ]);
+    const workflowCapabilities = projectPaperContractWorkflowCapabilities({
+      actorId: actorId(req), actorCanRecord: true, employmentStatus: application.employmentRelationship.status,
+      latestContract, correctionTask,
+    });
+    if (!workflowCapabilities.canRecordNewVersion) {
+      throw new Error(latestContract
+        ? 'ابتدا وظیفه اصلاح قرارداد را دریافت کنید؛ فقط مسئول فعلی می‌تواند نسخه اصلاح‌شده را ثبت کند.'
+        : 'در حال حاضر امکان ثبت نسخه قرارداد وجود ندارد.');
+    }
     const unresolved = await prisma.hrEmploymentContractDocument.findFirst({ where: {
       applicationId: req.params.id, submittedAt: { not: null }, approvedAt: null, returnedAt: null, withdrawnAt: null,
     }, orderBy: { version: 'desc' } });
@@ -4110,6 +4188,39 @@ router.post('/applications/:id/contracts', requireActionPermission('RECORD_SIGNE
     validateHiringFileSignature(req.file.path, req.file.mimetype);
     const scanStatus = await scanHiringFile(req.file.path); const digest = await sha256File(req.file.path);
     const row = await prisma.$transaction(async (tx) => {
+      const [transactionApplication, transactionLatestContract, transactionCorrectionTask] = await Promise.all([
+        tx.hrJobApplication.findUniqueOrThrow({
+          where: { id: req.params.id }, include: { employmentRelationship: true },
+        }),
+        tx.hrEmploymentContractDocument.findFirst({
+          where: { applicationId: req.params.id }, orderBy: { version: 'desc' },
+        }),
+        tx.hrWorkItem.findUnique({
+          where: { sourceKey: `HIRING:${req.params.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED` },
+        }),
+      ]);
+      const transactionCapabilities = projectPaperContractWorkflowCapabilities({
+        actorId: actorId(req),
+        actorCanRecord: true,
+        employmentStatus: transactionApplication.employmentRelationship?.status,
+        latestContract: transactionLatestContract,
+        correctionTask: transactionCorrectionTask,
+      });
+      if (!transactionCapabilities.canRecordNewVersion) {
+        throw Object.assign(new Error(transactionLatestContract
+          ? 'ابتدا وظیفه اصلاح قرارداد را دریافت کنید؛ فقط مسئول فعلی می‌تواند نسخه اصلاح‌شده را ثبت کند.'
+          : 'در حال حاضر امکان ثبت نسخه قرارداد وجود ندارد.'), { statusCode: 409 });
+      }
+      const transactionUnresolved = await tx.hrEmploymentContractDocument.findFirst({ where: {
+        applicationId: req.params.id,
+        submittedAt: { not: null },
+        approvedAt: null,
+        returnedAt: null,
+        withdrawnAt: null,
+      } });
+      if (transactionUnresolved) {
+        throw Object.assign(new Error('نسخهٔ در انتظار تصمیم باید ابتدا با ذکر دلیل پس گرفته شود.'), { statusCode: 409 });
+      }
       const aggregate = await tx.hrEmploymentContractDocument.aggregate({ where: { applicationId: req.params.id }, _max: { version: true } });
       const created = await tx.hrEmploymentContractDocument.create({ data: {
         applicationId: req.params.id, version: (aggregate._max.version || 0) + 1, contractNumber: String(req.body.contractNumber).trim(),
@@ -4122,12 +4233,8 @@ router.post('/applications/:id/contracts', requireActionPermission('RECORD_SIGNE
         where: { applicationId: req.params.id, ...SYSTEM_ONBOARDING_TASK_DEFINITIONS.SIGNED_CONTRACT },
         data: { status: 'PENDING', completedBy: null, completedAt: null }
       });
-      await tx.hrWorkItem.updateMany({
-        where: { sourceKey: `HIRING:${req.params.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED`, status: { in: ['PENDING', 'IN_PROGRESS'] } },
-        data: { status: 'COMPLETE', completedByUserId: actorId(req), completedAt: new Date() },
-      });
       return created;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await audit(req.params.id, 'SIGNED_CONTRACT_VERSION_RECORDED', req, { contractId: row.id, version: row.version });
     res.status(201).json({ success: true, data: row });
   } catch (error) { removeHiringFile(req.file.path); throw error; }
@@ -4142,8 +4249,9 @@ router.post('/applications/:id/contracts/:contractId/submit', requireActionPermi
   if (contract.approvedAt) throw new Error('این قرارداد قبلاً تأیید شده است.');
   if (contract.submittedAt) throw new Error('این قرارداد قبلاً برای بررسی ارسال شده است.');
   const identityApplication = await prisma.hrJobApplication.findUniqueOrThrow({
-    where: { id: req.params.id }, include: { candidate: { include: { linkedPersonnel: true } } },
+    where: { id: req.params.id }, include: { candidate: { include: { linkedPersonnel: true } }, employmentRelationship: true },
   });
+  if (identityApplication.employmentRelationship?.status !== 'PLANNED') throw new Error('ارسال قرارداد در این مسیر فقط پیش از شروع واقعی همکاری مجاز است.');
   await ensureCandidatePersonnelIdentityConsistent(prisma, { applicationId: identityApplication.id, candidate: identityApplication.candidate });
   const result = await prisma.$transaction(async (tx) => {
     const current = await tx.hrEmploymentContractDocument.findFirstOrThrow({
@@ -4171,10 +4279,10 @@ router.post('/applications/:id/contracts/:contractId/submit', requireActionPermi
       sourceId: { in: applicationContractIds },
     } });
     for (const duty of supersededDuties) {
-      await tx.crossWorkspaceDuty.update({ where: { id: duty.id }, data: {
-        status: 'CANCELLED', respondedAt: submittedAt,
-        structuredResultJson: { actionCode: 'SUPERSEDED_BY_NEWER_CONTRACT_VERSION', successorContractId: row.id },
+      const cancelled = await cancelOpenCrossWorkspaceDuty(tx, { dutyId: duty.id, structuredResult: {
+        actionCode: 'SUPERSEDED_BY_NEWER_CONTRACT_VERSION', successorContractId: row.id,
       } });
+      if (cancelled.count !== 1) throw Object.assign(new Error('وظیفه بررسی نسخه قبلی هم‌زمان تعیین تکلیف شده است.'), { statusCode: 409 });
       await tx.crossWorkspaceDutyAssignmentHistory.updateMany({ where: { dutyId: duty.id, endedAt: null }, data: {
         endedAt: submittedAt, endReason: 'SOURCE_CHANGED', changedByUserId: actorId(req),
       } });
@@ -4186,6 +4294,29 @@ router.post('/applications/:id/contracts/:contractId/submit', requireActionPermi
       } });
     }
     const duty = await createHrHiringContractReviewDuty(tx, { contractId: row.id, actorUserId: actorId(req) });
+    if (row.version > 1) {
+      const correctionTask = await tx.hrWorkItem.findUnique({
+        where: { sourceKey: `HIRING:${req.params.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED` },
+      });
+      if (!correctionTask) throw new Error('وظیفه اصلاح قرارداد پیدا نشد.');
+      const completedCorrection = await tx.hrWorkItem.updateMany({ where: {
+        id: correctionTask.id,
+        status: 'IN_PROGRESS', assignedToUserId: actorId(req),
+      }, data: { status: 'COMPLETE', completedByUserId: actorId(req), completedAt: submittedAt } });
+      if (completedCorrection.count !== 1) throw new Error('فقط مسئول فعلی وظیفه اصلاح می‌تواند نسخه اصلاح‌شده را ارسال کند.');
+      await tx.hrWorkItemAudit.create({ data: {
+        workItemId: correctionTask.id,
+        eventType: 'TASK_COMPLETE',
+        actorUserId: actorId(req),
+        beforeJson: JSON.parse(JSON.stringify(correctionTask)),
+        afterJson: {
+          ...JSON.parse(JSON.stringify(correctionTask)),
+          status: 'COMPLETE',
+          completedByUserId: actorId(req),
+          completedAt: submittedAt,
+        },
+      } });
+    }
     await tx.hrHiringAudit.create({ data: {
       applicationId: req.params.id, actorUserId: actorId(req), actorKind: 'USER', eventType: 'SIGNED_CONTRACT_SUBMITTED',
       payloadJson: { contractId: row.id, version: row.version, accountingDutyId: duty.id },
@@ -4200,19 +4331,22 @@ router.post('/applications/:id/contracts/:contractId/withdraw', requireActionPer
   if (reason.length < 3) throw new Error('دلیل پس‌گرفتن نسخه قرارداد الزامی است.');
   const now = new Date();
   const result = await prisma.$transaction(async (tx) => {
+    const application = await tx.hrJobApplication.findUniqueOrThrow({
+      where: { id: req.params.id }, select: { employmentRelationship: { select: { status: true } } },
+    });
+    if (application.employmentRelationship?.status !== 'PLANNED') throw new Error('پس‌گرفتن نسخه فقط پیش از شروع واقعی همکاری مجاز است.');
     const contract = await tx.hrEmploymentContractDocument.findFirstOrThrow({ where: { id: req.params.contractId, applicationId: req.params.id } });
     const latest = await tx.hrEmploymentContractDocument.findFirst({ where: { applicationId: req.params.id }, orderBy: { version: 'desc' }, select: { id: true } });
-    if (latest?.id !== contract.id || contract.submittedBy !== actorId(req) || !contract.submittedAt || contract.approvedAt || contract.returnedAt || contract.withdrawnAt) {
-      throw new Error('فقط ثبت‌کننده می‌تواند آخرین نسخه ارسال‌شده و تعیین‌تکلیف‌نشده را پس بگیرد.');
+    if (latest?.id !== contract.id || !contract.submittedAt || contract.approvedAt || contract.returnedAt || contract.withdrawnAt) {
+      throw new Error('فقط آخرین نسخه ارسال‌شده و تعیین‌تکلیف‌نشده قابل پس‌گرفتن است.');
     }
     const duty = await tx.crossWorkspaceDuty.findFirst({ where: {
       sourceType: 'HR_HIRING_FINANCE', sourceId: contract.id, sourceActionCode: 'HIRING_CONTRACT_REVIEW', status: 'OPEN',
     } });
     if (!duty) throw new Error('وظیفه بررسی حسابداری دیگر باز نیست.');
-    const cancelled = await tx.crossWorkspaceDuty.updateMany({ where: { id: duty.id, status: 'OPEN' }, data: {
-      status: 'CANCELLED', respondedAt: now, respondedByUserId: null,
-      structuredResultJson: { actionCode: 'WITHDRAWN_BY_RECORDER', reason },
-    } });
+    const cancelled = await cancelOpenCrossWorkspaceDuty(tx, {
+      dutyId: duty.id, structuredResult: { actionCode: 'WITHDRAWN_BY_PERMISSION_HOLDER', reason },
+    });
     if (!cancelled.count) throw new Error('وظیفه بررسی هم‌زمان تعیین تکلیف شده است.');
     await tx.crossWorkspaceDutyAssignmentHistory.updateMany({ where: { dutyId: duty.id, endedAt: null }, data: {
       endedAt: now, endReason: 'CANCELLED', changedByUserId: actorId(req),
@@ -4230,12 +4364,18 @@ router.post('/applications/:id/contracts/:contractId/withdraw', requireActionPer
       .map((entry) => tehranCivilDateKey(entry.date)));
     const dueAt = addTehranWorkingDays(now, 3, holidays);
     const sourceKey = `HIRING:${req.params.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED`;
-    await tx.hrWorkItem.upsert({ where: { sourceKey }, update: {
-      status: 'PENDING', dueDate: dueAt, description: reason, completedAt: null, completedByUserId: null,
+    const correctionTask = await tx.hrWorkItem.upsert({ where: { sourceKey }, update: {
+      status: 'PENDING', dueDate: dueAt, description: reason, assignedToUserId: null, assignmentReason: null,
+      completedAt: null, completedByUserId: null, waivedAt: null, waivedByUserId: null, waiverReason: null,
     }, create: {
       title: 'اصلاح قرارداد کاغذی پس از پس‌گرفتن نسخه', description: reason,
       sourceType: 'HIRING_ACTION', sourceKey, destinationHref: `/dashboard/hr/hiring/${req.params.id}`,
       assignedToUserId: null, dueDate: dueAt, createdByUserId: actorId(req),
+    } });
+    await tx.hrWorkItemAudit.create({ data: {
+      workItemId: correctionTask.id, eventType: 'CONTRACT_CORRECTION_TASK_CREATED', actorUserId: actorId(req),
+      beforeJson: Prisma.JsonNull,
+      afterJson: { contractId: contract.id, contractVersion: contract.version, dueAt, reason },
     } });
     await tx.hrHiringAudit.create({ data: {
       applicationId: req.params.id, actorUserId: actorId(req), actorKind: 'USER', eventType: 'SIGNED_CONTRACT_WITHDRAWN',
@@ -4315,10 +4455,10 @@ router.post('/applications/:id/planned-start-revision', requireActionPermission(
       sourceId: { in: application.contracts.map((contract) => contract.id) },
     } });
     for (const duty of openContractDuties) {
-      await tx.crossWorkspaceDuty.update({ where: { id: duty.id }, data: {
-        status: 'CANCELLED', respondedAt: now,
-        structuredResultJson: { actionCode: 'PLANNED_START_DATE_REVISED', reason: command.reason },
+      const cancelled = await cancelOpenCrossWorkspaceDuty(tx, { dutyId: duty.id, structuredResult: {
+        actionCode: 'PLANNED_START_DATE_REVISED', reason: command.reason,
       } });
+      if (cancelled.count !== 1) throw Object.assign(new Error('وظیفه بررسی قرارداد هم‌زمان تعیین تکلیف شده است.'), { statusCode: 409 });
       await tx.crossWorkspaceDutyAssignmentHistory.updateMany({ where: { dutyId: duty.id, endedAt: null }, data: {
         endedAt: now, endReason: 'SOURCE_CHANGED', changedByUserId: actorId(req),
       } });
@@ -4340,7 +4480,8 @@ router.post('/applications/:id/planned-start-revision', requireActionPermission(
       const sourceKey = `HIRING:${application.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED`;
       const dueDate = addTehranWorkingDays(now, 3, new Set());
       await tx.hrWorkItem.upsert({ where: { sourceKey }, update: {
-        status: 'PENDING', description: command.reason, dueDate, completedAt: null, completedByUserId: null,
+        status: 'PENDING', description: command.reason, dueDate, assignedToUserId: null, assignmentReason: null,
+        completedAt: null, completedByUserId: null, waivedAt: null, waivedByUserId: null, waiverReason: null,
       }, create: {
         title: 'اصلاح قرارداد پس از تغییر تاریخ شروع', description: command.reason, sourceType: 'HIRING_ACTION', sourceKey,
         destinationHref: `/dashboard/hr/hiring/${application.id}`, dueDate, createdByUserId: actorId(req),
@@ -4539,7 +4680,19 @@ router.use((error: any, req: express.Request, res: Response, _next: NextFunction
     return res.status(400).json(interviewCompletionResponse);
   }
   console.error('HR hiring route error:', error);
-  if (error?.code === 'P2002') return res.status(409).json({ success: false, error: 'رکورد تکراری است.', details: error.meta });
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+    return res.status(409).json({ success: false, error: 'رکورد تکراری است.' });
+  }
+  if (error instanceof Prisma.PrismaClientKnownRequestError
+    || error instanceof Prisma.PrismaClientUnknownRequestError
+    || error instanceof Prisma.PrismaClientRustPanicError
+    || /ConnectorError|prisma\.[A-Za-z]+\.(?:create|update|delete|find)/i.test(String(error?.message || ''))) {
+    return res.status(500).json({
+      success: false,
+      error: `عملیات استخدام به‌دلیل خطای فنی انجام نشد. کد پیگیری: ${trackingId}`,
+      trackingId,
+    });
+  }
   if (error instanceof multer.MulterError) return res.status(400).json({ success: false, error: error.message });
   if (Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode <= 599) {
     return res.status(error.statusCode).json({ success: false, error: error.message });

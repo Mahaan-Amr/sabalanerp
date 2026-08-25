@@ -3,6 +3,8 @@ import {
   assertPaperContractDraft,
   assertPaperContractReviewable,
   paperContractReviewState,
+  projectPaperContractCorrectionTask,
+  projectPaperContractWorkflowCapabilities,
 } from "../hrEmploymentContract";
 
 assert.doesNotThrow(() =>
@@ -73,5 +75,104 @@ assert.equal(
   }),
   "RETURNED",
 );
+
+const submittedCapabilities = projectPaperContractWorkflowCapabilities({
+  actorId: "permitted-user-2",
+  actorCanRecord: true,
+  employmentStatus: "PLANNED",
+  latestContract: {
+    uploadedBy: "recorder-1",
+    submittedAt: new Date("2026-07-27T10:00:00.000Z"),
+  },
+  correctionTask: null,
+});
+assert.equal(submittedCapabilities.canWithdraw, true);
+assert.equal(submittedCapabilities.canRecordNewVersion, false);
+assert.equal(submittedCapabilities.canSubmitLatestDraft, false);
+
+assert.deepEqual(
+  projectPaperContractWorkflowCapabilities({
+    actorId: "permitted-user-2",
+    actorCanRecord: true,
+    employmentStatus: "ACTIVE",
+    latestContract: {
+      uploadedBy: "recorder-1",
+      submittedAt: new Date("2026-07-27T10:00:00.000Z"),
+    },
+    correctionTask: null,
+  }),
+  {
+    canClaimCorrectionTask: false,
+    canRecordNewVersion: false,
+    canSubmitLatestDraft: false,
+    canWithdraw: false,
+  },
+);
+
+const returnedWithUnclaimedTask = projectPaperContractWorkflowCapabilities({
+  actorId: "permitted-user-2",
+  actorCanRecord: true,
+  employmentStatus: "PLANNED",
+  latestContract: {
+    uploadedBy: "recorder-1",
+    submittedAt: new Date("2026-07-27T10:00:00.000Z"),
+    returnedAt: new Date("2026-07-28T10:00:00.000Z"),
+  },
+  correctionTask: { status: "PENDING", assignedToUserId: null },
+});
+assert.equal(returnedWithUnclaimedTask.canClaimCorrectionTask, true);
+assert.equal(returnedWithUnclaimedTask.canRecordNewVersion, false);
+
+const claimedCorrection = projectPaperContractWorkflowCapabilities({
+  actorId: "permitted-user-2",
+  actorCanRecord: true,
+  employmentStatus: "PLANNED",
+  latestContract: {
+    uploadedBy: "recorder-1",
+    submittedAt: new Date("2026-07-27T10:00:00.000Z"),
+    withdrawnAt: new Date("2026-07-28T10:00:00.000Z"),
+  },
+  correctionTask: {
+    status: "IN_PROGRESS",
+    assignedToUserId: "permitted-user-2",
+  },
+});
+assert.equal(claimedCorrection.canRecordNewVersion, true);
+assert.equal(claimedCorrection.canClaimCorrectionTask, false);
+
+const draftSuccessor = projectPaperContractWorkflowCapabilities({
+  actorId: "permitted-user-2",
+  actorCanRecord: true,
+  employmentStatus: "PLANNED",
+  latestContract: { uploadedBy: "permitted-user-2" },
+  correctionTask: {
+    status: "IN_PROGRESS",
+    assignedToUserId: "permitted-user-2",
+  },
+});
+assert.equal(draftSuccessor.canRecordNewVersion, false);
+assert.equal(draftSuccessor.canSubmitLatestDraft, true);
+
+const sensitiveCorrectionTask = {
+  id: "task-1",
+  assignedToUserId: null,
+  description: "دلیل محرمانه اصلاح قرارداد",
+};
+assert.equal(projectPaperContractCorrectionTask({
+  canSeeContracts: false,
+  task: sensitiveCorrectionTask,
+  capabilities: returnedWithUnclaimedTask,
+  actorId: "permitted-user-2",
+}), null);
+assert.deepEqual(projectPaperContractCorrectionTask({
+  canSeeContracts: true,
+  task: sensitiveCorrectionTask,
+  capabilities: returnedWithUnclaimedTask,
+  actorId: "permitted-user-2",
+}), {
+  ...sensitiveCorrectionTask,
+  canClaim: true,
+  isClaimant: false,
+});
 
 console.log("HR employment contract policy tests passed.");

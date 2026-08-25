@@ -47,6 +47,7 @@ import {
   shouldLoadCompanyEvaluationPlan,
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
+import { projectContractWorkflowPresentation } from "@/features/hr-hiring/contractWorkflowPresentation";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import { ApplicantCaseOverview } from "@/features/hr-hiring/ApplicantCaseOverview";
 import { FinalHiringRejection } from "@/features/hr-hiring/FinalHiringRejection";
@@ -400,6 +401,11 @@ export default function HiringCasePage() {
     toIsoDate(insurance.dueDate) < new Date().toISOString().slice(0, 10),
   );
   const latestContract = data.contracts?.[0];
+  const contractPresentation = projectContractWorkflowPresentation({
+    latestContract: latestContract || null,
+    correctionTask: data.contractCorrectionTask || null,
+    canRecordNewVersion: Boolean(data.contractWorkflowCapabilities?.canRecordNewVersion),
+  });
   const openIdentityConflict = data.identityConflicts?.find((item: any) => item.status === "OPEN");
   const currentCollateralItems = (data.collateralItems || []).filter((item: any) => !item.supersededBy);
   const collateralExplicitlyNotRequired = data.collateralRequirements?.[0]?.type === "NO_PRE_HIRE_COLLATERAL";
@@ -1820,6 +1826,8 @@ export default function HiringCasePage() {
             <div className="grid gap-3 md:grid-cols-4">
               {hasActionPermission("RECORD_SIGNED_EMPLOYMENT_CONTRACT") && (
                 <>
+                  {contractPresentation.showContractFields && (
+                    <>
                   <ErpField label="شماره قرارداد" required>
                     <ErpInput
                       value={contract.contractNumber}
@@ -1874,7 +1882,9 @@ export default function HiringCasePage() {
                     }
                     onClick={uploadContract}
                   />
-                  {latestContract?.canSubmit && (
+                    </>
+                  )}
+                  {contractPresentation.primaryAction === "SUBMIT_DRAFT" && latestContract?.canSubmit && (
                     <ErpButton
                       label="ارسال برای بررسی مدیر مالی"
                       disabled={busy}
@@ -1887,7 +1897,7 @@ export default function HiringCasePage() {
                       tone="success"
                     />
                   )}
-                  {latestContract?.canWithdraw && !contractWithdrawOpen && (
+                  {contractPresentation.primaryAction === "WITHDRAW" && latestContract?.canWithdraw && !contractWithdrawOpen && (
                     <ErpButton
                       label="پس گرفتن نسخه برای اصلاح"
                       variant="soft"
@@ -1896,7 +1906,7 @@ export default function HiringCasePage() {
                       onClick={() => setContractWithdrawOpen(true)}
                     />
                   )}
-                  {latestContract?.canWithdraw && contractWithdrawOpen && (
+                  {contractPresentation.primaryAction === "WITHDRAW" && latestContract?.canWithdraw && contractWithdrawOpen && (
                     <div className="space-y-2 md:col-span-2">
                       <ErpField label="دلیل پس گرفتن نسخه" required>
                         <ErpTextarea
@@ -1925,6 +1935,16 @@ export default function HiringCasePage() {
                         }} />
                       </div>
                     </div>
+                  )}
+                  {contractPresentation.showClaimCorrection && data.contractCorrectionTask && (
+                    <ErpButton
+                      label="دریافت وظیفه اصلاح قرارداد"
+                      disabled={busy}
+                      onClick={() => run(
+                        () => hiringAPI.claimWorkItem(data.contractCorrectionTask.id),
+                        "وظیفه اصلاح قرارداد به شما تخصیص یافت.",
+                      )}
+                    />
                   )}
                 </>
               )}

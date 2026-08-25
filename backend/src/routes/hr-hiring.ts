@@ -58,12 +58,15 @@ import {
 import {
   assertPaperContractDraft,
   assertPaperContractReviewable,
+  canReusePaperContractStoredEvidence,
   paperContractReviewState,
   projectPaperContractCorrectionTask,
   projectPaperContractWorkflowCapabilities,
+  projectWithdrawalCorrectionTaskTransition,
 } from '../services/hrEmploymentContract';
 import { normalizeInsuranceEnrollmentCommand } from '../services/hrInsuranceEnrollment';
 import { normalizePayrollParticipationCommand } from '../services/hrPayrollParticipation';
+import { eraseJobApplicationRecords } from '../services/hrJobApplicationErasure';
 import { buildEmploymentActivationReadiness } from '../services/hrEmploymentActivation';
 import {
   assertArchiveReason,
@@ -526,13 +529,13 @@ const applicationDeletionImpact = async (applicationId: string, client: PrismaCl
     }
   });
   if (!application) return null;
-  const files = [
+  const files = Array.from(new Set([
     ...application.documents.map((item) => item.storageName),
     ...application.assessments.map((item) => item.storageName),
     ...application.preIdentityChecklistItems.map((item) => item.storageName),
     ...application.collateralItems.flatMap((item) => [item.storageName, item.returnEvidenceStorageName]),
     ...application.contracts.map((item) => item.storageName)
-  ].filter(Boolean).sort() as string[];
+  ].filter(Boolean) as string[])).sort();
   const counts = Object.fromEntries(Object.entries(application._count).sort(([left], [right]) => left.localeCompare(right)));
   const { _count, ...affectedSnapshot } = application;
   const fingerprintSource = { targetId: application.id, affectedSnapshot, counts, files };
@@ -2206,14 +2209,11 @@ router.post('/applications/:id/permanent-delete', requireSystemAdmin, asyncHandl
     await prisma.$transaction(async (tx) => {
       const currentImpact = await applicationDeletionImpact(req.params.id, tx);
       if (!currentImpact || currentImpact.data.fingerprint !== impact.data.fingerprint) throw new Error('پیش‌نمایش حذف منقضی شده است؛ دوباره بررسی کنید.');
-      if (currentImpact.application.employmentRelationship) {
-        await tx.hrEmploymentRelationship.update({
-          where: { id: currentImpact.application.employmentRelationship.id },
-          data: { hiringApplicationId: null }
-        });
-      }
-      await tx.hrPlannedStartRevision.deleteMany({ where: { applicationId: req.params.id } });
-      await tx.hrJobApplication.delete({ where: { id: req.params.id } });
+      await eraseJobApplicationRecords(
+        tx,
+        req.params.id,
+        currentImpact.application.employmentRelationship?.id,
+      );
       await tx.hrDeletionReceipt.create({ data: {
         id: receiptId,
         targetType: 'JOB_APPLICATION', targetId: req.params.id, actorUserId: actorId(req), reason: assertArchiveReason(req.body.reason),
@@ -4153,7 +4153,6 @@ router.post('/applications/:id/convert', requireActionPermission('MANAGE_RECRUIT
 }));
 
 router.post('/applications/:id/contracts', requireActionPermission('RECORD_SIGNED_EMPLOYMENT_CONTRACT'), upload.single('file'), asyncHandler(async (req: AuthRequest, res: Response) => {
-  if (!req.file) throw new Error('اسکن قرارداد الزامی است.');
   try {
     const application = await prisma.hrJobApplication.findUniqueOrThrow({
       where: { id: req.params.id }, include: { employmentRelationship: true },
@@ -4183,10 +4182,11 @@ router.post('/applications/:id/contracts', requireActionPermission('RECORD_SIGNE
       contractNumber: String(req.body.contractNumber || ''),
       effectiveFrom,
       effectiveTo,
-      hasFile: Boolean(req.file)
+      hasFile: Boolean(req.file) || canReusePaperContractStoredEvidence(latestContract),
     });
-    validateHiringFileSignature(req.file.path, req.file.mimetype);
-    const scanStatus = await scanHiringFile(req.file.path); const digest = await sha256File(req.file.path);
+    if (req.file) validateHiringFileSignature(req.file.path, req.file.mimetype);
+    const scanStatus = req.file ? await scanHiringFile(req.file.path) : null;
+    const digest = req.file ? await sha256File(req.file.path) : null;
     const row = await prisma.$transaction(async (tx) => {
       const [transactionApplication, transactionLatestContract, transactionCorrectionTask] = await Promise.all([
         tx.hrJobApplication.findUniqueOrThrow({
@@ -4221,23 +4221,38 @@ router.post('/applications/:id/contracts', requireActionPermission('RECORD_SIGNE
       if (transactionUnresolved) {
         throw Object.assign(new Error('نسخهٔ در انتظار تصمیم باید ابتدا با ذکر دلیل پس گرفته شود.'), { statusCode: 409 });
       }
+      const reusedEvidence = !req.file && canReusePaperContractStoredEvidence(transactionLatestContract)
+        ? transactionLatestContract
+        : null;
+      if (!req.file && !reusedEvidence) {
+        throw Object.assign(new Error('اسکن قرارداد امضاشده الزامی است.'), { statusCode: 409 });
+      }
       const aggregate = await tx.hrEmploymentContractDocument.aggregate({ where: { applicationId: req.params.id }, _max: { version: true } });
       const created = await tx.hrEmploymentContractDocument.create({ data: {
         applicationId: req.params.id, version: (aggregate._max.version || 0) + 1, contractNumber: String(req.body.contractNumber).trim(),
         effectiveFrom, effectiveTo,
-        storageName: req.file!.filename, originalName: req.file!.originalname, mimeType: req.file!.mimetype, size: req.file!.size,
-        sha256: digest, malwareScanStatus: scanStatus, uploadedBy: actorId(req), note: req.body.note || null
+        storageName: req.file?.filename || reusedEvidence!.storageName,
+        originalName: req.file?.originalname || reusedEvidence!.originalName,
+        mimeType: req.file?.mimetype || reusedEvidence!.mimeType,
+        size: req.file?.size || reusedEvidence!.size,
+        sha256: digest || reusedEvidence!.sha256,
+        malwareScanStatus: scanStatus || reusedEvidence!.malwareScanStatus,
+        uploadedBy: actorId(req), note: req.body.note || null
       }});
       await tx.hrJobApplication.update({ where: { id: req.params.id }, data: { contractClearance: 'IN_PROGRESS' } });
       await tx.hrOnboardingTask.updateMany({
         where: { applicationId: req.params.id, ...SYSTEM_ONBOARDING_TASK_DEFINITIONS.SIGNED_CONTRACT },
         data: { status: 'PENDING', completedBy: null, completedAt: null }
       });
-      return created;
+      return { created, reusedEvidenceFromContractId: reusedEvidence?.id || null };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    await audit(req.params.id, 'SIGNED_CONTRACT_VERSION_RECORDED', req, { contractId: row.id, version: row.version });
-    res.status(201).json({ success: true, data: row });
-  } catch (error) { removeHiringFile(req.file.path); throw error; }
+    await audit(req.params.id, 'SIGNED_CONTRACT_VERSION_RECORDED', req, {
+      contractId: row.created.id,
+      version: row.created.version,
+      reusedEvidenceFromContractId: row.reusedEvidenceFromContractId,
+    });
+    res.status(201).json({ success: true, data: row.created });
+  } catch (error) { removeHiringFile(req.file?.path); throw error; }
 }));
 
 router.post('/applications/:id/contracts/:contractId/submit', requireActionPermission('RECORD_SIGNED_EMPLOYMENT_CONTRACT'), asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -4364,18 +4379,25 @@ router.post('/applications/:id/contracts/:contractId/withdraw', requireActionPer
       .map((entry) => tehranCivilDateKey(entry.date)));
     const dueAt = addTehranWorkingDays(now, 3, holidays);
     const sourceKey = `HIRING:${req.params.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED`;
+    const priorCorrectionTask = await tx.hrWorkItem.findUnique({ where: { sourceKey } });
+    const correctionTransition = projectWithdrawalCorrectionTaskTransition({
+      actorId: actorId(req), dueDate: dueAt, reason,
+    });
     const correctionTask = await tx.hrWorkItem.upsert({ where: { sourceKey }, update: {
-      status: 'PENDING', dueDate: dueAt, description: reason, assignedToUserId: null, assignmentReason: null,
-      completedAt: null, completedByUserId: null, waivedAt: null, waivedByUserId: null, waiverReason: null,
+      ...correctionTransition,
     }, create: {
-      title: 'اصلاح قرارداد کاغذی پس از پس‌گرفتن نسخه', description: reason,
+      title: 'اصلاح قرارداد کاغذی پس از پس‌گرفتن نسخه',
       sourceType: 'HIRING_ACTION', sourceKey, destinationHref: `/dashboard/hr/hiring/${req.params.id}`,
-      assignedToUserId: null, dueDate: dueAt, createdByUserId: actorId(req),
+      ...correctionTransition, createdByUserId: actorId(req),
     } });
     await tx.hrWorkItemAudit.create({ data: {
-      workItemId: correctionTask.id, eventType: 'CONTRACT_CORRECTION_TASK_CREATED', actorUserId: actorId(req),
-      beforeJson: Prisma.JsonNull,
-      afterJson: { contractId: contract.id, contractVersion: contract.version, dueAt, reason },
+      workItemId: correctionTask.id, eventType: 'CONTRACT_CORRECTION_TASK_CREATED_AND_ASSIGNED', actorUserId: actorId(req),
+      beforeJson: priorCorrectionTask ? JSON.parse(JSON.stringify(priorCorrectionTask)) : Prisma.JsonNull,
+      afterJson: {
+        contractId: contract.id, contractVersion: contract.version, dueAt, reason,
+        status: correctionTask.status, assignedToUserId: correctionTask.assignedToUserId,
+        assignmentReason: correctionTask.assignmentReason,
+      },
     } });
     await tx.hrHiringAudit.create({ data: {
       applicationId: req.params.id, actorUserId: actorId(req), actorKind: 'USER', eventType: 'SIGNED_CONTRACT_WITHDRAWN',
@@ -4522,7 +4544,7 @@ router.put('/applications/:id/insurance', requireActionPermission('MANAGE_RECRUI
   const command = normalizeInsuranceEnrollmentCommand(req.body);
   const effectiveDate = command.effectiveDate ? parseDate(command.effectiveDate, 'تاریخ شروع پوشش بیمه') : null;
   const dueDate = command.dueDate ? parseDate(command.dueDate, 'مهلت پیگیری بیمه') : null;
-  const communicatedAt = command.communicatedAt ? parseDate(command.communicatedAt, 'زمان اعلام درخواست ثبت مستقل') : null;
+  const communicatedAt = command.communicatedAt ? parseDate(command.communicatedAt, 'تاریخ اعلام درخواست ثبت مستقل') : null;
   const row = await prisma.hrInsuranceEnrollment.upsert({
     where: { applicationId: req.params.id },
     create: {

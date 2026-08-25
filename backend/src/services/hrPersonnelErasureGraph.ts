@@ -117,6 +117,28 @@ export const buildPersonnelErasurePlan = async (
       const total = [...selected.values()].reduce((sum, ids) => sum + ids.size, 0);
       if (total > maximumNodes) throw new Error(`دامنه حذف بیش از ${maximumNodes.toLocaleString('fa-IR')} رکورد است و نیازمند بررسی فنی مستقل است.`);
     }
+    const applicationIds = [...(selected.get('HrJobApplication') || [])];
+    if (applicationIds.length) {
+      const workItemSet = selected.get('HrWorkItem') || new Set<string>();
+      const applicationWorkItems = await (client as any).hrWorkItem.findMany({
+        where: {
+          sourceType: 'HIRING_ACTION',
+          OR: applicationIds.map((applicationId) => ({
+            sourceKey: { startsWith: `HIRING:${applicationId}:` },
+          })),
+        },
+        select: { id: true },
+      });
+      for (const workItem of applicationWorkItems) {
+        if (!workItemSet.has(workItem.id)) {
+          workItemSet.add(workItem.id);
+          changed = true;
+        }
+      }
+      if (workItemSet.size) selected.set('HrWorkItem', workItemSet);
+    }
+    const total = [...selected.values()].reduce((sum, ids) => sum + ids.size, 0);
+    if (total > maximumNodes) throw new Error(`دامنه حذف بیش از ${maximumNodes.toLocaleString('fa-IR')} رکورد است و نیازمند بررسی فنی مستقل است.`);
   }
   const root = await (client as any).personnel.findUnique({ where: { id: personnelId }, select: { id: true } });
   if (!root) throw new Error('پرسنل پیدا نشد.');

@@ -21,6 +21,7 @@ import Link from "next/link";
 import {
   FaArchive,
   FaCheck,
+  FaDownload,
   FaFileUpload,
   FaSync,
   FaTrash,
@@ -47,7 +48,12 @@ import {
   shouldLoadCompanyEvaluationPlan,
 } from "@/features/hr-hiring/hiringLifecycleViewModel";
 import { insuranceSubmissionBlocker } from "@/features/hr-hiring/insuranceViewModel";
-import { projectContractWorkflowPresentation } from "@/features/hr-hiring/contractWorkflowPresentation";
+import {
+  contractDraftDefaultsFromLatest,
+  projectContractCorrectionEditor,
+  projectLatestContractStatus,
+  projectContractWorkflowPresentation,
+} from "@/features/hr-hiring/contractWorkflowPresentation";
 import { parseLocalizedAssessmentScore } from "@/features/hr-hiring/assessmentScore";
 import { ApplicantCaseOverview } from "@/features/hr-hiring/ApplicantCaseOverview";
 import { FinalHiringRejection } from "@/features/hr-hiring/FinalHiringRejection";
@@ -223,6 +229,7 @@ export default function HiringCasePage() {
   });
   const [contractReturnReason, setContractReturnReason] = useState("");
   const [contractWithdrawOpen, setContractWithdrawOpen] = useState(false);
+  const [contractCorrectionEditorDismissed, setContractCorrectionEditorDismissed] = useState(false);
   const [insurance, setInsurance] = useState({
     registrationPath: "COMPANY",
     status: "NOT_STARTED",
@@ -232,14 +239,28 @@ export default function HiringCasePage() {
     communicatedAt: "",
     note: "",
   });
+  const [insuranceDirty, setInsuranceDirty] = useState(false);
+  const [insuranceSavedMessage, setInsuranceSavedMessage] = useState("");
   const [payrollDate, setPayrollDate] = useState("");
   const [payrollMismatchReason, setPayrollMismatchReason] = useState("");
   const [payrollReviewConfirmed, setPayrollReviewConfirmed] = useState(false);
+  const [payrollDirty, setPayrollDirty] = useState(false);
+  const [payrollSavedMessage, setPayrollSavedMessage] = useState("");
   const load = async () => {
     try {
       setError("");
       const result = await hiringAPI.get(id);
       setData(result.data.data);
+      const latestPaperContract = result.data.data.contracts?.[0] || null;
+      if (["RETURNED", "WITHDRAWN"].includes(latestPaperContract?.reviewState)) {
+        const defaults = contractDraftDefaultsFromLatest(latestPaperContract, fromIsoDate);
+        setContract((current: any) => ({
+          contractNumber: current.contractNumber || defaults.contractNumber,
+          effectiveFrom: current.effectiveFrom || defaults.effectiveFrom,
+          effectiveTo: current.effectiveTo || defaults.effectiveTo,
+          file: current.file,
+        }));
+      }
       setPlannedStartRevision((current) => ({
         ...current,
         scheduledStartDate: current.open ? current.scheduledStartDate : fromIsoDate(result.data.data.scheduledStartDate),
@@ -253,6 +274,7 @@ export default function HiringCasePage() {
       setPayrollMismatchReason(
         result.data.data.payrollParticipation?.startMismatchReason || "",
       );
+      setPayrollDirty(false);
       const currentCompensation = result.data.data.compensationSnapshots?.find(
         (snapshot: any) => !snapshot.obsoleteAt,
       );
@@ -268,15 +290,17 @@ export default function HiringCasePage() {
             result.data.data.insuranceEnrollment.effectiveDate,
           ),
           dueDate: fromIsoDate(result.data.data.insuranceEnrollment.dueDate),
-          communicatedAt: fromIsoDateTime(
+          communicatedAt: fromIsoDate(
             result.data.data.insuranceEnrollment.communicatedAt,
           ),
         });
+      setInsuranceDirty(false);
     } catch (e) {
       setError(hiringError(e));
     }
   };
   useEffect(() => {
+    setContractCorrectionEditorDismissed(false);
     void load();
     void hiringAPI
       .myActionPermissions()
@@ -285,6 +309,22 @@ export default function HiringCasePage() {
     // `load` intentionally follows the route id; recreating it is harmless but would retrigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  useEffect(() => {
+    if (!insuranceSavedMessage) return;
+    const timeout = window.setTimeout(
+      () => setInsuranceSavedMessage(""),
+      3000,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [insuranceSavedMessage]);
+  useEffect(() => {
+    if (!payrollSavedMessage) return;
+    const timeout = window.setTimeout(
+      () => setPayrollSavedMessage(""),
+      3000,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [payrollSavedMessage]);
   const requestedLifecyclePhaseId = searchParams.get("phase");
   const currentLifecyclePhaseId = data?.lifecycle?.currentPhaseId || null;
   const effectiveRequestedLifecyclePhaseId = currentLifecyclePhaseId
@@ -318,12 +358,18 @@ export default function HiringCasePage() {
     success: string,
     options: CaseActionOptions = {},
   ) => {
-    const { propagateActionError = false, awaitRefresh = true } = options;
+    const {
+      propagateActionError = false,
+      awaitRefresh = true,
+      showSuccessMessage = true,
+    } = options;
     try {
       setBusy(true);
       setError("");
       const response = await action();
-      setMessage(response?.data?.meta?.warning || success);
+      if (showSuccessMessage) {
+        setMessage(response?.data?.meta?.warning || success);
+      }
     } catch (e) {
       if (propagateActionError) throw e;
       setError(hiringError(e));
@@ -334,6 +380,44 @@ export default function HiringCasePage() {
     if (awaitRefresh) await load();
     else void load();
     return true;
+  };
+  const updateInsurance = (patch: Partial<typeof insurance>) => {
+    setInsurance((current) => ({ ...current, ...patch }));
+    setInsuranceDirty(true);
+    setInsuranceSavedMessage("");
+  };
+  const saveInsurance = async () => {
+    const succeeded = await run(
+      () =>
+        hiringAPI.setInsurance(id, {
+          ...insurance,
+          effectiveDate: toIsoDate(insurance.effectiveDate),
+          dueDate: toIsoDate(insurance.dueDate),
+          communicatedAt: toIsoDate(insurance.communicatedAt),
+        }),
+      "وضعیت بیمه با موفقیت ذخیره شد.",
+      { showSuccessMessage: false },
+    );
+    if (succeeded) {
+      setInsuranceDirty(false);
+      setInsuranceSavedMessage("وضعیت بیمه با موفقیت ذخیره شد.");
+    }
+  };
+  const savePayrollParticipation = async () => {
+    const succeeded = await run(
+      () =>
+        hiringAPI.setPayroll(id, {
+          effectiveFrom: toIsoDate(payrollDate),
+          startMismatchReason: payrollMismatchReason,
+          reviewConfirmed: payrollReviewConfirmed,
+        }),
+      "مشارکت حقوق و دستمزد با موفقیت تنظیم شد.",
+      { showSuccessMessage: false },
+    );
+    if (succeeded) {
+      setPayrollDirty(false);
+      setPayrollSavedMessage("مشارکت حقوق و دستمزد با موفقیت تنظیم شد.");
+    }
   };
   const confirmRetentionAction = async ({ reason }: { reason: string }) => {
     if (!retentionTarget) return;
@@ -401,11 +485,27 @@ export default function HiringCasePage() {
     toIsoDate(insurance.dueDate) < new Date().toISOString().slice(0, 10),
   );
   const latestContract = data.contracts?.[0];
+  const canReuseLatestContractFile = Boolean(
+    latestContract?.originalName &&
+    ["RETURNED", "WITHDRAWN"].includes(latestContract.reviewState),
+  );
   const contractPresentation = projectContractWorkflowPresentation({
     latestContract: latestContract || null,
     correctionTask: data.contractCorrectionTask || null,
     canRecordNewVersion: Boolean(data.contractWorkflowCapabilities?.canRecordNewVersion),
   });
+  const contractCorrectionEditor = projectContractCorrectionEditor({
+    showContractFields: contractPresentation.showContractFields,
+    latestReviewState: latestContract?.reviewState || null,
+    dismissed: contractCorrectionEditorDismissed,
+  });
+  const latestContractStatus = latestContract
+    ? projectLatestContractStatus({
+        reviewState: latestContract.reviewState,
+        contractClearance: data.contractClearance,
+        correctionTaskStatus: data.contractCorrectionTask?.status,
+      })
+    : null;
   const openIdentityConflict = data.identityConflicts?.find((item: any) => item.status === "OPEN");
   const currentCollateralItems = (data.collateralItems || []).filter((item: any) => !item.supersededBy);
   const collateralExplicitlyNotRequired = data.collateralRequirements?.[0]?.type === "NO_PRE_HIRE_COLLATERAL";
@@ -505,8 +605,12 @@ export default function HiringCasePage() {
         );
       }
     });
-    fd.append("file", contract.file);
+    if (contract.file) fd.append("file", contract.file);
     return run(() => hiringAPI.uploadContract(id, fd), "قرارداد بارگذاری شد.");
+  };
+  const cancelContractCorrection = () => {
+    setContract(contractDraftDefaultsFromLatest(latestContract, fromIsoDate));
+    setContractCorrectionEditorDismissed(true);
   };
   const addAssessment = () => {
     const fd = new FormData();
@@ -1795,17 +1899,29 @@ export default function HiringCasePage() {
               columns={3}
               items={startPreparationStatuses.map((item) => ({
                 label: item.label,
-                value: hrDisplayLabel(item.status),
-                hint: `${item.ownerAuthorities.map(authorityLabel).join("، ")} · ${item.activationEffect}`,
-                tone: ["COMPLETE", "APPROVED", "ACTIVE", "EXEMPT"].includes(
-                  item.status,
-                )
-                  ? "success"
-                  : item.status === "REJECTED"
-                    ? "danger"
-                    : item.status === "IN_PROGRESS"
-                      ? "info"
-                      : "warning",
+                value:
+                  item.id === "SIGNED_CONTRACT" &&
+                  latestContractStatus?.preparationLabel
+                    ? latestContractStatus.preparationLabel
+                    : hrDisplayLabel(item.status),
+                hint:
+                  item.id === "SIGNED_CONTRACT" &&
+                  latestContractStatus?.preparationHint
+                    ? latestContractStatus.preparationHint
+                    : `${item.ownerAuthorities.map(authorityLabel).join("، ")} · ${item.activationEffect}`,
+                tone:
+                  item.id === "SIGNED_CONTRACT" &&
+                  latestContractStatus?.priorApprovalRequiresCorrection
+                    ? "warning"
+                    : ["COMPLETE", "APPROVED", "ACTIVE", "EXEMPT"].includes(
+                          item.status,
+                        )
+                      ? "success"
+                      : item.status === "REJECTED"
+                        ? "danger"
+                        : item.status === "IN_PROGRESS"
+                          ? "info"
+                          : "warning",
               }))}
             />
           </ErpSection>
@@ -1823,165 +1939,238 @@ export default function HiringCasePage() {
       {selectedLifecyclePhase === "ONBOARDING" && canViewContractTask && (
         <>
           <ErpSection title="قرارداد کاغذی">
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="space-y-4">
+              {latestContractStatus?.priorApprovalRequiresCorrection && (
+                <ErpInlineState
+                  kind="stale"
+                  title="تأیید قبلی پس از تغییر تاریخ شروع برای فعال‌سازی کافی نیست. وظیفه اصلاح قرارداد را دریافت و نسخه جدید را ارسال کنید."
+                />
+              )}
               {hasActionPermission("RECORD_SIGNED_EMPLOYMENT_CONTRACT") && (
                 <>
-                  {contractPresentation.showContractFields && (
-                    <>
-                  <ErpField label="شماره قرارداد" required>
-                    <ErpInput
-                      value={contract.contractNumber}
-                      onChange={(e) =>
-                        setContract({
-                          ...contract,
-                          contractNumber: e.target.value,
-                        })
-                      }
-                    />
-                  </ErpField>
-                  <ErpField label="تاریخ شروع اعتبار قرارداد" required>
-                    <HrPersianCalendar
-                      value={contract.effectiveFrom}
-                      onChange={(effectiveFrom) =>
-                        setContract({
-                          ...contract,
-                          effectiveFrom,
-                        })
-                      }
-                    />
-                  </ErpField>
-                  <ErpField label="تاریخ پایان اعتبار قرارداد" required>
-                    <HrPersianCalendar
-                      value={contract.effectiveTo}
-                      onChange={(effectiveTo) =>
-                        setContract({
-                          ...contract,
-                          effectiveTo,
-                        })
-                      }
-                    />
-                  </ErpField>
-                  <ErpField label="اسکن قرارداد امضاشده" required>
-                    <ErpInput
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={(e) =>
-                        setContract({ ...contract, file: e.target.files?.[0] })
-                      }
-                    />
-                  </ErpField>
-                  <ErpButton
-                    className="w-fit self-end px-3 py-1.5"
-                    label="ثبت نسخه قرارداد"
-                    disabled={
-                      busy ||
-                      !contract.file ||
-                      !contract.contractNumber ||
-                      !contract.effectiveFrom ||
-                      !contract.effectiveTo
-                    }
-                    onClick={uploadContract}
-                  />
-                    </>
-                  )}
-                  {contractPresentation.primaryAction === "SUBMIT_DRAFT" && latestContract?.canSubmit && (
-                    <ErpButton
-                      label="ارسال برای بررسی مدیر مالی"
-                      disabled={busy}
-                      onClick={() =>
-                        run(
-                          () => hiringAPI.submitContract(id, latestContract.id),
-                          "قرارداد برای بررسی مدیر مالی ارسال شد.",
-                        )
-                      }
-                      tone="success"
-                    />
-                  )}
-                  {contractPresentation.primaryAction === "WITHDRAW" && latestContract?.canWithdraw && !contractWithdrawOpen && (
-                    <ErpButton
-                      label="پس گرفتن نسخه برای اصلاح"
-                      variant="soft"
-                      tone="warning"
-                      disabled={busy}
-                      onClick={() => setContractWithdrawOpen(true)}
-                    />
-                  )}
-                  {contractPresentation.primaryAction === "WITHDRAW" && latestContract?.canWithdraw && contractWithdrawOpen && (
-                    <div className="space-y-2 md:col-span-2">
-                      <ErpField label="دلیل پس گرفتن نسخه" required>
-                        <ErpTextarea
-                          value={contractReturnReason.trimStart()}
-                          onChange={(event) => setContractReturnReason(event.target.value)}
-                        />
-                      </ErpField>
-                      <div className="flex flex-wrap gap-2">
+                  {contractCorrectionEditor.showEditor && (
+                    <ErpCard className="space-y-4 p-4">
+                      <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        <ErpField label="شماره قرارداد" required>
+                          <ErpInput
+                            value={contract.contractNumber}
+                            onChange={(event) =>
+                              setContract({
+                                ...contract,
+                                contractNumber: event.target.value,
+                              })
+                            }
+                          />
+                        </ErpField>
+                        <ErpField label="تاریخ شروع اعتبار قرارداد" required>
+                          <HrPersianCalendar
+                            value={contract.effectiveFrom}
+                            onChange={(effectiveFrom) =>
+                              setContract({ ...contract, effectiveFrom })
+                            }
+                          />
+                        </ErpField>
+                        <ErpField label="تاریخ پایان اعتبار قرارداد" required>
+                          <HrPersianCalendar
+                            value={contract.effectiveTo}
+                            onChange={(effectiveTo) =>
+                              setContract({ ...contract, effectiveTo })
+                            }
+                          />
+                        </ErpField>
+                        <div>
+                          <ErpField
+                            label={
+                              canReuseLatestContractFile
+                                ? "اسکن جدید قرارداد (اختیاری)"
+                                : "اسکن قرارداد امضاشده"
+                            }
+                            required={!canReuseLatestContractFile}
+                          >
+                            <ErpInput
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              onChange={(event) =>
+                                setContract({
+                                  ...contract,
+                                  file: event.target.files?.[0],
+                                })
+                              }
+                            />
+                          </ErpField>
+                          {canReuseLatestContractFile && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--sds-text-secondary)]">
+                              <ErpBadge
+                                tone={contract.file ? "info" : "success"}
+                              >
+                                {contract.file
+                                  ? "فایل جدید جایگزین می‌شود"
+                                  : "تصویر نسخه قبل حفظ می‌شود"}
+                              </ErpBadge>
+                              {!contract.file && (
+                                <span>{latestContract.originalName}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
                         <ErpButton
-                          label="ثبت پس گرفتن و ایجاد وظیفه اصلاح"
-                          tone="warning"
-                          disabled={busy || contractReturnReason.trim().length < 3}
-                          onClick={() => run(
-                            () => hiringAPI.withdrawContract(id, latestContract.id, contractReturnReason.trim()),
-                            "نسخه قرارداد پس گرفته شد و وظیفه اصلاح ایجاد شد.",
-                          ).then((succeeded) => {
-                            if (succeeded) {
+                          label="ثبت نسخه قرارداد"
+                          disabled={
+                            busy ||
+                            (!contract.file && !canReuseLatestContractFile) ||
+                            !contract.contractNumber ||
+                            !contract.effectiveFrom ||
+                            !contract.effectiveTo
+                          }
+                          onClick={uploadContract}
+                        />
+                        {contractCorrectionEditor.showCancel && (
+                          <ErpButton
+                            label="انصراف"
+                            variant="soft"
+                            disabled={busy}
+                            onClick={cancelContractCorrection}
+                          />
+                        )}
+                      </div>
+                    </ErpCard>
+                  )}
+                  {contractPresentation.primaryAction === "WITHDRAW" &&
+                    latestContract?.canWithdraw &&
+                    contractWithdrawOpen && (
+                      <ErpCard className="space-y-3 p-4">
+                        <ErpField label="دلیل پس گرفتن نسخه" required>
+                          <ErpTextarea
+                            value={contractReturnReason.trimStart()}
+                            onChange={(event) =>
+                              setContractReturnReason(event.target.value)
+                            }
+                          />
+                        </ErpField>
+                        <div className="flex flex-wrap gap-2">
+                          <ErpButton
+                            label="پس گرفتن و شروع اصلاح"
+                            tone="warning"
+                            disabled={
+                              busy || contractReturnReason.trim().length < 3
+                            }
+                            onClick={() =>
+                              run(
+                                () =>
+                                  hiringAPI.withdrawContract(
+                                    id,
+                                    latestContract.id,
+                                    contractReturnReason.trim(),
+                                  ),
+                                "نسخه قرارداد پس گرفته شد؛ اطلاعات نسخه اصلاحی آماده است.",
+                              ).then((succeeded) => {
+                                if (succeeded) {
+                                  setContractWithdrawOpen(false);
+                                  setContractReturnReason("");
+                                  setContractCorrectionEditorDismissed(false);
+                                }
+                              })
+                            }
+                          />
+                          <ErpButton
+                            label="انصراف"
+                            variant="soft"
+                            disabled={busy}
+                            onClick={() => {
                               setContractWithdrawOpen(false);
                               setContractReturnReason("");
-                            }
-                          })}
-                        />
-                        <ErpButton label="انصراف" variant="soft" disabled={busy} onClick={() => {
-                          setContractWithdrawOpen(false);
-                          setContractReturnReason("");
-                        }} />
-                      </div>
-                    </div>
-                  )}
-                  {contractPresentation.showClaimCorrection && data.contractCorrectionTask && (
-                    <ErpButton
-                      label="دریافت وظیفه اصلاح قرارداد"
-                      disabled={busy}
-                      onClick={() => run(
-                        () => hiringAPI.claimWorkItem(data.contractCorrectionTask.id),
-                        "وظیفه اصلاح قرارداد به شما تخصیص یافت.",
-                      )}
-                    />
-                  )}
+                            }}
+                          />
+                        </div>
+                      </ErpCard>
+                    )}
                 </>
               )}
-              {latestContract && (
-                <ErpCard className="p-3 text-sm md:col-span-2">
-                  <p className="font-bold">وضعیت آخرین نسخه</p>
-                  <p className="mt-1">
-                    {{
-                      DRAFT: "ثبت‌شده؛ در انتظار ارسال",
-                      SUBMITTED: "ارسال‌شده؛ در انتظار بررسی مدیر مالی",
-                      WITHDRAWN: "پس‌گرفته‌شده؛ در انتظار نسخه اصلاح‌شده",
-                      RETURNED: "برای اصلاح بازگردانده شده",
-                      APPROVED: "تأییدشده",
-                    }[latestContract.reviewState as string] ||
-                      latestContract.reviewState}
-                  </p>
-                  {latestContract.returnReason && (
-                    <p className="mt-2 text-[var(--sds-danger)]">
-                      دلیل بازگشت: {latestContract.returnReason}
+              <div className="flex flex-col items-stretch gap-3 lg:flex-row lg:items-start lg:justify-between">
+                {latestContract && (
+                  <ErpCard className="min-w-0 flex-1 p-4 text-sm">
+                    <p className="font-bold">وضعیت آخرین نسخه</p>
+                    <p className="mt-1">
+                      {latestContractStatus?.label}
                     </p>
+                    {latestContract.returnReason && (
+                      <p className="mt-2 text-[var(--sds-danger)]">
+                        دلیل بازگشت: {latestContract.returnReason}
+                      </p>
+                    )}
+                  </ErpCard>
+                )}
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                  {contractPresentation.primaryAction === "SUBMIT_DRAFT" &&
+                    latestContract?.canSubmit && (
+                      <ErpButton
+                        label="ارسال برای بررسی مدیر مالی"
+                        disabled={busy}
+                        onClick={() =>
+                          run(
+                            () =>
+                              hiringAPI.submitContract(id, latestContract.id),
+                            "قرارداد برای بررسی مدیر مالی ارسال شد.",
+                          )
+                        }
+                        tone="success"
+                      />
+                    )}
+                  {contractPresentation.primaryAction === "WITHDRAW" &&
+                    latestContract?.canWithdraw &&
+                    !contractWithdrawOpen && (
+                      <ErpButton
+                        label="پس گرفتن نسخه برای اصلاح"
+                        variant="soft"
+                        tone="warning"
+                        disabled={busy}
+                        onClick={() => setContractWithdrawOpen(true)}
+                      />
+                    )}
+                  {contractPresentation.showClaimCorrection &&
+                    data.contractCorrectionTask && (
+                      <ErpButton
+                        label="دریافت وظیفه اصلاح قرارداد"
+                        disabled={busy}
+                        onClick={() =>
+                          run(
+                            () =>
+                              hiringAPI.claimWorkItem(
+                                data.contractCorrectionTask.id,
+                              ),
+                            "وظیفه اصلاح قرارداد به شما تخصیص یافت.",
+                          )
+                        }
+                      />
+                    )}
+                  {contractCorrectionEditor.showResume && (
+                    <ErpButton
+                      label="ادامه اصلاح قرارداد"
+                      variant="soft"
+                      onClick={() =>
+                        setContractCorrectionEditorDismissed(false)
+                      }
+                    />
                   )}
-                </ErpCard>
-              )}
-              {latestContract?.originalName && (
-                <ErpPressable
-                  type="submit"
-                  className="rounded-lg border px-3 py-2 text-sm"
-                  onClick={() =>
-                    download(
-                      () => hiringAPI.downloadContract(id, latestContract.id),
-                      latestContract.originalName,
-                    )
-                  }
-                >
-                  دریافت قرارداد
-                </ErpPressable>
-              )}
+                  {latestContract?.originalName && (
+                    <ErpButton
+                      label="دریافت قرارداد"
+                      icon={FaDownload}
+                      tone="neutral"
+                      variant="outline"
+                      onClick={() =>
+                        download(
+                          () =>
+                            hiringAPI.downloadContract(id, latestContract.id),
+                          latestContract.originalName,
+                        )
+                      }
+                    />
+                  )}
+                </div>
+              </div>
             </div>
           </ErpSection>
         </>
@@ -2003,10 +2192,7 @@ export default function HiringCasePage() {
                       <ErpSelect
                         value={insurance.registrationPath}
                         onChange={(e) =>
-                          setInsurance({
-                            ...insurance,
-                            registrationPath: e.target.value,
-                          })
+                          updateInsurance({ registrationPath: e.target.value })
                         }
                       >
                         <option value="COMPANY">ثبت بیمه توسط شرکت</option>
@@ -2021,10 +2207,7 @@ export default function HiringCasePage() {
                           <ErpSelect
                             value={insurance.status}
                             onChange={(e) =>
-                              setInsurance({
-                                ...insurance,
-                                status: e.target.value,
-                              })
+                              updateInsurance({ status: e.target.value })
                             }
                           >
                             <option value="NOT_STARTED">شروع نشده</option>
@@ -2045,7 +2228,7 @@ export default function HiringCasePage() {
                           <HrPersianCalendar
                             value={insurance.effectiveDate}
                             onChange={(effectiveDate) =>
-                              setInsurance({ ...insurance, effectiveDate })
+                              updateInsurance({ effectiveDate })
                             }
                           />
                         </ErpField>
@@ -2056,7 +2239,7 @@ export default function HiringCasePage() {
                           <HrPersianCalendar
                             value={insurance.dueDate}
                             onChange={(dueDate) =>
-                              setInsurance({ ...insurance, dueDate })
+                              updateInsurance({ dueDate })
                             }
                           />
                         </ErpField>
@@ -2071,8 +2254,7 @@ export default function HiringCasePage() {
                           <ErpSelect
                             value={insurance.communicationMethod}
                             onChange={(e) =>
-                              setInsurance({
-                                ...insurance,
+                              updateInsurance({
                                 communicationMethod: e.target.value,
                               })
                             }
@@ -2083,12 +2265,11 @@ export default function HiringCasePage() {
                             <option value="EMAIL">ایمیل</option>
                           </ErpSelect>
                         </ErpField>
-                        <ErpField label="زمان اعلام درخواست شخص" required>
+                        <ErpField label="تاریخ اعلام درخواست شخص" required>
                           <HrPersianCalendar
-                            showTime
                             value={insurance.communicatedAt}
                             onChange={(communicatedAt) =>
-                              setInsurance({ ...insurance, communicatedAt })
+                              updateInsurance({ communicatedAt })
                             }
                           />
                         </ErpField>
@@ -2098,26 +2279,23 @@ export default function HiringCasePage() {
                       placeholder="یادداشت"
                       value={insurance.note}
                       onChange={(e) =>
-                        setInsurance({ ...insurance, note: e.target.value })
+                        updateInsurance({ note: e.target.value })
                       }
                     />
+                    {insuranceSavedMessage && (
+                      <ErpInlineState
+                        kind="success"
+                        title={insuranceSavedMessage}
+                      />
+                    )}
                     <ErpButton
                       label="ذخیره وضعیت بیمه"
-                      disabled={Boolean(insuranceSubmissionBlocker(insurance))}
-                      onClick={() =>
-                        run(
-                          () =>
-                            hiringAPI.setInsurance(id, {
-                              ...insurance,
-                              effectiveDate: toIsoDate(insurance.effectiveDate),
-                              dueDate: toIsoDate(insurance.dueDate),
-                              communicatedAt: toIsoDateTime(
-                                insurance.communicatedAt,
-                              ),
-                            }),
-                          "بیمه به‌روزرسانی شد.",
-                        )
+                      disabled={
+                        busy ||
+                        !insuranceDirty ||
+                        Boolean(insuranceSubmissionBlocker(insurance))
                       }
+                      onClick={saveInsurance}
                     />
                   </ErpCard>
                 )}
@@ -2157,7 +2335,11 @@ export default function HiringCasePage() {
                     >
                       <HrPersianCalendar
                         value={payrollDate}
-                        onChange={setPayrollDate}
+                        onChange={(value) => {
+                          setPayrollDate(value);
+                          setPayrollDirty(true);
+                          setPayrollSavedMessage("");
+                        }}
                       />
                     </ErpField>
                     {payrollDiffersFromPlanned && (
@@ -2167,9 +2349,11 @@ export default function HiringCasePage() {
                       >
                         <ErpTextarea
                           value={payrollMismatchReason}
-                          onChange={(event) =>
-                            setPayrollMismatchReason(event.target.value)
-                          }
+                          onChange={(event) => {
+                            setPayrollMismatchReason(event.target.value);
+                            setPayrollDirty(true);
+                            setPayrollSavedMessage("");
+                          }}
                         />
                       </ErpField>
                     )}
@@ -2177,34 +2361,34 @@ export default function HiringCasePage() {
                       <ErpInput
                         type="checkbox"
                         checked={payrollReviewConfirmed}
-                        onChange={(event) =>
-                          setPayrollReviewConfirmed(event.target.checked)
-                        }
+                        onChange={(event) => {
+                          setPayrollReviewConfirmed(event.target.checked);
+                          setPayrollDirty(true);
+                          setPayrollSavedMessage("");
+                        }}
                       />
                       <span>
                         حقوق و مزایای تأییدشده و تاریخ شروع را بررسی و تأیید
                         کردم.
                       </span>
                     </label>
+                    {payrollSavedMessage && (
+                      <ErpInlineState
+                        kind="success"
+                        title={payrollSavedMessage}
+                      />
+                    )}
                     <ErpButton
                       label="تنظیم مشارکت حقوق و دستمزد"
                       disabled={
+                        busy ||
+                        !payrollDirty ||
                         !payrollDate ||
                         !payrollReviewConfirmed ||
                         (payrollDiffersFromPlanned &&
                           !payrollMismatchReason.trim())
                       }
-                      onClick={() =>
-                        run(
-                          () =>
-                            hiringAPI.setPayroll(id, {
-                              effectiveFrom: toIsoDate(payrollDate),
-                              startMismatchReason: payrollMismatchReason,
-                              reviewConfirmed: payrollReviewConfirmed,
-                            }),
-                          "مشارکت حقوق تنظیم شد.",
-                        )
-                      }
+                      onClick={savePayrollParticipation}
                     />
                   </ErpCard>
                 )}
@@ -2375,6 +2559,7 @@ type CaseActionRunner = (
 type CaseActionOptions = {
   propagateActionError?: boolean;
   awaitRefresh?: boolean;
+  showSuccessMessage?: boolean;
 };
 
 function CompanyEvaluationPlan({ applicationId, actionPermissions, busy, run, onPendingChange }: { applicationId: string; actionPermissions: string[]; busy: boolean; run: CaseActionRunner; onPendingChange: (pending: boolean) => void }) {

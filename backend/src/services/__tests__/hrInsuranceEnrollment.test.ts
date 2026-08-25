@@ -7,7 +7,7 @@ const independent = normalizeInsuranceEnrollmentCommand({
   effectiveDate: "1405/05/05",
   dueDate: "1405/05/31",
   communicationMethod: "PHONE",
-  communicatedAt: "2026-07-27T10:00:00.000Z",
+  communicatedAt: "2026-07-27",
   note: "درخواست متقاضی ثبت شد",
 });
 
@@ -24,7 +24,7 @@ assert.throws(
       communicationMethod: "",
       communicatedAt: "",
     }),
-  /روش و زمان اعلام درخواست/,
+  /روش و تاریخ اعلام درخواست/,
 );
 
 const company = normalizeInsuranceEnrollmentCommand({

@@ -27,7 +27,7 @@ assert.equal(
     status: "NOT_STARTED",
     effectiveDate: "",
     communicationMethod: "PHONE",
-    communicatedAt: "1405/05/01 12:30",
+    communicatedAt: "1405/05/01",
   }),
   null,
 );

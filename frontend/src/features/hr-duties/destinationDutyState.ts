@@ -12,6 +12,9 @@ export const initialDestinationDutyState: DestinationDutyLoadState<any> = {
   error: null,
 };
 
+export const destinationDutySourceVersionLabel = (sourceVersion: number) =>
+  `نسخه ${sourceVersion.toLocaleString('fa-IR')}`;
+
 export type DestinationDutyLoadAction<T> =
   | { type: 'start' }
   | { type: 'success'; data: T }

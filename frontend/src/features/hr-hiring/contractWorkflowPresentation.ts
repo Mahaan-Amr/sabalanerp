@@ -5,6 +5,78 @@ export type ContractWorkflowPrimaryAction =
   | "CLAIM_CORRECTION"
   | "NONE";
 
+const contractReviewLabels: Record<string, string> = {
+  DRAFT: "ثبت‌شده؛ در انتظار ارسال",
+  SUBMITTED: "ارسال‌شده؛ در انتظار بررسی مدیر مالی",
+  WITHDRAWN: "پس‌گرفته‌شده؛ در انتظار نسخه اصلاح‌شده",
+  RETURNED: "برای اصلاح بازگردانده شده",
+  APPROVED: "تأییدشده",
+};
+
+export const projectLatestContractStatus = (input: {
+  reviewState: string;
+  contractClearance: string;
+  correctionTaskStatus?: string | null;
+}) => {
+  const correctionTaskOpen = ["PENDING", "IN_PROGRESS"].includes(
+    input.correctionTaskStatus || "",
+  );
+  const priorApprovalRequiresCorrection =
+    input.reviewState === "APPROVED" &&
+    input.contractClearance !== "APPROVED" &&
+    correctionTaskOpen;
+
+  return {
+    label: priorApprovalRequiresCorrection
+      ? "تأیید قبلی؛ نیازمند نسخه اصلاحی"
+      : contractReviewLabels[input.reviewState] || input.reviewState,
+    priorApprovalRequiresCorrection,
+    preparationLabel: priorApprovalRequiresCorrection
+      ? "نیازمند اصلاح قرارداد"
+      : null,
+    preparationHint: priorApprovalRequiresCorrection
+      ? "منابع انسانی · نسخه جدید برای بررسی مالی ارسال شود"
+      : null,
+  };
+};
+
+export const contractDraftDefaultsFromLatest = (
+  latestContract: null | {
+    contractNumber?: string | null;
+    effectiveFrom?: string | null;
+    effectiveTo?: string | null;
+  },
+  toFieldDate: (value: string) => string,
+) => ({
+  contractNumber: latestContract?.contractNumber || "",
+  effectiveFrom: latestContract?.effectiveFrom
+    ? toFieldDate(latestContract.effectiveFrom)
+    : "",
+  effectiveTo: latestContract?.effectiveTo
+    ? toFieldDate(latestContract.effectiveTo)
+    : "",
+  file: null,
+});
+
+export const projectContractCorrectionEditor = (input: {
+  showContractFields: boolean;
+  latestReviewState: string | null;
+  dismissed: boolean;
+}) => {
+  const isCorrection = ["RETURNED", "WITHDRAWN"].includes(
+    input.latestReviewState || "",
+  );
+  const showEditor =
+    input.showContractFields && (!isCorrection || !input.dismissed);
+
+  return {
+    isCorrection,
+    showEditor,
+    showCancel: showEditor && isCorrection,
+    showResume: input.showContractFields && isCorrection && input.dismissed,
+  };
+};
+
 export const projectContractWorkflowPresentation = (input: {
   latestContract: null | {
     reviewState: string;

@@ -979,6 +979,7 @@ export default function HrPersonnelPage() {
         dismissible={!saving}
         title={scheduleTarget ? `برنامه کاری ${scheduleTarget.firstName} ${scheduleTarget.lastName}` : "برنامه کاری"}
         presentation="modal"
+        size="wide"
       >
         {scheduleLoading && !scheduleData ? <ErpLoading /> : null}
         {scheduleData && scheduleTarget ? (

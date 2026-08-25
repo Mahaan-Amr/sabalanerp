@@ -25,6 +25,23 @@ export interface PaperContractWorkflowCapabilities {
   canWithdraw: boolean;
 }
 
+export const projectWithdrawalCorrectionTaskTransition = (input: {
+  actorId: string;
+  dueDate: Date;
+  reason: string;
+}) => ({
+  status: "IN_PROGRESS" as const,
+  dueDate: input.dueDate,
+  description: input.reason,
+  assignedToUserId: input.actorId,
+  assignmentReason: "AUTO_ASSIGNED_AFTER_CONTRACT_WITHDRAWAL",
+  completedAt: null,
+  completedByUserId: null,
+  waivedAt: null,
+  waivedByUserId: null,
+  waiverReason: null,
+});
+
 export const projectPaperContractCorrectionTask = <T extends {
   assignedToUserId: string | null;
 }>(input: {
@@ -47,6 +64,27 @@ export const paperContractReviewState = (
   if (contract.submittedAt) return "SUBMITTED";
   return "DRAFT";
 };
+
+export const canReusePaperContractStoredEvidence = (
+  contract: (PaperContractEvidenceState & {
+    storageName?: string | null;
+    originalName?: string | null;
+    mimeType?: string | null;
+    size?: number | null;
+    sha256?: string | null;
+    malwareScanStatus?: string | null;
+  }) | null | undefined,
+) => Boolean(
+  contract &&
+  ["RETURNED", "WITHDRAWN"].includes(paperContractReviewState(contract)) &&
+  contract.storageName &&
+  contract.originalName &&
+  contract.mimeType &&
+  contract.size !== null &&
+  contract.size !== undefined &&
+  contract.sha256 &&
+  contract.malwareScanStatus,
+);
 
 export const projectPaperContractWorkflowCapabilities = (input: {
   actorId: string;
@@ -76,7 +114,13 @@ export const projectPaperContractWorkflowCapabilities = (input: {
 
   const reviewState = paperContractReviewState(input.latestContract);
   const correctionTask = input.correctionTask;
-  const correctionNeeded = reviewState === "RETURNED" || reviewState === "WITHDRAWN";
+  const correctionTaskOpen =
+    correctionTask?.status === "PENDING" ||
+    correctionTask?.status === "IN_PROGRESS";
+  const correctionNeeded =
+    reviewState === "RETURNED" ||
+    reviewState === "WITHDRAWN" ||
+    (reviewState === "APPROVED" && correctionTaskOpen);
   return {
     canClaimCorrectionTask:
       correctionNeeded &&

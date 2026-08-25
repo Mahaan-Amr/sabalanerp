@@ -24,7 +24,7 @@ export const normalizeInsuranceEnrollmentCommand = (
 
   if (registrationPath === "INDEPENDENT_REQUEST") {
     if (!String(input.communicationMethod || "").trim() || !input.communicatedAt)
-      throw new Error("روش و زمان اعلام درخواست ثبت مستقل الزامی است.");
+      throw new Error("روش و تاریخ اعلام درخواست ثبت مستقل الزامی است.");
     return {
       registrationPath,
       status: "EXEMPT",

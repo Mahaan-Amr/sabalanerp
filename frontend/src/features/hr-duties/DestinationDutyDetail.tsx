@@ -20,7 +20,7 @@ import {
   ErpPersianDateField,
 } from '@/components/erp';
 import { hrDutyApi, type DestinationDuty } from './hrDutyApi';
-import { initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
+import { destinationDutySourceVersionLabel, initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
 import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-duties/crossWorkspaceDutyApi';
 import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
 import { downloadBlobResponse } from '@/lib/downloadFile';
@@ -239,7 +239,7 @@ export function DestinationDutyDetail({ workspace, dutyId }: { workspace: string
         <ErpSummaryGrid columns={3} items={[
           { label: 'وضعیت', value: <ErpBadge tone={duty.status === 'OPEN' ? 'info' : 'neutral'}>{duty.status === 'OPEN' ? 'باز' : 'بسته'}</ErpBadge> },
           { label: 'مهلت', value: duty.dueAtDisplay, tone: duty.overdue ? 'danger' : 'neutral' },
-          { label: 'نسخه', value: `${duty.sourceVersion.toLocaleString('fa-IR')} / ${duty.envelopeVersion.toLocaleString('fa-IR')}` },
+          { label: 'نسخه', value: destinationDutySourceVersionLabel(duty.sourceVersion) },
         ]} />
       </ErpSection>
       {duty.status !== 'OPEN' && structuredResult && (

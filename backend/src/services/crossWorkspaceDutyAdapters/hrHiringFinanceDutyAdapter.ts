@@ -387,7 +387,8 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
       const dueAt = addTehranWorkingDays(now, 3, holidays);
       const sourceKey = `HIRING:${application.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED`;
       const correction = await database.hrWorkItem.upsert({ where: { sourceKey }, update: {
-        status: 'PENDING', dueDate: dueAt, description: reason, completedAt: null, completedByUserId: null,
+        status: 'PENDING', dueDate: dueAt, description: reason, assignedToUserId: null, assignmentReason: null,
+        completedAt: null, completedByUserId: null, waivedAt: null, waivedByUserId: null, waiverReason: null,
       }, create: {
         title: `اصلاح قرارداد کاغذی — ${application.candidate.firstName} ${application.candidate.lastName}`,
         description: reason, sourceType: 'HIRING_ACTION', sourceKey,

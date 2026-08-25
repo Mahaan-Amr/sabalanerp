@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import {
+  destinationDutySourceVersionLabel,
   initialDestinationDutyState,
   reduceDestinationDutyState,
 } from './destinationDutyState';
+
+assert.equal(destinationDutySourceVersionLabel(5), 'نسخه ۵');
 
 const first = [{ id: 'duty-1', status: 'OPEN' }];
 const available = reduceDestinationDutyState(initialDestinationDutyState, { type: 'success', data: first });

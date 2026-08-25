@@ -10,6 +10,8 @@ import {
 } from '../crossWorkspaceDutyAdapters/hrHiringFinanceDutyAdapter';
 import { canClaimCrossWorkspaceDuty, claimCrossWorkspaceDuty, reassignCrossWorkspaceDuty, respondToCrossWorkspaceDuty } from '../crossWorkspaceDutyModule';
 import { activeHrActionPermissionsForUser } from '../hrAuthorizationService';
+import { cancelOpenCrossWorkspaceDuty } from '../crossWorkspaceDutyCancellation';
+import { claimContractCorrectionTask } from '../hrContractCorrectionTask';
 
 process.env.DATABASE_URL ??= 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public';
 const rollback = new Error('ROLLBACK_HR_HIRING_FINANCE_DUTY_TEST');
@@ -88,8 +90,28 @@ test('Accounting duties record and verify collateral atomically without granting
       });
       assert.ok((await tx.hrEmploymentContractDocument.findUniqueOrThrow({ where: { id: ordinaryContract.id } })).approvedAt);
 
+      const withdrawnContract = await tx.hrEmploymentContractDocument.create({ data: {
+        applicationId: application.id, version: 2, contractNumber: 'PAPER-WITHDRAW',
+        effectiveFrom: new Date('2026-08-23T00:00:00Z'), effectiveTo: new Date('2027-08-23T00:00:00Z'),
+        storageName: 'paper-withdraw.pdf', originalName: 'paper-withdraw.pdf', mimeType: 'application/pdf', size: 12,
+        sha256: 'e'.repeat(64), malwareScanStatus: 'CLEAN', uploadedBy: recorder.id,
+        submittedBy: recorder.id, submittedAt: new Date('2026-08-23T08:00:30Z'),
+      } });
+      const withdrawnContractDuty = await createHrHiringContractReviewDuty(tx, { contractId: withdrawnContract.id, actorUserId: recorder.id });
+      const cancelled = await cancelOpenCrossWorkspaceDuty(tx, {
+        dutyId: withdrawnContractDuty.id,
+        structuredResult: { actionCode: 'WITHDRAWN_BY_PERMISSION_HOLDER', reason: 'اصلاح شماره قرارداد' },
+      });
+      assert.equal(cancelled.count, 1);
+      assert.deepEqual(
+        await tx.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: withdrawnContractDuty.id }, select: {
+          status: true, respondedAt: true, respondedByUserId: true,
+        } }),
+        { status: 'CANCELLED', respondedAt: null, respondedByUserId: null },
+      );
+
       const managerialContract = await tx.hrEmploymentContractDocument.create({ data: {
-        applicationId: application.id, version: 2, contractNumber: 'PAPER-2',
+        applicationId: application.id, version: 3, contractNumber: 'PAPER-2',
         effectiveFrom: new Date('2026-08-23T00:00:00Z'), effectiveTo: new Date('2027-08-23T00:00:00Z'),
         storageName: 'paper-2.pdf', originalName: 'paper-2.pdf', mimeType: 'application/pdf', size: 12,
         sha256: 'd'.repeat(64), malwareScanStatus: 'CLEAN', uploadedBy: manager.id,
@@ -98,7 +120,7 @@ test('Accounting duties record and verify collateral atomically without granting
       const managerialContractDuty = await createHrHiringContractReviewDuty(tx, { contractId: managerialContract.id, actorUserId: manager.id });
       await respondToCrossWorkspaceDuty(tx, {
         dutyId: managerialContractDuty.id, actorUserId: manager.id, actionCode: 'APPROVE',
-        expectedSourceVersion: 2, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
+        expectedSourceVersion: 3, expectedEnvelopeVersion: 1, reason: null, policyVersion: 1,
       });
       assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
         dutyId: managerialContractDuty.id, eventCode: 'WORKSPACE_ADMIN_SELF_DECISION',
@@ -255,6 +277,9 @@ test('a concurrent Accounting claim has exactly one winner', async () => {
   let unitId = '';
   let itemId = '';
   let dutyId = '';
+  let correctionTaskId = '';
+  let relationshipId = '';
+  let personnelId = '';
   let userIds: string[] = [];
   try {
     const [initiator, contenderA, contenderB] = await Promise.all(['initiator', 'a', 'b'].map((role) => prisma.user.create({ data: {
@@ -273,6 +298,11 @@ test('a concurrent Accounting claim has exactly one winner', async () => {
     const position = await prisma.hrPosition.create({ data: { code: `POS-${suffix}`, title: suffix, capacity: 1, organizationalUnitId: unit.id, jobId: job.id, createdBy: initiator.id } }); positionId = position.id;
     const candidate = await prisma.hrCandidate.create({ data: { firstName: 'Concurrent', lastName: 'Candidate', mobile: `09${Date.now().toString().slice(-9)}` } }); candidateId = candidate.id;
     const application = await prisma.hrJobApplication.create({ data: { candidateId: candidate.id, positionId: position.id, createdBy: initiator.id } }); applicationId = application.id;
+    const personnel = await prisma.personnel.create({ data: { firstName: 'Concurrent', lastName: 'Personnel' } }); personnelId = personnel.id;
+    const relationship = await prisma.hrEmploymentRelationship.create({ data: {
+      personnelId: personnel.id, status: 'PLANNED', effectiveFrom: new Date('2026-09-01T00:00:00Z'),
+      createdBy: initiator.id, hiringApplicationId: application.id,
+    } }); relationshipId = relationship.id;
     const item = await prisma.hrCollateralItem.create({ data: { applicationId: application.id, type: 'PROMISSORY_NOTE', status: 'MISSING', recordedBy: initiator.id } }); itemId = item.id;
     const duty = await createHrHiringFinanceDuty(prisma, { collateralItemId: item.id, actionCode: 'HIRING_COLLATERAL_RECORD_RECEIPT', actorUserId: initiator.id }); dutyId = duty.id;
 
@@ -285,6 +315,21 @@ test('a concurrent Accounting claim has exactly one winner', async () => {
     const claimed = await prisma.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } });
     assert.ok([contenderA.id, contenderB.id].includes(claimed.currentAssigneeUserId || ''));
     assert.deepEqual((await prisma.crossWorkspaceDutyAssignmentHistory.findMany({ where: { dutyId: duty.id }, orderBy: { sequence: 'asc' } })).map(({ sequence }) => sequence), [1, 2]);
+
+    const correctionTask = await prisma.hrWorkItem.create({ data: {
+      title: 'Concurrent contract correction', sourceType: 'HIRING_ACTION',
+      sourceKey: `HIRING:${application.id}:RECORD_CONTRACT_CORRECTION:UNASSIGNED`,
+      destinationHref: `/dashboard/hr/hiring/${application.id}`, dueDate: new Date('2026-09-02T00:00:00Z'),
+    } }); correctionTaskId = correctionTask.id;
+    const correctionClaims = await Promise.allSettled([
+      claimContractCorrectionTask(contenderAClient, { workItemId: correctionTask.id, actorUserId: contenderA.id }),
+      claimContractCorrectionTask(contenderBClient, { workItemId: correctionTask.id, actorUserId: contenderB.id }),
+    ]);
+    assert.equal(correctionClaims.filter(({ status }) => status === 'fulfilled').length, 1);
+    assert.equal(correctionClaims.filter(({ status }) => status === 'rejected').length, 1);
+    const claimedCorrection = await prisma.hrWorkItem.findUniqueOrThrow({ where: { id: correctionTask.id } });
+    assert.equal(claimedCorrection.status, 'IN_PROGRESS');
+    assert.ok([contenderA.id, contenderB.id].includes(claimedCorrection.assignedToUserId || ''));
   } finally {
     if (dutyId) {
       await prisma.crossWorkspaceDutyAuditVersion.deleteMany({ where: { dutyId } });
@@ -292,8 +337,14 @@ test('a concurrent Accounting claim has exactly one winner', async () => {
       await prisma.crossWorkspaceDuty.deleteMany({ where: { id: dutyId } });
     }
     if (applicationId) await prisma.hrHiringAudit.deleteMany({ where: { applicationId } });
+    if (correctionTaskId) {
+      await prisma.hrWorkItemAudit.deleteMany({ where: { workItemId: correctionTaskId } });
+      await prisma.hrWorkItem.deleteMany({ where: { id: correctionTaskId } });
+    }
     if (itemId) await prisma.hrCollateralItem.deleteMany({ where: { id: itemId } });
+    if (relationshipId) await prisma.hrEmploymentRelationship.deleteMany({ where: { id: relationshipId } });
     if (applicationId) await prisma.hrJobApplication.deleteMany({ where: { id: applicationId } });
+    if (personnelId) await prisma.personnel.deleteMany({ where: { id: personnelId } });
     if (candidateId) await prisma.hrCandidate.deleteMany({ where: { id: candidateId } });
     if (positionId) await prisma.hrPosition.deleteMany({ where: { id: positionId } });
     if (jobId) await prisma.hrJob.deleteMany({ where: { id: jobId } });

@@ -60,6 +60,7 @@ export const hiringAPI = {
   createWorkItem: (data: any) => internal.post("/work-items", data),
   updateWorkItem: (id: string, data: any) =>
     internal.patch(`/work-items/${id}`, data),
+  claimWorkItem: (id: string) => internal.post(`/work-items/${id}/claim`),
   create: (data: any) => internal.post("/applications", data),
   invite: (id: string) => internal.post(`/applications/${id}/invitations`),
   refreshInvitationDelivery: (id: string, invitationId: string) =>

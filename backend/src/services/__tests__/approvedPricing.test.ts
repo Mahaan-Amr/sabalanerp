@@ -26,6 +26,7 @@ import {
   bindFrozenRowsToPostSnapshotCanonicalGraph,
   bindLegacyRowsToMigratedGraph,
   financialCommercialSnapshotMatches,
+  resolveCanonicalWriterV2MoneyProvenance,
   reconstructLegacyV1DiscountEligibility,
   reconstructLegacyV1Pricing,
   reconstructLegacyV1Quantity,
@@ -332,6 +333,99 @@ test('preserves a fractional graph-v1 source total when it seals exactly to the 
   assert.equal(resolved.normalization?.sealedTotalAmountToman, '46666667');
   assert.equal(resolved.normalization?.difference, '0.33');
   assert.deepEqual(resolved.pricing, pricing, 'raw-value compatibility must not replace canonical component evidence');
+});
+
+test('preserves an audited canonical-writer rounding-v2 money residue without enabling legacy reconstruction', () => {
+  const pricing = {
+    baseAmountToman: '42666667',
+    totalAmountToman: '46666667',
+    pricingComponents: [
+      { id: 'base-material', kind: 'base-material', amountToman: '42666667' },
+      { id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '4000000' },
+    ],
+  };
+  const resolved = resolveLegacyV1PricingProjection({
+    canReconstructLegacyV1: false,
+    canonicalWriterV2MoneyProvenance: {
+      graphSchemaVersion: 1,
+      roundingPolicy: 'rounding-v2',
+      producer: 'CANONICAL_WIZARD_SAVE',
+      producerVersion: 1,
+      graphAuditCommandId: 'wizard-save:contract-100318:1:result-hash',
+    },
+    productRowId: 'contract-row-16ba23bf-810b-4f59-85f0-10e5d47145b1',
+    productSnapshot: {
+      currency: 'تومان',
+      originalTotalPrice: '42666666.66666672',
+      totalPrice: '46666666.66666672',
+      cuttingCost: '4000000',
+      totalSubServiceCost: '0',
+      finishingId: null,
+      finishingCost: null,
+      isMandatory: false,
+      mandatoryPercentage: '20',
+      appliedSubServices: [],
+    },
+    pricing,
+  });
+
+  assert.deepEqual(resolved.normalization, {
+    productRowId: 'contract-row-16ba23bf-810b-4f59-85f0-10e5d47145b1',
+    rawTotalAmountToman: '46666666.66666672',
+    sealedTotalAmountToman: '46666667',
+    difference: '0.33333328',
+    rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL',
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    producer: 'CANONICAL_WIZARD_SAVE',
+    producerVersion: 1,
+    graphAuditCommandId: 'wizard-save:contract-100318:1:result-hash',
+  });
+  assert.deepEqual(resolved.pricing, pricing, 'the compatibility witness must never replace canonical pricing');
+});
+
+test('authorizes rounding-v2 money compatibility only for an audited whole-contract no-discount writer', () => {
+  const writer = {
+    producer: 'CANONICAL_WIZARD_SAVE' as const,
+    producerVersion: 1 as const,
+    graphAuditCommandId: 'wizard-save:contract-100318:1:result-hash',
+  };
+  const eligible = {
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    mode: 'FROM_CONTRACT_TOTAL',
+    contractData: { discount: { enabled: false, percent: '0', amount: '0' } },
+    writerProvenance: writer,
+  };
+
+  assert.deepEqual(resolveCanonicalWriterV2MoneyProvenance(eligible), {
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    ...writer,
+  });
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({ ...eligible, mode: 'FROM_SELECTED_ITEMS' }), null);
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({
+    ...eligible,
+    contractData: { discount: { enabled: true, percent: '10', amount: '4666666.7' } },
+  }), null);
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({ ...eligible, writerProvenance: null }), null);
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({ ...eligible, graphSchemaVersion: 2 }), null);
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({ ...eligible, roundingPolicy: 'rounding-v1' }), null);
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({
+    ...eligible,
+    contractData: {},
+  }), null, 'missing discount provenance must remain fail-closed');
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({
+    ...eligible,
+    contractData: {
+      discount: { enabled: false, percent: '0', amount: '0' },
+      contractDiscountAmount: '1',
+    },
+  }), null, 'explicit zero discount must not mask conflicting adjustment evidence');
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({
+    ...eligible,
+    contractData: { contractDiscountAmount: '1' },
+  }), null, 'an absent discount field with conflicting adjustment evidence must remain blocked');
 });
 
 test('keeps unmatched or unproven fractional source totals fail-closed', () => {
@@ -716,6 +810,115 @@ test('accepts graph-v1 money only through its audited historical storage-scale c
     scope: 'invoice', rawInvoiceAmount: '12505.1', sealedInvoiceAmount: '12510',
     difference: '4.9', rule: 'LEGACY_GRAPH_V1_AMOUNT_STORAGE_SCALE_TO_CANONICAL_TOMAN',
   });
+});
+
+test('seals the 100318-style rounding-v2 residue with complete immutable audit provenance', () => {
+  const source = approvedPricingSourceFixture();
+  const productRowId = 'contract-row-16ba23bf-810b-4f59-85f0-10e5d47145b1';
+  (source.contract.contractData as any).discount = {
+    enabled: false, baseSubtotal: '42666667', percent: '0', amount: '0', currency: 'تومان',
+  };
+  (source.contract.contractData as any).products[0] = {
+    ...(source.contract.contractData as any).products[0],
+    rowId: productRowId,
+    originalTotalPrice: '42666666.66666672',
+    totalPrice: '46666666.66666672',
+  };
+  source.contract.items = [{
+    ...source.contract.items[0]!, productRowId, totalPrice: '46666666.67',
+  }];
+  source.contract.currentItems = source.contract.items.map(item => ({ ...item }));
+  source.leaf.invoiceItems = [{
+    ...source.leaf.invoiceItems[0]!, totalPrice: '466666666.70',
+  }];
+  source.leaf.amount = '466666666.70';
+  source.contract.productGraph = {
+    ...source.contract.productGraph!,
+    schemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    totalAmountToman: '46666667',
+    compatibility: {
+      evidenceOrigin: 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION',
+      snapshotOriginallyMissing: false,
+      monetaryNormalizations: [{
+        productRowId,
+        rawTotalAmountToman: '46666666.66666672',
+        sealedTotalAmountToman: '46666667',
+        difference: '0.33333328',
+        rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL',
+        graphSchemaVersion: 1,
+        roundingPolicy: 'rounding-v2',
+        producer: 'CANONICAL_WIZARD_SAVE',
+        producerVersion: 1,
+        graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+      }],
+    },
+    rows: [{
+      ...source.contract.productGraph!.rows[0]!,
+      productRowId,
+      baseAmountToman: '42666667',
+      totalAmountToman: '46666667',
+      legacyRawTotalAmountToman: '46666666.66666672',
+      pricingComponents: [
+        { id: 'base-material', kind: 'base-material', amountToman: '42666667' },
+        { id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '4000000' },
+      ],
+      operations: [],
+    }],
+  };
+
+  const version = buildApprovedPricingVersion(source, 1, 'rounding-v2-money-residue-version');
+  assert.equal(version.netAmount, '46666667.000000000000');
+  assert.deepEqual(version.sourceEvidence.financialAmountNormalizations, [{
+    productRowId,
+    rawGraphAmountToman: '46666666.66666672',
+    rawContractItemAmountToman: '46666666.67',
+    rawInvoiceItemAmount: '466666666.7',
+    canonicalBaseAmountToman: '42666667',
+    sealedAmountToman: '46666667.000000000000',
+    sealedInvoiceItemAmount: '466666670',
+    differenceToman: '0.33',
+    currencyConversionFactor: '10',
+    graphSchemaVersion: '1',
+    roundingPolicy: 'rounding-v2',
+    producer: 'CANONICAL_WIZARD_SAVE',
+    producerVersion: '1',
+    graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+    initiatingActor: 'accountant-1',
+    action: 'FINANCIAL_APPROVAL',
+    rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL',
+  }, {
+    scope: 'invoice',
+    rawInvoiceAmount: '466666666.7',
+    sealedInvoiceAmount: '466666670',
+    difference: '3.3',
+    currencyConversionFactor: '10',
+    graphSchemaVersion: '1',
+    roundingPolicy: 'rounding-v2',
+    producer: 'CANONICAL_WIZARD_SAVE',
+    producerVersion: '1',
+    graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+    initiatingActor: 'accountant-1',
+    action: 'FINANCIAL_APPROVAL',
+    normalizedProductRowIds: productRowId,
+    rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL',
+  }]);
+  assert.equal(source.contract.items[0]!.totalPrice, '46666666.67');
+  assert.equal(source.leaf.amount, '466666666.70');
+
+  source.leaf.metadata = { mode: 'FROM_SELECTED_ITEMS' };
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 2, 'rounding-v2-selected-items-forgery'),
+    /rounding-v2 money normalization provenance conflicts/,
+    'a compatibility witness must not be replayed into a selected-items flow',
+  );
+  source.leaf.metadata = { mode: 'FROM_CONTRACT_TOTAL' };
+  source.contract.productGraph!.quantityPolicyProvenance = null;
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 2, 'rounding-v2-missing-writer-forgery'),
+    /rounding-v2 money normalization provenance conflicts/,
+    'a compatibility witness must not survive without its audited canonical writer',
+  );
 });
 
 const optimizerDerivedSourceFixture = () => {

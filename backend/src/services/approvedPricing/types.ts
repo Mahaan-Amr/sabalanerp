@@ -90,7 +90,8 @@ export type ApprovedPricingSource = {
         evidenceOrigin:
           | 'POST_SNAPSHOT_DETERMINISTIC_LEGACY_GRAPH_MIGRATION'
           | 'POST_SNAPSHOT_DETERMINISTIC_CANONICAL_GRAPH_BINDING'
-          | 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION';
+          | 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION'
+          | 'CANONICAL_WRITER_V2_MONEY_RESIDUE_NORMALIZATION';
         migrationAuditCommandId?: string;
         snapshotOriginallyMissing: boolean;
         rowIdentityAssignments?: readonly {
@@ -107,7 +108,14 @@ export type ApprovedPricingSource = {
           rawTotalAmountToman: string;
           sealedTotalAmountToman: string;
           difference: string;
-          rule: 'LEGACY_GRAPH_V1_ROUND_HALF_UP_TOMAN';
+          rule:
+            | 'LEGACY_GRAPH_V1_ROUND_HALF_UP_TOMAN'
+            | 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL';
+          graphSchemaVersion?: 1;
+          roundingPolicy?: 'rounding-v2';
+          producer?: 'CANONICAL_WIZARD_SAVE';
+          producerVersion?: 0 | 1;
+          graphAuditCommandId?: string;
           componentConversions?: readonly {
             component: 'cutting';
             rawValue: string;

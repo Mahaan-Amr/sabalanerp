@@ -11,6 +11,10 @@ import {
   optimizerQuantityPolicyProvenanceFromAudit,
 } from '../optimizerDerivedQuantityEvidence';
 import { sanitizeContractDataCustomerSnapshot } from '../contractSnapshotBoundary';
+import {
+  hasConflictingDiscountOrNonProductAdjustmentEvidence,
+  isExplicitZeroDiscountInput,
+} from '../contractDiscountEvidence';
 import type {
   ApprovalLeaf,
   ApprovedPricingPersistenceContext,
@@ -446,8 +450,48 @@ type ProjectedLegacyV1Pricing = {
   pricingComponents: ReadonlyArray<{ id: string; kind: string; amountToman: string }>;
 };
 
+type CanonicalWriterV2MoneyProvenance = {
+  graphSchemaVersion: 1;
+  roundingPolicy: 'rounding-v2';
+  producer: 'CANONICAL_WIZARD_SAVE';
+  producerVersion: 0 | 1;
+  graphAuditCommandId: string;
+};
+
+export const resolveCanonicalWriterV2MoneyProvenance = (input: {
+  graphSchemaVersion: number;
+  roundingPolicy: string;
+  mode: string;
+  contractData: unknown;
+  writerProvenance: {
+    producer: 'LEGACY_MIGRATION' | 'CANONICAL_WIZARD_SAVE';
+    producerVersion: 0 | 1;
+    graphAuditCommandId: string;
+  } | null;
+}): CanonicalWriterV2MoneyProvenance | null => {
+  if (input.graphSchemaVersion !== 1 || input.roundingPolicy !== 'rounding-v2' ||
+    input.mode !== 'FROM_CONTRACT_TOTAL' || input.writerProvenance?.producer !== 'CANONICAL_WIZARD_SAVE') {
+    return null;
+  }
+  const contractData = optionalRecord(input.contractData);
+  if (!contractData) return null;
+  const hasDiscountField = Object.prototype.hasOwnProperty.call(contractData, 'discount');
+  const hasNoDiscountEvidence = hasDiscountField &&
+    (contractData.discount === null || isExplicitZeroDiscountInput(contractData.discount)) &&
+    !hasConflictingDiscountOrNonProductAdjustmentEvidence(contractData);
+  if (!hasNoDiscountEvidence) return null;
+  return {
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    producer: 'CANONICAL_WIZARD_SAVE',
+    producerVersion: input.writerProvenance.producerVersion,
+    graphAuditCommandId: input.writerProvenance.graphAuditCommandId,
+  };
+};
+
 export const resolveLegacyV1PricingProjection = (input: {
   canReconstructLegacyV1: boolean;
+  canonicalWriterV2MoneyProvenance?: CanonicalWriterV2MoneyProvenance | null;
   productRowId: string;
   productSnapshot: Record<string, any> | null;
   pricing: ProjectedLegacyV1Pricing;
@@ -466,8 +510,10 @@ export const resolveLegacyV1PricingProjection = (input: {
       snapshotRawTotal = null;
     }
   }
-  const needsLegacyProjection = requiresPricingReconstruction || snapshotRawTotal != null;
-  if (!input.canReconstructLegacyV1 || !needsLegacyProjection) {
+  const canReconstructPricing = input.canReconstructLegacyV1 && requiresPricingReconstruction;
+  const canNormalizeStoredResidue = snapshotRawTotal != null &&
+    (input.canReconstructLegacyV1 || input.canonicalWriterV2MoneyProvenance != null);
+  if (!canReconstructPricing && !canNormalizeStoredResidue) {
     return { pricing: input.pricing, normalization: null };
   }
   if (!input.productSnapshot) {
@@ -482,7 +528,14 @@ export const resolveLegacyV1PricingProjection = (input: {
     if (!new Prisma.Decimal(reconstructed.baseAmountToman).eq(input.pricing.baseAmountToman!)) {
       throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} legacy material amount conflicts with canonical pricing`);
     }
-    return { pricing: input.pricing, normalization: reconstructed.normalization };
+    const normalization = input.canonicalWriterV2MoneyProvenance
+      ? {
+          ...reconstructed.normalization,
+          rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL' as const,
+          ...input.canonicalWriterV2MoneyProvenance,
+        }
+      : reconstructed.normalization;
+    return { pricing: input.pricing, normalization };
   }
   return { pricing: reconstructed, normalization: reconstructed.normalization };
 };
@@ -702,6 +755,13 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
               graphAuditCommand: migrationAudit.command,
             })
           : null;
+      const canonicalWriterV2MoneyProvenance = resolveCanonicalWriterV2MoneyProvenance({
+        graphSchemaVersion: graph.schemaVersion,
+        roundingPolicy: graph.calculationPolicy.rounding,
+        mode: String(optionalRecord(leaf.metadata)?.mode ?? ''),
+        contractData: snapshot.contractData,
+        writerProvenance: quantityPolicyProvenance,
+      });
       let compatibility: NonNullable<ApprovedPricingSource['contract']['productGraph']>['compatibility'] =
         resolvedGraph.compatibility ?? undefined;
       if (frozenIdentityBinding.rebindings.length > 0) {
@@ -730,6 +790,7 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
         };
         const resolvedPricing = resolveLegacyV1PricingProjection({
           canReconstructLegacyV1,
+          canonicalWriterV2MoneyProvenance,
           productRowId: row.productRowId,
           productSnapshot,
           pricing,
@@ -931,7 +992,9 @@ export class PrismaApprovedPricingRepository implements ApprovedPricingRepositor
       }
       if (!compatibility && (monetaryNormalizations.length > 0 || legacyQuantityNormalizations.length > 0)) {
         compatibility = {
-          evidenceOrigin: 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION',
+          evidenceOrigin: canonicalWriterV2MoneyProvenance && monetaryNormalizations.length > 0
+            ? 'CANONICAL_WRITER_V2_MONEY_RESIDUE_NORMALIZATION'
+            : 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION',
           snapshotOriginallyMissing: false,
         };
       }

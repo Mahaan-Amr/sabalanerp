@@ -550,6 +550,26 @@ export const buildApprovedPricingVersion = (
   if (!contractEligibleBase.eq(discountBase)) throw new ApprovedPricingEvidenceError('Contract discount base subtotal conflicts with canonical eligible rows');
   if (discountValue.gt(contractEligibleBase)) throw new ApprovedPricingEvidenceError('Contract discount exceeds eligible pricing');
 
+  const canonicalWriterV2MoneyNormalizations = new Map(
+    (graph.compatibility?.monetaryNormalizations ?? [])
+      .filter(item => item.rule === 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL')
+      .map(item => [item.productRowId, item]),
+  );
+  if (canonicalWriterV2MoneyNormalizations.size > 0) {
+    const writer = graph.quantityPolicyProvenance;
+    const hasExactProvenance = mode === 'FROM_CONTRACT_TOTAL' && discount.enabled === false &&
+      graph.schemaVersion === 1 && graph.roundingPolicy === 'rounding-v2' &&
+      writer?.producer === 'CANONICAL_WIZARD_SAVE';
+    for (const normalization of canonicalWriterV2MoneyNormalizations.values()) {
+      if (!hasExactProvenance || normalization.graphSchemaVersion !== 1 ||
+        normalization.roundingPolicy !== 'rounding-v2' || normalization.producer !== 'CANONICAL_WIZARD_SAVE' ||
+        normalization.producerVersion !== writer!.producerVersion ||
+        normalization.graphAuditCommandId !== writer!.graphAuditCommandId) {
+        throw new ApprovedPricingEvidenceError('Canonical writer rounding-v2 money normalization provenance conflicts with approved pricing');
+      }
+    }
+  }
+
   const { rows, selectedEligibleBase, gross } = projectApprovedPricingRows({
     graphRows: selectedGraphRows,
     itemByRow,
@@ -585,6 +605,7 @@ export const buildApprovedPricingVersion = (
       throw new ApprovedPricingEvidenceError('Approved invoice item quantity conflicts with source snapshot');
     }
     const graphRow = selectedGraphRows.find(item => item.productRowId === pricingRow.productRowId)!;
+    const canonicalWriterV2Normalization = canonicalWriterV2MoneyNormalizations.get(pricingRow.productRowId);
     const sourceItemTotal = new Prisma.Decimal(money(sourceItem.totalPrice, `Contract item ${sourceItem.id} total`));
     const legacySourceItemTotal = graphRow.legacyRawTotalAmountToman == null ? null :
       new Prisma.Decimal(graphRow.legacyRawTotalAmountToman).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
@@ -608,7 +629,20 @@ export const buildApprovedPricingVersion = (
         sealedAmountToman: pricingRow.canonicalAllInTotal,
         sealedInvoiceItemAmount: expectedInvoiceGross.toString(),
         differenceToman: new Prisma.Decimal(pricingRow.canonicalAllInTotal).minus(sourceItemTotal).toString(),
-        rule: 'LEGACY_GRAPH_V1_AMOUNT_STORAGE_SCALE_TO_CANONICAL_TOMAN',
+        ...(canonicalWriterV2Normalization ? {
+          canonicalBaseAmountToman: String(graphRow.baseAmountToman),
+          currencyConversionFactor: currencyFactor.toString(),
+          graphSchemaVersion: String(canonicalWriterV2Normalization.graphSchemaVersion),
+          roundingPolicy: canonicalWriterV2Normalization.roundingPolicy!,
+          producer: canonicalWriterV2Normalization.producer!,
+          producerVersion: String(canonicalWriterV2Normalization.producerVersion),
+          graphAuditCommandId: canonicalWriterV2Normalization.graphAuditCommandId!,
+          initiatingActor: approvedBy,
+          action: 'FINANCIAL_APPROVAL',
+          rule: canonicalWriterV2Normalization.rule,
+        } : {
+          rule: 'LEGACY_GRAPH_V1_AMOUNT_STORAGE_SCALE_TO_CANONICAL_TOMAN',
+        }),
       });
     }
   }
@@ -626,12 +660,28 @@ export const buildApprovedPricingVersion = (
     throw new ApprovedPricingEvidenceError('Approved invoice amount conflicts with sealed net pricing');
   }
   if (!leafAmount.eq(expectedInvoiceAmount)) {
+    const canonicalWriterV2InvoiceNormalizations = [...canonicalWriterV2MoneyNormalizations.values()]
+      .filter(item => selectedGraphRows.some(row => row.productRowId === item.productRowId));
     financialAmountNormalizations.push({
       scope: 'invoice',
       rawInvoiceAmount: leafAmount.toString(),
       sealedInvoiceAmount: expectedInvoiceAmount.toString(),
       difference: expectedInvoiceAmount.minus(leafAmount).toString(),
-      rule: 'LEGACY_GRAPH_V1_AMOUNT_STORAGE_SCALE_TO_CANONICAL_TOMAN',
+      ...(canonicalWriterV2InvoiceNormalizations.length > 0 ? {
+        currencyConversionFactor: currencyFactor.toString(),
+        graphSchemaVersion: '1',
+        roundingPolicy: 'rounding-v2',
+        producer: 'CANONICAL_WIZARD_SAVE',
+        producerVersion: String(canonicalWriterV2InvoiceNormalizations[0]!.producerVersion),
+        graphAuditCommandId: canonicalWriterV2InvoiceNormalizations[0]!.graphAuditCommandId!,
+        initiatingActor: approvedBy,
+        action: 'FINANCIAL_APPROVAL',
+        normalizedProductRowIds: canonicalWriterV2InvoiceNormalizations
+          .map(item => item.productRowId).sort().join(','),
+        rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL',
+      } : {
+        rule: 'LEGACY_GRAPH_V1_AMOUNT_STORAGE_SCALE_TO_CANONICAL_TOMAN',
+      }),
     });
   }
   const sourceEvidence = {

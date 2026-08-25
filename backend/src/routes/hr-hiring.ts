@@ -521,6 +521,9 @@ const applicationDeletionImpact = async (applicationId: string, client: PrismaCl
       onboardingTasks: true,
       audits: true,
       assessments: true,
+      companyEvaluationOccurrences: { include: { assignmentHistory: true } },
+      formalAssessmentPlans: { include: formalAssessmentPlanInclude },
+      assessmentMigrationEvents: true,
       preIdentityChecklistItems: { include: { events: true } },
       hiringDecisions: true,
       reopenings: true,
@@ -532,6 +535,7 @@ const applicationDeletionImpact = async (applicationId: string, client: PrismaCl
   const files = Array.from(new Set([
     ...application.documents.map((item) => item.storageName),
     ...application.assessments.map((item) => item.storageName),
+    ...application.companyEvaluationOccurrences.map((item) => item.resultStorageName),
     ...application.preIdentityChecklistItems.map((item) => item.storageName),
     ...application.collateralItems.flatMap((item) => [item.storageName, item.returnEvidenceStorageName]),
     ...application.contracts.map((item) => item.storageName)

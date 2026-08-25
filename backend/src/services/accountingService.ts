@@ -28,6 +28,7 @@ import { lockFinancialApprovalRecord, publishCurrentApprovedPricingReadinessWith
 import {
   assertGeneralFlagTransitionAllowed,
   FINANCIAL_EVIDENCE_REVIEW_PREFIX,
+  ensureFinancialEvidenceSupportReferral,
   financialEvidenceReviewActionUrl,
   isFinancialEvidenceReviewCase,
   presentFinancialEvidenceReviewCase,
@@ -71,6 +72,7 @@ import {
   resolveTaxRecordPopulation,
   taxRecordPopulationWhere,
 } from './accountingPopulations';
+import { createFinancialApprovalTransactionRunner } from './financialApprovalTransaction';
 
 
 const ELIGIBLE_CONTRACT_STATUSES: ContractStatus[] = [
@@ -687,6 +689,10 @@ export const recordFinancialEvidenceReviewCase = async (input: {
         note: `Financial approval blocked; ${trackingCode}`,
       });
     }
+    if (input.conflict.remediationKind === 'EVIDENCE_RECOVERY' ||
+      input.conflict.remediationKind === 'TECHNICAL_SUPPORT' || !input.conflict.remediationKind) {
+      await ensureFinancialEvidenceSupportReferral(tx, reviewCase, input.actorId);
+    }
     return { id: reviewCase.id, trackingCode, contractId: source.contractId!, actionUrl };
   });
 };
@@ -773,7 +779,7 @@ const buildContractRow = async (contract: any, settings: any) => {
       disabledReason: !eligible ? disabledReason : records.length === 0 ? 'ابتدا پیش‌نویس صورتحساب ایجاد شود' : undefined
     },
     {
-      kind: 'REQUEST_CORRECTION',
+      kind: 'CREATE_CORRECTION_REQUEST',
       labelFa: 'درخواست اصلاح',
       enabled: !contract.isInactive,
       disabledReason: contract.isInactive ? 'قرارداد غیرفعال و فقط‌خواندنی است' : undefined
@@ -1646,7 +1652,8 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
   const sepidarAmount = toDecimal(command.sepidarAmount);
   if (sepidarAmount.lte(0)) throw new Error('Sepidar amount is required');
 
-  const result = await prisma.$transaction(async (tx) => {
+  const runFinancialApprovalTransaction = createFinancialApprovalTransactionRunner(prisma);
+  const result = await runFinancialApprovalTransaction(async (tx) => {
     await lockFinancialApprovalRecord(tx, invoiceId);
     let before = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
     if (!before) throw new Error('Invoice record not found');
@@ -1878,7 +1885,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       if (contract) await publishAccountingActionWithinTransaction(notificationHook, tx, command.kind, contract, updated.id);
     }
     return updated;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  });
 
   return actionResponse('APPLIED', 'تایید مالی ثبت شد', { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
 };
@@ -3097,8 +3104,26 @@ export const listCorrectionRequests = async (query: any = {}) => {
     prisma.accountingCorrectionRequest.count({ where })
   ]);
   const enrichedRows = await attachListContext(rows);
+  const relatedDuties = rows.length ? await prisma.crossWorkspaceDuty.findMany({
+    where: {
+      sourceType: 'SALES_CONTRACT_CORRECTION',
+      sourceId: { in: rows.map((row) => row.id) },
+      destinationWorkspaceCode: 'ACCOUNTING',
+      status: 'OPEN',
+    },
+    select: { id: true, sourceId: true, sourceVersion: true, createdAt: true },
+    orderBy: [{ sourceVersion: 'desc' }, { createdAt: 'desc' }],
+  }) : [];
+  const accountingDutyByRequest = new Map<string, string>();
+  for (const duty of relatedDuties) {
+    if (!accountingDutyByRequest.has(duty.sourceId)) accountingDutyByRequest.set(duty.sourceId, duty.id);
+  }
+  const rowsWithDuty = enrichedRows.map((row) => ({
+    ...row,
+    accountingDutyId: accountingDutyByRequest.get(row.id) ?? null,
+  }));
   const contractIds = [...new Set(rows.map((row) => row.contractId).filter(Boolean))] as string[];
-  if (!contractIds.length) return { items: enrichedRows, page, pageSize, total };
+  if (!contractIds.length) return { items: rowsWithDuty, page, pageSize, total };
 
   const approvedRecords = await prisma.accountingFinancialRecord.findMany({
     where: {
@@ -3110,7 +3135,7 @@ export const listCorrectionRequests = async (query: any = {}) => {
   const lockedContractIds = new Set(approvedRecords.map((record) => record.contractId).filter(Boolean));
 
   return {
-    items: enrichedRows.map((row) => ({
+    items: rowsWithDuty.map((row) => ({
     ...row,
     accountingEditLocked: row.contractId ? lockedContractIds.has(row.contractId) : false
     })),

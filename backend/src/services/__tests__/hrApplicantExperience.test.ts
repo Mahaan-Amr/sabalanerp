@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   buildCandidateClosedState,
   normalizeCoveredHiringAmounts,
+  normalizeHiringNumericFields,
   normalizeHiringRial,
   projectApplicantClosureSummary,
   projectApplicantFullInformation,
@@ -123,6 +124,25 @@ assert.deepEqual(normalizeCoveredHiringAmounts({
   workHistory: [{ organization: 'Sabalan', lastSalaryBenefits: '10000' }],
   untouched: 'value',
 });
+assert.deepEqual(normalizeHiringNumericFields({
+  nationalCode: '۰۰۱۲۳۴۵۶۷۸',
+  postalCode: '١٢٣٤٥٦٧٨٩٠',
+  mobile: '۰۹1٢ ۳۴۵-۶۷۸۹',
+  homePhone: '۰۲۱۱۲۳۴۵۶۷۸',
+  childrenCount: '۲',
+  graduationYear: '۱۴۰۴',
+  desiredSalary: '۱۲٬۳۴۵',
+  workHistory: [{ lastSalaryBenefits: '١٠,٠٠٠' }],
+}), {
+  nationalCode: '0012345678',
+  postalCode: '1234567890',
+  mobile: '09123456789',
+  homePhone: '02112345678',
+  childrenCount: '2',
+  graduationYear: '1404',
+  desiredSalary: '12345',
+  workHistory: [{ lastSalaryBenefits: '10000' }],
+});
 
 const closureAudit = {
   actorUserId: 'manager-1',
@@ -138,6 +158,43 @@ assert.deepEqual(projectApplicantClosureSummary(source, closureAudit, { canViewE
   explanationRestricted: true,
 });
 assert.equal((projectApplicantClosureSummary(source, closureAudit, { canViewExplanation: true, actorDisplayName: 'مدیر منابع انسانی' }) as any).explanation, 'immutable reason');
+
+const convertedAudit = {
+  eventType: 'HIRE_CONVERTED',
+  actorUserId: 'hr-manager-1',
+  createdAt: new Date('2026-08-09T08:00:00.000Z'),
+  payloadJson: { personnelId: 'personnel-1', relationshipId: 'relationship-1' },
+};
+assert.deepEqual(projectApplicantClosureSummary(
+  {
+    ...source,
+    stage: 'ASSESSMENT', outcome: 'HIRED', outcomeReason: null, preClosureStage: null,
+    scheduledStartDate: new Date('2026-08-12T00:00:00.000Z'),
+    activatedAt: new Date('2026-08-12T07:30:00.000Z'),
+    employmentRelationship: {
+      status: 'ACTIVE', effectiveFrom: new Date('2026-08-12T00:00:00.000Z'),
+      personnel: { id: 'personnel-1', firstName: 'علی', lastName: 'رضایی' },
+    },
+  },
+  convertedAudit,
+  {
+    canViewExplanation: true, actorDisplayName: 'مدیر منابع انسانی',
+    activationActorDisplayName: 'مدیر عملیات منابع انسانی', canViewPersonnel: true,
+  },
+), {
+  available: true,
+  outcome: 'HIRED',
+  previousStage: null,
+  closedAt: '2026-08-09T08:00:00.000Z',
+  closedBy: 'مدیر منابع انسانی',
+  completionKind: 'HIRE_CONVERSION',
+  personnel: { displayName: 'علی رضایی', href: '/dashboard/hr/personnel?focus=personnel-1' },
+  scheduledStartDate: '2026-08-12T00:00:00.000Z',
+  relationshipEffectiveFrom: '2026-08-12T00:00:00.000Z',
+  relationshipStatus: 'ACTIVE',
+  activatedAt: '2026-08-12T07:30:00.000Z',
+  activatedBy: 'مدیر عملیات منابع انسانی',
+});
 
 assert.deepEqual(buildCandidateClosedState(source), {
   closed: true,

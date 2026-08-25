@@ -30,6 +30,8 @@ export type {
 export {
   calculateLongitudinalProduct,
   createNewLongitudinalProductInput,
+  longitudinalOperationsQuantity,
+  parseLongitudinalQuantityEntry,
   parseLongitudinalProductInput,
   transitionLongitudinalQuantity
 } from './longitudinalPolicy';

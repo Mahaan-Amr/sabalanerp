@@ -1,7 +1,7 @@
 import express, { Response } from 'express';
 import path from 'path';
 import * as XLSX from 'xlsx';
-import { protect, authorize } from '../middleware/auth';
+import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
 import { FEATURE_PERMISSIONS, FEATURES, requireFeatureAccess } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
@@ -99,7 +99,6 @@ const renderBiReportHtml = (overview: BiSnapshot) => {
 
 const requireBiAccess = [
   protect,
-  authorize('ADMIN', 'MANAGER'),
   requireWorkspaceAccess(WORKSPACES.BI, WORKSPACE_PERMISSIONS.VIEW),
   requireFeatureAccess(FEATURES.BI_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW),
 ];

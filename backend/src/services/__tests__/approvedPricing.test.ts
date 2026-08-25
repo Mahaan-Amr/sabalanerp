@@ -23,17 +23,97 @@ import {
   OptimizerQuantityEvidenceConflictError,
 } from '../optimizerDerivedQuantityEvidence';
 import {
+  bindFrozenRowsToPostSnapshotCanonicalGraph,
   bindLegacyRowsToMigratedGraph,
   financialCommercialSnapshotMatches,
+  resolveCanonicalWriterV2MoneyProvenance,
   reconstructLegacyV1DiscountEligibility,
   reconstructLegacyV1Pricing,
   reconstructLegacyV1Quantity,
+  resolveLegacyV1PricingProjection,
+  rebindFrozenContractItemIdentities,
   resolveFinancialApprovalGraphEvidence,
 } from '../approvedPricing/prismaRepository';
 import {
   ApprovedPricingEvidenceError,
   asApprovedPricingEvidenceError,
 } from '../approvedPricing/evidenceError';
+import { resolveCommercialQuantityPolicy } from '../commercialQuantityPolicy';
+import { approvedPricingOperationalContractItemId } from '../approvedPricing/prismaEvidence';
+
+test('keeps frozen pricing identity for integrity while exposing the live item operationally', () => {
+  assert.equal(approvedPricingOperationalContractItemId({
+    contractItemId: 'frozen-item',
+    linkedContractItemId: 'live-item',
+  }), 'live-item');
+  assert.equal(approvedPricingOperationalContractItemId({
+    contractItemId: 'ordinary-live-item',
+    linkedContractItemId: 'ordinary-live-item',
+  }), 'ordinary-live-item');
+  assert.equal(approvedPricingOperationalContractItemId({
+    contractItemId: 'recovered-frozen-item',
+    linkedContractItemId: null,
+  }), 'recovered-frozen-item');
+});
+
+test('rebinds a frozen source identity to the live item only through its stable product row', () => {
+  const result = rebindFrozenContractItemIdentities({
+    snapshotItems: [{ id: 'frozen-item', productId: 'product-1', productRowId: 'row-1', productType: 'longitudinal' }],
+    liveItems: [{ id: 'live-item', productId: 'product-1', productRowId: 'row-1', productType: 'longitudinal' }],
+    invoiceItems: [{ id: 'invoice-item', contractItemId: 'frozen-item' }],
+  });
+
+  assert.equal(result.idMap.get('frozen-item'), 'live-item');
+  assert.deepEqual(result.rebindings, [{
+    sourceContractItemId: 'frozen-item',
+    linkedContractItemId: 'live-item',
+    invoiceItemId: 'invoice-item',
+    productRowId: 'row-1',
+    rule: 'FROZEN_STABLE_PRODUCT_ROW_LIVE_ITEM_REBINDING_V1',
+  }]);
+});
+
+test('rejects frozen identity rebinding when product identity is not exact', () => {
+  assert.throws(() => rebindFrozenContractItemIdentities({
+    snapshotItems: [{ id: 'frozen-item', productId: 'product-1', productRowId: 'row-1', productType: 'longitudinal' }],
+    liveItems: [{ id: 'live-item', productId: 'different-product', productRowId: 'row-1', productType: 'longitudinal' }],
+    invoiceItems: [{ id: 'invoice-item', contractItemId: 'frozen-item' }],
+  }), ApprovedPricingEvidenceError);
+});
+
+const longitudinalCommercialPolicy = (roundingPolicy: 'rounding-v1' | 'rounding-v2') =>
+  resolveCommercialQuantityPolicy({ graphSchemaVersion: 1, roundingPolicy, productFamily: 'longitudinal' });
+
+test('defines versioned piece, measured, and billable roles for every canonical product family', () => {
+  assert.deepEqual(resolveCommercialQuantityPolicy({
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    productFamily: 'prepared',
+    commercialUnit: 'count',
+  }).billableQuantity, {
+    role: 'BILLABLE_QUANTITY', basis: 'PIECE_COUNT', unit: 'count', scale: 0,
+  });
+  assert.equal(resolveCommercialQuantityPolicy({ graphSchemaVersion: 1, roundingPolicy: 'rounding-v1',
+    productFamily: 'prepared', commercialUnit: 'ton' }).billableQuantity.scale, 3);
+  for (const productFamily of ['longitudinal', 'slab']) {
+    const policy = resolveCommercialQuantityPolicy({ graphSchemaVersion: 1, roundingPolicy: 'rounding-v1', productFamily });
+    assert.equal(policy.version, 'commercial-quantity-v1');
+    assert.equal(policy.pieceCount.scale, 0);
+    assert.equal(policy.billableQuantity.basis, 'MEASURED_QUANTITY');
+    assert.equal(policy.billableQuantity.scale, 3);
+  }
+  for (const productFamily of ['stair', 'volumetric']) {
+    const policy = resolveCommercialQuantityPolicy({ graphSchemaVersion: 1, roundingPolicy: 'rounding-v1', productFamily });
+    assert.equal(policy.billableQuantity.basis, 'PIECE_COUNT');
+    assert.equal(policy.billableQuantity.unit, 'count');
+    assert.equal(policy.billableQuantity.scale, 0);
+  }
+  assert.throws(() => resolveCommercialQuantityPolicy({
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    productFamily: 'unknown',
+  }), ApprovedPricingEvidenceError);
+});
 
 test('only typed evidence failures can become a financial review case', () => {
   const evidenceFailure = new ApprovedPricingEvidenceError('frozen evidence conflict');
@@ -94,6 +174,68 @@ test('accepts a missing draft graph snapshot only from the exact deterministic l
     migrationAuditCommandId: 'legacy-migration:contract-1:same-hash',
     snapshotOriginallyMissing: true,
   });
+});
+
+test('accepts a post-snapshot canonical graph only from its exact audited writer revision and hashes', () => {
+  const currentGraphState = {
+    schemaVersion: 1, revision: 2, graph: { schemaVersion: 1 },
+    inputHash: 'canonical-hash', resultHash: 'canonical-hash', totalAmountToman: '100',
+  };
+  const resolved = resolveFinancialApprovalGraphEvidence({
+    snapshotGraphState: null,
+    currentGraphState,
+    migrationAudit: {
+      commandId: 'wizard-save:contract-1:2:canonical-hash', resultRevision: 2,
+      inputHash: 'canonical-hash', resultHash: 'canonical-hash',
+      command: { kind: 'canonical-wizard-save' },
+    },
+  });
+  assert.equal(resolved.graphState, currentGraphState);
+  assert.equal(resolved.compatibility?.evidenceOrigin, 'POST_SNAPSHOT_DETERMINISTIC_CANONICAL_GRAPH_BINDING');
+  assert.throws(() => resolveFinancialApprovalGraphEvidence({
+    snapshotGraphState: null,
+    currentGraphState,
+    migrationAudit: {
+      commandId: 'wizard-save:contract-1:2:wrong', resultRevision: 2,
+      inputHash: 'wrong', resultHash: 'canonical-hash', command: { kind: 'canonical-wizard-save' },
+    },
+  }), /no matching deterministic legacy migration/);
+});
+
+test('binds frozen rows to a later canonical graph only by a unique complete commercial tuple', () => {
+  const binding = bindFrozenRowsToPostSnapshotCanonicalGraph({
+    contractData: { products: [
+      { productId: 'product-1', productType: 'longitudinal', quantity: '9375', totalPrice: '3000000000' },
+      { productId: 'product-1', productType: 'longitudinal', quantity: '6250', totalPrice: '3000000000' },
+    ] },
+    snapshotItems: [
+      { id: 'item-1', productId: 'product-1', productType: 'longitudinal', quantity: '9375', totalPrice: '3000000000' },
+      { id: 'item-2', productId: 'product-1', productType: 'longitudinal', quantity: '6250', totalPrice: '3000000000' },
+    ],
+    graphRows: [
+      { productRowId: 'row-b', catalogProductId: 'product-1', productType: 'longitudinal', legacySnapshot: { productId: 'product-1', productType: 'longitudinal', quantity: '6250', totalPrice: '3000000000' } },
+      { productRowId: 'row-a', catalogProductId: 'product-1', productType: 'longitudinal', legacySnapshot: { productId: 'product-1', productType: 'longitudinal', quantity: '9375', totalPrice: '3000000000' } },
+    ],
+  });
+  assert.deepEqual(binding.snapshotItems.map(item => item.productRowId), ['row-a', 'row-b']);
+  assert.deepEqual(binding.assignments.map(assignment => assignment.rule), [
+    'FROZEN_ITEM_AND_PRODUCT_UNIQUE_COMMERCIAL_TUPLE_V1',
+    'FROZEN_ITEM_AND_PRODUCT_UNIQUE_COMMERCIAL_TUPLE_V1',
+  ]);
+  assert.throws(() => bindFrozenRowsToPostSnapshotCanonicalGraph({
+    contractData: { products: [
+      { productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' },
+      { productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' },
+    ] },
+    snapshotItems: [
+      { id: 'item-1', productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' },
+      { id: 'item-2', productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' },
+    ],
+    graphRows: [
+      { productRowId: 'row-a', catalogProductId: 'product-1', productType: 'longitudinal', legacySnapshot: { productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' } },
+      { productRowId: 'row-b', catalogProductId: 'product-1', productType: 'longitudinal', legacySnapshot: { productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' } },
+    ],
+  }), /no unique canonical graph witness/);
 });
 
 test('reconstructs legacy v1 quantities from typed product evidence at scale three', () => {
@@ -158,6 +300,218 @@ test('reconstructs legacy v1 monetary components with audited half-up Toman conv
       isMandatory: false, mandatoryPercentage: '20', appliedSubServices: [],
     },
   }), /do not reconcile/);
+});
+
+test('preserves a fractional graph-v1 source total when it seals exactly to the canonical whole Toman', () => {
+  const pricing = {
+    baseAmountToman: '42666667',
+    totalAmountToman: '46666667',
+    pricingComponents: [
+      { id: 'base-material', kind: 'base-material', amountToman: '42666667' },
+      { id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '4000000' },
+    ],
+  };
+  const resolved = resolveLegacyV1PricingProjection({
+    canReconstructLegacyV1: true,
+    productRowId: 'contract-row-16ba23bf-810b-4f59-85f0-10e5d47145b1',
+    productSnapshot: {
+      currency: 'تومان',
+      originalTotalPrice: '42666666.67',
+      totalPrice: '46666666.67',
+      cuttingCost: '4000000',
+      totalSubServiceCost: '0',
+      finishingId: null,
+      finishingCost: null,
+      isMandatory: false,
+      mandatoryPercentage: '20',
+      appliedSubServices: [],
+    },
+    pricing,
+  });
+
+  assert.equal(resolved.normalization?.rawTotalAmountToman, '46666666.67');
+  assert.equal(resolved.normalization?.sealedTotalAmountToman, '46666667');
+  assert.equal(resolved.normalization?.difference, '0.33');
+  assert.deepEqual(resolved.pricing, pricing, 'raw-value compatibility must not replace canonical component evidence');
+});
+
+test('preserves an audited canonical-writer rounding-v2 money residue without enabling legacy reconstruction', () => {
+  const pricing = {
+    baseAmountToman: '42666667',
+    totalAmountToman: '46666667',
+    pricingComponents: [
+      { id: 'base-material', kind: 'base-material', amountToman: '42666667' },
+      { id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '4000000' },
+    ],
+  };
+  const resolved = resolveLegacyV1PricingProjection({
+    canReconstructLegacyV1: false,
+    canonicalWriterV2MoneyProvenance: {
+      graphSchemaVersion: 1,
+      roundingPolicy: 'rounding-v2',
+      producer: 'CANONICAL_WIZARD_SAVE',
+      producerVersion: 1,
+      graphAuditCommandId: 'wizard-save:contract-100318:1:result-hash',
+    },
+    productRowId: 'contract-row-16ba23bf-810b-4f59-85f0-10e5d47145b1',
+    productSnapshot: {
+      currency: 'تومان',
+      originalTotalPrice: '42666666.66666672',
+      totalPrice: '46666666.66666672',
+      cuttingCost: '4000000',
+      totalSubServiceCost: '0',
+      finishingId: null,
+      finishingCost: null,
+      isMandatory: false,
+      mandatoryPercentage: '20',
+      appliedSubServices: [],
+    },
+    pricing,
+  });
+
+  assert.deepEqual(resolved.normalization, {
+    productRowId: 'contract-row-16ba23bf-810b-4f59-85f0-10e5d47145b1',
+    rawTotalAmountToman: '46666666.66666672',
+    sealedTotalAmountToman: '46666667',
+    difference: '0.33333328',
+    rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL',
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    producer: 'CANONICAL_WIZARD_SAVE',
+    producerVersion: 1,
+    graphAuditCommandId: 'wizard-save:contract-100318:1:result-hash',
+  });
+  assert.deepEqual(resolved.pricing, pricing, 'the compatibility witness must never replace canonical pricing');
+});
+
+test('authorizes rounding-v2 money compatibility only for an audited whole-contract no-discount writer', () => {
+  const writer = {
+    producer: 'CANONICAL_WIZARD_SAVE' as const,
+    producerVersion: 1 as const,
+    graphAuditCommandId: 'wizard-save:contract-100318:1:result-hash',
+  };
+  const eligible = {
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    mode: 'FROM_CONTRACT_TOTAL',
+    contractData: { discount: { enabled: false, percent: '0', amount: '0' } },
+    writerProvenance: writer,
+  };
+
+  assert.deepEqual(resolveCanonicalWriterV2MoneyProvenance(eligible), {
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    ...writer,
+  });
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({ ...eligible, mode: 'FROM_SELECTED_ITEMS' }), null);
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({
+    ...eligible,
+    contractData: { discount: { enabled: true, percent: '10', amount: '4666666.7' } },
+  }), null);
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({ ...eligible, writerProvenance: null }), null);
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({ ...eligible, graphSchemaVersion: 2 }), null);
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({ ...eligible, roundingPolicy: 'rounding-v1' }), null);
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({
+    ...eligible,
+    contractData: {},
+  }), null, 'missing discount provenance must remain fail-closed');
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({
+    ...eligible,
+    contractData: {
+      discount: { enabled: false, percent: '0', amount: '0' },
+      contractDiscountAmount: '1',
+    },
+  }), null, 'explicit zero discount must not mask conflicting adjustment evidence');
+  assert.equal(resolveCanonicalWriterV2MoneyProvenance({
+    ...eligible,
+    contractData: { contractDiscountAmount: '1' },
+  }), null, 'an absent discount field with conflicting adjustment evidence must remain blocked');
+});
+
+test('keeps unmatched or unproven fractional source totals fail-closed', () => {
+  const pricing = {
+    baseAmountToman: '42666667',
+    totalAmountToman: '46666667',
+    pricingComponents: [
+      { id: 'base-material', kind: 'base-material', amountToman: '42666667' },
+      { id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '4000000' },
+    ],
+  };
+  const snapshot = {
+    currency: 'تومان', originalTotalPrice: '42666666.49', totalPrice: '46666666.49',
+    cuttingCost: '4000000', totalSubServiceCost: '0', finishingId: null, finishingCost: null,
+    isMandatory: false, mandatoryPercentage: '20', appliedSubServices: [],
+  };
+
+  assert.equal(resolveLegacyV1PricingProjection({
+    canReconstructLegacyV1: true,
+    productRowId: 'legacy-row-unmatched',
+    productSnapshot: snapshot,
+    pricing,
+  }).normalization, null, 'a source total that rounds to another whole Toman must remain unresolved');
+  assert.equal(resolveLegacyV1PricingProjection({
+    canReconstructLegacyV1: false,
+    productRowId: 'canonical-row-without-legacy-provenance',
+    productSnapshot: { ...snapshot, originalTotalPrice: '42666666.67', totalPrice: '46666666.67' },
+    pricing,
+  }).normalization, null, 'the graph-v1 rule must not apply without matching legacy provenance');
+
+  assert.throws(() => resolveLegacyV1PricingProjection({
+    canReconstructLegacyV1: true,
+    productRowId: 'legacy-row-conflicting-base',
+    productSnapshot: { ...snapshot, originalTotalPrice: '42666666.67', totalPrice: '46666666.67' },
+    pricing: {
+      baseAmountToman: '42000000',
+      totalAmountToman: '46666667',
+      pricingComponents: [
+        { id: 'base-material', kind: 'base-material', amountToman: '42000000' },
+        { id: 'other-allocation', kind: 'other-allocation', amountToman: '4666667' },
+      ],
+    },
+  }), /legacy material amount conflicts/, 'equal grand totals must not hide a conflicting canonical base allocation');
+});
+
+test('reconciles a mixed legacy-fractional and canonical invoice without rewriting either row', () => {
+  const source = approvedPricingSourceFixture();
+  (source.contract.contractData as any).discount = {
+    enabled: false, baseSubtotal: '1500', percent: '0', amount: '0', currency: 'تومان',
+  };
+  (source.contract.contractData as any).products.push({
+    rowId: 'row-2', productId: 'product-2', productType: 'longitudinal',
+    length: '1', lengthUnit: 'm', quantity: '1', meta: { isLayer: false },
+  });
+  source.contract.items = [
+    { ...source.contract.items[0]!, totalPrice: '1250.40' },
+    { id: 'item-2', productId: 'product-2', productRowId: 'row-2', productType: 'longitudinal', quantity: '1', totalPrice: '500' },
+  ];
+  source.contract.currentItems = source.contract.items.map(item => ({ ...item }));
+  source.contract.productGraph = {
+    ...source.contract.productGraph!,
+    totalAmountToman: '1750',
+    rows: [
+      { ...source.contract.productGraph!.rows[0]!, legacyRawTotalAmountToman: '1250.40' },
+      {
+        productRowId: 'row-2', catalogProductId: 'product-2', productType: 'longitudinal', contractualTitle: 'Canonical row',
+        baseAmountToman: '500', totalAmountToman: '500', requestedQuantity: '1', requestedLengthMeters: '1',
+        requestedAreaSquareMeters: null, operations: [], pricingComponents: [
+          { id: 'base-material', kind: 'base-material', amountToman: '500' },
+        ],
+      },
+    ],
+  };
+  source.leaf.invoiceItems = [
+    { ...source.leaf.invoiceItems[0]!, totalPrice: '12504' },
+    { id: 'invoice-item-2', contractItemId: 'item-2', productId: 'product-2', quantity: '1', totalPrice: '5000' },
+  ];
+  source.leaf.amount = '17504';
+
+  const version = buildApprovedPricingVersion(source, 1, 'mixed-legacy-canonical-version');
+  assert.equal(version.grossAmount, '1750.000000000000');
+  assert.equal(version.netAmount, '1750.000000000000');
+  const normalizations = version.sourceEvidence.financialAmountNormalizations as readonly unknown[];
+  assert.equal(normalizations.length, 2);
+  assert.equal(source.contract.items[0]!.totalPrice, '1250.40');
+  assert.equal(source.leaf.amount, '17504');
 });
 
 test('reconstructs graph-v1 stair cutting from its duplicated physical and tool lines', () => {
@@ -458,6 +812,115 @@ test('accepts graph-v1 money only through its audited historical storage-scale c
   });
 });
 
+test('seals the 100318-style rounding-v2 residue with complete immutable audit provenance', () => {
+  const source = approvedPricingSourceFixture();
+  const productRowId = 'contract-row-16ba23bf-810b-4f59-85f0-10e5d47145b1';
+  (source.contract.contractData as any).discount = {
+    enabled: false, baseSubtotal: '42666667', percent: '0', amount: '0', currency: 'تومان',
+  };
+  (source.contract.contractData as any).products[0] = {
+    ...(source.contract.contractData as any).products[0],
+    rowId: productRowId,
+    originalTotalPrice: '42666666.66666672',
+    totalPrice: '46666666.66666672',
+  };
+  source.contract.items = [{
+    ...source.contract.items[0]!, productRowId, totalPrice: '46666666.67',
+  }];
+  source.contract.currentItems = source.contract.items.map(item => ({ ...item }));
+  source.leaf.invoiceItems = [{
+    ...source.leaf.invoiceItems[0]!, totalPrice: '466666666.70',
+  }];
+  source.leaf.amount = '466666666.70';
+  source.contract.productGraph = {
+    ...source.contract.productGraph!,
+    schemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    totalAmountToman: '46666667',
+    compatibility: {
+      evidenceOrigin: 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION',
+      snapshotOriginallyMissing: false,
+      monetaryNormalizations: [{
+        productRowId,
+        rawTotalAmountToman: '46666666.66666672',
+        sealedTotalAmountToman: '46666667',
+        difference: '0.33333328',
+        rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL',
+        graphSchemaVersion: 1,
+        roundingPolicy: 'rounding-v2',
+        producer: 'CANONICAL_WIZARD_SAVE',
+        producerVersion: 1,
+        graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+      }],
+    },
+    rows: [{
+      ...source.contract.productGraph!.rows[0]!,
+      productRowId,
+      baseAmountToman: '42666667',
+      totalAmountToman: '46666667',
+      legacyRawTotalAmountToman: '46666666.66666672',
+      pricingComponents: [
+        { id: 'base-material', kind: 'base-material', amountToman: '42666667' },
+        { id: 'longitudinal-cut', kind: 'longitudinal-cut', amountToman: '4000000' },
+      ],
+      operations: [],
+    }],
+  };
+
+  const version = buildApprovedPricingVersion(source, 1, 'rounding-v2-money-residue-version');
+  assert.equal(version.netAmount, '46666667.000000000000');
+  assert.deepEqual(version.sourceEvidence.financialAmountNormalizations, [{
+    productRowId,
+    rawGraphAmountToman: '46666666.66666672',
+    rawContractItemAmountToman: '46666666.67',
+    rawInvoiceItemAmount: '466666666.7',
+    canonicalBaseAmountToman: '42666667',
+    sealedAmountToman: '46666667.000000000000',
+    sealedInvoiceItemAmount: '466666670',
+    differenceToman: '0.33',
+    currencyConversionFactor: '10',
+    graphSchemaVersion: '1',
+    roundingPolicy: 'rounding-v2',
+    producer: 'CANONICAL_WIZARD_SAVE',
+    producerVersion: '1',
+    graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+    initiatingActor: 'accountant-1',
+    action: 'FINANCIAL_APPROVAL',
+    rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL',
+  }, {
+    scope: 'invoice',
+    rawInvoiceAmount: '466666666.7',
+    sealedInvoiceAmount: '466666670',
+    difference: '3.3',
+    currencyConversionFactor: '10',
+    graphSchemaVersion: '1',
+    roundingPolicy: 'rounding-v2',
+    producer: 'CANONICAL_WIZARD_SAVE',
+    producerVersion: '1',
+    graphAuditCommandId: 'wizard-save:contract-1:7:graph-result-hash',
+    initiatingActor: 'accountant-1',
+    action: 'FINANCIAL_APPROVAL',
+    normalizedProductRowIds: productRowId,
+    rule: 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL',
+  }]);
+  assert.equal(source.contract.items[0]!.totalPrice, '46666666.67');
+  assert.equal(source.leaf.amount, '466666666.70');
+
+  source.leaf.metadata = { mode: 'FROM_SELECTED_ITEMS' };
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 2, 'rounding-v2-selected-items-forgery'),
+    /rounding-v2 money normalization provenance conflicts/,
+    'a compatibility witness must not be replayed into a selected-items flow',
+  );
+  source.leaf.metadata = { mode: 'FROM_CONTRACT_TOTAL' };
+  source.contract.productGraph!.quantityPolicyProvenance = null;
+  assert.throws(
+    () => buildApprovedPricingVersion(source, 2, 'rounding-v2-missing-writer-forgery'),
+    /rounding-v2 money normalization provenance conflicts/,
+    'a compatibility witness must not survive without its audited canonical writer',
+  );
+});
+
 const optimizerDerivedSourceFixture = () => {
   const source = approvedPricingSourceFixture();
   source.contract.productGraph!.schemaVersion = 1;
@@ -565,6 +1028,7 @@ test('seals an optimizer-derived longitudinal zero sentinel from agreeing frozen
     },
     compatibility: {
       policy: 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE',
+      commercialQuantityPolicy: longitudinalCommercialPolicy('rounding-v1'),
       graphSchemaVersion: 1,
       rounding: 'ROUND_HALF_UP',
       sealedScale: 3,
@@ -608,6 +1072,7 @@ test('seals a graph-v1 optimizer float through its recorded scale-two persistenc
   assert.equal(version.rows[0]?.contractedQuantity, '58.333');
   assert.deepEqual((version.sourceEvidence.quantityNormalizations as any[])[0]?.compatibility, {
     policy: 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE',
+    commercialQuantityPolicy: longitudinalCommercialPolicy('rounding-v1'),
     graphSchemaVersion: 1,
     rounding: 'ROUND_HALF_UP',
     sealedScale: 3,
@@ -619,6 +1084,16 @@ test('seals a graph-v1 optimizer float through its recorded scale-two persistenc
     rawProductionQuantity: '58.33333333333334',
     rawCanonicalGraphQuantity: '58.333333333333333333',
     sourceTransformation: 'ROUND_HALF_UP_SCALE_THREE',
+    commercialEquivalences: [{
+      leftSource: 'PRODUCT_GRAPH',
+      rightSource: 'OPTIMIZER_TOTAL',
+      rawLeft: '58.333333333333333333',
+      rawRight: '58.33333333333334',
+      comparableLeft: '58.333',
+      comparableRight: '58.333',
+      rawDifference: '-6.667e-15',
+      rule: 'ROUND_HALF_UP_SCALE_THREE',
+    }],
     rawPersistedDeliveryTotal: '58.33',
     sealedQuantity: '58.333',
     persistedComparableQuantity: '58.33',
@@ -646,6 +1121,7 @@ test('seals a new rounding-v2 optimizer float through audited scale-three persis
   assert.equal(version.rows[0]?.contractedQuantity, '58.333');
   assert.deepEqual((version.sourceEvidence.quantityNormalizations as any[])[0]?.compatibility, {
     policy: 'CONTRACT_PRODUCT_GRAPH_V2_SCALE_THREE_PERSISTENCE',
+    commercialQuantityPolicy: longitudinalCommercialPolicy('rounding-v2'),
     graphSchemaVersion: 1,
     rounding: 'ROUND_HALF_UP',
     sealedScale: 3,
@@ -686,6 +1162,53 @@ test('uses explicit half-up rounding for an exact scale-three tie', () => {
   );
 });
 
+test('treats floating-point residue as equal only after the recorded scale-three commercial conversion', () => {
+  const source = optimizerDerivedSourceFixture();
+  (source.contract.contractData as any).products[0].smartCutPlan = {
+    ...(source.contract.contractData as any).products[0].smartCutPlan,
+    totalRequestedLengthM: '50',
+    productionPieces: [{ lengthM: '50.00000000000001', quantity: '1' }],
+  };
+  (source.contract.productGraph!.rows as any)[0].requestedLengthMeters = '50';
+  (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '50';
+  (source.contract.contractData as any).deliveries[0].products[0].quantity = '50';
+
+  const version = buildApprovedPricingVersion(source, 1, 'optimizer-floating-residue');
+  const normalization = (version.sourceEvidence.quantityNormalizations as any[])[0];
+  assert.equal(version.rows[0]?.contractedQuantity, '50.000');
+  assert.deepEqual(normalization.compatibility.commercialEquivalences, [{
+    leftSource: 'OPTIMIZER_PRODUCTION',
+    rightSource: 'OPTIMIZER_TOTAL',
+    rawLeft: '50.00000000000001',
+    rawRight: '50',
+    comparableLeft: '50.000',
+    comparableRight: '50.000',
+    rawDifference: '1e-14',
+    rule: 'ROUND_HALF_UP_SCALE_THREE',
+  }]);
+});
+
+test('reconciles the frozen 100302-style graph residue under rounding-v2 without guessing quantity', () => {
+  const source = optimizerDerivedSourceFixture();
+  source.contract.productGraph!.roundingPolicy = 'rounding-v2';
+  (source.contract.contractData as any).products[0].smartCutPlan = {
+    ...(source.contract.contractData as any).products[0].smartCutPlan,
+    totalRequestedLengthM: '16.66666666666667',
+    productionPieces: [{ lengthM: '16.66666666666667', quantity: '1' }],
+  };
+  (source.contract.productGraph!.rows as any)[0].requestedLengthMeters = '16.666666666666666667';
+  (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '16.667';
+  (source.contract.contractData as any).deliveries[0].products[0].quantity = '16.66666666666667';
+
+  const version = buildApprovedPricingVersion(source, 1, 'optimizer-100302-residue');
+  assert.equal(version.rows[0]?.contractedQuantity, '16.667');
+  assert.equal(
+    (version.sourceEvidence.quantityNormalizations as any[])[0]
+      .compatibility.commercialEquivalences[0].rawDifference,
+    '-3.333e-15',
+  );
+});
+
 test('keeps incomplete or conflicting optimizer-derived quantity evidence fail-closed', () => {
   const cases: readonly [string, (source: ApprovedPricingSource) => void, RegExp][] = [
     ['missing persisted Delivery', source => {
@@ -712,8 +1235,8 @@ test('keeps incomplete or conflicting optimizer-derived quantity evidence fail-c
         ...source.contract.productGraph!.rows[0], requestedLengthMeters: '41',
       };
     }, /canonical graph quantity conflicts with optimizer plan/],
-    ['more than scale-three precision', source => {
-      (source.contract.contractData as any).products[0].smartCutPlan.totalRequestedLengthM = '40.0001';
+    ['different after scale-three precision', source => {
+      (source.contract.contractData as any).products[0].smartCutPlan.totalRequestedLengthM = '40.0005';
     }, /optimizer quantities conflict/],
   ];
 
@@ -738,9 +1261,9 @@ test('captures exact raw optimizer conflict evidence without tolerance guessing'
       assert.equal(error.evidence?.productRowId, 'row-1');
       assert.equal(error.evidence?.rule, 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE');
       assert.equal(error.evidence?.rawOptimizerQuantity, '40');
-      assert.equal(error.evidence?.transformedOptimizerQuantity, '40');
+      assert.equal(error.evidence?.transformedOptimizerQuantity, '40.000');
       assert.equal(error.evidence?.rawProductionQuantity, '120');
-      assert.equal(error.evidence?.transformedProductionQuantity, '120');
+      assert.equal(error.evidence?.transformedProductionQuantity, '120.000');
       assert.equal(error.evidence?.rawCanonicalGraphQuantity, '40');
       assert.equal(error.evidence?.transformedCanonicalGraphQuantity, '40.000');
       assert.equal(error.evidence?.difference, '80');
@@ -758,10 +1281,10 @@ test('captures exact raw optimizer conflict evidence without tolerance guessing'
         leftSource: 'OPTIMIZER_PRODUCTION',
         rightSource: 'OPTIMIZER_TOTAL',
         unit: 'meter',
-        basis: 'RAW',
-        rule: 'EXACT_DECIMAL',
-        leftComparableValue: '120',
-        rightComparableValue: '40',
+        basis: 'HISTORICAL_TRANSFORMED',
+        rule: 'ROUND_HALF_UP_SCALE_THREE',
+        leftComparableValue: '120.000',
+        rightComparableValue: '40.000',
         value: '80',
       }]);
       assert.match(error.userMessageFa, /مدیر حسابداری.*پروندهٔ بررسی کمیت/);
@@ -814,9 +1337,9 @@ test('captures the exact named difference for graph, persisted Delivery, and inv
       },
       key: 'INVOICE_MINUS_OPTIMIZER',
       value: '-1',
-      basis: 'RAW',
-      leftComparableValue: '39',
-      rightComparableValue: '40',
+      basis: 'HISTORICAL_TRANSFORMED',
+      leftComparableValue: '39.000',
+      rightComparableValue: '40.000',
     },
   ];
 
@@ -848,7 +1371,7 @@ test('captures the exact named difference for graph, persisted Delivery, and inv
             ? 'ROUND_HALF_UP_SCALE_THREE'
             : item.name === 'persisted Delivery'
               ? 'ROUND_HALF_UP_SCALE_TWO_PER_ROW_THEN_SUM'
-              : 'EXACT_DECIMAL',
+              : 'ROUND_HALF_UP_SCALE_THREE',
           leftComparableValue: item.leftComparableValue,
           rightComparableValue: item.rightComparableValue,
         }], item.name);

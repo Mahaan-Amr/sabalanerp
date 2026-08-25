@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FaArrowRight, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaTimes } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
+import { formatNumericInputText } from '@/lib/numberFormat';
 
 type IconType = React.ComponentType<{ className?: string }>;
 
@@ -58,6 +59,8 @@ export type ErpSegmentOption<T extends string> = {
   value: T;
   label: React.ReactNode;
   icon?: IconType;
+  count?: number;
+  countTone?: ErpTone;
   disabled?: boolean;
 };
 
@@ -241,6 +244,45 @@ export const ErpInput = React.forwardRef<
             : erpFieldClassName;
   return <input ref={ref} type={type} className={cx(controlClassName, className)} {...props} />;
 });
+
+export function ErpRialInput({
+  value,
+  onValueChange,
+  maxDigits = 18,
+  ...props
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'> & {
+  value: string;
+  onValueChange: (canonicalValue: string) => void;
+  maxDigits?: number;
+}) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const displayValue = formatNumericInputText(value, value.length, 0).displayText;
+
+  return (
+    <ErpInput
+      {...props}
+      ref={inputRef}
+      type="text"
+      inputMode="numeric"
+      value={displayValue}
+      onChange={(event) => {
+        const formatted = formatNumericInputText(
+          event.currentTarget.value,
+          event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+          0
+        );
+        const canonicalValue = formatted.canonicalText.slice(0, maxDigits);
+        onValueChange(canonicalValue);
+        requestAnimationFrame(() => {
+          const next = inputRef.current;
+          if (!next) return;
+          const caret = Math.min(formatted.caretPosition, next.value.length);
+          next.setSelectionRange(caret, caret);
+        });
+      }}
+    />
+  );
+}
 
 export const ErpSelect = React.forwardRef<
   HTMLSelectElement,
@@ -645,6 +687,11 @@ export function ErpSegmentedControl<T extends string>({ options, value, onChange
           >
             {Icon && <Icon className="h-4 w-4" />}
             <span>{option.label}</span>
+            {option.count != null && option.count > 0 && (
+              <ErpBadge tone={option.countTone || 'danger'} variant="solid">
+                {option.count.toLocaleString('fa-IR')}
+              </ErpBadge>
+            )}
           </button>
         );
       })}

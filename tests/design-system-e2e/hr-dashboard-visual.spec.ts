@@ -124,6 +124,7 @@ test('limited HR landing is minimal, neumorphic, and shows only effective featur
     body.data.role = 'USER';
     body.data.permissions = {
       ...body.data.permissions,
+      workspaces: [{ workspace: 'accounting', permissionLevel: 'admin' }],
       features: [
         { workspace: 'hr', feature: 'RECRUITMENT_CASES', permissionLevel: 'view' },
         { workspace: 'hr', feature: 'HR_WORK_MANAGEMENT', permissionLevel: 'view' },

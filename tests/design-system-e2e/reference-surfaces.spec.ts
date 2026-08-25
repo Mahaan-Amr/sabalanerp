@@ -1283,7 +1283,7 @@ test('Contract submission preserves input across an invalid response, succeeds o
   const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
   await expect(submit).toBeEnabled({ timeout: 15_000 });
   await submit.click();
-  await expect(page.getByText('E2E_VALIDATION_RETRY', { exact: true })).toBeVisible();
+  await expect(page.getByText(/عملیات انجام نشد\. اطلاعات را بررسی و دوباره تلاش کنید/)).toBeVisible();
   await expect(submit).toBeEnabled();
 
   await submit.click();

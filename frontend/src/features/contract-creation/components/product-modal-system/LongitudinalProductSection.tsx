@@ -7,6 +7,7 @@ import { formatPrice } from '@/lib/numberFormat';
 import {
   calculateLongitudinalProduct,
   parseCanonicalDecimal,
+  parseLongitudinalQuantityEntry,
   transitionLongitudinalQuantity,
   type CanonicalDecimal,
   type LongitudinalManualField,
@@ -245,10 +246,10 @@ export function LongitudinalProductSection({
   const noPhysicalCut = effectiveWidth === input.motherWidthMeters;
   const summaryRows = resolved
     ? resolved.summary.map(row => row.key === 'cutting' &&
-        Number(resolved.packingPlan.longitudinalCutMeters) > 0
+        Number(resolved.billableLongitudinalCutMeters) > 0
       ? {
           ...row,
-          value: `عادی ${resolved.packingPlan.longitudinalCutMeters}m · ${formatPrice(
+          value: `عادی ${resolved.billableLongitudinalCutMeters}m · ${formatPrice(
             resolved.longitudinalCutAmountToman
           )} | کالیبر ${resolved.packingPlan.calibrationMeters}m · ${formatPrice(
             resolved.calibrationCutAmountToman
@@ -301,18 +302,9 @@ export function LongitudinalProductSection({
           value={input.quantity?.toString() ?? ''}
           inputMode="numeric"
           onValueChange={value => {
-            const trimmed = value.trim();
-            let nextQuantity: number | undefined;
-            if (trimmed !== '') {
-              try {
-                const normalized = parseCanonicalDecimal(trimmed);
-                if (!/^[1-9]\d*$/.test(normalized)) return;
-                nextQuantity = Number(normalized);
-                if (!Number.isSafeInteger(nextQuantity)) return;
-              } catch {
-                return;
-              }
-            }
+            const parsedEntry = parseLongitudinalQuantityEntry(value);
+            if (!parsedEntry.accepted) return;
+            const nextQuantity = parsedEntry.quantity;
             const transitioned = transitionLongitudinalQuantity({
               previousQuantity: input.quantity,
               nextQuantity,

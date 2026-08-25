@@ -44,6 +44,11 @@ export const buildEmploymentActivationReadiness = (
   now = new Date()
 ) => {
   const blockers: Array<{ id: string; message: string }> = [];
+  const payrollStartRevisionReviewRequired = Boolean(
+    input.payrollParticipation && typeof input.payrollParticipation === 'object'
+    && 'startRevisionReviewRequired' in input.payrollParticipation
+    && input.payrollParticipation.startRevisionReviewRequired,
+  );
   if (!plannedStartHasArrived(input.scheduledStartDate, now)) {
     blockers.push({ id: 'PLANNED_START_NOT_REACHED', message: 'تاریخ شروع برنامه‌ریزی‌شده هنوز نرسیده است.' });
   }
@@ -52,6 +57,10 @@ export const buildEmploymentActivationReadiness = (
   if (input.contractClearance !== 'APPROVED') blockers.push({ id: 'PAPER_CONTRACT_NOT_APPROVED', message: 'قرارداد کاغذی هنوز توسط مدیر امور مالی تأیید نشده است.' });
   if (input.compensationClearance !== 'APPROVED') blockers.push({ id: 'COMPENSATION_NOT_APPROVED', message: 'حقوق و مزایای نهایی تأیید نشده است.' });
   if (!input.payrollParticipation) blockers.push({ id: 'PAYROLL_NOT_CONFIGURED', message: 'مشارکت حقوق و دستمزد تنظیم نشده است.' });
+  else if (payrollStartRevisionReviewRequired) blockers.push({
+    id: 'PAYROLL_START_REVISION_NOT_REVIEWED',
+    message: 'تاریخ حقوق و دستمزد پس از تغییر تاریخ شروع باید دوباره تأیید شود.',
+  });
   for (const task of input.onboardingTasks || []) {
     if (task.activationBlocker && !['COMPLETE', 'WAIVED'].includes(task.status)) {
       blockers.push({ id: `ONBOARDING_TASK:${task.id || task.title}`, message: `وظیفه مسدودکننده «${task.title}» تکمیل نشده است.` });

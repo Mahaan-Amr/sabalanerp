@@ -149,7 +149,7 @@ An offer decision is final for that offer version. A portal decline cannot be ov
 
 ## Collateral
 
-`COMPANY_MANAGER` proposes and registers the collateral requirement: type, amount/obligation when applicable, due timing, and Candidate-facing explanation. Management may define it before offer acceptance, and `/apply` must show it with the offer.
+Company Management proposes and registers the collateral requirement: type and amount/obligation when applicable. Management supplies neither a delivery-time value nor free-text Candidate instruction; `/apply` shows the requirement with a system-generated statement that Finance will coordinate receipt after offer acceptance.
 
 Finance may record physical receipt only after acceptance of the latest fully approved offer. `FINANCE_RECORDER` records protected instrument data and evidence; `FINANCE_MANAGER` verifies and approves independently. Management sees the requirement and clearance, not instrument identifiers, guarantor details, custody locations, or protected scans.
 

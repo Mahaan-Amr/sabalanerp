@@ -27,6 +27,7 @@ export type ClaimCrossWorkspaceDutyInput = {
   dutyId: string;
   actorUserId: string;
   policyVersion: number;
+  reason?: string | null;
   now?: Date;
 };
 
@@ -58,12 +59,14 @@ export type ReconcileCrossWorkspaceDutyAssignmentInput = {
 export type CrossWorkspaceDutySourceProjectionInput = {
   sourceType: string;
   sourceId: string;
+  sourceActionCode: string;
   sourceVersion: number;
 };
 
 export type CrossWorkspaceDutySourceProjection = {
   title: string;
   description: string | null;
+  destinationHref?: string;
   sourceIsCurrent: boolean;
 };
 
@@ -84,6 +87,26 @@ export interface CrossWorkspaceDutySourceAdapter {
   canClaim(
     database: CrossWorkspaceDutyDatabase,
     input: ClaimCrossWorkspaceDutyInput,
+  ): Promise<boolean>;
+  claimRequiresReason(
+    database: CrossWorkspaceDutyDatabase,
+    input: ClaimCrossWorkspaceDutyInput,
+  ): Promise<boolean>;
+  responseRequiresReason(
+    database: CrossWorkspaceDutyDatabase,
+    input: { dutyId: string; actorUserId: string },
+  ): Promise<boolean>;
+  canAccessSharedDecision(
+    database: CrossWorkspaceDutyDatabase,
+    input: { dutyId: string; actorUserId: string; includeCompleted?: boolean; now?: Date },
+  ): Promise<boolean>;
+  sharedDecisionAccessProvenance?(
+    database: CrossWorkspaceDutyDatabase,
+    input: { dutyId: string; actorUserId: string; now?: Date },
+  ): Promise<string[]>;
+  canReassign(
+    database: CrossWorkspaceDutyDatabase,
+    input: { dutyId: string; actorUserId: string; now?: Date },
   ): Promise<boolean>;
   reassign(
     database: CrossWorkspaceDutyDatabase,

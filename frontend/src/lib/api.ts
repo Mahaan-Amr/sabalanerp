@@ -14,6 +14,38 @@ const isPublicVerificationPath = (pathname: string) => (
   || pathname.startsWith('/contracts/confirm/')
 );
 
+const containsPersianText = (value: string) => /[\u0600-\u06FF]/.test(value);
+
+export const normalizeOperationalErrorPayload = (
+  payload: unknown,
+  status = 0,
+  requestTrackingId?: string,
+): unknown => {
+  if (!payload || typeof payload !== 'object' || payload instanceof Blob) return payload;
+  const data = payload as Record<string, unknown>;
+  const candidates = [data.message, data.error].filter((value): value is string => typeof value === 'string');
+  const safeMessage = candidates.find((value) => containsPersianText(value));
+  const trackingId = String(data.trackingId || requestTrackingId || '').trim().slice(0, 64);
+  const supportStep = trackingId
+    ? `کد پیگیری ${trackingId} را به پشتیبانی اعلام کنید.`
+    : 'با پشتیبانی تماس بگیرید.';
+  const fallback = status === 403
+    ? 'مجوز انجام این عملیات برای شما فعال نیست. از مدیر همان فضای کاری درخواست دسترسی کنید.'
+    : status === 410
+      ? 'این عملیات دیگر از این مسیر انجام نمی‌شود. صفحه را تازه‌سازی کنید و از مسیر پیشنهادی سامانه ادامه دهید.'
+      : status === 404
+        ? 'اطلاعات موردنظر پیدا نشد یا دیگر در دسترس نیست.'
+        : status >= 500
+          ? `سرویس موقتاً پاسخ‌گو نیست. دوباره تلاش کنید و در صورت تکرار ${supportStep}`
+          : 'عملیات انجام نشد. اطلاعات را بررسی و دوباره تلاش کنید.';
+  const message = safeMessage || (
+    trackingId && status < 500
+      ? `${fallback} کد پیگیری ${trackingId} را در صورت نیاز به پشتیبانی اعلام کنید.`
+      : fallback
+  );
+  return { ...data, message, error: message, ...(trackingId ? { trackingId } : {}) };
+};
+
 export const resolveBackendAssetUrl = (url?: string | null) => {
   if (!url) return '';
   if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
@@ -99,7 +131,7 @@ const clearRetryKey = (config?: RetryAwareConfig) => {
 api.interceptors.request.use(async (config) => {
   const method = String(config.method || 'get').toUpperCase();
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
-  if (isMutation && !config.headers.has('x-correlation-id')) {
+  if (!config.headers.has('x-correlation-id')) {
     config.headers['x-correlation-id'] = createClientRequestId();
   }
   if (isMutation && !config.headers['x-idempotency-key']) {
@@ -130,6 +162,11 @@ api.interceptors.response.use(
       ) window.location.href = '/login';
     }
     const status = Number(error.response?.status || 0);
+    if (error.response) {
+      const requestTrackingId = error.config?.headers?.get?.('x-correlation-id')
+        || error.config?.headers?.['x-correlation-id'];
+      error.response.data = normalizeOperationalErrorPayload(error.response.data, status, requestTrackingId);
+    }
     if (status > 0 && status !== 409 && status < 500) {
       clearRetryKey(error.config as RetryAwareConfig | undefined);
     }
@@ -344,11 +381,6 @@ export const hrAPI = {
   createExceptionalPersonnel: (data: any) => api.post('/hr/personnel/exceptional', data),
   updatePersonnel: (id: string, data: any) => api.put(`/hr/personnel/${id}`, data),
   updatePersonnelWorkSchedule: (id: string, data: any) => api.put(`/hr/personnel/${id}/work-schedule`, data),
-  proposePersonnelWorkSchedule: (id: string, data: any) => api.post(`/hr/personnel/${id}/work-schedule/proposals`, data),
-  preparePersonnelWorkSchedule: (personnelId: string, changeId: string, data: any) => api.put(`/hr/personnel/${personnelId}/work-schedule/changes/${changeId}/prepare`, data),
-  submitPersonnelWorkSchedule: (personnelId: string, changeId: string) => api.post(`/hr/personnel/${personnelId}/work-schedule/changes/${changeId}/submit`),
-  returnPersonnelWorkSchedule: (personnelId: string, changeId: string, reason: string) => api.post(`/hr/personnel/${personnelId}/work-schedule/changes/${changeId}/return`, { reason }),
-  approvePersonnelWorkSchedule: (personnelId: string, changeId: string) => api.post(`/hr/personnel/${personnelId}/work-schedule/changes/${changeId}/approve`),
   createRelationship: (personnelId: string, data: any) => api.post(`/hr/personnel/${personnelId}/relationships`, data),
   updateRelationshipStatus: (id: string, data: any) => api.put(`/hr/relationships/${id}/status`, data),
   createAssignment: (relationshipId: string, data: any) => api.post(`/hr/relationships/${relationshipId}/assignments`, data),
@@ -442,6 +474,8 @@ export const ordersAPI = {
 export const dashboardAPI = {
   getStats: () => api.get('/dashboard/stats'),
   getProfile: () => api.get('/dashboard/profile'),
+  getRouteAvailability: (path: string) => api.get('/dashboard/route-availability', { params: { path } }),
+  getActionAvailability: (workspace: string) => api.get('/dashboard/action-availability', { params: { workspace } }),
 };
 
 // Workspace Permissions API
@@ -929,6 +963,13 @@ export const accountingAPI = {
   getPayments: (params?: any) => api.get('/accounting/payments', { params }),
   getTaxRecords: (params?: any) => api.get('/accounting/tax', { params }),
   getCorrectionRequests: (params?: any) => api.get('/accounting/correction-requests', { params }),
+  createCorrectionRequest: (
+    contractId: string,
+    data: { category: string; priority: string; reason: string },
+    idempotencyKey: string,
+  ) => api.post(`/accounting/contracts/${contractId}/correction-requests`, data, {
+    headers: { 'X-Idempotency-Key': idempotencyKey },
+  }),
   getAuditLogs: (params?: any) => api.get('/accounting/audit', { params }),
   getPerformanceReport: (params?: any) => api.get('/accounting/performance', { params }),
   getSettings: () => api.get('/accounting/settings'),

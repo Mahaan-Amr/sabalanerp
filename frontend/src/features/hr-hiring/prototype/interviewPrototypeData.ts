@@ -21,6 +21,9 @@ export type CriterionAnswer = {
   companionPresent: "YES" | "NO" | null;
   strengths: string[];
   weaknesses: string[];
+  /** Preserved evidence from a version-1 draft whose criterion was score-only. */
+  legacyScore?: Score;
+  legacyNote?: string;
 };
 
 export type InterviewState = {
@@ -184,7 +187,10 @@ export const criterionIsComplete = (
 ) => {
   if (criterion.kind === "score") {
     if (answer.score === "UNASSESSED") return criterion.allowUnassessed !== false;
-    return answer.score !== null;
+    return typeof answer.score === "number"
+      && Number.isInteger(answer.score)
+      && answer.score >= 1
+      && answer.score <= 5;
   }
   if (criterion.kind === "address") {
     return (
@@ -209,7 +215,9 @@ export const criterionIsComplete = (
   }
   if (criterion.kind === "strengthsWeaknesses") {
     return (
+      answer.strengths.length === 5 &&
       answer.strengths.every((item) => item.trim().length > 0) &&
+      answer.weaknesses.length === 5 &&
       answer.weaknesses.every((item) => item.trim().length > 0)
     );
   }

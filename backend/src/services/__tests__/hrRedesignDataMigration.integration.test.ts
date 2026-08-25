@@ -9,6 +9,10 @@ const rollback = new Error('ROLLBACK_HR_REDESIGN_INTEGRATION_TEST');
 const run = async () => {
   await assert.rejects(prisma.$transaction(async (tx) => {
     const suffix = `${Date.now()}`;
+    // The approved local database may already contain the legacy QA identity
+    // that this migration is expected to retire. Replace it only inside this
+    // rollback transaction so the test remains repeatable and non-destructive.
+    await tx.user.deleteMany({ where: { username: 'qa_hiring_manager' } });
     const retiredQaUser = await tx.user.create({ data: {
       email: `qa-hiring-manager-${suffix}@example.invalid`,
       username: 'qa_hiring_manager',
@@ -71,7 +75,12 @@ const run = async () => {
     } }), 1, 'QA matrix revocations preserve before/after audit history');
     const financeManagerQa = await tx.user.findUniqueOrThrow({ where: { username: 'qa_finance_manager' } });
     assert.equal(await tx.hrWorkspaceAccessGrant.count({ where: { userId: financeManagerQa.id, status: 'ACTIVE' } }), 0, 'Finance QA receives no ordinary HR workspace access');
-    assert.equal(await tx.hrFeatureAccessGrant.count({ where: { userId: financeManagerQa.id, status: 'ACTIVE' } }), 0, 'Finance QA receives no ordinary HR feature access');
+    assert.equal(await tx.hrFeatureAccessGrant.count({ where: {
+      userId: financeManagerQa.id, status: 'ACTIVE', featureCode: { not: 'MANAGE_FINANCE_EVIDENCE' },
+    } }), 0, 'Finance QA receives no ordinary HR feature access');
+    assert.equal(await tx.hrFeatureAccessGrant.count({ where: {
+      userId: financeManagerQa.id, status: 'ACTIVE', featureCode: 'MANAGE_FINANCE_EVIDENCE',
+    } }), 1, 'Finance QA receives only the independently scoped destination action');
     assert.equal(await tx.hrBusinessAuthorityGrant.count({ where: { userId: financeManagerQa.id, authorityCode: 'FINANCE_MANAGER', status: 'ACTIVE' } }), 1);
     const financeResolution = await resolveHrNamedResponsibility(tx, {
       sourceActionCode: 'QA_FINANCE_APPROVAL', responsibilityTypeCode: 'FINANCE_MANAGER',

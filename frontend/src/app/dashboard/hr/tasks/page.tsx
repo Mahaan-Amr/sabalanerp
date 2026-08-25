@@ -324,6 +324,19 @@ function HrWorkItemRow({ item, users, canManage, currentUserId, busy, run }: any
               }
             />
           )}
+          {item.canClaim && (
+            <ErpButton
+              label="دریافت وظیفه اصلاح"
+              icon={FaPlay}
+              disabled={busy}
+              onClick={() =>
+                run(
+                  () => hiringAPI.claimWorkItem(item.id),
+                  "وظیفه اصلاح قرارداد به شما تخصیص یافت.",
+                )
+              }
+            />
+          )}
           {item.sourceType !== "HIRING_ACTION" && item.assignedToUserId === currentUserId && (
             <ErpButton
               label="انجام شد"

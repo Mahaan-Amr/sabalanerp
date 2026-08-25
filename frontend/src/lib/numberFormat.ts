@@ -10,6 +10,9 @@ export const normalizeDigits = (value: string): string => {
     .replace(/[\u060C\u066C]/g, ',');
 };
 
+export const normalizeIdentifierDigits = (value: string): string =>
+  normalizeDigits(value).replace(/\D/g, '');
+
 const canonicalNumericText = (
   value: string,
   maximumFractionDigits: number | null
@@ -44,6 +47,9 @@ const canonicalNumericText = (
 
   return result;
 };
+
+export const normalizeNumericText = (value: string, maximumFractionDigits: number | null = null): string =>
+  canonicalNumericText(value, maximumFractionDigits);
 
 const groupCanonicalNumericText = (canonicalText: string): string => {
   const negative = canonicalText.startsWith('-');

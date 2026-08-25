@@ -16,6 +16,10 @@ const FEATURE_EXCEPTION_PERMISSION_LEVELS = [
   FEATURE_PERMISSIONS.VIEW,
   FEATURE_PERMISSIONS.EDIT
 ];
+const rejectLegacyHrWriter = (res: Response) => res.status(409).json({
+  success: false,
+  message: 'ثبت مجوز منابع انسانی از این مسیر متوقف شده است. مدیر سامانه باید مجوز را از بخش مدیریت دسترسی منابع انسانی ثبت کند تا سابقه و تاریخ اعتبار آن حفظ شود.',
+});
 
 const getFeatureWorkspace = (feature: string): string | null => {
   if (getHrActionPermissionDefinition(feature)) return 'hr';
@@ -240,6 +244,7 @@ router.post('/features', protect, authorize('ADMIN', 'MANAGER'), [
     }
 
     const { userId, workspace, feature, permissionLevel, expiresAt } = req.body;
+    if (workspace === 'hr') return rejectLegacyHrWriter(res);
 
     const featureWorkspaceError = validateFeatureWorkspacePair(feature, workspace);
     if (featureWorkspaceError) {
@@ -371,6 +376,7 @@ router.post('/features/bulk', protect, authorize('ADMIN', 'MANAGER'), [
     }
 
     const { userId, permissions } = req.body;
+    if (permissions.some((permission: any) => permission.workspace === 'hr')) return rejectLegacyHrWriter(res);
     const targetUser = await prisma.user.findUnique({
       where: { id: userId }
     });
@@ -499,6 +505,7 @@ router.put('/features/:id', protect, authorize('ADMIN', 'MANAGER'), [
         error: 'Feature permission not found'
       });
     }
+    if (permission.workspace === 'hr' || workspace === 'hr') return rejectLegacyHrWriter(res);
 
     const targetUser = await prisma.user.findUnique({
       where: { id: permission.userId }
@@ -606,6 +613,7 @@ router.delete('/features/:id', protect, authorize('ADMIN', 'MANAGER'), async (re
         error: 'Feature permission not found'
       });
     }
+    if (permission.workspace === 'hr') return rejectLegacyHrWriter(res);
 
     const targetUser = await prisma.user.findUnique({
       where: { id: permission.userId }

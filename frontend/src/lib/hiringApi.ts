@@ -35,6 +35,7 @@ export const hiringAPI = {
   permanentlyDelete: (id: string, data: any) =>
     internal.post(`/applications/${id}/permanent-delete`, data),
   get: (id: string) => internal.get(`/applications/${id}`),
+  revealApplicantOtp: (id: string) => internal.get(`/applications/${id}/applicant-otp`),
   getOverview: (id: string, returnTo?: string) =>
     internal.get(`/applications/${id}/overview`, { params: returnTo ? { returnTo } : undefined }),
   getFullInformation: (id: string) =>
@@ -46,7 +47,9 @@ export const hiringAPI = {
   interviewCriteria: () => internal.get("/interview-criteria"),
   publishInterviewCriteria: (criteria: any[]) => internal.post("/interview-criteria/publish", { criteria }),
   companyEvaluations: (id: string) => internal.get(`/applications/${id}/company-evaluations`),
+  eligibleCompanyEvaluationPersonnel: (id: string, type: string) => internal.get(`/applications/${id}/company-evaluations/eligible-personnel`, { params: { type } }),
   addCompanyEvaluation: (id: string, data: any) => internal.post(`/applications/${id}/company-evaluations`, data),
+  reassignCompanyEvaluation: (id: string, occurrenceId: string, evaluatorPersonnelId: string) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/reassign`, { evaluatorPersonnelId }),
   cancelCompanyEvaluation: (id: string, occurrenceId: string) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/cancel`),
   recordCompanyEvaluationResult: (id: string, occurrenceId: string, data: FormData) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/result`, data),
   downloadCompanyEvaluationEvidence: (id: string, occurrenceId: string) => internal.get(`/applications/${id}/company-evaluations/${occurrenceId}/evidence/download`, { responseType: "blob" }),
@@ -57,6 +60,7 @@ export const hiringAPI = {
   createWorkItem: (data: any) => internal.post("/work-items", data),
   updateWorkItem: (id: string, data: any) =>
     internal.patch(`/work-items/${id}`, data),
+  claimWorkItem: (id: string) => internal.post(`/work-items/${id}/claim`),
   create: (data: any) => internal.post("/applications", data),
   invite: (id: string) => internal.post(`/applications/${id}/invitations`),
   refreshInvitationDelivery: (id: string, invitationId: string) =>
@@ -111,6 +115,8 @@ export const hiringAPI = {
     files.forEach((file) => data.append("files", file));
     return internal.post(`/applications/${id}/formal-assessments/${kind}/evidence`, data);
   },
+  downloadFormalAssessmentEvidence: (id: string, linkId: string) =>
+    internal.get(`/applications/${id}/formal-assessments/evidence/${linkId}/download`, { responseType: 'blob' }),
   finallyReject: (id: string, data: any) =>
     internal.post(`/applications/${id}/final-rejection`, data),
   reactivateDisposition: (id: string, reason: string) =>
@@ -121,6 +127,8 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/reopen/execute`, data),
   addCollateralRequirement: (id: string, data: any) =>
     internal.post(`/applications/${id}/collateral-requirements`, data),
+  markCollateralNotRequired: (id: string) =>
+    internal.post(`/applications/${id}/collateral-requirements/not-required`),
   returnForm: (id: string, data: any) =>
     internal.post(`/applications/${id}/form/return`, data),
   retryCorrectionNotification: (id: string) =>
@@ -133,21 +141,14 @@ export const hiringAPI = {
     }),
   setIdentityCheck: (id: string, field: string, data: any) =>
     internal.put(`/applications/${id}/identity-checks/${field}`, data),
+  resolveIdentityConflict: (id: string, conflictId: string, data: any) =>
+    internal.post(`/applications/${id}/identity-conflicts/${conflictId}/resolve`, data),
   approveIdentity: (id: string) =>
     internal.post(`/applications/${id}/identity/approve`),
   createCompensation: (id: string, data: any) =>
     internal.post(`/applications/${id}/compensation`, data),
-  prepareCompensation: (id: string, snapshotId: string, data: any) =>
-    internal.put(
-      `/applications/${id}/compensation/${snapshotId}/prepare`,
-      data,
-    ),
-  approveCompensationHr: (id: string, snapshotId: string) =>
-    internal.post(`/applications/${id}/compensation/${snapshotId}/hr-approve`),
-  approveCompensationFinance: (id: string, snapshotId: string) =>
-    internal.post(
-      `/applications/${id}/compensation/${snapshotId}/finance-approve`,
-    ),
+  reviewCompensationPayroll: (id: string, snapshotId: string, data: any) =>
+    internal.post(`/applications/${id}/compensation/${snapshotId}/payroll-review`, data),
   retryOfferNotification: (id: string, snapshotId: string) =>
     internal.post(
       `/applications/${id}/compensation/${snapshotId}/notification/retry`,
@@ -204,6 +205,10 @@ export const hiringAPI = {
       `/applications/${id}/collateral/${itemId}/return-evidence/download`,
       { responseType: "blob" },
     ),
+  downloadCollateralReturnVersion: (id: string, returnId: string) =>
+    internal.get(`/applications/${id}/collateral-returns/${returnId}/download`, {
+      responseType: "blob",
+    }),
   convert: (id: string, data: any) =>
     internal.post(`/applications/${id}/convert`, data),
   uploadContract: (id: string, data: FormData) =>
@@ -216,6 +221,8 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/contracts/${contractId}/approve`),
   submitContract: (id: string, contractId: string) =>
     internal.post(`/applications/${id}/contracts/${contractId}/submit`),
+  withdrawContract: (id: string, contractId: string, reason: string) =>
+    internal.post(`/applications/${id}/contracts/${contractId}/withdraw`, { reason }),
   returnContract: (id: string, contractId: string, reason: string) =>
     internal.post(`/applications/${id}/contracts/${contractId}/return`, {
       reason,
@@ -224,10 +231,11 @@ export const hiringAPI = {
     internal.post(`/applications/${id}/payroll-participation`, data),
   setInsurance: (id: string, data: any) =>
     internal.put(`/applications/${id}/insurance`, data),
-  addOnboardingTask: (id: string, data: any) =>
-    internal.post(`/applications/${id}/onboarding-tasks`, data),
-  updateOnboardingTask: (id: string, taskId: string, data: any) =>
-    internal.put(`/applications/${id}/onboarding-tasks/${taskId}`, data),
+  revisePlannedStart: (id: string, data: any) =>
+    internal.post(`/applications/${id}/planned-start-revision`, data),
+  companyEvaluationSettings: () => internal.get('/company-evaluation-settings'),
+  saveCompanyEvaluationSettings: (type: string, positionIds: string[], reason?: string) =>
+    internal.put(`/company-evaluation-settings/${type}`, { positionIds, reason }),
   activate: (id: string) => internal.post(`/applications/${id}/activate`),
   close: (id: string, data: any) =>
     internal.post(`/applications/${id}/close`, data),
@@ -245,9 +253,8 @@ export const applicantHiringAPI = {
   getClosedState: () => applicant.get("/public/application/closed-state"),
   saveDraft: (data: any) => applicant.put("/public/application/draft", data),
   submit: (data: any) => applicant.post("/public/application/submit", data),
-  acceptCompensation: (fullName: string) =>
+  acceptCompensation: () =>
     applicant.post("/public/application/compensation/accept", {
-      fullName,
       accepted: true,
     }),
   declineCompensation: (category: string, note: string) =>

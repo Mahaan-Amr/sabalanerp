@@ -26,9 +26,14 @@ export const buildDeletionRelationIndex = (models: ModelShape[]): DeletionRelati
   const relationBackedFields = new Set(model.fields.flatMap((field) => field.kind === 'object' ? field.relationFromFields || [] : []));
   const declared = model.fields.flatMap((field) => {
     if (field.kind !== 'object' || !field.type) return [];
-    if (field.relationFromFields?.length !== 1 || field.relationToFields?.length !== 1 || field.relationToFields[0] !== 'id') return [];
+    if (!field.relationFromFields?.length || field.relationFromFields.length !== field.relationToFields?.length) return [];
     if (model.name === field.type) return [];
-    const childField = field.relationFromFields[0];
+    // A composite foreign key can still be traversed from a selected parent id.
+    // Pair the child column with the referenced `id` column and retain the
+    // complete relation as a child-before-parent ordering edge.
+    const parentIdIndex = field.relationToFields.indexOf('id');
+    if (parentIdIndex < 0) return [];
+    const childField = field.relationFromFields[parentIdIndex];
     const scalar = model.fields.find((candidate) => candidate.name === childField);
     return [{ childModel: model.name, childField, parentModel: field.type, childRequired: scalar?.isRequired !== false }];
   });
@@ -61,6 +66,7 @@ const fileFields: Record<string, { fields: string[]; storageRoot: string; catego
   HrPreIdentityChecklistItem: { fields: ['storageName'], storageRoot: HR_HIRING_STORAGE_DIR, category: 'PRE_IDENTITY_EVIDENCE' },
   HrCollateralItem: { fields: ['storageName', 'returnEvidenceStorageName'], storageRoot: HR_HIRING_STORAGE_DIR, category: 'COLLATERAL_EVIDENCE' },
   HrCandidateAssessment: { fields: ['storageName'], storageRoot: HR_HIRING_STORAGE_DIR, category: 'ASSESSMENT' },
+  HrCompanyEvaluationOccurrence: { fields: ['resultStorageName'], storageRoot: HR_HIRING_STORAGE_DIR, category: 'COMPANY_EVALUATION' },
   HrEmploymentContractDocument: { fields: ['storageName'], storageRoot: HR_HIRING_STORAGE_DIR, category: 'EMPLOYMENT_CONTRACT' },
   SecurityShiftLogAttachment: { fields: ['storageName'], storageRoot: path.join(process.cwd(), 'uploads', 'security-shift-log'), category: 'SECURITY_SHIFT_ATTACHMENT' },
   SecurityVehiclePairPhoto: { fields: ['storageName'], storageRoot: path.join(process.cwd(), 'uploads', 'security-vehicle-pairs'), category: 'SECURITY_VEHICLE_PHOTO' },
@@ -111,6 +117,28 @@ export const buildPersonnelErasurePlan = async (
       const total = [...selected.values()].reduce((sum, ids) => sum + ids.size, 0);
       if (total > maximumNodes) throw new Error(`دامنه حذف بیش از ${maximumNodes.toLocaleString('fa-IR')} رکورد است و نیازمند بررسی فنی مستقل است.`);
     }
+    const applicationIds = [...(selected.get('HrJobApplication') || [])];
+    if (applicationIds.length) {
+      const workItemSet = selected.get('HrWorkItem') || new Set<string>();
+      const applicationWorkItems = await (client as any).hrWorkItem.findMany({
+        where: {
+          sourceType: 'HIRING_ACTION',
+          OR: applicationIds.map((applicationId) => ({
+            sourceKey: { startsWith: `HIRING:${applicationId}:` },
+          })),
+        },
+        select: { id: true },
+      });
+      for (const workItem of applicationWorkItems) {
+        if (!workItemSet.has(workItem.id)) {
+          workItemSet.add(workItem.id);
+          changed = true;
+        }
+      }
+      if (workItemSet.size) selected.set('HrWorkItem', workItemSet);
+    }
+    const total = [...selected.values()].reduce((sum, ids) => sum + ids.size, 0);
+    if (total > maximumNodes) throw new Error(`دامنه حذف بیش از ${maximumNodes.toLocaleString('fa-IR')} رکورد است و نیازمند بررسی فنی مستقل است.`);
   }
   const root = await (client as any).personnel.findUnique({ where: { id: personnelId }, select: { id: true } });
   if (!root) throw new Error('پرسنل پیدا نشد.');

@@ -36,6 +36,7 @@ import {
 } from '@/features/accounting/financialEvidenceReview';
 import {
   CompactQueueItem,
+  accountingActionAvailability,
   FinancialInvoiceApprovalForm,
   FinancialInvoiceApprovalPayload,
   StatusBadge,
@@ -353,14 +354,22 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   const requestCorrection = async (values: Record<string, string | number>) => {
     const reason = String(values.reason || '').trim();
     if (!reason) return;
-    const applied = await execute({
-      kind: 'REQUEST_CORRECTION',
-      contractId: params.contractId,
-      category: values.category || 'OTHER',
-      priority: values.priority || 'MEDIUM',
-      reason,
-    });
-    if (applied) setCorrectionModalOpen(false);
+    try {
+      setActionError(null);
+      setActionLoading(true);
+      await accountingAPI.createCorrectionRequest(params.contractId, {
+        category: String(values.category || 'OTHER'),
+        priority: String(values.priority || 'MEDIUM'),
+        reason,
+      }, crypto.randomUUID());
+      await loadDetail();
+      setCorrectionModalOpen(false);
+    } catch (error) {
+      const response = (error as any)?.response?.data;
+      setActionError(response?.message || 'ثبت درخواست اصلاح انجام نشد. دوباره تلاش کنید.');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const openPdfUrl = (url: string, tryPrint: boolean) => {
@@ -481,6 +490,9 @@ export default function AccountingContractDetailPage({ params }: { params: { con
   }
 
   const contract = data.contract;
+  const canUseAccountingAction = (kind: string) => accountingActionAvailability(contract, kind)?.visible === true;
+  const canExecuteAccountingAction = (kind: string) => accountingActionAvailability(contract, kind)?.enabled === true;
+  const accountingActionReason = (kind: string) => accountingActionAvailability(contract, kind)?.reason || undefined;
   const source = data.sourceSnapshot;
   const canCreateRecords = contract.accounting.eligibleForFinancialRecords;
   const replacementWorkflow = data.replacementWorkflow;
@@ -930,12 +942,12 @@ export default function AccountingContractDetailPage({ params }: { params: { con
             <>
             <ErpSection title="اقدام سریع">
               <div className="space-y-2">
-                <ErpButton
+                {canUseAccountingAction('CREATE_INVOICE') && <ErpButton
                   label="ایجاد پیش‌نویس صورتحساب"
                   icon={FaFileInvoice}
                   tone="info"
-                  disabled={!canCreateRecords || actionLoading}
-                  title={contract.accounting.eligibilityReason}
+                  disabled={!canExecuteAccountingAction('CREATE_INVOICE') || !canCreateRecords || actionLoading}
+                  title={accountingActionReason('CREATE_INVOICE') || contract.accounting.eligibilityReason}
                   onClick={() => execute({
                     kind: 'CREATE_INVOICE',
                     contractId: contract.contractId,
@@ -943,13 +955,13 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     issueDate: new Date().toISOString(),
                     idempotencyKey: `invoice-candidate:${contract.contractId}:full`,
                   })}
-                />
-                <ErpButton
+                />}
+                {canUseAccountingAction('CREATE_RECEIVABLE') && <ErpButton
                   label="ایجاد دریافتنی"
                   icon={FaReceipt}
                   tone="success"
-                  disabled={!canCreateRecords || contract.accounting.invoiceStatus !== 'ISSUED' || actionLoading}
-                  title={contract.accounting.eligibilityReason || (contract.accounting.invoiceStatus !== 'ISSUED' ? 'ابتدا صورتحساب را تایید مالی کنید' : undefined)}
+                  disabled={!canExecuteAccountingAction('CREATE_RECEIVABLE') || !canCreateRecords || contract.accounting.invoiceStatus !== 'ISSUED' || actionLoading}
+                  title={accountingActionReason('CREATE_RECEIVABLE') || contract.accounting.eligibilityReason || (contract.accounting.invoiceStatus !== 'ISSUED' ? 'ابتدا صورتحساب را تایید مالی کنید' : undefined)}
                   onClick={() => execute({
                     kind: 'CREATE_RECEIVABLE',
                     contractId: contract.contractId,
@@ -957,21 +969,23 @@ export default function AccountingContractDetailPage({ params }: { params: { con
                     dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
                     idempotencyKey: `receivable:${contract.contractId}:planned`,
                   })}
-                />
-                <ErpButton
+                />}
+                {canUseAccountingAction('FLAG_CONTRACT') && <ErpButton
                   label="پرچم حسابداری"
                   icon={FaFlag}
                   tone="warning"
-                  disabled={actionLoading}
+                  disabled={!canExecuteAccountingAction('FLAG_CONTRACT') || actionLoading}
+                  title={accountingActionReason('FLAG_CONTRACT')}
                   onClick={() => setFlagModalOpen(true)}
-                />
-                <ErpButton
+                />}
+                {canUseAccountingAction('CREATE_CORRECTION_REQUEST') && <ErpButton
                   label="درخواست اصلاح"
                   icon={FaExclamationTriangle}
                   tone="danger"
-                  disabled={actionLoading}
+                  disabled={!canExecuteAccountingAction('CREATE_CORRECTION_REQUEST') || actionLoading}
+                  title={accountingActionReason('CREATE_CORRECTION_REQUEST')}
                   onClick={() => setCorrectionModalOpen(true)}
-                />
+                />}
               </div>
             </ErpSection>
 

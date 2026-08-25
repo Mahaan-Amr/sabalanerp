@@ -84,7 +84,7 @@ Failure before `MUTATION_STARTED` removes maintenance and resumes the unchanged 
 ## Timeouts and retries
 
 - Target total normal maintenance: less than five minutes.
-- Checkpoint creation and remote verification before mutation: at most ten minutes, then abort without rollback.
+- Checkpoint creation and remote verification before mutation: a configurable 10-minute to 4-hour fail-closed window (1 hour by default), sized for the independent off-server store; expiry aborts without rollback.
 - Migration, startup, and mandatory gates after mutation: at most fifteen minutes, then begin rollback.
 - Transient idempotent operations may retry three times with bounded exponential backoff.
 - Migration, promotion, database rename, filesystem swap, and restore are never blindly repeated; the durable journal determines resume or rollback.
@@ -99,6 +99,8 @@ Before public traffic opens, all of the following pass:
 - backend readiness and database query;
 - frontend, Inquiry, Nginx, and ClamAV health;
 - contract-product-graph migration audit and every release-specific acceptance command;
+- a retained contract-by-contract financial-evidence preflight report with zero unresolved results; case resolution is atomic and is skipped entirely when any contract is unresolved;
+- while legacy Hiring onboarding rows remain, the read-only Start Preparation retirement audit proving zero open manual tasks, zero missing or duplicate system rows, and zero drift from contract, Payroll Participation, and insurance evidence;
 - isolated read/write smoke tests with deterministic cleanup;
 - checkpoint and release manifest integrity;
 - protected file counts, checksums, and database-to-file reference validation;

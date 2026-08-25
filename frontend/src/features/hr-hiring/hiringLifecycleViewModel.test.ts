@@ -3,9 +3,12 @@ import {
   hiringLifecyclePhaseOptions,
   hiringTaskCapability,
   hiringTaskDetailVisible,
+  startPreparationStatusItems,
   hiringLifecycleStatusLabel,
+  resolvePhaseAfterLifecycleAdvance,
   resolveSelectedHiringPhase,
   selectedHiringPhase,
+  shouldLoadCompanyEvaluationPlan,
   type HiringLifecycleProjection,
 } from "./hiringLifecycleViewModel";
 
@@ -72,6 +75,39 @@ assert.equal(
 );
 assert.equal(hiringLifecycleStatusLabel.ACTION_REQUIRED, "اقدام شما");
 
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: "COMPANY_EVALUATION_PLAN",
+    previousCurrentPhaseId: "COMPANY_EVALUATION_PLAN",
+    nextCurrentPhaseId: "IDENTITY",
+  }),
+  "IDENTITY",
+);
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: "INITIAL_HR_REVIEW",
+    previousCurrentPhaseId: "IDENTITY",
+    nextCurrentPhaseId: "IDENTITY",
+  }),
+  "INITIAL_HR_REVIEW",
+);
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: "APPLICATION",
+    previousCurrentPhaseId: "IDENTITY",
+    nextCurrentPhaseId: "OFFER",
+  }),
+  "APPLICATION",
+);
+assert.equal(
+  resolvePhaseAfterLifecycleAdvance({
+    requestedPhaseId: null,
+    previousCurrentPhaseId: null,
+    nextCurrentPhaseId: "IDENTITY",
+  }),
+  null,
+);
+
 const taskCapabilities = [
   {
     id: "SIGNED_CONTRACT",
@@ -101,5 +137,61 @@ assert.equal(
   "UPDATE_INSURANCE",
 );
 assert.equal(hiringTaskCapability(taskCapabilities, "UNKNOWN"), null);
+
+assert.deepEqual(startPreparationStatusItems([
+  ...taskCapabilities,
+  {
+    id: "PAYROLL_PARTICIPATION",
+    title: "تنظیم مشارکت حقوق و دستمزد",
+    status: "COMPLETE",
+    ownerAuthorities: ["HR_PAYROLL_MANAGER"],
+    detailVisible: false,
+    actionIds: [],
+  },
+  {
+    id: "ONBOARDING_TASK",
+    title: "وظیفه دستی قدیمی",
+    status: "PENDING",
+    ownerAuthorities: ["HR_MANAGER"],
+    detailVisible: true,
+    actionIds: ["UPDATE_ONBOARDING_TASK"],
+  },
+]), [
+  {
+    id: "SIGNED_CONTRACT",
+    label: "قرارداد کاغذی",
+    status: "IN_PROGRESS",
+    ownerAuthorities: ["FINANCE_RECORDER", "FINANCE_MANAGER"],
+    activationEffect: "الزامی برای فعال‌سازی",
+  },
+  {
+    id: "PAYROLL_PARTICIPATION",
+    label: "تنظیم مشارکت حقوق و دستمزد",
+    status: "COMPLETE",
+    ownerAuthorities: ["HR_PAYROLL_MANAGER"],
+    activationEffect: "الزامی برای فعال‌سازی",
+  },
+  {
+    id: "INSURANCE",
+    label: "پیگیری ثبت بیمه",
+    status: "IN_PROGRESS",
+    ownerAuthorities: ["HR_PROCESSOR"],
+    activationEffect: "پیگیری پس از شروع مجاز است",
+  },
+]);
+
+assert.equal(
+  shouldLoadCompanyEvaluationPlan("COMPANY_EVALUATION_PLAN", [
+    "VIEW_INITIAL_INTERVIEW_REPORT",
+    "RECORD_PRELIMINARY_DECISION",
+  ]),
+  false,
+);
+assert.equal(
+  shouldLoadCompanyEvaluationPlan("COMPANY_EVALUATION_PLAN", [
+    "VIEW_COMPANY_EVALUATION_RESULTS",
+  ]),
+  true,
+);
 
 console.log("HR hiring lifecycle view-model tests passed.");

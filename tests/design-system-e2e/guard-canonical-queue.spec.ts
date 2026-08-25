@@ -118,7 +118,7 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   await workspace.getByRole('button', { name: 'ثبت خروج', exact: true }).click();
   await page.getByRole('dialog', { name: 'تأیید خروج فیزیکی' }).getByRole('button', { name: 'ثبت خروج فیزیکی', exact: true }).click();
   await expect.poll(() => failedExits).toBe(1);
-  await expect(workspace.getByText('Expired authorization', { exact: true })).toBeVisible();
+  await expect(workspace.getByText(/عملیات انجام نشد\. اطلاعات را بررسی و دوباره تلاش کنید/)).toBeVisible();
   await workspace.getByRole('button', { name: 'صف رانندگان', exact: true }).click();
   await expect(workspace.getByRole('heading', { name: 'سوابق صف قدیمی', exact: true })).toBeVisible();
   await expect(workspace.getByText('فقط سابقه', { exact: true })).toBeVisible();

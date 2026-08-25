@@ -26,6 +26,7 @@ import {
   ErpSheet,
 } from "@/components/erp";
 import { hrAPI } from "@/lib/api";
+import { normalizeIdentifierDigits } from "@/lib/numberFormat";
 import {
   apiError,
   fromIsoDate,
@@ -579,14 +580,14 @@ export default function HrStructurePage() {
                 </ErpField>
                 <ErpField label="ظرفیت" required>
                   <ErpInput
-                    type="number"
+                    inputMode="numeric"
                     min={1}
 
                     value={position.capacity}
                     onChange={(e) =>
                       setPosition({
                         ...position,
-                        capacity: Number(e.target.value),
+                        capacity: Number(normalizeIdentifierDigits(e.target.value)),
                       })
                     }
                   />
@@ -780,7 +781,7 @@ export default function HrStructurePage() {
                 <ErpField label="مرکز هزینه"><ErpSelect value={editTarget.form.costCenterId} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, costCenterId: event.target.value } })}><option value="">بدون پیش‌فرض</option>{data.costCenters.filter((item: any) => item.isActive).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</ErpSelect></ErpField>
                 <ErpField label="ظرفیت جایگاه" required>
                   <div className="flex gap-2">
-                    <ErpInput type="number" min={1} step={1} value={editTarget.form.capacity} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, capacity: Number(event.target.value) } })} />
+                    <ErpInput inputMode="numeric" value={editTarget.form.capacity} onChange={(event) => setEditTarget({ ...editTarget, form: { ...editTarget.form, capacity: Number(normalizeIdentifierDigits(event.target.value)) } })} />
                     <ErpButton
                       label="ثبت ظرفیت"
                       variant="outline"

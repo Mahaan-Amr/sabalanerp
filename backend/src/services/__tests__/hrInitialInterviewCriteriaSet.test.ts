@@ -3,7 +3,11 @@ import test from 'node:test';
 import {
   ensureInitialInterviewCriteriaSet,
 } from '../hrInitialInterviewCriteriaSet';
-import { initialInterviewDraftSaveError } from '../hrInitialInterviewDraftPersistence';
+import {
+  initialInterviewDraftSaveError,
+  mergeInitialInterviewDraftWithFrozenCriteria,
+  withFrozenInitialInterviewCriteria,
+} from '../hrInitialInterviewDraftPersistence';
 
 test('first interview atomically materializes the canonical defaults as criteria version 1', async () => {
   const calls: unknown[] = [];
@@ -68,4 +72,36 @@ test('Prisma serializable conflicts become safe explicit draft conflicts', () =>
   assert.match(conflict.message, /نسخه جدید سرور/);
   assert.doesNotMatch(conflict.message, /P2034|Prisma|Transaction/);
   assert.equal((conflict.cause as { code: string }).code, 'P2034');
+});
+
+test('an existing draft always keeps the exact frozen criteria version and snapshot', () => {
+  const frozenSnapshot = [{ stableId: 'appearance', title: 'نوع پوشش' }];
+  const result = mergeInitialInterviewDraftWithFrozenCriteria(
+    { version: 1, criteria: [{ criterionId: 'appearance', score: 4 }] },
+    {
+      schemaVersion: 2,
+      state: { decision: null },
+      criteriaTemplateVersion: 999,
+      criteriaSnapshot: [{ stableId: 'wrong' }],
+    },
+    7,
+    frozenSnapshot,
+  );
+
+  assert.equal(result.schemaVersion, 2);
+  assert.equal(result.criteriaTemplateVersion, 7);
+  assert.equal(result.criteriaSnapshot, frozenSnapshot);
+  assert.deepEqual(result.state, { decision: null });
+});
+
+test('a draft without its historical criteria fails closed and remains recoverable', () => {
+  assert.throws(
+    () => withFrozenInitialInterviewCriteria({ schemaVersion: 2 }, 7, null),
+    (error: Error & { statusCode?: number; code?: string }) => {
+      assert.equal(error.statusCode, 409);
+      assert.equal(error.code, 'HR_INTERVIEW_CRITERIA_SNAPSHOT_UNAVAILABLE');
+      assert.match(error.message, /اطلاعات حفظ شده/);
+      return true;
+    },
+  );
 });

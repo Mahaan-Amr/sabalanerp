@@ -24,13 +24,8 @@ import {
   ErpPagination,
   ErpQuickFilters,
 } from '@/components/erp';
-import { logisticsAPI } from '@/lib/api';
+import { dashboardAPI, logisticsAPI } from '@/lib/api';
 import { StatusBadge, dateFa, loadingDriversName } from '../logistics-ui';
-
-const canFinalize = (row: any) => row.status === 'DRAFT';
-const canDelete = (row: any) => row.status === 'DRAFT';
-const canCancel = (row: any) => row.status !== 'CANCELLED';
-const canEdit = (row: any) => row.status === 'DRAFT';
 
 const actionLabel = (action: 'finalize' | 'delete' | 'cancel' | 'print') => ({
   finalize: 'نهایی‌سازی',
@@ -50,15 +45,25 @@ export default function LogisticsLoadingsPage() {
   const [error, setError] = useState('');
   const [actionRequest, setActionRequest] = useState<null | { action: 'finalize' | 'delete' | 'cancel'; targets: any[] }>(null);
   const [actionReason, setActionReason] = useState('');
+  const [actionAvailability, setActionAvailability] = useState<any>({});
+  const may = (action: string) => actionAvailability[action]?.enabled === true;
+  const canFinalize = (row: any) => may('FINALIZE_LOADING') && row.status === 'DRAFT';
+  const canDelete = (row: any) => may('EDIT_LOADING') && row.status === 'DRAFT';
+  const canCancel = (row: any) => may('CANCEL_LOADING') && row.status !== 'CANCELLED';
+  const canEdit = (row: any) => may('EDIT_LOADING') && row.status === 'DRAFT';
 
   const load = async () => {
     setError('');
     try {
       setIsLoading(true);
-      const response = await logisticsAPI.getLoadings();
+      const [response, availability] = await Promise.all([
+        logisticsAPI.getLoadings(),
+        dashboardAPI.getActionAvailability('logistics'),
+      ]);
       if (response.data.success) {
         setRows(response.data.data);
       }
+      setActionAvailability(availability.data.data || {});
     } catch (err: any) {
       setError(err.response?.data?.error || 'دریافت بارگیری‌ها ناموفق بود.');
     } finally {

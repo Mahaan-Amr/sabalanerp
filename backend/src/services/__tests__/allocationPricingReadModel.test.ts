@@ -17,7 +17,8 @@ const event = {
   integrityHash: pricedAllocationIntegrityHash(payload), recordedAt: new Date(),
   allocationRevisionLine: { id: 'line-1', sourceContractId: 'contract-1', sourceContractItemId: 'item-1',
     productRowId: 'stable-row-1', unit: 'm2', quantity: new Prisma.Decimal('1.250') },
-  pricingRow: { pricingVersionId: 'version-1', contractItemId: 'item-1', productRowId: 'stable-row-1', unit: 'm2' },
+  pricingRow: { pricingVersionId: 'version-1', contractItemId: 'frozen-item-1', linkedContractItemId: 'item-1',
+    productRowId: 'stable-row-1', unit: 'm2' },
 };
 const tx = {
   logisticsAllocationRevisionPricing: { findMany: async () => [{
@@ -37,6 +38,7 @@ const main = async () => {
   assert.deepEqual(model.totals, {
     grossAmount: '12.500000000000', discountAmount: '2.500000000000', netAmount: '10.000000000000',
   });
+  assert.equal(model.lines[0].contractItemId, 'item-1');
   assert.deepEqual(await assessBoundAllocationPricingFreshness(tx as never, 'revision-1'), {
     status: 'CURRENT', staleContracts: [],
   });

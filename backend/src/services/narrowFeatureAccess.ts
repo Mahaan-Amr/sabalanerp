@@ -19,10 +19,21 @@ export const evaluateNarrowFeatureAccess = (input: {
   userWorkspace: NarrowPermissionRecord;
   roleWorkspace: NarrowPermissionRecord;
 }, at = new Date()): { allowed: boolean; permissionLevel: NarrowPermissionLevel | null } => {
-  if (input.role === 'ADMIN' || input.role === 'MANAGER') return { allowed: true, permissionLevel: 'admin' };
-  const explicit = activeAt(input.userFeature, at) ? input.userFeature : activeAt(input.roleFeature, at) ? input.roleFeature : null;
-  const workspaceAdmin = [input.userWorkspace, input.roleWorkspace].some((permission) => activeAt(permission, at) && permission?.permissionLevel === 'admin');
-  const permissionLevel = workspaceAdmin ? 'admin' : explicit?.permissionLevel as NarrowPermissionLevel | undefined;
+  if (input.role === 'ADMIN') return { allowed: true, permissionLevel: 'admin' };
+  const directFeature = activeAt(input.userFeature, at) ? input.userFeature : null;
+  const directWorkspace = activeAt(input.userWorkspace, at) ? input.userWorkspace : null;
+  const roleFeature = activeAt(input.roleFeature, at) ? input.roleFeature : null;
+  const roleWorkspace = activeAt(input.roleWorkspace, at) ? input.roleWorkspace : null;
+  // A current direct feature grant is an intentional narrowing override. Only
+  // inherited feature access may fall back to workspace administration.
+  const permissionLevelValue = directWorkspace?.permissionLevel === 'admin'
+    ? 'admin'
+    : directFeature?.permissionLevel
+    ?? (!directWorkspace ? roleFeature?.permissionLevel : undefined)
+    ?? (!directWorkspace && roleWorkspace?.permissionLevel === 'admin' ? 'admin' : undefined);
+  const permissionLevel = levels.includes(permissionLevelValue as NarrowPermissionLevel)
+    ? permissionLevelValue as NarrowPermissionLevel
+    : undefined;
   const allowed = Boolean(permissionLevel && levels.indexOf(permissionLevel) >= levels.indexOf(input.requiredPermission));
   return { allowed, permissionLevel: allowed ? permissionLevel! : null };
 };

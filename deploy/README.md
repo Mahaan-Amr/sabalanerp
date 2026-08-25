@@ -11,7 +11,7 @@
 3. Set `DOMAIN`, `FRONTEND_URL`, and `INQUIRY_DOMAIN` to your real domains.
 4. Make sure DNS A records for both `DOMAIN` and `INQUIRY_DOMAIN` point to the VPS.
 
-`DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS` defaults to 3600 and accepts values from 600 to 7200. It applies only to the pre-mutation local/remote checkpoint verification window; post-mutation gates retain their strict 15-minute deadline.
+`DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS` defaults to 3600 and accepts values from 600 to 14400. It applies only to the pre-mutation local/remote checkpoint verification window, allowing a slow independent off-server store enough time to complete the mandatory full read-back. Post-mutation gates retain their strict 15-minute deadline.
 
 ## 2) Build and deploy
 ```bash

@@ -197,6 +197,9 @@ export const FEATURES = {
   ACCOUNTING_PAYMENTS_MANAGE: 'accounting_payments_manage',
   ACCOUNTING_TAX_MANAGE: 'accounting_tax_manage',
   ACCOUNTING_CORRECTIONS_MANAGE: 'accounting_corrections_manage',
+  ACCOUNTING_CORRECTIONS_CREATE: 'accounting_corrections_create',
+  ACCOUNTING_CORRECTIONS_APPROVE: 'accounting_corrections_approve',
+  ACCOUNTING_CORRECTIONS_VERIFY: 'accounting_corrections_verify',
   ACCOUNTING_AUDIT_VIEW: 'accounting_audit_view',
   ACCOUNTING_RECORDS_APPROVE_VOID: 'accounting_records_approve_void',
   ACCOUNTING_ACTIONS_MANAGE: 'accounting_actions_manage',
@@ -474,6 +477,9 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.ACCOUNTING_PAYMENTS_MANAGE]: 'accounting',
   [FEATURES.ACCOUNTING_TAX_MANAGE]: 'accounting',
   [FEATURES.ACCOUNTING_CORRECTIONS_MANAGE]: 'accounting',
+  [FEATURES.ACCOUNTING_CORRECTIONS_CREATE]: 'accounting',
+  [FEATURES.ACCOUNTING_CORRECTIONS_APPROVE]: 'accounting',
+  [FEATURES.ACCOUNTING_CORRECTIONS_VERIFY]: 'accounting',
   [FEATURES.ACCOUNTING_AUDIT_VIEW]: 'accounting',
   [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID]: 'accounting',
   [FEATURES.ACCOUNTING_ACTIONS_MANAGE]: 'accounting',
@@ -832,6 +838,41 @@ export const requireNarrowFeatureAccess = (feature: Feature, requiredPermission:
       return res.status(500).json({ success: false, error: 'Internal server error' });
     }
   };
+};
+
+export const requireAnyNarrowFeatureAccess = (
+  features: Feature[],
+  requiredPermission: FeaturePermission = FEATURE_PERMISSIONS.VIEW,
+) => async (req: FeatureRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'برای ادامه وارد سامانه شوید.' });
+    for (const feature of features) {
+      const workspace = FEATURE_WORKSPACE_MAP[feature];
+      const access = await resolveNarrowFeatureAccess(prisma, {
+        userId: req.user.id,
+        role: req.user.role,
+        workspace,
+        feature,
+        requiredPermission,
+      });
+      if (access.allowed) {
+        req.featurePermission = access.permissionLevel!;
+        return next();
+      }
+    }
+    return res.status(403).json({
+      success: false,
+      message: 'مجوز انجام این عملیات برای شما فعال نیست. از مدیر همان فضای کاری درخواست دسترسی کنید.',
+    });
+  } catch (error) {
+    const trackingId = `AUTH-${Date.now().toString(36).toUpperCase()}`;
+    console.error('Narrow feature access resolution failed:', { trackingId, error });
+    return res.status(500).json({
+      success: false,
+      message: `بررسی مجوز انجام نشد. دوباره تلاش کنید یا کد پیگیری ${trackingId} را به پشتیبانی اعلام کنید.`,
+      trackingId,
+    });
+  }
 };
 
 /**

@@ -7,6 +7,7 @@ import {
   calculateProductOperations,
   calculateSlab,
   createNewLongitudinalProductInput,
+  longitudinalOperationsQuantity,
   parseCanonicalDecimal,
   parseStableIdentity,
   refreshProductOperationsGeometry,
@@ -607,7 +608,7 @@ export function CompactProductConfigurationModal({
           productRowId: previous.rowId || `draft:${selectedProduct.id}`,
           lengthMeters: calculation.result.lengthMeters,
           widthMeters: calculation.result.widthMeters,
-          quantity: calculation.result.quantity
+          quantity: longitudinalOperationsQuantity(calculation.result)
         })
       };
     });

@@ -16,8 +16,9 @@ import {
 } from '@/components/erp';
 import { hrDutyApi, type DestinationDuty, type DestinationDutySummary, type DestinationDutyView } from './hrDutyApi';
 import { initialDestinationDutyState, reduceDestinationDutyState } from './destinationDutyState';
-import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-duties/crossWorkspaceDutyApi';
 import { buildDutyQueueTabs, dutyQueueEmptyTitle } from '@/features/cross-workspace-duties/dutyQueuePresentation';
+import { DestinationDutyClaimAction } from './DestinationDutyClaimAction';
+import { destinationDutyHref } from '@/features/cross-workspace-duties/dutyDestination';
 
 const statusLabel: Record<string, string> = {
   OPEN: 'باز', COMPLETED: 'تکمیل‌شده', WAIVED: 'جایگزین‌شده', CANCELLED: 'لغوشده',
@@ -36,7 +37,6 @@ type QueueData = { summary: DestinationDutySummary; duties: DestinationDuty[]; v
 
 export function DestinationDutyQueue({ workspace }: { workspace: string }) {
   const [view, setView] = useState<DestinationDutyView>('assigned');
-  const [pendingClaim, setPendingClaim] = useState<string | null>(null);
   const [state, dispatch] = useReducer(
     reduceDestinationDutyState<QueueData>,
     initialDestinationDutyState as typeof initialDestinationDutyState & { data: QueueData | null },
@@ -49,7 +49,30 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
         hrDutyApi.summary(workspace),
         hrDutyApi.list(workspace, view),
       ]);
-      dispatch({ type: 'success', data: { summary: summary.data.data, duties: duties.data.data, view } });
+      let resolvedSummary = summary.data.data;
+      if (view === 'history' && duties.data.data.length > 0) {
+        const seenThrough = duties.data.data.reduce((latest, duty) => (
+          duty.updatedAt > latest ? duty.updatedAt : latest
+        ), duties.data.data[0].updatedAt);
+        try {
+          await hrDutyApi.markHistorySeen(workspace, seenThrough);
+          resolvedSummary = (await hrDutyApi.summary(workspace)).data.data;
+        } catch {
+          // History remains readable; the badge stays until the acknowledgement succeeds.
+        }
+      }
+      if (view === 'available' && duties.data.data.length > 0) {
+        const seenThrough = duties.data.data.reduce((latest, duty) => (
+          duty.updatedAt > latest ? duty.updatedAt : latest
+        ), duties.data.data[0].updatedAt);
+        try {
+          await hrDutyApi.markAvailableSeen(workspace, seenThrough);
+          resolvedSummary = (await hrDutyApi.summary(workspace)).data.data;
+        } catch {
+          // Available work remains readable; the badge stays until acknowledgement succeeds.
+        }
+      }
+      dispatch({ type: 'success', data: { summary: resolvedSummary, duties: duties.data.data, view } });
     } catch {
       dispatch({ type: 'failure', message: 'به‌روزرسانی وظایف انجام نشد.' });
     }
@@ -75,18 +98,6 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
   const { summary, duties } = state.data;
   const displayedView = state.loading || state.stale ? state.data.view : view;
   const options = buildDutyQueueTabs(summary);
-  const claim = async (dutyId: string) => {
-    if (pendingClaim) return;
-    setPendingClaim(dutyId);
-    try {
-      await hrDutyApi.claim(dutyId);
-      announceCrossWorkspaceDutyChanged();
-      setView('assigned');
-    } finally {
-      setPendingClaim(null);
-    }
-  };
-
   return (
     <ErpPage
       eyebrow="وظایف بین‌واحدی"
@@ -126,16 +137,9 @@ export function DestinationDutyQueue({ workspace }: { workspace: string }) {
                 {duty.overdue && <p className="text-sm font-semibold text-[var(--sds-danger)]">مهلت انجام گذشته است.</p>}
               </div>
               {duty.access === 'AVAILABLE' ? (
-                <ErpButton
-                  label={pendingClaim === duty.id ? 'در حال دریافت…' : 'دریافت وظیفه'}
-                  icon={FaUserCheck}
-                  tone="success"
-                  variant="solid"
-                  disabled={Boolean(pendingClaim)}
-                  onClick={() => void claim(duty.id)}
-                />
+                <DestinationDutyClaimAction duty={duty} disabled={state.loading} onClaimed={() => setView('assigned')} />
               ) : duty.detailAvailable ? (
-                <ErpButton label="مشاهده وظیفه" href={`/dashboard/${workspace}/duties/${duty.id}`} tone="primary" variant="solid" />
+                <ErpButton label="مشاهده وظیفه" href={destinationDutyHref(workspace, duty)} tone="primary" variant="solid" />
               ) : (
                 <p className="sds-text-muted text-sm">این سابقه بسته شده و دیگر پیوند عملیاتی ندارد.</p>
               )}

@@ -8,8 +8,179 @@ export const GUIDED_HR_INTERVIEW_CRITERION_IDS = [
   "workplaceValues", "createdValues", "achievement", "companion",
 ] as const;
 
-export const assertGuidedHrInterviewEvidence = (input: unknown) => {
+export type HrInterviewEvidenceErrorTarget = "criterion" | "custom-criterion" | "summary" | "snapshot";
+
+export type HrInterviewEvidenceError = Error & {
+  code: "HR_INTERVIEW_EVIDENCE_INVALID";
+  target: HrInterviewEvidenceErrorTarget;
+  criterionId?: string;
+  isOperational: true;
+};
+
+const interviewEvidenceError = (
+  message: string,
+  target: HrInterviewEvidenceErrorTarget,
+  criterionId?: string,
+): HrInterviewEvidenceError => Object.assign(new Error(message), {
+  code: "HR_INTERVIEW_EVIDENCE_INVALID" as const,
+  target,
+  ...(criterionId ? { criterionId } : {}),
+  isOperational: true as const,
+});
+
+const record = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
+
+const nonEmpty = (value: unknown) => typeof value === "string" && value.trim().length > 0;
+const validJudgment = (value: unknown) => ["POSITIVE", "NEUTRAL", "NEGATIVE"].includes(String(value));
+const validYesNo = (value: unknown) => value === "YES" || value === "NO";
+const validScore = (value: unknown, allowUnassessed: boolean) => (
+  (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 5)
+  || (allowUnassessed && value === "UNASSESSED")
+);
+
+const v2CriterionIsComplete = (
+  criterion: Record<string, unknown>,
+  answer: Record<string, unknown> | null,
+) => {
+  if (!answer) return false;
+  switch (criterion.answerType) {
+    case "SCORE_1_TO_5":
+      return validScore(answer.score, criterion.allowUnassessed === true);
+    case "TEXT":
+      return nonEmpty(answer.text);
+    case "ADDRESS":
+      return nonEmpty(answer.text)
+        && validJudgment(answer.judgment)
+        && (answer.judgment !== "NEGATIVE" || nonEmpty(answer.note));
+    case "YES_NO":
+    case "COMPANION":
+      return validYesNo(answer.companionPresent)
+        && validJudgment(answer.judgment)
+        && (answer.judgment !== "NEGATIVE" || nonEmpty(answer.note));
+    case "STRENGTHS_WEAKNESSES":
+      return Array.isArray(answer.strengths)
+        && answer.strengths.length === 5
+        && answer.strengths.every(nonEmpty)
+        && Array.isArray(answer.weaknesses)
+        && answer.weaknesses.length === 5
+        && answer.weaknesses.every(nonEmpty);
+    default:
+      return false;
+  }
+};
+
+const assertSchemaTwoGuidedHrInterviewEvidence = (
+  evidence: Record<string, unknown>,
+  expectedCriteriaTemplateVersion?: number,
+) => {
+  const criteriaTemplateVersion = evidence.criteriaTemplateVersion;
+  const criteriaSnapshot = Array.isArray(evidence.criteriaSnapshot) ? evidence.criteriaSnapshot : null;
+  const state = record(evidence.state);
+  const answers = record(state?.answers);
+  if (
+    typeof criteriaTemplateVersion !== "number"
+    || !Number.isInteger(criteriaTemplateVersion)
+    || criteriaTemplateVersion < 1
+    || (expectedCriteriaTemplateVersion !== undefined && criteriaTemplateVersion !== expectedCriteriaTemplateVersion)
+    || !criteriaSnapshot
+    || !state
+    || !answers
+    || !Array.isArray(evidence.customCriteria)
+  ) {
+    throw interviewEvidenceError(
+      "نسخه معیارهای این مصاحبه قابل اعتبارسنجی نیست. اطلاعات حفظ شده است؛ با پشتیبانی تماس بگیرید.",
+      "snapshot",
+    );
+  }
+
+  const snapshotCriteria = criteriaSnapshot.map(record);
+  const supportedAnswerTypes = new Set(["SCORE_1_TO_5", "TEXT", "ADDRESS", "YES_NO", "COMPANION", "STRENGTHS_WEAKNESSES"]);
+  const stableIds = snapshotCriteria.map((criterion) => criterion?.stableId);
+  if (
+    !snapshotCriteria.length
+    || snapshotCriteria.some((criterion) => !criterion)
+    || stableIds.some((stableId) => typeof stableId !== "string" || !stableId || stableId !== stableId.trim())
+    || new Set(stableIds).size !== stableIds.length
+    || snapshotCriteria.some((criterion, index) => (
+      typeof criterion?.order !== "number"
+      || !Number.isInteger(criterion.order)
+      || criterion.order !== index + 1
+      || typeof criterion.isActive !== "boolean"
+      || typeof criterion.allowUnassessed !== "boolean"
+      || !nonEmpty(criterion.title)
+      || typeof criterion.answerType !== "string"
+      || !supportedAnswerTypes.has(criterion.answerType)
+    ))
+  ) {
+    throw interviewEvidenceError(
+      "نسخه معیارهای این مصاحبه قابل اعتبارسنجی نیست. اطلاعات حفظ شده است؛ با پشتیبانی تماس بگیرید.",
+      "snapshot",
+    );
+  }
+  const activeCriteria = snapshotCriteria.filter(
+    (criterion): criterion is Record<string, unknown> => Boolean(criterion) && criterion!.isActive !== false,
+  );
+  if (!activeCriteria.length) {
+    throw interviewEvidenceError(
+      "نسخه معیارهای این مصاحبه قابل اعتبارسنجی نیست. اطلاعات حفظ شده است؛ با پشتیبانی تماس بگیرید.",
+      "snapshot",
+    );
+  }
+
+  for (const criterion of activeCriteria) {
+    const criterionId = String(criterion.stableId);
+    if (!v2CriterionIsComplete(criterion, record(answers[criterionId]))) {
+      const title = String(criterion.title).trim().slice(0, 160);
+      throw interviewEvidenceError(`پاسخ معیار «${title}» کامل نیست. این معیار را بررسی کنید.`, "criterion", criterionId);
+    }
+  }
+
+  const customCriteria = evidence.customCriteria;
+  const customCriterionIds = new Set<string>();
+  for (const rawCriterion of customCriteria) {
+    const criterion = record(rawCriterion);
+    const rawCriterionId = criterion?.id;
+    const criterionId = typeof rawCriterionId === "string" && rawCriterionId === rawCriterionId.trim()
+      ? rawCriterionId
+      : "";
+    const title = typeof criterion?.title === "string" ? criterion.title.trim().slice(0, 160) : "";
+    const kind = criterion?.kind;
+    const complete = Boolean(criterionId && title && !customCriterionIds.has(criterionId)) && (
+      (kind === "score" && validScore(criterion?.score, true))
+      || (kind === "text" && nonEmpty(criterion?.text))
+      || (kind === "yes-no" && validYesNo(criterion?.yesNo))
+    );
+    if (!complete) {
+      throw interviewEvidenceError(
+        title ? `پاسخ معیار اختصاصی «${title}» کامل نیست. این معیار را بررسی کنید.` : "یکی از معیارهای اختصاصی مصاحبه معتبر نیست. آن معیار را بررسی کنید.",
+        "custom-criterion",
+        criterionId || undefined,
+      );
+    }
+    customCriterionIds.add(criterionId);
+  }
+
+  if (!["POSITIVE", "NEGATIVE"].includes(String(state.decision)) || !nonEmpty(state.decisionReason)) {
+    throw interviewEvidenceError("نتیجه و دلیل نهایی مصاحبه را کامل کنید.", "summary");
+  }
+};
+
+export const assertGuidedHrInterviewEvidence = (input: unknown, expectedCriteriaTemplateVersion?: number) => {
   const evidence = input as Record<string, unknown> | null;
+  if (evidence && Object.prototype.hasOwnProperty.call(evidence, "schemaVersion")) {
+    if (evidence.schemaVersion !== 2) {
+      throw interviewEvidenceError(
+        "نسخه معیارهای این مصاحبه قابل اعتبارسنجی نیست. اطلاعات حفظ شده است؛ با پشتیبانی تماس بگیرید.",
+        "snapshot",
+      );
+    }
+    assertSchemaTwoGuidedHrInterviewEvidence(evidence, expectedCriteriaTemplateVersion);
+    return;
+  }
   const criteria = evidence && Array.isArray(evidence.criteria) ? evidence.criteria : [];
   const validScores = new Set<unknown>([1, 2, 3, 4, 5, "UNASSESSED"]);
   if (criteria.length !== GUIDED_HR_INTERVIEW_CRITERION_IDS.length || criteria.some((raw, index) => {

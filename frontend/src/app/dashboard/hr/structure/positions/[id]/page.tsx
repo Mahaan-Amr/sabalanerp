@@ -1,4 +1,5 @@
 "use client";
+import { normalizeIdentifierDigits } from "@/lib/numberFormat";
 import { ErpInlineState } from "@/components/erp";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -152,7 +153,7 @@ export default function PositionHistoryPage() {
         {data.capabilities?.canEditCapacity && <div className="xl:sticky xl:top-24 xl:self-start">
           <ErpSection title="تغییر ظرفیت" description={`ظرفیت جاری: ${data.position.capacity.toLocaleString("fa-IR")}`}>
             <ErpCard className="space-y-3 p-4">
-              <ErpField label="ظرفیت جدید" required><ErpInput type="number" min={1} value={capacity.newCapacity} onChange={(event) => setCapacity({ ...capacity, newCapacity: event.target.value })} /></ErpField>
+              <ErpField label="ظرفیت جدید" required><ErpInput inputMode="numeric" value={capacity.newCapacity} onChange={(event) => setCapacity({ ...capacity, newCapacity: normalizeIdentifierDigits(event.target.value) })} /></ErpField>
               <ErpField label="تاریخ اثر" required><HrPersianCalendar value={fromIsoDate(capacity.effectiveAt)} onChange={(value) => setCapacity({ ...capacity, effectiveAt: toIsoDate(value) })} disablePastDates /></ErpField>
               <ErpField label="دلیل کاهش"><ErpTextarea value={capacity.reason} onChange={(event) => setCapacity({ ...capacity, reason: event.target.value })} /></ErpField>
               <ErpButton label="ثبت تغییر ظرفیت" icon={FaPlus} disabled={saving || !capacity.newCapacity || Number(capacity.newCapacity) < 1} onClick={submitCapacity} />

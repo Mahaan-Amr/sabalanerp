@@ -96,6 +96,8 @@ interface FormRevisionLike {
 interface CompensationLike {
   obsoleteAt?: Date | string | null;
   proposedBy?: string | null;
+  payrollReviewStatus?: string | null;
+  payrollVerifiedAt?: Date | string | null;
   preparedAt?: Date | string | null;
   hrApprovedAt?: Date | string | null;
   financeApprovedAt?: Date | string | null;
@@ -121,6 +123,17 @@ interface OnboardingTaskLike {
 interface PreIdentityChecklistLike {
   status: string;
   managementResolution?: string | null;
+}
+interface CompanyEvaluationOccurrenceLike {
+  status: string;
+}
+interface IdentityCheckLike { fieldKey: string; status: string }
+interface IdentityDocumentLike {
+  category: string;
+  side?: string | null;
+  customTitle?: string | null;
+  version: number;
+  status: string;
 }
 interface HiringDecisionLike {
   kind: string;
@@ -154,6 +167,9 @@ export interface HiringLifecycleSource {
   outcome?: string | null;
   formRevisions?: FormRevisionLike[];
   identityClearance?: string | null;
+  candidate?: { nationalCode?: string | null };
+  identityChecks?: IdentityCheckLike[];
+  documents?: IdentityDocumentLike[];
   assessments?: unknown[];
   assessmentCompletedAt?: Date | string | null;
   assessmentReviewRequired?: boolean;
@@ -164,6 +180,7 @@ export interface HiringLifecycleSource {
   preIdentityReleasedAt?: Date | string | null;
   preIdentityGrandfatheredAt?: Date | string | null;
   preIdentityChecklistItems?: PreIdentityChecklistLike[];
+  companyEvaluationOccurrences?: CompanyEvaluationOccurrenceLike[];
   formalAssessmentPlans?: FormalAssessmentPlanLike[];
   hiringDecisions?: HiringDecisionLike[];
   compensationClearance?: string | null;
@@ -210,11 +227,7 @@ export const projectHiringTaskCapabilities = (
     contractClearance: source.contractClearance || "NOT_STARTED",
     compensationClearance: source.compensationClearance || "NOT_STARTED",
     payrollParticipation: source.payrollParticipation,
-    onboardingTasks: (source.onboardingTasks || []).map((task) => ({
-      ...task,
-      title: task.title || "وظیفه آماده‌سازی",
-      activationBlocker: Boolean(task.activationBlocker),
-    })),
+    onboardingTasks: [],
     insuranceEnrollment: source.insuranceEnrollment,
   }).ready;
   const employmentActive = source.employmentRelationship?.status === "ACTIVE";
@@ -296,21 +309,6 @@ export const projectHiringTaskCapabilities = (
     },
   ];
 
-  for (const task of source.onboardingTasks || []) {
-    const ownerAuthorities = task.ownerAuthority
-      ? [task.ownerAuthority]
-      : [];
-    const detailVisible = visibleTo(...ownerAuthorities);
-    tasks.push({
-      id: "ONBOARDING_TASK",
-      title: task.title || "وظیفه آماده‌سازی شروع همکاری",
-      status: task.status,
-      ownerAuthorities,
-      detailVisible,
-      actionIds: detailVisible ? ["UPDATE_ONBOARDING_TASK"] : [],
-    });
-  }
-
   return tasks;
 };
 
@@ -337,15 +335,60 @@ const blocker = (
   label,
   responsibleAuthorities,
 });
+export const actionPermissionForHiringLifecycleAction = (actionId: string) => {
+  if (actionId.startsWith("RECORD_COMPANY_ASSESSMENT_RESULT:")) {
+    return "RECORD_COMPANY_EVALUATION_RESULT";
+  }
+  return ({
+    RECORD_HR_INTERVIEW: "RECORD_INITIAL_INTERVIEW",
+    RECORD_HR_PRELIMINARY_APPROVAL: "RECORD_PRELIMINARY_DECISION",
+    FINALIZE_FORMAL_ASSESSMENT_PLAN: "MANAGE_COMPANY_EVALUATION_PLAN",
+    REVISE_FORMAL_ASSESSMENT_PLAN: "MANAGE_COMPANY_EVALUATION_PLAN",
+    RECORD_COMPANY_EVALUATION_RESULT: "RECORD_COMPANY_EVALUATION_RESULT",
+    ADD_COMPANY_EVALUATION: "MANAGE_COMPANY_EVALUATION_PLAN",
+    FINALIZE_PRE_IDENTITY_REQUIREMENTS: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    ADD_PRE_IDENTITY_ITEM: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    RESOLVE_NEGATIVE_PRE_IDENTITY_ITEM: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    APPROVE_PRE_IDENTITY: "RECORD_FINAL_MANAGEMENT_DECISION",
+    COMPLETE_PRE_IDENTITY_ITEM: "MANAGE_RECRUITMENT_CASE",
+    RELEASE_PRE_IDENTITY: "MANAGE_RECRUITMENT_CASE",
+    CREATE_OFFER: "MANAGE_COMPENSATION",
+    VERIFY_OFFER_PAYROLL: "MANAGE_PAYROLL",
+    RECORD_CONTRACT: "RECORD_SIGNED_EMPLOYMENT_CONTRACT",
+    UPLOAD_CONTRACT: "RECORD_SIGNED_EMPLOYMENT_CONTRACT",
+    SUBMIT_CONTRACT: "RECORD_SIGNED_EMPLOYMENT_CONTRACT",
+    REVIEW_CONTRACT: "VERIFY_SIGNED_EMPLOYMENT_CONTRACT",
+    APPROVE_CONTRACT: "VERIFY_SIGNED_EMPLOYMENT_CONTRACT",
+    CONFIGURE_PAYROLL: "MANAGE_PAYROLL",
+    REVIEW_IDENTITY: "REVIEW_IDENTITY_DOCUMENTS",
+    APPROVE_IDENTITY: "APPROVE_IDENTITY_CLEARANCE",
+    RECORD_ASSESSMENT: "MANAGE_RECRUITMENT_CASE",
+    COMPLETE_ASSESSMENT: "MANAGE_RECRUITMENT_CASE",
+    DECIDE_ASSESSMENT: "MANAGE_PRE_EMPLOYMENT_REQUIREMENTS",
+    CONVERT_TO_PERSONNEL: "MANAGE_RECRUITMENT_CASE",
+    COMPLETE_COLLATERAL: "RECORD_COLLATERAL_CUSTODY",
+    UPDATE_INSURANCE: "MANAGE_RECRUITMENT_CASE",
+    UPDATE_ONBOARDING_TASK: "MANAGE_RECRUITMENT_CASE",
+    COMPLETE_ONBOARDING_TASK: "MANAGE_RECRUITMENT_CASE",
+    ACTIVATE_EMPLOYMENT: "MANAGE_RECRUITMENT_CASE",
+    RESEND_INVITATION: "MANAGE_RECRUITMENT_CASE",
+  } as Record<string, string>)[actionId] ?? null;
+};
+
 const canPerform = (
   viewerAuthorities: ReadonlySet<string>,
+  viewerActionPermissions: ReadonlySet<string>,
   candidate: HiringLifecycleAction | null,
 ) =>
   Boolean(
-    candidate?.authorities.some((required) => viewerAuthorities.has(required)),
+    candidate && (
+      candidate.authorities.some((required) => viewerAuthorities.has(required))
+      || Boolean(
+        actionPermissionForHiringLifecycleAction(candidate.id)
+        && viewerActionPermissions.has(actionPermissionForHiringLifecycleAction(candidate.id)!),
+      )
+    ),
   );
-const isCompleteTask = (status: string) =>
-  status === "COMPLETE" || status === "WAIVED";
 const authorityLabels: Record<string, string> = {
   HR_PROCESSOR: "کارشناس منابع انسانی",
   HR_MANAGER: "مدیریت منابع انسانی",
@@ -402,15 +445,15 @@ const initialHrReviewGate = (source: HiringLifecycleSource): Gate => {
   if (source.preIdentityGrandfatheredAt) {
     return completedGate(2);
   }
-  const interviewApproved = latestDecision(source, "HR_INTERVIEW")?.outcome === "POSITIVE";
+  const interviewRecorded = Boolean(latestDecision(source, "HR_INTERVIEW"));
   const hrApproved = latestDecision(source, "HR_PRELIMINARY_APPROVAL")?.outcome === "POSITIVE";
-  const completed = Number(interviewApproved) + Number(hrApproved);
+  const completed = Number(interviewRecorded) + Number(hrApproved);
   return {
     complete: completed === 2,
     requiredComplete: completed,
     requiredTotal: 2,
     blockers: [],
-    action: !interviewApproved
+    action: !interviewRecorded
       ? action("RECORD_HR_INTERVIEW", "ثبت نتیجه مصاحبه اولیه HR", "HR_PROCESSOR")
       : action("RECORD_HR_PRELIMINARY_APPROVAL", "ثبت تأیید اولیه HR", "HR_MANAGER"),
     secondaryActions: [],
@@ -466,42 +509,52 @@ const formalAssessmentGate = (source: HiringLifecycleSource): Gate => {
 
 const companyEvaluationPlanGate = (source: HiringLifecycleSource): Gate => {
   if (source.preIdentityGrandfatheredAt) return completedGate(2);
-  const requirementsFinalized = Boolean(source.preIdentityRequirementsFinalizedAt);
-  const items = source.preIdentityChecklistItems || [];
-  const incompleteItems = items.filter((item) =>
-    !["POSITIVE", "NEGATIVE", "CANCELLED", "WAIVED"].includes(item.status),
-  );
-  const unresolvedNegative = items.filter(
-    (item) => item.status === "NEGATIVE" && !item.managementResolution,
-  );
-  const managementApproved = Boolean(source.preIdentityManagementApprovedAt);
-  const released = Boolean(source.preIdentityReleasedAt);
+  const evaluations = source.companyEvaluationOccurrences || [];
+  const pendingEvaluations = evaluations.filter((item) => item.status === "PLANNED");
+  const resolvedEvaluations = evaluations.length - pendingEvaluations.length;
   const companyApproved = latestDecision(source, "COMPANY_APPROVAL")?.outcome === "POSITIVE";
-  const completed = Number(requirementsFinalized) + Number(companyApproved && managementApproved && released);
-  let nextAction = action("FINALIZE_PRE_IDENTITY_REQUIREMENTS", "تعیین و نهایی‌سازی الزامات پرونده", "COMPANY_MANAGER");
-  if (requirementsFinalized && incompleteItems.length)
-    nextAction = action("COMPLETE_PRE_IDENTITY_ITEM", "پیگیری و ثبت نتیجه الزامات", "HR_PROCESSOR");
-  else if (requirementsFinalized && unresolvedNegative.length)
-    nextAction = action("RESOLVE_NEGATIVE_PRE_IDENTITY_ITEM", "تصمیم درباره نتیجه منفی", "COMPANY_MANAGER");
-  else if (requirementsFinalized && (!managementApproved || !companyApproved))
-    nextAction = action("APPROVE_PRE_IDENTITY", "تأیید ادامه پرونده توسط مدیریت شرکت", "COMPANY_MANAGER");
-  else if (managementApproved && !released)
-    nextAction = action("RELEASE_PRE_IDENTITY", "تأیید تکمیل اداری چک‌لیست", "HR_PROCESSOR");
   return {
-    complete: released && managementApproved && companyApproved && !incompleteItems.length && !unresolvedNegative.length,
-    requiredComplete: completed,
-    requiredTotal: 2,
+    complete: companyApproved && pendingEvaluations.length === 0,
+    requiredComplete: resolvedEvaluations + Number(companyApproved),
+    requiredTotal: evaluations.length + 1,
     blockers: [],
-    action: nextAction,
-    secondaryActions: requirementsFinalized
-      ? [action("ADD_PRE_IDENTITY_ITEM", "افزودن الزام جدید", "COMPANY_MANAGER")]
-      : [],
+    action: pendingEvaluations.length
+      ? action(
+          "RECORD_COMPANY_EVALUATION_RESULT",
+          "پیگیری و ثبت نتیجه ارزیابی‌های شرکت",
+          "HR_PROCESSOR",
+        )
+      : action(
+          "RECORD_FINAL_MANAGEMENT_DECISION",
+          "ثبت تصمیم نهایی مدیریت شرکت",
+          "COMPANY_MANAGER",
+        ),
+    secondaryActions: [
+      action("ADD_COMPANY_EVALUATION", "افزودن ارزیابی شرکت", "COMPANY_MANAGER"),
+    ],
   };
 };
 
 const identityGate = (source: HiringLifecycleSource): Gate => {
   const complete = source.identityClearance === "APPROVED";
   const rejected = source.identityClearance === "REJECTED";
+  const requiredChecks = ["firstName", "lastName", "birthDate", "birthPlace", "fatherName",
+    source.candidate?.nationalCode ? "nationalCode" : "foreignIdentity", "address", "postalCode", "mobile", "educationLevel", "maritalStatus"];
+  const checks = source.identityChecks || [];
+  const checksReady = requiredChecks.every((fieldKey) => checks.some((item) => item.fieldKey === fieldKey && item.status === "VERIFIED"))
+    && ["militaryStatus", "birthCertificateExplanations"].every((fieldKey) => checks.some((item) => item.fieldKey === fieldKey && ["VERIFIED", "NOT_APPLICABLE"].includes(item.status)));
+  const latestDocuments = Array.from((source.documents || []).reduce((latest, document) => {
+    const key = `${document.category}:${document.side || ""}:${document.customTitle || ""}`;
+    const current = latest.get(key);
+    if (!current || document.version > current.version) latest.set(key, document);
+    return latest;
+  }, new Map<string, IdentityDocumentLike>()).values());
+  const requiredCategories = source.candidate?.nationalCode
+    ? ["BIRTH_CERTIFICATE_ALL_PAGES", "NATIONAL_ID_FRONT", "NATIONAL_ID_BACK"] : [];
+  const documentsReady = latestDocuments.length > 0
+    && latestDocuments.every((item) => !["MISMATCH", "UNREADABLE"].includes(item.status))
+    && requiredCategories.every((category) => latestDocuments.some((item) => item.category === category));
+  const evidenceReady = checksReady && documentsReady;
   return {
     complete,
     requiredComplete: complete ? 1 : 0,
@@ -517,23 +570,14 @@ const identityGate = (source: HiringLifecycleSource): Gate => {
         ]
       : [],
     action:
-      source.identityClearance === "IN_PROGRESS"
+      source.identityClearance === "IN_PROGRESS" && evidenceReady
         ? action("APPROVE_IDENTITY", "تأیید نهایی احراز هویت", "HR_MANAGER")
         : action(
             "REVIEW_IDENTITY",
             "بررسی و تطبیق مدارک هویتی",
             "HR_PROCESSOR",
           ),
-    secondaryActions:
-      source.identityClearance === "IN_PROGRESS"
-        ? [
-            action(
-              "REVIEW_IDENTITY",
-              "ادامه بررسی و تطبیق مدارک هویتی",
-              "HR_PROCESSOR",
-            ),
-          ]
-        : [],
+    secondaryActions: [],
   };
 };
 
@@ -574,15 +618,15 @@ const assessmentGate = (source: HiringLifecycleSource): Gate => {
 const offerGate = (source: HiringLifecycleSource): Gate => {
   const latest = source.compensationSnapshots?.find((snapshot) => !snapshot.obsoleteAt);
   const proposed = Boolean(latest?.proposedBy);
-  const prepared = Boolean(latest?.preparedAt);
-  const hrApproved = Boolean(latest?.hrApprovedAt);
-  const financeApproved = Boolean(latest?.financeApprovedAt);
+  const payrollVerified = Boolean(
+    latest?.payrollReviewStatus === "VERIFIED" ||
+    latest?.payrollVerifiedAt ||
+    (latest?.hrApprovedAt && latest?.financeApprovedAt),
+  );
   const candidateAccepted = Boolean(latest?.candidateAcceptedAt);
   const completed = [
     proposed,
-    prepared,
-    hrApproved,
-    financeApproved,
+    payrollVerified,
     candidateAccepted,
   ].filter(Boolean).length;
   let nextAction = action(
@@ -590,23 +634,17 @@ const offerGate = (source: HiringLifecycleSource): Gate => {
     "ایجاد پیشنهاد همکاری",
     "COMPANY_MANAGER",
   );
-  if (latest && !prepared)
+  if (latest?.payrollReviewStatus === "RETURNED")
     nextAction = action(
-      "PREPARE_OFFER_PAYROLL",
-      "آماده‌سازی پیشنهاد توسط کارشناس حقوق‌ودستمزد",
-      "HR_PAYROLL_PROCESSOR",
+      "CREATE_OFFER",
+      "ثبت نسخه اصلاح‌شده پیشنهاد همکاری",
+      "COMPANY_MANAGER",
     );
-  else if (latest && !hrApproved)
+  else if (latest && !payrollVerified)
     nextAction = action(
-      "APPROVE_OFFER_HR",
-      "تأیید پیشنهاد توسط منابع انسانی و حقوق‌ودستمزد",
+      "VERIFY_OFFER_PAYROLL",
+      "بررسی ردیف‌های پیشنهاد حقوق",
       "HR_PAYROLL_MANAGER",
-    );
-  else if (latest && !financeApproved)
-    nextAction = action(
-      "APPROVE_OFFER_FINANCE",
-      "تأیید مالی پیشنهاد همکاری",
-      "FINANCE_MANAGER",
     );
   else if (latest && !candidateAccepted)
     nextAction = action(
@@ -614,9 +652,9 @@ const offerGate = (source: HiringLifecycleSource): Gate => {
       "در انتظار پذیرش پیشنهاد توسط متقاضی",
     );
   return {
-    complete: completed === 5,
+    complete: completed === 3,
     requiredComplete: completed,
-    requiredTotal: 5,
+    requiredTotal: 3,
     blockers:
       source.compensationClearance === "REJECTED"
         ? [
@@ -692,14 +730,8 @@ const onboardingGate = (source: HiringLifecycleSource, viewerUserId?: string): G
     Boolean(source.contracts?.[0]?.approvedAt) &&
     source.contractClearance === "APPROVED";
   const payrollReady = Boolean(source.payrollParticipation);
-  const blockingTasks =
-    source.onboardingTasks?.filter((task) => task.activationBlocker) || [];
-  const completedTasks = blockingTasks.filter((task) =>
-    isCompleteTask(task.status),
-  ).length;
-  const completed =
-    Number(contractApproved) + Number(payrollReady) + completedTasks;
-  const total = 2 + blockingTasks.length;
+  const completed = Number(contractApproved) + Number(payrollReady);
+  const total = 2;
   const missingEmployment =
     Boolean(source.convertedAt || source.outcome === "HIRED") &&
     !source.employmentRelationship;
@@ -743,18 +775,6 @@ const onboardingGate = (source: HiringLifecycleSource, viewerUserId?: string): G
       "تنظیم مشارکت حقوق و دستمزد",
       "HR_PAYROLL_MANAGER",
     );
-  else if (
-    contractApproved &&
-    payrollReady &&
-    completedTasks < blockingTasks.length
-  ) {
-    const pending = blockingTasks.find((task) => !isCompleteTask(task.status));
-    nextAction = action(
-      "COMPLETE_ONBOARDING_TASK",
-      pending?.title || "تکمیل وظیفه مسدودکننده شروع همکاری",
-      pending?.ownerAuthority || "HR_MANAGER",
-    );
-  }
   return {
     complete: !missingEmployment && completed === total,
     requiredComplete: completed,
@@ -794,19 +814,12 @@ const activationGate = (source: HiringLifecycleSource): Gate => {
     contractClearance: source.contractClearance || "NOT_STARTED",
     compensationClearance: source.compensationClearance || "NOT_STARTED",
     payrollParticipation: source.payrollParticipation,
-    onboardingTasks: (source.onboardingTasks || []).map((task) => ({
-      ...task,
-      title: task.title || "وظیفه آماده‌سازی",
-      activationBlocker: Boolean(task.activationBlocker),
-    })),
+    onboardingTasks: [],
     insuranceEnrollment: source.insuranceEnrollment,
   });
-  const blockers = readiness.blockers.map((item) => {
-    const task = source.onboardingTasks?.find(
-      (candidate) => `ONBOARDING_TASK:${candidate.id || candidate.title}` === item.id,
-    );
-    return blocker(item.id, item.message, task?.ownerAuthority || "HR_MANAGER");
-  });
+  const blockers = readiness.blockers.map((item) =>
+    blocker(item.id, item.message, "HR_MANAGER"),
+  );
   if (source.employmentRelationship?.status === "ENDED") blockers.push(blocker("EMPLOYMENT_ENDED", "رابطه استخدامی پایان یافته است.", "HR_MANAGER"));
   return {
     complete,
@@ -824,8 +837,10 @@ export const projectHiringLifecycle = (
   source: HiringLifecycleSource,
   viewerAuthorities: Iterable<string> = [],
   viewerUserId?: string,
+  viewerActionPermissions: Iterable<string> = [],
 ): HiringLifecycleProjection => {
   const authorities = new Set(viewerAuthorities);
+  const actionPermissions = new Set(viewerActionPermissions);
   const gates = [
     applicationGate(source),
     initialHrReviewGate(source),
@@ -853,7 +868,7 @@ export const projectHiringLifecycle = (
       else if (gate.blockers.length) status = "BLOCKED";
       else if (
         [gate.action, ...gate.secondaryActions].some((candidate) =>
-          canPerform(authorities, candidate),
+          canPerform(authorities, actionPermissions, candidate),
         )
       )
         status = "ACTION_REQUIRED";
@@ -867,7 +882,7 @@ export const projectHiringLifecycle = (
       const permittedActions = actionable
         ? [gate.action, ...gate.secondaryActions].filter(
             (candidate): candidate is HiringLifecycleAction =>
-              canPerform(authorities, candidate),
+              canPerform(authorities, actionPermissions, candidate),
           )
         : [];
       const primaryAction = permittedActions[0] || null;

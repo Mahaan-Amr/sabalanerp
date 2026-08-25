@@ -14,7 +14,7 @@ import {
   ErpSelect,
 } from "@/components/erp";
 import { dateTimeFa } from "@/features/hr/hrUi";
-import { hrDisplayLabel } from "@/features/hr/hrDisplay";
+import { hrCandidateDocumentStatusLabel, hrDisplayLabel } from "@/features/hr/hrDisplay";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { formatDisplayNumber } from "@/lib/numberFormat";
 
@@ -116,42 +116,20 @@ function AnswersGroup({ group }: { group: any }) {
   ))}</div>;
 }
 
-function EvidenceGroup({ group }: { group: any }) {
+function EvidenceGroup({ entries, onDownload }: { entries: any[]; onDownload: (item: any) => void }) {
   return (
     <div className="space-y-3">
-      {(group.documents || []).map((document: any) => (
-        <ErpCard key={document.id} className="p-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <ErpFieldView label="عنوان" value={document.customTitle || hrDisplayLabel(document.category)} />
-            <ErpFieldView label="نسخه" value={Number(document.version).toLocaleString("fa-IR")} />
-            <ErpFieldView label="نوع شاهد" value={hrDisplayLabel(document.inspectionSource)} />
-            <ErpFieldView label="فایل" value={value(document.originalName)} hint={document.inspectionSource === "ORIGINAL_SEEN" && !document.originalName ? "اصل مدرک مشاهده شده و الزاماً فایل ندارد." : undefined} />
-            <ErpFieldView label="وضعیت" value={hrDisplayLabel(document.status)} />
-            <ErpFieldView label="یادداشت" value={value(document.note)} />
+      {entries.map((item: any) => (
+        <ErpCard key={`${item.category}-${item.id}-${item.version}`} className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div>
+            <p className="font-bold">{item.title}</p>
+            <p className="text-xs text-[var(--sds-text-secondary)]">{item.safeOwner} · نسخه {Number(item.version || 1).toLocaleString("fa-IR")} · {item.category === "IDENTITY" ? hrCandidateDocumentStatusLabel({ inspectionSource: item.inspectionSource, status: item.reviewStatus }) : hrDisplayLabel(item.reviewStatus)}</p>
+            {!item.restricted && <p className="text-xs text-[var(--sds-text-secondary)]">{item.originalName || "بدون فایل پیوست"}</p>}
           </div>
+          {item.canOpen ? <ErpButton label="دریافت فایل" variant="soft" onClick={() => onDownload(item)} /> : <ErpBadge>دسترسی مستقل لازم است</ErpBadge>}
         </ErpCard>
       ))}
-      {(group.assessments || []).map((assessment: any) => (
-        <ErpCard key={assessment.id} className="p-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <ErpFieldView label="ارزیابی" value={hrDisplayLabel(assessment.type)} />
-            <ErpFieldView label="نسخه" value={Number(assessment.version || 1).toLocaleString("fa-IR")} />
-            <ErpFieldView label="زمان ثبت" value={assessment.recordedAt ? dateTimeFa(assessment.recordedAt) : "—"} />
-            <ErpFieldView label="فایل شاهد" value={value(assessment.originalName)} />
-          </div>
-        </ErpCard>
-      ))}
-      {(group.preIdentityEvidence || []).map((item: any) => (
-        <ErpCard key={item.id} className="p-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <ErpFieldView label="شاهد پیش از احراز هویت" value={item.title} />
-            <ErpFieldView label="وضعیت" value={hrDisplayLabel(item.status)} />
-            <ErpFieldView label="فایل شاهد" value={value(item.originalName)} />
-            <ErpFieldView label="یادداشت نتیجه" value={value(item.resultNote)} />
-          </div>
-        </ErpCard>
-      ))}
-      {!group.documents?.length && !group.assessments?.length && !group.preIdentityEvidence?.length && (
+      {!entries.length && (
         <ErpInlineState kind="empty" title="مدرک یا شاهدی در این پرونده ثبت نشده است." />
       )}
     </div>
@@ -165,6 +143,19 @@ export default function ApplicantFullInformationPage() {
   const router = useRouter();
   const [data, setData] = useState<any>();
   const [error, setError] = useState("");
+  const downloadEvidence = async (item: any) => {
+    const request = item.downloadKind === "PRE_IDENTITY" ? hiringAPI.downloadPreIdentityEvidence(id, item.id)
+      : item.downloadKind === "DOCUMENT" ? hiringAPI.downloadDocument(id, item.id)
+      : item.downloadKind === "ASSESSMENT" ? hiringAPI.downloadAssessment(id, item.id)
+      : item.downloadKind === "CONTRACT" ? hiringAPI.downloadContract(id, item.id)
+      : item.downloadKind === "COLLATERAL_RETURN_VERSION" ? hiringAPI.downloadCollateralReturnVersion(id, item.id)
+      : hiringAPI.downloadCollateral(id, item.id);
+    try {
+      const response = await request;
+      const url = URL.createObjectURL(response.data);
+      const anchor = window.document.createElement("a"); anchor.href = url; anchor.download = item.originalName || item.title; anchor.click(); URL.revokeObjectURL(url);
+    } catch (cause) { setError(hiringError(cause)); }
+  };
 
   useEffect(() => {
     hiringAPI.getFullInformation(id)
@@ -217,7 +208,7 @@ export default function ApplicantFullInformationPage() {
           ) : selectedGroup.key === "APPLICATION_ANSWERS" ? (
             <AnswersGroup group={selectedGroup} />
           ) : (
-            <EvidenceGroup group={selectedGroup} />
+            <EvidenceGroup entries={data.documentIndex || []} onDownload={downloadEvidence} />
           )}
         </ErpSection>}
       </>}

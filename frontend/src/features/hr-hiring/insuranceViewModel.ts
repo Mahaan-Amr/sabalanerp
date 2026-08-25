@@ -2,13 +2,13 @@ export type InsuranceFormState = {
   registrationPath: string;
   status: string;
   effectiveDate: string;
-  communicationMethod: string;
-  communicatedAt: string;
+  communicationMethod: string | null;
+  communicatedAt: string | null;
 };
 
 export const insuranceSubmissionBlocker = (form: InsuranceFormState) => {
   if (form.registrationPath === "INDEPENDENT_REQUEST") {
-    return form.communicationMethod.trim() && form.communicatedAt
+    return String(form.communicationMethod ?? "").trim() && form.communicatedAt
       ? null
       : "communication-required";
   }

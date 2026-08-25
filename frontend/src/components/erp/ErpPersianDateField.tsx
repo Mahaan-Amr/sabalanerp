@@ -8,16 +8,20 @@ export default function ErpPersianDateField({
   value,
   onChange,
   placeholder,
+  required = false,
+  disableFutureDates = false,
 }: {
   label: ReactNode;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  required?: boolean;
+  disableFutureDates?: boolean;
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)]">{label}</span>
-      <PersianCalendarComponent value={value} onChange={onChange} placeholder={placeholder} />
+      <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)]">{label}{required ? <span aria-hidden="true"> *</span> : null}</span>
+      <PersianCalendarComponent value={value} onChange={onChange} placeholder={placeholder} disableFutureDates={disableFutureDates} />
     </label>
   );
 }

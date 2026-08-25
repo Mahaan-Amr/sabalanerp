@@ -55,4 +55,11 @@ assert.deepEqual(blocked.blockers.map((item) => item.id), [
   'PAPER_CONTRACT_NOT_APPROVED', 'PAYROLL_NOT_CONFIGURED', 'ONBOARDING_TASK:task-1',
 ]);
 
+const payrollRecheck = buildEmploymentActivationReadiness({
+  ...base,
+  payrollParticipation: { id: 'payroll-1', startRevisionReviewRequired: true },
+});
+assert.equal(payrollRecheck.ready, false);
+assert.equal(payrollRecheck.blockers[0].id, 'PAYROLL_START_REVISION_NOT_REVIEWED');
+
 console.log('HR employment activation readiness tests passed.');

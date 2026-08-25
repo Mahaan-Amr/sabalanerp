@@ -1878,6 +1878,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     const deliveryReferences = reconcileDeliveryProductReferences(products, data.deliveries || []);
     return {
       ...data,
+      customer: data.customer ? {
+        ...data.customer,
+        projectAddresses: data.customer.projectAddresses || []
+      } : data.customer,
       serviceRows: data.serviceRows || [],
       products,
       deliveries: deliveryReferences.deliveries
@@ -6286,7 +6290,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           open={!editRecoveryBlocked && showProductModal && productConfig.productType === 'stair'}
           onClose={requestCloseStairConfiguration}
           labelledBy="stair-product-dialog-title"
-          className="stair-v2-modal flex w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)] text-[var(--sds-text-primary)]"
+          className="stair-v2-modal sds-neumorphic-workflow-scope flex w-full max-w-4xl flex-col overflow-hidden rounded-[var(--sds-radius-dialog)] text-[var(--sds-text-primary)]"
         >
               <div className="stair-v2-header flex min-h-14 flex-shrink-0 items-center justify-between border-b border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-4 dark:border-[var(--sds-border-subtle)] dark:bg-[var(--sds-surface-subtle)]">
                 <h3 id="stair-product-dialog-title" className="text-base font-bold text-[var(--sds-text-primary)]">
@@ -6508,7 +6512,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             <div className="relative">
                               <ErpInput
                                 name="stone"
-                                className="w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 py-2 text-[var(--sds-text-primary)] transition-all focus:border-[var(--sds-accent)] focus:outline-none dark:border-[var(--sds-border-default)] dark:text-[var(--sds-text-inverse)]"
+                                className="w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 py-2 text-[var(--sds-text-primary)] transition-all focus:border-[var(--sds-accent)] focus:outline-none dark:border-[var(--sds-border-default)] dark:text-[var(--sds-text-primary)]"
                                 value={stairSystemV2.stoneSearchTerm}
                                 onChange={(e) => stairSystemV2.setStoneSearchTerm(e.target.value)}
                               />
@@ -6534,7 +6538,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     }}
                                   >
                                     {/* 🎯 Show complete product name using generateFullProductName */}
-                                    <div className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                                    <div className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                                       {p.fullName || generateFullProductName(p) || p.namePersian || p.name}
                                     </div>
                                   </ErpPressable>
@@ -6584,7 +6588,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             }}
                                 min={0}
                                 step={0.01}
-                                className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
+                                className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                               />
                             <div className="mt-3">
                               <label className="mb-2 flex items-center justify-between text-sm font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
@@ -6654,7 +6658,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 }}
                                 min={0}
                                 step={0.01}
-                                className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-2.5 text-[var(--sds-text-primary)] transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-inverse)]"
+                                className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] px-4 py-2.5 text-[var(--sds-text-primary)] transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)] dark:text-[var(--sds-text-primary)]"
                               />
                               {draftErrors.motherLength && (
                                 <p className="mt-1 text-xs text-[var(--sds-danger)]">
@@ -6729,7 +6733,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             }}
                               min={0}
                               step={0.1}
-                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
+                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                             />
                           {draftErrors.width && (
                             <p className="mt-1 text-xs text-[var(--sds-danger)]">{draftErrors.width}</p>
@@ -6770,7 +6774,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             }}
                               min={1}
                               step={1}
-                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
+                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                             />
                           {draftErrors.quantity && (
                             <p className="mt-1 text-xs text-[var(--sds-danger)]">{draftErrors.quantity}</p>
@@ -6864,7 +6868,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                             }}
                               min={0}
                               step={1000}
-                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
+                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                             />
                           {draftErrors.pricePerSquareMeter && (
                             <p className="mt-1 text-xs text-[var(--sds-danger)]">{draftErrors.pricePerSquareMeter}</p>
@@ -6913,7 +6917,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                     min={0}
                                     max={100}
                                     step={1}
-                                    className="w-24 rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent text-sm"
+                                    className="w-24 rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent text-sm"
                                   />
                                   <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">%</span>
                                 </div>
@@ -7021,7 +7025,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-2">
                             <div className="w-1 h-5 bg-gradient-to-b from-[var(--sds-purple)] to-[var(--sds-purple-surface)] rounded-full"></div>
-                            <h5 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">ابزارها (بر متر)</h5>
+                            <h5 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">ابزارها (بر متر)</h5>
                           </div>
                           {stairSystemV2.stairActivePart === 'landing' && (
                             <span className="text-xs text-[var(--sds-purple)] dark:text-[var(--sds-purple)] bg-[var(--sds-purple-surface)] dark:bg-[var(--sds-purple-surface)] px-2 py-1 rounded">مدل لبه پاگرد: محیط/جهت‌ها</span>
@@ -7031,7 +7035,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           <div>
                             <label className="block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)] mb-2">افزودن ابزار</label>
                             <ErpInput
-                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
+                              className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                               value={stairSystemV2.toolsSearchTerm}
                               onChange={(e) => stairSystemV2.setToolsSearchTerm(e.target.value)}
                               onFocus={() => stairSystemV2.setToolsDropdownOpen(true)}
@@ -7078,7 +7082,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       stairSystemV2.setToolsDropdownOpen(false);
                                     }}
                                   >
-                                    <div className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">{t.namePersian || t.name}</div>
+                                    <div className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{t.namePersian || t.name}</div>
                                     {(t.pricePerMeter || t.price || t.costPerMeter) && (
                                       <div className="text-xs text-[var(--sds-purple)] dark:text-[var(--sds-purple)] mt-0.5">
                                         {formatPrice(t.pricePerMeter || t.price || t.costPerMeter)}/m
@@ -7240,7 +7244,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       {true && (
                       <div className="border-y border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
                         <div className="mb-3 flex items-center justify-between">
-                          <h5 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">لایه‌ها</h5>
+                          <h5 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">لایه‌ها</h5>
                           {(draft.numberOfLayersPerStair || 0) > 0 && (
                             <ErpPressable
                               type="button"
@@ -7397,7 +7401,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               }}
                               min={1}
                               step={1}
-                              className="w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 py-2 text-[var(--sds-text-primary)] outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-default)] dark:text-[var(--sds-text-inverse)]"
+                              className="w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 py-2 text-[var(--sds-text-primary)] outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-default)] dark:text-[var(--sds-text-primary)]"
                             />
                           </div>
 
@@ -7433,13 +7437,13 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                   }}
                                   min={0}
                                   step={0.1}
-                                  className="w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 py-2 text-[var(--sds-text-primary)] outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-default)] dark:text-[var(--sds-text-inverse)]"
+                                  className="w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 py-2 text-[var(--sds-text-primary)] outline-none focus:border-[var(--sds-accent)] dark:border-[var(--sds-border-default)] dark:text-[var(--sds-text-primary)]"
                                 />
                               </div>
 
 
                               <div className="md:col-span-2 flex min-h-9 items-center justify-between border-b border-[var(--sds-border-default)] py-2 text-xs dark:border-[var(--sds-border-subtle)]">
-                                <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                                <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                                   خوراک اره
                                 </span>
                                 <CompactSwitch
@@ -7695,7 +7699,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           <>
                                             <ErpInput
                                               name="layerStone"
-                                              className="w-full rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
+                                              className="w-full rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                                               value={stairSystemV2.layerStoneSearchTerm}
                                               onChange={(e) => stairSystemV2.setLayerStoneSearchTerm(e.target.value)}
                                               onFocus={() => stairSystemV2.setLayerStoneDropdownOpen(true)}
@@ -7733,7 +7737,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                                       clearDraftFieldErrorWrapper(stairSystemV2.stairActivePart, 'layerStone');
                                                     }}
                                                   >
-                                                    <div className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                                                    <div className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                                                       {(p as any).fullName || generateFullProductName(p as Product) || p.namePersian || p.name}
                                                     </div>
                                                   </ErpPressable>
@@ -7744,7 +7748,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         ) : (
                                           <div className="flex items-center justify-between rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-surface-raised)] p-3 dark:bg-[var(--sds-surface-subtle)]">
                                             <div>
-                                              <div className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">
+                                              <div className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
                                                 {draft.layerStoneLabel || draft.layerStoneProduct.namePersian || draft.layerStoneProduct.name}
                                               </div>
                                               <div className="text-[11px] text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
@@ -7822,7 +7826,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                           }}
                                           min={0}
                                           step={1000}
-                                          className="w-full rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
+                                          className="w-full rounded-lg bg-[var(--sds-surface-raised)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-4 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                                         />
                                         {stairSystemV2.stairDraftErrors[stairSystemV2.stairActivePart]?.layerStonePrice && (
                                           <p className="mt-1 text-xs text-[var(--sds-danger)]">
@@ -7884,7 +7888,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                               min={0}
                                               max={100}
                                               step={1}
-                                              className="w-24 rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent text-sm"
+                                              className="w-24 rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent text-sm"
                                             />
                                             <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">%</span>
                                             <p className="text-[11px] text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
@@ -8554,7 +8558,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                       )}
 
                       <div className="flex min-h-9 items-center justify-between border-b border-[var(--sds-border-default)] py-2 text-xs dark:border-[var(--sds-border-subtle)]">
-                        <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">برش کالیبر</span>
+                        <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">برش کالیبر</span>
                         <CompactSwitch
                           label="برش کالیبر"
                           checked={draft.calibrationSelection === 'manual'
@@ -8580,7 +8584,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
                               <div className="w-1 h-5 bg-gradient-to-b from-[var(--sds-accent)] to-[var(--sds-accent-hover)] rounded-full"></div>
-                              <h5 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)]">پرداخت سنگ</h5>
+                              <h5 className="text-sm font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">پرداخت سنگ</h5>
                             </div>
                             <span className="text-xs text-[var(--sds-accent)] dark:text-[var(--sds-accent)] bg-[var(--sds-accent-soft)] dark:bg-[var(--sds-accent-soft)] px-2 py-1 rounded">
                               هزینه به ازای {finishingUnitLabel}
@@ -8658,7 +8662,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       ...draft,
                                       finishingSearchTerm: e.target.value
                                     } as any)}
-                                    className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
+                                    className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                                   />
                                   <div className="max-h-44 overflow-y-auto rounded-lg border border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)] bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] divide-y divide-[var(--sds-border-subtle)] dark:divide-[var(--sds-border-subtle)]">
                                     {visibleStoneFinishings.length > 0 ? visibleStoneFinishings.map(option => {
@@ -8731,7 +8735,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                       min={0}
                                       max={maxFinishingQuantity || undefined}
                                       step={0.01}
-                                      className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-inverse)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
+                                      className="w-full rounded-lg bg-[var(--sds-surface-subtle)] dark:bg-[var(--sds-surface-subtle)] border border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] px-3 py-2.5 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--sds-focus-ring)] focus:border-transparent transition-all"
                                     />
                                     {Number(maxFinishingQuantity || 0) > 0 && (
                                       <p className="mt-1 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">

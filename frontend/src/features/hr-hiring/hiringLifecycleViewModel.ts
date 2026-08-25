@@ -54,6 +54,45 @@ export const hiringTaskDetailVisible = (
   id: string,
 ) => Boolean(hiringTaskCapability(tasks, id)?.detailVisible);
 
+export interface StartPreparationStatusItem {
+  id: "SIGNED_CONTRACT" | "PAYROLL_PARTICIPATION" | "INSURANCE";
+  label: string;
+  status: string;
+  ownerAuthorities: string[];
+  activationEffect: string;
+}
+
+const startPreparationStatusDefinitions = [
+  {
+    id: "SIGNED_CONTRACT",
+    activationEffect: "الزامی برای فعال‌سازی",
+  },
+  {
+    id: "PAYROLL_PARTICIPATION",
+    activationEffect: "الزامی برای فعال‌سازی",
+  },
+  {
+    id: "INSURANCE",
+    activationEffect: "پیگیری پس از شروع مجاز است",
+  },
+] as const;
+
+export const startPreparationStatusItems = (
+  tasks: HiringTaskCapability[] | null | undefined,
+): StartPreparationStatusItem[] => startPreparationStatusDefinitions.flatMap(
+  (definition) => {
+    const capability = hiringTaskCapability(tasks, definition.id);
+    return capability
+      ? [{
+          ...definition,
+          label: capability.title,
+          status: capability.status,
+          ownerAuthorities: capability.ownerAuthorities,
+        }]
+      : [];
+  },
+);
+
 export const hiringLifecycleStatusLabel: Record<HiringLifecycleStatus, string> =
   {
     COMPLETED: "تکمیل‌شده",
@@ -85,6 +124,21 @@ export const resolveSelectedHiringPhase = (
     ? (requestedPhase as string)
     : projection.currentPhaseId;
 
+export const resolvePhaseAfterLifecycleAdvance = ({
+  requestedPhaseId,
+  previousCurrentPhaseId,
+  nextCurrentPhaseId,
+}: {
+  requestedPhaseId: string | null;
+  previousCurrentPhaseId: string | null;
+  nextCurrentPhaseId: string;
+}) =>
+  previousCurrentPhaseId &&
+  requestedPhaseId === previousCurrentPhaseId &&
+  previousCurrentPhaseId !== nextCurrentPhaseId
+    ? nextCurrentPhaseId
+    : requestedPhaseId;
+
 export const selectedHiringPhase = (
   projection: HiringLifecycleProjection,
   requestedPhase: string | null | undefined,
@@ -95,3 +149,10 @@ export const selectedHiringPhase = (
     projection.phases[0]
   );
 };
+
+export const shouldLoadCompanyEvaluationPlan = (
+  phaseId: string | null | undefined,
+  actionPermissions: readonly string[],
+) =>
+  phaseId === "COMPANY_EVALUATION_PLAN" &&
+  actionPermissions.includes("VIEW_COMPANY_EVALUATION_RESULTS");

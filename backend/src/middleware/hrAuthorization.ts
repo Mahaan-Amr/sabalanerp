@@ -16,7 +16,10 @@ export const requireHrAuthorization = (requirement: {
   systemRoles?: string[];
 }) => async (req: HrAuthorizedRequest, res: Response, next: NextFunction) => {
   try {
-    if (!req.user) return res.status(401).json({ success: false, error: 'Authentication required' });
+    if (!req.user) return res.status(401).json({
+      success: false,
+      message: 'نشست شما معتبر نیست. دوباره وارد سامانه شوید و عملیات را تکرار کنید.',
+    });
     const { dutyIdFromRequest, ...fixedRequirement } = requirement;
     const decision = await authorizeHrUser(prisma, req.user.id, {
       ...fixedRequirement,
@@ -24,10 +27,16 @@ export const requireHrAuthorization = (requirement: {
     });
     req.hrAuthorization = { missingLayers: decision.missingLayers };
     if (!decision.allowed) {
+      const trackingId = `HR-AUTH-${Date.now().toString(36).toUpperCase()}`;
+      console.warn('HR authorization rejected.', {
+        trackingId,
+        actorId: req.user.id,
+        missingLayers: decision.missingLayers,
+      });
       return res.status(403).json({
         success: false,
-        error: 'HR_AUTHORIZATION_DENIED',
-        missingLayers: decision.missingLayers,
+        message: `این عملیات متوقف شد چون مجوز فعال لازم در منابع انسانی را ندارید. از مدیر منابع انسانی بخواهید مجوز این اقدام را بررسی کند. کد پیگیری ${trackingId}`,
+        trackingId,
       });
     }
     return next();

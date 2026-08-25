@@ -1,5 +1,6 @@
 import express from 'express';
 import { FEATURE_PERMISSIONS, FEATURES, requireNarrowFeatureAccess } from '../middleware/feature';
+import { requireHrFeature } from '../middleware/hrAuthorization';
 import { fail, prisma } from './dispatch-master-data.shared';
 
 const router = express.Router();
@@ -10,8 +11,8 @@ const read = async (ownerScope: 'HR' | 'VEHICLE_OPERATIONS' | 'GUARD', subjectTy
   } catch (error) { return fail(res, error, 'Read workspace-owned dispatch master-data audit'); }
 };
 
-router.get('/audit/hr/internal-driver/:subjectId', requireNarrowFeatureAccess(FEATURES.HR_DRIVER_BIOMETRIC_AUDIT_VIEW, FEATURE_PERMISSIONS.VIEW), (req, res) => read('HR', 'INTERNAL_DRIVER_ELIGIBILITY', req.params.subjectId, res));
-router.get('/audit/vehicle-operations/:subjectType/:subjectId', requireNarrowFeatureAccess(FEATURES.HR_VEHICLE_OPERATIONS_AUDIT_VIEW, FEATURE_PERMISSIONS.VIEW), (req, res) => {
+router.get('/audit/hr/internal-driver/:subjectId', requireHrFeature(FEATURES.HR_DRIVER_BIOMETRIC_AUDIT_VIEW, 'VIEW'), (req, res) => read('HR', 'INTERNAL_DRIVER_ELIGIBILITY', req.params.subjectId, res));
+router.get('/audit/vehicle-operations/:subjectType/:subjectId', requireHrFeature(FEATURES.HR_VEHICLE_OPERATIONS_AUDIT_VIEW, 'VIEW'), (req, res) => {
   if (!['INTERNAL_DRIVER_PROFILE', 'COMPANY_VEHICLE'].includes(req.params.subjectType)) return res.status(404).json({ success: false, error: 'Evidence subject was not found.' });
   return read('VEHICLE_OPERATIONS', req.params.subjectType, req.params.subjectId, res);
 });

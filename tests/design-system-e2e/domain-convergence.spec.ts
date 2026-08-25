@@ -30,6 +30,33 @@ test('public login remains accessible at mobile width and 200% zoom in both them
   await expect(page.getByRole('button', { name: 'ورود', exact: true })).toBeVisible();
 });
 
+test('login errors are Persian and successful login starts protected providers without 401 races', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('invalid-e2e-user');
+  await page.locator('input[type="password"]').fill('invalid-e2e-password');
+  await page.getByRole('button', { name: 'ورود', exact: true }).click();
+  const loginError = page.getByRole('alert').filter({ hasText: 'نام کاربری یا رمز عبور نادرست است.' });
+  await expect(loginError).toBeVisible();
+  await expect(loginError).not.toContainText('Invalid credentials');
+
+  const protected401s: string[] = [];
+  page.on('response', (response) => {
+    if (response.status() === 401 && response.url().includes('/api/workspace-permissions')) {
+      protected401s.push(response.url());
+    }
+  });
+  await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(
+    process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin',
+  );
+  await page.locator('input[type="password"]').fill(
+    process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123',
+  );
+  await page.getByRole('button', { name: 'ورود', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
+  await page.waitForLoadState('networkidle');
+  expect(protected401s).toEqual([]);
+});
+
 test('Administration security actions use a pending-safe canonical dialog', async ({ page }) => {
   await loginAsAdmin(page);
   const userId = await page.evaluate(async () => {
@@ -62,7 +89,8 @@ test('HR work schedule and Persian time selection are RTL, keyboard, mobile, and
   await expect(page.getByRole('heading', { name: 'ساعت کاری' })).toBeVisible();
 
   await setViewportAndZoom(page, { width: 390, height: 844 });
-  await page.getByRole('button', { name: 'شنبه', exact: true }).click();
+  const saturday = page.getByRole('button', { name: 'شنبه', exact: true });
+  if (await saturday.getAttribute('aria-pressed') !== 'true') await saturday.click();
   const opener = page.getByRole('button', { name: 'زمان شروع شنبه' });
   await opener.click();
   const dialog = page.getByRole('dialog', { name: 'انتخاب ساعت' });
@@ -102,10 +130,10 @@ test('Hiring lifecycle journey remains keyboard, reduced-motion, mobile, zoom, a
   const expectedPhaseCount = Number(casePayload?.data?.lifecycle?.totalPhases);
   expect(expectedPhaseCount).toBeGreaterThanOrEqual(8);
   await expect(page.getByText('مسیر جذب و شروع همکاری')).toBeVisible({ timeout: 15_000 });
-  await page.getByRole('textbox', { name: 'دلیل رد نهایی پرونده' }).fill('آزمون گذار کامل چرخه جذب');
-  await page.getByRole('button', { name: 'ثبت رد نهایی و بستن دسترسی' }).click();
-  const rejectionDialog = page.getByRole('dialog', { name: 'تأیید رد نهایی' });
+  await page.getByRole('button', { name: 'رد نهایی پرونده', exact: true }).click();
+  const rejectionDialog = page.getByRole('dialog', { name: 'رد نهایی پرونده' });
   await expect(rejectionDialog).toBeVisible();
+  await rejectionDialog.getByRole('textbox', { name: 'دلیل رد نهایی پرونده' }).fill('آزمون گذار کامل چرخه جذب');
   await rejectionDialog.getByRole('button', { name: 'بستن پرونده و دسترسی' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'رد نهایی ثبت و پرونده بسته شد.' })).toBeVisible();
   expect(finalRejectionPayload?.reason).toBe('آزمون گذار کامل چرخه جذب');

@@ -51,6 +51,12 @@ const labels: Record<string, string> = {
   CASH: "وجه نقد",
   RETURNED: "بازگردانده‌شده",
   HIRED: "استخدام‌شده",
+  WITHDRAWN: "انصراف متقاضی",
+  REQUEST_CANCELLED: "لغو درخواست",
+  SCREENING: "بررسی اولیه",
+  ASSESSMENT: "ارزیابی",
+  OFFER: "پیشنهاد همکاری",
+  CLOSED: "بسته‌شده",
   RECEIVED: "دریافت‌شده",
   VERIFIED: "تأییدشده",
   MISSING: "دریافت‌نشده",
@@ -77,6 +83,12 @@ export const authorityLabel = (value?: string | null) =>
   (value && labels[value]) || (value ? "خطای طبقه‌بندی" : "—");
 
 export const hrDisplayLabel = authorityLabel;
+
+export const hrCandidateDocumentStatusLabel = (document: { inspectionSource?: string | null; status?: string | null }) => {
+  if (document.inspectionSource === "ORIGINAL_SEEN") return "مشاهده‌شده";
+  if (document.inspectionSource === "COPY_RECEIVED") return "دریافت‌شده";
+  return hrDisplayLabel(document.status);
+};
 
 export const assessmentTypeLabel = (value?: string | null) => {
   const assessmentLabels: Record<string, string> = {

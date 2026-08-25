@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { publishNotificationEvent } from '../notificationService';
 import { authorizeHrUser, resolveHrNamedResponsibility } from '../hrAuthorizationService';
+import { lockCrossWorkspaceDuty } from '../crossWorkspaceDutyLock';
 
 const responseSchema = Object.freeze({
   type: 'object',
@@ -17,6 +18,7 @@ function dutyDefinition(
   responsibilityTypeCode: string,
   destinationWorkspaceCode: string | null,
   actionPermissionCode: string | null,
+  accountabilityModel: 'SHARED_DECISION' | 'INDIVIDUAL_EXECUTION',
   routingScope: 'GLOBAL' | 'HIRING_POSITION' = 'GLOBAL',
 ) {
   return {
@@ -26,6 +28,8 @@ function dutyDefinition(
     responsibilityTypeCode,
     actionPermissionCode,
     destinationWorkspaceCode,
+    accountabilityModel,
+    workspaceAdminOverrideDenied: true,
     routingScope,
     allowedFields: ['title', 'description', 'dueAt'] as const,
     allowedEvidence: [] as const,
@@ -44,17 +48,19 @@ export const HR_DUTY_DEFINITIONS = Object.freeze({
     responsibilityTypeCode: 'HR_PROCESSOR',
     actionPermissionCode: 'MANAGE_HR_WORK',
     destinationWorkspaceCode: 'HUMAN_RESOURCES',
+    accountabilityModel: 'SHARED_DECISION' as const,
+    workspaceAdminOverrideDenied: true,
     routingScope: 'GLOBAL' as const,
     allowedActionCodes,
     responseSchema,
   },
-  FINANCE_RECORDING: dutyDefinition('FINANCE_RECORDING', 'FINANCE_RECORDER', 'ACCOUNTING', 'MANAGE_FINANCE_EVIDENCE'),
-  FINANCE_APPROVAL: dutyDefinition('FINANCE_APPROVAL', 'FINANCE_MANAGER', 'ACCOUNTING', 'MANAGE_FINANCE_EVIDENCE'),
-  COMPANY_MANAGER_REVIEW: dutyDefinition('COMPANY_MANAGER_REVIEW', 'COMPANY_MANAGER', null, 'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS'),
-  COMPANY_MANAGER_DECISION: dutyDefinition('COMPANY_MANAGER_DECISION', 'COMPANY_MANAGER', null, 'RECORD_FINAL_MANAGEMENT_DECISION'),
-  RESPONSIBLE_SUPERVISOR_REVIEW: dutyDefinition('RESPONSIBLE_SUPERVISOR_REVIEW', 'RESPONSIBLE_SUPERVISOR', null, null, 'HIRING_POSITION'),
-  PAYROLL_PREPARATION: dutyDefinition('PAYROLL_PREPARATION', 'HR_PAYROLL_PROCESSOR', 'HUMAN_RESOURCES', 'MANAGE_PAYROLL'),
-  PAYROLL_APPROVAL: dutyDefinition('PAYROLL_APPROVAL', 'HR_PAYROLL_MANAGER', 'HUMAN_RESOURCES', 'MANAGE_PAYROLL'),
+  FINANCE_RECORDING: dutyDefinition('FINANCE_RECORDING', 'FINANCE_RECORDER', 'ACCOUNTING', 'RECORD_COLLATERAL_CUSTODY', 'INDIVIDUAL_EXECUTION'),
+  FINANCE_APPROVAL: dutyDefinition('FINANCE_APPROVAL', 'FINANCE_MANAGER', 'ACCOUNTING', 'VERIFY_COLLATERAL_CUSTODY', 'SHARED_DECISION'),
+  COMPANY_MANAGER_REVIEW: dutyDefinition('COMPANY_MANAGER_REVIEW', 'COMPANY_MANAGER', null, 'MANAGE_PRE_EMPLOYMENT_REQUIREMENTS', 'SHARED_DECISION'),
+  COMPANY_MANAGER_DECISION: dutyDefinition('COMPANY_MANAGER_DECISION', 'COMPANY_MANAGER', null, 'RECORD_FINAL_MANAGEMENT_DECISION', 'SHARED_DECISION'),
+  RESPONSIBLE_SUPERVISOR_REVIEW: dutyDefinition('RESPONSIBLE_SUPERVISOR_REVIEW', 'RESPONSIBLE_SUPERVISOR', null, null, 'SHARED_DECISION', 'HIRING_POSITION'),
+  PAYROLL_PREPARATION: dutyDefinition('PAYROLL_PREPARATION', 'HR_PAYROLL_PROCESSOR', 'HUMAN_RESOURCES', 'MANAGE_PAYROLL', 'INDIVIDUAL_EXECUTION'),
+  PAYROLL_APPROVAL: dutyDefinition('PAYROLL_APPROVAL', 'HR_PAYROLL_MANAGER', 'HUMAN_RESOURCES', 'MANAGE_PAYROLL', 'SHARED_DECISION'),
 });
 
 type DutyDefinition = typeof HR_DUTY_DEFINITIONS[keyof typeof HR_DUTY_DEFINITIONS];
@@ -89,6 +95,7 @@ type DutyResponseInput = {
   separationOfDutiesSatisfied: boolean;
   allowedActionCodes: readonly string[];
   sourceActorUserId?: string | null;
+  sharedDecision?: boolean;
 };
 
 export type HrDutyResponseDenialCode =
@@ -106,7 +113,9 @@ export type HrDutyResponseDenialCode =
 export const evaluateHrDutyResponse = (input: DutyResponseInput):
   { allowed: true } | { allowed: false; code: HrDutyResponseDenialCode } => {
   if (input.duty.status !== 'OPEN') return { allowed: false, code: 'DUTY_NOT_OPEN' };
-  if (input.duty.currentAssigneeUserId !== input.actorUserId) return { allowed: false, code: 'ASSIGNEE_CHANGED' };
+  if (!input.sharedDecision && input.duty.currentAssigneeUserId !== input.actorUserId) {
+    return { allowed: false, code: 'ASSIGNEE_CHANGED' };
+  }
   if (input.duty.sourceVersion !== input.expectedSourceVersion) return { allowed: false, code: 'SOURCE_VERSION_CHANGED' };
   if (input.duty.envelopeVersion !== input.expectedEnvelopeVersion) return { allowed: false, code: 'ENVELOPE_VERSION_CHANGED' };
   if (!input.sourceIsCurrent) return { allowed: false, code: 'SOURCE_STATE_CHANGED' };
@@ -234,6 +243,23 @@ const destinationManagerIds = async (
     select: { id: true },
   });
   return users.map(({ id }) => id);
+};
+
+const sharedDecisionRecipientIds = async (
+  tx: Prisma.TransactionClient,
+  actionPermissionCode: string | null,
+  sourceActorUserId: string | null,
+  now: Date,
+) => {
+  const users = await tx.user.findMany({
+    where: { isActive: true, erasedAt: null, ...(sourceActorUserId ? { id: { not: sourceActorUserId } } : {}) },
+    select: { id: true },
+  });
+  if (!actionPermissionCode) return users.map(({ id }) => id);
+  const allowed = await Promise.all(users.map(({ id }) => authorizeHrUser(tx, id, {
+    actionPermissionCodes: [actionPermissionCode],
+  }, now).then((result) => result.allowed)));
+  return users.filter((_user, index) => allowed[index]).map(({ id }) => id);
 };
 
 const writeDutyNotification = async (
@@ -425,7 +451,9 @@ export const createHrDutyFromLegacyWorkItem = (
     throw new Error('HR_DUTY_DESTINATION_INCOMPATIBLE_WITH_ENVELOPE');
   }
   const envelope = await upsertDutyEnvelope(tx, definition, input.actorUserId, destinationWorkspaceCode);
-  const assigned = resolution.status === 'RESOLVED';
+  const sharedDecision = definition.accountabilityModel === 'SHARED_DECISION';
+  const assigned = !sharedDecision && resolution.status === 'RESOLVED';
+  const resolutionReason = resolution.status === 'UNRESOLVED' ? resolution.reason : null;
   const duty = await tx.crossWorkspaceDuty.upsert({
     where: { stableKey },
     update: {},
@@ -464,7 +492,7 @@ export const createHrDutyFromLegacyWorkItem = (
       policyVersion: input.policyVersion,
     },
   });
-  const eventCode = assigned ? 'ASSIGNED' : 'UNASSIGNED_TRIAGE';
+  const eventCode = sharedDecision ? 'QUEUED' : assigned ? 'ASSIGNED' : 'UNASSIGNED_TRIAGE';
   await tx.crossWorkspaceDutyAuditVersion.upsert({
     where: { dutyId_version: { dutyId: duty.id, version: 1 } },
     update: {},
@@ -482,29 +510,30 @@ export const createHrDutyFromLegacyWorkItem = (
         destinationWorkspaceCode,
         destinationQueueCode,
       }),
-      reason: assigned ? null : resolution.reason,
+      reason: sharedDecision || assigned ? null : resolutionReason,
     },
   });
   const routedSource = await tx.hrWorkItem.update({
     where: { id: source.id },
-    data: assigned
+    data: assigned || sharedDecision
       ? { dutyRoutingBlockedAt: null, dutyRoutingBlockReason: null }
-      : { dutyRoutingBlockedAt: now, dutyRoutingBlockReason: resolution.reason },
+      : { dutyRoutingBlockedAt: now, dutyRoutingBlockReason: resolutionReason },
   });
-  if (!assigned) await tx.hrWorkItemAudit.create({ data: {
+  if (!assigned && !sharedDecision) await tx.hrWorkItemAudit.create({ data: {
     workItemId: source.id,
     actorUserId: input.actorUserId,
     eventType: 'DUTY_ROUTING_BLOCKED',
     beforeJson: asJson(source),
     afterJson: asJson(routedSource),
   } });
-  const recipients = assigned
-    ? [resolution.assignedUserId]
-    : await destinationManagerIds(tx, destinationWorkspaceCode, now);
+  const recipients = sharedDecision
+    ? await sharedDecisionRecipientIds(tx, definition.actionPermissionCode, sourceActorUserId, now)
+    : assigned ? [resolution.assignedUserId]
+      : await destinationManagerIds(tx, destinationWorkspaceCode, now);
   await writeDutyNotification(tx, {
     dutyId: duty.id,
     auditVersion: 1,
-    eventType: assigned ? 'HR_DUTY_ASSIGNED' : 'HR_DUTY_UNASSIGNED_TRIAGE',
+    eventType: assigned || sharedDecision ? 'HR_DUTY_ASSIGNED' : 'HR_DUTY_UNASSIGNED_TRIAGE',
     eventCode,
     recipientUserIds: recipients,
     destinationWorkspaceCode,
@@ -529,6 +558,7 @@ export const respondToHrDuty = (
   input: RespondToHrDutyInput,
 ) => inTransaction(database, async (tx) => {
   const now = input.now ?? new Date();
+  await lockCrossWorkspaceDuty(tx, input.dutyId);
   const duty = await tx.crossWorkspaceDuty.findUniqueOrThrow({
     where: { id: input.dutyId },
     include: { envelope: true, responsibility: true },
@@ -536,6 +566,7 @@ export const respondToHrDuty = (
   const structuredResult = { actionCode: input.actionCode, reason: input.reason };
   if (duty.sourceType !== 'HR_WORK_ITEM') throw new Error('HR_DUTY_SOURCE_ADAPTER_NOT_REGISTERED');
   const definition = definitionFor(duty.sourceActionCode);
+  const sharedDecision = definition.accountabilityModel === 'SHARED_DECISION';
   assertDutyEnvelopeCurrent(definition, duty.envelope);
   const source = await tx.hrWorkItem.findUniqueOrThrow({ where: { id: duty.sourceId } });
   const currentSourceVersion = await legacySourceVersion(tx, source.id);
@@ -552,21 +583,25 @@ export const respondToHrDuty = (
       : storedResult?.actionCode === 'REJECT'
         ? source.status === 'WAIVED'
         : source.status === 'IN_PROGRESS';
-    const replayPermission = definition.actionPermissionCode
-      ? await authorizeHrUser(tx, input.actorUserId, { actionPermissionCodes: [definition.actionPermissionCode] }, now)
-      : { allowed: true };
+    const replayPermission = sharedDecision
+      ? { allowed: await canAccessHrWorkItemSharedDecision(tx, {
+        dutyId: duty.id, actorUserId: input.actorUserId, includeCompleted: true, now,
+      }) }
+      : definition.actionPermissionCode
+        ? await authorizeHrUser(tx, input.actorUserId, { actionPermissionCodes: [definition.actionPermissionCode] }, now)
+        : { allowed: true };
     const replayIsAuthorized = replayPermission.allowed
       && input.expectedSourceVersion === duty.sourceVersion
       && input.expectedEnvelopeVersion === duty.envelopeVersion
       && currentSourceVersion === duty.sourceVersion
-      && duty.currentAssigneeUserId === input.actorUserId
+      && (sharedDecision || duty.currentAssigneeUserId === input.actorUserId)
       && duty.sourceActorUserId !== input.actorUserId
       && terminalSourceMatches;
     if (resultMatches && replayIsAuthorized) return { duty, replayed: true };
-    throw new Error(resultMatches ? 'DUTY_REPLAY_REVALIDATION_FAILED' : 'DUTY_NOT_OPEN');
+    throw new Error(resultMatches ? 'DUTY_REPLAY_REVALIDATION_FAILED' : sharedDecision ? 'DUTY_ALREADY_DECIDED' : 'DUTY_NOT_OPEN');
   }
   const authorization = await authorizeHrUser(tx, input.actorUserId, {
-    dutyId: duty.id,
+    ...(!sharedDecision ? { dutyId: duty.id } : {}),
     ...(definition.actionPermissionCode ? { actionPermissionCodes: [definition.actionPermissionCode] } : {}),
   }, now);
   const decision = evaluateHrDutyResponse({
@@ -581,6 +616,7 @@ export const respondToHrDuty = (
     responsibilityIsCurrent: true,
     separationOfDutiesSatisfied: duty.sourceActorUserId !== input.actorUserId,
     sourceActorUserId: duty.sourceActorUserId,
+    sharedDecision,
     allowedActionCodes: definition.allowedActionCodes,
   });
   if (!decision.allowed) throw new Error(decision.code);
@@ -594,7 +630,7 @@ export const respondToHrDuty = (
       respondedByUserId: input.actorUserId,
     },
   });
-  if (!claimed.count) throw new Error('DUTY_RESPONSE_CONFLICT');
+  if (!claimed.count) throw new Error(sharedDecision ? 'DUTY_ALREADY_DECIDED' : 'DUTY_RESPONSE_CONFLICT');
   const sourceStatus = input.actionCode === 'APPROVE'
     ? 'COMPLETE' as const
     : input.actionCode === 'REJECT'
@@ -660,6 +696,22 @@ export const respondToHrDuty = (
   };
 });
 
+export const canAccessHrWorkItemSharedDecision = async (
+  database: HrDutyDatabase,
+  input: { dutyId: string; actorUserId: string; includeCompleted?: boolean; now?: Date },
+) => {
+  const duty = await database.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
+  if (!duty || duty.sourceType !== 'HR_WORK_ITEM') return false;
+  const definition = definitionFor(duty.sourceActionCode);
+  if (definition.accountabilityModel !== 'SHARED_DECISION') return false;
+  if (!input.includeCompleted && duty.status !== 'OPEN') return false;
+  if (duty.sourceActorUserId === input.actorUserId) return false;
+  if (!definition.actionPermissionCode) return true;
+  return (await authorizeHrUser(database, input.actorUserId, {
+    actionPermissionCodes: [definition.actionPermissionCode],
+  }, input.now ?? new Date())).allowed;
+};
+
 export const reconcileHrDutyAssignment = (
   database: HrDutyDatabase,
   input: { dutyId: string; actorUserId: string; policyVersion: number; now?: Date; resetDueAt?: Date | null },
@@ -675,6 +727,7 @@ export const reconcileHrDutyAssignment = (
   }
   if (duty.sourceType !== 'HR_WORK_ITEM') throw new Error('HR_DUTY_SOURCE_ADAPTER_NOT_REGISTERED');
   const definition = definitionFor(duty.sourceActionCode);
+  const sharedDecision = definition.accountabilityModel === 'SHARED_DECISION';
   const source = await tx.hrWorkItem.findUniqueOrThrow({ where: { id: duty.sourceId } });
   const currentSourceVersion = await legacySourceVersion(tx, source.id);
   if (!['PENDING', 'IN_PROGRESS'].includes(source.status)) {
@@ -719,6 +772,7 @@ export const reconcileHrDutyAssignment = (
       replayed: false,
     };
   }
+  if (sharedDecision && currentSourceVersion === duty.sourceVersion) return null;
   const priorResponsibility = duty.responsibility;
   const responsibilityTypeCode = duty.routingResponsibilityTypeCode
     ?? priorResponsibility?.responsibilityTypeCode;
@@ -749,7 +803,7 @@ export const reconcileHrDutyAssignment = (
     && destination.workspaceCode !== definition.destinationWorkspaceCode) {
     throw new Error('HR_DUTY_DESTINATION_INCOMPATIBLE_WITH_ENVELOPE');
   }
-  const nextAssigneeUserId = resolution.status === 'RESOLVED' ? resolution.assignedUserId : null;
+  const nextAssigneeUserId = sharedDecision ? null : resolution.status === 'RESOLVED' ? resolution.assignedUserId : null;
   const sourceChanged = currentSourceVersion !== duty.sourceVersion;
   const assignmentPlan = planHrDutyReassignment({
     status: duty.status,
@@ -822,7 +876,7 @@ export const reconcileHrDutyAssignment = (
       destinationWorkspaceCode,
       destinationQueueCode,
       currentAssigneeUserId: nextAssigneeUserId,
-      responsibilityId: resolution.status === 'RESOLVED' ? resolution.responsibilityId : null,
+      responsibilityId: sharedDecision ? null : resolution.status === 'RESOLVED' ? resolution.responsibilityId : null,
       routingResponsibilityTypeCode: responsibilityTypeCode,
       routingScopeType: scopeType,
       routingScopeId: scopeId,
@@ -844,7 +898,7 @@ export const reconcileHrDutyAssignment = (
     changedByUserId: input.actorUserId,
     policyVersion: input.policyVersion,
   } });
-  const successorEventCode = nextAssigneeUserId ? 'REASSIGNED' : 'UNASSIGNED_TRIAGE';
+  const successorEventCode = sharedDecision ? 'QUEUED' : nextAssigneeUserId ? 'REASSIGNED' : 'UNASSIGNED_TRIAGE';
   const hasSuccessorAudit = await tx.crossWorkspaceDutyAuditVersion.findFirst({ where: { dutyId: successor.id } });
   if (!hasSuccessorAudit) {
     await tx.crossWorkspaceDutyAuditVersion.create({ data: {
@@ -860,15 +914,17 @@ export const reconcileHrDutyAssignment = (
         predecessorDutyId: duty.id,
         currentAssigneeUserId: successor.currentAssigneeUserId,
       }),
-      reason: resolution.status === 'RESOLVED' ? 'RESPONSIBILITY_CHANGED' : resolution.reason,
+      reason: sharedDecision ? null : resolution.status === 'RESOLVED' ? 'RESPONSIBILITY_CHANGED' : resolution.reason,
     } });
-    const recipients = nextAssigneeUserId
+    const recipients = sharedDecision
+      ? await sharedDecisionRecipientIds(tx, definition.actionPermissionCode, duty.sourceActorUserId, now)
+      : nextAssigneeUserId
       ? [nextAssigneeUserId]
       : await destinationManagerIds(tx, destinationWorkspaceCode, now);
     await writeDutyNotification(tx, {
       dutyId: successor.id,
       auditVersion: 1,
-      eventType: nextAssigneeUserId ? 'HR_DUTY_REASSIGNED' : 'HR_DUTY_UNASSIGNED_TRIAGE',
+      eventType: sharedDecision ? 'HR_DUTY_ASSIGNED' : nextAssigneeUserId ? 'HR_DUTY_REASSIGNED' : 'HR_DUTY_UNASSIGNED_TRIAGE',
       eventCode: successorEventCode,
       recipientUserIds: recipients,
       destinationWorkspaceCode,

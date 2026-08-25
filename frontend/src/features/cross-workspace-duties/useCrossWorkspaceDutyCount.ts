@@ -15,7 +15,7 @@ export const useCrossWorkspaceDutyCount = (workspace: string | null) => {
     }
     try {
       const response = await crossWorkspaceDutyApi.summary(workspace);
-      setCount(response.data.data.open);
+      setCount(response.data.data.attention);
     } catch {
       // Preserve the last successful count during transient failures.
     }

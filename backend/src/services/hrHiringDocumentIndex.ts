@@ -29,6 +29,7 @@ const restricted = (entry: any) => ({
   category: entry.category,
   version: entry.version,
   reviewStatus: entry.reviewStatus,
+  inspectionSource: entry.inspectionSource,
   safeOwner: entry.safeOwner,
   restricted: true,
   canOpen: false,
@@ -40,7 +41,10 @@ export const buildHiringDocumentIndex = (
 ) => {
   const canHr = permissions.has('VIEW_FULL_APPLICANT_INFORMATION');
   const canCompanyManagement = permissions.has('VIEW_COMPANY_EVALUATION_RESULTS');
-  const canFinance = permissions.has('MANAGE_FINANCE_EVIDENCE');
+  const canFinance = permissions.has('RECORD_COLLATERAL_CUSTODY')
+    || permissions.has('VERIFY_COLLATERAL_CUSTODY')
+    || permissions.has('RECORD_SIGNED_EMPLOYMENT_CONTRACT')
+    || permissions.has('VERIFY_SIGNED_EMPLOYMENT_CONTRACT');
   const entries: any[] = [];
 
   for (const row of application.preIdentityChecklistItems || []) {
@@ -57,7 +61,7 @@ export const buildHiringDocumentIndex = (
   for (const row of application.documents || []) {
     const entry = {
       id: row.id, title: identityTitle(row), category: 'IDENTITY', version: row.version,
-      uploader: row.uploadedBy, date: row.createdAt, reviewStatus: row.status,
+      uploader: row.uploadedBy, date: row.createdAt, reviewStatus: row.status, inspectionSource: row.inspectionSource,
       safeOwner: 'منابع انسانی', originalName: row.originalName,
       downloadKind: 'DOCUMENT', canOpen: canHr && Boolean(row.originalName), restricted: !canHr,
     };
@@ -94,12 +98,17 @@ export const buildHiringDocumentIndex = (
       };
       entries.push(canFinance ? entry : restricted(entry));
     }
-    if (row.returnEvidenceOriginalName) {
+    const historicalReturns = row.returns?.length ? row.returns : row.returnEvidenceOriginalName ? [{
+      id: row.id, version: row.version, returnedBy: row.returnedBy, returnedAt: row.returnedAt,
+      status: row.returnConfirmedAt ? 'CONFIRMED' : 'SUBMITTED', evidenceOriginalName: row.returnEvidenceOriginalName,
+    }] : [];
+    for (const returned of historicalReturns) {
+      if (!returned.evidenceOriginalName) continue;
       const returnEntry = {
-        id: row.id, title: `مدرک بازگشت وثیقه ${label(row.type)}`, category: 'FINANCE_COLLATERAL_RETURN', version: row.version,
-        uploader: row.returnedBy, date: row.returnedAt, reviewStatus: row.returnConfirmedAt ? 'APPROVED' : 'SUBMITTED',
-        safeOwner: 'امور مالی', originalName: row.returnEvidenceOriginalName,
-        downloadKind: 'COLLATERAL_RETURN', canOpen: canFinance, restricted: !canFinance,
+        id: returned.id, title: `مدرک بازگشت وثیقه ${label(row.type)}`, category: 'FINANCE_COLLATERAL_RETURN', version: returned.version,
+        uploader: returned.returnedBy, date: returned.returnedAt, reviewStatus: returned.status,
+        safeOwner: 'امور مالی', originalName: returned.evidenceOriginalName,
+        downloadKind: 'COLLATERAL_RETURN_VERSION', canOpen: canFinance, restricted: !canFinance,
       };
       entries.push(canFinance ? returnEntry : restricted(returnEntry));
     }

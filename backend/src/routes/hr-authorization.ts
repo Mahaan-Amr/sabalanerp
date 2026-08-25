@@ -189,7 +189,8 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
   const legacyFeatureSet = new Set(legacyFeatures);
   const desiredLegacyInput = requestedFeatures
     .map((entry: unknown) => typeof entry === 'string' ? entry : text((entry as { key?: unknown })?.key))
-    .filter((feature: string) => legacyFeatureSet.has(feature as never));
+    .filter((feature: string) => legacyFeatureSet.has(feature as never)
+      && FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP] !== 'hr');
   const desiredLegacy = expandFeaturePrerequisites(desiredLegacyInput, legacyFeatures);
   const requestedLevelByFeature = new Map<string, string>(requestedFeatures.map((entry: any) => [text(entry.key), text(entry.level).toLowerCase()]));
   if ([...requestedLevelByFeature.values()].some((level) => !['view', 'edit', 'admin'].includes(level))) {
@@ -197,7 +198,8 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
   }
   const requestedHrInput = requestedFeatures
     .map((entry: unknown) => typeof entry === 'string' ? entry : text((entry as { key?: unknown })?.key))
-    .filter((feature: string) => !legacyFeatureSet.has(feature as never));
+    .filter((feature: string) => !legacyFeatureSet.has(feature as never)
+      || FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP] === 'hr');
   const desiredHr = expandHrActionPermissionSelection(requestedHrInput);
 
   const updated = await prisma.$transaction(async (tx) => {

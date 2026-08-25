@@ -10,6 +10,7 @@ import {
 } from './statementAdjustmentPosting';
 import type { ConfiguredStatementAdjustmentArtifactPreparer } from './statementAdjustmentRuntime';
 import { verifyDispatchArtifactStorageUnderLock } from './dispatchDocuments';
+import { approvedPricingOperationalContractItemId } from './approvedPricing';
 
 type Tx = Prisma.TransactionClient;
 type Authority = { actorRole: string; workspace: string; workspacePermission: string; feature?: string; featurePermission?: string };
@@ -160,7 +161,7 @@ export const createDispatchCorrection = (prisma: PrismaClient, input: { waybillI
     throw new DispatchRecoveryValidationError('Correction effectiveAt cannot precede the original physical dispatch.');
   }
   const pricingVersionByItem = new Map(waybill.candidate.allocationRevision.pricingReferences.flatMap((reference) =>
-    reference.pricingVersion.rows.map((row) => [row.contractItemId, reference.pricingVersionId] as const)));
+    reference.pricingVersion.rows.map((row) => [approvedPricingOperationalContractItemId(row), reference.pricingVersionId] as const)));
   let normalized: ReturnType<typeof normalizeDispatchCorrectionDraft>;
   try {
     normalized = normalizeDispatchCorrectionDraft({ lines: input.lines, reattributions: input.reattributions,
@@ -262,7 +263,7 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
     const policy = await correctionPostingPolicy(tx, correction);
     if (policy.kind === 'REATTRIBUTION') {
       const pricingVersionByItem = new Map(scope.waybill.candidate.allocationRevision.pricingReferences.flatMap((reference) =>
-        reference.pricingVersion.rows.map((row) => [row.contractItemId, reference.pricingVersionId] as const)));
+        reference.pricingVersion.rows.map((row) => [approvedPricingOperationalContractItemId(row), reference.pricingVersionId] as const)));
       let expected: ReturnType<typeof normalizeDispatchCorrectionDraft>;
       try {
         expected = normalizeDispatchCorrectionDraft({ reattributions: Array.isArray(policy.reattributions)

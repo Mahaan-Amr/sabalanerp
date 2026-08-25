@@ -13,12 +13,16 @@ const fixture = {
   applicationId: "hr-e2e-application",
   releaseApplicationId: "hr-e2e-release-application",
   blockedApplicationId: "hr-e2e-blocked-application",
+  interviewApplicationId: "hr-e2e-interview-application",
   candidateId: "hr-e2e-candidate",
   releaseCandidateId: "hr-e2e-release-candidate",
+  interviewCandidateId: "hr-e2e-interview-candidate",
   invitationId: "hr-e2e-invitation",
   unitId: "hr-e2e-unit",
   jobId: "hr-e2e-job",
   positionId: "hr-e2e-position",
+  financeRecorderEmail: "finance.recorder.e2e@sabalanerp.test",
+  financeManagerEmail: "finance.manager.e2e@sabalanerp.test",
 };
 
 const plusDays = (days: number) =>
@@ -49,6 +53,21 @@ async function main() {
       creationSource: "SYSTEM_SEEDED",
     },
   });
+  const [financeRecorder, financeManager] = await Promise.all([
+    { email: fixture.financeRecorderEmail, username: "finance_recorder_e2e", firstName: "ثبت‌کننده", lastName: "مالی" },
+    { email: fixture.financeManagerEmail, username: "finance_manager_e2e", firstName: "مدیر", lastName: "مالی" },
+  ].map((financeUser) => prisma.user.upsert({
+    where: { email: financeUser.email },
+    update: { ...financeUser, password, role: "USER", isActive: true, mustChangePassword: false },
+    create: { ...financeUser, password, role: "USER", isActive: true, mustChangePassword: false, creationSource: "SYSTEM_SEEDED" },
+  })));
+  for (const financeUser of [financeRecorder, financeManager]) {
+    await prisma.workspacePermission.upsert({
+      where: { userId_workspace: { userId: financeUser.id, workspace: "accounting" } },
+      update: { permissionLevel: "edit", isActive: true },
+      create: { userId: financeUser.id, workspace: "accounting", permissionLevel: "edit", isActive: true, grantedBy: user.id },
+    });
+  }
 
   await prisma.workspacePermission.upsert({
     where: { userId_workspace: { userId: user.id, workspace: "hr" } },
@@ -86,6 +105,45 @@ async function main() {
     update: { workspaceCode: "HUMAN_RESOURCES", isActive: true },
     create: { code: "RECRUITMENT_CASES", workspaceCode: "HUMAN_RESOURCES", displayName: "Recruitment Cases" },
   });
+  for (const feature of [
+    { code: "VIEW_INITIAL_INTERVIEW_CRITERIA", displayName: "View Initial Interview Criteria" },
+    { code: "RECORD_INITIAL_INTERVIEW", displayName: "Record Initial Interview" },
+    { code: "VIEW_FULL_APPLICANT_INFORMATION", displayName: "View Full Applicant Information" },
+    { code: "VIEW_INITIAL_INTERVIEW_REPORT", displayName: "View Initial Interview Report" },
+    { code: "VIEW_COMPANY_EVALUATION_RESULTS", displayName: "View Company Evaluation Results" },
+    { code: "RECORD_COMPANY_EVALUATION_RESULT", displayName: "Record Company Evaluation Result" },
+    { code: "MANAGE_RECRUITMENT_CASE", displayName: "Manage Recruitment Case" },
+    { code: "PERSONNEL", displayName: "Personnel" },
+    { code: "MANAGE_PERSONNEL_SCHEDULE", displayName: "Manage Personnel Schedule" },
+    { code: "MANAGE_FINANCE_EVIDENCE", displayName: "Manage Finance Evidence" },
+    { code: "REVIEW_IDENTITY_DOCUMENTS", displayName: "Review Identity Documents" },
+    { code: "RECORD_COLLATERAL_CUSTODY", displayName: "Record Collateral Custody" },
+    { code: "VERIFY_COLLATERAL_CUSTODY", displayName: "Verify Collateral Custody" },
+    { code: "RECORD_SIGNED_EMPLOYMENT_CONTRACT", displayName: "Record Signed Employment Contract" },
+    { code: "VERIFY_SIGNED_EMPLOYMENT_CONTRACT", displayName: "Verify Signed Employment Contract" },
+  ]) {
+    await prisma.hrFeatureCatalog.upsert({
+      where: { code: feature.code },
+      update: { workspaceCode: "HUMAN_RESOURCES", isActive: true },
+      create: { ...feature, workspaceCode: "HUMAN_RESOURCES" },
+    });
+  }
+  for (const [financeUser, featureCodes] of [
+    [financeRecorder, ["RECORD_COLLATERAL_CUSTODY"]],
+    [financeManager, ["VERIFY_COLLATERAL_CUSTODY", "VERIFY_SIGNED_EMPLOYMENT_CONTRACT"]],
+  ] as const) {
+    for (const featureCode of featureCodes) {
+    await prisma.hrFeatureAccessGrant.upsert({
+      where: { stableKey: `hr-e2e:feature:${financeUser.id}:${featureCode}` },
+      update: { level: "EDIT", status: "ACTIVE", effectiveTo: null },
+      create: {
+        stableKey: `hr-e2e:feature:${financeUser.id}:${featureCode}`, userId: financeUser.id,
+        featureCode, level: "EDIT", effectiveFrom: authorizationEffectiveFrom,
+        grantedByUserId: user.id, reason: "Accounting-only hiring Finance E2E fixture",
+      },
+    });
+    }
+  }
   await prisma.hrFeatureCatalog.upsert({
     where: { code: "ORGANIZATIONAL_STRUCTURE" },
     update: { workspaceCode: "HUMAN_RESOURCES", isActive: true },
@@ -127,6 +185,32 @@ async function main() {
       reason: "HR hiring E2E fixture",
     },
   });
+  for (const feature of [
+    { code: "VIEW_INITIAL_INTERVIEW_CRITERIA", level: "VIEW" as const },
+    { code: "RECORD_INITIAL_INTERVIEW", level: "EDIT" as const },
+    { code: "VIEW_FULL_APPLICANT_INFORMATION", level: "VIEW" as const },
+    { code: "VIEW_INITIAL_INTERVIEW_REPORT", level: "VIEW" as const },
+    { code: "VIEW_COMPANY_EVALUATION_RESULTS", level: "VIEW" as const },
+    { code: "RECORD_COMPANY_EVALUATION_RESULT", level: "EDIT" as const },
+    { code: "MANAGE_RECRUITMENT_CASE", level: "EDIT" as const },
+    { code: "PERSONNEL", level: "EDIT" as const },
+    { code: "MANAGE_PERSONNEL_SCHEDULE", level: "EDIT" as const },
+    { code: "REVIEW_IDENTITY_DOCUMENTS", level: "EDIT" as const },
+  ]) {
+    await prisma.hrFeatureAccessGrant.upsert({
+      where: { stableKey: `hr-e2e:feature:${user.id}:${feature.code}` },
+      update: { level: feature.level, status: "ACTIVE", effectiveTo: null },
+      create: {
+        stableKey: `hr-e2e:feature:${user.id}:${feature.code}`,
+        userId: user.id,
+        featureCode: feature.code,
+        level: feature.level,
+        effectiveFrom: authorizationEffectiveFrom,
+        grantedByUserId: user.id,
+        reason: "HR hiring E2E fixture",
+      },
+    });
+  }
   await prisma.hrFeatureAccessGrant.upsert({
     where: { stableKey: `hr-e2e:feature:${user.id}:ORGANIZATIONAL_STRUCTURE` },
     update: { level: "VIEW", status: "ACTIVE", effectiveTo: null },
@@ -253,6 +337,9 @@ async function main() {
       assessmentReviewAcknowledgedBy: null,
       assessmentReviewAcknowledgedAt: null,
       preIdentityReleasedAt: new Date(),
+      acceptedOfferAt: null,
+      collateralClearance: "NOT_STARTED",
+      compensationClearance: "IN_PROGRESS",
     },
     create: {
       id: fixture.applicationId,
@@ -268,6 +355,70 @@ async function main() {
       assessmentDecisionBy: user.id,
       assessmentDecisionAt: new Date(),
       preIdentityReleasedAt: new Date(),
+      collateralClearance: "NOT_STARTED",
+      compensationClearance: "IN_PROGRESS",
+    },
+  });
+  await prisma.hrCollateralRequirement.upsert({
+    where: { applicationId_version: { applicationId: fixture.applicationId, version: 1 } },
+    update: {
+      type: "PROMISSORY_NOTE", amountRials: "20000000", status: "ACTIVE",
+      candidateExplanation: "پس از پذیرش پیشنهاد، امور مالی برای دریافت سفته به مبلغ 20,000,000 ریال با شما هماهنگ می‌کند.",
+      proposedBy: user.id, dueTiming: null,
+    },
+    create: {
+      applicationId: fixture.applicationId, version: 1, type: "PROMISSORY_NOTE",
+      amountRials: "20000000", status: "ACTIVE",
+      candidateExplanation: "پس از پذیرش پیشنهاد، امور مالی برای دریافت سفته به مبلغ 20,000,000 ریال با شما هماهنگ می‌کند.",
+      proposedBy: user.id,
+    },
+  });
+
+  await prisma.hrCandidate.upsert({
+    where: { id: fixture.interviewCandidateId },
+    update: {
+      firstName: "مصاحبه",
+      lastName: "آزمایشی",
+      mobile: "09120000003",
+    },
+    create: {
+      id: fixture.interviewCandidateId,
+      firstName: "مصاحبه",
+      lastName: "آزمایشی",
+      mobile: "09120000003",
+    },
+  });
+  await prisma.hrJobApplication.upsert({
+    where: { id: fixture.interviewApplicationId },
+    update: {
+      candidateId: fixture.interviewCandidateId,
+      positionId: fixture.positionId,
+      stage: "SCREENING",
+      outcome: null,
+      createdBy: user.id,
+    },
+    create: {
+      id: fixture.interviewApplicationId,
+      candidateId: fixture.interviewCandidateId,
+      positionId: fixture.positionId,
+      stage: "SCREENING",
+      createdBy: user.id,
+    },
+  });
+  await prisma.hrApplicationFormRevision.upsert({
+    where: {
+      applicationId_revisionNumber: {
+        applicationId: fixture.interviewApplicationId,
+        revisionNumber: 1,
+      },
+    },
+    update: { status: "SUBMITTED", dataJson: {}, submittedAt: new Date() },
+    create: {
+      applicationId: fixture.interviewApplicationId,
+      revisionNumber: 1,
+      status: "SUBMITTED",
+      dataJson: {},
+      submittedAt: new Date(),
     },
   });
 
@@ -444,6 +595,9 @@ async function main() {
       hrApprovedAt: new Date(),
       financeApprovedBy: user.id,
       financeApprovedAt: new Date(),
+      payrollReviewStatus: "VERIFIED",
+      payrollVerifiedBy: user.id,
+      payrollVerifiedAt: new Date(),
       candidateAcceptedAt: null,
       candidateAcceptedName: null,
       candidateDecision: null,
@@ -464,6 +618,7 @@ async function main() {
       candidateNotificationAttempts: 1,
     },
     create: {
+      id: "hr-e2e-compensation-snapshot",
       applicationId: fixture.applicationId,
       version: 1,
       componentsJson: [
@@ -481,6 +636,9 @@ async function main() {
       hrApprovedAt: new Date(),
       financeApprovedBy: user.id,
       financeApprovedAt: new Date(),
+      payrollReviewStatus: "VERIFIED",
+      payrollVerifiedBy: user.id,
+      payrollVerifiedAt: new Date(),
       candidateNotificationStatus: "FAILED",
       candidateNotificationError: "خطای آزمایشی ارسال پیامک پیشنهاد",
       candidateNotifiedAt: null,
@@ -488,31 +646,50 @@ async function main() {
   });
 
   for (const applicationId of [fixture.applicationId, fixture.releaseApplicationId, fixture.blockedApplicationId]) {
-    const companyExecutedDisc = applicationId === fixture.applicationId;
+    const applicantExecutedDisc = applicationId === fixture.applicationId;
     const plan = await prisma.hrFormalAssessmentPlan.upsert({
       where: { stableKey: `hr-e2e:formal-assessment-plan:${applicationId}:1` },
       update: {
         status: "ACTIVE",
-        explicitlyNoAssessment: !companyExecutedDisc,
-        executionMethod: companyExecutedDisc ? "COMPANY" : null,
+        explicitlyNoAssessment: !applicantExecutedDisc,
+        executionMethod: applicantExecutedDisc ? "APPLICANT" : null,
       },
       create: {
         stableKey: `hr-e2e:formal-assessment-plan:${applicationId}:1`,
         applicationId,
         version: 1,
-        explicitlyNoAssessment: !companyExecutedDisc,
-        executionMethod: companyExecutedDisc ? "COMPANY" : null,
+        explicitlyNoAssessment: !applicantExecutedDisc,
+        executionMethod: applicantExecutedDisc ? "APPLICANT" : null,
         finalizedByUserId: user.id,
-        reason: companyExecutedDisc
-          ? "Company-executed DISC for localized score acceptance"
+        reason: applicantExecutedDisc
+          ? "Applicant-executed DISC for localized score acceptance"
           : "Explicit no-assessment decision for the HR hiring E2E fixture",
       },
     });
-    if (companyExecutedDisc) {
-      await prisma.hrFormalAssessmentPlanSelection.upsert({
+    if (applicantExecutedDisc) {
+      const selection = await prisma.hrFormalAssessmentPlanSelection.upsert({
         where: { planId_assessmentKind: { planId: plan.id, assessmentKind: "DISC" } },
-        update: { selected: true, executionMethod: "COMPANY" },
-        create: { planId: plan.id, assessmentKind: "DISC", selected: true, executionMethod: "COMPANY" },
+        update: { selected: true, executionMethod: "APPLICANT" },
+        create: { planId: plan.id, assessmentKind: "DISC", selected: true, executionMethod: "APPLICANT" },
+      });
+      await prisma.hrFormalAssessmentResult.upsert({
+        where: { stableKey: `hr-e2e:formal-assessment-result:${applicationId}:DISC:1` },
+        update: {
+          planId: plan.id,
+          planSelectionId: selection.id,
+          status: "PENDING",
+          resultJson: undefined,
+          recordedAt: null,
+        },
+        create: {
+          stableKey: `hr-e2e:formal-assessment-result:${applicationId}:DISC:1`,
+          applicationId,
+          planId: plan.id,
+          planSelectionId: selection.id,
+          assessmentKind: "DISC",
+          resultVersion: 1,
+          status: "PENDING",
+        },
       });
     }
   }

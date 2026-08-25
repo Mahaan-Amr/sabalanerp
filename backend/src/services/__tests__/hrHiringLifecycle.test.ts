@@ -28,6 +28,28 @@ const base = (
 });
 
 {
+  const incomplete = projectHiringLifecycle(base({
+    stage: "SCREENING", formRevisions: [submitted], identityClearance: "IN_PROGRESS",
+    identityChecks: [{ fieldKey: "firstName", status: "VERIFIED" }],
+    documents: [],
+  }), ["HR_PROCESSOR"]);
+  assert.equal(incomplete.phases[4].primaryAction?.id, "REVIEW_IDENTITY");
+
+  const requiredChecks = ["firstName", "lastName", "birthDate", "birthPlace", "fatherName", "foreignIdentity", "address", "postalCode", "mobile", "educationLevel", "maritalStatus"];
+  const ready = projectHiringLifecycle(base({
+    stage: "SCREENING", formRevisions: [submitted], identityClearance: "IN_PROGRESS", candidate: { nationalCode: null },
+    identityChecks: [
+      ...requiredChecks.map((fieldKey) => ({ fieldKey, status: "VERIFIED" })),
+      { fieldKey: "militaryStatus", status: "NOT_APPLICABLE" },
+      { fieldKey: "birthCertificateExplanations", status: "NOT_APPLICABLE" },
+    ],
+    documents: [{ category: "FOREIGN_IDENTITY", side: null, customTitle: null, version: 1, status: "VERIFIED" }],
+  }), ["HR_MANAGER"]);
+  assert.equal(ready.phases[4].primaryAction?.id, "APPROVE_IDENTITY");
+  assert.equal(ready.phases[4].secondaryActions.length, 0);
+}
+
+{
   const result = projectHiringLifecycle(base());
   assert.equal(result.totalPhases, 9);
   assert.deepEqual(result.phases.map(({ id }) => id), [
@@ -41,6 +63,19 @@ const base = (
     "ONBOARDING",
     "ACTIVATION",
   ]);
+}
+
+{
+  const result = projectHiringLifecycle(
+    base({
+      formRevisions: [submitted], stage: "OFFER", identityClearance: "APPROVED",
+      assessmentCompletedAt: new Date(),
+      compensationSnapshots: [{ proposedBy: "company-manager", payrollReviewStatus: "RETURNED" }],
+    }),
+    ["COMPANY_MANAGER"],
+  );
+  assert.equal(result.phases[5].primaryAction?.id, "CREATE_OFFER");
+  assert.equal(result.phases[5].primaryAction?.label, "ثبت نسخه اصلاح‌شده پیشنهاد همکاری");
 }
 
 {
@@ -139,12 +174,12 @@ const base = (
       assessmentCompletedAt: new Date(),
       compensationSnapshots: [{ proposedBy: "hiring-manager" }],
     }),
-    ["HR_PAYROLL_PROCESSOR"],
+    ["HR_PAYROLL_MANAGER"],
   );
   assert.equal(result.phases[5].status, "ACTION_REQUIRED");
-  assert.equal(result.phases[5].primaryAction?.id, "PREPARE_OFFER_PAYROLL");
+  assert.equal(result.phases[5].primaryAction?.id, "VERIFY_OFFER_PAYROLL");
   assert.equal(result.phases[5].requiredComplete, 1);
-  assert.equal(result.phases[5].requiredTotal, 5);
+  assert.equal(result.phases[5].requiredTotal, 3);
 }
 
 {
@@ -196,6 +231,22 @@ const base = (
 }
 
 {
+  const result = projectHiringLifecycle(base({
+    preIdentityGrandfatheredAt: null,
+    formRevisions: [submitted],
+    stage: "SCREENING",
+    hiringDecisions: [
+      { kind: "HR_INTERVIEW", outcome: "NEGATIVE", version: 1 },
+    ],
+  }), ["HR_MANAGER"]);
+  assert.equal(result.currentPhaseId, "INITIAL_HR_REVIEW");
+  assert.equal(result.phases[1].requiredComplete, 1);
+  assert.equal(result.phases[1].primaryAction?.id, "RECORD_HR_PRELIMINARY_APPROVAL");
+  assert.deepEqual(result.phases[1].primaryAction?.authorities, ["HR_MANAGER"]);
+  assert.equal(result.phases[1].responsibleFunction, "مدیریت منابع انسانی");
+}
+
+{
   const result = projectHiringLifecycle(
     base({
       formRevisions: [submitted],
@@ -205,17 +256,15 @@ const base = (
       compensationSnapshots: [
         {
           proposedBy: "hiring-manager",
-          preparedAt: new Date(),
           hrApprovedAt: new Date(),
-          financeApprovedAt: new Date(),
         },
       ],
     }),
   );
   assert.equal(result.currentPhaseId, "OFFER");
   assert.equal(result.phases[5].status, "WAITING");
-  assert.equal(result.phases[5].requiredComplete, 4);
-  assert.equal(result.phases[5].requiredTotal, 5);
+  assert.equal(result.phases[5].requiredComplete, 1);
+  assert.equal(result.phases[5].requiredTotal, 3);
   assert.equal(result.phases[5].primaryAction, null);
 }
 
@@ -248,8 +297,9 @@ const base = (
       payrollParticipation: {},
       onboardingTasks: [
         {
+          title: "وظیفه دستی قدیمی نباید در projection نمایش داده شود",
           activationBlocker: true,
-          status: "WAIVED",
+          status: "PENDING",
           ownerAuthority: "HR_MANAGER",
         },
       ],
@@ -487,7 +537,53 @@ const base = (
   assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
   const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
   assert.equal(companyEvaluationPhase?.status, "ACTION_REQUIRED");
-  assert.equal(companyEvaluationPhase?.primaryAction?.id, "APPROVE_PRE_IDENTITY");
+  assert.equal(companyEvaluationPhase?.primaryAction?.id, "RECORD_FINAL_MANAGEMENT_DECISION");
+}
+
+{
+  const result = projectHiringLifecycle(
+    base({
+      preIdentityGrandfatheredAt: null,
+      formRevisions: [submitted],
+      hiringDecisions: [
+        { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+        { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+      ],
+      formalAssessmentPlans: [{ version: 1, status: "ACTIVE", explicitlyNoAssessment: true }],
+      companyEvaluationOccurrences: [{ status: "PLANNED" }],
+    }),
+    ["HR_PROCESSOR"],
+  );
+  assert.equal(result.currentPhaseId, "COMPANY_EVALUATION_PLAN");
+  const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
+  assert.equal(companyEvaluationPhase?.status, "ACTION_REQUIRED");
+  assert.equal(companyEvaluationPhase?.primaryAction?.id, "RECORD_COMPANY_EVALUATION_RESULT");
+  assert.deepEqual(companyEvaluationPhase?.primaryAction?.authorities, ["HR_PROCESSOR"]);
+}
+
+{
+  const result = projectHiringLifecycle(
+    base({
+      preIdentityGrandfatheredAt: null,
+      formRevisions: [submitted],
+      hiringDecisions: [
+        { kind: "HR_INTERVIEW", outcome: "POSITIVE", version: 1 },
+        { kind: "HR_PRELIMINARY_APPROVAL", outcome: "POSITIVE", version: 1 },
+      ],
+      formalAssessmentPlans: [{ version: 1, status: "ACTIVE", explicitlyNoAssessment: true }],
+      companyEvaluationOccurrences: [{ status: "PLANNED" }],
+    }),
+    [],
+    "processor-with-action-permission",
+    ["RECORD_COMPANY_EVALUATION_RESULT"],
+  );
+  const companyEvaluationPhase = result.phases.find((phase) => phase.id === "COMPANY_EVALUATION_PLAN");
+  assert.equal(
+    companyEvaluationPhase?.status,
+    "ACTION_REQUIRED",
+    "effective action permissions must drive the queue status even when no legacy authority grant exists",
+  );
+  assert.equal(companyEvaluationPhase?.primaryAction?.id, "RECORD_COMPANY_EVALUATION_RESULT");
 }
 
 {
@@ -541,7 +637,6 @@ const base = (
       { id: "INSURANCE", status: "IN_PROGRESS", detailVisible: false, actionIds: [] },
       { id: "PAYROLL_PARTICIPATION", status: "PENDING", detailVisible: false, actionIds: [] },
       { id: "EMPLOYMENT_ACTIVATION", status: "BLOCKED", detailVisible: true, actionIds: [] },
-      { id: "ONBOARDING_TASK", status: "PENDING", detailVisible: false, actionIds: [] },
     ],
   );
 

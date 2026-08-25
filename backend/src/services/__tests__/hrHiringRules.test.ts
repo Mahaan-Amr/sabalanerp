@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { compensationTotalRials, normalizeCompensationComponents, unresolvedActivationRequirements, validateHiringQuestionnaire } from '../hrHiringRules';
+import { collateralCandidateExplanation, compensationTotalRials, normalizeCompensationComponents, unresolvedActivationRequirements, validateHiringCorrection, validateHiringQuestionnaire } from '../hrHiringRules';
 import { validateHiringFileSignature } from '../hrHiringFileStorage';
 
 const complete = {
   firstName: 'علی', lastName: 'احمدی', alias: 'ندارم', birthDate: '2000-01-01', birthPlace: 'تهران',
   militaryStatus: 'پایان خدمت', fatherName: 'رضا', fatherOccupation: 'بازنشسته', maritalStatus: 'SINGLE',
   address: 'تهران', postalCode: '1234567890', mobile: '09120000000', homePhone: 'ندارم',
-  educationLevel: 'کارشناسی', fieldOfStudy: 'مدیریت', graduationYear: '1402', socialMedia: 'ندارم',
+  educationLevel: 'BACHELOR', educationLevelOther: '', fieldOfStudy: 'مدیریت', graduationYear: '1402', socialMedia: 'ندارم',
   hasSocialSecurityHistory: false, identityKind: 'IRANIAN', nationalCode: '0013546929',
   cooperationType: 'FULL_TIME', cooperationDuration: 'LONG_TERM'
 };
@@ -19,6 +19,13 @@ assert.throws(() => validateHiringQuestionnaire({ ...complete, postalCode: '123'
 assert.throws(() => validateHiringQuestionnaire({ ...complete, nationalCode: '0012345678' }), /کد ملی/);
 assert.throws(() => validateHiringQuestionnaire({ ...complete, maritalStatus: 'MARRIED' }), /تعداد فرزندان/);
 assert.equal(validateHiringQuestionnaire({ ...complete, identityKind: 'FOREIGN', nationalCode: '', foreignIdentityType: 'PASSPORT', foreignIdentityNumber: 'A123' }), true);
+assert.throws(() => validateHiringQuestionnaire({ ...complete, educationLevel: 'OTHER', educationLevelOther: '' }), /عنوان مقطع/);
+assert.throws(() => validateHiringQuestionnaire({ ...complete, graduationYear: '1299' }), /سال اخذ مدرک/);
+assert.throws(() => validateHiringQuestionnaire({ ...complete, graduationYear: '9999' }), /سال اخذ مدرک/);
+assert.throws(() => validateHiringQuestionnaire({ ...complete, workHistory: [{ organization: 'سبلان', duration: '', lastPosition: '', lastSalaryBenefits: '' }] }), /ردیف سابقه کاری/);
+assert.throws(() => validateHiringCorrection({ workHistory: [{ organization: 'سبلان', duration: '' }] }, ['workHistory']), /ردیف سابقه کاری/);
+assert.throws(() => validateHiringCorrection({ nationalCode: '123456789' }, ['nationalCode']), /دقیقاً ۱۰ رقم/);
+assert.doesNotThrow(() => validateHiringCorrection({ nationalCode: '2294567890' }, ['nationalCode']));
 
 assert.equal(compensationTotalRials([{ label: 'حقوق پایه', amountRials: '1000' }, { label: 'مزایا', amountRials: 250 }]), 1250n);
 assert.throws(() => compensationTotalRials([{ label: 'حقوق پایه', amountRials: '12.5' }]), /عدد صحیح ریال/);
@@ -42,6 +49,22 @@ assert.throws(
 assert.throws(
   () => normalizeCompensationComponents([{ category: 'UNKNOWN', label: 'ناشناخته', amountRials: '1000' }]),
   /طبقه‌بندی/,
+);
+assert.throws(
+  () => normalizeCompensationComponents([{ category: 'FIXED_BENEFIT', amountRials: '1000' }]),
+  /حقوق پایه/,
+);
+assert.throws(
+  () => normalizeCompensationComponents([{ category: 'BASE_SALARY', amountRials: '0' }]),
+  /بزرگ‌تر از صفر/,
+);
+assert.throws(
+  () => normalizeCompensationComponents([
+    { category: 'BASE_SALARY', amountRials: '1000' },
+    { category: 'ALLOWANCE', amountRials: '200' },
+    { category: 'ALLOWANCE', amountRials: '300' },
+  ]),
+  /تکراری/,
 );
 
 const ready = unresolvedActivationRequirements({
@@ -70,4 +93,5 @@ try {
   fs.rmSync(uploadTestDir, { recursive: true, force: true });
 }
 
+assert.equal(collateralCandidateExplanation('PROMISSORY_NOTE', '20000000'), 'پس از پذیرش پیشنهاد، امور مالی برای دریافت سفته به مبلغ 20,000,000 ریال با شما هماهنگ می‌کند.');
 console.log('HR hiring rule tests passed.');

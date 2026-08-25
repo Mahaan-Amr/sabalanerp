@@ -37,6 +37,8 @@ export const fromIsoDateTime = (value?: string | null) => {
     ? parsed.utcOffset(3 * 60 + 30).format('jYYYY/jMM/jDD HH:mm')
     : String(value);
 };
+export const isCompletePersianDateTime = (value: string) =>
+  moment(latinDigits(value), 'jYYYY/jMM/jDD HH:mm', true).isValid();
 export const toIsoDateTime = (value: string) => {
   if (!value) return '';
   const parsed = moment(latinDigits(value), 'jYYYY/jMM/jDD HH:mm', true);

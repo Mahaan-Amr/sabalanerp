@@ -18,6 +18,16 @@ assert.match(
 );
 assert.match(
   deployScript,
+  /\[ "\$\{checkpoint_timeout\}" -ge 600 \] && \[ "\$\{checkpoint_timeout\}" -le 14400 \]/,
+  'the pre-mutation checkpoint window must allow a slow independent store without changing post-mutation deadlines',
+);
+assert.match(
+  deployScript,
+  /run_backend_timed "\$\{remaining\}" node dist\/scripts\/audit-hr-onboarding-task-retirement\.js --output=\/app\/deployment-reports\/\$\{onboarding_audit_name\}/,
+  'release promotion must fail closed on the read-only onboarding retirement audit',
+);
+assert.match(
+  deployScript,
   /run_backend\(\)[\s\S]*docker compose[^\n]* run -T --rm --no-deps/,
   'deployment control jobs must disable Compose TTY allocation',
 );
@@ -35,6 +45,16 @@ assert.match(
   checkpointScript,
   /remote\.uploadVerified\(result\.destination, objectKey, result\.sha256\)/,
   'remote read-back must compare against the checksum produced by package creation',
+);
+assert.match(
+  deployScript,
+  /DEPLOYMENT_GATE_MODE=ROLLBACK run_backend node dist\/scripts\/deployment-gates\.js; then[\s\S]*--refer-from="\/app\/deployment-reports\/\$\{FINANCIAL_EVIDENCE_DRY_RUN_REPORT\}"[\s\S]*if \[ "\$\{referral_ready\}" -eq 1 \]; then[\s\S]*control maintenance-off/,
+  'unresolved evidence referral must persist after verified rollback and before traffic reopens',
+);
+assert.doesNotMatch(
+  deployScript,
+  /--refer-unresolved --deployment-checkpoint/,
+  'a pre-rollback support referral would be erased by checkpoint restoration',
 );
 
 console.log('deployment checkpoint runtime tests passed');

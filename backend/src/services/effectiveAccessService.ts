@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { FEATURE_WORKSPACE_MAP, type Feature } from '../middleware/feature';
 import { HR_REDESIGN_CATALOG } from './hrRedesignDataContracts';
+import { HR_ACTION_PERMISSIONS } from './hrActionPermissionCatalog';
 
 export type EffectiveWorkspacePermission = 'view' | 'edit' | 'admin';
 
@@ -18,7 +19,21 @@ export type EffectiveFeatureAccess = {
 export type EffectiveUserAccess = {
   workspaces: EffectiveWorkspaceAccess[];
   features: EffectiveFeatureAccess[];
+  provenance: {
+    workspaces: Array<EffectiveWorkspaceAccess & { source: AuthorizationProvenanceSource; grantId: string | null }>;
+    features: Array<EffectiveFeatureAccess & { source: AuthorizationProvenanceSource; grantId: string | null }>;
+  };
 };
+
+export type AuthorizationProvenanceSource =
+  | 'SYSTEM_ADMIN_OVERRIDE'
+  | 'DIRECT_WORKSPACE'
+  | 'ROLE_WORKSPACE'
+  | 'DIRECT_FEATURE'
+  | 'ROLE_FEATURE'
+  | 'CANONICAL_HR_WORKSPACE'
+  | 'CANONICAL_HR_FEATURE'
+  | 'HR_MANAGER_OVERRIDE';
 
 type EffectiveAccessClient = Pick<
   PrismaClient | Prisma.TransactionClient,
@@ -32,6 +47,7 @@ type EffectiveAccessClient = Pick<
 
 const ADMIN_WORKSPACES = ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security', 'bi', 'logistics'];
 const HR_FEATURE_CODES = HR_REDESIGN_CATALOG.workspaceFeatures.map(({ code }) => code);
+const HR_ACTION_CODES = new Set(HR_ACTION_PERMISSIONS.map(({ code }) => code));
 
 const activeLegacyGrant = (
   grant: { isActive: boolean; expiresAt?: Date | null },
@@ -58,14 +74,20 @@ export const getEffectiveUserAccess = async (
   input: { userId: string; userRole: string; at?: Date },
 ): Promise<EffectiveUserAccess> => {
   if (input.userRole === 'ADMIN') {
-    return {
-      workspaces: ADMIN_WORKSPACES.map((workspace) => ({ workspace, permission: 'admin' })),
-      features: [
+    const workspaces = ADMIN_WORKSPACES.map((workspace) => ({ workspace, permission: 'admin' as const }));
+    const features = [
         ...Object.entries(FEATURE_WORKSPACE_MAP)
           .filter(([, workspace]) => workspace !== 'hr')
           .map(([feature, workspace]) => ({ feature, workspace, permission: 'admin' as const })),
         ...HR_FEATURE_CODES.map((feature) => ({ feature, workspace: 'hr', permission: 'admin' as const })),
-      ],
+      ];
+    return {
+      workspaces,
+      features,
+      provenance: {
+        workspaces: workspaces.map((grant) => ({ ...grant, source: 'SYSTEM_ADMIN_OVERRIDE', grantId: null })),
+        features: features.map((grant) => ({ ...grant, source: 'SYSTEM_ADMIN_OVERRIDE', grantId: null })),
+      },
     };
   }
 
@@ -130,7 +152,9 @@ export const getEffectiveUserAccess = async (
     const directWorkspace = activeDirect.find((grant) => grant.workspace === workspace);
     const roleFeature = activeRoleFeatures.find((grant) => grant.feature === feature);
     const roleWorkspace = roleWorkspaces.find((grant) => grant.workspace === workspace && activeLegacyGrant(grant, at));
-    const effective = directFeature ?? directWorkspace ?? roleFeature ?? roleWorkspace;
+    const effective = directWorkspace?.permissionLevel.toLowerCase() === 'admin'
+      ? directWorkspace
+      : directFeature ?? directWorkspace ?? roleFeature ?? roleWorkspace;
     return effective ? [{ feature, permission: permission(effective.permissionLevel), workspace }] : [];
   });
 
@@ -148,8 +172,11 @@ export const getEffectiveUserAccess = async (
     ...directHrFeatures.keys(),
     ...inheritedHrFeatures.map((grant) => grant.feature),
   ]);
+  const independentActionFeatures = activeCanonicalFeatures
+    .filter((grant) => HR_ACTION_CODES.has(grant.featureCode))
+    .map((grant) => ({ feature: grant.featureCode, permission: permission(grant.level), workspace: 'hr' }));
   const hrFeatures = !effectiveHrWorkspaceLevel
-    ? []
+    ? independentActionFeatures
     : broadManagerOverride
       ? HR_FEATURE_CODES.map((feature) => ({
         feature,
@@ -159,15 +186,49 @@ export const getEffectiveUserAccess = async (
       : [...hrFeatureCodes].map((feature) => {
     const direct = directHrFeatures.get(feature);
     const inherited = inheritedHrFeatures.find((grant) => grant.feature === feature);
+    const resolvedLevel = direct?.level ?? inherited!.permissionLevel;
     return {
       feature,
-      permission: capAtWorkspaceLevel(
-        direct?.level ?? inherited!.permissionLevel,
-        effectiveHrWorkspaceLevel,
-      ),
+      // Action permissions are independently scoped authorization. A VIEW
+      // workspace grant admits the user to the destination without reducing
+      // an explicitly granted EDIT action to VIEW.
+      permission: HR_ACTION_CODES.has(feature)
+        ? permission(resolvedLevel)
+        : capAtWorkspaceLevel(resolvedLevel, effectiveHrWorkspaceLevel),
       workspace: 'hr',
     };
       });
 
-  return { workspaces, features: [...nonHrFeatures, ...hrFeatures] };
+  const features = [...nonHrFeatures, ...hrFeatures];
+  const workspaceProvenance = workspaces.map((grant) => {
+    if (grant.workspace === 'hr') {
+      return { ...grant, source: canonicalHr ? 'CANONICAL_HR_WORKSPACE' as const : 'ROLE_WORKSPACE' as const,
+        grantId: canonicalHr?.id ?? inheritedHr?.id ?? null };
+    }
+    const direct = activeDirect.find((candidate) => candidate.workspace === grant.workspace);
+    const inherited = roleWorkspaces.find((candidate) => candidate.workspace === grant.workspace && activeLegacyGrant(candidate, at));
+    return { ...grant, source: direct ? 'DIRECT_WORKSPACE' as const : 'ROLE_WORKSPACE' as const,
+      grantId: direct?.id ?? inherited?.id ?? null };
+  });
+  const featureProvenance = features.map((grant) => {
+    if (grant.workspace === 'hr') {
+      if (broadManagerOverride) return { ...grant, source: 'HR_MANAGER_OVERRIDE' as const, grantId: canonicalHr?.id ?? null };
+      const direct = directHrFeatures.get(grant.feature);
+      const inherited = inheritedHrFeatures.find((candidate) => candidate.feature === grant.feature);
+      return { ...grant, source: direct ? 'CANONICAL_HR_FEATURE' as const : 'ROLE_FEATURE' as const,
+        grantId: direct?.id ?? inherited?.id ?? null };
+    }
+    const directFeature = activeDirectFeatures.find((candidate) => candidate.feature === grant.feature);
+    const directWorkspace = activeDirect.find((candidate) => candidate.workspace === grant.workspace);
+    const roleFeature = activeRoleFeatures.find((candidate) => candidate.feature === grant.feature);
+    const roleWorkspace = roleWorkspaces.find((candidate) => candidate.workspace === grant.workspace && activeLegacyGrant(candidate, at));
+    if (directWorkspace?.permissionLevel.toLowerCase() === 'admin') {
+      return { ...grant, source: 'DIRECT_WORKSPACE' as const, grantId: directWorkspace.id };
+    }
+    if (directFeature) return { ...grant, source: 'DIRECT_FEATURE' as const, grantId: directFeature.id };
+    if (directWorkspace) return { ...grant, source: 'DIRECT_WORKSPACE' as const, grantId: directWorkspace.id };
+    if (roleFeature) return { ...grant, source: 'ROLE_FEATURE' as const, grantId: roleFeature.id };
+    return { ...grant, source: 'ROLE_WORKSPACE' as const, grantId: roleWorkspace?.id ?? null };
+  });
+  return { workspaces, features, provenance: { workspaces: workspaceProvenance, features: featureProvenance } };
 };

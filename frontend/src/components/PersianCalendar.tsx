@@ -1,6 +1,6 @@
 'use client';
 
-import { ErpPressable, ErpSelect, useErpOverlayPortalContainer } from '@/components/erp';
+import { ErpButton, ErpPressable, ErpSelect, useErpOverlayPortalContainer } from '@/components/erp';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -9,6 +9,8 @@ import moment from 'moment-jalaali';
 import PersianCalendar from '@/lib/persian-calendar';
 import PersianTimePicker from './PersianTimePicker';
 import { isCalendarOwnedInteraction } from './calendarOverlayPolicy';
+import { resolveDateTimeSelection } from './persianCalendarCommitPolicy';
+import { normalizeYearOnlyValue, yearOnlyOptions } from './persianCalendarYearPolicy';
 
 export interface PersianCalendarProps {
   id?: string;
@@ -20,11 +22,14 @@ export interface PersianCalendarProps {
   className?: string;
   disabled?: boolean;
   showTime?: boolean;
+  autoCommitDateTime?: boolean;
   enableYearSelection?: boolean;
   minYear?: number;
   maxYear?: number;
   disablePastDates?: boolean;
+  disableFutureDates?: boolean;
   clearable?: boolean;
+  yearOnly?: boolean;
 }
 
 const splitDateTime = (raw?: string) => {
@@ -45,18 +50,25 @@ export default function PersianCalendarComponent({
   className = '',
   disabled = false,
   showTime = false,
+  autoCommitDateTime = false,
   enableYearSelection = false,
   minYear = 1300,
   maxYear = 1410,
   disablePastDates = false,
+  disableFutureDates = false,
   clearable = false,
+  yearOnly = false,
 }: PersianCalendarProps) {
   const overlayPortalContainer = useErpOverlayPortalContainer();
-  const initial = splitDateTime(value);
+  const initial = yearOnly
+    ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
+    : splitDateTime(value);
   const [open, setOpen] = useState(false);
   const [draftDate, setDraftDate] = useState(initial.date);
   const [draftTime, setDraftTime] = useState(initial.time);
-  const [currentMonth, setCurrentMonth] = useState((initial.date || PersianCalendar.now()).slice(0, 7));
+  const [currentMonth, setCurrentMonth] = useState(yearOnly
+    ? `${initial.date || PersianCalendar.now().slice(0, 4)}/01`
+    : (initial.date || PersianCalendar.now()).slice(0, 7));
   const [showYearSelector, setShowYearSelector] = useState(false);
   const [mobile, setMobile] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 344, maxHeight: 520 });
@@ -75,14 +87,17 @@ export default function PersianCalendarComponent({
   })();
 
   const isPast = useCallback((date: string) => disablePastDates && moment(date, 'jYYYY/jMM/jDD').isBefore(moment().startOf('day'), 'day'), [disablePastDates]);
+  const isFuture = useCallback((date: string) => disableFutureDates && moment(date, 'jYYYY/jMM/jDD').isAfter(moment().startOf('day'), 'day'), [disableFutureDates]);
 
   useEffect(() => {
     if (open) return;
-    const next = splitDateTime(value);
+    const next = yearOnly
+      ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
+      : splitDateTime(value);
     setDraftDate(next.date);
     setDraftTime(next.time);
-    if (next.date) setCurrentMonth(next.date.slice(0, 7));
-  }, [open, value]);
+    if (next.date) setCurrentMonth(yearOnly ? `${next.date}/01` : next.date.slice(0, 7));
+  }, [maxYear, minYear, open, value, yearOnly]);
 
   const updateLayout = useCallback(() => {
     const isMobile = window.matchMedia('(max-width: 639px)').matches;
@@ -90,14 +105,15 @@ export default function PersianCalendarComponent({
     if (isMobile || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const width = Math.min(Math.max(rect.width, 344), window.innerWidth - 32);
-    const height = showTime ? 510 : 440;
+    const height = yearOnly ? 360 : showTime ? 510 : 440;
     const top = rect.bottom + height + 12 <= window.innerHeight ? rect.bottom + 8 : Math.max(16, rect.top - height - 8);
     const left = Math.max(16, Math.min(rect.left, window.innerWidth - width - 16));
     setPosition({ top, left, width, maxHeight: Math.min(height, window.innerHeight - 32) });
-  }, [showTime]);
+  }, [showTime, yearOnly]);
 
   useEffect(() => {
     if (!open) return;
+    const trigger = triggerRef.current;
     updateLayout();
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -117,14 +133,15 @@ export default function PersianCalendarComponent({
       window.removeEventListener('scroll', updateLayout, true);
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
-      triggerRef.current?.focus();
+      trigger?.focus();
     };
   }, [open, updateLayout]);
 
   const displayValue = useMemo(() => {
     if (!draftDate) return '';
+    if (yearOnly) return draftDate;
     return PersianCalendar.formatForDisplay(showTime && draftTime ? `${draftDate} ${draftTime}` : draftDate, showTime && Boolean(draftTime));
-  }, [draftDate, draftTime, showTime]);
+  }, [draftDate, draftTime, showTime, yearOnly]);
 
   const commit = (date: string, time = draftTime) => {
     onChange(showTime && time ? `${date} ${time}` : date);
@@ -132,9 +149,31 @@ export default function PersianCalendarComponent({
   };
 
   const chooseDate = (date: string) => {
-    if (isPast(date)) return;
+    if (isPast(date) || isFuture(date)) return;
+    if (showTime && autoCommitDateTime) {
+      const selection = resolveDateTimeSelection({
+        initialValue: value || '', draftDate, draftTime,
+        changedPart: 'date', nextValue: date,
+      });
+      setDraftDate(selection.date);
+      if (selection.commitValue) commit(selection.date, selection.time);
+      return;
+    }
     setDraftDate(date);
     if (!showTime) commit(date);
+  };
+
+  const chooseTime = (time: string) => {
+    if (!autoCommitDateTime) {
+      setDraftTime(time);
+      return;
+    }
+    const selection = resolveDateTimeSelection({
+      initialValue: value || '', draftDate, draftTime,
+      changedPart: 'time', nextValue: time,
+    });
+    setDraftTime(selection.time);
+    if (selection.commitValue) commit(selection.date, selection.time);
   };
 
   const moveMonth = (amount: number) => {
@@ -155,11 +194,23 @@ export default function PersianCalendarComponent({
 
   const openCalendar = () => {
     if (disabled) return;
-    const next = splitDateTime(value);
+    const next = yearOnly
+      ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
+      : splitDateTime(value);
     setDraftDate(next.date);
     setDraftTime(next.time);
-    setCurrentMonth((next.date || PersianCalendar.now()).slice(0, 7));
+    setCurrentMonth(yearOnly
+      ? `${next.date || PersianCalendar.now().slice(0, 4)}/01`
+      : (next.date || PersianCalendar.now()).slice(0, 7));
     setOpen((current) => !current);
+  };
+
+  const chooseYear = (selectedYear: number) => {
+    const next = String(selectedYear);
+    setDraftDate(next);
+    setCurrentMonth(`${next}/01`);
+    onChange(next);
+    setOpen(false);
   };
 
   const panel = (
@@ -174,11 +225,35 @@ export default function PersianCalendarComponent({
       transition={{ duration: reduceMotion ? 0 : 0.2, ease: [0.22, 1, 0.36, 1] }}
       role="dialog"
       aria-modal={mobile}
-      aria-label="انتخاب تاریخ شمسی"
+      aria-label={yearOnly ? "انتخاب سال شمسی" : "انتخاب تاریخ شمسی"}
       dir="rtl"
     >
       <div className="max-h-[92dvh] overflow-y-auto p-4">
         {mobile && <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[var(--sds-border-default)] dark:bg-[var(--sds-surface-subtle)]" />}
+        {yearOnly ? (
+          <div className="space-y-3">
+            <p className="text-sm font-bold sds-text-primary">سال اخذ مدرک را انتخاب کنید</p>
+            <div className="grid max-h-64 grid-cols-3 gap-2 overflow-y-auto rounded-xl bg-[var(--sds-surface-subtle)] p-2 sm:grid-cols-4">
+              {yearOnlyOptions(minYear, maxYear).map((option) => (
+                <ErpPressable
+                  key={option}
+                  type="button"
+                  onClick={() => chooseYear(option)}
+                  tone={draftDate === String(option) ? 'primary' : 'neutral'}
+                  variant={draftDate === String(option) ? 'solid' : 'ghost'}
+                  className="min-h-11 font-semibold"
+                  aria-pressed={draftDate === String(option)}
+                >
+                  {option}
+                </ErpPressable>
+              ))}
+            </div>
+            <div className="flex justify-between border-t border-[var(--sds-border-subtle)] pt-3">
+              {clearable ? <ErpButton label="پاک‌کردن" variant="ghost" onClick={() => { setDraftDate(''); onChange(''); setOpen(false); }} /> : <span />}
+              <ErpButton label="بستن" variant="soft" onClick={() => setOpen(false)} />
+            </div>
+          </div>
+        ) : <>
         <div className="mb-4 flex items-center justify-between gap-2">
           <ErpPressable type="button" onClick={() => moveMonth(-1)} className="h-11 w-11 p-0" disabled={year <= minYear && month === 1} aria-label="ماه قبل"><FaChevronRight /></ErpPressable>
           <div className="flex min-w-0 items-center justify-center gap-2">
@@ -211,14 +286,14 @@ export default function PersianCalendarComponent({
             const date = dateOnly(year, month, day);
             const selected = draftDate === date;
             const today = PersianCalendar.now() === date;
-            const past = isPast(date);
+            const unavailable = isPast(date) || isFuture(date);
             return (
               <ErpPressable
                 key={date}
                 data-date={date}
                 type="button"
                 role="gridcell"
-                disabled={past}
+                disabled={unavailable}
                 aria-selected={selected}
                 aria-label={PersianCalendar.formatForDisplay(date)}
                 onClick={() => chooseDate(date)}
@@ -229,7 +304,7 @@ export default function PersianCalendarComponent({
                 }}
                 tone={selected ? 'primary' : 'neutral'}
                 variant={selected ? 'solid' : 'ghost'}
-                className={`relative min-h-11 p-0 font-semibold ${past ? 'cursor-not-allowed' : ''} ${today && !selected ? 'ring-1 ring-inset ring-[var(--sds-focus-ring)]' : ''}`}
+                className={`relative min-h-11 p-0 font-semibold ${unavailable ? 'cursor-not-allowed' : ''} ${today && !selected ? 'ring-1 ring-inset ring-[var(--sds-focus-ring)]' : ''}`}
               >
                 {day.toLocaleString('fa-IR')}
               </ErpPressable>
@@ -240,7 +315,7 @@ export default function PersianCalendarComponent({
         {showTime && (
           <div className="mt-4 border-t border-[var(--sds-border-subtle)] pt-4">
             <span className="mb-2 block text-xs font-semibold sds-text-muted">زمان</span>
-            <PersianTimePicker value={draftTime} onChange={setDraftTime} className="w-full" />
+            <PersianTimePicker value={draftTime} onChange={chooseTime} className="w-full" presentation="inline" />
           </div>
         )}
 
@@ -249,12 +324,13 @@ export default function PersianCalendarComponent({
             <ErpPressable type="button" onClick={() => chooseDate(PersianCalendar.now())} disabled={isPast(PersianCalendar.now())} tone="primary" className="min-h-11 px-3 font-bold">امروز</ErpPressable>
             {clearable && <ErpPressable type="button" onClick={() => { setDraftDate(''); setDraftTime(''); onChange(''); setOpen(false); }} className="min-h-11 px-3 font-semibold">پاک‌کردن</ErpPressable>}
           </div>
-          {showTime ? (
+          {showTime && !autoCommitDateTime ? (
             <ErpPressable type="button" onClick={() => draftDate && commit(draftDate)} disabled={!draftDate} tone="primary" variant="solid" className="min-h-11 px-4 font-bold"><FaCheck />تأیید</ErpPressable>
           ) : (
             <ErpPressable type="button" onClick={() => setOpen(false)} className="h-11 w-11 p-0" aria-label="بستن"><FaTimes /></ErpPressable>
           )}
         </div>
+        </>}
       </div>
     </motion.div>
   );

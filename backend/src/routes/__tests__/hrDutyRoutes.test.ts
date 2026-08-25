@@ -20,6 +20,7 @@ for (const expected of [
   'GET /workspaces/:workspaceCode/summary',
   'GET /workspaces/:workspaceCode/duties',
   'GET /workspaces/:workspaceCode/duties/:id',
+  'POST /workspaces/:workspaceCode/history-seen',
   'POST /legacy-work-items/:id/duties',
   'POST /:id/respond',
   'POST /:id/reconcile',
@@ -31,7 +32,9 @@ for (const route of routes) {
 }
 
 const source = fs.readFileSync(path.resolve(__dirname, '../hr-duties.ts'), 'utf8');
-assert.match(source, /HR_LEGACY_DUTY_ROUTING_RETIRED/, 'legacy work items cannot create live named-responsibility duties');
-assert.match(source, /HR_NAMED_RESPONSIBILITY_ROUTING_RETIRED/, 'named-responsibility reconciliation cannot mutate live routing');
+assert.match(source, /این مسیر قدیمی متوقف شده است/, 'legacy work items must return operational Persian guidance');
+assert.doesNotMatch(source, /res\.status\(410\).*HR_LEGACY_DUTY_ROUTING_RETIRED/, 'legacy routes must not expose internal retirement codes');
+assert.match(source, /تعیین مسئول را از صف بین‌واحدی فضای مقصد انجام دهید/, 'retired named-responsibility routes must return operational Persian guidance');
+assert.doesNotMatch(source, /res\.status\(410\).*HR_NAMED_RESPONSIBILITY_ROUTING_RETIRED/, 'retired named-responsibility routes must not expose internal codes');
 
 console.log('HR duty route tests passed.');

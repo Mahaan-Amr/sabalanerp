@@ -98,4 +98,15 @@ assert.equal(
   'هویت مشتری و پروژه قرارداد یکپارچه نیست؛ مشتری و پروژه را دوباره انتخاب کنید.'
 );
 
+assert.equal(
+  validateContractPartyIdentity({
+    customerId: 'customer-next',
+    customer: { ...nextCustomer, projectAddresses: undefined },
+    projectId: 'project-next',
+    project: { ...nextCustomer.projectAddresses[0], customerId: undefined }
+  } as unknown as ContractWizardData),
+  null,
+  'legacy edit data without embedded project addresses defers ownership validation to the server without crashing'
+);
+
 console.log('contract party identity tests passed');

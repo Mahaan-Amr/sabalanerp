@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "currentJalaliYear": 1405,
+  "scanned": {
+    "revisions": 3
+  },
+  "changes": [
+    {
+      "revisionId": "cmsvgqr3701gzrxj429s6kwpl",
+      "field": "educationLevel",
+      "before": "کارشناسی ارشد",
+      "after": "MASTER",
+      "educationLevelOther": "",
+      "legacyRaw": "کارشناسی ارشد"
+    },
+    {
+      "revisionId": "cmt73nvaf008oljg1c1p4acpi",
+      "field": "educationLevel",
+      "before": "کارشناسی ارشد",
+      "after": "MASTER",
+      "educationLevelOther": "",
+      "legacyRaw": "کارشناسی ارشد"
+    },
+    {
+      "revisionId": "cmt743w49015nljg1voijlfw1",
+      "field": "educationLevel",
+      "before": "کارشناسی ارشد",
+      "after": "MASTER",
+      "educationLevelOther": "",
+      "legacyRaw": "کارشناسی ارشد"
+    }
+  ],
+  "reviews": []
+}

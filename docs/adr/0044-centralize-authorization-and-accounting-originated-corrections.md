@@ -1,0 +1,11 @@
+---
+status: accepted
+---
+
+# Centralize authorization and Accounting-originated Contract corrections
+
+Sabalan ERP will resolve effective authorization once in the backend and project route, feature, action, provenance, expiry, and current workflow availability to every frontend surface. ADMIN has complete system-wide authority and audited self-service override of ownership, assignment, and separation rules; workspace administrators have complete authority only inside their workspace, MANAGER has no global bypass, explicit lower direct grants may narrow inherited access, and no actor—including ADMIN—may bypass data-integrity, immutable-evidence, or required-history boundaries. Frontends neither reproduce permission precedence nor render live controls for retired commands, and operational denials expose only a Persian next step plus a safe support reference.
+
+Sales Contract correction is again Accounting-originated, superseding ADR-0041's Seller-originated design. An explicitly permitted Accounting User creates the request, an Accounting manager separately approves or rejects it, approval gives the Responsible Seller one audited correction opportunity, and the completed difference returns to a permission-based Accounting verification queue that prefers the initiator. Shared work remains unassigned and Available until claimed or deliberately allocated; broad workspace access never auto-assigns it. ADMIN may execute every separately recorded stage, including a stage that would otherwise violate separation of duties, only through an explicit confirmation with a mandatory audited reason. One active correction chain per Contract, immutable financial evidence, controlled reactivation, and one-save Sales opportunities remain mandatory.
+
+Legacy and canonical permission stores will be reconciled through a versioned dry-run migration that preserves every unambiguous valid grant, sends ambiguity to ADMIN review, and retires contradictory writers and readers only after parity tests. This central model was chosen over workspace-specific resolvers and frontend role checks because operability for administrators, least privilege for every other User, immediate expiry and revocation, and auditable cross-workspace work must produce one answer everywhere.

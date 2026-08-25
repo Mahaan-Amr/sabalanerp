@@ -87,7 +87,11 @@ export type ApprovedPricingSource = {
         graphAuditCommandId: string;
       } | null;
       compatibility?: {
-        evidenceOrigin: 'POST_SNAPSHOT_DETERMINISTIC_LEGACY_GRAPH_MIGRATION' | 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION';
+        evidenceOrigin:
+          | 'POST_SNAPSHOT_DETERMINISTIC_LEGACY_GRAPH_MIGRATION'
+          | 'POST_SNAPSHOT_DETERMINISTIC_CANONICAL_GRAPH_BINDING'
+          | 'GRAPH_V1_LEGACY_SNAPSHOT_RECONSTRUCTION'
+          | 'CANONICAL_WRITER_V2_MONEY_RESIDUE_NORMALIZATION';
         migrationAuditCommandId?: string;
         snapshotOriginallyMissing: boolean;
         rowIdentityAssignments?: readonly {
@@ -95,14 +99,23 @@ export type ApprovedPricingSource = {
           productRowId: string;
           rawContractItemProductRowId: string | null;
           rawProductSnapshotRowId: string | null;
-          rule: 'MIGRATED_GRAPH_ORDINAL_PRODUCT_IDENTITY_V1';
+          rule:
+            | 'MIGRATED_GRAPH_ORDINAL_PRODUCT_IDENTITY_V1'
+            | 'FROZEN_ITEM_AND_PRODUCT_UNIQUE_COMMERCIAL_TUPLE_V1';
         }[];
         monetaryNormalizations?: readonly {
           productRowId: string;
           rawTotalAmountToman: string;
           sealedTotalAmountToman: string;
           difference: string;
-          rule: 'LEGACY_GRAPH_V1_ROUND_HALF_UP_TOMAN';
+          rule:
+            | 'LEGACY_GRAPH_V1_ROUND_HALF_UP_TOMAN'
+            | 'CANONICAL_WIZARD_GRAPH_V1_ROUNDING_V2_RAW_TOMAN_TO_CANONICAL';
+          graphSchemaVersion?: 1;
+          roundingPolicy?: 'rounding-v2';
+          producer?: 'CANONICAL_WIZARD_SAVE';
+          producerVersion?: 0 | 1;
+          graphAuditCommandId?: string;
           componentConversions?: readonly {
             component: 'cutting';
             rawValue: string;
@@ -125,6 +138,26 @@ export type ApprovedPricingSource = {
           rawIsLayer: null;
           sealedIsLayer: false;
           rule: 'LEGACY_GRAPH_V1_EMPTY_LAYER_CONFIGURATION_NON_LAYER';
+        }[];
+        recoveredAccountingRows?: readonly {
+          contractItemId: string;
+          invoiceItemId: string;
+          productRowId: string;
+          rule: 'FROZEN_GRAPH_ROW_ACCOUNTING_EVIDENCE_V1';
+        }[];
+        recoveredInvoiceAmount?: {
+          rawFinancialRecordAmount: string;
+          sealedContractTotal: string;
+          recoveredInvoiceAmount: string;
+          currencyFactor: string;
+          rule: 'ZERO_SENTINEL_FROM_FROZEN_CONTRACT_TOTAL_V1';
+        };
+        liveContractItemRebindings?: readonly {
+          sourceContractItemId: string;
+          linkedContractItemId: string;
+          invoiceItemId: string;
+          productRowId: string;
+          rule: 'FROZEN_STABLE_PRODUCT_ROW_LIVE_ITEM_REBINDING_V1';
         }[];
       };
       rows: readonly ApprovedPricingGraphRowSource[];

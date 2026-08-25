@@ -12,6 +12,22 @@ export const eraseJobApplicationRecords = async (
     },
   });
   await client.hrCandidatePersonnelIdentityConflict.deleteMany({ where: { applicationId } });
+  await client.hrCompanyEvaluationAssignmentHistory.deleteMany({
+    where: { occurrence: { applicationId } },
+  });
+  await client.hrCompanyEvaluationOccurrence.deleteMany({ where: { applicationId } });
+  await client.hrFormalAssessmentEvidenceLink.deleteMany({
+    where: { attempt: { result: { applicationId } } },
+  });
+  await client.hrFormalAssessmentAttempt.deleteMany({
+    where: { result: { applicationId } },
+  });
+  await client.hrFormalAssessmentResult.deleteMany({ where: { applicationId } });
+  await client.hrFormalAssessmentPlanSelection.deleteMany({
+    where: { plan: { applicationId } },
+  });
+  await client.hrFormalAssessmentPlan.deleteMany({ where: { applicationId } });
+  await client.hrAssessmentMigrationEvent.deleteMany({ where: { applicationId } });
   if (employmentRelationshipId) {
     await client.hrEmploymentRelationship.update({
       where: { id: employmentRelationshipId },

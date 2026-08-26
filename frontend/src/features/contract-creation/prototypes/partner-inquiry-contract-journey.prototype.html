@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>نمونه اولیه مسیر فروشنده همکار</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --sds-surface-canvas: #f5f7fb;
+      --sds-surface-panel: #ffffff;
+      --sds-surface-subtle: #f1f4f8;
+      --sds-text-primary: #172033;
+      --sds-text-secondary: #536078;
+      --sds-text-muted: #7a869c;
+      --sds-border-subtle: #e2e7ef;
+      --sds-border-default: #c9d1de;
+      --sds-action-accent: #315ee8;
+      --sds-action-accent-hover: #234dcc;
+      --sds-action-accent-soft: #e9efff;
+      --sds-status-success: #157a55;
+      --sds-status-success-surface: #e8f7f1;
+      --sds-status-warning: #99620a;
+      --sds-status-warning-surface: #fff5d9;
+      --sds-status-danger: #b3333f;
+      --sds-status-danger-surface: #ffedef;
+      --sds-status-info: #245fa8;
+      --sds-status-info-surface: #eaf3ff;
+      --sds-radius: 14px;
+      --sds-shadow: 0 14px 34px rgba(34, 49, 76, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--sds-surface-canvas);
+      color: var(--sds-text-primary);
+      font-family: Tahoma, "Segoe UI", sans-serif;
+      line-height: 1.65;
+    }
+
+    button { font: inherit; }
+
+    .shell {
+      width: min(1480px, calc(100% - 32px));
+      margin: 28px auto 72px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: start;
+      padding: 28px;
+      border: 1px solid var(--sds-border-subtle);
+      border-radius: 20px;
+      background: var(--sds-surface-panel);
+      box-shadow: var(--sds-shadow);
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 8px; font-size: clamp(1.5rem, 3vw, 2.2rem); }
+    h2 { margin-bottom: 14px; font-size: 1.15rem; }
+    h3 { margin-bottom: 8px; font-size: 1rem; }
+    .lede { max-width: 930px; margin: 0; color: var(--sds-text-secondary); }
+
+    .prototype-mark {
+      padding: 8px 12px;
+      border: 1px solid #b7c8ff;
+      border-radius: 999px;
+      background: var(--sds-action-accent-soft);
+      color: #244bbd;
+      white-space: nowrap;
+      font-weight: 700;
+      font-size: 0.83rem;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .metric, .panel {
+      border: 1px solid var(--sds-border-subtle);
+      border-radius: var(--sds-radius);
+      background: var(--sds-surface-panel);
+    }
+
+    .metric { padding: 15px 17px; }
+    .metric-label { color: var(--sds-text-muted); font-size: 0.8rem; }
+    .metric-value { margin-top: 3px; font-weight: 800; }
+
+    .notice {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin-top: 14px;
+      padding: 13px 16px;
+      border: 1px solid;
+      border-radius: 12px;
+    }
+
+    .notice.info { color: var(--sds-status-info); background: var(--sds-status-info-surface); border-color: #bfd6f2; }
+    .notice.success { color: var(--sds-status-success); background: var(--sds-status-success-surface); border-color: #b8e1d1; }
+    .notice.warning { color: var(--sds-status-warning); background: var(--sds-status-warning-surface); border-color: #ead39a; }
+    .notice.danger { color: var(--sds-status-danger); background: var(--sds-status-danger-surface); border-color: #f0bbc1; }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.55fr);
+      gap: 18px;
+      margin-top: 18px;
+      align-items: start;
+    }
+
+    .panel { padding: 20px; box-shadow: 0 6px 18px rgba(34, 49, 76, 0.04); }
+    .panel + .panel { margin-top: 18px; }
+    .sticky { position: sticky; top: 18px; }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .section-head h2 { margin: 0; }
+    .muted { color: var(--sds-text-muted); }
+    .small { font-size: 0.82rem; }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 900px; }
+    th, td { padding: 12px 10px; border-bottom: 1px solid var(--sds-border-subtle); text-align: right; vertical-align: top; }
+    th { color: var(--sds-text-muted); font-size: 0.78rem; font-weight: 700; }
+    td { font-size: 0.86rem; }
+    tr:last-child td { border-bottom: 0; }
+
+    .product-name { font-weight: 800; }
+    .fingerprint { color: var(--sds-text-muted); font-family: Consolas, monospace; font-size: 0.72rem; direction: ltr; text-align: left; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--sds-surface-subtle);
+      color: var(--sds-text-secondary);
+      font-size: 0.76rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .badge.success { background: var(--sds-status-success-surface); color: var(--sds-status-success); }
+    .badge.warning { background: var(--sds-status-warning-surface); color: var(--sds-status-warning); }
+    .badge.danger { background: var(--sds-status-danger-surface); color: var(--sds-status-danger); }
+    .badge.info { background: var(--sds-status-info-surface); color: var(--sds-status-info); }
+
+    .money { direction: ltr; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .loss { color: var(--sds-status-danger); font-weight: 800; }
+    .profit { color: var(--sds-status-success); font-weight: 800; }
+
+    .action-groups { display: grid; gap: 18px; }
+    .action-group { padding-bottom: 16px; border-bottom: 1px solid var(--sds-border-subtle); }
+    .action-group:last-child { border-bottom: 0; padding-bottom: 0; }
+    .button-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+
+    .action {
+      min-height: 44px;
+      padding: 9px 12px;
+      border: 1px solid var(--sds-border-default);
+      border-radius: 10px;
+      background: var(--sds-surface-panel);
+      color: var(--sds-text-primary);
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+
+    .action:hover { border-color: var(--sds-action-accent); background: var(--sds-action-accent-soft); }
+    .action:focus-visible { outline: 3px solid rgba(49, 94, 232, 0.28); outline-offset: 2px; }
+    .action.primary { border-color: var(--sds-action-accent); background: var(--sds-action-accent); color: white; }
+    .action.primary:hover { background: var(--sds-action-accent-hover); }
+    .action.warning { border-color: #dcbf79; color: var(--sds-status-warning); }
+    .action.danger { border-color: #e0a4aa; color: var(--sds-status-danger); }
+
+    .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .fact { padding: 12px; border-radius: 10px; background: var(--sds-surface-subtle); }
+    .fact dt { color: var(--sds-text-muted); font-size: 0.76rem; }
+    .fact dd { margin: 2px 0 0; font-weight: 800; font-size: 0.88rem; }
+
+    .tabs { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; }
+    .tab {
+      min-height: 44px;
+      padding: 8px 14px;
+      border: 1px solid var(--sds-border-default);
+      border-radius: 999px;
+      background: var(--sds-surface-panel);
+      color: var(--sds-text-secondary);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .tab[aria-selected="true"] { background: var(--sds-action-accent-soft); border-color: #a8bbf4; color: #244bbd; font-weight: 800; }
+
+    .scenario-copy { margin: 14px 0; color: var(--sds-text-secondary); }
+    .steps { display: grid; gap: 8px; }
+    .step {
+      display: grid;
+      grid-template-columns: 36px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      min-height: 54px;
+      padding: 8px 10px;
+      border: 1px solid var(--sds-border-subtle);
+      border-radius: 12px;
+      background: var(--sds-surface-panel);
+    }
+    .step.current { border-color: #9eb4f3; background: #f8faff; }
+    .step.done { opacity: 0.62; }
+    .step-index { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--sds-surface-subtle); font-weight: 800; }
+    .step.current .step-index { background: var(--sds-action-accent); color: white; }
+    .step button { min-width: 96px; }
+    .step button:disabled { cursor: not-allowed; opacity: 0.45; }
+
+    .history { margin: 0; padding: 0 20px 0 0; max-height: 220px; overflow: auto; }
+    .history li { margin-bottom: 7px; color: var(--sds-text-secondary); font-size: 0.82rem; }
+
+    @media (max-width: 980px) {
+      .workspace { grid-template-columns: 1fr; }
+      .sticky { position: static; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 620px) {
+      .shell { width: min(100% - 20px, 1480px); margin-top: 10px; }
+      .hero { grid-template-columns: 1fr; padding: 20px; }
+      .prototype-mark { justify-self: start; }
+      .metrics, .facts, .button-grid { grid-template-columns: 1fr; }
+      .panel { padding: 15px; }
+      .step { grid-template-columns: 32px 1fr; }
+      .step button { grid-column: 1 / -1; width: 100%; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <h1>مسیر Partner از استعلام تا قرارداد</h1>
+        <p class="lede">
+          پرسش این نمونه: آیا یک state model ردیفی که پاسخ جزئی را قابل‌استفاده می‌کند، قیمت خرده‌فروشی را آزاد نگه می‌دارد،
+          و expiry را پیش و پس از ثبت اتمیک پرونده متفاوت می‌بیند، برای کار روزانه فروشنده همکار درست و قابل‌فهم است؟
+        </p>
+      </div>
+      <div class="prototype-mark">نمونه موقت — کد تولید نیست</div>
+    </header>
+
+    <section id="metrics" class="metrics" aria-label="وضعیت کلی"></section>
+    <section id="notice" aria-live="polite"></section>
+
+    <div class="workspace">
+      <div>
+        <section class="panel">
+          <div class="section-head">
+            <h2>حقیقت ردیف‌ها</h2>
+            <span class="muted small">هر ردیف یک configuration و approval مستقل دارد</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>محصول و پیکربندی</th>
+                  <th>استعلام</th>
+                  <th>قیمت عمده مصوب</th>
+                  <th>اعتبار</th>
+                  <th>قیمت مشتری</th>
+                  <th>اختلاف واحد</th>
+                  <th>Wizard / Case</th>
+                </tr>
+              </thead>
+              <tbody id="rows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>پرونده و دو سند</h2>
+            <span class="muted small">Case تنها lifecycle canonical است</span>
+          </div>
+          <dl id="caseFacts" class="facts"></dl>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>سناریوهای هدایت‌شده</h2>
+            <span class="muted small">انتخاب هر سناریو، وضعیت را از نو می‌سازد</span>
+          </div>
+          <div id="scenarioTabs" class="tabs" role="tablist" aria-label="سناریوها"></div>
+          <div id="scenario" role="tabpanel"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>تاریخچه قابل‌مشاهده</h2>
+            <span class="muted small">آخرین رویداد بالا است</span>
+          </div>
+          <ol id="history" class="history"></ol>
+        </section>
+      </div>
+
+      <aside class="sticky">
+        <section class="panel">
+          <div class="section-head">
+            <h2>آزمایش آزاد</h2>
+            <span class="muted small">اقدام نامعتبر هم پیام روشن می‌دهد</span>
+          </div>
+          <div id="actions" class="action-groups"></div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <script>
+    // Pure state module. It has no dependency on the DOM and is the part worth
+    // carrying into implementation discussions if the behavior is accepted.
+    const PartnerJourney = (() => {
+      const HOUR = 60 * 60 * 1000;
+      const BASE_TIME = Date.UTC(2026, 7, 26, 6, 30, 0);
+
+      const productSeeds = [
+        { id: 'p1', name: 'تراورتن عباس‌آباد', config: 'طولی · عرض ۴۰ · ضخامت ۲ · سابیده', fingerprint: 'TRV-ABS|LONG|W40|T2|HONED', baseWholesale: 1850000 },
+        { id: 'p2', name: 'مرمریت دهبید', config: 'اسلب · ضخامت ۲ · پولیش · ممتاز', fingerprint: 'MRB-DHB|SLAB|T2|POLISHED|A', baseWholesale: 2420000 },
+        { id: 'p3', name: 'پله چینی', config: 'پله · ۱۱۰×۳۵ · ضخامت ۳ · چرمی', fingerprint: 'STEP-CHN|110X35|T3|LEATHER', baseWholesale: 3190000 }
+      ];
+
+      const clone = value => JSON.parse(JSON.stringify(value));
+      const makeId = (prefix, state) => `${prefix}-${state.sequence}`;
+
+      const initialState = () => ({
+        now: BASE_TIME,
+        sequence: 0,
+        partner: { active: true },
+        inquiry: { submitted: false, number: null },
+        products: productSeeds.map(seed => ({
+          ...seed,
+          configured: false,
+          inquiryStatus: 'not_sent',
+          approval: null,
+          pendingPredecessorId: null,
+          lineage: [],
+          rejectionReason: null
+        })),
+        wizard: { open: false, rows: [] },
+        saleCase: null,
+        last: { tone: 'info', text: 'برای شروع، سه محصول را کامل پیکربندی کنید.' },
+        history: ['نمونه اولیه با یک سبد پیکربندی‌نشده آغاز شد.']
+      });
+
+      const isApprovalUsable = (state, product) => Boolean(
+        product.approval &&
+        product.inquiryStatus === 'approved' &&
+        state.now < product.approval.expiresAt &&
+        product.approval.fingerprint === product.fingerprint &&
+        state.partner.active
+      );
+
+      const inquiryStatus = state => {
+        if (!state.inquiry.submitted) return 'پیش‌نویس';
+        const statuses = state.products.map(product => {
+          if (product.inquiryStatus === 'approved' && state.now >= product.approval.expiresAt) return 'expired';
+          return product.inquiryStatus;
+        });
+        const pending = statuses.filter(status => status === 'pending').length;
+        const decided = statuses.filter(status => ['approved', 'rejected', 'expired', 'superseded'].includes(status)).length;
+        if (pending && decided) return 'پاسخ جزئی';
+        if (pending) return 'ارسال‌شده';
+        return 'تکمیل‌شده';
+      };
+
+      const record = (state, text, tone = 'info') => {
+        state.last = { text, tone };
+        state.history.unshift(text);
+        state.history = state.history.slice(0, 30);
+        return state;
+      };
+
+      const reject = (state, text) => record(state, text, 'danger');
+
+      const approve = (state, product, amount, suffix = '') => {
+        if (product.inquiryStatus !== 'pending') return;
+        state.sequence += 1;
+        const predecessorId = product.pendingPredecessorId || product.approval?.id || product.lineage.at(-1)?.id || null;
+        if (product.approval) product.lineage.push({ ...product.approval, state: 'superseded' });
+        product.approval = {
+          id: makeId('APR', state),
+          predecessorId,
+          fingerprint: product.fingerprint,
+          wholesale: amount,
+          approvedAt: state.now,
+          expiresAt: state.now + 48 * HOUR,
+          suffix
+        };
+        product.inquiryStatus = 'approved';
+        product.pendingPredecessorId = null;
+        product.rejectionReason = null;
+      };
+
+      const syncWizardApproval = (state, product) => {
+        const row = state.wizard.rows.find(item => item.productId === product.id);
+        if (!row || !product.approval) return;
+        const wasDefault = row.retailSource === 'default';
+        row.approvalId = product.approval.id;
+        row.wholesale = product.approval.wholesale;
+        if (wasDefault) row.retail = product.approval.wholesale;
+      };
+
+      const reducer = (input, action) => {
+        if (action.type === 'RESET') return initialState();
+        const state = clone(input);
+
+        switch (action.type) {
+          case 'CONFIGURE_PRODUCTS': {
+            if (state.saleCase) return reject(state, 'پس از ایجاد Case، تغییر سبد از این مسیر مجاز نیست.');
+            state.products.forEach(product => { product.configured = true; });
+            return record(state, 'هر سه محصول با configuration قیمت‌ساز کامل و fingerprint ثابت آماده شدند.', 'success');
+          }
+          case 'SUBMIT_INQUIRY': {
+            if (!state.partner.active) return reject(state, 'Partner فعال نیست؛ ارسال استعلام متوقف است.');
+            if (state.inquiry.submitted) return reject(state, 'این استعلام قبلاً ارسال شده است.');
+            if (state.products.some(product => !product.configured)) return reject(state, 'ارسال نشد: ابتدا پیکربندی همه ردیف‌ها را کامل کنید.');
+            state.sequence += 1;
+            state.inquiry = { submitted: true, number: `INQ-${140500 + state.sequence}` };
+            state.products.forEach(product => { product.inquiryStatus = 'pending'; });
+            return record(state, 'استعلام سه‌ردیفی یک‌جا ارسال شد؛ outcome هر ردیف مستقل خواهد بود.', 'success');
+          }
+          case 'BULK_PARTIAL_RESPONSE': {
+            if (!state.inquiry.submitted) return reject(state, 'هنوز استعلامی برای پاسخ وجود ندارد.');
+            const [first, second] = state.products;
+            approve(state, first, first.baseWholesale);
+            if (second.inquiryStatus === 'pending') {
+              second.inquiryStatus = 'rejected';
+              second.rejectionReason = 'نیاز به بررسی موجودی کوپ';
+            }
+            return record(state, 'پاسخ bulk به‌صورت جزئی ثبت شد: یک مصوب، یک ردشده و یک در انتظار.', 'warning');
+          }
+          case 'BULK_APPROVE_ALL': {
+            if (!state.inquiry.submitted) return reject(state, 'هنوز استعلامی برای پاسخ وجود ندارد.');
+            state.products.forEach(product => approve(state, product, product.baseWholesale));
+            return record(state, 'تمام ردیف‌های pending مستقل و با اعتبار ۴۸ساعته مصوب شدند.', 'success');
+          }
+          case 'ENTER_WIZARD': {
+            if (state.saleCase) return reject(state, 'Case قبلاً ساخته شده؛ این دیگر Wizard پیش از ثبت نیست.');
+            const usable = state.products.filter(product => isApprovalUsable(state, product));
+            if (!usable.length) return reject(state, 'هیچ ردیف مصوب و معتبری برای ورود به Wizard وجود ندارد.');
+            state.wizard.open = true;
+            usable.forEach(product => {
+              if (!state.wizard.rows.some(row => row.productId === product.id)) {
+                state.wizard.rows.push({
+                  productId: product.id,
+                  approvalId: product.approval.id,
+                  wholesale: product.approval.wholesale,
+                  retail: product.approval.wholesale,
+                  retailSource: 'default',
+                  quantity: 10
+                });
+              }
+            });
+            const omitted = state.products.length - usable.length;
+            return record(state, omitted
+              ? `Wizard با ${usable.length} ردیف مصوب باز شد؛ ${omitted} ردیف نامعتبر/بی‌پاسخ بیرون ماند.`
+              : 'Wizard با همه ردیف‌های مصوب باز شد و retail هر ردیف از wholesale پیش‌فرض گرفت.', omitted ? 'warning' : 'success');
+          }
+          case 'RAISE_RETAIL': {
+            if (!state.wizard.rows.length || state.saleCase) return reject(state, 'برای ویرایش retail باید در Wizard پیش از Final Submit باشید.');
+            state.wizard.rows.forEach(row => { row.retail = row.wholesale + 420000; row.retailSource = 'manual'; });
+            return record(state, 'Partner قیمت مشتری را مستقل و بالاتر از عمده تنظیم کرد.', 'success');
+          }
+          case 'LOWER_FIRST_RETAIL': {
+            if (!state.wizard.rows.length || state.saleCase) return reject(state, 'برای ویرایش retail باید در Wizard پیش از Final Submit باشید.');
+            const row = state.wizard.rows[0];
+            row.retail = Math.max(0, row.wholesale - 250000);
+            row.retailSource = 'manual';
+            return record(state, 'قیمت مشتری زیر عمده ثبت شد؛ warning زیان نمایان است ولی ویرایش مسدود نشد.', 'warning');
+          }
+          case 'ADVANCE_43_HOURS': {
+            state.now += 43 * HOUR;
+            return record(state, 'زمان ۴۳ ساعت جلو رفت؛ approvalهای باز کمتر از ۶ ساعت اعتبار دارند.', 'warning');
+          }
+          case 'ADVANCE_6_HOURS': {
+            state.now += 6 * HOUR;
+            return record(state, state.saleCase
+              ? 'زمان از expiry عبور کرد؛ Case ثبت‌شده و snapshot عمده آن همچنان معتبر است.'
+              : 'زمان از expiry عبور کرد؛ Final Submit برای ردیف‌های منقضی مجاز نیست.', state.saleCase ? 'success' : 'danger');
+          }
+          case 'REINQUIRE_UNUSABLE': {
+            if (!state.inquiry.submitted || state.saleCase) return reject(state, 're-inquiry فقط پیش از ساخت Case و برای ردیف نامعتبر انجام می‌شود.');
+            let count = 0;
+            state.products.forEach(product => {
+              const expired = product.inquiryStatus === 'approved' && state.now >= product.approval.expiresAt;
+              if (expired || product.inquiryStatus === 'rejected') {
+                if (product.approval) {
+                  product.lineage.push({ ...product.approval, state: expired ? 'expired' : 'rejected' });
+                  product.pendingPredecessorId = product.approval.id;
+                  product.approval = null;
+                }
+                product.inquiryStatus = 'pending';
+                product.rejectionReason = null;
+                count += 1;
+              }
+            });
+            if (!count) return reject(state, 'هیچ ردیف expired یا rejected برای re-inquiry وجود ندارد.');
+            return record(state, `برای ${count} ردیف successor خطی ساخته شد؛ داده‌های Wizard حفظ شدند.`, 'info');
+          }
+          case 'APPROVE_PENDING_SUCCESSORS': {
+            if (!state.inquiry.submitted) return reject(state, 'ردیف pending برای پاسخ پیدا نشد.');
+            let count = 0;
+            state.products.forEach(product => {
+              if (product.inquiryStatus === 'pending') {
+                approve(state, product, Math.round(product.baseWholesale * 1.04), 'successor');
+                syncWizardApproval(state, product);
+                count += 1;
+              }
+            });
+            if (!count) return reject(state, 'ردیف pending برای پاسخ پیدا نشد.');
+            return record(state, `${count} پاسخ تازه مصوب شد؛ retail دستی حفظ و retail پیش‌فرض با wholesale تازه هم‌تراز شد.`, 'success');
+          }
+          case 'CHANGE_FIRST_CONFIG': {
+            if (state.saleCase) return reject(state, 'پس از Case، تغییر configuration به revision و approval تازه نیاز دارد.');
+            const product = state.products[0];
+            product.config = 'طولی · عرض ۴۰ · ضخامت ۳ · سابیده';
+            product.fingerprint = 'TRV-ABS|LONG|W40|T3|HONED';
+            product.inquiryStatus = 'rejected';
+            product.rejectionReason = 'configuration تغییر کرده؛ approval قبلی تطبیق ندارد';
+            return record(state, 'ضخامت ردیف اول تغییر کرد؛ approval قبلی به‌دلیل CONFIG_MISMATCH قابل‌استفاده نیست.', 'warning');
+          }
+          case 'FINAL_SUBMIT': {
+            if (state.saleCase) return reject(state, 'Final Submit قبلاً موفق شده و replay باید همان Case را برگرداند.');
+            if (!state.wizard.open || !state.wizard.rows.length) return reject(state, 'Wizard خالی است؛ Case ساخته نشد.');
+            const failures = state.wizard.rows.filter(row => {
+              const product = state.products.find(item => item.id === row.productId);
+              return !product || !isApprovalUsable(state, product) || product.approval.id !== row.approvalId;
+            });
+            if (failures.length) return reject(state, `Final Submit کامل rollback شد: ${failures.length} ردیف approval معتبر ندارد. Wizard و retailها حفظ شدند.`);
+            state.sequence += 1;
+            state.saleCase = {
+              number: `PSC-${140500 + state.sequence}`,
+              customerContractNumber: `PC-${8200 + state.sequence}`,
+              internalRecordNumber: `SI-${6100 + state.sequence}`,
+              lifecycle: 'DRAFT',
+              committed: false,
+              accountingQueued: false,
+              rows: state.wizard.rows.map(row => ({ ...row }))
+            };
+            return record(state, 'Final Submit اتمیک موفق شد: Case و دقیقاً دو سند با snapshot عمده یک‌جا ساخته شدند.', 'success');
+          }
+          case 'SEND_CONFIRMATION': {
+            if (!state.saleCase) return reject(state, 'ابتدا باید Case ساخته شود.');
+            if (state.saleCase.lifecycle !== 'DRAFT') return reject(state, 'ارسال تأیید فقط از DRAFT ممکن است.');
+            state.saleCase.lifecycle = 'AWAITING_CUSTOMER_CONFIRMATION';
+            return record(state, 'همان flow فعلی SMS/OTP با customer-output retail-only ارسال شد.', 'success');
+          }
+          case 'CUSTOMER_APPROVE': {
+            if (!state.saleCase || state.saleCase.lifecycle !== 'AWAITING_CUSTOMER_CONFIRMATION') return reject(state, 'OTP فقط در وضعیت انتظار تأیید مشتری پذیرفته می‌شود.');
+            state.saleCase.lifecycle = 'CUSTOMER_APPROVED';
+            return record(state, 'OTP فقط تأیید مشتری را ثبت کرد؛ هنوز بدهی Accounting ساخته نشده است.', 'success');
+          }
+          case 'PRINT_CONTRACT': {
+            if (!state.saleCase || !['AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'].includes(state.saleCase.lifecycle)) return reject(state, 'چاپ نهایی از وضعیت فعلی مجاز نیست.');
+            state.saleCase.lifecycle = 'COMMITTED';
+            state.saleCase.committed = true;
+            state.saleCase.accountingQueued = true;
+            return record(state, 'اولین PRINTED پرونده را دقیقاً یک‌بار committed و وارد صف Accounting کرد.', 'success');
+          }
+          case 'SUSPEND_PARTNER': {
+            state.partner.active = false;
+            return record(state, 'Partner معلق شد؛ mutationها متوقف‌اند اما ساعت approval ادامه دارد و Draft پاک نمی‌شود.', 'warning');
+          }
+          case 'REACTIVATE_PARTNER': {
+            state.partner.active = true;
+            return record(state, 'Partner دوباره فعال شد؛ فقط approvalهای هنوز معتبر قابل‌استفاده‌اند.', 'success');
+          }
+          default:
+            return reject(state, `اقدام ناشناخته: ${action.type}`);
+        }
+      };
+
+      const selectors = {
+        inquiryStatus,
+        isApprovalUsable,
+        remainingHours: (state, product) => product.approval ? Math.max(0, (product.approval.expiresAt - state.now) / HOUR) : null,
+        wizardRow: (state, productId) => state.wizard.rows.find(row => row.productId === productId),
+        displayRows: state => state.saleCase?.rows || state.wizard.rows
+      };
+
+      return { initialState, reducer, selectors, BASE_TIME };
+    })();
+
+    const actionGroups = [
+      { title: 'استعلام', actions: [
+        ['CONFIGURE_PRODUCTS', 'تکمیل پیکربندی‌ها'],
+        ['SUBMIT_INQUIRY', 'ارسال bulk inquiry', 'primary'],
+        ['BULK_PARTIAL_RESPONSE', 'ثبت پاسخ جزئی'],
+        ['BULK_APPROVE_ALL', 'تأیید همه pending'],
+        ['REINQUIRE_UNUSABLE', 're-inquiry نامعتبرها'],
+        ['APPROVE_PENDING_SUCCESSORS', 'تأیید successorها']
+      ]},
+      { title: 'Wizard و قیمت retail', actions: [
+        ['ENTER_WIZARD', 'ورود مصوب‌ها به Wizard', 'primary'],
+        ['RAISE_RETAIL', 'افزایش قیمت مشتری'],
+        ['LOWER_FIRST_RETAIL', 'قیمت زیان‌ده ردیف اول', 'warning'],
+        ['CHANGE_FIRST_CONFIG', 'تغییر configuration', 'warning'],
+        ['FINAL_SUBMIT', 'Final Submit اتمیک', 'primary']
+      ]},
+      { title: 'قرارداد مشتری', actions: [
+        ['SEND_CONFIRMATION', 'ارسال SMS/OTP'],
+        ['CUSTOMER_APPROVE', 'تأیید OTP مشتری'],
+        ['PRINT_CONTRACT', 'چاپ نهایی و commitment', 'primary']
+      ]},
+      { title: 'زمان و lifecycle', actions: [
+        ['ADVANCE_43_HOURS', '۴۳ ساعت بعد'],
+        ['ADVANCE_6_HOURS', '۶ ساعت دیگر'],
+        ['SUSPEND_PARTNER', 'تعلیق Partner', 'danger'],
+        ['REACTIVATE_PARTNER', 'فعال‌سازی دوباره'],
+        ['RESET', 'شروع دوباره']
+      ]}
+    ];
+
+    const scenarios = [
+      {
+        id: 'happy', title: 'مسیر کامل',
+        description: 'همه ردیف‌ها مصوب می‌شوند، retail آزادانه افزایش می‌یابد و همان flow فعلی OTP/print پرونده را committed می‌کند.',
+        steps: [
+          ['CONFIGURE_PRODUCTS', 'پیکربندی کامل محصولات'], ['SUBMIT_INQUIRY', 'ارسال استعلام گروهی'],
+          ['BULK_APPROVE_ALL', 'تصویب همه ردیف‌ها'], ['ENTER_WIZARD', 'ورود به Wizard با retail پیش‌فرض'],
+          ['RAISE_RETAIL', 'override قیمت مشتری'], ['FINAL_SUBMIT', 'ساخت اتمیک Case و دو سند'],
+          ['SEND_CONFIRMATION', 'ارسال برای تأیید'], ['CUSTOMER_APPROVE', 'ثبت OTP مشتری'],
+          ['PRINT_CONTRACT', 'چاپ نهایی و commitment']
+        ]
+      },
+      {
+        id: 'partial', title: 'پاسخ جزئی و زیان',
+        description: 'فقط ردیف مصوب وارد Wizard می‌شود. Partner می‌تواند زیر wholesale بفروشد، اما warning واضح و غیرمسدودکننده می‌بیند.',
+        steps: [
+          ['CONFIGURE_PRODUCTS', 'پیکربندی کامل محصولات'], ['SUBMIT_INQUIRY', 'ارسال سه ردیف'],
+          ['BULK_PARTIAL_RESPONSE', 'ثبت approve / reject / pending'], ['ENTER_WIZARD', 'ادامه فقط با ردیف مصوب'],
+          ['LOWER_FIRST_RETAIL', 'ثبت قیمت زیان‌ده'], ['FINAL_SUBMIT', 'ثبت پرونده با warning غیرمسدودکننده']
+        ]
+      },
+      {
+        id: 'expiry-before', title: 'expiry وسط Wizard',
+        description: 'اگر approval پیش از Final Submit منقضی شود، ثبت کامل rollback می‌شود؛ Wizard حفظ و re-inquiry روی همان lineage انجام می‌شود.',
+        steps: [
+          ['CONFIGURE_PRODUCTS', 'پیکربندی محصولات'], ['SUBMIT_INQUIRY', 'ارسال استعلام'],
+          ['BULK_APPROVE_ALL', 'تصویب همه'], ['ENTER_WIZARD', 'ورود به Wizard'],
+          ['RAISE_RETAIL', 'ثبت retail دستی'], ['ADVANCE_43_HOURS', 'نمایش هشدار شش‌ساعته'],
+          ['ADVANCE_6_HOURS', 'عبور از expiry'], ['FINAL_SUBMIT', 'تلاش ناموفق و حفظ Wizard'],
+          ['REINQUIRE_UNUSABLE', 'ساخت successor برای expiredها'], ['APPROVE_PENDING_SUCCESSORS', 'تصویب قیمت‌های تازه'],
+          ['FINAL_SUBMIT', 'ثبت موفق با evidence تازه']
+        ]
+      },
+      {
+        id: 'expiry-after', title: 'expiry بعد از Draft',
+        description: 'Final Submit موفق، wholesale را در Case snapshot می‌کند؛ expiry بعدی نباید Draft ساخته‌شده را invalid یا reprice کند.',
+        steps: [
+          ['CONFIGURE_PRODUCTS', 'پیکربندی محصولات'], ['SUBMIT_INQUIRY', 'ارسال استعلام'],
+          ['BULK_APPROVE_ALL', 'تصویب همه'], ['ENTER_WIZARD', 'ورود به Wizard'],
+          ['FINAL_SUBMIT', 'ساخت Case در DRAFT'], ['ADVANCE_43_HOURS', 'نزدیک expiry'],
+          ['ADVANCE_6_HOURS', 'عبور از expiry بدون اثر بر Case'], ['SEND_CONFIRMATION', 'ادامه عادی برای تأیید مشتری']
+        ]
+      },
+      {
+        id: 'mismatch', title: 'پیکربندی ناسازگار',
+        description: 'تغییر مؤلفه قیمت‌ساز، approval قبلی را قابل‌استفاده نمی‌کند و Final Submit باید بدون ساخت partial pair شکست بخورد.',
+        steps: [
+          ['CONFIGURE_PRODUCTS', 'پیکربندی محصولات'], ['SUBMIT_INQUIRY', 'ارسال استعلام'],
+          ['BULK_APPROVE_ALL', 'تصویب همه'], ['ENTER_WIZARD', 'ورود به Wizard'],
+          ['CHANGE_FIRST_CONFIG', 'تغییر ضخامت ردیف اول'], ['FINAL_SUBMIT', 'مشاهده rollback کامل']
+        ]
+      }
+    ];
+
+    let state = PartnerJourney.initialState();
+    let activeScenario = scenarios[0];
+    let scenarioStep = 0;
+
+    const money = value => value == null ? '—' : `${new Intl.NumberFormat('fa-IR').format(value)} تومان`;
+    const formatTime = timestamp => new Intl.DateTimeFormat('fa-IR', {
+      timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+    }).format(new Date(timestamp));
+
+    const lifecycleLabel = lifecycle => ({
+      DRAFT: 'پیش‌نویس پرونده',
+      AWAITING_CUSTOMER_CONFIRMATION: 'در انتظار تأیید مشتری',
+      CUSTOMER_APPROVED: 'تأییدشده توسط مشتری',
+      COMMITTED: 'قطعی‌شده'
+    }[lifecycle] || 'هنوز ساخته نشده');
+
+    const statusPresentation = (state, product) => {
+      if (!product.configured) return ['نیازمند پیکربندی', 'warning'];
+      if (product.inquiryStatus === 'approved' && state.now >= product.approval.expiresAt) return ['منقضی', 'danger'];
+      return ({
+        not_sent: ['آماده ارسال', 'info'], pending: ['در انتظار پاسخ', 'warning'],
+        approved: ['مصوب', 'success'], rejected: ['ردشده', 'danger'], superseded: ['جایگزین‌شده', 'muted']
+      }[product.inquiryStatus] || ['نامشخص', 'muted']);
+    };
+
+    function dispatch(type, fromScenario = false) {
+      state = PartnerJourney.reducer(state, { type });
+      if (fromScenario) scenarioStep += 1;
+      render();
+    }
+
+    function renderMetrics() {
+      const usable = state.products.filter(product => PartnerJourney.selectors.isApprovalUsable(state, product)).length;
+      const items = [
+        ['زمان شبیه‌سازی', formatTime(state.now)],
+        ['وضعیت استعلام', PartnerJourney.selectors.inquiryStatus(state)],
+        ['approval قابل‌استفاده', `${new Intl.NumberFormat('fa-IR').format(usable)} از ${new Intl.NumberFormat('fa-IR').format(state.products.length)}`],
+        ['وضعیت پرونده', lifecycleLabel(state.saleCase?.lifecycle)]
+      ];
+      document.getElementById('metrics').innerHTML = items.map(([label, value]) => `
+        <div class="metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>
+      `).join('');
+    }
+
+    function renderNotice() {
+      document.getElementById('notice').innerHTML = `<div class="notice ${state.last.tone}"><strong>آخرین نتیجه:</strong><span>${state.last.text}</span></div>`;
+    }
+
+    function renderRows() {
+      document.getElementById('rows').innerHTML = state.products.map(product => {
+        const [status, tone] = statusPresentation(state, product);
+        const approval = product.approval;
+        const hours = PartnerJourney.selectors.remainingHours(state, product);
+        const wizardRow = PartnerJourney.selectors.wizardRow(state, product.id);
+        const finalRow = state.saleCase?.rows.find(row => row.productId === product.id);
+        const activeRow = finalRow || wizardRow;
+        const difference = activeRow ? activeRow.retail - activeRow.wholesale : null;
+        const validity = !approval ? '—' : state.saleCase && finalRow
+          ? 'snapshot در Case'
+          : hours > 0 ? `${new Intl.NumberFormat('fa-IR', { maximumFractionDigits: 0 }).format(hours)} ساعت` : 'پایان یافته';
+        return `<tr>
+          <td><div class="product-name">${product.name}</div><div>${product.config}</div><div class="fingerprint">${product.fingerprint}</div></td>
+          <td><span class="badge ${tone}">${status}</span>${product.rejectionReason ? `<div class="small loss">${product.rejectionReason}</div>` : ''}</td>
+          <td class="money">${money(activeRow?.wholesale ?? approval?.wholesale)}</td>
+          <td>${validity}${hours !== null && hours > 0 && hours <= 6 && !state.saleCase ? '<div class="small loss">کمتر از ۶ ساعت</div>' : ''}</td>
+          <td><div class="money">${money(activeRow?.retail)}</div>${activeRow ? `<div class="small muted">${activeRow.retailSource === 'manual' ? 'تنظیم دستی' : 'پیش‌فرض عمده'}</div>` : ''}</td>
+          <td class="money ${difference == null ? '' : difference < 0 ? 'loss' : 'profit'}">${difference == null ? '—' : money(difference)}</td>
+          <td>${finalRow ? '<span class="badge success">snapshot پرونده</span>' : wizardRow ? '<span class="badge info">در Wizard</span>' : '<span class="muted">بیرون</span>'}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderCaseFacts() {
+      const saleCase = state.saleCase;
+      const totalRetail = (saleCase?.rows || state.wizard.rows).reduce((sum, row) => sum + row.retail * row.quantity, 0);
+      const totalWholesale = (saleCase?.rows || state.wizard.rows).reduce((sum, row) => sum + row.wholesale * row.quantity, 0);
+      const facts = [
+        ['شماره Case', saleCase?.number || '—'],
+        ['قرارداد مشتری', saleCase?.customerContractNumber || '—'],
+        ['سند داخلی سبلان', saleCase?.internalRecordNumber || '—'],
+        ['مبلغ retail', money(totalRetail || null)],
+        ['مبلغ wholesale', money(totalWholesale || null)],
+        ['صف Accounting', saleCase?.accountingQueued ? 'وارد شده' : 'هنوز نه']
+      ];
+      document.getElementById('caseFacts').innerHTML = facts.map(([label, value]) => `<div class="fact"><dt>${label}</dt><dd>${value}</dd></div>`).join('');
+    }
+
+    function renderActions() {
+      document.getElementById('actions').innerHTML = actionGroups.map(group => `
+        <div class="action-group">
+          <h3>${group.title}</h3>
+          <div class="button-grid">${group.actions.map(([type, label, tone = '']) => `<button class="action ${tone}" type="button" data-action="${type}">${label}</button>`).join('')}</div>
+        </div>
+      `).join('');
+      document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => dispatch(button.dataset.action)));
+    }
+
+    function selectScenario(id) {
+      activeScenario = scenarios.find(item => item.id === id);
+      scenarioStep = 0;
+      state = PartnerJourney.initialState();
+      state.last = { tone: 'info', text: `سناریوی «${activeScenario.title}» آماده است؛ گام اول را اجرا کنید.` };
+      render();
+    }
+
+    function renderScenario() {
+      document.getElementById('scenarioTabs').innerHTML = scenarios.map(scenario => `
+        <button class="tab" type="button" role="tab" aria-selected="${scenario.id === activeScenario.id}" data-scenario="${scenario.id}">${scenario.title}</button>
+      `).join('');
+      document.querySelectorAll('[data-scenario]').forEach(button => button.addEventListener('click', () => selectScenario(button.dataset.scenario)));
+
+      document.getElementById('scenario').innerHTML = `
+        <p class="scenario-copy">${activeScenario.description}</p>
+        <div class="steps">${activeScenario.steps.map(([type, label], index) => `
+          <div class="step ${index < scenarioStep ? 'done' : index === scenarioStep ? 'current' : ''}">
+            <span class="step-index">${new Intl.NumberFormat('fa-IR').format(index + 1)}</span>
+            <span>${label}</span>
+            <button class="action ${index === scenarioStep ? 'primary' : ''}" type="button" data-step="${index}" data-step-action="${type}" ${index !== scenarioStep ? 'disabled' : ''}>${index < scenarioStep ? 'انجام شد' : index === scenarioStep ? 'اجرا' : 'در انتظار'}</button>
+          </div>
+        `).join('')}</div>
+      `;
+      document.querySelectorAll('[data-step-action]').forEach(button => button.addEventListener('click', () => dispatch(button.dataset.stepAction, true)));
+    }
+
+    function renderHistory() {
+      document.getElementById('history').innerHTML = state.history.map(item => `<li>${item}</li>`).join('');
+    }
+
+    function render() {
+      renderMetrics();
+      renderNotice();
+      renderRows();
+      renderCaseFacts();
+      renderActions();
+      renderScenario();
+      renderHistory();
+    }
+
+    render();
+  </script>
+</body>
+</html>

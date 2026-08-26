@@ -35,6 +35,7 @@
     "docker:verify": "node scripts/verify-local-docker.mjs",
     "prototype:hr-interview": "docker compose -f docker-compose.local.yml up -d --build frontend",
     "prototype:accounting-dashboard": "docker compose -f docker-compose.local.yml up -d --build frontend",
+    "prototype:partner-management": "docker compose -f docker-compose.local.yml up -d --build frontend",
     "docker:prod:build": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml build",
     "check:frontend-docker-workspace": "node deploy/scripts/check-frontend-docker-workspace.mjs",
     "docker:prod:up": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml up -d",

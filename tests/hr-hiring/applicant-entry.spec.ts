@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { hrHiringE2eUrl } from "./e2e-url";
 
 const expectReadable = async (locator: import("@playwright/test").Locator) => {
   const colors = await locator.evaluate((element) => {
@@ -50,7 +51,7 @@ test("HR Processor can enter the hiring case and control the external SMS bounda
   await expect(page.getByRole("link", { name: "متقاضی آزمایشی" })).toBeVisible({ timeout: 30_000 });
 
   const controlResponse = await page.request.put(
-    "http://127.0.0.1:3100/api/test/hr-hiring-sms",
+    hrHiringE2eUrl("/api/test/hr-hiring-sms"),
     { data: { mode: "failure" } },
   );
   expect(controlResponse.ok()).toBe(true);
@@ -64,20 +65,20 @@ test("HR Processor can enter the hiring case and control the external SMS bounda
   await expect(page.getByText("خطای آزمایشی ارسال پیامک")).toBeVisible();
 
   const casePayload = await page.request.get(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-application"),
   );
   const caseBody = await casePayload.json();
   expect(casePayload.ok(), JSON.stringify(caseBody)).toBe(true);
   expect(caseBody.data.currentApplicantOtp).toBeUndefined();
   const otpReveal = await page.request.get(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/applicant-otp",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-application/applicant-otp"),
   );
   const otpBody = await otpReveal.json();
   expect(otpReveal.ok(), JSON.stringify(otpBody)).toBe(true);
   expect(otpBody.data.code).toMatch(/^\d{6}$/);
 
   const smsSnapshot = await page.request.get(
-    "http://127.0.0.1:3100/api/test/hr-hiring-sms",
+    hrHiringE2eUrl("/api/test/hr-hiring-sms"),
   );
   expect(smsSnapshot.ok()).toBe(true);
   expect(await smsSnapshot.json()).toMatchObject({
@@ -101,7 +102,7 @@ test("latest pre-identity decisions and identity evidence modes persist through 
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
 
   const release = await page.request.post(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-release-application/pre-identity/release",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-release-application/pre-identity/release"),
   );
   expect(release.ok(), await release.text()).toBe(true);
   await page.goto("/dashboard/hr/hiring/hr-e2e-release-application");
@@ -112,7 +113,7 @@ test("latest pre-identity decisions and identity evidence modes persist through 
   );
 
   const blockedRelease = await page.request.post(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-blocked-application/pre-identity/release",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-blocked-application/pre-identity/release"),
   );
   expect(blockedRelease.ok()).toBe(false);
   expect(await blockedRelease.json()).toMatchObject({
@@ -121,7 +122,7 @@ test("latest pre-identity decisions and identity evidence modes persist through 
   });
 
   const originalSeen = await page.request.post(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/documents",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-application/documents"),
     { form: { category: "OTHER", customTitle: "گواهی حرفه‌ای", inspectionSource: "ORIGINAL_SEEN", note: "اصل بررسی شد" } },
   );
   expect(originalSeen.status()).toBe(201);
@@ -131,7 +132,7 @@ test("latest pre-identity decisions and identity evidence modes persist through 
   });
 
   const replacement = await page.request.post(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/documents",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-application/documents"),
     { form: { category: "OTHER", customTitle: "گواهی حرفه‌ای", inspectionSource: "ORIGINAL_SEEN" } },
   );
   expect(replacement.status()).toBe(201);
@@ -141,7 +142,7 @@ test("latest pre-identity decisions and identity evidence modes persist through 
   });
 
   const secondSeries = await page.request.post(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/documents",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-application/documents"),
     { form: { category: "OTHER", customTitle: "مجوز تخصصی", inspectionSource: "ORIGINAL_SEEN" } },
   );
   expect(secondSeries.status()).toBe(201);
@@ -151,7 +152,7 @@ test("latest pre-identity decisions and identity evidence modes persist through 
   });
 
   const missingCopy = await page.request.post(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/documents",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-application/documents"),
     { form: { category: "NATIONAL_ID_FRONT", inspectionSource: "COPY_RECEIVED" } },
   );
   expect(missingCopy.ok()).toBe(false);
@@ -161,7 +162,7 @@ test("latest pre-identity decisions and identity evidence modes persist through 
   });
 
   const receivedCopy = await page.request.post(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/documents",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-application/documents"),
     {
       multipart: {
         category: "NATIONAL_ID_FRONT",
@@ -193,7 +194,7 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
   await page.locator("form").getByRole("button", { name: "ورود" }).click();
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
 
-  await page.request.put("http://127.0.0.1:3100/api/test/hr-hiring-sms", {
+  await page.request.put(hrHiringE2eUrl("/api/test/hr-hiring-sms"), {
     data: { mode: "success", reset: true },
   });
   await page.goto("/dashboard/hr/hiring/hr-e2e-application?phase=IDENTITY");
@@ -207,11 +208,11 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
   await expect(page.getByText("درخواست اصلاح برای متقاضی ارسال شد.")).toBeVisible();
 
   const snapshot = await page.request.get(
-    "http://127.0.0.1:3100/api/test/hr-hiring-sms",
+    hrHiringE2eUrl("/api/test/hr-hiring-sms"),
   );
   const snapshotBody = await snapshot.json();
   const otpReveal = await page.request.get(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/applicant-otp",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-application/applicant-otp"),
   );
   const otpBody = await otpReveal.json();
   expect(otpReveal.ok(), JSON.stringify(otpBody)).toBe(true);
@@ -227,7 +228,7 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
     timezoneId: "Asia/Tehran",
   });
   const candidatePage = await candidateContext.newPage();
-  await candidatePage.goto("http://127.0.0.1:3100/apply");
+  await candidatePage.goto(hrHiringE2eUrl("/apply"));
   await candidatePage.getByLabel("شماره همراه").fill("09120000001");
   await candidatePage.getByLabel("کد ورود شش‌رقمی").fill("123456");
   await candidatePage.getByRole("button", { name: "تأیید و ورود" }).click();
@@ -250,8 +251,8 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
   await nationalCodeInput.fill("۱۲۳۴۵۶۷۸۹");
   await expect(nationalCodeInput).toHaveValue("123456789");
   await expect(candidatePage.getByText("کد ملی باید دقیقاً ۱۰ رقم باشد.", { exact: true })).toBeVisible();
-  await nationalCodeInput.fill("۲۲۹۴۵۶۷۸۹۰");
-  await expect(nationalCodeInput).toHaveValue("2294567890");
+  await nationalCodeInput.fill("۲۲۹۴۵۶۷۸۰۳");
+  await expect(nationalCodeInput).toHaveValue("2294567803");
   await candidatePage
     .getByLabel(/کد پستی — کد پستی را با مدرک نشانی بررسی کنید/)
     .fill("1234567890");
@@ -275,17 +276,17 @@ test("Offer notification includes the applicant's existing OTP for /apply", asyn
   await page.locator("form").getByRole("button", { name: "ورود" }).click();
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
 
-  await page.request.put("http://127.0.0.1:3100/api/test/hr-hiring-sms", {
+  await page.request.put(hrHiringE2eUrl("/api/test/hr-hiring-sms"), {
     data: { mode: "success", reset: true },
   });
   const retry = await page.request.post("/api/hr-hiring/applications/hr-e2e-application/compensation/hr-e2e-compensation-snapshot/notification/retry");
   expect(retry.ok()).toBeTruthy();
 
   const smsSnapshot = await page.request.get(
-    "http://127.0.0.1:3100/api/test/hr-hiring-sms",
+    hrHiringE2eUrl("/api/test/hr-hiring-sms"),
   );
   const otpReveal = await page.request.get(
-    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/applicant-otp",
+    hrHiringE2eUrl("/api/hr-hiring/applications/hr-e2e-application/applicant-otp"),
   );
   const otpBody = await otpReveal.json();
   expect(otpReveal.ok(), JSON.stringify(otpBody)).toBe(true);

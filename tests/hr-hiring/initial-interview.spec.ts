@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { hrHiringE2eUrl } from "./e2e-url";
 
 const applicationId = "hr-e2e-interview-application";
-const apiBase = `http://127.0.0.1:3100/api/hr-hiring/applications/${applicationId}`;
+const apiBase = hrHiringE2eUrl(`/api/hr-hiring/applications/${applicationId}`);
 
 test("schema-two interview completion preserves invalid evidence and atomically records corrected evidence", async ({ page }) => {
   await page.goto("/login");
@@ -12,7 +13,7 @@ test("schema-two interview completion preserves invalid evidence and atomically 
   await page.locator("form").getByRole("button", { name: "ورود" }).click();
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
   const permissionsResponse = await page.request.get(
-    "http://127.0.0.1:3100/api/hr-hiring/me/action-permissions",
+    hrHiringE2eUrl("/api/hr-hiring/me/action-permissions"),
   );
   expect((await permissionsResponse.json()).data).toEqual(expect.arrayContaining([
     "RECORD_INITIAL_INTERVIEW",
@@ -20,7 +21,7 @@ test("schema-two interview completion preserves invalid evidence and atomically 
   ]));
 
   const criteriaResponse = await page.request.get(
-    "http://127.0.0.1:3100/api/hr-hiring/interview-criteria",
+    hrHiringE2eUrl("/api/hr-hiring/interview-criteria"),
   );
   expect(criteriaResponse.ok(), await criteriaResponse.text()).toBe(true);
   const criteria = (await criteriaResponse.json()).data.criteriaJson as Array<{
@@ -118,7 +119,7 @@ test("completion error names and focuses the invalid criterion before retry succ
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
 
   const criteriaResponse = await page.request.get(
-    "http://127.0.0.1:3100/api/hr-hiring/interview-criteria",
+    hrHiringE2eUrl("/api/hr-hiring/interview-criteria"),
   );
   const criteria = (await criteriaResponse.json()).data.criteriaJson as Array<{
     stableId: string;

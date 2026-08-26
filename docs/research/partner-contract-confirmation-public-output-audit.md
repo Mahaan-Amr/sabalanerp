@@ -1,8 +1,11 @@
 # ممیزی پیامک، OTP و خروجی عمومی قرارداد Partner
 
-وضعیت: تحقیق تکمیل‌شده  
-تاریخ: ۱۴۰۵/۰۶/۰۴  
-Issue: [#300](https://github.com/Mahaan-Amr/sabalanerp/issues/300)  
+وضعیت: تحقیق تکمیل‌شده
+
+تاریخ: ۱۴۰۵/۰۶/۰۴
+
+Issue: [#300](https://github.com/Mahaan-Amr/sabalanerp/issues/300)
+
 مبنای کد: `602923ebd1fac3234eea3dd5dea7021f4ebd541b`
 
 ## نتیجه اجرایی
@@ -134,4 +137,3 @@ Issue: [#300](https://github.com/Mahaan-Amr/sabalanerp/issues/300)
 - PDF حسابداری/کارگاه و سند داخلی سبلان نباید به public confirmation متصل شوند.
 - تأیید OTP مشتری نباید معادل امضای داخلی، چاپ یا ایجاد بدهی سبلان تلقی شود.
 - پنهان‌کردن wholesale field در React کافی نیست؛ حذف باید پیش از serialization در backend انجام شود.
-

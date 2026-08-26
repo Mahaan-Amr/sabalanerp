@@ -22,6 +22,28 @@ export interface SmsTemplateParameter {
   value: string;
 }
 
+const assertSixDigitHiringCode = (code: string, label: string) => {
+  if (!/^\d{6}$/.test(code)) throw new Error(`${label} must contain exactly six digits.`);
+};
+
+export const buildHiringInvitationTemplateParameters = (code: string): SmsTemplateParameter[] => {
+  assertSixDigitHiringCode(code, 'Hiring invitation access code');
+  return [{ name: 'CODE', value: code }];
+};
+
+export const buildHiringCorrectionTemplateParameters = (
+  details: string,
+  code: string,
+): SmsTemplateParameter[] => {
+  const normalizedDetails = String(details || '').trim();
+  if (!normalizedDetails) throw new Error('Hiring correction details are required.');
+  assertSixDigitHiringCode(code, 'Hiring correction access code');
+  return [
+    { name: 'DETAILS', value: normalizedDetails },
+    { name: 'CODE', value: code },
+  ];
+};
+
 type SmsSendResult = {
   success: boolean;
   messageId?: number;
@@ -33,7 +55,7 @@ type SmsSendResult = {
 };
 
 export const buildHiringOfferTemplateParameters = (code: string): SmsTemplateParameter[] => {
-  if (!/^\d{6}$/.test(code)) throw new Error('Hiring offer access code must contain exactly six digits.');
+  assertSixDigitHiringCode(code, 'Hiring offer access code');
   return [{ name: 'CODE', value: code }];
 };
 
@@ -98,7 +120,7 @@ class SmsService {
       10
     );
     this.hiringInvitationTemplateId = parseInt(
-      process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || '135816',
+      process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || '363360',
       10
     );
     this.hiringCorrectionTemplateId = parseInt(
@@ -343,29 +365,21 @@ class SmsService {
     }
     const formattedPhone = this.formatPhoneNumber(params.phoneNumber);
     return this.sendTemplate(formattedPhone, this.hiringInvitationTemplateId, [
-      { name: 'Code', value: params.code }
+      ...buildHiringInvitationTemplateParameters(params.code)
     ]);
   }
 
   async sendHiringCorrection(params: {
     phoneNumber: string;
     details: string;
-    replacementCode?: string;
+    replacementCode: string;
   }): Promise<{ success: boolean; messageId?: number; error?: string; rawResponse?: unknown }> {
     if (this.environment === 'sandbox' && !this.apiKey) return { success: true };
     if (!Number.isInteger(this.hiringCorrectionTemplateId) || this.hiringCorrectionTemplateId <= 0) {
       return { success: false, error: 'قالب پیامک درخواست اصلاح استخدام تنظیم نشده است.' };
     }
     const formattedPhone = this.formatPhoneNumber(params.phoneNumber);
-    const parameters = [
-      { name: 'Details', value: params.details },
-      {
-        name: 'Code',
-        value: params.replacementCode
-          ? `کد ورود جدید: ${params.replacementCode}`
-          : 'کد ورود قبلی شما همچنان معتبر است.'
-      }
-    ];
+    const parameters = buildHiringCorrectionTemplateParameters(params.details, params.replacementCode);
     return this.sendTemplate(formattedPhone, this.hiringCorrectionTemplateId, parameters);
   }
 

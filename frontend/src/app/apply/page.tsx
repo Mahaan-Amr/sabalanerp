@@ -1038,17 +1038,30 @@ export default function ApplicantFormPage() {
             {application.compensation.collateralRequirement && (
               <ErpCard className="mt-4 p-4">
                 <ErpInlineState kind="stale" title="شرایط وثیقه این پیشنهاد" />
-                <p className="mt-2 text-sm">
-                  {application.compensation.collateralRequirement.candidateExplanation}
-                </p>
-                <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
-                  <span>نوع: {hrDisplayLabel(application.compensation.collateralRequirement.type)}</span>
-                  {application.compensation.collateralRequirement.amountRials && (
-                    <span>
-                      مبلغ: {formatPrice(Number(application.compensation.collateralRequirement.amountRials), 'ریال')}
-                    </span>
-                  )}
+                <div className="mt-3 space-y-2">
+                  {(application.compensation.collateralRequirement.lines?.length
+                    ? application.compensation.collateralRequirement.lines
+                    : [application.compensation.collateralRequirement]
+                  ).map((line: any, index: number) => (
+                    <div key={line.lineKey || line.id || index} className="rounded-xl border border-[var(--sds-border-subtle)] p-3 text-sm">
+                      <b>{line.type === "OTHER" ? line.customTitle : hrDisplayLabel(line.type)}</b>
+                      {line.amountRials && <span className="me-2">— {formatPrice(Number(line.amountRials), 'ریال')}</span>}
+                      <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{line.candidateExplanation}</p>
+                    </div>
+                  ))}
                 </div>
+              </ErpCard>
+            )}
+            {application.compensation.candidateDecision === "ACCEPTED" && (
+              <ErpInlineState className="mt-4" kind="success" title="پذیرش پیشنهاد همکاری با موفقیت ثبت شد." />
+            )}
+            {application.compensation.candidateDecision === "DECLINED" && (
+              <ErpCard className="mt-4 space-y-2 p-4">
+                <ErpInlineState kind="error" title="رد پیشنهاد همکاری با موفقیت ثبت شد." />
+                <p className="text-sm">دسته دلیل: {hrDisplayLabel(application.compensation.candidateDeclineCategory)}</p>
+                {application.compensation.candidateDecisionNote && (
+                  <p className="text-sm text-[var(--sds-text-secondary)]">توضیح شما: {application.compensation.candidateDecisionNote}</p>
+                )}
               </ErpCard>
             )}
             {!application.compensation.candidateDecision && (

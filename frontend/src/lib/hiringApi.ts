@@ -67,6 +67,10 @@ export const hiringAPI = {
     internal.post(
       `/applications/${id}/invitations/${invitationId}/delivery/refresh`,
     ),
+  refreshCandidateSmsDelivery: (id: string, purpose: string, referenceId: string) =>
+    internal.post(`/applications/${id}/sms/${purpose}/${referenceId}/delivery/refresh`),
+  retryInvitation: (id: string, invitationId: string) =>
+    internal.post(`/applications/${id}/invitations/${invitationId}/retry`),
   recordDecision: (id: string, kind: string, data: any) =>
     internal.post(`/applications/${id}/decisions/${kind}`, data),
   getInitialInterview: (id: string) => internal.get(`/applications/${id}/initial-interview`),

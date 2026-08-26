@@ -1,3 +1,5 @@
+import { normalizeHiringRial } from './hrApplicantExperience';
+
 export const isValidIranianNationalCode = (value: unknown) => {
   const code = String(value || '');
   if (!/^\d{10}$/.test(code) || /^(\d)\1{9}$/.test(code)) return false;
@@ -75,8 +77,8 @@ export const validateHiringCorrection = (data: any, fields: string[]) => {
   if (missing.length) {
     throw new Error(`فیلدهای درخواستی برای اصلاح ناقص‌اند: ${missing.join(', ')}`);
   }
-  if (fields.includes('nationalCode') && data?.identityKind !== 'FOREIGN' && !/^\d{10}$/.test(String(data?.nationalCode ?? ''))) {
-    throw new Error('کد ملی باید دقیقاً ۱۰ رقم باشد.');
+  if (fields.includes('nationalCode') && data?.identityKind !== 'FOREIGN') {
+    validateIranianNationalCode(data?.nationalCode);
   }
   if (fields.includes('postalCode') && !/^\d{10}$/.test(String(data?.postalCode || ''))) {
     throw new Error('کد پستی باید ۱۰ رقم باشد.');
@@ -163,6 +165,48 @@ export const collateralCandidateExplanation = (type: string, amountRials: string
   return `پس از پذیرش پیشنهاد، امور مالی برای دریافت ${label}${amount} با شما هماهنگ می‌کند.`;
 };
 
+export type CollateralRequirementLineInput = {
+  lineKey?: unknown;
+  type?: unknown;
+  amountRials?: unknown;
+  customTitle?: unknown;
+};
+
+export const normalizeCollateralRequirementLines = (input: unknown) => {
+  if (!Array.isArray(input) || input.length === 0) throw new Error('حداقل یک ردیف وثیقه الزامی است.');
+  if (input.length > 20) throw new Error('حداکثر ۲۰ ردیف وثیقه قابل ثبت است.');
+  const keys = new Set<string>();
+  return input.map((raw, sortOrder) => {
+    const row = (raw || {}) as CollateralRequirementLineInput;
+    const type = String(row.type || '');
+    if (!Object.prototype.hasOwnProperty.call(COLLATERAL_LABELS, type)) throw new Error('نوع یکی از ردیف‌های وثیقه معتبر نیست.');
+    const lineKey = String(row.lineKey || '').trim() || `line-${sortOrder + 1}`;
+    if (lineKey.length > 100 || keys.has(lineKey)) throw new Error('شناسه ردیف وثیقه باید یکتا و معتبر باشد.');
+    keys.add(lineKey);
+    const rawAmount = row.amountRials == null ? '' : String(row.amountRials).trim();
+    if (rawAmount && (!/^\d+$/.test(rawAmount) || rawAmount === '0' || rawAmount.length > 18)) {
+      throw new Error('مبلغ وثیقه باید عدد صحیح مثبت ریال باشد.');
+    }
+    if (['PROMISSORY_NOTE', 'CHEQUE'].includes(type) && !rawAmount) {
+      throw new Error('برای سفته و چک ضمانت مبلغ مثبت الزامی است.');
+    }
+    const customTitle = type === 'OTHER' ? String(row.customTitle || '').trim() : '';
+    if (type === 'OTHER' && !customTitle) throw new Error('برای ردیف «سایر» عنوان اختصاصی الزامی است.');
+    if (customTitle.length > 200) throw new Error('عنوان اختصاصی وثیقه بیش از حد طولانی است.');
+    const amountRials = rawAmount || null;
+    const label = type === 'OTHER' ? customTitle : COLLATERAL_LABELS[type];
+    const amount = amountRials ? ` به مبلغ ${BigInt(amountRials).toLocaleString('en-US')} ریال` : '';
+    return {
+      lineKey,
+      sortOrder,
+      type,
+      amountRials,
+      customTitle: customTitle || null,
+      candidateExplanation: `پس از پذیرش پیشنهاد، امور مالی برای دریافت ${label}${amount} با شما هماهنگ می‌کند.`,
+    };
+  });
+};
+
 export const unresolvedActivationRequirements = (input: {
   scheduledStartDate?: Date | null;
   identityClearance: string;
@@ -182,4 +226,3 @@ export const unresolvedActivationRequirements = (input: {
   unresolved.push(...input.tasks.filter((task) => task.activationBlocker && !['COMPLETE', 'WAIVED'].includes(task.status)).map((task) => task.title));
   return unresolved;
 };
-import { normalizeHiringRial } from './hrApplicantExperience';

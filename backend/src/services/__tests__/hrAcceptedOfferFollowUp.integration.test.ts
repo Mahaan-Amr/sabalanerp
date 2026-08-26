@@ -7,7 +7,7 @@ process.env.DATABASE_URL ??=
   "postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public";
 const rollback = new Error("ROLLBACK_ACCEPTED_OFFER_FOLLOW_UP_TEST");
 
-test("accepted offer follow-up creates one Accounting collateral duty and safely replays", async () => {
+test("accepted offer follow-up creates one Accounting duty per collateral line and safely replays", async () => {
   const prisma = new PrismaClient();
   try {
     await assert.rejects(
@@ -39,8 +39,12 @@ test("accepted offer follow-up creates one Accounting collateral duty and safely
         });
         const firstRequirement = await tx.hrCollateralRequirement.create({
           data: {
-            applicationId: application.id, version: 1, type: "PROMISSORY_NOTE",
-            amountRials: "20000000", candidateExplanation: "سفته الزامی", proposedBy: actor.id,
+            applicationId: application.id, version: 1, type: "BUNDLE",
+            candidateExplanation: "دو وثیقه الزامی", proposedBy: actor.id,
+            lines: { create: [
+              { lineKey: 'promissory', sortOrder: 0, type: 'PROMISSORY_NOTE', amountRials: '20000000', candidateExplanation: 'سفته الزامی' },
+              { lineKey: 'guarantor', sortOrder: 1, type: 'GUARANTEE', candidateExplanation: 'ضامن الزامی' },
+            ] },
           },
         });
 
@@ -54,14 +58,12 @@ test("accepted offer follow-up creates one Accounting collateral duty and safely
 
         assert.equal(first.outcome, "CREATED");
         assert.equal(replay.outcome, "EXISTING");
-        assert.equal(await tx.hrCollateralItem.count({ where: { applicationId: application.id } }), 1);
-        assert.equal(
-          (await tx.hrCollateralItem.findFirstOrThrow({ where: { applicationId: application.id } })).collateralRequirementId,
-          firstRequirement.id,
-        );
+        const firstItems = await tx.hrCollateralItem.findMany({ where: { applicationId: application.id } });
+        assert.equal(firstItems.length, 2);
+        assert.equal(await tx.hrCollateralItem.count({ where: { applicationId: application.id, collateralRequirementId: firstRequirement.id, collateralRequirementLineId: { not: null } } }), 2);
         assert.equal(await tx.crossWorkspaceDuty.count({
-          where: { sourceType: "HR_HIRING_FINANCE", sourceActionCode: "HIRING_COLLATERAL_RECORD_RECEIPT" },
-        }), 1);
+          where: { sourceType: "HR_HIRING_FINANCE", sourceId: { in: firstItems.map(({ id }) => id) }, sourceActionCode: "HIRING_COLLATERAL_RECORD_RECEIPT" },
+        }), 2);
         assert.equal(
           (await tx.hrJobApplication.findUniqueOrThrow({ where: { id: application.id } })).collateralClearance,
           "IN_PROGRESS",
@@ -69,18 +71,22 @@ test("accepted offer follow-up creates one Accounting collateral duty and safely
 
         await tx.hrCollateralRequirement.update({ where: { id: firstRequirement.id }, data: { status: 'SUPERSEDED' } });
         const secondRequirement = await tx.hrCollateralRequirement.create({ data: {
-          applicationId: application.id, version: 2, type: firstRequirement.type,
-          amountRials: firstRequirement.amountRials, candidateExplanation: firstRequirement.candidateExplanation,
+          applicationId: application.id, version: 2, type: 'BUNDLE',
+          candidateExplanation: firstRequirement.candidateExplanation,
           proposedBy: actor.id,
+          lines: { create: [
+            { lineKey: 'promissory', sortOrder: 0, type: 'PROMISSORY_NOTE', amountRials: '30000000', candidateExplanation: 'سفته جدید' },
+            { lineKey: 'guarantor', sortOrder: 1, type: 'GUARANTEE', candidateExplanation: 'ضامن جدید' },
+          ] },
         } });
         const reconciled = await reconcileAcceptedOfferFollowUp(tx, {
           applicationId: application.id, actorUserId: actor.id, actorKind: 'SYSTEM', now,
         });
         assert.equal(reconciled.outcome, 'CREATED');
         assert.equal(
-          (await tx.hrCollateralItem.findFirstOrThrow({
-            where: { applicationId: application.id, supersededBy: null },
-          })).collateralRequirementId,
+          (await tx.hrCollateralItem.findFirstOrThrow({ where: {
+            applicationId: application.id, collateralRequirementId: secondRequirement.id,
+          } })).collateralRequirementId,
           secondRequirement.id,
         );
         const cancelledDuty = await tx.crossWorkspaceDuty.findFirstOrThrow({
@@ -97,6 +103,25 @@ test("accepted offer follow-up creates one Accounting collateral duty and safely
         assert.equal(cancellationAudit.actorUserId, null);
         assert.equal((cancellationAudit.afterJson as Record<string, unknown>).actorKind, 'SYSTEM');
         assert.equal((cancellationAudit.afterJson as Record<string, unknown>).technicalActorUserId, actor.id);
+
+        await tx.hrCollateralRequirement.update({ where: { id: secondRequirement.id }, data: { status: 'SUPERSEDED' } });
+        const thirdRequirement = await tx.hrCollateralRequirement.create({ data: {
+          applicationId: application.id, version: 3, type: 'BUNDLE',
+          candidateExplanation: 'فقط سفته', proposedBy: actor.id,
+          lines: { create: [
+            { lineKey: 'promissory', sortOrder: 0, type: 'PROMISSORY_NOTE', amountRials: '40000000', candidateExplanation: 'سفته نهایی' },
+          ] },
+        } });
+        const afterRemoval = await reconcileAcceptedOfferFollowUp(tx, {
+          applicationId: application.id, actorUserId: actor.id, actorKind: 'SYSTEM', now,
+        });
+        assert.equal(afterRemoval.itemIds?.length, 1);
+        assert.equal(await tx.hrCollateralItem.count({ where: {
+          applicationId: application.id, collateralRequirementId: thirdRequirement.id, required: true,
+        } }), 1);
+        assert.equal(await tx.crossWorkspaceDuty.count({ where: {
+          sourceType: 'HR_HIRING_FINANCE', sourceId: { in: reconciled.itemIds }, status: 'OPEN',
+        } }), 0);
         throw rollback;
       }, { timeout: 120_000 }),
       (error: unknown) => error === rollback,

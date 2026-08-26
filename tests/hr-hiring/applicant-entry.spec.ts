@@ -210,12 +210,17 @@ test("HR sends one correction request and Candidate reuses the existing OTP", as
     "http://127.0.0.1:3100/api/test/hr-hiring-sms",
   );
   const snapshotBody = await snapshot.json();
+  const otpReveal = await page.request.get(
+    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/applicant-otp",
+  );
+  const otpBody = await otpReveal.json();
+  expect(otpReveal.ok(), JSON.stringify(otpBody)).toBe(true);
   expect(snapshotBody.data.messages).toHaveLength(1);
   expect(snapshotBody.data.messages[0]).toMatchObject({
     kind: "correction",
     phoneNumber: "09120000001",
+    code: otpBody.data.code,
   });
-  expect(snapshotBody.data.messages[0].code).toBeUndefined();
 
   const candidateContext = await browser.newContext({
     locale: "fa-IR",
@@ -279,6 +284,11 @@ test("Offer notification includes the applicant's existing OTP for /apply", asyn
   const smsSnapshot = await page.request.get(
     "http://127.0.0.1:3100/api/test/hr-hiring-sms",
   );
+  const otpReveal = await page.request.get(
+    "http://127.0.0.1:3100/api/hr-hiring/applications/hr-e2e-application/applicant-otp",
+  );
+  const otpBody = await otpReveal.json();
+  expect(otpReveal.ok(), JSON.stringify(otpBody)).toBe(true);
   expect(await smsSnapshot.json()).toMatchObject({
     success: true,
     data: {
@@ -286,7 +296,7 @@ test("Offer notification includes the applicant's existing OTP for /apply", asyn
         {
           kind: "offer",
           phoneNumber: "09120000001",
-          code: "123456",
+          code: otpBody.data.code,
         },
       ],
     },
@@ -326,7 +336,9 @@ test("Candidate accepts the latest offer with fresh dedicated evidence", async (
     .getByLabel("پیشنهاد همکاری را مطالعه کرده‌ام و می‌پذیرم.")
     .check();
   await page.getByRole("button", { name: "پذیرش پیشنهاد" }).click();
-  await expect(page.getByText("پیشنهاد همکاری پذیرفته شد.")).toBeVisible();
+  await expect(
+    page.getByText("پذیرش پیشنهاد همکاری با موفقیت ثبت شد."),
+  ).toBeVisible();
 });
 
 test("Accounting-only Finance users record and independently verify collateral through duties", async ({ browser }) => {

@@ -28,6 +28,8 @@
     "test:hr-candidate-correction": "tsx src/services/__tests__/hrCandidateCorrection.test.ts",
     "test:hr-offer-decision": "tsx src/services/__tests__/hrOfferDecision.test.ts",
     "test:hr-offer-sms": "tsx src/services/__tests__/hrHiringOfferSms.test.ts",
+    "test:hr-candidate-sms-delivery": "tsx src/services/__tests__/hrCandidateSmsDelivery.test.ts",
+    "test:hr-collateral-requirement-bundle": "tsx src/services/__tests__/hrCollateralRequirementBundle.test.ts",
     "test:dispatch-sms-templates": "tsx src/services/__tests__/dispatchSmsTemplates.test.ts",
     "test:hr-candidate-assessment": "tsx src/services/__tests__/hrCandidateAssessment.test.ts",
     "test:hr-hiring-lifecycle": "tsx src/services/__tests__/hrHiringLifecycle.test.ts && tsx src/services/__tests__/hrEmploymentContract.test.ts && tsx src/services/__tests__/hrInsuranceEnrollment.test.ts && tsx src/services/__tests__/hrPayrollParticipation.test.ts && tsx src/services/__tests__/hrHiringDocumentIndex.test.ts && tsx src/services/__tests__/hrHiringDocumentEvidence.test.ts && tsx src/services/__tests__/hrEmploymentActivation.test.ts && tsx src/services/__tests__/hrInitialInterviewCriteriaSet.test.ts && tsx src/routes/__tests__/hrOnboardingTaskRetirementRoutes.test.ts && tsx src/services/__tests__/hrOnboardingTaskRetirementAudit.test.ts",

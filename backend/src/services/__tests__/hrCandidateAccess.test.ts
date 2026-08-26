@@ -57,6 +57,9 @@ assert.deepEqual(projectCurrentApplicantOtp(invitations, '09123456789', now), {
 });
 assert.equal(projectCurrentApplicantOtp([{ ...invitations[1], revokedAt: now }], '09123456789', now), null);
 assert.equal(projectCurrentApplicantOtp([{ ...invitations[1], expiresAt: now }], '09123456789', now), null);
+assert.equal(projectCurrentApplicantOtp([{
+  ...invitations[0], overlapExpiresAt: new Date(now.getTime() - 1),
+}], '09123456789', now), null);
 assert.equal(projectCurrentApplicantOtp([{ ...invitations[1], otpCiphertext: null }], '09123456789', now), null);
 
 for (let index = 0; index < 100; index += 1) assert.match(generateApplicantOtp(), /^\d{6}$/);

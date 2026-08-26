@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   customCriteriaAreComplete,
+  initialInterviewScoreSummary,
   InterviewSnapshotError,
   normalizeInitialInterviewPayload,
   publishedCriteriaForInterview,
@@ -76,5 +77,52 @@ assert.equal(customCriteriaAreComplete([
   { id: "x", title: "اول", kind: "text", score: null, text: "پاسخ", yesNo: null },
   { id: "x", title: "دوم", kind: "yes-no", score: null, text: "", yesNo: "YES" },
 ]), false);
+
+assert.deepEqual(initialInterviewScoreSummary({
+  schemaVersion: 2,
+  criteriaTemplateVersion: 7,
+  criteriaSnapshot: [
+    ...snapshot,
+    { stableId: "stability", title: "ثبات شغلی", answerType: "SCORE_1_TO_5", isActive: true, order: 3, allowUnassessed: true },
+  ],
+  state: {
+    answers: {
+      appearance: { score: 4 },
+      motivation: { text: "پاسخ" },
+      stability: { score: "UNASSESSED" },
+    },
+    decision: "POSITIVE",
+    decisionReason: "مناسب",
+  },
+  customCriteria: [
+    { id: "custom-score", title: "معیار اختصاصی", kind: "score", score: 3, text: "", yesNo: null },
+    { id: "custom-text", title: "توضیح", kind: "text", score: null, text: "ثبت شده", yesNo: null },
+  ],
+} as any), { average: 3.5, scoredCount: 2 });
+
+assert.deepEqual(initialInterviewScoreSummary({
+  schemaVersion: 2,
+  criteriaTemplateVersion: 7,
+  criteriaSnapshot: snapshot,
+  state: {
+    answers: {
+      appearance: { score: "UNASSESSED" },
+      motivation: { text: "پاسخ" },
+    },
+    decision: "POSITIVE",
+    decisionReason: "مناسب",
+  },
+  customCriteria: [],
+} as any), { average: null, scoredCount: 0 });
+
+assert.deepEqual(initialInterviewScoreSummary({
+  version: 1,
+  criteriaTemplateVersion: 7,
+  criteriaSnapshot: snapshot,
+  criteria: [
+    { criterionId: "appearance", order: 1, score: 5 },
+    { criterionId: "motivation", order: 2, score: 3 },
+  ],
+}), { average: 4, scoredCount: 2 });
 
 console.log("HR interview evidence compatibility tests passed.");

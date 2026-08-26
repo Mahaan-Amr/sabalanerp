@@ -1,321 +1,135 @@
 "use client";
 
 import {
-  ErpBadge,
-  ErpButton,
-  ErpCard,
-  ErpInlineState,
-  ErpIconButton,
-  ErpMetricGrid,
-  ErpPage,
-  ErpPressable,
-  ErpSection,
-  ErpSegmentedControl,
-  ErpSummaryGrid,
+  ErpBadge, ErpButton, ErpIconButton, ErpNeumorphicCard,
+  ErpNeumorphicInteractiveCard, ErpNeumorphicMetricGrid, ErpSegmentedControl,
 } from "@/components/erp";
+import { useTheme } from "@/contexts/ThemeContext";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
-  FaArrowLeft,
-  FaArrowRight,
-  FaChartLine,
-  FaCheck,
-  FaClock,
-  FaExchangeAlt,
-  FaPause,
-  FaSearchDollar,
-  FaShieldAlt,
-  FaUserCheck,
-  FaUsers,
-  FaWallet,
+  FaArrowLeft, FaArrowRight, FaBars, FaBell, FaBriefcase, FaChartLine,
+  FaCheck, FaChevronLeft, FaClock, FaExchangeAlt, FaFileInvoiceDollar,
+  FaHome, FaMoon, FaPause, FaSearch, FaSearchDollar, FaShieldAlt, FaSun,
+  FaUser, FaUserCheck, FaUsers, FaWallet,
 } from "react-icons/fa";
 
 type Variant = "A" | "B" | "C";
 type Persona = "ADMIN" | "HR" | "SALES" | "PARTNER";
 type Tone = "neutral" | "primary" | "success" | "warning" | "danger" | "info" | "purple";
-
-type WorkItem = {
-  id: string;
-  owner: Persona;
-  title: string;
-  partner: string;
-  detail: string;
-  status: string;
-  tone: Tone;
-  action: string;
-  age: string;
-};
+type Decision = { id: string; owner: Persona; title: string; partner: string; detail: string; status: string; tone: Tone; age: string; icon: typeof FaClock };
 
 const variants: Variant[] = ["A", "B", "C"];
-const variantNames: Record<Variant, string> = {
-  A: "صف تصمیم",
-  B: "پرونده Partner",
-  C: "هاب نقش‌ها",
-};
-
+const variantNames: Record<Variant, string> = { A: "مرکز عملیات", B: "پرونده Partner", C: "گزارش و حساب" };
 const personaOptions = [
-  { value: "ADMIN" as const, label: "Admin", icon: FaShieldAlt },
-  { value: "HR" as const, label: "HR", icon: FaUserCheck },
-  { value: "SALES" as const, label: "Sales / CRM", icon: FaUsers },
-  { value: "PARTNER" as const, label: "Partner", icon: FaWallet },
+  { value: "ADMIN" as const, label: "مدیر", icon: FaShieldAlt },
+  { value: "HR" as const, label: "منابع انسانی", icon: FaUserCheck },
+  { value: "SALES" as const, label: "فروش و CRM", icon: FaUsers },
+  { value: "PARTNER" as const, label: "فروشنده همکار", icon: FaWallet },
 ];
-
-const personaCopy: Record<Persona, { title: string; scope: string; boundary: string }> = {
-  ADMIN: {
-    title: "دید سراسری و اقدام‌های نام‌دار",
-    scope: "COMPANY",
-    boundary: "مشاهده کامل؛ بدون impersonation و بدون پاسخ به استعلام مگر پس از assignment ممیزی‌شده.",
-  },
-  HR: {
-    title: "هویت و چرخه پروفایل",
-    scope: "DEPARTMENT / COMPANY صریح",
-    boundary: "فقط activation gates، تعلیق و خاتمه؛ بدون قیمت، margin یا پرداخت.",
-  },
-  SALES: {
-    title: "مدیریت تجاری و مالکیت مشتری",
-    scope: "DEPARTMENT پیش‌فرض",
-    boundary: "assignment و مدیریت تجاری از Sales؛ تصمیم انتقال از مجوز صریح CRM. فروشنده عادی دسترسی ضمنی ندارد.",
-  },
-  PARTNER: {
-    title: "فروش، گزارش شخصی و حساب من",
-    scope: "OWN",
-    boundary: "فقط مشتریان و پرونده‌های خود؛ حساب سبلان read-only و جدا از وصول مشتری.",
-  },
+const personaCopy: Record<Persona, { eyebrow: string; title: string; subtitle: string; scope: string }> = {
+  ADMIN: { eyebrow: "فروش · کانال همکار", title: "مرکز فروشندگان همکار", subtitle: "مدیریت چرخه، مسئولیت‌ها و سلامت کانال فروش", scope: "دید سراسری شرکت" },
+  HR: { eyebrow: "منابع انسانی · فروشنده همکار", title: "پروفایل‌های فروشنده همکار", subtitle: "هویت تجاری، فعال‌سازی و چرخه همکاری", scope: "محدوده مجاز منابع انسانی" },
+  SALES: { eyebrow: "فروش و CRM · کانال همکار", title: "عملیات فروشندگان همکار", subtitle: "پاسخ‌دهنده قیمت، مشتریان و پرونده‌های تجاری", scope: "محدوده دپارتمان فروش" },
+  PARTNER: { eyebrow: "فضای فروشنده همکار", title: "کسب‌وکار من", subtitle: "فروش، وصول مشتری و حساب من با سبلان", scope: "فقط اطلاعات حساب من" },
 };
-
-const workItems: WorkItem[] = [
-  { id: "activation", owner: "HR", title: "تکمیل درگاه فعال‌سازی", partner: "سنگ آریا", detail: "هویت تجاری تأیید شده؛ شرایط پرداخت و پاسخ‌دهنده هنوز ناقص‌اند.", status: "۲ مانع", tone: "warning", action: "بررسی درگاه‌ها", age: "از دیروز" },
-  { id: "suspension", owner: "HR", title: "تصمیم تعلیق", partner: "پارس سازه", detail: "درخواست تعلیق با دلیل ثبت شده؛ ۴ پرونده قطعی برای Accounting و Delivery ادامه می‌یابد.", status: "نیازمند تصمیم", tone: "danger", action: "بررسی تعلیق", age: "۴۵ دقیقه" },
-  { id: "assignment", owner: "SALES", title: "تعیین پاسخ‌دهنده قیمت", partner: "گروه سپید", detail: "بدون پاسخ‌دهنده فعال؛ ارسال استعلام جدید fail-closed است و تیکت پشتیبانی باز مانده.", status: "فوری", tone: "danger", action: "تعیین پاسخ‌دهنده", age: "۲ ساعت" },
-  { id: "transfer", owner: "SALES", title: "تصمیم انتقال مشتری", partner: "سنگ آریا", detail: "تطبیق احتمالی: مریم احمدی · شخص حقیقی · تهران · تلفن •••• ۴۸۱۲",
-    status: "projection محدود", tone: "info", action: "بررسی درخواست", age: "امروز" },
-  { id: "reassign", owner: "ADMIN", title: "بازانتساب اضطراری", partner: "گروه سپید", detail: "پاسخ‌دهنده قبلی غیرفعال شده؛ فقط ردیف‌های pending منتقل می‌شوند و تاریخچه تصمیم‌ها ثابت می‌ماند.", status: "۳ ردیف pending", tone: "warning", action: "بازانتساب", age: "۲ ساعت" },
-  { id: "audit", owner: "ADMIN", title: "بازبینی اقدام حساس", partner: "پارس سازه", detail: "تعلیق، assignment revision و scope مؤثر در یک audit trail قابل مشاهده‌اند.", status: "بدون تعارض", tone: "success", action: "مشاهده ممیزی", age: "امروز" },
-  { id: "inquiry", owner: "PARTNER", title: "استعلام‌های من", partner: "حساب من", detail: "۲ ردیف تا کمتر از ۶ ساعت دیگر منقضی می‌شوند؛ expiry در زمان تعلیق متوقف نمی‌شود.", status: "۲ نزدیک انقضا", tone: "warning", action: "مشاهده استعلام‌ها", age: "تا ۵ ساعت" },
-  { id: "receivable", owner: "PARTNER", title: "حساب من با سبلان", partner: "حساب من", detail: "مانده حساب از حقیقت Accounting خوانده می‌شود؛ وصول مشتری در این مانده محاسبه نشده است.", status: "۴۸۰ میلیون ریال", tone: "info", action: "مشاهده گردش حساب", age: "به‌روز" },
+const decisions: Decision[] = [
+  { id: "activation", owner: "HR", title: "تکمیل فعال‌سازی", partner: "سنگ آریا", detail: "شرایط پرداخت و پاسخ‌دهنده قیمت هنوز تکمیل نشده‌اند.", status: "۲ مانع", tone: "warning", age: "از دیروز", icon: FaUserCheck },
+  { id: "suspension", owner: "HR", title: "بررسی درخواست تعلیق", partner: "پارس سازه", detail: "۴ پرونده قطعی پس از تعلیق برای حسابداری و تحویل ادامه می‌یابد.", status: "نیازمند تصمیم", tone: "danger", age: "۴۵ دقیقه", icon: FaPause },
+  { id: "assignment", owner: "SALES", title: "تعیین پاسخ‌دهنده قیمت", partner: "گروه سپید", detail: "ارسال استعلام جدید تا assignment رسمی متوقف است.", status: "فوری", tone: "danger", age: "۲ ساعت", icon: FaSearchDollar },
+  { id: "transfer", owner: "SALES", title: "درخواست انتقال مشتری", partner: "سنگ آریا", detail: "مریم احمدی · شخص حقیقی · تهران · تلفن •••• ۴۸۱۲", status: "بررسی CRM", tone: "info", age: "امروز", icon: FaExchangeAlt },
+  { id: "audit", owner: "ADMIN", title: "بازبینی اقدام حساس", partner: "پارس سازه", detail: "تعلیق، scope و revision مؤثر در audit trail ثبت شده‌اند.", status: "بدون تعارض", tone: "success", age: "امروز", icon: FaShieldAlt },
+  { id: "inquiry", owner: "PARTNER", title: "استعلام‌های نزدیک انقضا", partner: "حساب من", detail: "۲ ردیف تا کمتر از شش ساعت دیگر منقضی می‌شوند.", status: "۲ مورد", tone: "warning", age: "تا ۵ ساعت", icon: FaClock },
 ];
-
 const profiles = [
-  { name: "سنگ آریا", owner: "علی اکبری", lifecycle: "در انتظار تکمیل", tone: "warning" as Tone, responder: "تعیین نشده", blockers: "شرایط پرداخت، پاسخ‌دهنده", sales: "۰", balance: "۰ ریال" },
-  { name: "پارس سازه", owner: "نازنین یوسفی", lifecycle: "معلق", tone: "danger" as Tone, responder: "سارا محمدی", blockers: "تصمیم تعلیق", sales: "۱۲", balance: "۳۲۰ میلیون ریال" },
-  { name: "گروه سپید", owner: "حسین رضایی", lifecycle: "فعال", tone: "success" as Tone, responder: "فاقد پاسخ‌دهنده فعال", blockers: "بازانتساب", sales: "۸", balance: "۱۶۰ میلیون ریال" },
+  { name: "سنگ آریا", person: "علی اکبری", initials: "س‌آ", lifecycle: "در انتظار تکمیل", tone: "warning" as Tone, responder: "تعیین نشده", blocker: "۲ درگاه ناقص", cases: "۰", balance: "۰ ریال", city: "تهران" },
+  { name: "پارس سازه", person: "نازنین یوسفی", initials: "پ‌س", lifecycle: "معلق", tone: "danger" as Tone, responder: "سارا محمدی", blocker: "بررسی تعلیق", cases: "۱۲", balance: "۳۲۰ میلیون ریال", city: "کرج" },
+  { name: "گروه سپید", person: "حسین رضایی", initials: "گ‌س", lifecycle: "فعال", tone: "success" as Tone, responder: "فاقد پاسخ‌دهنده فعال", blocker: "بازانتساب", cases: "۸", balance: "۱۶۰ میلیون ریال", city: "تهران" },
 ];
+const toneSurface: Record<Tone, string> = { neutral: "sds-tone-neutral", primary: "sds-tone-primary", success: "sds-tone-success", warning: "sds-tone-warning", danger: "sds-tone-danger", info: "sds-tone-info", purple: "sds-tone-purple" };
 
-function PartnerDecisionRow({ item, selected, onSelect }: { item: WorkItem; selected?: boolean; onSelect: () => void }) {
-  return (
-    <ErpPressable
-      type="button"
-      onClick={onSelect}
-      variant={selected ? "soft" : "ghost"}
-      tone={selected ? "primary" : "neutral"}
-      className="flex min-h-16 w-full items-start justify-between gap-3 p-3 text-right"
-    >
-      <span className="min-w-0">
-        <span className="block font-semibold text-[var(--sds-text-primary)]">{item.title}</span>
-        <span className="mt-1 block text-xs text-[var(--sds-text-secondary)]">{item.partner} · {item.age}</span>
-      </span>
-      <ErpBadge tone={item.tone}>{item.status}</ErpBadge>
-    </ErpPressable>
-  );
+function PrototypeFrame({ children }: { children: ReactNode }) {
+  const { theme, setTheme } = useTheme();
+  const rail = [FaHome, FaChartLine, FaUsers, FaBriefcase, FaFileInvoiceDollar];
+  return <div className="sds-neumorphic-scope min-h-screen bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)]">
+    <header className="sds-dashboard-topbar sticky top-0 z-40 flex h-16 items-center justify-between px-4 lg:pr-28">
+      <div className="flex items-center gap-3"><ErpIconButton label="منو" icon={FaBars} /><div className="sds-dashboard-brand h-11 w-11 overflow-hidden rounded-xl">{/* eslint-disable-next-line @next/next/no-img-element */}<img src="/brand/logo-project.png" alt="Sabalan ERP" className="h-full w-full object-cover" /></div><div><p className="text-lg font-black">فروش</p><p className="text-xs text-[var(--sds-text-muted)]">مدیریت فروش و قراردادها</p></div></div>
+      <div className="flex items-center gap-1"><ErpIconButton label={theme === "dark" ? "حالت روشن" : "حالت تیره"} icon={theme === "dark" ? FaSun : FaMoon} onClick={() => setTheme(theme === "dark" ? "light" : "dark")} /><ErpIconButton label="اعلان‌ها" icon={FaBell} /><ErpIconButton label="حساب کاربری" icon={FaUser} /></div>
+    </header>
+    <aside className="sds-dashboard-sidebar fixed bottom-0 right-0 top-16 z-30 hidden w-20 flex-col items-center py-4 lg:flex">{rail.map((Icon, index) => <span key={index} className={`sds-dashboard-nav-icon mb-3 inline-flex h-12 w-12 items-center justify-center ${index === 1 ? "sds-dashboard-nav-active" : ""}`}><Icon /></span>)}</aside>
+    <main className="mx-auto w-full max-w-[1540px] px-4 pb-32 pt-6 sm:px-6 lg:pr-28 xl:px-10">{children}</main>
+    <nav className="sds-neumorphic-bottom-nav fixed inset-x-3 bottom-3 z-30 grid grid-cols-5 p-1.5 lg:hidden" aria-label="ناوبری نمونه">{["داشبورد", "Partnerها", "استعلام", "گزارش", "حساب من"].map((label, index) => <span key={label} className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-bold ${index === 1 ? "bg-[var(--sds-accent-soft)] text-[var(--sds-accent)]" : "text-[var(--sds-text-secondary)]"}`}>{index === 0 ? <FaHome /> : index === 1 ? <FaUsers /> : index === 2 ? <FaSearchDollar /> : index === 3 ? <FaChartLine /> : <FaWallet />}{label}</span>)}</nav>
+  </div>;
 }
 
-function ActionPreview({ item, onAct }: { item: WorkItem; onAct: (message: string) => void }) {
-  return (
-    <ErpSection title={item.title} description={`${item.partner} · ${item.age}`}>
-      <div className="space-y-4">
-        <ErpInlineState kind={item.tone === "danger" ? "error" : item.tone === "warning" ? "stale" : "success"} title={item.detail} />
-        <ErpSummaryGrid columns={2} items={[
-          { label: "مالک اقدام", value: personaOptions.find((option) => option.value === item.owner)?.label },
-          { label: "وضعیت", value: item.status, tone: item.tone },
-          { label: "محدوده", value: personaCopy[item.owner].scope },
-          { label: "اثر ثبت", value: "دلیل + actor + زمان + revision" },
-        ]} />
-        <div className="flex flex-wrap justify-end gap-2">
-          <ErpButton label="مشاهده تاریخچه" variant="outline" tone="neutral" onClick={() => onAct("تاریخچه فقط برای ارزیابی نمایش داده شد؛ داده‌ای ثبت نشد.")} />
-          <ErpButton label={item.action} tone={item.tone === "danger" ? "danger" : "primary"} onClick={() => onAct(`اقدام «${item.action}» در این نمونه ثبت نمی‌شود.`)} />
-        </div>
-      </div>
-    </ErpSection>
-  );
+function PageHeading({ persona }: { persona: Persona }) {
+  const copy = personaCopy[persona];
+  return <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold text-[var(--sds-accent)]">{copy.eyebrow}</p><h1 className="mt-1 text-2xl font-black sm:text-3xl">{copy.title}</h1><p className="mt-2 text-sm text-[var(--sds-text-secondary)]">{copy.subtitle}</p></div><ErpBadge tone="info">{copy.scope}</ErpBadge></div>;
 }
 
-function QueueVariant({ persona, selectedId, onSelect, onAct }: { persona: Persona; selectedId: string; onSelect: (id: string) => void; onAct: (message: string) => void }) {
-  const visible = workItems.filter((item) => persona === "ADMIN" ? true : item.owner === persona);
+function PersonaControl({ persona, onChange }: { persona: Persona; onChange: (value: Persona) => void }) {
+  return <ErpNeumorphicCard className="p-2.5"><div className="mb-2 flex items-center justify-between px-1"><span className="text-xs font-bold text-[var(--sds-text-muted)]">نمایش نمونه برای</span><span className="text-xs text-[var(--sds-text-muted)]">داده آزمایشی</span></div><ErpSegmentedControl options={personaOptions} value={persona} onChange={onChange} /></ErpNeumorphicCard>;
+}
+
+function DecisionItem({ item, selected, onClick }: { item: Decision; selected: boolean; onClick: () => void }) {
+  const Icon = item.icon;
+  return <ErpNeumorphicInteractiveCard onClick={onClick} className={`flex min-h-20 w-full items-center gap-3 p-3 text-right ${selected ? "outline outline-2 outline-[var(--sds-accent)]" : ""}`}><span className={`sds-neumorphic-icon sds-tone-surface inline-flex h-11 w-11 shrink-0 items-center justify-center ${toneSurface[item.tone]}`}><Icon /></span><span className="min-w-0 flex-1"><span className="block font-bold">{item.title}</span><span className="mt-1 block truncate text-xs text-[var(--sds-text-muted)]">{item.partner} · {item.age}</span></span><ErpBadge tone={item.tone}>{item.status}</ErpBadge></ErpNeumorphicInteractiveCard>;
+}
+
+function OperationsView({ persona }: { persona: Persona }) {
+  const visible = decisions.filter((item) => persona === "ADMIN" || item.owner === persona);
+  const [selectedId, setSelectedId] = useState(visible[0]?.id || "activation");
   const selected = visible.find((item) => item.id === selectedId) || visible[0];
-  return (
-    <div className="space-y-4">
-      <ErpMetricGrid items={[
-        { label: "در انتظار اقدام من", value: visible.length.toLocaleString("fa-IR"), hint: "فقط actionهای مجاز", icon: FaClock, tone: "warning" },
-        { label: "Partner فعال", value: "۲۴", hint: persona === "PARTNER" ? "فقط حساب خودم" : "در scope مؤثر", icon: FaUserCheck, tone: "success" },
-        { label: "استعلام بدون responder", value: "۳", hint: "ارسال جدید متوقف است", icon: FaSearchDollar, tone: "danger" },
-        { label: "درخواست انتقال", value: "۲", hint: "هویت ماسک‌شده", icon: FaExchangeAlt, tone: "info" },
-      ]} />
-      <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
-        <ErpSection title="صف تصمیم" description="اولویت با مواردی است که فروش را fail-closed کرده‌اند.">
-          <div className="space-y-2">{visible.map((item) => <PartnerDecisionRow key={item.id} item={item} selected={item.id === selected.id} onSelect={() => onSelect(item.id)} />)}</div>
-        </ErpSection>
-        <ActionPreview item={selected} onAct={onAct} />
-      </div>
+  useEffect(() => setSelectedId(visible[0]?.id || "activation"), [persona]);
+  const SelectedIcon = selected?.icon;
+  return <div className="space-y-5">
+    <ErpNeumorphicMetricGrid items={[
+      { id: "active", label: persona === "PARTNER" ? "پرونده‌های فعال من" : "Partner فعال", value: persona === "PARTNER" ? "۸" : "۲۴", icon: FaUserCheck, tone: "success", hint: "در محدوده مجاز" },
+      { id: "waiting", label: "در انتظار اقدام", value: visible.length.toLocaleString("fa-IR"), icon: FaClock, tone: "warning", hint: "اولویت‌بندی‌شده" },
+      { id: "responder", label: "بدون پاسخ‌دهنده", value: persona === "PARTNER" ? "—" : "۳", icon: FaSearchDollar, tone: "danger", hint: "ارسال استعلام متوقف" },
+      { id: "transfer", label: persona === "PARTNER" ? "مانده به سبلان" : "درخواست انتقال", value: persona === "PARTNER" ? "۴۸۰ م.ر" : "۲", icon: persona === "PARTNER" ? FaWallet : FaExchangeAlt, tone: "info", hint: persona === "PARTNER" ? "به‌روز از حسابداری" : "projection محدود" },
+    ]} />
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(20rem,.8fr)]">
+      <ErpNeumorphicCard className="p-4 sm:p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-black">صف عملیات</h2><p className="mt-1 text-sm text-[var(--sds-text-muted)]">مواردی که بدون تصمیم متوقف مانده‌اند</p></div><ErpButton label="مشاهده همه" variant="ghost" /></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">{visible.map((item) => <DecisionItem key={item.id} item={item} selected={item.id === selected?.id} onClick={() => setSelectedId(item.id)} />)}</div></ErpNeumorphicCard>
+      {selected && SelectedIcon ? <ErpNeumorphicCard className="p-5"><div className="flex items-start justify-between gap-3"><span className={`sds-neumorphic-icon sds-tone-surface inline-flex h-12 w-12 items-center justify-center ${toneSurface[selected.tone]}`}><SelectedIcon /></span><ErpBadge tone={selected.tone}>{selected.status}</ErpBadge></div><h2 className="mt-5 text-xl font-black">{selected.title}</h2><p className="mt-1 font-bold text-[var(--sds-accent)]">{selected.partner}</p><p className="mt-4 leading-7 text-[var(--sds-text-secondary)]">{selected.detail}</p><div className="my-5 grid grid-cols-2 gap-3"><div className="rounded-xl bg-[var(--sds-surface-subtle)] p-3"><span className="text-xs text-[var(--sds-text-muted)]">مالک اقدام</span><b className="mt-1 block">{personaOptions.find((item) => item.value === selected.owner)?.label}</b></div><div className="rounded-xl bg-[var(--sds-surface-subtle)] p-3"><span className="text-xs text-[var(--sds-text-muted)]">زمان انتظار</span><b className="mt-1 block">{selected.age}</b></div></div><ErpButton label="بازکردن پرونده" icon={FaChevronLeft} tone="primary" className="w-full" /></ErpNeumorphicCard> : null}
     </div>
-  );
+  </div>;
 }
 
-function ProfileVariant({ persona, profileIndex, onProfileChange, onAct }: { persona: Persona; profileIndex: number; onProfileChange: (index: number) => void; onAct: (message: string) => void }) {
-  const profile = persona === "PARTNER" ? profiles[2] : profiles[profileIndex];
-  return (
-    <div className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
-      <ErpSection title={persona === "PARTNER" ? "حساب تجاری من" : "فهرست Partnerها"} description="پرونده، نقطه ورود همه تصمیم‌های مربوط به یک Partner است.">
-        <div className="space-y-2">
-          {(persona === "PARTNER" ? [profile] : profiles).map((item, index) => (
-            <ErpPressable key={item.name} type="button" onClick={() => onProfileChange(index)} variant={item.name === profile.name ? "soft" : "ghost"} tone={item.name === profile.name ? "primary" : "neutral"} className="flex min-h-14 w-full items-center justify-between px-3 text-right">
-              <span><b className="block">{item.name}</b><small className="text-[var(--sds-text-secondary)]">{item.owner}</small></span>
-              <ErpBadge tone={item.tone}>{item.lifecycle}</ErpBadge>
-            </ErpPressable>
-          ))}
-        </div>
-      </ErpSection>
-      <div className="space-y-4">
-        <ErpSection title={profile.name} description={`مالک تجاری: ${profile.owner}`} actions={[{ label: "مشاهده audit", variant: "outline", onClick: () => onAct("Audit projection متناسب با نقش نمایش داده شد.") }]}>
-          <ErpSummaryGrid columns={3} items={[
-            { label: "چرخه پروفایل", value: <ErpBadge tone={profile.tone}>{profile.lifecycle}</ErpBadge> },
-            { label: "پاسخ‌دهنده قیمت", value: profile.responder },
-            { label: "مانع جاری", value: profile.blockers, tone: profile.blockers === "—" ? "success" : "warning" },
-          ]} />
-        </ErpSection>
-        <div className="grid gap-4 xl:grid-cols-2">
-          <ErpSection title="راه‌اندازی و چرخه" description="هر domain فقط gate متعلق به خودش را تکمیل می‌کند.">
-            <div className="space-y-3">
-              {["هویت تجاری · HR", "شرایط پرداخت · Accounting", "شرایط تجاری · Sales", "پاسخ‌دهنده قیمت · Sales"].map((gate, index) => (
-                <div key={gate} className="flex min-h-12 items-center justify-between gap-3 border-b border-[var(--sds-border-subtle)] py-2 last:border-0">
-                  <span className="text-sm">{gate}</span><ErpBadge tone={index < 2 ? "success" : "warning"}>{index < 2 ? "تکمیل" : "ناقص"}</ErpBadge>
-                </div>
-              ))}
-            </div>
-          </ErpSection>
-          <ErpSection title={persona === "PARTNER" ? "گزارش و حساب من" : "نمای مدیریتی"} description="هر عدد از projection مجاز خودش می‌آید.">
-            <ErpSummaryGrid items={[
-              { label: "فروش retail", value: `${profile.sales} پرونده`, hint: "درآمد سبلان نیست" },
-              { label: "مانده به سبلان", value: profile.balance, hint: "read-only از Accounting" },
-              { label: "وصول مشتری", value: "۷۴٪", hint: "خصوصی Partner / Sales management" },
-              { label: "تحویل", value: "۳ در جریان", hint: "customer-safe status" },
-            ]} />
-          </ErpSection>
-        </div>
-      </div>
-    </div>
-  );
+function PartnerDirectoryView({ persona }: { persona: Persona }) {
+  const [index, setIndex] = useState(persona === "PARTNER" ? 2 : 0);
+  const profile = persona === "PARTNER" ? profiles[2] : profiles[index];
+  return <div className="grid min-w-0 gap-5 xl:grid-cols-[22rem_minmax(0,1fr)]"><div className="min-w-0 space-y-4"><ErpNeumorphicCard className="flex items-center gap-3 p-3"><FaSearch className="text-[var(--sds-text-muted)]" /><span className="text-sm text-[var(--sds-text-muted)]">جست‌وجوی نام، مسئول یا شهر…</span></ErpNeumorphicCard><div className="flex min-w-0 gap-3 overflow-x-auto pb-2 xl:block xl:space-y-3 xl:overflow-visible">{(persona === "PARTNER" ? [profile] : profiles).map((item, itemIndex) => <ErpNeumorphicInteractiveCard key={item.name} onClick={() => setIndex(itemIndex)} className={`min-w-[16rem] p-4 text-right xl:w-full ${item.name === profile.name ? "outline outline-2 outline-[var(--sds-accent)]" : ""}`}><div className="flex items-center gap-3"><span className="sds-neumorphic-icon inline-flex h-12 w-12 items-center justify-center bg-[var(--sds-accent-soft)] font-black text-[var(--sds-accent)]">{item.initials}</span><span className="min-w-0 flex-1"><b className="block text-base">{item.name}</b><small className="text-[var(--sds-text-muted)]">{item.person} · {item.city}</small></span><ErpBadge tone={item.tone}>{item.lifecycle}</ErpBadge></div></ErpNeumorphicInteractiveCard>)}</div></div>
+    <div className="min-w-0 space-y-5"><ErpNeumorphicCard className="p-5 sm:p-6"><div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-4"><span className="sds-neumorphic-icon inline-flex h-16 w-16 items-center justify-center bg-[var(--sds-accent-soft)] text-xl font-black text-[var(--sds-accent)]">{profile.initials}</span><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-2xl font-black">{profile.name}</h2><ErpBadge tone={profile.tone}>{profile.lifecycle}</ErpBadge></div><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{profile.person} · {profile.city}</p></div></div><div className="flex gap-2"><ErpButton label="تاریخچه" variant="outline" /><ErpButton label="اقدام جدید" /></div></div><div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">{[["پاسخ‌دهنده", profile.responder], ["مانع جاری", profile.blocker], ["پرونده قطعی", profile.cases], ["مانده", profile.balance]].map(([label, value]) => <div key={label} className="rounded-xl bg-[var(--sds-surface-subtle)] p-4"><span className="text-xs text-[var(--sds-text-muted)]">{label}</span><b className="mt-2 block text-sm">{value}</b></div>)}</div></ErpNeumorphicCard>
+      <div className="grid gap-5 lg:grid-cols-2"><ErpNeumorphicCard className="p-5"><h3 className="text-lg font-black">درگاه‌های فعال‌سازی</h3><div className="mt-4 space-y-4">{[["هویت تجاری", "HR", true], ["شرایط پرداخت", "Accounting", true], ["شرایط تجاری", "Sales", false], ["پاسخ‌دهنده قیمت", "Sales", false]].map(([label, owner, done]) => <div key={String(label)} className="flex items-center gap-3"><span className={`inline-flex h-9 w-9 items-center justify-center rounded-full ${done ? "bg-[var(--sds-success-surface)] text-[var(--sds-success)]" : "bg-[var(--sds-warning-surface)] text-[var(--sds-warning)]"}`}>{done ? <FaCheck /> : <FaClock />}</span><span className="flex-1"><b className="block text-sm">{label}</b><small className="text-[var(--sds-text-muted)]">{owner}</small></span><ErpBadge tone={done ? "success" : "warning"}>{done ? "تکمیل" : "ناقص"}</ErpBadge></div>)}</div></ErpNeumorphicCard><ErpNeumorphicCard className="p-5"><h3 className="text-lg font-black">فعالیت اخیر</h3><div className="mt-4 space-y-4">{["درخواست انتقال مشتری ثبت شد", "پاسخ‌دهنده قبلی غیرفعال شد", "پرداخت حسابداری ثبت شد"].map((label, row) => <div key={label} className="flex gap-3 border-b border-[var(--sds-border-subtle)] pb-4 last:border-0"><span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--sds-accent)]" /><span><b className="block text-sm">{label}</b><small className="text-[var(--sds-text-muted)]">{row === 0 ? "امروز، ۱۰:۴۵" : row === 1 ? "دیروز" : "۳ روز پیش"}</small></span></div>)}</div></ErpNeumorphicCard></div>
+    </div></div>;
 }
 
-const lanes = [
-  { owner: "HR", title: "هویت و lifecycle", icon: FaUserCheck, items: ["تکمیل هویت تجاری", "فعال‌سازی نهایی", "تعلیق / خاتمه"] },
-  { owner: "SALES", title: "تجارت و CRM", icon: FaUsers, items: ["شرایط تجاری", "assignment پاسخ‌دهنده", "انتقال مالکیت مشتری"] },
-  { owner: "ADMIN", title: "نظارت سراسری", icon: FaShieldAlt, items: ["aggregate reports", "audit حساس", "اقدام نام‌دار با دلیل"] },
-  { owner: "PARTNER", title: "کسب‌وکار من", icon: FaWallet, items: ["گزارش شخصی", "وصول مشتری", "حساب من با سبلان"] },
-] as const;
+function ReportBar({ label, value, width }: { label: string; value: string; width: string }) {
+  return <div><div className="mb-2 flex items-center justify-between text-sm"><span>{label}</span><b>{value}</b></div><div className="h-2 overflow-hidden rounded-full bg-[var(--sds-surface-subtle)]"><div className="h-full rounded-full bg-[var(--sds-accent)]" style={{ width }} /></div></div>;
+}
 
-function LanesVariant({ persona, onAct }: { persona: Persona; onAct: (message: string) => void }) {
-  const visible = persona === "ADMIN" ? lanes : lanes.filter((lane) => lane.owner === persona);
-  return (
-    <div className="space-y-4">
-      <ErpInlineState kind="success" title="این چیدمان مرز اختیار را به‌جای صف یا پرونده، مستقیماً بر اساس workspace نشان می‌دهد." />
-      <div className={`grid gap-4 ${visible.length > 1 ? "xl:grid-cols-2" : ""}`}>
-        {visible.map((lane) => {
-          const Icon = lane.icon;
-          return (
-            <ErpSection key={lane.owner} title={<span className="flex items-center gap-2"><Icon aria-hidden="true" />{lane.title}</span>} description={`Scope: ${personaCopy[lane.owner].scope}`}>
-              <div className="space-y-2">
-                {lane.items.map((item, index) => (
-                  <ErpPressable key={item} type="button" onClick={() => onAct(`سطح «${item}» برای بررسی باز شد؛ داده‌ای ثبت نشد.`)} variant="ghost" className="flex min-h-14 w-full items-center justify-between px-3 text-right">
-                    <span>{item}</span><ErpBadge tone={index === 0 ? "warning" : "neutral"}>{index === 0 ? "۳ مورد" : "مشاهده"}</ErpBadge>
-                  </ErpPressable>
-                ))}
-              </div>
-            </ErpSection>
-          );
-        })}
-      </div>
-      <ErpSection title="کاتالوگ گزارش" description="گزارش‌ها mutation یا duty ایجاد نمی‌کنند؛ فقط projection نقش‌محورند.">
-        <div className="grid gap-3 md:grid-cols-3">
-          {[
-            ["عملکرد Partner", "retail، خرید از سبلان، سود/زیان", "SALES / ADMIN"],
-            ["حساب من با سبلان", "خرید، پرداخت، مانده و وضعیت امن", "PARTNER"],
-            ["سلامت عملیاتی", "assignment، suspension و گلوگاه‌ها", "ADMIN"],
-          ].map(([title, detail, scope]) => (
-            <ErpCard key={title} className="p-4"><FaChartLine className="mb-3 text-[var(--sds-accent)]" /><b>{title}</b><p className="mt-2 text-sm text-[var(--sds-text-secondary)]">{detail}</p><ErpBadge tone="info">{scope}</ErpBadge></ErpCard>
-          ))}
-        </div>
-      </ErpSection>
-    </div>
-  );
+function ReportingView({ persona }: { persona: Persona }) {
+  const partner = persona === "PARTNER";
+  return <div className="space-y-5"><ErpNeumorphicCard className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between"><ErpSegmentedControl value="month" onChange={() => undefined} options={[{ value: "week", label: "۷ روز" }, { value: "month", label: "ماه جاری" }, { value: "quarter", label: "فصل جاری" }]} /><ErpButton label="خروجی گزارش" icon={FaChartLine} variant="outline" /></ErpNeumorphicCard>
+    <ErpNeumorphicMetricGrid items={[{ id: "retail", label: partner ? "فروش من" : "فروش retail Partnerها", value: "۱٫۸ میلیارد", icon: FaChartLine, tone: "primary", hint: "درآمد سبلان نیست" }, { id: "purchase", label: "خرید از سبلان", value: "۱٫۳ میلیارد", icon: FaBriefcase, tone: "info", hint: "wholesale قطعی" }, { id: "margin", label: partner ? "سود بازفروش من" : "سود بازفروش", value: "۴۸۰ میلیون", icon: FaWallet, tone: "success", hint: partner ? "خصوصی حساب من" : "فقط مدیریت مجاز" }, { id: "balance", label: "مانده به سبلان", value: "۲۶۰ میلیون", icon: FaFileInvoiceDollar, tone: "warning", hint: "از حقیقت حسابداری" }]} />
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(20rem,.8fr)]"><ErpNeumorphicCard className="p-5"><div className="flex items-center justify-between"><div><h2 className="text-lg font-black">روند فروش و خرید</h2><p className="mt-1 text-sm text-[var(--sds-text-muted)]">مقایسه هفتگی مبالغ قطعی</p></div><ErpBadge tone="success">+۱۲٪</ErpBadge></div><div className="mt-8 flex h-64 items-end justify-between gap-3 border-b border-[var(--sds-border-default)] px-2">{[42, 58, 49, 76, 68, 88, 81].map((height, index) => <div key={index} className="flex h-full flex-1 items-end justify-center gap-1"><span className="w-2.5 rounded-t-full bg-[var(--sds-accent)] sm:w-4" style={{ height: `${height}%` }} /><span className="w-2.5 rounded-t-full bg-[var(--sds-info)] opacity-45 sm:w-4" style={{ height: `${Math.max(22, height - 24)}%` }} /></div>)}</div><div className="mt-3 flex justify-between text-xs text-[var(--sds-text-muted)]"><span>هفته اول</span><span>هفته هفتم</span></div></ErpNeumorphicCard><ErpNeumorphicCard className="p-5"><h2 className="text-lg font-black">وضعیت وصول</h2><p className="mt-1 text-sm text-[var(--sds-text-muted)]">دو جریان مستقل پرداخت</p><div className="mt-6 space-y-6"><ReportBar label="وصول از مشتری" value="۷۴٪" width="74%" /><ReportBar label="پرداخت به سبلان" value="۶۲٪" width="62%" /><ReportBar label="پرونده‌های تحویل‌شده" value="۸۱٪" width="81%" /></div><div className="mt-7 rounded-xl bg-[var(--sds-warning-surface)] p-4 text-sm leading-6 text-[var(--sds-warning)]">وصول مشتری، مانده Partner به سبلان را کاهش نمی‌دهد.</div></ErpNeumorphicCard></div>
+    <ErpNeumorphicCard className="p-5"><h2 className="text-lg font-black">ترکیب عملکرد</h2><div className="mt-4 grid gap-5 md:grid-cols-3"><ReportBar label="سنگ اسلب" value="۴۲٪" width="42%" /><ReportBar label="سنگ طولی" value="۳۵٪" width="35%" /><ReportBar label="پله" value="۲۳٪" width="23%" /></div></ErpNeumorphicCard>
+  </div>;
 }
 
 function PrototypeSwitcher({ variant, onChange }: { variant: Variant; onChange: (variant: Variant) => void }) {
-  const cycle = useCallback((delta: number) => {
-    const index = variants.indexOf(variant);
-    onChange(variants[(index + delta + variants.length) % variants.length]);
-  }, [onChange, variant]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
-      if (event.key === "ArrowLeft") cycle(-1);
-      if (event.key === "ArrowRight") cycle(1);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [cycle]);
-
-  if (process.env.NODE_ENV === "production") return null;
-  return (
-    <div className="fixed bottom-4 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-2 rounded-full border border-[var(--sds-border-strong)] bg-[var(--sds-text-primary)] p-2 text-[var(--sds-surface-canvas)] shadow-xl" aria-label="تعویض طرح نمونه">
-      <ErpIconButton label="طرح قبلی" onClick={() => cycle(-1)} icon={FaArrowRight} />
-      <span className="min-w-36 text-center text-sm font-bold">{variant} · {variantNames[variant]}</span>
-      <ErpIconButton label="طرح بعدی" onClick={() => cycle(1)} icon={FaArrowLeft} />
-    </div>
-  );
+  const cycle = useCallback((delta: number) => { const index = variants.indexOf(variant); onChange(variants[(index + delta + variants.length) % variants.length]); }, [onChange, variant]);
+  useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.target as HTMLElement)?.matches("input, textarea, select, [contenteditable='true']")) return; if (event.key === "ArrowLeft") cycle(-1); if (event.key === "ArrowRight") cycle(1); }; window.addEventListener("keydown", handler); return () => window.removeEventListener("keydown", handler); }, [cycle]);
+  if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_ENABLE_PROTOTYPES !== "1") return null;
+  return <div className="sds-neumorphic-card fixed bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 p-1.5 shadow-xl lg:bottom-5"><ErpIconButton label="طرح قبلی" icon={FaArrowRight} onClick={() => cycle(-1)} /><span className="min-w-36 text-center text-xs font-black">{variant} · {variantNames[variant]}</span><ErpIconButton label="طرح بعدی" icon={FaArrowLeft} onClick={() => cycle(1)} /></div>;
 }
 
-export default function PartnerManagementPrototype() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const requestedVariant = searchParams.get("variant")?.toUpperCase();
-  const variant: Variant = requestedVariant === "B" || requestedVariant === "C" ? requestedVariant : "A";
-  const requestedPersona = searchParams.get("persona")?.toUpperCase();
-  const persona: Persona = requestedPersona === "HR" || requestedPersona === "SALES" || requestedPersona === "PARTNER" ? requestedPersona : "ADMIN";
-  const [selectedId, setSelectedId] = useState("reassign");
-  const [profileIndex, setProfileIndex] = useState(0);
-  const [notice, setNotice] = useState("");
-
-  const setQuery = useCallback((key: string, value: string) => {
-    const next = new URLSearchParams(searchParams.toString());
-    next.set(key, value);
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-  }, [pathname, router, searchParams]);
-
-  const stateSummary = useMemo(() => `${personaCopy[persona].title} · ${personaCopy[persona].scope}`, [persona]);
-
-  return (
-    <div dir="rtl" className="pb-24">
-      <ErpPage
-        eyebrow="نمونه آزمایشی · اطلاعات ذخیره نمی‌شود"
-        title="مدیریت و گزارش فروشنده همکار"
-        description={`طرح ${variant}: ${variantNames[variant]} · ${stateSummary}`}
-        backHref="/dashboard/sales"
-      >
-        <ErpSection title="نقش ارزیابی" description={personaCopy[persona].boundary}>
-          <ErpSegmentedControl options={personaOptions} value={persona} onChange={(value) => { setNotice(""); setQuery("persona", value); }} />
-        </ErpSection>
-        {notice ? <ErpInlineState kind="success" title={notice} action={{ label: "بستن", onClick: () => setNotice("") }} /> : null}
-        {variant === "A" ? <QueueVariant persona={persona} selectedId={selectedId} onSelect={setSelectedId} onAct={setNotice} /> : null}
-        {variant === "B" ? <ProfileVariant persona={persona} profileIndex={profileIndex} onProfileChange={setProfileIndex} onAct={setNotice} /> : null}
-        {variant === "C" ? <LanesVariant persona={persona} onAct={setNotice} /> : null}
-        <ErpCard className="p-3 text-xs text-[var(--sds-text-secondary)]">
-          <b className="text-[var(--sds-text-primary)]">وضعیت کامل نمونه:</b> persona={persona} · scope={personaCopy[persona].scope} · variant={variant} · mutation=stub-only · selected={selectedId}
-        </ErpCard>
-      </ErpPage>
-      <PrototypeSwitcher variant={variant} onChange={(next) => setQuery("variant", next)} />
-    </div>
-  );
+export default function PartnerManagementPrototype({ standalone = false }: { standalone?: boolean }) {
+  const router = useRouter(); const pathname = usePathname(); const searchParams = useSearchParams();
+  const requestedVariant = searchParams.get("variant")?.toUpperCase(); const variant: Variant = requestedVariant === "B" || requestedVariant === "C" ? requestedVariant : "A";
+  const requestedPersona = searchParams.get("persona")?.toUpperCase(); const persona: Persona = requestedPersona === "HR" || requestedPersona === "SALES" || requestedPersona === "PARTNER" ? requestedPersona : "ADMIN";
+  const setQuery = useCallback((key: string, value: string) => { const next = new URLSearchParams(searchParams.toString()); next.set(key, value); router.replace(`${pathname}?${next.toString()}`, { scroll: false }); }, [pathname, router, searchParams]);
+  const content = <div className="space-y-5"><PageHeading persona={persona} /><PersonaControl persona={persona} onChange={(value) => setQuery("persona", value)} />{variant === "A" ? <OperationsView persona={persona} /> : variant === "B" ? <PartnerDirectoryView persona={persona} /> : <ReportingView persona={persona} />}<PrototypeSwitcher variant={variant} onChange={(value) => setQuery("variant", value)} /></div>;
+  return standalone ? <PrototypeFrame>{content}</PrototypeFrame> : <div className="sds-neumorphic-scope pb-24">{content}</div>;
 }

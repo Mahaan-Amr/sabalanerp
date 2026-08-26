@@ -4,5 +4,5 @@ import PartnerManagementPrototype from "@/features/partner-prototype/PartnerMana
 // the local backend is unavailable. Production builds keep it disabled.
 export default function PartnerManagementStandalonePrototypePage() {
   if (process.env.NEXT_PUBLIC_ENABLE_PROTOTYPES !== "1") return null;
-  return <PartnerManagementPrototype />;
+  return <PartnerManagementPrototype standalone />;
 }

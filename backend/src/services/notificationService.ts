@@ -56,8 +56,12 @@ const latestPolicy = async (
   });
   if (existing) return existing;
 
-  return database.notificationPolicyVersion.create({
-    data: {
+  return database.notificationPolicyVersion.upsert({
+    where: {
+      eventType_version: { eventType: type, version: 1 },
+    },
+    update: {},
+    create: {
       eventType: type,
       version: 1,
       enabled: true,

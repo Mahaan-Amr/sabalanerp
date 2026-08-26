@@ -200,6 +200,13 @@ export const recordHrHiringCollateralReceipt = async (database: any, input: {
   if (duty.status !== 'OPEN' || duty.currentAssigneeUserId !== input.actorUserId) throw new Error('DUTY_NOT_ASSIGNED');
   await assertEligible(database, input.actorUserId, duty.id, now);
   const item = await database.hrCollateralItem.findUniqueOrThrow({ where: { id: duty.sourceId } });
+  const [application, activeRequirement] = await Promise.all([
+    database.hrJobApplication.findUniqueOrThrow({ where: { id: item.applicationId }, select: { acceptedOfferAt: true } }),
+    database.hrCollateralRequirement.findFirst({
+      where: { applicationId: item.applicationId, status: 'ACTIVE' }, orderBy: { version: 'desc' }, select: { id: true },
+    }),
+  ]);
+  if (!application.acceptedOfferAt || activeRequirement?.id !== item.collateralRequirementId) throw new Error('DUTY_SOURCE_CHANGED');
   if (item.status !== 'MISSING' || item.version !== duty.sourceVersion) throw new Error('DUTY_SOURCE_CHANGED');
   const changed = await database.hrCollateralItem.updateMany({
     where: { id: item.id, status: 'MISSING', version: duty.sourceVersion },
@@ -501,6 +508,13 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
   }
   if (duty.sourceActionCode !== 'HIRING_COLLATERAL_VERIFY_RECEIPT') throw new Error('DUTY_RESPONSE_NOT_SUPPORTED');
   const item = await database.hrCollateralItem.findUniqueOrThrow({ where: { id: duty.sourceId } });
+  const [application, activeRequirement] = await Promise.all([
+    database.hrJobApplication.findUniqueOrThrow({ where: { id: item.applicationId }, select: { acceptedOfferAt: true } }),
+    database.hrCollateralRequirement.findFirst({
+      where: { applicationId: item.applicationId, status: 'ACTIVE' }, orderBy: { version: 'desc' }, select: { id: true },
+    }),
+  ]);
+  if (!application.acceptedOfferAt || activeRequirement?.id !== item.collateralRequirementId) throw new Error('DUTY_SOURCE_CHANGED');
   if (item.version !== duty.sourceVersion || item.status !== 'RECEIVED'
     || (item.recordedBy === input.actorUserId && !managerialSelfDecision)) throw new Error('SEPARATION_OF_DUTIES_CONFLICT');
   const itemChange = await database.hrCollateralItem.updateMany({
@@ -516,7 +530,10 @@ const respond: CrossWorkspaceDutySourceAdapter['respond'] = async (database, inp
   } });
   if (!completed.count) throw new Error('DUTY_RESPONSE_CONFLICT');
   if (input.actionCode === 'APPROVE') {
-    const remaining = await database.hrCollateralItem.count({ where: { applicationId: item.applicationId, required: true, supersededBy: null, status: { not: 'VERIFIED' } } });
+    const remaining = await database.hrCollateralItem.count({ where: {
+      applicationId: item.applicationId, collateralRequirementId: activeRequirement.id,
+      required: true, supersededBy: null, status: { not: 'VERIFIED' },
+    } });
     const explicitNoRequirement = await database.hrCollateralRequirement.findFirst({
       where: { applicationId: item.applicationId, status: 'ACTIVE', type: 'NO_PRE_HIRE_COLLATERAL' }, select: { id: true },
     });

@@ -45,7 +45,7 @@
 
 ## SMS
 
-قالب `SMS_IR_HIRING_INVITATION_TEMPLATE_ID` فقط پارامتر `Code` دارد. نشانی `sabalanerp.com/apply` باید متن ثابت خود قالب SMS.ir باشد و به‌عنوان پارامتر پویا ارسال نشود. در sandbox، API داخلی کد آزمایشی را برای اپراتور مجاز برمی‌گرداند.
+قالب `SMS_IR_HIRING_INVITATION_TEMPLATE_ID` با شناسه `363360` فقط پارامتر case-sensitive با نام `CODE` دارد. نشانی `sabalanerp.com/apply` باید متن ثابت خود قالب SMS.ir باشد و به‌عنوان پارامتر پویا ارسال نشود. در sandbox، API داخلی کد آزمایشی را برای اپراتور مجاز برمی‌گرداند.
 
 قالب پیشنهادی پیامک:
 
@@ -60,7 +60,7 @@ sabalanerp.com/apply
 سبلان ERP
 ```
 
-قالب `SMS_IR_HIRING_CORRECTION_TEMPLATE_ID` با شناسه `763918` فقط پارامترهای case-sensitive با نام‌های `Details` و `Code` دارد و متن آن باید دقیقاً این باشد:
+قالب `SMS_IR_HIRING_CORRECTION_TEMPLATE_ID` با شناسه `763918` فقط پارامترهای case-sensitive با نام‌های `DETAILS` و `CODE` دارد و متن آن باید دقیقاً این باشد:
 
 ```text
 سامانه منابع انسانی سبلان
@@ -83,7 +83,9 @@ sabalanerp.com/apply
 لطفاً به sabalanerp.com/apply وارد شوید، با شماره همراه و کد #CODE# ورود کنید و پیشنهاد همکاری را بررسی و اعلام تصمیم نمایید.
 ```
 
-در production، `PUBLIC_APP_URL` باید یک مبدأ HTTPS معتبر، `SMS_IR_API_KEY` موجود، `SMS_IR_ENVIRONMENT=production` و `SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS=Code` باشد. `SMS_IR_HIRING_INVITATION_TEMPLATE_ID` باید شناسه عددی قالب اختصاصی و متفاوت از قالب OTP عمومی باشد؛ برنامه در نبود یا ناسازگاری این تنظیمات اجرا نمی‌شود.
+در production، `PUBLIC_APP_URL` باید یک مبدأ HTTPS معتبر، `SMS_IR_API_KEY` موجود و `SMS_IR_ENVIRONMENT=production` باشد. قرارداد سه قالب باید دقیقاً `363360/CODE`، `763918/DETAILS,CODE` و `894291/CODE` باشد؛ برنامه در نبود یا ناسازگاری این تنظیمات اجرا نمی‌شود.
+
+هر پاسخ فوری درگاه با `messageId` مستقل ثبت می‌شود. گزارش تحویل هر پنج دقیقه تا ۲۴ ساعت بررسی می‌شود؛ ارسال مجدد فقط پس از شکست قطعی یا نامشخص‌ماندن پس از پایان این بازه و با فاصله حداقل دو دقیقه مجاز است. تحویل هر تلاش، وضعیت کلی اعلان را تحویل‌شده می‌کند.
 
 شماره همراه نرمال‌شده‌ای که SMS را دریافت کرده و OTP یک جفت Application-specific می‌سازند. برای چند Application باز روی یک موبایل، کدهای فعال متفاوت صادر می‌شوند و صفحه عمومی هرگز Applicationهای دیگر را فهرست نمی‌کند. کد تا هفت روز روی دستگاه‌های مختلف قابل استفاده است؛ نشست فقط در browser session جاری باقی می‌ماند و از انقضای دعوت فراتر نمی‌رود. بستن Application، صدور دعوت جدید یا خروج امن نشست را بی‌اعتبار می‌کند.
 

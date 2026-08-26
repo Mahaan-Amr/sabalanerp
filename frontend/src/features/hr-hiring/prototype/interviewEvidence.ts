@@ -51,6 +51,11 @@ export type LegacyInterviewPayload = {
 
 export type InterviewEvidencePayload = ProductionInterviewPayload | LegacyInterviewPayload;
 
+export type InitialInterviewScoreSummary = {
+  average: number | null;
+  scoredCount: number;
+};
+
 export const INVALID_INTERVIEW_SNAPSHOT_MESSAGE =
   "نسخه معیارهای این مصاحبه معتبر یا قابل بازیابی نیست. اطلاعات شما حفظ شده است؛ با پشتیبانی تماس بگیرید.";
 
@@ -60,6 +65,34 @@ export class InterviewSnapshotError extends Error {
     this.name = "InterviewSnapshotError";
   }
 }
+
+export const initialInterviewScoreSummary = (
+  payload: InterviewEvidencePayload,
+): InitialInterviewScoreSummary => {
+  const scores: number[] = [];
+  if ((payload as ProductionInterviewPayload).schemaVersion === 2) {
+    const normalized = normalizeInitialInterviewPayload(payload);
+    if (!normalized) return { average: null, scoredCount: 0 };
+    const criteria = publishedCriteriaForInterview(normalized.criteriaSnapshot);
+    for (const criterion of criteria) {
+      if (criterion.kind !== "score") continue;
+      const score = normalized.state.answers[criterion.id]?.score;
+      if (typeof score === "number") scores.push(score);
+    }
+    for (const criterion of normalized.customCriteria) {
+      if (criterion.kind === "score" && typeof criterion.score === "number") {
+        scores.push(criterion.score);
+      }
+    }
+  } else {
+    for (const criterion of (payload as LegacyInterviewPayload).criteria || []) {
+      if (typeof criterion.score === "number") scores.push(criterion.score);
+    }
+  }
+  if (!scores.length) return { average: null, scoredCount: 0 };
+  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  return { average: Math.round(average * 10) / 10, scoredCount: scores.length };
+};
 
 const INVALID_INTERVIEW_DRAFT_MESSAGE =
   "ساختار پیش‌نویس مصاحبه معتبر نیست. اطلاعات ذخیره‌شده حفظ شده است؛ با پشتیبانی تماس بگیرید.";

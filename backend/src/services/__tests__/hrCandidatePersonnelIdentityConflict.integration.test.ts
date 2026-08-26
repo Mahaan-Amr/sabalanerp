@@ -173,6 +173,111 @@ test('permanent application deletion removes its identity-conflict decision bund
   }
 });
 
+test('permanent application deletion removes formal and company evaluation graphs', async () => {
+  const prisma = new PrismaClient();
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    await assert.rejects(prisma.$transaction(async (tx) => {
+      const candidate = await tx.hrCandidate.create({ data: {
+        firstName: 'علی', lastName: 'رضایی', mobile: `04${suffix.replace(/\D/g, '').slice(-9).padStart(9, '0')}`,
+      } });
+      const evaluator = await tx.personnel.create({ data: {
+        firstName: 'ارزیاب', lastName: 'آزمایشی', nationalCode: `5${suffix.replace(/\D/g, '').slice(-9).padStart(9, '0')}`,
+      } });
+      const unit = await tx.hrOrganizationalUnit.create({ data: {
+        code: `ERASE-EVAL-U-${suffix}`, name: suffix, type: 'DEPARTMENT', createdBy: 'SYSTEM',
+      } });
+      const job = await tx.hrJob.create({ data: {
+        code: `ERASE-EVAL-J-${suffix}`, title: suffix, createdBy: 'SYSTEM',
+      } });
+      const position = await tx.hrPosition.create({ data: {
+        code: `ERASE-EVAL-P-${suffix}`, title: suffix, organizationalUnitId: unit.id, jobId: job.id, createdBy: 'SYSTEM',
+      } });
+      const application = await tx.hrJobApplication.create({ data: {
+        candidateId: candidate.id, positionId: position.id, createdBy: 'SYSTEM', stage: 'OFFER', identityClearance: 'APPROVED',
+      } });
+      const occurrence = await tx.hrCompanyEvaluationOccurrence.create({ data: {
+        applicationId: application.id,
+        type: 'SECTION_SUPERVISOR_INTERVIEW',
+        occurrenceNumber: 1,
+        evidencePolicy: 'REPORT_REQUIRED',
+        evaluatorPersonnelId: evaluator.id,
+        createdByUserId: 'SYSTEM',
+        resultStorageName: `company-evaluation-${suffix}.pdf`,
+      } });
+      await tx.hrCompanyEvaluationAssignmentHistory.create({ data: {
+        occurrenceId: occurrence.id,
+        evaluatorPersonnelId: evaluator.id,
+        assignedByUserId: 'SYSTEM',
+      } });
+      const plan = await tx.hrFormalAssessmentPlan.create({ data: {
+        stableKey: `ERASE-EVAL-PLAN-${suffix}`,
+        applicationId: application.id,
+        version: 1,
+        executionMethod: 'APPLICANT',
+        finalizedByUserId: 'SYSTEM',
+      } });
+      const selection = await tx.hrFormalAssessmentPlanSelection.create({ data: {
+        planId: plan.id,
+        assessmentKind: 'DISC',
+        selected: true,
+        executionMethod: 'APPLICANT',
+      } });
+      const result = await tx.hrFormalAssessmentResult.create({ data: {
+        stableKey: `ERASE-EVAL-RESULT-${suffix}`,
+        applicationId: application.id,
+        planId: plan.id,
+        planSelectionId: selection.id,
+        assessmentKind: 'DISC',
+        resultVersion: 1,
+        status: 'COMPLETED',
+        resultJson: { D: 25, I: 25, S: 25, C: 25 },
+        recordedAt: new Date('2026-08-25T08:00:00Z'),
+      } });
+      const attempt = await tx.hrFormalAssessmentAttempt.create({ data: {
+        stableKey: `ERASE-EVAL-ATTEMPT-${suffix}`,
+        resultId: result.id,
+        attemptNumber: 1,
+        executionMethod: 'APPLICANT',
+        status: 'COMPLETED',
+        completedAt: new Date('2026-08-25T08:00:00Z'),
+      } });
+      const document = await tx.hrHiringDocument.create({ data: {
+        applicationId: application.id,
+        category: 'OTHER',
+        customTitle: 'گزارش DISC',
+        version: 1,
+        inspectionSource: 'COPY_RECEIVED',
+        storageName: `formal-assessment-${suffix}.pdf`,
+        uploadedBy: 'SYSTEM',
+      } });
+      await tx.hrFormalAssessmentEvidenceLink.create({ data: {
+        stableKey: `ERASE-EVAL-EVIDENCE-${suffix}`,
+        attemptId: attempt.id,
+        evidenceType: 'HIRING_DOCUMENT',
+        hiringDocumentId: document.id,
+      } });
+      await tx.hrAssessmentMigrationEvent.create({ data: {
+        stableKey: `ERASE-EVAL-MIGRATION-${suffix}`,
+        applicationId: application.id,
+        eventCode: 'LEGACY_RESULT_IMPORTED',
+        detailsJson: { source: 'test' },
+      } });
+
+      await eraseJobApplicationRecords(tx, application.id);
+
+      assert.equal(await tx.hrJobApplication.count({ where: { id: application.id } }), 0);
+      assert.equal(await tx.hrCompanyEvaluationOccurrence.count({ where: { applicationId: application.id } }), 0);
+      assert.equal(await tx.hrFormalAssessmentPlan.count({ where: { applicationId: application.id } }), 0);
+      assert.equal(await tx.hrFormalAssessmentResult.count({ where: { applicationId: application.id } }), 0);
+      assert.equal(await tx.hrAssessmentMigrationEvent.count({ where: { applicationId: application.id } }), 0);
+      throw rollback;
+    }), (error: unknown) => error === rollback);
+  } finally {
+    await prisma.$disconnect();
+  }
+});
+
 test('permanent personnel erasure includes identity conflicts and their decision work item', async () => {
   const prisma = new PrismaClient();
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;

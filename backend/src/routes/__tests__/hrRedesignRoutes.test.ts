@@ -16,6 +16,7 @@ assert.equal(hrBaseFeatureLevelForRequest('PUT', '/personnel/person-1'), 'EDIT')
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications'), 'VIEW');
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications/app-1/decisions/HR_PRELIMINARY_APPROVAL'), 'VIEW');
 assert.equal(hrHiringBaseFeatureLevelForRequest('PUT', '/applications/app-1/onboarding-tasks/task-1'), 'VIEW');
+assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications/app-1/sms/OFFER/ref-1/delivery/refresh'), 'VIEW');
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/authorities'), 'ADMIN');
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/unclassified-mutation'), 'EDIT');
 assert.equal(

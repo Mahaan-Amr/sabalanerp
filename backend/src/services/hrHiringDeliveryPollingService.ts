@@ -3,6 +3,8 @@ import hrHiringSmsGateway from './hrHiringSmsGateway';
 import { getRecoveryRuntimeState } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
 import { activeHrActionPermissionsForUser } from './hrAuthorizationService';
+import { mapSmsIrDeliveryState } from './hrCandidateSmsDelivery';
+export { mapSmsIrDeliveryState } from './hrCandidateSmsDelivery';
 
 const POLL_INTERVAL_MS = 5 * 60_000;
 const REPORT_WINDOW_MS = 24 * 60 * 60_000;
@@ -13,19 +15,19 @@ const actionPermissionRecipientIds = async (prisma: PrismaClient, permissionCode
   return users.filter((_user, index) => permissions[index].includes(permissionCode)).map(({ id }) => id);
 };
 
-export const mapSmsIrDeliveryState = (deliveryState?: number | null) =>
-  deliveryState === 1
-    ? 'DELIVERED'
-    : [2, 3].includes(Number(deliveryState))
-      ? 'FAILED'
-      : 'ACCEPTED';
-
 export const pollHiringInvitationDelivery = async (prisma: PrismaClient, now = new Date()) => {
-  const rows = await prisma.hrCandidateInvitation.findMany({
+  await prisma.hrCandidateSmsAttempt.updateMany({
+    where: {
+      providerDeliveryState: 'PENDING',
+      providerMessageId: null,
+      createdAt: { lt: new Date(now.getTime() - REPORT_WINDOW_MS) },
+    },
+    data: { providerDeliveryState: 'UNKNOWN', providerLastCheckedAt: now },
+  });
+  const rows = await prisma.hrCandidateSmsAttempt.findMany({
     where: {
       providerMessageId: { not: null },
       providerDeliveryState: { notIn: ['DELIVERED', 'FAILED'] },
-      accessConfirmedAt: null,
       createdAt: { gte: new Date(now.getTime() - REPORT_WINDOW_MS) },
       OR: [
         { providerLastCheckedAt: null },
@@ -38,29 +40,42 @@ export const pollHiringInvitationDelivery = async (prisma: PrismaClient, now = n
   if (!rows.length) return { checked: 0, updated: 0 };
   let updated = 0;
   const failureRecipientIds = await actionPermissionRecipientIds(prisma, 'MANAGE_RECRUITMENT_CASE', now);
-  for (const invitation of rows) {
-    const report = await hrHiringSmsGateway.getDeliveryReport(Number(invitation.providerMessageId));
+  for (const attempt of rows) {
+    const report = await hrHiringSmsGateway.getDeliveryReport(Number(attempt.providerMessageId));
     const state = report.success ? mapSmsIrDeliveryState(report.deliveryState) : 'UNKNOWN';
     await prisma.$transaction(async (tx) => {
-      await tx.hrCandidateInvitation.update({
-        where: { id: invitation.id },
+      await tx.hrCandidateSmsAttempt.update({
+        where: { id: attempt.id },
         data: {
           providerDeliveryState: state,
+          providerDeliveryCode: report.deliveryState ?? null,
+          providerResultJson: JSON.parse(JSON.stringify(report)),
           providerDeliveryAt: report.deliveryDateTime ? new Date(report.deliveryDateTime * 1000) : null,
           providerLastCheckedAt: now
         }
       });
-      if (state === 'FAILED' && invitation.providerDeliveryState !== 'FAILED') {
+      if (attempt.purpose === 'INVITATION') {
+        await tx.hrCandidateInvitation.updateMany({
+          where: { id: attempt.referenceId },
+          data: {
+            providerDeliveryState: state,
+            providerDeliveryAt: report.deliveryDateTime ? new Date(report.deliveryDateTime * 1000) : null,
+            providerLastCheckedAt: now,
+          },
+        });
+      }
+      if (state === 'FAILED' && attempt.providerDeliveryState !== 'FAILED') {
         if (failureRecipientIds.length) await publishNotificationEvent(tx, {
           type: 'HIRING_INVITATION_SMS_FAILED',
-          deduplicationKey: `hiring-invitation-sms-failed:${invitation.id}`,
+          deduplicationKey: `hiring-candidate-sms-failed:${attempt.id}`,
           recipientIds: failureRecipientIds,
           workspace: 'hr',
           feature: 'hr_hiring',
           resourceType: 'HrJobApplication',
-          resourceId: invitation.applicationId,
-          referenceId: invitation.applicationId,
-          actionUrl: `/dashboard/hr/hiring/${invitation.applicationId}`,
+          resourceId: attempt.applicationId,
+          referenceId: attempt.applicationId,
+          actionUrl: `/dashboard/hr/hiring/${attempt.applicationId}`,
+          payload: { purpose: attempt.purpose, attemptId: attempt.id },
         });
       }
     });

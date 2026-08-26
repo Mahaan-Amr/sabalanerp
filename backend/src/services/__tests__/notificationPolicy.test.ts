@@ -30,6 +30,16 @@ assert.equal(rendered.title, 'ورود از مرورگر جدید');
 assert.equal(rendered.message, 'Chrome · Windows · 192.0.2.10');
 assert.equal(rendered.priority, 'URGENT');
 
+const declinedOffer = renderNotificationPolicy({
+  definition: notificationEventDefinition('HIRING_OFFER_DECLINED'),
+  payload: {
+    candidateName: 'متقاضی نمونه', positionTitle: 'کارشناس مالی',
+    declineCategory: 'حقوق و مزایا', decisionNote: 'مبلغ پیشنهادی مناسب نیست.',
+  },
+});
+assert.match(declinedOffer.message, /حقوق و مزایا/);
+assert.match(declinedOffer.message, /مبلغ پیشنهادی مناسب نیست/);
+
 assert.deepEqual(
   validateNotificationPolicyDraft(newBrowser, {
     enabled: false,
@@ -125,6 +135,7 @@ assert.deepEqual(registeredNotificationEventTypes(), [
   'FAILED_LOGIN_ALERT',
   'HIRING_CHECKLIST_OVERDUE',
   'HIRING_INVITATION_SMS_FAILED',
+  'HIRING_OFFER_ACCEPTED',
   'HIRING_OFFER_DECLINED',
   'HIRING_SHARED_WORK_AVAILABLE',
   'HR_DUTY_ASSIGNED',

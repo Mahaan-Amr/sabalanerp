@@ -112,6 +112,10 @@ const validateProductionEnvironment = () => {
     "SMS_IR_API_KEY",
     "SMS_IR_HIRING_INVITATION_TEMPLATE_ID",
     "SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS",
+    "SMS_IR_HIRING_CORRECTION_TEMPLATE_ID",
+    "SMS_IR_HIRING_CORRECTION_TEMPLATE_PARAMETERS",
+    "SMS_IR_HIRING_OFFER_TEMPLATE_ID",
+    "SMS_IR_HIRING_OFFER_TEMPLATE_PARAMETERS",
     "SMS_IR_DISPATCH_CONFIRM_OTP_TEMPLATE_ID",
     "SMS_IR_DISPATCH_EXIT_TEMPLATE_ID",
     "SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID",
@@ -119,11 +123,10 @@ const validateProductionEnvironment = () => {
   const missingVars = requiredVars.filter((key) => !process.env[key]);
   const hiringTemplateId =
     process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || "";
-  const genericTemplateId = process.env.SMS_IR_TEMPLATE_ID || "135816";
   const hasInvalidHiringTemplate =
-    !/^\d+$/.test(hiringTemplateId) ||
-    Number(hiringTemplateId) <= 0 ||
-    hiringTemplateId === genericTemplateId;
+    hiringTemplateId !== "363360" ||
+    process.env.SMS_IR_HIRING_CORRECTION_TEMPLATE_ID !== "763918" ||
+    process.env.SMS_IR_HIRING_OFFER_TEMPLATE_ID !== "894291";
   const hiringTemplateParameters = (
     process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS || ""
   )
@@ -132,7 +135,11 @@ const validateProductionEnvironment = () => {
     .filter(Boolean);
   const hasInvalidHiringTemplateParameters =
     hiringTemplateParameters.length !== 1 ||
-    hiringTemplateParameters[0] !== "Code";
+    hiringTemplateParameters[0] !== "CODE";
+  const correctionTemplateParameters = (process.env.SMS_IR_HIRING_CORRECTION_TEMPLATE_PARAMETERS || '').split(',').map((value) => value.trim()).filter(Boolean);
+  const offerTemplateParameters = (process.env.SMS_IR_HIRING_OFFER_TEMPLATE_PARAMETERS || '').split(',').map((value) => value.trim()).filter(Boolean);
+  const hasInvalidHiringCorrectionParameters = correctionTemplateParameters.join(',') !== 'DETAILS,CODE';
+  const hasInvalidHiringOfferParameters = offerTemplateParameters.join(',') !== 'CODE';
   const hasInvalidSmsEnvironment =
     process.env.SMS_IR_ENVIRONMENT !== "production";
   const dispatchTemplateIds = [
@@ -156,6 +163,8 @@ const validateProductionEnvironment = () => {
     hasWeakJwtSecret ||
     hasInvalidHiringTemplate ||
     hasInvalidHiringTemplateParameters ||
+    hasInvalidHiringCorrectionParameters ||
+    hasInvalidHiringOfferParameters ||
     hasInvalidSmsEnvironment ||
     hasInvalidDispatchTemplates ||
     hasInvalidPublicAppUrl
@@ -166,10 +175,16 @@ const validateProductionEnvironment = () => {
         ? "JWT_SECRET must be at least 32 chars and not a placeholder."
         : "",
       hasInvalidHiringTemplate
-        ? "SMS_IR_HIRING_INVITATION_TEMPLATE_ID must be a dedicated positive numeric template ID and must not equal SMS_IR_TEMPLATE_ID."
+        ? "Hiring SMS template IDs must be exactly invitation=363360, correction=763918, offer=894291."
         : "",
       hasInvalidHiringTemplateParameters
-        ? "SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS must be exactly Code."
+        ? "SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS must be exactly CODE."
+        : "",
+      hasInvalidHiringCorrectionParameters
+        ? "SMS_IR_HIRING_CORRECTION_TEMPLATE_PARAMETERS must be exactly DETAILS,CODE."
+        : "",
+      hasInvalidHiringOfferParameters
+        ? "SMS_IR_HIRING_OFFER_TEMPLATE_PARAMETERS must be exactly CODE."
         : "",
       hasInvalidSmsEnvironment ? "SMS_IR_ENVIRONMENT must be production." : "",
       hasInvalidDispatchTemplates

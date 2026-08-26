@@ -2282,7 +2282,7 @@ model ContractItem {
   logisticsLoadingCorrections       LogisticsLoadingCorrection[]
   shipmentQuantityEvidence          ShipmentQuantityEvidence[]
   shipmentQuantityProjection        ShipmentQuantityProjection?
-  approvedPricingRows               ContractApprovedPricingRow[]      @relation("ApprovedPricingLiveContractItem")
+  approvedPricingRows               ContractApprovedPricingRow[]       @relation("ApprovedPricingLiveContractItem")
 
   @@unique([contractId, productRowId])
   @@map("contract_items")
@@ -3039,7 +3039,7 @@ model ContractApprovedPricingRow {
   componentEvidence      Json
   integrityHash          String                          @unique
   pricingVersion         ContractApprovedPricingVersion  @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
-  contractItem           ContractItem?                    @relation("ApprovedPricingLiveContractItem", fields: [linkedContractItemId], references: [id], onDelete: Restrict)
+  contractItem           ContractItem?                   @relation("ApprovedPricingLiveContractItem", fields: [linkedContractItemId], references: [id], onDelete: Restrict)
   pricedAllocationEvents DispatchPricedAllocationEvent[]
 
   @@unique([pricingVersionId, ordinal])
@@ -5413,6 +5413,7 @@ model HrJobApplication {
   position                           HrPosition                             @relation(fields: [positionId], references: [id], onDelete: Restrict)
   employmentRelationship             HrEmploymentRelationship?
   invitations                        HrCandidateInvitation[]
+  candidateSmsAttempts               HrCandidateSmsAttempt[]
   formRevisions                      HrApplicationFormRevision[]
   documents                          HrHiringDocument[]
   identityChecks                     HrIdentityCheck[]
@@ -5498,6 +5499,34 @@ model HrCandidateInvitation {
   @@index([applicationId, expiresAt])
   @@index([mobileSnapshot, expiresAt, revokedAt])
   @@map("hr_candidate_invitations")
+}
+
+model HrCandidateSmsAttempt {
+  id                    String           @id @default(cuid())
+  applicationId         String
+  purpose               String
+  referenceId           String
+  attemptNumber         Int
+  providerMessageId     String?
+  providerDeliveryState String           @default("PENDING")
+  providerDeliveryAt    DateTime?
+  providerLastCheckedAt DateTime?
+  providerDeliveryCode  Int?
+  providerFailureKind   String?
+  providerHttpStatus    Int?
+  providerResultJson    Json?
+  immediateError        String?
+  initiatedByUserId     String?
+  initiatedByKind       String           @default("USER")
+  retryOfAttemptId      String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  application           HrJobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([purpose, referenceId, attemptNumber])
+  @@index([applicationId, purpose, createdAt])
+  @@index([providerMessageId])
+  @@map("hr_candidate_sms_attempts")
 }
 
 model HrRecruitmentChecklistTemplate {
@@ -5721,24 +5750,43 @@ model HrApplicationReopening {
 }
 
 model HrCollateralRequirement {
-  id                   String             @id @default(cuid())
+  id                   String                        @id @default(cuid())
   applicationId        String
   version              Int
   type                 String
-  amountRials          Decimal?           @db.Decimal(18, 0)
+  amountRials          Decimal?                      @db.Decimal(18, 0)
   obligation           String?
   dueTiming            String?
   candidateExplanation String
-  status               String             @default("ACTIVE")
+  status               String                        @default("ACTIVE")
   proposedBy           String
-  proposedAt           DateTime           @default(now())
+  proposedAt           DateTime                      @default(now())
   supersedesId         String?
-  application          HrJobApplication   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application          HrJobApplication              @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   collateralItems      HrCollateralItem[]
+  lines                HrCollateralRequirementLine[]
 
   @@unique([applicationId, version])
   @@index([applicationId, status])
   @@map("hr_collateral_requirements")
+}
+
+model HrCollateralRequirementLine {
+  id                   String                  @id @default(cuid())
+  requirementId        String
+  lineKey              String
+  sortOrder            Int
+  type                 String
+  amountRials          Decimal?                @db.Decimal(18, 0)
+  customTitle          String?
+  candidateExplanation String?
+  requirement          HrCollateralRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  collateralItems      HrCollateralItem[]
+
+  @@unique([requirementId, lineKey])
+  @@unique([requirementId, sortOrder])
+  @@index([requirementId, sortOrder])
+  @@map("hr_collateral_requirement_lines")
 }
 
 model HrCandidateAccessThrottle {
@@ -5893,6 +5941,7 @@ model HrCollateralItem {
   id                              String                             @id @default(cuid())
   applicationId                   String
   collateralRequirementId         String?
+  collateralRequirementLineId     String?
   type                            String
   required                        Boolean                            @default(true)
   amountRials                     Decimal?                           @db.Decimal(18, 0)
@@ -5929,6 +5978,7 @@ model HrCollateralItem {
   updatedAt                       DateTime                           @updatedAt
   application                     HrJobApplication                   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   collateralRequirement           HrCollateralRequirement?           @relation(fields: [collateralRequirementId], references: [id], onDelete: SetNull)
+  collateralRequirementLine       HrCollateralRequirementLine?       @relation(fields: [collateralRequirementLineId], references: [id], onDelete: SetNull)
   templateItemId                  String?
   supersedesItemId                String?                            @unique
   templateItem                    HrCollateralChecklistTemplateItem? @relation(fields: [templateItemId], references: [id], onDelete: SetNull)
@@ -5938,6 +5988,7 @@ model HrCollateralItem {
 
   @@index([applicationId, status])
   @@index([collateralRequirementId])
+  @@index([collateralRequirementLineId])
   @@map("hr_collateral_items")
 }
 

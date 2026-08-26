@@ -4,12 +4,15 @@ import path from "node:path";
 const repositoryRoot = __dirname;
 const backendRoot = path.join(repositoryRoot, "backend");
 const frontendRoot = path.join(repositoryRoot, "frontend");
+const frontendPort = process.env.HR_HIRING_E2E_FRONTEND_PORT || "3100";
+const frontendBaseUrl = `http://127.0.0.1:${frontendPort}`;
+process.env.HR_HIRING_E2E_BASE_URL = frontendBaseUrl;
 
 process.env.DATABASE_URL ??=
   "postgresql://postgres:postgres@127.0.0.1:55432/sabalanerp_e2e?schema=public";
 process.env.JWT_SECRET ??= "hr-hiring-e2e-secret-with-at-least-32-characters";
-process.env.FRONTEND_URL ??= "http://127.0.0.1:3100";
-process.env.PUBLIC_APP_URL ??= "http://127.0.0.1:3100";
+process.env.FRONTEND_URL ??= frontendBaseUrl;
+process.env.PUBLIC_APP_URL ??= frontendBaseUrl;
 process.env.NEXT_PUBLIC_API_URL ??= "/api";
 process.env.BACKEND_API_ORIGIN ??= "http://127.0.0.1:5100";
 process.env.SMS_IR_ENVIRONMENT ??= "sandbox";
@@ -30,7 +33,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   use: {
-    baseURL: "http://127.0.0.1:3100",
+    baseURL: frontendBaseUrl,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",
@@ -58,9 +61,9 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: "npm run dev -- --port 3100",
+      command: `npm run dev -- --port ${frontendPort}`,
       cwd: frontendRoot,
-      url: "http://127.0.0.1:3100/login",
+      url: `${frontendBaseUrl}/login`,
       env: {
         ...process.env,
         NODE_ENV: "test",

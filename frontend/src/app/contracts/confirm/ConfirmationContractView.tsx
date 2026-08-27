@@ -2,8 +2,9 @@
 import { ErpButton, ErpCard, ErpInlineState, ErpInput } from '@/components/erp';
 import { formatPriceWithRial, toFiniteNumber } from '@/lib/numberFormat';
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
+import type { CustomerContractOutput } from '../../../../../packages/partner-sales-contracts';
 
-export type ConfirmationData = {
+type OrdinaryConfirmationData = {
   sessionId: string;
   status: string;
   contractStatus: string;
@@ -29,6 +30,15 @@ export type ConfirmationData = {
     payments: any[];
   };
 };
+
+type RetailConfirmationData = {
+  contract: CustomerContractOutput;
+  verifiedAt: string | null;
+  linkExpiresAt: string;
+  readOnly: boolean;
+  banner: 'CANCELLED' | 'SUPERSEDED' | null;
+};
+export type ConfirmationData = OrdinaryConfirmationData | RetailConfirmationData;
 
 interface ConfirmationContractViewProps {
   data: ConfirmationData;
@@ -59,6 +69,14 @@ const formatPersianDate = (value?: string | null) => {
   }).format(date);
 };
 
+// Retail wire money is an exact decimal string, including amounts above the
+// binary number safe-integer range. Presentation must not reprice or round it.
+const formatRetailMoney = (amount: string, currency: string) => {
+  const [integer, fraction] = amount.split('.');
+  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, '٬');
+  return `${`${grouped}${fraction ? `٫${fraction}` : ''}`.replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} ${currency}`;
+};
+
 export default function ConfirmationContractView({
   data,
   code,
@@ -69,13 +87,18 @@ export default function ConfirmationContractView({
   onVerify,
   onResend
 }: ConfirmationContractViewProps) {
-  const fullName = `${data.contract.customer.firstName || ''} ${data.contract.customer.lastName || ''}`.trim();
-  const customerName = fullName || data.contract.customer.companyName || 'مشتری';
-  const isApproved = data.contractStatus === 'APPROVED';
+  const retailData = 'readOnly' in data ? data : null;
+  const retail = retailData?.contract;
+  const ordinary = retailData ? null : data as OrdinaryConfirmationData;
+  const fullName = `${ordinary?.contract.customer.firstName || ''} ${ordinary?.contract.customer.lastName || ''}`.trim();
+  const customerName = retail?.customer.displayName || fullName || ordinary?.contract.customer.companyName || 'مشتری';
+  const contractStatus = retailData?.banner === 'CANCELLED' ? 'CANCELLED'
+    : retailData?.verifiedAt ? 'APPROVED' : retail?.status || ordinary?.contractStatus || '';
+  const isApproved = Boolean(retailData?.readOnly) || ['APPROVED', 'SIGNED', 'PRINTED'].includes(contractStatus);
   const verifiedDate = formatPersianDate(data.verifiedAt);
-  const displayItems = Array.isArray(data.contract.contractData?.products) && data.contract.contractData.products.length > 0
-    ? data.contract.contractData.products
-    : data.contract.items || [];
+  const displayItems = retail?.products || (Array.isArray(ordinary?.contract.contractData?.products) && ordinary.contract.contractData.products.length > 0
+    ? ordinary.contract.contractData.products : ordinary?.contract.items || []);
+  const currency = retail?.totals.currency === 'IRR' ? 'ریال' : retail?.totals.currency === 'IRT' ? 'تومان' : ordinary?.contract.currency || 'تومان';
 
   return (
     <main className="sds-workspace min-h-screen px-4 py-10 text-primary">
@@ -87,15 +110,25 @@ export default function ConfirmationContractView({
           </p>
         </ErpCard>
 
+        {retailData?.banner && <ErpInlineState kind="stale" title={retailData.banner === 'CANCELLED'
+          ? 'این قرارداد لغو شده است؛ نسخه تأییدشده فقط برای مشاهده نگهداری می‌شود.'
+          : 'نسخه جدید جایگزین شده است؛ این نسخه تأییدشده فقط برای مشاهده است.'} />}
+
         <ErpCard className="p-6">
           <h2 className="mb-4 text-xl font-semibold">اطلاعات قرارداد</h2>
           <div className="grid gap-3 text-sm sm:grid-cols-2">
             <p>شماره قرارداد: <span className="font-semibold">{data.contract.contractNumber}</span></p>
             <p>مشتری: <span className="font-semibold">{customerName}</span></p>
-            <p>شماره تماس: <span className="font-semibold">{data.contract.customer.phoneNumber || 'ثبت نشده'}</span></p>
-            <p>مبلغ کل: <span className="font-semibold">{formatPriceWithRial(data.contract.totalAmount, data.contract.currency || 'تومان')}</span></p>
+            <p>شماره تماس: <span className="font-semibold">{retail?.customer.phone || ordinary?.contract.customer.phoneNumber || 'ثبت نشده'}</span></p>
+            <p>مبلغ کل: <span className="font-semibold">{retail ? formatRetailMoney(retail.totals.payable, currency) : formatPriceWithRial(ordinary?.contract.totalAmount, currency)}</span></p>
             <p>تعداد اقلام: <span className="font-semibold">{displayItems.length}</span></p>
-            <p>وضعیت: <span className="font-semibold">{statusLabel(data.contractStatus)}</span></p>
+            <p>وضعیت: <span className="font-semibold">{statusLabel(contractStatus)}</span></p>
+            {retail && <>
+              <p>فروشنده: <span className="font-semibold">{retail.seller.displayName}</span></p>
+              <p>تلفن فروشنده: <span dir="ltr">{retail.seller.phone}</span></p>
+              <p className="sm:col-span-2">نشانی فروشنده: {retail.seller.address}</p>
+              <p className="text-xs text-secondary sm:col-span-2">تأمین و تحویل توسط سبلان</p>
+            </>}
           </div>
         </ErpCard>
 
@@ -113,7 +146,7 @@ export default function ConfirmationContractView({
                 </thead>
                 <tbody>
                   {displayItems.map((item: any, index: number) => {
-                    const finishing = normalizeProductFinishing(item);
+                    const finishing = retail ? null : normalizeProductFinishing(item);
                     return (
                       <tr key={item.id || `${item.productId || 'item'}-${index}`} className="border-b border-[var(--sds-border-default)]">
                         <td className="py-3">
@@ -124,8 +157,10 @@ export default function ConfirmationContractView({
                             </div>
                           )}
                         </td>
-                        <td className="py-3">{item.quantity || 0}</td>
-                        <td className="py-3">{formatPriceWithRial(toFiniteNumber(item.totalPrice) || item.price, data.contract.currency || 'تومان')}</td>
+                        <td className="py-3">{item.quantity || 0}{retail ? ` ${item.unit}` : ''}</td>
+                        <td className="py-3">{retail
+                          ? <>{formatRetailMoney(item.retailUnitPrice, currency)} <span className="text-xs text-secondary">برای هر {item.unit}</span></>
+                          : formatPriceWithRial(toFiniteNumber(item.totalPrice) || item.price, currency)}</td>
                       </tr>
                     );
                   })}

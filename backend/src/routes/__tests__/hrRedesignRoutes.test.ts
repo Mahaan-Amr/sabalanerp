@@ -71,8 +71,12 @@ for (const route of [
   'GET /positions/:id/history',
   'POST /positions/:id/capacity-changes',
   'GET /foundation/:entityType/:id/dependencies',
+  'GET /foundation/:entityType/:id/detail',
   'POST /foundation/:entityType/:id/lifecycle',
   'DELETE /foundation/:entityType/:id/permanent',
+  'POST /assignments/:id/cancel',
+  'POST /assignments/:id/void',
+  'POST /assignments/:id/end',
 ]) assert.ok(registeredRoutes.includes(route), `missing lifecycle-safe organization route: ${route}`);
 
 const drilldownPositions = [

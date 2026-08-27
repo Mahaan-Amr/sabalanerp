@@ -1300,6 +1300,15 @@ function PersonnelCard(props: any) {
                     run={run}
                   />
                 ))}
+                {(relationship.assignmentWithdrawals || []).map((withdrawal: any) => (
+                  <div key={withdrawal.id} className="rounded-xl border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-semibold">{withdrawal.assignmentSnapshot?.position?.title || withdrawal.assignmentSnapshot?.position?.name || "تخصیص اصلاح‌شده"}</p>
+                      <ErpBadge tone="neutral">{withdrawal.action === "CANCELLED" ? "لغوشده" : withdrawal.action === "VOIDED" ? "باطل‌شده" : "پایان‌یافته"}</ErpBadge>
+                    </div>
+                    <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{dateFa(withdrawal.effectiveAt)} · {withdrawal.reason}</p>
+                  </div>
+                ))}
               </div>
             </>
           )}
@@ -1552,14 +1561,18 @@ function AssignmentForm({
 }
 
 function AssignmentRow({ item, endDate, setEndDate, run }: any) {
+  const [withdrawalReason, setWithdrawalReason] = useState("");
   const supervisor =
     item.responsibleSupervisorAssignment?.employmentRelationship?.personnel;
+  const isFuture = new Date(item.effectiveFrom).getTime() > Date.now();
+  const isOpen = !item.effectiveTo;
+  const positionTitle = item.position?.title || item.positionSnapshot?.title || item.positionSnapshot?.name || "جایگاه حذف‌شده";
   return (
     <div className="rounded-xl border border-[var(--sds-border-default)] p-3 dark:border-[var(--sds-border-strong)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="font-semibold">
-            {item.position.title}{" "}
+            {positionTitle}{" "}
             <ErpBadge
               tone={
                 item.type === "PRIMARY"
@@ -1580,28 +1593,17 @@ function AssignmentRow({ item, endDate, setEndDate, run }: any) {
               : "تعیین نشده"}
           </p>
         </div>
-        {!item.effectiveTo && item.type !== "PRIMARY" && (
-          <div className="flex items-end gap-2">
-            <div className="w-40">
-              <HrPersianCalendar
-                value={endDate}
-                onChange={setEndDate}
-                placeholder="تاریخ پایان"
-              />
+        {isOpen && (
+          <div className="min-w-[280px] space-y-2">
+            <ErpField label="دلیل پس‌گرفتن تخصیص" required>
+              <ErpInput value={withdrawalReason} onChange={(event) => setWithdrawalReason(event.target.value)} placeholder="دلیل قابل ممیزی را وارد کنید" />
+            </ErpField>
+            {!isFuture && <HrPersianCalendar value={endDate} onChange={setEndDate} placeholder="تاریخ پایان" />}
+            <div className="flex flex-wrap justify-end gap-2">
+              {isFuture && <ErpButton label="لغو تخصیص آینده" icon={FaUndo} tone="danger" variant="ghost" disabled={!withdrawalReason.trim()} onClick={() => run(() => hrAPI.cancelAssignment(item.id, { reason: withdrawalReason }), "تخصیص آینده لغو شد.")} />}
+              {!isFuture && <ErpButton label="پایان تخصیص" icon={FaStop} tone="danger" variant="ghost" disabled={!endDate || !withdrawalReason.trim()} onClick={() => run(() => hrAPI.endAssignment(item.id, { effectiveTo: toIsoDate(endDate), reason: withdrawalReason }), "تخصیص در تاریخ انتخاب‌شده پایان یافت.")} />}
+              <ErpButton label="باطل‌کردن ثبت اشتباه" icon={FaTrash} tone="danger" variant="ghost" disabled={!withdrawalReason.trim()} onClick={() => run(() => hrAPI.voidAssignment(item.id, { reason: withdrawalReason, confirmNeverEffective: true }), "تخصیص اشتباه با حفظ سابقه ممیزی باطل شد.")} />
             </div>
-            <ErpButton
-              label="پایان تخصیص"
-              icon={FaStop}
-              tone="danger"
-              variant="ghost"
-              disabled={!endDate}
-              onClick={() =>
-                run(
-                  () => hrAPI.endAssignment(item.id, toIsoDate(endDate)),
-                  "تخصیص در تاریخ انتخاب‌شده پایان یافت.",
-                )
-              }
-            />
           </div>
         )}
       </div>

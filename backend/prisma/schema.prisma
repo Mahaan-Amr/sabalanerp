@@ -5047,6 +5047,7 @@ enum HrAssignmentType {
 model HrOrganizationalUnit {
   id                 String                   @id @default(cuid())
   code               String                   @unique
+  codeOccurrence     Int                      @default(1)
   name               String
   type               HrOrganizationalUnitType
   parentId           String?
@@ -5097,6 +5098,7 @@ model HrCostCenter {
 model HrJob {
   id               String       @id @default(cuid())
   code             String       @unique
+  codeOccurrence   Int          @default(1)
   title            String
   description      String?
   responsibilities String?
@@ -5112,6 +5114,7 @@ model HrJob {
 model HrPosition {
   id                                 String                                       @id @default(cuid())
   code                               String                                       @unique
+  codeOccurrence                     Int                                          @default(1)
   title                              String
   jobId                              String
   organizationalUnitId               String
@@ -5142,24 +5145,25 @@ model HrPosition {
 }
 
 model HrEmploymentRelationship {
-  id                  String                   @id @default(cuid())
-  personnelId         String
-  status              HrEmploymentStatus
-  effectiveFrom       DateTime
-  effectiveTo         DateTime?
-  originalStartDate   DateTime?
-  startDateVerified   Boolean                  @default(false)
-  endReason           String?
-  sourceSystem        String?
-  sourceId            String?
-  migratedAt          DateTime?
-  createdBy           String
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
-  hiringApplicationId String?                  @unique
-  personnel           Personnel                @relation(fields: [personnelId], references: [id], onDelete: Restrict)
-  assignments         HrEmploymentAssignment[]
-  hiringApplication   HrJobApplication?        @relation(fields: [hiringApplicationId], references: [id], onDelete: SetNull)
+  id                    String                             @id @default(cuid())
+  personnelId           String
+  status                HrEmploymentStatus
+  effectiveFrom         DateTime
+  effectiveTo           DateTime?
+  originalStartDate     DateTime?
+  startDateVerified     Boolean                            @default(false)
+  endReason             String?
+  sourceSystem          String?
+  sourceId              String?
+  migratedAt            DateTime?
+  createdBy             String
+  createdAt             DateTime                           @default(now())
+  updatedAt             DateTime                           @updatedAt
+  hiringApplicationId   String?                            @unique
+  personnel             Personnel                          @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  assignments           HrEmploymentAssignment[]
+  assignmentWithdrawals HrEmploymentAssignmentWithdrawal[]
+  hiringApplication     HrJobApplication?                  @relation(fields: [hiringApplicationId], references: [id], onDelete: SetNull)
 
   @@unique([sourceSystem, sourceId])
   @@index([personnelId, status, effectiveFrom, effectiveTo])
@@ -5169,11 +5173,13 @@ model HrEmploymentRelationship {
 model HrEmploymentAssignment {
   id                                String                   @id @default(cuid())
   employmentRelationshipId          String
-  positionId                        String
+  positionId                        String?
+  positionSnapshot                  Json?
   type                              HrAssignmentType
   effectiveFrom                     DateTime
   effectiveTo                       DateTime?
   organizationalUnitId              String?
+  organizationalUnitSnapshot        Json?
   workplaceId                       String?
   costCenterId                      String?
   responsibleSupervisorAssignmentId String?
@@ -5182,7 +5188,7 @@ model HrEmploymentAssignment {
   createdAt                         DateTime                 @default(now())
   updatedAt                         DateTime                 @updatedAt
   employmentRelationship            HrEmploymentRelationship @relation(fields: [employmentRelationshipId], references: [id], onDelete: Restrict)
-  position                          HrPosition               @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  position                          HrPosition?              @relation(fields: [positionId], references: [id], onDelete: Restrict)
   organizationalUnit                HrOrganizationalUnit?    @relation(fields: [organizationalUnitId], references: [id], onDelete: Restrict)
   workplace                         HrWorkplace?             @relation(fields: [workplaceId], references: [id], onDelete: Restrict)
   costCenter                        HrCostCenter?            @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
@@ -5361,7 +5367,8 @@ model HrCandidate {
 model HrJobApplication {
   id                                 String                                 @id @default(cuid())
   candidateId                        String
-  positionId                         String
+  positionId                         String?
+  positionSnapshot                   Json?
   stage                              HrApplicationStage                     @default(RECEIVED)
   outcome                            HrApplicationOutcome?
   outcomeReason                      String?
@@ -5410,7 +5417,7 @@ model HrJobApplication {
   archivedBy                         String?
   archiveReason                      String?
   candidate                          HrCandidate                            @relation(fields: [candidateId], references: [id], onDelete: Restrict)
-  position                           HrPosition                             @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  position                           HrPosition?                            @relation(fields: [positionId], references: [id], onDelete: Restrict)
   employmentRelationship             HrEmploymentRelationship?
   invitations                        HrCandidateInvitation[]
   candidateSmsAttempts               HrCandidateSmsAttempt[]
@@ -6952,17 +6959,18 @@ model HrFoundationLifecycleVersion {
 }
 
 model HrPositionCapacityChange {
-  id               String     @id @default(cuid())
-  stableKey        String     @unique
-  positionId       String
+  id               String      @id @default(cuid())
+  stableKey        String      @unique
+  positionId       String?
+  positionSnapshot Json?
   version          Int
   previousCapacity Int
   newCapacity      Int
   effectiveAt      DateTime
   reason           String
   changedByUserId  String
-  createdAt        DateTime   @default(now())
-  position         HrPosition @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  createdAt        DateTime    @default(now())
+  position         HrPosition? @relation(fields: [positionId], references: [id], onDelete: Restrict)
 
   @@unique([positionId, version])
   @@index([positionId, effectiveAt])
@@ -6972,7 +6980,8 @@ model HrPositionCapacityChange {
 model HrRecruitmentRequest {
   id                String                     @id @default(cuid())
   stableKey         String                     @unique
-  positionId        String
+  positionId        String?
+  positionSnapshot  Json?
   status            HrRecruitmentRequestStatus @default(DRAFT)
   approvedHeadcount Int
   convertedHires    Int                        @default(0)
@@ -6981,7 +6990,7 @@ model HrRecruitmentRequest {
   createdByUserId   String
   createdAt         DateTime                   @default(now())
   updatedAt         DateTime                   @updatedAt
-  position          HrPosition                 @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  position          HrPosition?                @relation(fields: [positionId], references: [id], onDelete: Restrict)
 
   @@index([positionId, status, effectiveFrom, effectiveTo])
   @@map("hr_recruitment_requests")
@@ -6999,6 +7008,73 @@ model HrFoundationReservedCode {
   @@unique([entityType, code])
   @@unique([entityType, deletedEntityId])
   @@map("hr_foundation_reserved_codes")
+}
+
+model HrFoundationCodeOccurrence {
+  id               String    @id @default(cuid())
+  entityType       String
+  code             String
+  occurrence       Int
+  entityId         String
+  assignedAt       DateTime  @default(now())
+  assignedByUserId String
+  releasedAt       DateTime?
+  releasedByUserId String?
+  releaseReason    String?
+
+  @@unique([entityType, code, occurrence])
+  @@index([entityType, code, releasedAt])
+  @@index([entityType, entityId, assignedAt])
+  @@map("hr_foundation_code_occurrences")
+}
+
+model HrFoundationDeletionReceipt {
+  id                       String   @id @default(cuid())
+  entityType               String
+  entityId                 String
+  code                     String
+  codeOccurrence           Int
+  deletedByUserId          String
+  deletedAt                DateTime @default(now())
+  reason                   String
+  dependencyResolutionJson Json
+
+  @@unique([entityType, entityId])
+  @@index([entityType, code, codeOccurrence])
+  @@map("hr_foundation_deletion_receipts")
+}
+
+model HrFoundationHistoricalSnapshot {
+  id               String   @id @default(cuid())
+  entityType       String
+  entityId         String
+  code             String
+  codeOccurrence   Int
+  displayName      String
+  snapshotJson     Json
+  capturedAt       DateTime @default(now())
+  capturedByUserId String
+
+  @@unique([entityType, entityId])
+  @@index([entityType, code, codeOccurrence])
+  @@map("hr_foundation_historical_snapshots")
+}
+
+model HrEmploymentAssignmentWithdrawal {
+  id                       String                   @id @default(cuid())
+  originalAssignmentId     String
+  employmentRelationshipId String
+  action                   String
+  effectiveAt              DateTime
+  reason                   String
+  actorUserId              String
+  assignmentSnapshot       Json
+  createdAt                DateTime                 @default(now())
+  employmentRelationship   HrEmploymentRelationship @relation(fields: [employmentRelationshipId], references: [id], onDelete: Restrict)
+
+  @@unique([originalAssignmentId, action])
+  @@index([employmentRelationshipId, createdAt])
+  @@map("hr_employment_assignment_withdrawals")
 }
 
 model HrReconciliationRecord {

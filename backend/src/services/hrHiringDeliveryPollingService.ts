@@ -111,7 +111,7 @@ export const notifyOverduePreIdentityChecklist = async (prisma: PrismaClient, no
         payload: {
           itemTitle: item.title,
           candidateName: `${item.application.candidate.firstName} ${item.application.candidate.lastName}`,
-          positionTitle: item.application.position.title,
+          positionTitle: item.application.position?.title || 'جایگاه حذف‌شده',
         },
       });
       await tx.hrPreIdentityChecklistItem.update({ where: { id: item.id }, data: { overdueNotifiedAt: now } });

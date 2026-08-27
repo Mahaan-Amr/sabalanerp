@@ -4,7 +4,7 @@ import { ErpInlineState } from "@/components/erp";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { FaHistory, FaPlus } from "react-icons/fa";
+import { FaHistory, FaLink, FaPlus } from "react-icons/fa";
 import {
   ErpBadge,
   ErpButton,
@@ -15,6 +15,7 @@ import {
   ErpLoading,
   ErpPage,
   ErpSection,
+  ErpSummaryGrid,
   ErpTextarea,
 } from "@/components/erp";
 import { apiError, fromIsoDate, toIsoDate } from "@/features/hr/hrUi";
@@ -55,7 +56,22 @@ export default function PositionHistoryPage() {
     try {
       setLoading(true);
       setError("");
-      setData((await hrAPI.getPositionHistory(id)).data.data);
+      const detail = (await hrAPI.getFoundationDetail("position", id)).data.data;
+      if (detail.deleted) {
+        const snapshot = detail.entity || {};
+        setData({
+          position: { ...(snapshot.definition || snapshot), deleted: true },
+          detail,
+          assignments: [],
+          capacityChanges: [],
+          structuralChanges: detail.lifecycle || [],
+          recruitmentRequests: [],
+          capabilities: detail.capabilities || {},
+        });
+      } else {
+        const history = (await hrAPI.getPositionHistory(id)).data.data;
+        setData({ ...history, detail });
+      }
     } catch (cause) {
       setError(apiError(cause));
     } finally {
@@ -107,15 +123,42 @@ export default function PositionHistoryPage() {
     <ErpPage eyebrow="منابع انسانی" title={data.position.title} backHref={backHref}>
       {error && <ErpInlineState kind="error" title={error} />}
       {success && <ErpInlineState kind="success" title={success} />}
+      {data.detail?.deleted && <ErpInlineState
+        kind="stale"
+        title={data.detail.deletionReceipt
+          ? `این جایگاه به‌صورت دائمی حذف شده است · ${new Date(data.detail.deletionReceipt.deletedAt).toLocaleDateString("fa-IR")} · ${data.detail.deletionReceipt.reason}`
+          : "این جایگاه حذف شده و اطلاعات زیر از snapshot تاریخی نمایش داده می‌شود."}
+      />}
       <ErpCard className="p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="font-black text-[var(--sds-text-primary)]">{data.position.code}</p>
-            <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">{data.position.job.title} · {data.position.organizationalUnit.name}</p>
+            <p className="mt-1 text-sm text-[var(--sds-text-secondary)]">
+              {data.detail?.linked?.job?.title || data.position.job?.title || "شغل حذف‌شده"} · {data.detail?.linked?.organizationalUnit?.name || data.position.organizationalUnit?.name || "واحد حذف‌شده"}
+            </p>
           </div>
-          <ErpBadge tone={data.position.isActive ? "success" : "neutral"}>{data.position.isActive ? "فعال" : "غیرفعال"}</ErpBadge>
+          <ErpBadge tone={data.detail?.deleted ? "warning" : data.position.isActive ? "success" : "neutral"}>{data.detail?.deleted ? "حذف‌شده" : data.position.isActive ? "فعال" : "غیرفعال"}</ErpBadge>
         </div>
       </ErpCard>
+
+      <ErpSection title="جزئیات و پیوندهای جایگاه">
+        <ErpSummaryGrid columns={2} items={[
+          { label: "شغل", value: data.detail?.linked?.job?.title || "—", hint: data.detail?.linked?.job?.id && <ErpButton label="جزئیات" href={`/dashboard/hr/structure/jobs/${data.detail.linked.job.id}`} icon={FaLink} variant="ghost" /> },
+          { label: "واحد سازمانی", value: data.detail?.linked?.organizationalUnit?.name || "—", hint: data.detail?.linked?.organizationalUnit?.id && <ErpButton label="جزئیات" href={`/dashboard/hr/structure/units/${data.detail.linked.organizationalUnit.id}`} icon={FaLink} variant="ghost" /> },
+          { label: "جایگاه سرپرست", value: data.detail?.linked?.supervisorPosition?.title || "ندارد", hint: data.detail?.linked?.supervisorPosition?.id && <ErpButton label="جزئیات" href={`/dashboard/hr/structure/positions/${data.detail.linked.supervisorPosition.id}`} icon={FaLink} variant="ghost" /> },
+          { label: "محل کار", value: data.detail?.linked?.workplace?.name || "—" },
+          { label: "مرکز هزینه", value: data.detail?.linked?.costCenter?.name || "—" },
+          { label: "زیرجایگاه‌ها", value: (data.detail?.linked?.subordinatePositions?.length || 0).toLocaleString("fa-IR") },
+        ]} />
+        {(data.detail?.linked?.subordinatePositions || []).length > 0 && <div className="mt-3 space-y-2">
+          {data.detail.linked.subordinatePositions.map((row: any) => (
+            <ErpCard key={row.id} className="flex items-center justify-between gap-3 p-3">
+              <div><p className="font-bold">{row.title}</p><p className="text-xs text-[var(--sds-text-secondary)]">{row.code}</p></div>
+              <ErpButton label="جزئیات" href={`/dashboard/hr/structure/positions/${row.id}`} icon={FaLink} variant="ghost" />
+            </ErpCard>
+          ))}
+        </div>}
+      </ErpSection>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
         <div className="space-y-5">
@@ -136,6 +179,13 @@ export default function PositionHistoryPage() {
                 .map((row: any) => <ErpCard key={row.id} className="p-3"><p className="font-bold">{row.text}</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{new Date(row.date).toLocaleDateString("fa-IR")} · {row.reason}</p></ErpCard>)}
             </div>
           </ErpSection>
+          <ErpSection title="تاریخچه کد">
+            <div className="space-y-3">
+              {(data.detail?.codeHistory || []).map((row: any) => <ErpCard key={row.id} className="p-3"><p className="font-bold">{row.code} · نسخه {row.occurrence.toLocaleString("fa-IR")}</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{new Date(row.assignedAt).toLocaleDateString("fa-IR")} {row.releasedAt ? `تا ${new Date(row.releasedAt).toLocaleDateString("fa-IR")}` : "· جاری"}</p></ErpCard>)}
+            </div>
+          </ErpSection>
+          {(data.detail?.linked?.withdrawals || []).length > 0 && <ErpSection title="اصلاحات تخصیص"><div className="space-y-3">{data.detail.linked.withdrawals.map((row: any) => <ErpCard key={row.id} className="p-3"><p className="font-bold">{row.action === "CANCELLED" ? "لغو" : row.action === "VOIDED" ? "ابطال" : "پایان"} تخصیص</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{new Date(row.effectiveAt).toLocaleDateString("fa-IR")} · {row.reason}</p></ErpCard>)}</div></ErpSection>}
+          {(data.detail?.linked?.hiringApplications || []).length > 0 && <ErpSection title="پرونده‌های جذب مرتبط"><div className="space-y-3">{data.detail.linked.hiringApplications.map((row: any) => <ErpCard key={row.id} className="p-3"><div className="flex items-center justify-between gap-2"><p className="font-bold">{row.stage} · {row.outcome || "در جریان"}</p><ErpButton label="مشاهده" href={`/dashboard/hr/hiring/${row.id}`} variant="ghost" /></div></ErpCard>)}</div></ErpSection>}
           {(data.recruitmentRequests || []).length > 0 && (
             <ErpSection title="درخواست‌های جذب مرتبط">
               <div className="space-y-3">

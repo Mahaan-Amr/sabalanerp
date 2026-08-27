@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useProductPricingVisibility } from './productPricingVisibility';
 import type {
   CanonicalLayerCalculationRequest
 } from '../../services/stairCalculationService';
@@ -26,6 +27,7 @@ export function CanonicalStairLayerSummary({
 }: {
   request: CanonicalLayerCalculationRequest | undefined;
 }) {
+  const showPricing = useProductPricingVisibility();
   const state = useStairLayerCalculationWorker(request);
   const calculation = state.calculation;
 
@@ -76,8 +78,7 @@ export function CanonicalStairLayerSummary({
               {number(calculation.result.materialSourceSplit.paidSourceCount)} قطعه
               {' · '}
               {number(calculation.result.materialSourceSplit.paidMaterialSquareMeters)} m²
-              {' · '}
-              {formatPrice(calculation.result.materialSourceSplit.paidMaterialAmountToman)}
+              {showPricing && <> · {formatPrice(calculation.result.materialSourceSplit.paidMaterialAmountToman)}</>}
             </strong>
           </div>
           <div className="flex justify-between gap-3 py-1.5">
@@ -86,8 +87,7 @@ export function CanonicalStairLayerSummary({
               {number(calculation.result.materialSourceSplit.newSourceCount)} قطعه
               {' · '}
               {number(calculation.result.materialSourceSplit.newMaterialSquareMeters)} m²
-              {' · '}
-              {formatPrice(calculation.result.materialSourceSplit.newMaterialAmountToman)}
+              {showPricing && <> · {formatPrice(calculation.result.materialSourceSplit.newMaterialAmountToman)}</>}
             </strong>
           </div>
           <div className="flex justify-between gap-3 py-1.5">
@@ -98,7 +98,7 @@ export function CanonicalStairLayerSummary({
               کالیبر {number(calculation.result.packingPlan.calibrationMeters)}m
             </strong>
           </div>
-          {calculation.result.cuttingPricingLines.map(line => {
+          {showPricing && calculation.result.cuttingPricingLines.map(line => {
             const direction = line.lineId.endsWith(':longitudinal')
               ? 'طولی'
               : line.lineId.endsWith(':cross')
@@ -124,10 +124,10 @@ export function CanonicalStairLayerSummary({
               {number(calculation.result.generatedRemainders.length)} قطعه
             </strong>
           </div>
-          <div className="flex justify-between gap-3 py-1.5">
+          {showPricing && <div className="flex justify-between gap-3 py-1.5">
             <span>جمع</span>
             <strong>{formatPrice(calculation.result.totalAmountToman)}</strong>
-          </div>
+          </div>}
         </>
       ) : (
         <div className="py-2 text-[var(--sds-text-muted)]">—</div>

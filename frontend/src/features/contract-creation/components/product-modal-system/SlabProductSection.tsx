@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpPressable, ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { formatPrice } from '@/lib/numberFormat';
@@ -231,6 +232,7 @@ export function SlabProductSection({
   calculating?: boolean;
   createSourceIdentity?: () => StableIdentity<'slab-source-row'>;
 }) {
+  const showPricing = useProductPricingVisibility();
   const localCalculation = React.useMemo(
     () => workerCalculation === undefined && !calculating
       ? calculateSlab(input)
@@ -318,7 +320,7 @@ export function SlabProductSection({
         />
       </div>
 
-      <SlabField
+      {showPricing && <SlabField
         id="slab-base-rate"
         label="فی سنگ مادر مصرفی"
         value={input.baseMaterialRateToman ?? ''}
@@ -327,7 +329,7 @@ export function SlabProductSection({
           onChange(commitSlabDecimal(input, 'baseMaterialRateToman', value))
         )}
         error={conflict('baseMaterialRateToman')}
-      />
+      />}
 
       <section className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
         <div className="flex min-h-8 items-center justify-between gap-3">
@@ -372,7 +374,7 @@ export function SlabProductSection({
         {sourceError && <div className={errorClass}>{sourceError}</div>}
       </section>
 
-      <section className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
+      {showPricing && <section className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-bold">روش محاسبه برش</h3>
           <CompactSegmentedControl
@@ -399,7 +401,7 @@ export function SlabProductSection({
             />
           </div>
         )}
-      </section>
+      </section>}
 
       <div className="flex min-h-10 items-center gap-2 border-t border-[var(--sds-border-default)] py-2 text-xs font-semibold dark:border-[var(--sds-border-subtle)]">
         <CompactSwitch
@@ -440,7 +442,7 @@ export function SlabProductSection({
             : '—'],
           ['برش', resolved ? formatPrice(resolved.cuttingAmountToman) : '—'],
           ['جمع', resolved ? formatPrice(resolved.totalAmountToman) : '—']
-        ].map(([label, value]) => (
+        ].filter(([label]) => showPricing || (label !== 'برش' && label !== 'جمع')).map(([label, value]) => (
           <div
             key={label}
             className="grid min-h-9 grid-cols-[8rem_1fr] items-center gap-3 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs dark:border-[var(--sds-border-subtle)]"

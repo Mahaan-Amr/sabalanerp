@@ -1,0 +1,293 @@
+{
+  "interfaceVersion": "partner-qa-harness/v1",
+  "foundationInterface": "@sabalanerp/partner-sales-contracts@1.0.0; schemaVersion=1",
+  "runId": "partner-qa-19a85718-76d4-48a1-a683-d4361914fd20",
+  "mode": "all",
+  "startedAt": "2026-08-27T07:56:26.760Z",
+  "head": "ab3e842aa54d01bfdabc7ab17e19160480a9e74a",
+  "reviewBase": "9fcf2edb4f5f580f0e2e71347cd60fd374f8b3aa",
+  "workspaceStatus": "D .scratch/hr-dashboard-design-system/screenshots/desktop-dark-1920x1080.png\n D .scratch/hr-dashboard-design-system/screenshots/desktop-light-1920x1080.png\n D .scratch/hr-dashboard-design-system/screenshots/mobile-dark-390x844.png\n D .scratch/hr-dashboard-design-system/screenshots/mobile-light-390x844.png\n M docs/qa/partner-sales/baseline.md\n M frontend/tsconfig.tsbuildinfo\n?? backend/src/services/__tests__/partnerAccounting.test.ts\n?? backend/src/services/__tests__/partnerAccountingFixture.ts\n?? backend/src/services/__tests__/partnerCustomerOutput.test.ts\n?? backend/src/services/__tests__/partnerOperationsPolicy.test.ts\n?? backend/src/services/__tests__/partnerReporting.test.ts\n?? backend/src/services/__tests__/partnerReportingRevenue.test.ts\n?? backend/src/services/partnerSales/\n?? docs/qa/partner-sales/evidence/\n?? frontend/src/features/partner-sales/\n?? tests/partner-sales/wizard/\n?? tmp/partner-management-prototype/\n?? tmp/pdfs/github-change-report/\n?? tmp/pdfs/mordad-1405-attendance/\n?? tmp/pdfs/mordad-1405-font-update/\n?? tmp/pdfs/mordad-1405-raw-times/\n?? tmp/pdfs/sample/\n?? tmp/qa/\n?? tmp/wayfinder-partner-release-decision/",
+  "checks": [
+    {
+      "name": "inventory freshness",
+      "status": "pass"
+    },
+    {
+      "name": "harness contracts",
+      "command": "node --test tests/partner-sales/safety.test.mjs tests/partner-sales/inventory.test.mjs tests/partner-sales/runner.test.mjs",
+      "logFile": "1-harness-contracts.log",
+      "status": "pass",
+      "exitCode": 0
+    },
+    {
+      "name": "foundation consumer contract",
+      "command": "node --test tests/partner-sales/foundation-contract.test.mjs",
+      "logFile": "2-foundation-consumer-contract.log",
+      "status": "pass",
+      "exitCode": 0
+    },
+    {
+      "name": "typecheck",
+      "command": "node frontend/node_modules/typescript/bin/tsc -p tests/partner-sales/tsconfig.json",
+      "logFile": "3-typecheck.log",
+      "status": "pass",
+      "exitCode": 0
+    },
+    {
+      "name": "real-schema fixtures and internal Sales API",
+      "command": "node --test --test-concurrency=1 tests/partner-sales/fixtures.integration.test.mjs tests/partner-sales/api.integration.test.mjs",
+      "logFile": "4-real-schema-fixtures-and-internal-Sales-API.log",
+      "status": "fail",
+      "exitCode": 1
+    }
+  ],
+  "status": "fail",
+  "limitations": [
+    "Module baseline only; not Partner E2E or release acceptance.",
+    "Runtime container identity is recorded separately from checkout HEAD.",
+    "Foundation fixtures/clock/sandbox prove the consumer contract, not a live Partner backend or real OTP flow.",
+    "Known legacy redirect diagnostics remain open as LEGACY-314-01; functional browser pass does not close them."
+  ],
+  "sourceFiles": [
+    {
+      "path": ".github/workflows/partner-sales.yml",
+      "sha256": "109198202a15643244359fce4846c089ca068f07594bb6c86a4eca2ab07e5f2f"
+    },
+    {
+      "path": "playwright.partner-sales.config.ts",
+      "sha256": "e74fe79a255d6137727f384e29b94f1ce6bc0db66cae7bb7e70bf7b693a1b20e"
+    },
+    {
+      "path": "scripts/run-partner-sales-tests.mjs",
+      "sha256": "c4f427ba13910149f448017ee51c21c9a65c342cfb835ff501920814ba57544e"
+    },
+    {
+      "path": "tests/partner-sales/api.integration.test.mjs",
+      "sha256": "360c43025cbd554d9e9ce1a7bf7e29801d8378cf91c064aa852b2c0f6e684657"
+    },
+    {
+      "path": "tests/partner-sales/browser/entry.spec.ts",
+      "sha256": "5ce56ce1f9f2c0207d3b1abf1a1e1debed5fda90fbb3f75e9f85433d305f8825"
+    },
+    {
+      "path": "tests/partner-sales/browser/global-setup.ts",
+      "sha256": "362ef5b03e8651cd314205b466a953c5d13570cc3a460fc60026def94a4726e9"
+    },
+    {
+      "path": "tests/partner-sales/fixtures.integration.test.mjs",
+      "sha256": "f84953ebcde801da3f33c0408b7407c9fe65913ee7f2ec9538aa493186c849a3"
+    },
+    {
+      "path": "tests/partner-sales/foundation-contract.test.mjs",
+      "sha256": "3f3272da6368841b1d6d64c8da4479c4a6698f51c44061962950956528e132ff"
+    },
+    {
+      "path": "tests/partner-sales/harness/fixtures.mjs",
+      "sha256": "dfb95bbde87b60c05e688b2dd51658112296fd60cb42bfd7c6066554896ad723"
+    },
+    {
+      "path": "tests/partner-sales/harness/foundation.mjs",
+      "sha256": "167945fa23ab441619ebcbeadf6380709b3c73fbf394cbbb84d2fb4b5a895cc9"
+    },
+    {
+      "path": "tests/partner-sales/harness/inventory.mjs",
+      "sha256": "d74b923db8d2f957140814e1cc8d40b0a4dde805130325da0dbcbefa49078832"
+    },
+    {
+      "path": "tests/partner-sales/harness/safety.mjs",
+      "sha256": "29682804eae9c4b6d84c82bb4080514588a26515e2ea1500ea911f5ed50e7389"
+    },
+    {
+      "path": "tests/partner-sales/inventory.test.mjs",
+      "sha256": "dda966da914eaab47ddbe44412436cc6096ca2feb038ba1f8b6543b2cfa152eb"
+    },
+    {
+      "path": "tests/partner-sales/runner.test.mjs",
+      "sha256": "335ee403eb9cc5b7cf9328a264b128fc46eaee3364105e37043024bba331859a"
+    },
+    {
+      "path": "tests/partner-sales/safety.test.mjs",
+      "sha256": "56613cf4b710c6e812be83f38aec55c84d4da2fe203e5822c8823471dc6cad69"
+    },
+    {
+      "path": "tests/partner-sales/tsconfig.json",
+      "sha256": "83fc9a96cddd86ad7c83ec8c865a1e8b397ca55332029230289577dea121da4f"
+    },
+    {
+      "path": "tests/partner-sales/wizard/tsconfig.json",
+      "sha256": "c027ee2ffe61f1c6c4814918129bfb4287ff44d91bb8f55f0bcfa7d008184014"
+    }
+  ],
+  "sourceHash": "317b1073f2bd074ae5018a01163cb940f8d524fe28ce00aebf033f421c3e5735",
+  "foundationBuildFiles": [
+    {
+      "path": "packages/partner-sales-contracts/dist/authorization.d.ts",
+      "sha256": "f4bb24a7f2b70fc8cc28189d62b234919a8fb8bd41172f0ef9f03be246afc1e3"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/authorization.js",
+      "sha256": "4f4e04b04df80f5bcb8d866ef629c3d427bb85facf054d6e80907c20fa65141e"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/case.d.ts",
+      "sha256": "7fec9e482c94cc31501ef19f89c8017222ea145d34388813fbef67ff5ff02265"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/case.js",
+      "sha256": "fa70c2e3e13a9a039cef33739daaa5b92f9e89c86b81c579434f30bf3aea8218"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/commands.d.ts",
+      "sha256": "f53adcf3b2880cec7c60129375cbfc52556e72f0d0a39ef5448aa961f0713aaa"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/commands.js",
+      "sha256": "839807cbc97e3d0cd5dcf6fb6365b139844200c499034e5aef4a5c9ab83c1a67"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/errors.d.ts",
+      "sha256": "33695a30b2bdb009a8445fe37c89ed7d1902854f603917ecc0ac82207b4930c9"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/errors.js",
+      "sha256": "8ebd99e99e6c0d32166b5f51e91d3072d8e3217c8b59fb1e2e8370ebe40dd42b"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/events.d.ts",
+      "sha256": "107023d6bcb956c3a2e638fef905282c5ed2c080918d9fbf0153146fbf3ad366"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/events.js",
+      "sha256": "992b6168026b074c07dd1380af1c5d74107ce186be22e7cc3417ba29a9d41b6d"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/graph-adapter.d.ts",
+      "sha256": "4a5b995ddcf3557c308a471df284e47a7f8fbc2d6c82881f5b411059eb9aa461"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/graph-adapter.js",
+      "sha256": "fb02888a9e2a28d94015e96e0c2f8eb490781107d3b9d8148b298d39368256b2"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/index.d.ts",
+      "sha256": "faa3438bb1728c9af569881b1ecca3efd7bff5079b2c7588667836deb5b17daa"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/index.js",
+      "sha256": "0cab53f42ca12aef528d43473d94c592d7e9c9c879008d87f59a4f720248cdf9"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/inquiry.d.ts",
+      "sha256": "d1a58d9e6dd2f3125d0cddfd1f12af0f4e8205e969692f7fc3e6866de35ac649"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/inquiry.js",
+      "sha256": "b5bb7d0fbb59b7a1ccf3fcb57fed2ffea4c84db6bc66838d20aa223e59efc476"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/integrity.d.ts",
+      "sha256": "1f8e00105ef408bc79978233d467c7b54fee9ea1095018af30423d3d79749a34"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/integrity.js",
+      "sha256": "8443702c1470ed4c0f6af65140ba125be1b20f2bb9af93175052268739b32c3a"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/ports.d.ts",
+      "sha256": "8bb583676cbb5c1f6cbabf902e04d507baeef4eea2b022dbbecedae4fe731755"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/ports.js",
+      "sha256": "d322724e36f34a9f95da209206d58fcf0007560a3478720cf2320f04cfaedf06"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/primitives.d.ts",
+      "sha256": "6e960a1afd1d7b809a04930eb12ac459e3839cbcaa3bb30bfe5f5c09dc3f3b97"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/primitives.js",
+      "sha256": "5da08c8204b04fc1c61743a7f675f6be3a0dc2a3d79fe579ed5b15ed9bac7bc0"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/projections.d.ts",
+      "sha256": "5db44f277bb0d1663aaa0669cd1f325d9ca2c0ddbb1b8bee72da237af55633b2"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/projections.js",
+      "sha256": "126f957a51a3fe402a47d640e27396232ee7389ed017968a3d6dba499f5150c7"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/testing/fixtures.d.ts",
+      "sha256": "31ed095e970cc03b7c9813f6c53ecbd0968e82b3265a2f34ba5051b5576cad0c"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/testing/fixtures.js",
+      "sha256": "0492d3ee1ab2e75446b1ab4590a91896fb81ca08045c5878f0242e48cc023faa"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/testing/queryAdapter.d.ts",
+      "sha256": "f68b7cf8c7c9306bfa0e61a2dad6816d242c57959efff1498df65adda51891a2"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/testing/queryAdapter.js",
+      "sha256": "5195dab2a7f1378291c979d7291e452e50063a0d654264750ebcc942ed204db9"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/testing.d.ts",
+      "sha256": "4ebc7ed3f8c01da040879c2d88cfc521b84b72b01742a93eadd2b633d316e3db"
+    },
+    {
+      "path": "packages/partner-sales-contracts/dist/testing.js",
+      "sha256": "0e2907d4e503109efa2123f2a1803ee0c8c1954c7533a8f0c7a4c54190f81b6f"
+    }
+  ],
+  "inventoryHash": "762316227ba2133fae0102d8f91477892883ebdff0ded2d395734d81c7c5b77d",
+  "runtime": {
+    "target": {
+      "frontend": "http://127.0.0.1:3000",
+      "backend": "http://127.0.0.1:5000",
+      "database": "sabalanerp"
+    },
+    "runtime": {
+      "project": "sabalanerp-local",
+      "nodeEnv": "development",
+      "databaseHost": "postgres",
+      "databaseName": "sabalanerp",
+      "smsEnvironment": "sandbox",
+      "smsCredentialsPresent": false
+    },
+    "services": [
+      {
+        "service": "backend",
+        "container": "53f20e4aaacc",
+        "image": "sabalanerp-local-backend"
+      },
+      {
+        "service": "frontend",
+        "container": "f8be8d59b108",
+        "image": "sabalanerp-local-frontend"
+      },
+      {
+        "service": "inquiry",
+        "container": "80308df38982",
+        "image": "sabalanerp-local-inquiry"
+      },
+      {
+        "service": "postgres",
+        "container": "64e0861aaab5",
+        "image": "postgres:15-alpine"
+      },
+      {
+        "service": "redis",
+        "container": "633f3b143976",
+        "image": "redis:7-alpine"
+      }
+    ]
+  },
+  "schema": {
+    "appliedMigrationCount": 173,
+    "migrationHash": "9dffca5bdee50a3c1c839cce4a45ceaa"
+  },
+  "error": "real-schema fixtures and internal Sales API failed; see test output.",
+  "finishedAt": "2026-08-27T07:58:30.940Z"
+}

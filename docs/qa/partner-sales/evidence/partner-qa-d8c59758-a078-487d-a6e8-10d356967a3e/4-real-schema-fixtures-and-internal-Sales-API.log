@@ -1,0 +1,43 @@
+TAP version 13
+# Partner QA fixture namespace: partner-qa-309b8517-245b-4776-8c23-182fdda84d6b
+# Subtest: internal Sales create grant permits Standard and Collaboration entry, but not edit; session identity is isolated
+ok 1 - internal Sales create grant permits Standard and Collaboration entry, but not edit; session identity is isolated
+  ---
+  duration_ms: 11626.7418
+  ...
+# Partner QA fixture namespace: partner-qa-2def234b-41f4-447d-a6cd-6298c29f8579
+# Partner QA fixture namespace: partner-qa-3746b940-ffe2-43ba-bce6-8869149fa5ed
+# Partner QA fixture namespace: partner-qa-86b39433-c718-43ac-92ef-4fa6def056ad
+# Subtest: fixture failure cleans only its own rows, preserving a concurrent namespace and existing data
+ok 2 - fixture failure cleans only its own rows, preserving a concurrent namespace and existing data
+  ---
+  duration_ms: 37818.2253
+  ...
+# Partner QA fixture namespace: partner-qa-86b39433-c718-43ac-92ef-4fa6def056ad
+# Partner QA fixture namespace: partner-qa-8a05ec82-7575-4ea0-aed1-bab66dffeecf
+# Subtest: duplicate seed fails atomically without replacing another run owner
+ok 3 - duplicate seed fails atomically without replacing another run owner
+  ---
+  duration_ms: 13222.5979
+  ...
+# Partner QA fixture namespace: partner-qa-3619851c-574b-4214-89f4-6e4ce571be76
+# Partner QA fixture namespace: partner-qa-5398b05c-cfe0-4e47-afae-41a1ea165a5e
+# Subtest: cleanup refuses an unexpected foreign reference and rolls back its own deletions
+ok 4 - cleanup refuses an unexpected foreign reference and rolls back its own deletions
+  ---
+  duration_ms: 26559.7654
+  ...
+# Subtest: cleanup refuses a future cascading FK to a unique non-ID key
+ok 5 - cleanup refuses a future cascading FK to a unique non-ID key
+  ---
+  duration_ms: 11721.2871
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 101199.1369

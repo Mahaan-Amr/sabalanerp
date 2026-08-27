@@ -121,6 +121,9 @@ same protected read boundary; store retention cleanup belongs to the host owner.
 
 ## Verification
 
+See [recorded checks and independent reviews](verification.md) for the tested
+commit identity, results, environment limitations, and remaining integration gates.
+
 From repository root (no package changes needed):
 
 ```sh

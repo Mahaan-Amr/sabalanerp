@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { Prisma, PrismaClient } from '@prisma/client';
 
 export const CONTRACT_EDIT_LEASE_TTL_MS = 75_000;
@@ -22,8 +23,10 @@ export interface ContractEditSessionRecord {
 export interface ContractEditSessionStore {
   load(draftId: string): Promise<ContractEditSessionRecord | null>;
   create(record: ContractEditSessionRecord): Promise<ContractEditSessionRecord>;
-  replace(
-    expectedToken: string,
+  /** Atomically replace exactly the persisted snapshot that was read. Token-only
+   * checks cannot protect two writes from the same live browser. */
+  compareAndReplace(
+    expected: ContractEditSessionRecord,
     record: ContractEditSessionRecord
   ): Promise<ContractEditSessionRecord | null>;
   remove(draftId: string, leaseToken: string): Promise<boolean>;
@@ -175,7 +178,7 @@ export const acquireContractEditSession = async (
       updatedAt: now,
       takenOverAt: null
     };
-    const replaced = await store.replace(existing.leaseToken, replacement);
+    const replaced = await store.compareAndReplace(existing, replacement);
     if (replaced) {
       return {
         ok: true,
@@ -219,7 +222,7 @@ export const acquireContractEditSession = async (
       updatedAt: now,
       takenOverAt: null
     };
-    const replaced = await store.replace(existing.leaseToken, replacement);
+    const replaced = await store.compareAndReplace(existing, replacement);
     if (replaced) {
       return {
         ok: true,
@@ -255,7 +258,7 @@ export const acquireContractEditSession = async (
     updatedAt: now,
     takenOverAt: now
   };
-  const replaced = await store.replace(existing.leaseToken, replacement);
+  const replaced = await store.compareAndReplace(existing, replacement);
   if (!replaced) {
     const current = await store.load(input.draftId);
     return {
@@ -281,6 +284,9 @@ export const assertContractEditOwnership = async (
   const session = await store.load(input.draftId);
   if (!session) {
     return { ok: false, code: 'edit-session-missing', recovery: null };
+  }
+  if (session.ownerUserId !== input.userId) {
+    return { ok: false, code: 'edit-session-owned-elsewhere', recovery: null };
   }
   const now = input.now ?? new Date();
   if (now.getTime() - session.updatedAt.getTime() > CONTRACT_EDIT_LEASE_TTL_MS) {
@@ -308,23 +314,29 @@ export const checkpointContractRecovery = async (
   store: ContractEditSessionStore,
   input: CheckpointContractRecoveryInput
 ): Promise<ContractEditOwnershipResult> => {
-  const ownership = await assertContractEditOwnership(store, input);
+  let ownership = await assertContractEditOwnership(store, input);
   if (!ownership.ok) return ownership;
-  const next: ContractEditSessionRecord = {
-    ...ownership.session,
-    schemaVersion: input.schemaVersion,
-    recovery: input.recovery,
-    updatedAt: input.now ?? new Date()
-  };
-  const replaced = await store.replace(input.leaseToken, next);
-  if (!replaced) {
-    return {
-      ok: false,
-      code: 'edit-session-owned-elsewhere',
-      recovery: (await store.load(input.draftId))?.recovery ?? null
+  const initial = ownership.session;
+  // Heartbeats change presence, not recovery. Retry only that benign conflict;
+  // a different recovery checkpoint must never be overwritten automatically.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const next: ContractEditSessionRecord = {
+      ...ownership.session,
+      schemaVersion: input.schemaVersion,
+      recovery: input.recovery,
+      updatedAt: input.now ?? new Date()
     };
+    const replaced = await store.compareAndReplace(ownership.session, next);
+    if (replaced) return { ok: true, session: replaced };
+    ownership = await assertContractEditOwnership(store, input);
+    if (!ownership.ok) return ownership;
+    if (ownership.session.schemaVersion !== initial.schemaVersion ||
+        !isDeepStrictEqual(ownership.session.recovery, initial.recovery)) {
+      break;
+    }
   }
-  return { ok: true, session: replaced };
+  return { ok: false, code: 'revision-conflict', recovery: ownership.session.recovery,
+    currentBaseRevision: ownership.session.baseRevision };
 };
 
 export const heartbeatContractEditSession = async (
@@ -334,6 +346,9 @@ export const heartbeatContractEditSession = async (
   const now = input.now ?? new Date();
   const session = await store.load(input.draftId);
   if (!session) return { ok: false, code: 'edit-session-missing', recovery: null };
+  if (session.ownerUserId !== input.userId) {
+    return { ok: false, code: 'edit-session-owned-elsewhere', recovery: null };
+  }
   if (now.getTime() - session.updatedAt.getTime() > CONTRACT_EDIT_LEASE_TTL_MS) {
     return { ok: false, code: 'edit-session-owned-elsewhere', recovery: session.recovery };
   }
@@ -350,13 +365,11 @@ export const heartbeatContractEditSession = async (
         }
       : { ok: false, code: 'edit-session-owned-elsewhere', recovery: session.recovery };
   }
-  const renewed = await store.replace(input.leaseToken, { ...session, updatedAt: now });
+  const renewed = await store.compareAndReplace(session, { ...session, updatedAt: now });
   if (!renewed) {
-    return {
-      ok: false,
-      code: 'edit-session-owned-elsewhere',
-      recovery: (await store.load(input.draftId))?.recovery ?? null
-    };
+    // A concurrent checkpoint/heartbeat may already have renewed this lease.
+    // Revalidate the current owner; never retry the stale recovery snapshot.
+    return assertContractEditOwnership(store, input);
   }
   return { ok: true, session: renewed };
 };
@@ -468,29 +481,46 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
     return fromPrismaRecord(created);
   }
 
-  async replace(
-    expectedToken: string,
+  async compareAndReplace(
+    expected: ContractEditSessionRecord,
     record: ContractEditSessionRecord
   ): Promise<ContractEditSessionRecord | null> {
-    const updated = await this.prisma.salesContractEditSession.updateMany({
-      where: {
-        draftId: record.draftId,
-        leaseToken: expectedToken
-      },
-      data: {
-        contractId: record.contractId,
-        ownerUserId: record.ownerUserId,
-        browserSessionId: record.browserSessionId,
-        leaseToken: record.leaseToken,
-        schemaVersion: record.schemaVersion,
-        baseRevision: record.baseRevision,
-        recovery: record.recovery === null ? Prisma.JsonNull : toJson(record.recovery),
-        updatedAt: record.updatedAt,
-        takenOverAt: record.takenOverAt
-      }
+    if (expected.draftId !== record.draftId) return null;
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.salesContractEditSession.updateMany({
+        where: {
+          draftId: record.draftId,
+          leaseToken: expected.leaseToken,
+          ownerUserId: expected.ownerUserId,
+          browserSessionId: expected.browserSessionId,
+          contractId: expected.contractId,
+          baseRevision: expected.baseRevision,
+          schemaVersion: expected.schemaVersion,
+          createdAt: expected.createdAt,
+          updatedAt: expected.updatedAt,
+          takenOverAt: expected.takenOverAt,
+          // JSON equality matters even when both updates share a millisecond.
+          recovery: { equals: expected.recovery === null ? Prisma.AnyNull : toJson(expected.recovery) }
+        },
+        data: {
+          contractId: record.contractId,
+          ownerUserId: record.ownerUserId,
+          browserSessionId: record.browserSessionId,
+          leaseToken: record.leaseToken,
+          schemaVersion: record.schemaVersion,
+          baseRevision: record.baseRevision,
+          recovery: record.recovery === null ? Prisma.JsonNull : toJson(record.recovery),
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          takenOverAt: record.takenOverAt
+        }
+      });
+      if (updated.count !== 1) return null;
+      // Read under the write lock so the acknowledgement belongs to this write,
+      // not a later checkpoint or takeover that wins between two DB requests.
+      const current = await tx.salesContractEditSession.findUnique({ where: { draftId: record.draftId } });
+      return current ? fromPrismaRecord(current) : null;
     });
-    if (updated.count !== 1) return null;
-    return this.load(record.draftId);
   }
 
   async remove(draftId: string, leaseToken: string): Promise<boolean> {

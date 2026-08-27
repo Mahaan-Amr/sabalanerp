@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { isDeepStrictEqual } from 'node:util';
 import {
   acquireContractEditSession,
   heartbeatContractEditSession,
@@ -24,8 +25,8 @@ class MemoryStore implements ContractEditSessionStore {
     return structuredClone(record);
   }
 
-  async replace(expectedToken: string, record: ContractEditSessionRecord) {
-    if (this.record?.leaseToken !== expectedToken) return null;
+  async compareAndReplace(expected: ContractEditSessionRecord, record: ContractEditSessionRecord) {
+    if (!isDeepStrictEqual(this.record, expected)) return null;
     this.record = structuredClone(record);
     return structuredClone(record);
   }

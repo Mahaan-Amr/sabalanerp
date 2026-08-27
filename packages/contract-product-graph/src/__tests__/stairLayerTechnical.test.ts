@@ -94,3 +94,11 @@ test('ordered layer replay cannot consume the same paid source twice and retains
   assert.equal(result.result?.configurations[0].result.layerConfigurationId, 'layer-one');
   assert.equal(stock.quantity, 1);
 });
+
+test('even unused remainder inventory must have positive physical dimensions', () => {
+  const stock = { remainingStoneId: graph.parseStableIdentity('remaining-stone', 'invalid-stock'),
+    ownerProductRowId: parentId, sourceBatchId: input().sourceBatchId, catalogProductId: 'stone',
+    lengthMeters: c('-1'), widthMeters: c('0.04'), quantity: 1, creationOrder: 0, materialPaid: true as const };
+  const result = graph.replayStairLayerTechnical({ inputRevision: 5, inputs: [], parents: new Map(), baseInventory: [stock] });
+  assert.ok(!result.ok);
+});

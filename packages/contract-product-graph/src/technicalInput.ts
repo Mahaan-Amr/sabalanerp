@@ -28,6 +28,9 @@ export const technicalStock = (value: unknown): void => {
     'sourceBatchId', 'lengthMeters', 'widthMeters', 'quantity', 'creationOrder', 'materialPaid']);
   for (const field of ['remainingStoneId', 'ownerProductRowId', 'catalogProductId', 'sourceBatchId']) technicalIdentity(stock[field]);
   technicalDecimal(stock.lengthMeters); technicalDecimal(stock.widthMeters);
+  if ([stock.lengthMeters, stock.widthMeters].some(value => value === '0' || (value as string).startsWith('-'))) {
+    throw new TypeError('Technical stock dimensions must be positive.');
+  }
   if (typeof stock.quantity !== 'number' || !Number.isSafeInteger(stock.quantity) || stock.quantity <= 0 ||
       typeof stock.creationOrder !== 'number' || !Number.isSafeInteger(stock.creationOrder) || stock.creationOrder < 0 ||
       stock.materialPaid !== true) throw new TypeError('Invalid technical stock.');

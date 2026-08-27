@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "node --max-old-space-size=7168 node_modules/next/dist/bin/next dev",
     "build": "node --max-old-space-size=8192 node_modules/next/dist/bin/next build",
+    "test:partner-sales-contracts": "npm --prefix ../packages/partner-sales-contracts run test:consumer:frontend",
     "start": "next start",
     "lint": "next lint",
     "test:contract-party-identity": "npx tsx src/features/contract-creation/services/__tests__/contractPartyIdentity.test.ts && npx tsx src/features/contract-creation/services/__tests__/contractCorrectionPresentation.test.ts",

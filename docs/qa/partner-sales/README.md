@@ -6,7 +6,9 @@ This is the initial **Module harness**, not acceptance of Partner sales, the who
 
 QA owns `tests/partner-sales/`, `docs/qa/partner-sales/`, `playwright.partner-sales.config.ts`, `scripts/run-partner-sales-tests.mjs`, and `.github/workflows/partner-sales.yml`. No application, schema, lockfile, route, shell, or existing CI file is changed by this ticket. The #313 shared-file owner authored the three root script aliases below and explicitly handed that isolated `package.json` diff to #314 for publication.
 
-Harness interface: `partner-qa-harness/v1`. The consumer pins **`@sabalanerp/partner-sales-contracts@1.0.0`, schemaVersion 1**, using only public `.` and `/testing` exports owned by #313. The `foundation` check consumes `createPartnerFixtures`, `FixedTransactionClock`, `SandboxNotificationGateway` and `FixturePartnerQueryAdapter`; it verifies the exact expiry boundary, safe/retryable sandbox delivery and purpose-specific fixture queries. These are contract checks, not actual OTP verification, production authorization or live Partner submission. No substitute Case schema, invented Partner role, local fake clock or DTO is provided. The final published foundation SHA is recorded in `baseline.md` before #314 delivery.
+Harness interface: `partner-qa-harness/v1`. The consumer pins **`@sabalanerp/partner-sales-contracts@1.1.0`, schemaVersion 1**, using only public `.` and `/testing` exports owned by #313. The `foundation` check consumes `createPartnerFixtures`, `FixedTransactionClock`, `SandboxNotificationGateway` and `FixturePartnerQueryAdapter`; it verifies the exact expiry boundary, safe/retryable sandbox delivery and purpose-specific fixture queries. These are contract checks, not actual OTP verification, production authorization or live Partner submission. No substitute Case schema, invented Partner role, local fake clock or DTO is provided.
+
+The coordinated 1.1.0 update adds separate v2 workspace exports while preserving the v1 wire schemas, ports and fixtures. This harness continues to exercise those v1 consumers and explicitly rejects schemaVersion 2 in the customer-output regression; it does not claim coverage of the new workspace exports. The published #314 runtime baseline in `baseline.md` and its immutable evidence used 1.0.0. Updating the current pin does not relabel that historical run as 1.1.0 runtime acceptance.
 
 The #313 shared-file coordinator supplied these root scripts; #334 owns future shared wiring:
 
@@ -21,6 +23,18 @@ Direct commands and the reserved workflow also work without those aliases. CI's 
 ## Reproduce
 
 Install the existing root, canonical graph, Partner foundation and frontend locked dependencies; build the canonical graph before installing/building its Partner consumer; install Chrome for the root Playwright version. Node 22 is the CI runtime. Use the repository checkout as the working directory. The workflow records this order explicitly; foundation build outputs must exist before its consumer check.
+
+Initialize the Inquiry submodule at the parent checkout's pinned gitlink before any runner mode, including `unit`:
+
+```powershell
+git submodule update --init --checkout -- apps/sabalan-inquiry
+```
+
+Both CI jobs use `actions/checkout` with `submodules: true` and `persist-credentials: false`. Inquiry is currently a public HTTPS repository, so checkout's standard read-only GitHub token is sufficient; no additional secret is required. Do not use `--remote`, follow Inquiry's latest branch, or skip its routes/actions when it is missing. The workflow watches the gitlink path and `.gitmodules` because submodule commits appear as changes to `apps/sabalan-inquiry`, not its nested files. If repository access changes, arrange authorized read-only access with the infrastructure owner; do not omit inventory to make CI green.
+
+CI regression reference: run `33055122225` at `678359aa` failed at the unit-runner step after successful installs/builds. Hosted log downloads timed out; the same clean commit locally reproduced `ENOENT ... apps/sabalan-inquiry/app` before unit tests. This supports the missing-submodule diagnosis without claiming the unavailable hosted error text was inspected. The existing `inventory.test.mjs` requires the Inquiry routes, XLSX handler and server action; run `node scripts/run-partner-sales-tests.mjs unit` and `check-inventory` from a fresh checkout after the initialization above. This exercises the reproduced failure path without replacing the full Inquiry inventory with a mock.
+
+Verified locally on an isolated `678359aa` checkout: `unit` reproduced that exact failure before submodule initialization, then passed all 7 tests after checkout of gitlink `92b96e265cb1a32deeeed3da494501df3db9a544`; `check-inventory` also passed without regenerating or dropping inventory entries. YAML parsing and independent Standards/Spec reviews passed. This CI setup correction changes no application source or runtime and does not claim a hosted workflow rerun before publication.
 
 ```powershell
 node scripts/run-partner-sales-tests.mjs unit

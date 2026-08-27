@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { localTarget, validateRuntime, validateNamespace } from './harness/safety.mjs';
+import { localTarget, validateRuntime, validateNamespace, verifyLocalHttp } from './harness/safety.mjs';
 
 test('Partner QA rejects remote, redirected, alternate database and production targets', () => {
   assert.equal(localTarget({}).frontend, 'http://127.0.0.1:3000');
@@ -31,4 +31,23 @@ test('fixture cleanup accepts only complete, unpredictable run namespaces', () =
   for (const invalid of ['', 'partner-qa-', 'admin', 'partner-qa-%', '../partner-qa-123']) {
     assert.throws(() => validateNamespace(invalid), /namespace/);
   }
+});
+
+test('readiness probes release response bodies and never reuse idle connections or retry failures', async () => {
+  const calls = [];
+  const response = (ok) => ({ ok, body: { async cancel() { calls.push('released'); } } });
+  await verifyLocalHttp(async (url, options) => {
+    assert.equal(options.headers.Connection, 'close');
+    assert.equal(options.redirect, 'error');
+    assert.ok(options.signal instanceof AbortSignal);
+    calls.push(url);
+    return response(true);
+  });
+  assert.deepEqual(calls, ['http://127.0.0.1:5000/api/ready', 'released', 'http://127.0.0.1:3000/login', 'released']);
+  calls.length = 0;
+  await assert.rejects(verifyLocalHttp(async () => response(false)), /readiness failed/);
+  assert.deepEqual(calls, ['released']);
+  let attempts = 0;
+  await assert.rejects(verifyLocalHttp(async () => { attempts++; throw new Error('connection unavailable'); }), /connection unavailable/);
+  assert.equal(attempts, 1);
 });

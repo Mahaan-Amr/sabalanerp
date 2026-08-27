@@ -1,0 +1,955 @@
+[
+  {
+    "meta": {
+      "pricing": {
+        "authority": "canonical-current-save",
+        "toolsCost": 0,
+        "totalPrice": 6545000.000000001,
+        "cuttingCost": 275000,
+        "materialBase": 5700000,
+        "finishingCost": 0,
+        "mandatoryAmount": 570000.0000000009
+      }
+    },
+    "isCut": true,
+    "rowId": "contract-row-e8d95446-ba5b-40f7-a10d-2034e4d9a162",
+    "width": 14,
+    "length": 1.25,
+    "cutType": "longitudinal",
+    "currency": "تومان",
+    "quantity": 11,
+    "productId": "cmqckqezg004anbod92fi1hsc",
+    "sawKerfCm": null,
+    "stoneCode": "1040810670600",
+    "stoneName": "طولی گرانیت ع40 ض2 خرم دره فلیم",
+    "widthUnit": "cm",
+    "cutDetails": [],
+    "finishings": [],
+    "lengthUnit": "m",
+    "totalPrice": 6545000.000000001,
+    "cuttingCost": 275000,
+    "description": "منخای ضخامت شود",
+    "finishingId": null,
+    "isMandatory": true,
+    "productType": "longitudinal",
+    "smartCutPlan": {
+      "mode": "optimized",
+      "enabled": true,
+      "warnings": [],
+      "sawKerfCm": null,
+      "sourceWidthCm": 40,
+      "sawKerfEnabled": false,
+      "consumedAreaSqm": 3,
+      "consumedWidthCm": 14,
+      "derivedQuantity": false,
+      "remainingStones": [
+        {
+          "id": "remaining_smart_1787750894742_0",
+          "width": 12,
+          "length": 1.25,
+          "quantity": 5,
+          "isAvailable": true,
+          "sourceCutId": "cut_smart_1787750894742_0",
+          "squareMeters": 0.7499999999999998
+        },
+        {
+          "id": "remaining_smart_1787750894742_5",
+          "width": 26,
+          "length": 1.25,
+          "quantity": 1,
+          "isAvailable": true,
+          "sourceCutId": "cut_smart_1787750894742_5",
+          "squareMeters": 0.325
+        }
+      ],
+      "stripsPerSource": 2,
+      "cuttingBreakdown": [
+        {
+          "cost": 275000,
+          "rate": 20000,
+          "type": "longitudinal",
+          "meters": 13.75
+        }
+      ],
+      "derivedDimension": null,
+      "productionPieces": [
+        {
+          "lengthM": 1.25,
+          "widthCm": 14,
+          "quantity": 11
+        }
+      ],
+      "requestedAreaSqm": 1.925,
+      "requestedLengthM": 1.25,
+      "requestedWidthCm": 14,
+      "totalCuttingCost": 275000,
+      "requestedQuantity": 11,
+      "sourceBandsNeeded": 6,
+      "calibrationCutEnabled": false,
+      "sourceLengthConsumedM": 7.5,
+      "totalRequestedLengthM": 13.75,
+      "physicalSplittingAllowed": false
+    },
+    "squareMeters": 1.925,
+    "finishingCode": null,
+    "finishingCost": null,
+    "finishingName": null,
+    "originalWidth": "40",
+    "cutDescription": "برش طولی خودکار (40cm → 14.00cm)",
+    "originalLength": 1.25,
+    "sawKerfEnabled": false,
+    "diameterOrWidth": "40",
+    "remainingStones": [
+      {
+        "id": "remaining_smart_1787750894742_0:unit:1:secondary:1:secondary:1",
+        "width": 0.09999999999999609,
+        "length": 1.25,
+        "position": {
+          "startWidth": 5.9,
+          "startLength": 0
+        },
+        "quantity": 5,
+        "isAvailable": true,
+        "sourceCutId": "cut_smart_1787750894742_0",
+        "squareMeters": 0.006249999999999756
+      },
+      {
+        "id": "remaining_smart_1787750894742_5:secondary:1",
+        "width": 2,
+        "length": 1.25,
+        "position": {
+          "startWidth": 24,
+          "startLength": 0
+        },
+        "quantity": 1,
+        "isAvailable": true,
+        "sourceCutId": "cut_smart_1787750894742_5",
+        "squareMeters": 0.025
+      }
+    ],
+    "cuttingBreakdown": [
+      {
+        "cost": 275000,
+        "rate": 20000,
+        "type": "longitudinal",
+        "meters": 13.75
+      }
+    ],
+    "finishingQuantity": null,
+    "appliedSubServices": [],
+    "finishingUnitPrice": null,
+    "originalTotalPrice": 5700000,
+    "cuttingCostPerMeter": 20000,
+    "mandatoryPercentage": 10,
+    "physicalCuttingCost": 275000,
+    "pricePerSquareMeter": 1900000,
+    "totalSubServiceCost": 0,
+    "usedRemainingStones": [
+      {
+        "id": "used-partition_1787750978325_80axpk3zq",
+        "width": 6,
+        "length": 1.25,
+        "cutType": "longitudinal",
+        "quantity": 5,
+        "cuttingCost": 125000,
+        "isAvailable": false,
+        "sourceCutId": "cut_smart_1787750894742_0",
+        "squareMeters": 0.375,
+        "physicalPieces": [
+          {
+            "id": "partition_1787750978325_80axpk3zq__piece_0_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787750978325_80axpk3zq__piece_1_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787750978325_80axpk3zq__piece_2_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787750978325_80axpk3zq__piece_3_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787750978325_80axpk3zq__piece_4_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          }
+        ],
+        "cuttingCostPerMeter": 20000
+      },
+      {
+        "id": "used-partition_1787751002523_gnf0jpdhr",
+        "width": 5.9,
+        "length": 1.25,
+        "cutType": "longitudinal",
+        "quantity": 5,
+        "cuttingCost": 125000,
+        "isAvailable": false,
+        "sourceCutId": "cut_smart_1787750894742_0",
+        "squareMeters": 0.36875,
+        "physicalPieces": [
+          {
+            "id": "partition_1787751002523_gnf0jpdhr__piece_0_0",
+            "width": 5.9,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.07375
+          },
+          {
+            "id": "partition_1787751002523_gnf0jpdhr__piece_1_0",
+            "width": 5.9,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.07375
+          },
+          {
+            "id": "partition_1787751002523_gnf0jpdhr__piece_2_0",
+            "width": 5.9,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.07375
+          },
+          {
+            "id": "partition_1787751002523_gnf0jpdhr__piece_3_0",
+            "width": 5.9,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.07375
+          },
+          {
+            "id": "partition_1787751002523_gnf0jpdhr__piece_4_0",
+            "width": 5.9,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.07375
+          }
+        ],
+        "cuttingCostPerMeter": 20000
+      },
+      {
+        "id": "used-partition_1787751047231_bmqox7hpd",
+        "width": 6,
+        "length": 1.25,
+        "cutType": "longitudinal",
+        "quantity": 4,
+        "cuttingCost": 100000,
+        "isAvailable": false,
+        "sourceCutId": "cut_smart_1787750894742_5",
+        "squareMeters": 0.3,
+        "physicalPieces": [
+          {
+            "id": "partition_1787751047231_bmqox7hpd__piece_0_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787751047231_bmqox7hpd__piece_1_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787751047231_bmqox7hpd__piece_2_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787751047231_bmqox7hpd__piece_3_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          }
+        ],
+        "cuttingCostPerMeter": 20000
+      }
+    ],
+    "operationPolicyInput": {
+      "tools": [],
+      "groups": [],
+      "quantity": 11,
+      "finishings": [],
+      "widthMeters": "0.14",
+      "lengthMeters": "1.25",
+      "productRowId": "contract-row-e8d95446-ba5b-40f7-a10d-2034e4d9a162",
+      "policyVersion": "calculation-v1",
+      "pricingPolicyVersion": "pricing-v1",
+      "roundingPolicyVersion": "rounding-v1"
+    },
+    "calibrationCutEnabled": false,
+    "finishingSquareMeters": null,
+    "longitudinalPolicyInput": {
+      "quantity": 11,
+      "widthMeters": "0.14",
+      "lengthMeters": "1.25",
+      "baseRateToman": "1900000",
+      "sawKerfMeters": "0.003",
+      "sourceBatchId": "contract-row-e8d95446-ba5b-40f7-a10d-2034e4d9a162:contract-row-d401c2e2-3245-417e-944f-6bddf6d1722c",
+      "sawKerfEnabled": false,
+      "lastManualField": "quantity",
+      "mandatoryEnabled": true,
+      "widthDisplayUnit": "cm",
+      "lengthDisplayUnit": "m",
+      "motherWidthMeters": "0.4",
+      "calibrationEnabled": false,
+      "lastManualDimension": "width",
+      "mandatoryPercentage": "10",
+      "calibrationSelection": "automatic",
+      "packingPolicyVersion": "packing-v1",
+      "pricingPolicyVersion": "pricing-v1",
+      "roundingPolicyVersion": "rounding-v1",
+      "calibrationCutRateToman": "20000",
+      "calculationPolicyVersion": "calculation-v1",
+      "longitudinalCutRateToman": "20000",
+      "rememberedMandatoryPercentage": "10"
+    },
+    "smartCutDerivedQuantity": false,
+    "totalUsedRemainingWidth": 17.9,
+    "finishingCalculationBase": null,
+    "smartCutDerivedDimension": null,
+    "totalUsedRemainingLength": 1.25,
+    "usedLengthForSubServices": 0,
+    "finishingPricePerSquareMeter": null,
+    "remainingStoneSourceInventory": [
+      {
+        "id": "remaining_smart_1787750894742_0",
+        "width": 12,
+        "length": 1.25,
+        "quantity": 5,
+        "isAvailable": true,
+        "sourceCutId": "cut_smart_1787750894742_0",
+        "squareMeters": 0.7499999999999998
+      },
+      {
+        "id": "remaining_smart_1787750894742_5",
+        "width": 26,
+        "length": 1.25,
+        "quantity": 1,
+        "isAvailable": true,
+        "sourceCutId": "cut_smart_1787750894742_5",
+        "squareMeters": 0.325
+      }
+    ],
+    "smartCutAllowPhysicalSplitting": false,
+    "usedSquareMetersForSubServices": 0
+  },
+  {
+    "meta": {
+      "tools": [],
+      "pricing": {
+        "toolsCost": 0,
+        "totalPrice": 125000,
+        "cuttingCost": 125000,
+        "materialCost": 0,
+        "finishingCost": 0
+      },
+      "remainingSource": {
+        "partitionId": "partition_1787750978325_80axpk3zq",
+        "allocationId": "partition_1787750978325_80axpk3zq",
+        "physicalPieces": [
+          {
+            "id": "partition_1787750978325_80axpk3zq__piece_0_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787750978325_80axpk3zq__piece_1_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787750978325_80axpk3zq__piece_2_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787750978325_80axpk3zq__piece_3_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787750978325_80axpk3zq__piece_4_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          }
+        ],
+        "sourceGroupKey": "available|11.999999999999996|1.25",
+        "allocationOrder": 0,
+        "allocatedQuantity": 5,
+        "sourceProductIndex": 0,
+        "sourceProductRowId": "contract-row-e8d95446-ba5b-40f7-a10d-2034e4d9a162",
+        "sourceRemainingStone": {
+          "id": "remaining_smart_1787750894742_0",
+          "width": 12,
+          "length": 1.25,
+          "quantity": 5,
+          "isAvailable": true,
+          "sourceCutId": "cut_smart_1787750894742_0",
+          "squareMeters": 0.7499999999999998
+        },
+        "consumedSourceStoneIds": [
+          "remaining_smart_1787750894742_0:unit:1",
+          "remaining_smart_1787750894742_0:unit:2",
+          "remaining_smart_1787750894742_0:unit:3",
+          "remaining_smart_1787750894742_0:unit:4",
+          "remaining_smart_1787750894742_0:unit:5"
+        ],
+        "sourceRemainingStoneId": "remaining_smart_1787750894742_0",
+        "generatedRemainingStoneIds": [
+          "remaining_smart_1787750894742_0:unit:1:secondary:1",
+          "remaining_smart_1787750894742_0:unit:2:secondary:1",
+          "remaining_smart_1787750894742_0:unit:3:secondary:1",
+          "remaining_smart_1787750894742_0:unit:4:secondary:1",
+          "remaining_smart_1787750894742_0:unit:5:secondary:1"
+        ]
+      }
+    },
+    "isCut": true,
+    "rowId": "contract-row-c4681928-912d-46df-8e6a-e2d7b30ceb73",
+    "width": 6,
+    "length": 1.25,
+    "cutType": "longitudinal",
+    "currency": "تومان",
+    "quantity": 5,
+    "productId": "cmqckqezg004anbod92fi1hsc",
+    "sawKerfCm": null,
+    "stoneCode": "1040810670600-R42_0-1",
+    "stoneName": "طولی گرانیت ع40 ض2 خرم دره فلیم (از باقی‌مانده)",
+    "unitPrice": 0,
+    "widthUnit": "cm",
+    "cutDetails": [],
+    "finishings": [],
+    "lengthUnit": "m",
+    "totalPrice": 125000,
+    "cuttingCost": 125000,
+    "description": "ساخته شده از سنگ باقی‌مانده (11.999999999999996cm عرض)",
+    "isMandatory": false,
+    "productType": "longitudinal",
+    "squareMeters": 0.375,
+    "finishingCost": 0,
+    "originalWidth": 12,
+    "cutDescription": "هزینه برش بر اساس پارتیشن سنگ باقی‌مانده محاسبه شد.",
+    "originalLength": 1.25,
+    "sawKerfEnabled": false,
+    "diameterOrWidth": 6,
+    "remainingStones": [],
+    "cuttingBreakdown": [
+      {
+        "cost": 125000,
+        "rate": 20000,
+        "type": "longitudinal",
+        "meters": 6.25
+      }
+    ],
+    "appliedSubServices": [],
+    "originalTotalPrice": 0,
+    "parentProductIndex": 0,
+    "parentProductRowId": "contract-row-e8d95446-ba5b-40f7-a10d-2034e4d9a162",
+    "cuttingCostPerMeter": 20000,
+    "mandatoryPercentage": 0,
+    "physicalCuttingCost": 125000,
+    "pricePerSquareMeter": 0,
+    "totalSubServiceCost": 0,
+    "usedRemainingStones": [],
+    "finishingSquareMeters": null,
+    "totalUsedRemainingWidth": 0,
+    "totalUsedRemainingLength": 0,
+    "usedLengthForSubServices": 0,
+    "remainingStoneAllocationOrder": 0,
+    "usedSquareMetersForSubServices": 0
+  },
+  {
+    "meta": {
+      "tools": [],
+      "pricing": {
+        "toolsCost": 0,
+        "totalPrice": 125000,
+        "cuttingCost": 125000,
+        "materialCost": 0,
+        "finishingCost": 0
+      },
+      "remainingSource": {
+        "partitionId": "partition_1787751002523_gnf0jpdhr",
+        "allocationId": "partition_1787751002523_gnf0jpdhr",
+        "physicalPieces": [
+          {
+            "id": "partition_1787751002523_gnf0jpdhr__piece_0_0",
+            "width": 5.9,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.07375
+          },
+          {
+            "id": "partition_1787751002523_gnf0jpdhr__piece_1_0",
+            "width": 5.9,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.07375
+          },
+          {
+            "id": "partition_1787751002523_gnf0jpdhr__piece_2_0",
+            "width": 5.9,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.07375
+          },
+          {
+            "id": "partition_1787751002523_gnf0jpdhr__piece_3_0",
+            "width": 5.9,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.07375
+          },
+          {
+            "id": "partition_1787751002523_gnf0jpdhr__piece_4_0",
+            "width": 5.9,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.07375
+          }
+        ],
+        "sourceGroupKey": "available|5.9999999999999964|1.25",
+        "allocationOrder": 1,
+        "allocatedQuantity": 5,
+        "sourceProductIndex": 0,
+        "sourceProductRowId": "contract-row-e8d95446-ba5b-40f7-a10d-2034e4d9a162",
+        "sourceRemainingStone": {
+          "id": "remaining_smart_1787750894742_0:unit:1:secondary:1",
+          "width": 5.999999999999996,
+          "length": 1.25,
+          "position": {
+            "startWidth": 6,
+            "startLength": 0
+          },
+          "quantity": 5,
+          "isAvailable": true,
+          "sourceCutId": "cut_smart_1787750894742_0",
+          "squareMeters": 0.3749999999999998
+        },
+        "consumedSourceStoneIds": [
+          "remaining_smart_1787750894742_0:unit:1:secondary:1",
+          "remaining_smart_1787750894742_0:unit:2:secondary:1",
+          "remaining_smart_1787750894742_0:unit:3:secondary:1",
+          "remaining_smart_1787750894742_0:unit:4:secondary:1",
+          "remaining_smart_1787750894742_0:unit:5:secondary:1"
+        ],
+        "sourceRemainingStoneId": "remaining_smart_1787750894742_0:unit:1:secondary:1",
+        "generatedRemainingStoneIds": [
+          "remaining_smart_1787750894742_0:unit:1:secondary:1:secondary:1",
+          "remaining_smart_1787750894742_0:unit:2:secondary:1:secondary:1",
+          "remaining_smart_1787750894742_0:unit:3:secondary:1:secondary:1",
+          "remaining_smart_1787750894742_0:unit:4:secondary:1:secondary:1",
+          "remaining_smart_1787750894742_0:unit:5:secondary:1:secondary:1"
+        ]
+      }
+    },
+    "isCut": true,
+    "rowId": "contract-row-82259884-081b-4712-8b33-fdf42d45f1bd",
+    "width": 5.9,
+    "length": 1.25,
+    "cutType": "longitudinal",
+    "currency": "تومان",
+    "quantity": 5,
+    "productId": "cmqckqezg004anbod92fi1hsc",
+    "sawKerfCm": null,
+    "stoneCode": "1040810670600-Rry:1-1",
+    "stoneName": "طولی گرانیت ع40 ض2 خرم دره فلیم (از باقی‌مانده)",
+    "unitPrice": 0,
+    "widthUnit": "cm",
+    "cutDetails": [],
+    "finishings": [],
+    "lengthUnit": "m",
+    "totalPrice": 125000,
+    "cuttingCost": 125000,
+    "description": "ساخته شده از سنگ باقی‌مانده (5.9999999999999964cm عرض)",
+    "isMandatory": false,
+    "productType": "longitudinal",
+    "squareMeters": 0.36875,
+    "finishingCost": 0,
+    "originalWidth": 5.999999999999996,
+    "cutDescription": "هزینه برش بر اساس پارتیشن سنگ باقی‌مانده محاسبه شد.",
+    "originalLength": 1.25,
+    "sawKerfEnabled": false,
+    "diameterOrWidth": 5.9,
+    "remainingStones": [],
+    "cuttingBreakdown": [
+      {
+        "cost": 125000,
+        "rate": 20000,
+        "type": "longitudinal",
+        "meters": 6.25
+      }
+    ],
+    "appliedSubServices": [],
+    "originalTotalPrice": 0,
+    "parentProductIndex": 0,
+    "parentProductRowId": "contract-row-e8d95446-ba5b-40f7-a10d-2034e4d9a162",
+    "cuttingCostPerMeter": 20000,
+    "mandatoryPercentage": 0,
+    "physicalCuttingCost": 125000,
+    "pricePerSquareMeter": 0,
+    "totalSubServiceCost": 0,
+    "usedRemainingStones": [],
+    "finishingSquareMeters": null,
+    "totalUsedRemainingWidth": 0,
+    "totalUsedRemainingLength": 0,
+    "usedLengthForSubServices": 0,
+    "remainingStoneAllocationOrder": 1,
+    "usedSquareMetersForSubServices": 0
+  },
+  {
+    "meta": {
+      "tools": [],
+      "pricing": {
+        "toolsCost": 0,
+        "totalPrice": 100000,
+        "cuttingCost": 100000,
+        "materialCost": 0,
+        "finishingCost": 0
+      },
+      "remainingSource": {
+        "partitionId": "partition_1787751047231_bmqox7hpd",
+        "allocationId": "partition_1787751047231_bmqox7hpd",
+        "physicalPieces": [
+          {
+            "id": "partition_1787751047231_bmqox7hpd__piece_0_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787751047231_bmqox7hpd__piece_1_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787751047231_bmqox7hpd__piece_2_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          },
+          {
+            "id": "partition_1787751047231_bmqox7hpd__piece_3_0",
+            "width": 6,
+            "length": 1.25,
+            "quantity": 1,
+            "squareMeters": 0.075
+          }
+        ],
+        "sourceGroupKey": "available|26|1.25",
+        "allocationOrder": 2,
+        "allocatedQuantity": 4,
+        "sourceProductIndex": 0,
+        "sourceProductRowId": "contract-row-e8d95446-ba5b-40f7-a10d-2034e4d9a162",
+        "sourceRemainingStone": {
+          "id": "remaining_smart_1787750894742_5",
+          "width": 26,
+          "length": 1.25,
+          "quantity": 1,
+          "isAvailable": true,
+          "sourceCutId": "cut_smart_1787750894742_5",
+          "squareMeters": 0.325
+        },
+        "consumedSourceStoneIds": [
+          "remaining_smart_1787750894742_5"
+        ],
+        "sourceRemainingStoneId": "remaining_smart_1787750894742_5",
+        "generatedRemainingStoneIds": [
+          "remaining_smart_1787750894742_5:secondary:1"
+        ]
+      }
+    },
+    "isCut": true,
+    "rowId": "contract-row-a171bce7-7422-484b-a4a9-27accf553c6a",
+    "width": 6,
+    "length": 1.25,
+    "cutType": "longitudinal",
+    "currency": "تومان",
+    "quantity": 4,
+    "productId": "cmqckqezg004anbod92fi1hsc",
+    "sawKerfCm": null,
+    "stoneCode": "1040810670600-R42_5-1",
+    "stoneName": "طولی گرانیت ع40 ض2 خرم دره فلیم (از باقی‌مانده)",
+    "unitPrice": 0,
+    "widthUnit": "cm",
+    "cutDetails": [],
+    "finishings": [],
+    "lengthUnit": "m",
+    "totalPrice": 100000,
+    "cuttingCost": 100000,
+    "description": "ساخته شده از سنگ باقی‌مانده (26cm عرض)",
+    "isMandatory": false,
+    "productType": "longitudinal",
+    "squareMeters": 0.3,
+    "finishingCost": 0,
+    "originalWidth": 26,
+    "cutDescription": "هزینه برش بر اساس پارتیشن سنگ باقی‌مانده محاسبه شد.",
+    "originalLength": 1.25,
+    "sawKerfEnabled": false,
+    "diameterOrWidth": 6,
+    "remainingStones": [],
+    "cuttingBreakdown": [
+      {
+        "cost": 100000,
+        "rate": 20000,
+        "type": "longitudinal",
+        "meters": 5
+      }
+    ],
+    "appliedSubServices": [],
+    "originalTotalPrice": 0,
+    "parentProductIndex": 0,
+    "parentProductRowId": "contract-row-e8d95446-ba5b-40f7-a10d-2034e4d9a162",
+    "cuttingCostPerMeter": 20000,
+    "mandatoryPercentage": 0,
+    "physicalCuttingCost": 100000,
+    "pricePerSquareMeter": 0,
+    "totalSubServiceCost": 0,
+    "usedRemainingStones": [],
+    "finishingSquareMeters": null,
+    "totalUsedRemainingWidth": 0,
+    "totalUsedRemainingLength": 0,
+    "usedLengthForSubServices": 0,
+    "remainingStoneAllocationOrder": 2,
+    "usedSquareMetersForSubServices": 0
+  },
+  {
+    "meta": {
+      "stair": {
+        "inputHash": "cpg-fnv1a64-e510afe36dc97952",
+        "resultHash": "cpg-fnv1a64-04cf7c89953bf987",
+        "piecesPerStone": 1,
+        "motherLengthMode": "derived-from-finished",
+        "baseStoneQuantity": 11,
+        "motherWidthMeters": "0.35",
+        "cuttingMetersCross": 0,
+        "motherLengthMeters": "1.25",
+        "pricingSquareMeters": 4.8125,
+        "calibrationSelection": "automatic",
+        "packingPolicyVersion": "rectangle-pack-v1",
+        "remainingStoneGroups": [
+          {
+            "widthCm": 3,
+            "quantity": 11
+          }
+        ],
+        "calibrationCutEnabled": false,
+        "remainingStoneQuantity": 11,
+        "leftoverWidthCmPerStone": 3,
+        "motherLengthDisplayUnit": "m",
+        "calculationPolicyVersion": "stair-calculation-v1",
+        "cuttingMetersLongitudinal": 13.75,
+        "paidRemainderAreaSquareMeters": "0.4125",
+        "consumedMotherAreaSquareMeters": "4.8125",
+        "cuttingMetersLongitudinalProduction": 13.75,
+        "cuttingMetersLongitudinalCalibration": 0
+      },
+      "tools": [],
+      "meters": {
+        "widthM": 0.32,
+        "lengthM": 1.25,
+        "toolsMeters": 0
+      },
+      "isLayer": false,
+      "stairStepperV2": true
+    },
+    "isCut": true,
+    "rowId": "contract-row-39277a7a-189e-4dcc-807c-ccb9a2810832",
+    "width": 32,
+    "length": 1.25,
+    "cutType": "longitudinal",
+    "currency": "تومان",
+    "quantity": 11,
+    "productId": "cmqckqez10047nbodx96cei3t",
+    "sawKerfCm": null,
+    "stoneCode": "1040720670600",
+    "stoneName": "طولی گرانیت ع35 ض3 خرم دره فلیم",
+    "widthUnit": "cm",
+    "cutDetails": [
+      {
+        "id": "cut_1787751163521_w4o7qw7yp",
+        "length": 1375,
+        "cutWidth": 32,
+        "cuttingCost": 275000,
+        "orientation": "longitudinal",
+        "originalWidth": "35",
+        "remainingWidth": 3,
+        "cuttingCostPerMeter": "20000"
+      }
+    ],
+    "lengthUnit": "m",
+    "totalPrice": 16176875,
+    "cuttingCost": 275000,
+    "description": "",
+    "finishingId": null,
+    "isMandatory": true,
+    "productType": "stair",
+    "squareMeters": 4.4,
+    "finishingCode": null,
+    "finishingCost": null,
+    "finishingName": null,
+    "originalWidth": "35",
+    "stairPartType": "tread",
+    "stairSystemId": "stair_1787751157931_1iw1g5g0q",
+    "cutDescription": "برش طولی (35cm → 32cm)",
+    "originalLength": 1.25,
+    "sawKerfEnabled": false,
+    "diameterOrWidth": "3",
+    "remainingStones": [
+      {
+        "id": "contract-row-39277a7a-189e-4dcc-807c-ccb9a2810832:base-remainder:1",
+        "width": 3,
+        "length": 1.25,
+        "quantity": 11,
+        "isAvailable": true,
+        "sourceCutId": "stair:contract-row-39277a7a-189e-4dcc-807c-ccb9a2810832",
+        "squareMeters": 0.4125
+      }
+    ],
+    "cuttingBreakdown": [
+      {
+        "cost": 275000,
+        "rate": "20000",
+        "type": "longitudinal",
+        "meters": 13.75
+      }
+    ],
+    "finishingQuantity": null,
+    "actualLengthMeters": 1.25,
+    "appliedSubServices": [
+      {
+        "id": "tool-selection:f2fcab56-d08e-4912-9e0f-21b04a5af095",
+        "subServiceId": "cmqcc6qgc001r1iksdwa0tzgd",
+        "meter": 13.75,
+        "cost": 550000,
+        "calculationBase": "length",
+        "edges": {
+          "front": true
+        }
+      }
+    ],
+    "finishingUnitPrice": null,
+    "originalTotalPrice": 13956250,
+    "standardLengthUnit": "m",
+    "cuttingCostPerMeter": 20000,
+    "mandatoryPercentage": 10,
+    "physicalCuttingCost": 275000,
+    "pricePerSquareMeter": 2900000,
+    "standardLengthValue": null,
+    "totalSubServiceCost": 550000,
+    "usedRemainingStones": [],
+    "operationPolicyInput": {
+      "tools": [
+        {
+          "name": "پخ",
+          "unit": "meter",
+          "edges": [
+            "front"
+          ],
+          "rateToman": "40000",
+          "catalogItemId": "cmqcc6qgc001r1iksdwa0tzgd",
+          "toolSelectionId": "tool-selection:f2fcab56-d08e-4912-9e0f-21b04a5af095",
+          "operationGroupId": "stair-draft:cmqckqez10047nbodx96cei3t:tread:no-operations",
+          "catalogSnapshotVersion": "2026-06-13T12:33:34.573Z"
+        }
+      ],
+      "groups": [
+        {
+          "scope": "11",
+          "operationGroupId": "stair-draft:cmqckqez10047nbodx96cei3t:tread:no-operations"
+        }
+      ],
+      "quantity": 11,
+      "finishings": [],
+      "widthMeters": "0.32",
+      "lengthMeters": "1.25",
+      "productRowId": "contract-row-39277a7a-189e-4dcc-807c-ccb9a2810832",
+      "policyVersion": "calculation-v1",
+      "pricingPolicyVersion": "pricing-v1",
+      "roundingPolicyVersion": "rounding-v1"
+    },
+    "stairPartPolicyInput": {
+      "part": "tread",
+      "quantity": 11,
+      "lengthMeters": "1.25",
+      "baseRateToman": "2900000",
+      "sawKerfMeters": "0.003",
+      "sourceBatchId": "stair:contract-row-39277a7a-189e-4dcc-807c-ccb9a2810832",
+      "stairSystemId": "stair_1787751157931_1iw1g5g0q",
+      "sawKerfEnabled": false,
+      "mandatoryEnabled": true,
+      "crossCutRateToman": "20000",
+      "lengthDisplayUnit": "m",
+      "motherWidthMeters": "0.35",
+      "calibrationEnabled": false,
+      "mandatoryPercentage": "10",
+      "calibrationSelection": "automatic",
+      "crossDimensionMeters": "0.32",
+      "packingPolicyVersion": "rectangle-pack-v1",
+      "pricingPolicyVersion": "contract-pricing-v1",
+      "roundingPolicyVersion": "nearest-toman-v1",
+      "calibrationCutRateToman": "20000",
+      "motherLengthDisplayUnit": "m",
+      "calculationPolicyVersion": "stair-calculation-v1",
+      "longitudinalCutRateToman": "20000",
+      "crossDimensionDisplayUnit": "cm",
+      "rememberedMandatoryPercentage": "10"
+    },
+    "calibrationCutEnabled": false,
+    "finishingSquareMeters": null,
+    "totalUsedRemainingWidth": 0,
+    "finishingCalculationBase": null,
+    "totalUsedRemainingLength": 0,
+    "usedLengthForSubServices": 0,
+    "finishingPricePerSquareMeter": null,
+    "remainingStoneSourceInventory": [
+      {
+        "id": "contract-row-39277a7a-189e-4dcc-807c-ccb9a2810832:base-remainder:1",
+        "width": 3,
+        "length": 1.25,
+        "quantity": 11,
+        "isAvailable": true,
+        "sourceCutId": "stair:contract-row-39277a7a-189e-4dcc-807c-ccb9a2810832",
+        "squareMeters": 0.4125
+      }
+    ],
+    "usedSquareMetersForSubServices": 0,
+    "finishings": []
+  }
+]

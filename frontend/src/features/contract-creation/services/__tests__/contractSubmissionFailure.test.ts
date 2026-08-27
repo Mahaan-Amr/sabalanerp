@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mapAxiosFormErrors } from '../../../../lib/formErrors';
 import {
   isContractProductValidationFailure,
   mapProductValidationFailure
@@ -72,6 +73,11 @@ const rowError = {
     }
   }
 };
+const recoveryMessage = 'ردیف 2؛ منبع سنگ: ردیف 1؛ وابسته: ردیف 3. ترتیب ساخت مجدد: ردیف 2 سپس ردیف 3. پیش‌نویس حفظ شده است. کد پیگیری: recovery-test';
+const recoveryError = { response: { status: 422, data: { code: 'contract-product-graph-validation-failed',
+  trackingId: 'recovery-test', details: [{ path: 'productRow:row-2', message: recoveryMessage }] } } };
+assert.deepEqual(mapProductValidationFailure(recoveryError, mapAxiosFormErrors(recoveryError, 'fallback')),
+  { 'productRow:row-2': recoveryMessage }, 'Complete chain guidance survives the shared create/edit error mapping');
 assert.deepEqual(buildContractSubmissionDiagnostic(rowError, 1_000), {
   occurredAt: 1_000,
   httpStatus: 422,

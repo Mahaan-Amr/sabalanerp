@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { randomUUID } from 'node:crypto';
 // Contract service
 // Handles contract business logic
 
@@ -6,6 +7,7 @@ import { CorrectionRequestStatus, Prisma, PrismaClient } from '@prisma/client';
 import { generateContractNumberAssignment } from './contractNumberService';
 import { buildAccountingSummaryForContracts } from './accountingService';
 import { recordRealizedAdjustment } from './salesAttributionService';
+import { remainingRecoveryGuidance } from './remainingRecoveryGuidance';
 import {
   parseCanonicalProductGraph,
   projectCanonicalProductGraph,
@@ -152,6 +154,9 @@ const sanitizeReportedProductSemanticRepairEvidence = (
 };
 
 export interface ContractProductGraphValidationIssue {
+  readonly sourceProductRowId?: string;
+  readonly relatedProductRowIds?: readonly string[];
+  readonly rebuildProductRowIds?: readonly string[];
   readonly code: string;
   readonly causeCode?: string;
   readonly path: readonly string[];
@@ -233,13 +238,13 @@ const normalizeNewContractNoDiscountEvidence = (
   }
   const shouldNormalize = submittedDiscount === null || submittedDiscount === undefined ||
     isExplicitZeroDiscountInput(submittedDiscount);
-  if (!shouldNormalize) return contractData;
   const plan = buildLegacyContractMigrationPlan({
     id: 'new-contract-discount-evidence',
     totalAmount,
     contractData,
-  }, 1);
-  if (!plan.ok) return contractData;
+  }, 1, CURRENT_CONTRACT_PRODUCT_POLICY_V2, true);
+  if (!plan.ok) throw new ContractProductGraphValidationError(plan.conflicts, contractData);
+  if (!shouldNormalize) return contractData;
   const projection = projectCanonicalProductGraph(plan.graph, 'accounting');
   const productByRowId = new Map(productRecordsFrom(contractData).map(product => [
     String(product.rowId ?? product.productRowId ?? ''),
@@ -272,7 +277,7 @@ const productIndexForConflict = (
 ): number | undefined => {
   if (conflict.productRowId) {
     const directIndex = products.findIndex(product =>
-      product.rowId === conflict.productRowId
+      (product.rowId ?? product.productRowId) === conflict.productRowId
     );
     if (directIndex >= 0) return directIndex;
   }
@@ -291,6 +296,7 @@ const productIndexForConflict = (
 };
 
 export class ContractProductGraphValidationError extends Error {
+  readonly trackingId = randomUUID();
   readonly code = 'contract-product-graph-validation-failed';
   readonly issues: readonly ContractProductGraphValidationIssue[];
 
@@ -305,15 +311,26 @@ export class ContractProductGraphValidationError extends Error {
       const productIndex = productIndexForConflict(conflict, products);
       const productRowId = productIndex === undefined
         ? undefined
-        : typeof products[productIndex]?.rowId === 'string'
-          ? products[productIndex].rowId as string
+        : typeof (products[productIndex]?.rowId ?? products[productIndex]?.productRowId) === 'string'
+          ? (products[productIndex].rowId ?? products[productIndex].productRowId) as string
           : undefined;
+      const inRemainingChain = productRowId && products.some(product => {
+        const remaining = (product.meta as any)?.remainingSource;
+        return remaining?.sourceProductRowId === productRowId ||
+          ((product.rowId ?? product.productRowId) === productRowId && remaining?.sourceProductRowId);
+      });
+      const guidance = (conflict.code === 'legacy-remaining-recovery-required' || inRemainingChain) && productRowId
+        ? remainingRecoveryGuidance(products, productRowId, conflict.causeCode) : undefined;
       return {
+        ...(guidance ? { sourceProductRowId: guidance.sourceProductRowId,
+          relatedProductRowIds: guidance.relatedProductRowIds, rebuildProductRowIds: guidance.rebuildProductRowIds } : {}),
         code: conflict.code,
         ...(conflict.causeCode ? { causeCode: conflict.causeCode } : {}),
         path: productRowId ? [`productRow:${productRowId}`] : ['products'],
         message:
-          conflict.code === 'legacy-financial-drift' && productRowId
+          guidance
+            ? `${guidance.message} کد پیگیری: ${this.trackingId}`
+            : conflict.code === 'legacy-financial-drift' && productRowId
             ? PRODUCT_FINANCIAL_DRIFT_MESSAGE
             : conflict.code === 'legacy-canonical-input-invalid' &&
           ['operationGroups', 'toolSelections', 'finishingSelections']
@@ -370,7 +387,7 @@ const writeCanonicalGraphSnapshot = async (
     id: input.contractId,
     totalAmount: input.totalAmount,
     contractData: input.contractData
-  }, input.revision, input.calculationPolicy);
+  }, input.revision, input.calculationPolicy, true);
   if (!plan.ok) {
     throw new ContractProductGraphValidationError(plan.conflicts, input.contractData);
   }
@@ -906,10 +923,11 @@ export async function createContract(
 export async function updateContract(
   contractId: string,
   data: UpdateContractData,
-  userId: string
+  userId: string,
+  client: PrismaClient = prisma
 ) {
   // Get existing contract
-  const contract = await prisma.salesContract.findUnique({
+  const contract = await client.salesContract.findUnique({
     where: { id: contractId },
     include: { department: true }
   });
@@ -918,7 +936,7 @@ export async function updateContract(
     throw new Error('Contract not found');
   }
 
-  const user = await prisma.user.findUnique({
+  const user = await client.user.findUnique({
     where: { id: userId },
     select: { role: true, departmentId: true }
   });
@@ -935,14 +953,14 @@ export async function updateContract(
     throw new Error('Contract cannot be modified in current status');
   }
 
-  const financiallyApprovedRecord = await prisma.accountingFinancialRecord.findFirst({
+  const financiallyApprovedRecord = await client.accountingFinancialRecord.findFirst({
     where: {
       contractId,
       financiallyApprovedAt: { not: null }
     },
     select: { id: true }
   });
-  const approvedSalesCorrection = await getApprovedSalesCorrection(contractId);
+  const approvedSalesCorrection = await getApprovedSalesCorrection(contractId, client);
 
   if ((contract.status === 'SIGNED' || contract.status === 'PRINTED') && !approvedSalesCorrection) {
     throw new Error('Signed contract commercial evidence can only change through an approved formal correction');
@@ -955,7 +973,7 @@ export async function updateContract(
   const relations = data._relations;
 
   // Update contract and relation snapshots atomically.
-  const updatedContract = await prisma.$transaction(async (tx) => {
+  const updatedContract = await client.$transaction(async (tx) => {
     await tx.$queryRaw(Prisma.sql`
       SELECT "id" FROM "sales_contracts" WHERE "id" = ${contractId} FOR UPDATE
     `);
@@ -1018,6 +1036,10 @@ export async function updateContract(
       (existingGraph?.revision ?? 0) + 1
     );
     const nextContractData = productSemanticRepair.contractData as any;
+    const preparedGraph = buildLegacyContractMigrationPlan({ id: contractId,
+      totalAmount: data.totalAmount ?? transactionContract.totalAmount, contractData: nextContractData },
+      (existingGraph?.revision ?? 0) + 1, calculationPolicy, true);
+    if (!preparedGraph.ok) throw new ContractProductGraphValidationError(preparedGraph.conflicts, nextContractData);
     assertNoAmbiguousOperationIdentityRepair(
       operationIdentityRepair.blockedProductRowIds,
       nextContractData

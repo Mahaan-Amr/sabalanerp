@@ -1,0 +1,45 @@
+TAP version 13
+# Subtest: route inventory discovers dynamic and nested routes without claiming coverage
+ok 1 - route inventory discovers dynamic and nested routes without claiming coverage
+  ---
+  duration_ms: 22.7857
+  ...
+# Subtest: every discovered route and permission has an owner and explicit untested outcome
+ok 2 - every discovered route and permission has an owner and explicit untested outcome
+  ---
+  duration_ms: 213.5328
+  ...
+# Subtest: runner rejects unknown commands and Playwright overrides before any runtime action
+ok 3 - runner rejects unknown commands and Playwright overrides before any runtime action
+  ---
+  duration_ms: 283.5865
+  ...
+# Subtest: Partner QA rejects remote, redirected, alternate database and production targets
+ok 4 - Partner QA rejects remote, redirected, alternate database and production targets
+  ---
+  duration_ms: 3.1575
+  ...
+# Subtest: runtime must prove local database and credential-free SMS sandbox
+ok 5 - runtime must prove local database and credential-free SMS sandbox
+  ---
+  duration_ms: 1.1963
+  ...
+# Subtest: fixture cleanup accepts only complete, unpredictable run namespaces
+ok 6 - fixture cleanup accepts only complete, unpredictable run namespaces
+  ---
+  duration_ms: 0.5944
+  ...
+# Subtest: readiness probes release response bodies and never reuse idle connections or retry failures
+ok 7 - readiness probes release response bodies and never reuse idle connections or retry failures
+  ---
+  duration_ms: 2.349
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 407.169

@@ -15,6 +15,7 @@ test('customer print reuses the contract sections with frozen retail facts and n
   const html = result.htmlContent + result.headerTemplate;
   for (const label of ['سنگ آفتاب', 'تأمین و تحویل توسط سبلان', 'برنامه پرداخت', 'برنامه تحویل', '۲۱۱۰', 'ریال', 'Yekan Bakh']) assert.ok(html.includes(label), label);
   assert.ok(html.includes('&lt;script&gt;'));
+  for (const column of ['طول', 'عرض', 'مبلغ کل']) assert.ok(html.includes(column), column);
   for (const secret of ['<script>', '<img', 'FIXTURE-CASE', 'FIXTURE-INTERNAL', 'fixture-313-row', 'contractData', 'ایجاد کننده:', 'سامانه سبلان']) assert.ok(!html.includes(secret), secret);
   assert.ok(renderContractHtml({ contractNumber: 'ORDINARY', createdByUser: { firstName: 'Ordinary', lastName: 'Seller' } }).includes('ایجاد کننده:'));
 });

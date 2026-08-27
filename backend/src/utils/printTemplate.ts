@@ -2083,24 +2083,30 @@ export function renderReportPdfHeaderTemplate(meta: {
 const customerMoney = (amount: string, output: CustomerContractOutput) =>
   `${escapeHtml(amount)} ${output.totals.currency === 'IRR' ? 'ریال' : 'تومان'}`;
 
-function renderCustomerProductRows(output: CustomerContractOutput): string {
-  const rows = output.products.map((row, index) => `<tr>
-    <td>${escapeHtml(String(index + 1))}</td><td>${escapeHtml(row.description)}</td>
-    <td>${escapeHtml(row.quantity)} ${escapeHtml(row.unit)}</td><td>${customerMoney(row.retailUnitPrice, output)}</td>
-  </tr>`);
+function renderCustomerProductRows(output: CustomerContractOutput, columns: Array<{ key: ContractPrintColumnKey }>): string {
+  const rows = output.products.map((row, index) => {
+    // v1 has a customer-readable configuration, not separate dimensional or
+    // piece-count evidence. Retain the ordinary columns without guessing facts.
+    const cells: Partial<Record<ContractPrintColumnKey, string>> = {
+      index: escapeHtml(String(index + 1)),
+      description: `${escapeHtml(row.description)}<div>مقدار قراردادی: ${escapeHtml(row.quantity)} ${escapeHtml(row.unit)}</div>`,
+      rate: customerMoney(row.retailUnitPrice, output),
+    };
+    return `<tr>${columns.map(column => `<td>${cells[column.key] || EMPTY}</td>`).join('')}</tr>`;
+  });
   const totals = [['جمع خالص', output.totals.net], ['تخفیف', output.totals.discount],
     ['مالیات', output.totals.tax], ['هزینه‌ها', output.totals.charges], ['مبلغ نهایی قرارداد', output.totals.payable]];
-  return rows.join('') + totals.map(([label, amount]) => `<tr><td colspan="3">${label}</td><td>${customerMoney(amount, output)}</td></tr>`).join('');
+  return rows.join('') + totals.map(([label, amount]) => `<tr><td colspan="${columns.length - 1}">${label}</td><td>${customerMoney(amount, output)}</td></tr>`).join('');
 }
 
 function renderCustomerDeliveryRows(output: CustomerContractOutput): string {
   const products = new Map(output.products.map(row => [row.productRowId, row]));
-  return output.deliveries.map((delivery, index) => `<tr>
+  return output.deliveries.flatMap((delivery, index) => delivery.items.map(item => `<tr>
     <td>${escapeHtml(String(index + 1))}</td>
-    <td>${delivery.items.map(item => escapeHtml(products.get(item.productRowId)?.description || '')).join('<br>')}</td>
-    <td>${delivery.items.map(item => `${escapeHtml(item.quantity)} ${escapeHtml(products.get(item.productRowId)?.unit || '')}`).join('<br>')}</td>
+    <td>${escapeHtml(products.get(item.productRowId)?.description || '')}</td>
+    <td>${escapeHtml(item.quantity)} ${escapeHtml(products.get(item.productRowId)?.unit || '')}</td>
     <td>${escapeHtml(formatDate(delivery.date))}</td><td>${escapeHtml(output.customer.displayName)}</td><td>${escapeHtml(delivery.destination)}</td>
-  </tr>`).join('');
+  </tr>`)).join('');
 }
 
 function renderCustomerPaymentRows(output: CustomerContractOutput): string {
@@ -2218,18 +2224,13 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     { key: 'count', className: 'main-area-col', label: 'تعداد' },
     { key: 'linearMeasurement', className: 'main-linear-col', label: 'متر طول' },
     { key: 'squareMeasurement', className: 'main-square-col', label: 'متر مربع' },
-    { key: 'rate', className: 'main-rate-col', label: `نرخ - ${isAccountingVariant ? 'ریال' : 'تومان'}` },
-    { key: 'total', className: 'main-total-col', label: `مبلغ کل - ${isAccountingVariant ? 'ریال' : 'تومان'}` }
+    { key: 'rate', className: 'main-rate-col', label: `نرخ - ${output ? (output.totals.currency === 'IRR' ? 'ریال' : 'تومان') : isAccountingVariant ? 'ریال' : 'تومان'}` },
+    { key: 'total', className: 'main-total-col', label: `مبلغ کل - ${output ? (output.totals.currency === 'IRR' ? 'ریال' : 'تومان') : isAccountingVariant ? 'ریال' : 'تومان'}` }
   ];
-  const visibleProductColumnDefinitions = output ? [
-    { key: 'index', className: 'main-index-col', label: 'ردیف' },
-    { key: 'description', className: 'main-description-col', label: 'محصول و مشخصات' },
-    { key: 'count', className: 'main-count-col', label: 'مقدار و واحد' },
-    { key: 'rate', className: 'main-rate-col', label: `نرخ واحد - ${output.totals.currency === 'IRR' ? 'ریال' : 'تومان'}` },
-  ] : productColumnDefinitions.filter((column) => productColumns[column.key]);
+  const visibleProductColumnDefinitions = productColumnDefinitions.filter((column) => productColumns[column.key]);
 
   return `
-  <div class="sheet ${isWorkshopVariant ? 'workshop-print' : ''}">
+  <div class="sheet ${isWorkshopVariant ? 'workshop-print' : ''} ${output ? 'customer-output' : ''}">
     ${renderCompactMetadataSection(contract, { variant, customerName, customerAddress })}
 
     ${showFormalSection ? `<section class="section">
@@ -2268,7 +2269,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${output ? renderCustomerProductRows(output) : renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, {
+          ${output ? renderCustomerProductRows(output, visibleProductColumnDefinitions) : renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, {
             hidePrices: !showPriceColumns,
             productRowsMode: customPrint.productRowsMode || (customPrint.preset === 'summarized' ? 'summarized' : 'detailed'),
             showExplanatoryRows: customPrint.showExplanatoryRows,
@@ -2376,6 +2377,10 @@ export function renderContractHtml(contract: RenderableContract, options: Render
 
   <style>
     ${renderYekanFontFaces()}
+
+    .customer-output tr { break-inside: avoid; page-break-inside: avoid; }
+    .customer-output .section h2 { break-after: avoid; page-break-after: avoid; }
+    .customer-output .section:has(> .grid) { break-inside: avoid; page-break-inside: avoid; }
 
     @page {
       size: A4 portrait;

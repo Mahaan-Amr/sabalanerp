@@ -10,7 +10,7 @@ const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR ||
     (process.env.NODE_ENV === 'production' ? '.next-build' : '.next'),
   transpilePackages: ['@sabalanerp/contract-product-graph'],
-  webpack(config) {
+  webpack(config, { dev } = {}) {
     // The shared package is CommonJS for the backend runtime. Point the
     // frontend bundler at its TypeScript source so Fast Refresh never injects
     // ESM hot-reload code into the already-compiled CommonJS artifact.
@@ -18,6 +18,16 @@ const nextConfig = {
       __dirname,
       '../packages/contract-product-graph/src/index.ts'
     );
+    if (dev) {
+      // Next's refresh loader emits import.meta for .js even when the package
+      // declares CommonJS. Accept both syntaxes only for this package's built
+      // public exports; keep backend CJS, package resolution and production intact.
+      config.module.rules.push({
+        test: /\.js$/,
+        include: path.dirname(require.resolve('@sabalanerp/partner-sales-contracts')),
+        type: 'javascript/auto',
+      });
+    }
     return config;
   },
   env: {

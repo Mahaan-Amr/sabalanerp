@@ -24,6 +24,18 @@ Direct commands and the reserved workflow also work without those aliases. CI's 
 
 Install the existing root, canonical graph, Partner foundation and frontend locked dependencies; build the canonical graph before installing/building its Partner consumer; install Chrome for the root Playwright version. Node 22 is the CI runtime. Use the repository checkout as the working directory. The workflow records this order explicitly; foundation build outputs must exist before its consumer check.
 
+Initialize the Inquiry submodule at the parent checkout's pinned gitlink before any runner mode, including `unit`:
+
+```powershell
+git submodule update --init --checkout -- apps/sabalan-inquiry
+```
+
+Both CI jobs use `actions/checkout` with `submodules: true` and `persist-credentials: false`. Inquiry is currently a public HTTPS repository, so checkout's standard read-only GitHub token is sufficient; no additional secret is required. Do not use `--remote`, follow Inquiry's latest branch, or skip its routes/actions when it is missing. The workflow watches the gitlink path and `.gitmodules` because submodule commits appear as changes to `apps/sabalan-inquiry`, not its nested files. If repository access changes, arrange authorized read-only access with the infrastructure owner; do not omit inventory to make CI green.
+
+CI regression reference: run `33055122225` at `678359aa` failed at the unit-runner step after successful installs/builds. Hosted log downloads timed out; the same clean commit locally reproduced `ENOENT ... apps/sabalan-inquiry/app` before unit tests. This supports the missing-submodule diagnosis without claiming the unavailable hosted error text was inspected. The existing `inventory.test.mjs` requires the Inquiry routes, XLSX handler and server action; run `node scripts/run-partner-sales-tests.mjs unit` and `check-inventory` from a fresh checkout after the initialization above. This exercises the reproduced failure path without replacing the full Inquiry inventory with a mock.
+
+Verified locally on an isolated `678359aa` checkout: `unit` reproduced that exact failure before submodule initialization, then passed all 7 tests after checkout of gitlink `92b96e265cb1a32deeeed3da494501df3db9a544`; `check-inventory` also passed without regenerating or dropping inventory entries. YAML parsing and independent Standards/Spec reviews passed. This CI setup correction changes no application source or runtime and does not claim a hosted workflow rerun before publication.
+
 ```powershell
 node scripts/run-partner-sales-tests.mjs unit
 node scripts/run-partner-sales-tests.mjs foundation

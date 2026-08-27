@@ -1,6 +1,6 @@
 import { contracts, type AccountingPartnerPort, type RevisionRef } from './contracts';
 import type { PartnerAccountingRepository } from './repository';
-import { equalAmounts, failure, prepareCommittedAccountingSource } from './source';
+import { equalAmounts, failure, matchesFinancialPreparation, prepareCommittedAccountingSource } from './source';
 import { projectPartnerAccount } from './account';
 import { accountingFactEvent } from './events';
 
@@ -69,25 +69,26 @@ export function createPartnerAccountingAdapter(repository: PartnerAccountingRepo
       if (invoice.kind !== 'INVOICE_CANDIDATE' || !['ISSUED', 'POSTED'].includes(invoice.status) || !invoice.approval) return failure('STATE_CONFLICT');
       if (!contracts.MoneySchema.safeParse(invoice.amount).success || invoice.amount.currency !== prepared.value.amount.currency ||
           !equalAmounts(invoice.amount.amount, prepared.value.amount.amount)) return failure('INTEGRITY_CONFLICT');
-      if (contracts.canonicalJson(invoice.preparation) !== contracts.canonicalJson(prepared.value)) return failure('INTEGRITY_CONFLICT');
+      if (!matchesFinancialPreparation(prepared.value, invoice.preparation)) return failure('INTEGRITY_CONFLICT');
+      const approvedSource = invoice.preparation;
       const prior = await tx.findReceivable(invoiceRecordId);
       const active = await tx.findActiveReceivable(prepared.value.internalRecordId);
       if (active && active.invoiceRecordId !== invoiceRecordId) return failure('DEPENDENCY_BLOCKED');
       const receivable = {
         id: `partner-receivable:${(await contracts.canonicalHash(invoiceRecordId)).slice(10)}`, invoiceRecordId,
-        internalRecordId: prepared.value.internalRecordId,
-        partnerSellerId: prepared.value.debtor.partnerSellerId, commercialAccountId: prepared.value.debtor.commercialAccountId,
-        owner: prepared.value.owner, originalAmount: prepared.value.amount, paymentPlan: prepared.value.paymentPlan,
-        dueDate: [...prepared.value.paymentPlan.installments].sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0]?.dueDate || prepared.value.paymentPlan.effectiveDate,
+        internalRecordId: approvedSource.internalRecordId,
+        partnerSellerId: approvedSource.debtor.partnerSellerId, commercialAccountId: approvedSource.debtor.commercialAccountId,
+        owner: approvedSource.owner, originalAmount: approvedSource.amount, paymentPlan: approvedSource.paymentPlan,
+        dueDate: [...approvedSource.paymentPlan.installments].sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0]?.dueDate || approvedSource.paymentPlan.effectiveDate,
       };
       if (prior && contracts.canonicalJson(prior) !== contracts.canonicalJson(receivable)) return failure('INTEGRITY_CONFLICT');
       const approval = invoice.approval;
       const event = contracts.PartnerEventSchema.safeParse({
-        schemaVersion: 1, type: 'SABALAN_FINANCIAL_APPROVED', owner: prepared.value.owner,
+        schemaVersion: 1, type: 'SABALAN_FINANCIAL_APPROVED', owner: approvedSource.owner,
         eventId: approval.eventId, commandId: approval.commandId, correlationId: approval.correlationId,
         actorId: approval.actorId, recordedAt: approval.recordedAt, effectiveDate: approval.effectiveDate,
-        internalRecordId: prepared.value.internalRecordId, accountingReceivableId: receivable.id,
-        financialApprovalEvidenceId: approval.financialApprovalEvidenceId, amount: prepared.value.amount,
+        internalRecordId: approvedSource.internalRecordId, accountingReceivableId: receivable.id,
+        financialApprovalEvidenceId: approval.financialApprovalEvidenceId, amount: approvedSource.amount,
       });
       if (!event.success) return failure('INTEGRITY_CONFLICT');
       if (!prior) await tx.insertReceivable(receivable);

@@ -1,14 +1,9 @@
-import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
+import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { contracts, type PartnerEvent } from '../partnerSales/accounting/contracts';
 import type { PartnerAccountingSource } from '../partnerSales/accounting/source';
 import { preparePartnerFinancialSource } from '../partnerSales/accounting/source';
 import type { AccountingQueueEntry, PartnerAccountingRepository, PartnerAccountingTransaction, PartnerInvoiceEvidence, PartnerReceivable, PartnerAccountPurchase, PartnerAccountingFact } from '../partnerSales/accounting/repository';
 import type { PartnerErrorCode, Result } from '../partnerSales/accounting/contracts';
-
-const requireFoundation = createRequire(resolve(__dirname, '../../../../packages/partner-sales-contracts/package.json'));
-const { createPartnerFixtures } = requireFoundation('@sabalanerp/partner-sales-contracts/testing') as
-  typeof import('../../../../packages/partner-sales-contracts/dist/testing');
 
 /** In-memory persistence boundary only. Never imported by runtime code. */
 export class PartnerAccountingFixture implements PartnerAccountingRepository {

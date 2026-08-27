@@ -1,14 +1,9 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
 import { test } from 'node:test';
+import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { preparePartnerFinancialSource } from '../partnerSales/accounting/source';
 import { createPartnerAccountingAdapter } from '../partnerSales/accounting/adapter';
 import { PartnerAccountingFixture } from './partnerAccountingFixture';
-
-const requireFoundation = createRequire(resolve(__dirname, '../../../../packages/partner-sales-contracts/package.json'));
-const { createPartnerFixtures } = requireFoundation('@sabalanerp/partner-sales-contracts/testing') as
-  typeof import('../../../../packages/partner-sales-contracts/dist/testing');
 
 test('financial preparation keeps the Partner debtor, approved wholesale and Sabalan terms', async () => {
   const fixture = createPartnerFixtures();
@@ -249,4 +244,28 @@ test('the actual approved invoice amount must match the frozen internal payable'
   invoice.amount.amount = '2000';
   assert.equal((await adapter.acceptFinancialApproval(fixture.source.view.owner, invoice.invoiceRecordId)).ok, false);
   assert.equal(fixture.receivables.length, 0);
+});
+
+test('an internal installment note edit cannot invalidate an approved account or preparation', async () => {
+  const fixture = new PartnerAccountingFixture();
+  const adapter = createPartnerAccountingAdapter(fixture);
+  const before = await adapter.prepareFinancialRecord(fixture.source.view.owner);
+  const invoice = await fixture.invoice();
+  await adapter.acceptFinancialApproval(fixture.source.view.owner, invoice.invoiceRecordId);
+  fixture.source.view.sabalanPaymentPlan.installments[0].notes = 'یادداشت داخلی تازه حسابداری';
+  fixture.purchases = [{ source: fixture.source, official: { invoice, receivable: fixture.receivables[0],
+    received: { amount: '0', currency: 'IRR' }, balance: { amount: '1600', currency: 'IRR' }, status: 'OPEN' } }];
+  assert.deepEqual(await adapter.prepareFinancialRecord(fixture.source.view.owner), before);
+  assert.equal((await adapter.readOwnAccount(fixture.source.partnerSellerId)).ok, true);
+});
+
+test('approval replay after a retail-only successor returns original evidence without another receivable', async () => {
+  const fixture = new PartnerAccountingFixture();
+  const adapter = createPartnerAccountingAdapter(fixture);
+  const invoice = await fixture.invoice();
+  const approved = await adapter.acceptFinancialApproval(fixture.source.view.owner, invoice.invoiceRecordId);
+  const original = structuredClone({ receivables: fixture.receivables, events: fixture.events });
+  fixture.source.view.owner = { ...fixture.source.view.owner, revision: 2, integrityHash: 'sha256-v1:' + 'b'.repeat(64) };
+  assert.deepEqual(await adapter.acceptFinancialApproval(fixture.source.view.owner, invoice.invoiceRecordId), approved);
+  assert.deepEqual({ receivables: fixture.receivables, events: fixture.events }, original);
 });

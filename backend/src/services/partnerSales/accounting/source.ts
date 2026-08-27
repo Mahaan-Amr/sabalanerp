@@ -75,8 +75,12 @@ export async function preparePartnerFinancialSource(source: PartnerAccountingSou
     sourceKind: view.sourceKind, internalRecordId: view.recordId,
     debtor: { partnerSellerId: source.partnerSellerId, commercialAccountId: view.commercialAccountId, identity: view.debtor },
     amount: { amount: view.totals.payable, currency: view.totals.currency },
-    totals: view.totals, products: view.products, paymentPlan: view.sabalanPaymentPlan,
+    totals: view.totals, products: view.products,
+    paymentPlan: { ...view.sabalanPaymentPlan,
+      installments: installments.map(({ notes: _operationalNote, ...financialTerms }) => financialTerms),
+    },
   };
+  // Operational notes retain separate history, outside commercial evidence.
   // Excludes the encompassing revision: retail-only successors advance owner but
   // must keep exactly this internal commercial evidence and its existing invoice.
   return { ok: true, value: { ...evidence, owner: view.owner,

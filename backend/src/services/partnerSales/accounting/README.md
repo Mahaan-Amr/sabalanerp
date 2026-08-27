@@ -2,7 +2,8 @@
 
 Consumes the public `SabalanInternalRecordView`, `PartnerAccountView`,
 `AccountingPartnerPort`, and `SABALAN_*` contracts (wire schema 1, `sha256-v1`).
-The initial foundation baseline is package 1.0.0. No schema, shared manifest,
+The initial foundation baseline is package 1.0.0; delivery also consumes the
+unchanged v1 financial contracts from the owner's 1.1.0 package wiring. No schema, shared manifest,
 route registration, feature activation, SMS, or production deployment is owned here.
 
 ## Entry points
@@ -40,7 +41,8 @@ authoritative; this module deliberately does not guess whether `TotalsSchema.net
 already includes `discount`. The existing financial evidence owner must validate
 the totals before approving the invoice.
 
-The preparation fingerprint excludes only the encompassing Case revision.
+The preparation fingerprint excludes the encompassing Case revision and internal
+installment notes (which retain their separate operational audit history).
 Therefore a retail-only successor can advance the expected Case revision while
 retaining the same financial evidence and receivable. A shared or Sabalan-term
 change requires new financial evidence and the existing correction gates.
@@ -94,15 +96,14 @@ fixture. The real adapter must:
 
 ## Local verification
 
-From the repository root, before shared backend dependencies are installed:
+From the repository root, with shared backend dependencies installed by their owner:
 
 ```powershell
-node packages/partner-sales-contracts/node_modules/tsx/dist/cli.mjs --test backend/src/services/__tests__/partnerAccounting.test.ts
-node packages/partner-sales-contracts/node_modules/typescript/bin/tsc --noEmit --strict --skipLibCheck --esModuleInterop --target ES2020 --module commonjs --moduleResolution node --typeRoots packages/partner-sales-contracts/node_modules/@types backend/src/services/partnerSales/accounting/adapter.ts backend/src/services/__tests__/partnerAccounting.test.ts
+node backend/node_modules/tsx/dist/cli.mjs --test backend/src/services/__tests__/partnerAccounting.test.ts
+npm run build:backend
 npm run architecture:check
 ```
 
-After shared dependency wiring, run `npm run build:backend` and the full foundation
-suite as well. The fixture tests exercise only the approved Accounting/account
+Run the full foundation suite as well. The fixture tests exercise only the approved Accounting/account
 seams. Their serialized in-memory transaction proves adapter retry and rollback
 behavior; it does not prove database locking or production persistence.

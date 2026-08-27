@@ -86,3 +86,14 @@ redownload do not call the commitment port. SMS uses a safe fixture gateway.
 Production SMS, Partner activation, deployment and release acceptance were not
 performed or authorized by this ticket. The default runtime hooks remain unbound
 until the coordinated #334 integration.
+
+## Publication integration recheck
+
+Merged the published remaining-stone baseline `c8b166f6` into the isolated output
+candidate. The only conflict was adjacent imports in `printTemplate.ts`; both
+imports and both implementations were preserved. The diff against that baseline
+contains only the 20 output-owned files. The rebuilt graph/contracts packages,
+full backend compilation, all 18 output/ordinary-print checks (including the new
+remaining-recovery regression), and both confirmation UI tests passed. Separate
+compatibility checks against the published 1.1.0 package also passed (14 checks).
+These checks do not change the module-acceptance boundary above.

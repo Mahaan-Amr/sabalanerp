@@ -1,6 +1,18 @@
 import fs from 'fs';
 import path from 'path';
 import puppeteer from 'puppeteer';
+import type { ContractRuntime, Output } from '../services/partnerSales/customerOutput/contracts';
+import { createCustomerOutputSnapshots } from '../services/partnerSales/customerOutput/snapshots';
+import { renderCustomerContractPrint } from './printTemplate';
+
+/** Buffer-only consumer hook: no static file, status mutation or commitment.
+ * The authenticated issuance adapter owns publication through the Case port. */
+export async function generateCustomerContractPdf(contract: ContractRuntime, input: Output): Promise<Buffer> {
+  const content = await createCustomerOutputSnapshots(contract).content(input);
+  const template = renderCustomerContractPrint(content);
+  return generatePdfBufferFromHtml({ ...template, displayHeaderFooter: true,
+    footerTemplate: '<span></span>', margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
+}
 
 export interface GeneratePdfOptions {
   htmlContent: string;

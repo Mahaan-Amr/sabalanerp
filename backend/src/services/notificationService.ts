@@ -10,6 +10,7 @@ import {
   type RegisteredNotificationEventType,
 } from './notificationPolicy';
 import { filterCurrentlyAuthorizedNotifications } from './notificationAuthorization';
+import { isPartnerInquiryNotification } from './partnerSales/notifications/definitions';
 
 type NotificationDatabase = PrismaClient | Prisma.TransactionClient;
 
@@ -44,6 +45,11 @@ const jsonStringArray = (value: Prisma.JsonValue, fallback: string[]): string[] 
   Array.isArray(value) && value.every((item) => typeof item === 'string')
     ? value
     : fallback;
+
+const deliveryChannels = (notification: { type: string; policyVersion: { channels: Prisma.JsonValue } | null }): string[] =>
+  isPartnerInquiryNotification(notification.type) ? ['IN_APP']
+    : notification.policyVersion ? jsonStringArray(notification.policyVersion.channels, ['IN_APP', 'REALTIME'])
+      : ['IN_APP', 'REALTIME'];
 
 const latestPolicy = async (
   database: NotificationDatabase,
@@ -96,6 +102,14 @@ export const publishNotificationEvent = async (
       [...definition.allowedRecipientResolvers],
     ) as NotificationPolicyDraft['recipientResolvers'],
   };
+  if (isPartnerInquiryNotification(input.type)) {
+    // Partner inquiry notifications have fixed, non-economic text and are
+    // in-app only even if an older/custom stored policy asks for wider delivery.
+    policyDraft.titleTemplate = definition.titleTemplate;
+    policyDraft.messageTemplate = definition.messageTemplate;
+    policyDraft.channels = ['IN_APP'];
+    policyDraft.recipientResolvers = ['DIRECT_USER'];
+  }
   const selectedPolicyRecipientIds = input.recipientGroups
     ? policyDraft.recipientResolvers.flatMap((resolver) => input.recipientGroups?.[resolver] || [])
     : input.recipientIds;
@@ -147,7 +161,7 @@ export const publishNotificationEvent = async (
       message: materialized.message,
       priority: materialized.priority,
       actionUrl: materialized.actionUrl,
-      referenceId: input.referenceId || input.resourceId || null,
+      referenceId: input.referenceId === null ? null : input.referenceId || input.resourceId || null,
     })),
     skipDuplicates: true,
   });
@@ -206,9 +220,7 @@ export const deliverPendingNotificationOutbox = async (
     const currentlyAuthorized = (
       await filterCurrentlyAuthorizedNotifications(prisma, notification.user, [notification])
     ).length > 0;
-    const channels = notification.policyVersion
-      ? jsonStringArray(notification.policyVersion.channels, ['IN_APP', 'REALTIME'])
-      : ['IN_APP', 'REALTIME'];
+    const channels = deliveryChannels(notification);
     const realtimeDelivered = notification.deliveryAttempts.some(
       (attempt) => attempt.channel === 'REALTIME' && attempt.status === 'DELIVERED',
     );
@@ -350,9 +362,7 @@ export const deliverDailyWebPushDigests = async (
     if (!currentlyAuthorized) continue;
     const preference = preferenceByUser.get(notification.userId);
     if (!preference) continue;
-    const channels = notification.policyVersion
-      ? jsonStringArray(notification.policyVersion.channels, ['IN_APP', 'REALTIME'])
-      : ['IN_APP', 'REALTIME'];
+    const channels = deliveryChannels(notification);
     const definition = notificationEventDefinition(notification.type as RegisteredNotificationEventType);
     const muted = jsonStringArray(preference.mutedCategories, []);
     const optionalMuted = !definition.mandatory

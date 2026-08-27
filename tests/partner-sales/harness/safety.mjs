@@ -71,11 +71,19 @@ export async function preflight() {
     }));
   `]));
   validateRuntime(runtime);
+  await verifyLocalHttp();
+  return { target, runtime, services };
+}
+
+export async function verifyLocalHttp(fetchImpl = fetch) {
+  const target = localTarget();
   for (const url of [`${target.backend}/api/ready`, `${target.frontend}/login`]) {
-    const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(15_000) });
+    // Synchronous Docker inspections can outlast server keep-alive deadlines.
+    // These sparse probes need no pooled socket; release even an error response.
+    const response = await fetchImpl(url, { headers: { Connection: 'close' }, redirect: 'error', signal: AbortSignal.timeout(15_000) });
+    await response.body?.cancel();
     if (!response.ok) throw new Error('Partner QA local HTTP readiness failed.');
   }
-  return { target, runtime, services };
 }
 
 // Execute only harness-owned SQL through the verified service; no host DATABASE_URL.

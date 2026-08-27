@@ -34,5 +34,7 @@ test('QA fixture consumer stays on its published query purpose without treating 
   assert.equal(result.value.purpose, 'PARTNER_CASE');
   const hidden = await adapter.query({ schemaVersion: 1, purpose: 'ACCOUNTING', expected: fixtures.case.head });
   assert.equal(hidden.error.code, 'NOT_FOUND');
+  assert.equal(contract.CustomerContractOutputSchema.safeParse(fixtures.customer).success, true);
+  assert.equal(contract.CustomerContractOutputSchema.safeParse({ ...fixtures.customer, schemaVersion: 2 }).success, false);
   assert.equal(contract.CustomerContractOutputSchema.safeParse({ ...fixtures.customer, wholesaleUnitPrice: '800' }).success, false);
 });

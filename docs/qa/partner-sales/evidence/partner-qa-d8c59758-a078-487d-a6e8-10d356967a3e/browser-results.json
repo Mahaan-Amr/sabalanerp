@@ -1,0 +1,342 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "D:\\sabalanerp\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config=playwright.partner-sales.config.ts"
+    ],
+    "configFile": "D:\\sabalanerp\\playwright.partner-sales.config.ts",
+    "rootDir": "D:/sabalanerp/tests/partner-sales/browser",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": "D:\\sabalanerp\\tests\\partner-sales\\browser\\global-setup.ts",
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "D:/sabalanerp/test-results/partner-sales/partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e/browser",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop-light",
+        "name": "desktop-light",
+        "testDir": "D:/sabalanerp/tests/partner-sales/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 45000
+      },
+      {
+        "outputDir": "D:/sabalanerp/test-results/partner-sales/partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e/browser",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "narrow-light",
+        "name": "narrow-light",
+        "testDir": "D:/sabalanerp/tests/partner-sales/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 45000
+      },
+      {
+        "outputDir": "D:/sabalanerp/test-results/partner-sales/partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e/browser",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop-dark",
+        "name": "desktop-dark",
+        "testDir": "D:/sabalanerp/tests/partner-sales/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 45000
+      },
+      {
+        "outputDir": "D:/sabalanerp/test-results/partner-sales/partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e/browser",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "narrow-dark",
+        "name": "narrow-dark",
+        "testDir": "D:/sabalanerp/tests/partner-sales/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 45000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "D:\\sabalanerp\\test-results\\partner-sales\\partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e\\browser-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "entry.spec.ts",
+      "file": "entry.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "anonymous Sales deep-link returns to a usable Persian login @internal-entry",
+          "ok": true,
+          "tags": [
+            "internal-entry"
+          ],
+          "tests": [
+            {
+              "timeout": 45000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop-light",
+              "projectName": "desktop-light",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5615,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-08-27T08:03:36.306Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "known-legacy-observations",
+                      "contentType": "application/json",
+                      "body": "eyJkZWZlY3QiOiJMRUdBQ1ktMzE0LTAxIiwib2JzZXJ2YXRpb25zIjpbIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogZHVwbGljYXRlIGFub255bW91cyByZWRpcmVjdCBjYW5jZWxsZWQgbG9naW4gbmF2aWdhdGlvbi9SU0MiLCJMRUdBQ1ktMzE0LTAxOiBkdXBsaWNhdGUgYW5vbnltb3VzIHJlZGlyZWN0IGNhbmNlbGxlZCBsb2dpbiBuYXZpZ2F0aW9uL1JTQyIsIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogZHVwbGljYXRlIGFub255bW91cyByZWRpcmVjdCBjYW5jZWxsZWQgbG9naW4gbmF2aWdhdGlvbi9SU0MiLCJMRUdBQ1ktMzE0LTAxOiBkdXBsaWNhdGUgYW5vbnltb3VzIHJlZGlyZWN0IGNhbmNlbGxlZCBsb2dpbiBuYXZpZ2F0aW9uL1JTQyIsIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogbG9naW4gUlNDIGZhbGxiYWNrIGxvZ2dlZCBieSBOZXh0LmpzIl19"
+                    },
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "D:\\sabalanerp\\test-results\\partner-sales\\partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e\\browser\\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-light\\test-finished-1.png"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "D:\\sabalanerp\\test-results\\partner-sales\\partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e\\browser\\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-light\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a2a3eba492b1b8e90f7d-c209058cf6183ab4f393",
+          "file": "entry.spec.ts",
+          "line": 3,
+          "column": 5
+        },
+        {
+          "title": "anonymous Sales deep-link returns to a usable Persian login @internal-entry",
+          "ok": true,
+          "tags": [
+            "internal-entry"
+          ],
+          "tests": [
+            {
+              "timeout": 45000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "narrow-light",
+              "projectName": "narrow-light",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5175,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-08-27T08:03:43.233Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "known-legacy-observations",
+                      "contentType": "application/json",
+                      "body": "eyJkZWZlY3QiOiJMRUdBQ1ktMzE0LTAxIiwib2JzZXJ2YXRpb25zIjpbIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogZHVwbGljYXRlIGFub255bW91cyByZWRpcmVjdCBjYW5jZWxsZWQgbG9naW4gbmF2aWdhdGlvbi9SU0MiLCJMRUdBQ1ktMzE0LTAxOiBkdXBsaWNhdGUgYW5vbnltb3VzIHJlZGlyZWN0IGNhbmNlbGxlZCBsb2dpbiBuYXZpZ2F0aW9uL1JTQyIsIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogZHVwbGljYXRlIGFub255bW91cyByZWRpcmVjdCBjYW5jZWxsZWQgbG9naW4gbmF2aWdhdGlvbi9SU0MiLCJMRUdBQ1ktMzE0LTAxOiBkdXBsaWNhdGUgYW5vbnltb3VzIHJlZGlyZWN0IGNhbmNlbGxlZCBsb2dpbiBuYXZpZ2F0aW9uL1JTQyIsIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogbG9naW4gUlNDIGZhbGxiYWNrIGxvZ2dlZCBieSBOZXh0LmpzIl19"
+                    },
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "D:\\sabalanerp\\test-results\\partner-sales\\partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e\\browser\\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-light\\test-finished-1.png"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "D:\\sabalanerp\\test-results\\partner-sales\\partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e\\browser\\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-light\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a2a3eba492b1b8e90f7d-14bf79071d90ca32d536",
+          "file": "entry.spec.ts",
+          "line": 3,
+          "column": 5
+        },
+        {
+          "title": "anonymous Sales deep-link returns to a usable Persian login @internal-entry",
+          "ok": true,
+          "tags": [
+            "internal-entry"
+          ],
+          "tests": [
+            {
+              "timeout": 45000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop-dark",
+              "projectName": "desktop-dark",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5614,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-08-27T08:03:49.674Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "known-legacy-observations",
+                      "contentType": "application/json",
+                      "body": "eyJkZWZlY3QiOiJMRUdBQ1ktMzE0LTAxIiwib2JzZXJ2YXRpb25zIjpbIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogZHVwbGljYXRlIGFub255bW91cyByZWRpcmVjdCBjYW5jZWxsZWQgbG9naW4gbmF2aWdhdGlvbi9SU0MiLCJMRUdBQ1ktMzE0LTAxOiBkdXBsaWNhdGUgYW5vbnltb3VzIHJlZGlyZWN0IGNhbmNlbGxlZCBsb2dpbiBuYXZpZ2F0aW9uL1JTQyIsIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogZHVwbGljYXRlIGFub255bW91cyByZWRpcmVjdCBjYW5jZWxsZWQgbG9naW4gbmF2aWdhdGlvbi9SU0MiLCJMRUdBQ1ktMzE0LTAxOiBkdXBsaWNhdGUgYW5vbnltb3VzIHJlZGlyZWN0IGNhbmNlbGxlZCBsb2dpbiBuYXZpZ2F0aW9uL1JTQyIsIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogbG9naW4gUlNDIGZhbGxiYWNrIGxvZ2dlZCBieSBOZXh0LmpzIl19"
+                    },
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "D:\\sabalanerp\\test-results\\partner-sales\\partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e\\browser\\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-dark\\test-finished-1.png"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "D:\\sabalanerp\\test-results\\partner-sales\\partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e\\browser\\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-desktop-dark\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a2a3eba492b1b8e90f7d-1178b039bcb7aa53652f",
+          "file": "entry.spec.ts",
+          "line": 3,
+          "column": 5
+        },
+        {
+          "title": "anonymous Sales deep-link returns to a usable Persian login @internal-entry",
+          "ok": true,
+          "tags": [
+            "internal-entry"
+          ],
+          "tests": [
+            {
+              "timeout": 45000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "narrow-dark",
+              "projectName": "narrow-dark",
+              "results": [
+                {
+                  "workerIndex": 3,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6299,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-08-27T08:03:56.650Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "known-legacy-observations",
+                      "contentType": "application/json",
+                      "body": "eyJkZWZlY3QiOiJMRUdBQ1ktMzE0LTAxIiwib2JzZXJ2YXRpb25zIjpbIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogZHVwbGljYXRlIGFub255bW91cyByZWRpcmVjdCBjYW5jZWxsZWQgbG9naW4gbmF2aWdhdGlvbi9SU0MiLCJMRUdBQ1ktMzE0LTAxOiBkdXBsaWNhdGUgYW5vbnltb3VzIHJlZGlyZWN0IGNhbmNlbGxlZCBsb2dpbiBuYXZpZ2F0aW9uL1JTQyIsIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogZHVwbGljYXRlIGFub255bW91cyByZWRpcmVjdCBjYW5jZWxsZWQgbG9naW4gbmF2aWdhdGlvbi9SU0MiLCJMRUdBQ1ktMzE0LTAxOiBkdXBsaWNhdGUgYW5vbnltb3VzIHJlZGlyZWN0IGNhbmNlbGxlZCBsb2dpbiBuYXZpZ2F0aW9uL1JTQyIsIkxFR0FDWS0zMTQtMDE6IGR1cGxpY2F0ZSBhbm9ueW1vdXMgcmVkaXJlY3QgY2FuY2VsbGVkIGxvZ2luIG5hdmlnYXRpb24vUlNDIiwiTEVHQUNZLTMxNC0wMTogbG9naW4gUlNDIGZhbGxiYWNrIGxvZ2dlZCBieSBOZXh0LmpzIl19"
+                    },
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "D:\\sabalanerp\\test-results\\partner-sales\\partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e\\browser\\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-dark\\test-finished-1.png"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "D:\\sabalanerp\\test-results\\partner-sales\\partner-qa-d8c59758-a078-487d-a6e8-10d356967a3e\\browser\\entry-anonymous-Sales-deep-e1045-ersian-login-internal-entry-narrow-dark\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a2a3eba492b1b8e90f7d-755b43fddf2c6d8fc1d6",
+          "file": "entry.spec.ts",
+          "line": 3,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-08-27T08:03:33.553Z",
+    "duration": 30225.12,
+    "expected": 4,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

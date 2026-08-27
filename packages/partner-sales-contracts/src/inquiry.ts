@@ -1,8 +1,14 @@
 import { z } from 'zod';
-import { HashSchema, IdSchema, InstantSchema, MoneySchema, RevisionSchema, TextSchema } from './primitives';
+import { HashSchema, IdSchema, InstantSchema, MoneySchema, PersianReasonSchema, RevisionSchema, TextSchema } from './primitives';
 import { PartnerError, partnerError } from './errors';
 
 export const PRICE_APPROVAL_VALIDITY_MS = 48 * 60 * 60 * 1000;
+// Opaque owner-private technical recovery reference; the server resolves the full
+// graph and internal pricing identity. A client never supplies rates or policy inputs.
+export const PartnerConfigurationRefSchema = z.object({
+  recoveryId: IdSchema, recoveryRevision: RevisionSchema, productRowId: IdSchema,
+}).strict();
+export const ApprovedRowBindingSchema = z.object({ inquiryId: IdSchema, rowId: IdSchema, revision: RevisionSchema }).strict();
 // Internal evidence only: Partner and customer DTOs never include these inputs.
 export const InquiryIdentitySchema = z.object({
   schemaVersion: z.literal(1), partnerSellerId: IdSchema, catalogProductId: IdSchema,
@@ -17,9 +23,11 @@ export const ApprovedInquirySchema = z.object({
   revision: RevisionSchema, partnerSellerId: IdSchema, configurationHash: HashSchema, evidenceHash: HashSchema,
   wholesaleUnitPrice: MoneySchema, approvedAt: InstantSchema, expiresAt: InstantSchema, note: TextSchema.optional(),
   predecessorApprovalId: IdSchema.optional(),
+  supersessionReason: PersianReasonSchema.optional(),
   decision: z.object({ actorId: IdSchema, assignmentId: IdSchema, assignmentRevision: RevisionSchema,
     authorizationEvidenceId: IdSchema, commandId: IdSchema }).strict(),
-}).strict().refine(row => Date.parse(row.expiresAt) - Date.parse(row.approvedAt) === PRICE_APPROVAL_VALIDITY_MS, 'Approval window must be exactly 48 hours');
+}).strict().refine(row => Date.parse(row.expiresAt) - Date.parse(row.approvedAt) === PRICE_APPROVAL_VALIDITY_MS, 'Approval window must be exactly 48 hours')
+  .refine(row => Boolean(row.predecessorApprovalId) === Boolean(row.supersessionReason), 'Successor decision preserves its mandatory supersession reason');
 export type ApprovedInquiry = z.infer<typeof ApprovedInquirySchema>;
 export type InquiryIdentity = z.infer<typeof InquiryIdentitySchema>;
 
@@ -47,8 +55,16 @@ export const PartnerInquiryViewSchema = z.object({
     configuration: z.array(z.object({ label: TextSchema, value: TextSchema }).strict()),
     approvedPrice: MoneySchema.optional(), approvedAt: InstantSchema.optional(), expiresAt: InstantSchema.optional(),
     noteOrReason: TextSchema.optional(), usedCaseNumbers: z.array(IdSchema),
-  }).strict()),
-}).strict();
+    approvedRowBinding: ApprovedRowBindingSchema.optional(),
+  }).strict().refine(row => row.state !== 'APPROVED' || Boolean(row.approvedRowBinding), 'Approved rows expose a safe use binding')),
+}).strict().superRefine((view, context) => {
+  for (const row of view.rows) {
+    const binding = row.approvedRowBinding;
+    if (binding && (binding.inquiryId !== view.inquiryId || binding.rowId !== row.rowId || binding.revision !== row.revision)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Approved binding must identify its exact visible inquiry row' });
+    }
+  }
+});
 
 export const ResponderInquiryViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('RESPONDER_INQUIRY'), inquiryId: IdSchema,

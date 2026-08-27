@@ -1,19 +1,21 @@
 import { z } from 'zod';
-import { CaseStateSchema, DateSchema, DecimalSchema, DeliverySchema, HashSchema, IdSchema, MoneySchema, PaymentPlanSchema, RevisionRefSchema, RevisionSchema, TextSchema } from './primitives';
+import { CaseStateSchema, DateSchema, DecimalSchema, DeliverySchema, HashSchema, IdSchema, MoneySchema, PaymentPlanSchema, PersianReasonSchema, RevisionRefSchema, RevisionSchema, TextSchema } from './primitives';
 import { IdempotencySchema } from './integrity';
-import { InquiryIdentitySchema } from './inquiry';
+import { ApprovedRowBindingSchema, PartnerConfigurationRefSchema } from './inquiry';
 import { PartnerErrorSchema } from './errors';
 
 const envelope = { schemaVersion: z.literal(1), commandId: IdSchema, correlationId: IdSchema, idempotency: IdempotencySchema };
 const expected = { expected: RevisionRefSchema, expectedState: CaseStateSchema };
-export const PersianReasonSchema = TextSchema.refine(reason => /[\u0600-\u06ff]/u.test(reason), 'Persian business reason required');
-export const CaseDraftIntentSchema = z.object({
-  customerId: IdSchema, projectId: IdSchema.optional(), contractDate: DateSchema,
+export const PartnerDraftSubmissionRefSchema = z.object({
+  customerId: IdSchema, recoveryId: IdSchema, recoveryRevision: RevisionSchema,
+  graphHash: HashSchema, sabalanTermsVersionId: IdSchema,
+}).strict();
+export const CaseDraftIntentSchema = PartnerDraftSubmissionRefSchema.extend({
+  projectId: IdSchema.optional(), contractDate: DateSchema,
   // The Case writer resolves this immutable private recovery graph; no second graph owner.
-  recoveryId: IdSchema, recoveryRevision: RevisionSchema, graphHash: HashSchema,
-  rows: z.array(z.object({ productRowId: IdSchema, approvalId: IdSchema, approvalRevision: RevisionSchema,
-    approvalHash: HashSchema, configurationHash: HashSchema, retailUnitPrice: MoneySchema }).strict()).min(1),
-  customerPaymentPlan: PaymentPlanSchema, sabalanTermsVersionId: IdSchema,
+  rows: z.array(z.object({ productRowId: IdSchema, approvedRowBinding: ApprovedRowBindingSchema,
+    retailUnitPrice: MoneySchema }).strict()).min(1),
+  customerPaymentPlan: PaymentPlanSchema,
   retailDiscount: MoneySchema, belowCostConfirmed: z.boolean(), deliveries: z.array(DeliverySchema),
 }).strict();
 const decision = z.discriminatedUnion('outcome', [
@@ -27,7 +29,9 @@ export const PartnerCommandSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, ...expected, type: z.literal('CASE_COMMIT'), trigger: z.enum(['SIGNED', 'PRINTED']), authenticatedOutputEvidenceId: IdSchema }).strict(),
   z.object({ ...envelope, ...expected, type: z.literal('CUSTOMER_CONFIRMATION_SEND'), normalizedRecipient: TextSchema }).strict(),
   z.object({ ...envelope, type: z.literal('INQUIRY_SUBMIT'), partnerSellerId: IdSchema,
-    rows: z.array(z.object({ rowId: IdSchema, identity: InquiryIdentitySchema, predecessorRowId: IdSchema.optional() }).strict()).min(1) }).strict(),
+    rows: z.array(z.object({ rowId: IdSchema, configuration: PartnerConfigurationRefSchema,
+      predecessor: z.object({ rowId: IdSchema, revision: RevisionSchema, reason: PersianReasonSchema }).strict().optional(),
+    }).strict()).min(1) }).strict(),
   z.object({ ...envelope, type: z.literal('INQUIRY_DECIDE'), inquiryId: IdSchema, expectedAssignmentRevision: RevisionSchema, decisions: z.array(decision).min(1) }).strict(),
   z.object({ ...envelope, type: z.literal('INQUIRY_CANCEL'), inquiryId: IdSchema, expectedRevision: RevisionSchema, reason: PersianReasonSchema }).strict(),
   z.object({ ...envelope, type: z.literal('INQUIRY_REASSIGN'), inquiryId: IdSchema, expectedAssignmentRevision: RevisionSchema, responderId: IdSchema, reason: PersianReasonSchema }).strict(),

@@ -4,6 +4,7 @@ export const PARTNER_CONTRACT_VERSION = '1.0.0' as const;
 export const PARTNER_SCHEMA_VERSION = 1 as const;
 export const IdSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9:_-]*$/);
 export const TextSchema = z.string().trim().min(1).max(4000);
+export const PersianReasonSchema = TextSchema.refine(reason => /[\u0600-\u06ff]/u.test(reason), 'Persian business reason required');
 export const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;

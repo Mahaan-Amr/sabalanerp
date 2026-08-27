@@ -1,5 +1,6 @@
 import { ApprovedInquirySchema, PartnerInquiryViewSchema, ResponderInquiryViewSchema } from '../inquiry';
 import { PartnerSaleCaseSchema } from '../case';
+import { PartnerDraftSubmissionRefSchema } from '../commands';
 import { CustomerContractOutputSchema, FulfillmentViewSchema, PartnerAccountViewSchema, PartnerCaseViewSchema, PartnerProfileViewSchema, SabalanInternalRecordViewSchema } from '../projections';
 
 /** Synthetic namespaced payloads. Hashes are format fixtures, not signed evidence. */
@@ -20,10 +21,14 @@ export function createPartnerFixtures() {
   const deliveries = [{ deliveryId: 'fixture-313-delivery', date: '2026-08-29', destination: customer.address,
     items: [{ productRowId: product.productRowId, quantity: '2.000' }] }];
   return {
+    configurationDraft: { recoveryId: 'fixture-313-recovery', recoveryRevision: 1, productRowId: product.productRowId },
+    draftSubmissionReference: PartnerDraftSubmissionRefSchema.parse({ customerId: 'fixture-313-customer',
+      recoveryId: 'fixture-313-recovery', recoveryRevision: 1, graphHash: hash, sabalanTermsVersionId: 'fixture-313-terms-v1' }),
     inquiry: PartnerInquiryViewSchema.parse({ schemaVersion: 1, purpose: 'PARTNER_INQUIRY', inquiryId: 'fixture-313-inquiry', rows: [
       { rowId: 'fixture-313-inquiry-row', revision: 1, description: product.description, state: 'APPROVED',
         configuration: [{ label: 'عرض', value: '۴۰ سانتی‌متر' }], approvedPrice: { amount: '800', currency: 'IRR' },
-        approvedAt: '2026-08-27T08:00:00.000Z', expiresAt: '2026-08-29T08:00:00.000Z', usedCaseNumbers: ['FIXTURE-CASE-313'] },
+        approvedAt: '2026-08-27T08:00:00.000Z', expiresAt: '2026-08-29T08:00:00.000Z', usedCaseNumbers: ['FIXTURE-CASE-313'],
+        approvedRowBinding: { inquiryId: 'fixture-313-inquiry', rowId: 'fixture-313-inquiry-row', revision: 1 } },
     ] }),
     responder: ResponderInquiryViewSchema.parse({ schemaVersion: 1, purpose: 'RESPONDER_INQUIRY', inquiryId: 'fixture-313-inquiry',
       partnerDisplayName: party.displayName, assignmentId: 'fixture-313-assignment', assignmentRevision: 1, rows: [

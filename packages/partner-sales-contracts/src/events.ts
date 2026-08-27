@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import { DateSchema, DecimalSchema, HashSchema, IdSchema, InstantSchema, MoneySchema, RevisionRefSchema, SignedDecimalSchema } from './primitives';
-import { PersianReasonSchema } from './commands';
+import { DateSchema, DecimalSchema, HashSchema, IdSchema, InstantSchema, MoneySchema, PersianReasonSchema, RevisionRefSchema, SignedDecimalSchema } from './primitives';
 
 const event = { schemaVersion: z.literal(1), eventId: IdSchema, commandId: IdSchema, correlationId: IdSchema,
   actorId: IdSchema, recordedAt: InstantSchema, effectiveDate: DateSchema, owner: RevisionRefSchema };

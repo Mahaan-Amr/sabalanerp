@@ -21,7 +21,7 @@
     "pretest": "npm run build",
     "test": "tsx --test tests/*.test.ts",
     "test:consumer:backend": "npm run build && tsx --test tests/backend-consumer.test.ts",
-    "test:consumer:frontend": "npm run build && tsx --test tests/frontend-consumer.test.ts",
+    "test:consumer:frontend": "npm run build && tsx --test tests/frontend-consumer.test.ts tests/frontend-roundtrip.test.ts",
     "prepack": "npm run build"
   },
   "dependencies": {

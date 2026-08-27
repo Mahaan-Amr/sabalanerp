@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "target": "ES5", "module": "ESNext", "moduleResolution": "Bundler", "lib": ["ES2020", "DOM"] },
-  "include": ["tests/frontend-consumer.test.ts"]
+  "include": ["tests/frontend-consumer.test.ts", "tests/frontend-roundtrip.test.ts"]
 }

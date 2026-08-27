@@ -9,6 +9,7 @@ import {
   type PricedLine
 } from './packingPricing';
 import { parseStableIdentity, type StableIdentity } from './stableIdentity';
+import { packPreservedSourceDistribution } from './preservedSourcePacking';
 
 export interface PaidRemainderStock {
   readonly remainingStoneId: StableIdentity<'remaining-stone'>;
@@ -33,6 +34,9 @@ export const calculatePaidRemainderFacts = (stock: PaidRemainderStock) => {
 };
 
 export interface RemainderChildIntent {
+  /** Witnessed distribution: replay consumption, never repack these sources together. */
+  readonly sourcePieceQuantities?: readonly number[];
+  readonly secondaryOwnerProductRowId?: StableIdentity<'product-row'>;
   readonly allocationId: StableIdentity<'allocation'>;
   readonly allocationOrder: number;
   readonly childProductRowId: StableIdentity<'product-row'>;
@@ -50,6 +54,8 @@ export interface RemainderChildIntent {
 }
 
 export interface RemainderChildPolicyInput {
+  readonly sourcePieceQuantities?: readonly number[];
+  readonly secondaryOwnerProductRowId?: StableIdentity<'product-row'>;
   readonly allocationId: StableIdentity<'allocation'>;
   readonly sourceProductRowId: StableIdentity<'product-row'>;
   readonly selectedRemainingStoneId?: StableIdentity<'remaining-stone'>;
@@ -150,6 +156,12 @@ export const parseRemainderChildPolicyInput = (
             requiredString('selectedRemainingStoneId')
           )
         }),
+    ...(record.sourcePieceQuantities === undefined ? {} : {
+      sourcePieceQuantities: record.sourcePieceQuantities as readonly number[]
+    }),
+    ...(record.secondaryOwnerProductRowId === undefined ? {} : {
+      secondaryOwnerProductRowId: parseStableIdentity('product-row', requiredString('secondaryOwnerProductRowId'))
+    }),
     lengthMeters: parseCanonicalDecimal(requiredString('lengthMeters')),
     widthMeters: parseCanonicalDecimal(requiredString('widthMeters')),
     quantity,
@@ -283,6 +295,17 @@ const validateStock = (stock: PaidRemainderStock, index: number) => {
 };
 
 const validateIntent = (intent: RemainderChildIntent, index: number) => {
+  if (intent.sourcePieceQuantities !== undefined) {
+    if (!Array.isArray(intent.sourcePieceQuantities) || !intent.sourcePieceQuantities.length ||
+      intent.sourcePieceQuantities.some(q => !Number.isSafeInteger(q) || q <= 0) ||
+      intent.sourcePieceQuantities.reduce((sum, q) => sum + q, 0) !== intent.quantity) {
+      throw new TypeError('Preserved source distribution must account for every requested piece.');
+    }
+  }
+  if (intent.secondaryOwnerProductRowId !== undefined &&
+    intent.secondaryOwnerProductRowId !== intent.sourceProductRowId) {
+    throw new TypeError('Preserved secondary inventory must retain the source owner.');
+  }
   parseStableIdentity('allocation', intent.allocationId);
   parseStableIdentity('product-row', intent.childProductRowId);
   parseStableIdentity('product-row', intent.sourceProductRowId);
@@ -351,7 +374,7 @@ const aggregateSecondaryRemainders = ({
         'remaining-stone',
         `${intent.allocationId}:secondary:${index + 1}`
       ),
-      ownerProductRowId: intent.childProductRowId,
+      ownerProductRowId: intent.secondaryOwnerProductRowId ?? intent.childProductRowId,
       catalogProductId: intent.catalogProductId,
       sourceBatchId,
       lengthMeters: remainder.lengthMeters,
@@ -445,7 +468,7 @@ export const replayRemainderAllocations = (
         'source-batch',
         `${intent.allocationId}:selected-source`
       );
-      const packed = calculatePackingPlan({
+      const packingRequest = {
         policyVersion: input.policyVersion,
         kerfMeters: intent.kerfMeters,
         calibrationEnabled: intent.calibrationEnabled,
@@ -461,7 +484,10 @@ export const replayRemainderAllocations = (
           widthMeters: intent.widthMeters,
           quantity: intent.quantity
         }]
-      });
+      };
+      const packed = intent.sourcePieceQuantities
+        ? packPreservedSourceDistribution(packingRequest, intent.sourcePieceQuantities)
+        : calculatePackingPlan(packingRequest);
       if (!packed.ok) {
         replayConflicts.push({
             code: 'selected-remainder-insufficient',

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const PARTNER_CONTRACT_VERSION = '1.0.0' as const;
+export const PARTNER_CONTRACT_VERSION = '1.1.0' as const;
 export const PARTNER_SCHEMA_VERSION = 1 as const;
 export const IdSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9:_-]*$/);
 export const TextSchema = z.string().trim().min(1).max(4000);

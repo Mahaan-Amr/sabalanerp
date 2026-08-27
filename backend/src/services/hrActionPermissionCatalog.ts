@@ -55,6 +55,11 @@ export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
       { code: 'VERIFY_COLLATERAL_CUSTODY', labelFa: 'بررسی و تأیید وثیقه', level: 'EDIT', prerequisites: [] },
     ],
   },
+  {
+    code: 'FOUNDATION_ADMINISTRATION', labelFa: 'مدیریت ساختار سازمانی', permissions: [
+      { code: 'PERMANENTLY_DELETE_ORGANIZATIONAL_FOUNDATION', labelFa: 'حذف دائمی واحد، شغل و جایگاه', level: 'ADMIN', prerequisites: ['ORGANIZATIONAL_STRUCTURE'] },
+    ],
+  },
 ] as const;
 
 export const HR_ACTION_PERMISSIONS = HR_ACTION_PERMISSION_GROUPS.flatMap((group) => group.permissions);

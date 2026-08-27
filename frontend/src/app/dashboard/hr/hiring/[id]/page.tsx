@@ -714,14 +714,14 @@ export default function HiringCasePage() {
         <FinalHiringRejection applicationId={id} busy={busy} run={run} />
       )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-        <Metric label="مرحله" value={data.stage} />
-        <Metric label="هویت" value={data.identityClearance} />
-        <Metric label="جبران" value={data.compensationClearance} />
-        <Metric label="وثیقه" value={data.collateralClearance} />
-        <Metric label="قرارداد" value={data.contractClearance} />
+        <Metric label="مرحله" value={hrDisplayLabel(data.stage)} />
+        <Metric label="هویت" value={hrDisplayLabel(data.identityClearance)} />
+        <Metric label="جبران" value={hrDisplayLabel(data.compensationClearance)} />
+        <Metric label="وثیقه" value={hrDisplayLabel(data.collateralClearance)} />
+        <Metric label="قرارداد" value={hrDisplayLabel(data.contractClearance)} />
         <Metric
           label="اشتغال"
-          value={data.employmentRelationship?.status || "CANDIDATE"}
+          value={hrDisplayLabel(data.employmentRelationship?.status || "CANDIDATE")}
         />
       </div>
       {data.lifecycle && selectedLifecyclePhase && (

@@ -129,6 +129,14 @@ test('export freezes filtered data, then rechecks current actor, scope and expor
   await assert.rejects(() => service.downloadExport(created.exportId), { code: 'NOT_FOUND' });
 });
 
+test('another actor without a report grant cannot distinguish existing and missing exports', async () => {
+  const { service, state } = harness();
+  const created = await service.createExport(query);
+  state.actorId = 'other-actor'; state.allowed = false;
+  await assert.rejects(() => service.downloadExport(created.exportId), { code: 'NOT_FOUND' });
+  await assert.rejects(() => service.downloadExport('missing-export'), { code: 'NOT_FOUND' });
+});
+
 test('channel denials exclude rows before count and totals, and hidden detail matches missing detail', async () => {
   const { service, state } = harness(); state.blockedChannels = ['COUNT', 'SEARCH', 'DETAIL'];
   assert.equal((await service.count(query)).count, 0);
@@ -152,6 +160,10 @@ test('retail receipts and reversals affect only the private collection flow', as
   assert.equal(report.rows[0].collectionStatus, 'PARTIAL');
   assert.equal(report.totals[0].accountingBalance, '1200');
   assert.equal(report.rows[0].metrics!.wholesalePurchases, '1600');
+  // A timestamp and lexical event ID are not a causal sequence.
+  data.events[1].eventId = 'z-receipt'; data.events[2].eventId = 'a-reversal';
+  data.events[2].recordedAt = data.events[1].recordedAt;
+  assert.equal((await service.query(query)).rows[0].metrics!.retailCollected, '800');
 });
 
 test('retail-only successor books its discount change on the correction date', async () => {
@@ -168,6 +180,8 @@ test('retail-only successor books its discount change on the correction date', a
   assert.equal(report.rows[0].metrics!.retailSales, '-100');
   assert.equal(report.rows[0].metrics!.netComparableMargin, '-100');
   assert.equal(report.rows[0].metrics!.wholesalePurchases, '0');
+  data.events[1].recordedAt = data.events[0].recordedAt; data.events[1].eventId = 'a-correction';
+  assert.equal((await service.query({ ...query, from: '2026-09-01', to: '2026-09-30' })).rows[0].metrics!.retailSales, '-100');
 });
 
 test('a source returning a later revision for a closed period is rejected', async () => {

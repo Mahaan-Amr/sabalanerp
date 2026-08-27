@@ -139,16 +139,23 @@ export class PartnerReportingService {
     if (!this.runtime.IdSchema.safeParse(id).success) throw new ReportingError('NOT_FOUND');
     const artifact = await this.exports.get(id);
     if (!artifact) throw new ReportingError('NOT_FOUND');
-    return this.source.read(artifact.query, async snapshot => {
-      const context = this.access(snapshot, artifact.query);
-      if (artifact.actorId !== context.actorId || artifact.expiresAt <= snapshot.capturedAt) throw new ReportingError('NOT_FOUND');
-      if (await this.runtime.canonicalHash(artifact.report) !== artifact.contentHash) throw new ReportingError('INTEGRITY_CONFLICT');
-      for (const root of artifact.roots) {
-        const current = snapshot.roots.find(candidate => candidate.caseId === root.caseId);
-        if (!current || current.partnerSellerId !== root.partnerSellerId
-          || !await this.allowed(snapshot, artifact.query, current, 'EXPORT', context.actorId)) throw new ReportingError('NOT_FOUND');
+    try {
+      return await this.source.read(artifact.query, async snapshot => {
+        const context = this.access(snapshot, artifact.query);
+        if (artifact.actorId !== context.actorId || artifact.expiresAt <= snapshot.capturedAt) throw new ReportingError('NOT_FOUND');
+        if (await this.runtime.canonicalHash(artifact.report) !== artifact.contentHash) throw new ReportingError('INTEGRITY_CONFLICT');
+        for (const root of artifact.roots) {
+          const current = snapshot.roots.find(candidate => candidate.caseId === root.caseId);
+          if (!current || current.partnerSellerId !== root.partnerSellerId
+            || !await this.allowed(snapshot, artifact.query, current, 'EXPORT', context.actorId)) throw new ReportingError('NOT_FOUND');
+        }
+        return structuredClone(artifact.report);
+      });
+    } catch (error) {
+      if (error instanceof ReportingError && ['NOT_FOUND', 'FORBIDDEN', 'PARTNER_NOT_ACTIVE', 'CUSTOMER_OUT_OF_SCOPE', 'NOT_ASSIGNED'].includes(error.code)) {
+        throw new ReportingError('NOT_FOUND');
       }
-      return structuredClone(artifact.report);
-    });
+      throw error;
+    }
   }
 }

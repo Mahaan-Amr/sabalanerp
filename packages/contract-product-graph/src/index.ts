@@ -1,3 +1,7 @@
+export { calculateLongitudinalTechnical } from './longitudinalTechnical';
+export type { LongitudinalTechnicalInput, LongitudinalTechnicalResult, LongitudinalTechnicalCalculation } from './longitudinalTechnical';
+export type { TechnicalPackingPlan } from './technicalPacking';
+
 export { calculateProductOperationsTechnical } from './operationsTechnical';
 export type {
   ProductOperationsTechnicalInput, ProductOperationsTechnicalResult,
@@ -240,3 +244,15 @@ export {
   type SourceBatchId,
   type ToolSelectionId
 } from './productGraph';
+export { calculateSlabTechnical } from './slabTechnical';
+export type { SlabTechnicalInput, SlabTechnicalResult, SlabTechnicalCalculation } from './slabTechnical';
+export { calculateStairPartTechnical } from './stairTechnical';
+export type { StairPartTechnicalInput, StairPartTechnicalResult, StairPartTechnicalCalculation } from './stairTechnical';
+export { calculateStairLayerTechnical, replayStairLayerTechnical } from './stairLayerTechnical';
+export type { StairLayerTechnicalInput, StairLayerTechnicalResult, StairLayerTechnicalCalculation,
+  StairLayerTechnicalSource, StairLayerTechnicalSideOperations } from './stairLayerTechnical';
+export { replayRemainderTechnical } from './remainderTechnical';
+export type { RemainderTechnicalInput, RemainderTechnicalIntent, RemainderTechnicalResult,
+  RemainderTechnicalReplay, RemainderTechnicalAllocation } from './remainderTechnical';
+export { calculatePreparedTechnical } from './preparedTechnical';
+export type { PreparedKind, PreparedUnit, PreparedTechnicalInput, PreparedTechnicalResult, PreparedTechnicalCalculation } from './preparedTechnical';

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
@@ -12,10 +13,10 @@ const requireFrontend = createRequire(path.join(root, 'frontend/package.json'));
 const { build } = requireFrontend('esbuild');
 const output = path.join(root, 'test-results/partner-sales/wizard');
 await mkdir(output, { recursive: true });
-await preflight();
+const runtime = await preflight();
 await build({ entryPoints: [path.join(root, 'frontend/src/features/partner-sales/__tests__/wizardBrowserFixture.tsx')],
   outfile: path.join(output, 'fixture.js'), bundle: true, platform: 'browser', format: 'iife',
-  tsconfig: path.join(root, 'frontend/tsconfig.json'), define: { 'process.env.NODE_ENV': '"production"' },
+  tsconfig: path.join(root, 'frontend/tsconfig.json'), define: { 'process.env.NODE_ENV': '"production"', 'process.env': '{}' },
 });
 const cssInput = `${await readFile(path.join(root, 'frontend/src/app/globals.css'), 'utf8')}\n${await readFile(path.join(root, 'frontend/src/styles/design-system-tokens.css'), 'utf8')}\nbody{font-family:'Yekan Bakh',sans-serif;background:var(--sds-surface-canvas);color:var(--sds-text-primary)}`;
 await writeFile(path.join(output, 'fixture-input.css'), cssInput);
@@ -23,7 +24,12 @@ const css = spawnSync(process.execPath, [requireFrontend.resolve('tailwindcss/li
 if (css.status !== 0) throw new Error(css.stderr);
 const js = await readFile(path.join(output, 'fixture.js'), 'utf8');
 const styles = await readFile(path.join(output, 'fixture.css'), 'utf8');
-const browser = await chromium.launch({ headless: true });
+const identity = { executedAt: new Date().toISOString(),
+  fixtureSha256: createHash('sha256').update(js).digest('hex'),
+  stylesheetSha256: createHash('sha256').update(styles).digest('hex'),
+  services: runtime.services,
+};
+const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const errors = [];
 const evidence = [];
 try {
@@ -62,6 +68,13 @@ try {
     await page.evaluate(() => { document.documentElement.style.zoom = '2'; });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.join(output, `${theme}-${width}-zoom200.png`), fullPage: true });
+    await page.getByRole('button', { name: 'ادامه', exact: true }).click();
+    await page.getByRole('heading', { name: 'تحویل', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'ادامه', exact: true }).click();
+    await page.getByRole('button', { name: 'ادامه', exact: true }).click();
+    await page.getByRole('button', { name: 'ثبت پرونده', exact: true }).click();
+    await page.getByRole('button', { name: 'باز کردن پرونده', exact: true }).click();
+    await page.getByText('جزئیات پرونده آزمایشی', { exact: true }).waitFor();
     await page.goto('http://127.0.0.1:3000/__partner330-fixture?reinquiry');
     await page.getByRole('button', { name: 'استعلام مجدد', exact: true }).click();
     const dialog = page.getByRole('dialog');
@@ -73,10 +86,16 @@ try {
     await dialog.getByRole('button', { name: 'بررسی نتیجه ارسال', exact: true }).click();
     await dialog.waitFor({ state: 'detached' });
     await page.getByText('تعداد ارسال: 2', { exact: true }).waitFor();
-    evidence.push({ theme, width, partial: true, retailOverride: true, lossConfirmation: true, expiryPreservesDraft: true, takeoverPreservesDraft: true, escape: true, focus: true, uncertainSuccessorRetry: true, zoom200: true });
+    evidence.push({ theme, width, partial: true, retailOverride: true, lossConfirmation: true, expiryPreservesDraft: true, takeoverPreservesDraft: true, escape: true, focus: true, uncertainSuccessorRetry: true, zoom200: true, zoom200ContinueClick: true, caseFixtureSubmission: true });
     await page.close();
   }
   assert.deepEqual(errors, []);
-  await writeFile(path.join(output, 'evidence.json'), JSON.stringify({ scope: 'Component fixtures only; not live policy/inquiry/Case acceptance', evidence, errors }, null, 2));
+  await writeFile(path.join(output, 'evidence.json'), JSON.stringify({ scope: 'Component fixtures only; not live policy/inquiry/Case acceptance', identity, evidence, errors }, null, 2));
   console.log(`Partner wizard component browser acceptance passed: ${output}`);
+} catch (error) {
+  const page = browser.contexts().flatMap(context => context.pages()).at(-1);
+  if (page) await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true }).catch(() => undefined);
+  await writeFile(path.join(output, 'failure.json'), JSON.stringify({ identity, message: String(error), errors, evidence }, null, 2));
+  console.error(JSON.stringify({ browserErrors: errors }));
+  throw error;
 } finally { await browser.close(); }

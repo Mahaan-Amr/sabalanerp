@@ -21,9 +21,12 @@ The legacy whole product modal also requires priced calculation success before
 saving. Do not inject fake zero rates, expose private inputs or use
 `bindCanonicalCaseGraph` in the browser to bypass this missing interface.
 
-The remaining fixture browser and full Design System E2E runs also require the
-shared runtime owner's handoff. Earlier browser readiness timeouts occurred
-before UI assertions; they are not product failures or acceptance passes.
+After the shared runtime handoff, the fixture browser passed all four theme/width
+scenarios, including actual progression at 200% zoom and fixture Case submission.
+The six relevant existing Design System reference-surface regressions also passed.
+See `browser-acceptance.md` for scope and evidence. Earlier preflight and fixture
+bundling failures are superseded by these successful runs; the technical product
+parity blocker above remains unresolved.
 
 ## Delivered module boundaries
 

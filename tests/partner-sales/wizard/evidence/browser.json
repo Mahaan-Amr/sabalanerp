@@ -1,0 +1,98 @@
+{
+  "scope": "Component fixtures only; not live policy/inquiry/Case acceptance",
+  "identity": {
+    "executedAt": "2026-08-27T09:36:27.558Z",
+    "fixtureSha256": "31572df24e9726444a2b1910614b12bdf1ac9e367a4ce7f516de2b634a765b54",
+    "stylesheetSha256": "d130833c81f9dd75dfa66541f6ad9d7be280aa09e30d6c0984a77e6c4702fad8",
+    "services": [
+      {
+        "service": "backend",
+        "container": "25ccf61c5cd4",
+        "image": "sha256:b496f2a20ac3bb2940dda44b150ea87063db3131db9a3073a1765aad4edb2de5"
+      },
+      {
+        "service": "frontend",
+        "container": "756734f9c563",
+        "image": "sabalanerp-local-frontend"
+      },
+      {
+        "service": "inquiry",
+        "container": "80308df38982",
+        "image": "sha256:5d5953c1bf913497b7c145b4d8c3e743ff00ba89752c4cdd9e865c1f3025cf9e"
+      },
+      {
+        "service": "postgres",
+        "container": "64e0861aaab5",
+        "image": "postgres:15-alpine"
+      },
+      {
+        "service": "redis",
+        "container": "633f3b143976",
+        "image": "redis:7-alpine"
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "theme": "light",
+      "width": 390,
+      "partial": true,
+      "retailOverride": true,
+      "lossConfirmation": true,
+      "expiryPreservesDraft": true,
+      "takeoverPreservesDraft": true,
+      "escape": true,
+      "focus": true,
+      "uncertainSuccessorRetry": true,
+      "zoom200": true,
+      "zoom200ContinueClick": true,
+      "caseFixtureSubmission": true
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "partial": true,
+      "retailOverride": true,
+      "lossConfirmation": true,
+      "expiryPreservesDraft": true,
+      "takeoverPreservesDraft": true,
+      "escape": true,
+      "focus": true,
+      "uncertainSuccessorRetry": true,
+      "zoom200": true,
+      "zoom200ContinueClick": true,
+      "caseFixtureSubmission": true
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "partial": true,
+      "retailOverride": true,
+      "lossConfirmation": true,
+      "expiryPreservesDraft": true,
+      "takeoverPreservesDraft": true,
+      "escape": true,
+      "focus": true,
+      "uncertainSuccessorRetry": true,
+      "zoom200": true,
+      "zoom200ContinueClick": true,
+      "caseFixtureSubmission": true
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "partial": true,
+      "retailOverride": true,
+      "lossConfirmation": true,
+      "expiryPreservesDraft": true,
+      "takeoverPreservesDraft": true,
+      "escape": true,
+      "focus": true,
+      "uncertainSuccessorRetry": true,
+      "zoom200": true,
+      "zoom200ContinueClick": true,
+      "caseFixtureSubmission": true
+    }
+  ],
+  "errors": []
+}

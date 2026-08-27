@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { parseCanonicalProductGraph, projectCanonicalRemainderConsumption,
+  type CanonicalProjectedRemainderConsumption } from '@sabalanerp/contract-product-graph';
 
 interface RenderableContract {
   id?: string;
@@ -15,6 +17,7 @@ interface RenderableContract {
   signedAt?: Date | string | null;
   printedAt?: Date | string | null;
   contractData?: any;
+  productGraphState?: { graph: unknown } | null;
   signatures?: any;
   customer?: any;
   department?: any;
@@ -688,7 +691,18 @@ const buildPhysicalProductionNote = (product: any): string => {
   return `${derivedLabel}خروجی فیزیکی تولید: ${breakdown}`;
 };
 
-const buildSourceMaterialRows = (product: any): NormalizedSourceMaterial[] => {
+const buildSourceMaterialRows = (
+  product: any,
+  consumption: readonly CanonicalProjectedRemainderConsumption[] = []
+): NormalizedSourceMaterial[] => {
+  if (consumption.length > 0) {
+    return consumption.map(source => ({
+      description: product?.stoneName || EMPTY,
+      dimensionsOrAmount: `عرض ${toFaNumber(Number(source.widthMeters) * 100, 4)}cm × طول ${toFaNumber(source.lengthMeters, 4)}m`,
+      quantityOrArea: `${toFaNumber(source.quantity, 0)} عدد، جمع ${toFaNumber(source.areaSquareMeters, 4)} متر مربع`,
+      presentsMaterialCharge: true
+    }));
+  }
   const layerSourcePlan = product?.meta?.layerSourcePlan;
   if (product?.meta?.isLayer && layerSourcePlan) {
     const rows: NormalizedSourceMaterial[] = [];
@@ -797,14 +811,24 @@ const normalizeProducts = (
 ): NormalizedProduct[] => {
   const contractDataProducts = Array.isArray(contract.contractData?.products) ? contract.contractData.products : [];
   const relationItems = Array.isArray(contract.items) ? contract.items : [];
+  const consumption = contract.productGraphState
+    ? projectCanonicalRemainderConsumption(parseCanonicalProductGraph(contract.productGraphState.graph)) : [];
 
   if (contractDataProducts.length > 0) {
     return contractDataProducts.map((savedProduct: any, index: number) => {
       const product = restoreLongitudinalCustomerRequest(savedProduct);
-      const relationItem = relationItems.find((item: any) =>
+      const rowId = product?.productRowId || product?.rowId;
+      const identityMatches = rowId ? relationItems.filter((item: any) =>
+        (item?.productRowId || item?.rowId) === rowId) : [];
+      const catalogMatches = relationItems.filter((item: any) =>
+        !item?.productRowId && !item?.rowId && item?.productId === product?.productId &&
+        (item?.stairPartType || null) === (product?.stairPartType || null));
+      const sameCatalogProducts = contractDataProducts.filter((item: any) =>
         item?.productId === product?.productId &&
-        (item?.stairPartType || null) === (product?.stairPartType || null)
-      ) || relationItems[index];
+        (item?.stairPartType || null) === (product?.stairPartType || null));
+      const relationItem = identityMatches.length === 1 ? identityMatches[0]
+        : identityMatches.length === 0 && catalogMatches.length === 1 && sameCatalogProducts.length === 1
+          ? catalogMatches[0] : undefined;
 
       const mandatoryCuttingPolicy = (
         Boolean(product?.isMandatory) && toNumber(product?.mandatoryPercentage) > 0
@@ -966,7 +990,7 @@ const normalizeProducts = (
 
       const remainingCount = Array.isArray(product?.remainingStones) ? product.remainingStones.length : 0;
       const usedRemainingCount = Array.isArray(product?.usedRemainingStones) ? product.usedRemainingStones.length : 0;
-      const sourceMaterials = buildSourceMaterialRows(product);
+      const sourceMaterials = buildSourceMaterialRows(product, consumption.filter(source => source.productRowId === rowId));
       const isFromRemainingStone = Boolean(product?.meta?.remainingSource);
       const sourceMaterialSummary = sourceMaterials.length > 0
         ? `${sourceMaterials[0].dimensionsOrAmount}، ${sourceMaterials[0].quantityOrArea}`
@@ -986,7 +1010,7 @@ const normalizeProducts = (
         ? `لایه وابسته به ${stairPartLabel(layerInfo?.parentPartType || product?.stairPartType)}: ${toFaNumber(layerInfo?.layerSetQuantity || product?.quantity, 4)} ست (${layerEdgeLabels.join(' + ') || EMPTY})، ${toFaNumber(layerInfo?.physicalPieceQuantity || 0, 0)} نوار فیزیکی`
         : '';
       const description = [
-        product?.description || relationItem?.description || '',
+        typeof product?.description === 'string' ? product.description : relationItem?.description || '',
         layerProductionNote,
         product?.sawKerfEnabled ? 'خوراک اره لحاظ شده' : '',
         physicalProductionNote

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { planLegacyProductGraphMigration } from '../legacyMigration';
-import { projectCanonicalProductGraph } from '../projections';
+import { projectCanonicalProductGraph, projectCanonicalRemainderConsumption } from '../projections';
 import { parseCanonicalProductGraph, serializeCanonicalProductGraph } from '../productGraphSerialization';
 import { replayRemainderAllocations } from '../remainderPolicy';
 import { executeProductGraphCommand } from '../productGraph';
@@ -21,6 +21,12 @@ const projection = projectCanonicalProductGraph(plan.graph, 'accounting');
 assert.deepEqual(projection.products.slice(1, 4).map(row => row.baseAmountToman), ['0', '0', '0']);
 assert.equal(plan.graph.allocations.length, 3);
 assert.deepEqual(plan.graph.allocations.map(a => a.consumedSourcePieces), [5, 5, 1]);
+const consumption = projectCanonicalRemainderConsumption(plan.graph);
+assert.deepEqual(consumption.map(source => [source.lengthMeters, source.widthMeters, source.quantity, source.areaSquareMeters]),
+  [['1.25', '0.12', 5, '0.75'], ['1.25', '0.06', 5, '0.375'], ['1.25', '0.26', 1, '0.325']]);
+assert.deepEqual(projectCanonicalRemainderConsumption({ ...plan.graph, allocations: [...plan.graph.allocations].reverse() }),
+  consumption, 'projection follows allocation order, not array position');
+assert.throws(() => projectCanonicalRemainderConsumption({ ...plan.graph, sourceBatches: [] }), /no provable source/);
 assert.deepEqual(plan.graph.rows.map(row => row.commercial.totalAmountToman),
   ['6545000', '125000', '125000', '100000', '16176875']);
 assert.deepEqual(plan.graph.remainingStones.map(s => [s.widthMeters, s.quantity]).sort(),
@@ -158,6 +164,29 @@ if (historical.ok) assert.equal(historical.graph.allocations.length, 0, 'Read/mi
   const repaired = planLegacyProductGraphMigration({ ...input, products: rows });
   assert.ok(old.ok);
   assert.deepEqual(repaired, old, 'Canonical layer-only allocation is already owned by layer replay, not legacy child recovery');
+  if (old.ok) {
+    // Exercise the projection seam with real layer and remainder policy results;
+    // no second inventory algorithm or legacy geometry cache participates.
+    const generated = layer.result.generatedRemainders[0];
+    assert.ok(generated);
+    const intent = { allocationId: 'layer-child-allocation', allocationOrder: 2,
+      childProductRowId: 'layer-child', sourceProductRowId: generated.ownerProductRowId,
+      selectedRemainingStoneId: generated.remainingStoneId, catalogProductId: generated.catalogProductId,
+      lengthMeters: generated.lengthMeters, widthMeters: '0.005', quantity: 1,
+      kerfMeters: '0', calibrationEnabled: false, longitudinalCutRateToman: '100', crossCutRateToman: '100' } as any;
+    const replayed = replayRemainderAllocations({ policyVersion: policy.packing, pricingPolicyVersion: policy.pricing,
+      roundingPolicyVersion: policy.rounding, baseInventory: layer.inventory, childIntents: [intent] });
+    assert.ok(replayed.ok);
+    if (replayed.ok) {
+      const projectedGraph = { ...old.graph, allocations: replayed.result.allocations.map(allocation =>
+        ({ ...allocation, intentSnapshot: intent })) };
+      assert.equal(projectCanonicalRemainderConsumption(projectedGraph)[0].widthMeters, generated.widthMeters,
+        'layer-produced source geometry remains available after physical consumption');
+      assert.throws(() => projectCanonicalRemainderConsumption({ ...projectedGraph,
+        sourceBatches: [{ ...old.graph.sourceBatches[0], initialRemainders: [{ ...generated, widthMeters: '999' as any }] }]
+      }), /conflicting geometry/, 'conflicting source identity never selects an arbitrary geometry');
+    }
+  }
 }
 {
   const independent = structuredClone(products[4]);

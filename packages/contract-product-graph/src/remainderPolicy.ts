@@ -332,7 +332,7 @@ const stockSort = (left: PaidRemainderStock, right: PaidRemainderStock) =>
   left.creationOrder - right.creationOrder ||
   left.remainingStoneId.localeCompare(right.remainingStoneId);
 
-const aggregateSecondaryRemainders = ({
+export const aggregateSecondaryRemainders = ({
   intent,
   plan,
   sourceBatchId,

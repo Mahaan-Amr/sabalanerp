@@ -83,11 +83,13 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
     await expect(page).toHaveURL(new RegExp(`/dashboard/sales/contracts/${id}`), { timeout: 60_000 });
     await expect(page.getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible();
     await page.reload();
+    await expect(page.getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible();
     for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
       await page.setViewportSize({ width, height: 900 });
       await setTheme(page, theme);
       await assertNoHorizontalOverflow(page);
       await page.screenshot({ path: testInfo.outputPath(`saved-${width}-${theme}.png`), fullPage: true });
+      await page.screenshot({ path: testInfo.outputPath(`saved-${width}-${theme}-viewport.png`) });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
     for (const variant of ['original', 'summary']) {

@@ -53,6 +53,10 @@ All runtime tests use the existing `sabalanerp-local` project and its local Post
 4. Independent source-only rows no longer require paid-child price reconciliation or stable UI-cache IDs when canonical geometry/quantity proves unchanged inventory.
 5. Independent historical rows with no canonical source stock/base price, no children and no usage ledger remain opaque snapshots. The recovery bridge neither invents stock nor demands evidence for nonexistent children. The regression test failed before the narrow exemption and passes afterward; the canonical missing-children/consumed-inventory rejection remains covered.
 6. One pre-existing Accounting E2E mock omitted the API's required visible/enabled `nextBestActions` entry. Only the fixture was corrected; application behavior and permissions were not changed.
+7. Visual PDF inspection caught an output-only defect: the fourth row printed four source stones (its requested output count), although the canonical allocation consumed one 26cm source. The print boundary now projects frozen source geometry and consumed counts, including secondary/layer-generated source evidence, without repricing or replaying availability. The existing secondary-geometry owner is reused; contradictory geometry is rejected. The PDF template cache version is advanced so the corrected output is regenerated.
+8. The canonical-to-legacy projection erased legacy row descriptions, and the print fallback selected the first same-catalog relation. Descriptions now preserve canonical precedence, legacy text, explicit blank versus absence, and stable row ownership. Missing notes may fall back only to an exact row identity or an unambiguous identity-less historical relation. No positional or ambiguous catalog fallback remains. Six print suites pass, including the original five suites and the exact recovered fixture; source rows reconcile to 5/5/1 pieces and 0.75/0.375/0.325 square meters.
+
+The print changes do not rewrite stored contracts, their prices, or source inventory. Canonical parser shape validation is not claimed to be full chronology replay. The layer-generated projection test uses actual layer/remainder policy results; an attempted full mixed-command reproduction encountered pre-existing graph-integrity restrictions, so it is not counted as a successfully tested persisted mixed-layer user path.
 
 ### Read-only historical comparison
 
@@ -66,6 +70,38 @@ The local audit scanned 260 stored contracts (including two interrupted local QA
 ### Independent reviews and retained evidence
 
 Both independent Standards and Spec reviewers passed candidate v3: SHA256 `03DBE6C2680F647C10E2EE879D91AF04817037A9A902FE752B2F40012C9FC643`, retained locally at `.scratch/release-remaining-qa/candidate-v3.patch`. It contains 21 scoped files against the base above. Reviewers independently re-ran the remaining-recovery regressions and confirmed that the opaque historical-row exemption cannot expose new inventory. Diagnostic scripts, raw local IDs, screenshots and PDFs are not part of the committed application patch.
+
+Scoped inventory (no production frontend component, database schema, or deployment change; PDF normalization and cache identity are included):
+
+```text
+CONTEXT.md
+backend/package.json
+backend/src/routes/sales.ts
+backend/src/services/contractProductGraphMigration.ts
+backend/src/services/contractService.ts
+backend/src/services/remainingRecoveryGuidance.ts
+backend/src/services/__tests__/remainingRecoveryGuidance.test.ts
+backend/src/services/__tests__/remainingRecoveryWrite.integration.test.ts
+backend/src/utils/__tests__/printTemplateRemainingRecovery.test.ts
+backend/src/utils/printTemplate.ts
+backend/src/utils/salesContractPdf.ts
+docs/adr/0054-recover-remaining-allocations-only-at-authorized-writes.md
+docs/qa/remaining-child-recovery.md
+frontend/src/features/contract-creation/services/__tests__/contractSubmissionFailure.test.ts
+packages/contract-product-graph/package.json
+packages/contract-product-graph/src/legacyReadAdapter.ts
+packages/contract-product-graph/src/legacyRemainingRecovery.ts
+packages/contract-product-graph/src/preservedSourcePacking.ts
+packages/contract-product-graph/src/remainderPolicy.ts
+packages/contract-product-graph/src/index.ts
+packages/contract-product-graph/src/projections.ts
+packages/contract-product-graph/src/__tests__/projections.test.ts
+packages/contract-product-graph/src/__tests__/remainingChildRecovery.test.ts
+packages/contract-product-graph/src/__tests__/fixtures/remaining-child-chain.json
+tests/design-system-e2e/financial-evidence-review.spec.ts
+tests/design-system-e2e/remaining-recovery-real.spec.ts
+tests/design-system-e2e/remaining-recovery.spec.ts
+```
 
 ### Limits
 

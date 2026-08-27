@@ -1,0 +1,91 @@
+TAP version 13
+# Partner QA fixture namespace: partner-qa-f5315059-3605-447c-9a92-d4b47ab29a1c
+# Subtest: internal Sales create grant permits Standard and Collaboration entry, but not edit; session identity is isolated
+ok 1 - internal Sales create grant permits Standard and Collaboration entry, but not edit; session identity is isolated
+  ---
+  duration_ms: 8459.7363
+  ...
+# Partner QA fixture namespace: partner-qa-ec3dc3c9-6914-4a91-bfe0-7b99bb511e81
+# Partner QA fixture namespace: partner-qa-664d55e7-fff0-4fce-9a66-e2a8a0aeb047
+# Partner QA fixture namespace: partner-qa-4b9b3207-7080-441e-b7d4-c99dca433b4c
+# Subtest: fixture failure cleans only its own rows, preserving a concurrent namespace and existing data
+not ok 2 - fixture failure cleans only its own rows, preserving a concurrent namespace and existing data
+  ---
+  duration_ms: 24784.3811
+  location: 'D:\\sabalanerp\\tests\\partner-sales\\fixtures.integration.test.mjs:7:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+      'users:9810c09471d92dd589ee64d3ef57ca3b\n' +
+        'auth_sessions:a0487749a49ceedc6734deca83a15ab2\n' +
+        'workspace_permissions:57077e28c59bbe2742c150c8d944c98b\n' +
+        'feature_permissions:96d0226749805d2adec491582ecccd45\n' +
+        'sales_contracts:ae47cccdebd9654e6f873d7abb33beb4\n' +
+    +   'crm_customers:45b3ec731de513e26443f22c91f45a02'
+    -   'crm_customers:0737296614920185efa9943e11dd2a1a'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: |-
+    users:9810c09471d92dd589ee64d3ef57ca3b
+    auth_sessions:a0487749a49ceedc6734deca83a15ab2
+    workspace_permissions:57077e28c59bbe2742c150c8d944c98b
+    feature_permissions:96d0226749805d2adec491582ecccd45
+    sales_contracts:ae47cccdebd9654e6f873d7abb33beb4
+    crm_customers:0737296614920185efa9943e11dd2a1a
+  actual: |-
+    users:9810c09471d92dd589ee64d3ef57ca3b
+    auth_sessions:a0487749a49ceedc6734deca83a15ab2
+    workspace_permissions:57077e28c59bbe2742c150c8d944c98b
+    feature_permissions:96d0226749805d2adec491582ecccd45
+    sales_contracts:ae47cccdebd9654e6f873d7abb33beb4
+    crm_customers:45b3ec731de513e26443f22c91f45a02
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///D:/sabalanerp/tests/partner-sales/fixtures.integration.test.mjs:18:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Partner QA fixture namespace: partner-qa-4b9b3207-7080-441e-b7d4-c99dca433b4c
+# Partner QA fixture namespace: partner-qa-c3889d8f-70ca-4958-b62b-c62a500721a1
+# Subtest: duplicate seed fails atomically without replacing another run owner
+ok 3 - duplicate seed fails atomically without replacing another run owner
+  ---
+  duration_ms: 12408.9533
+  ...
+# Partner QA fixture namespace: partner-qa-285ce3a5-cccd-45c6-8a57-147901f332bf
+# Partner QA fixture namespace: partner-qa-d4f5ddbc-e103-4cfd-af53-d597adda931f
+# Subtest: cleanup refuses an unexpected foreign reference and rolls back its own deletions
+not ok 4 - cleanup refuses an unexpected foreign reference and rolls back its own deletions
+  ---
+  duration_ms: 26315.993
+  location: 'D:\\sabalanerp\\tests\\partner-sales\\fixtures.integration.test.mjs:31:1'
+  failureType: 'testCodeFailure'
+  error: 'fetch failed'
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  stack: |-
+    node:internal/deps/undici/undici:13484:13
+    async preflight (file:///D:/sabalanerp/tests/partner-sales/harness/safety.mjs:75:22)
+    async localSql (file:///D:/sabalanerp/tests/partner-sales/harness/safety.mjs:83:3)
+    async TestContext.<anonymous> (file:///D:/sabalanerp/tests/partner-sales/fixtures.integration.test.mjs:37:5)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: cleanup refuses a future cascading FK to a unique non-ID key
+ok 5 - cleanup refuses a future cascading FK to a unique non-ID key
+  ---
+  duration_ms: 12995.5691
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 3
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 85185.615

@@ -12,6 +12,7 @@
     "build": "tsc",
     "test:remaining-recovery": "tsx src/services/__tests__/remainingRecoveryGuidance.test.ts",
     "test:remaining-recovery:integration": "tsx src/services/__tests__/remainingRecoveryWrite.integration.test.ts",
+    "test:partner-sales-contracts": "npm --prefix ../packages/partner-sales-contracts run test:consumer:backend",
     "test:contract-party-identity": "tsx src/services/__tests__/contractPartyIdentity.test.ts && tsx src/services/__tests__/crmCustomerSearch.test.ts",
     "test:contract-print": "tsx src/utils/__tests__/printTemplateLongitudinalOptimizer.test.ts && tsx src/utils/__tests__/printTemplateProjectName.test.ts && tsx src/utils/__tests__/printTemplateStairLayer.test.ts && tsx src/utils/__tests__/printTemplateOperationLookup.test.ts && tsx src/utils/__tests__/printTemplateAccountingCurrency.test.ts",
     "test:dispatch-document-pdf": "tsx src/documents/dispatch/__tests__/dispatchDocumentTemplate.test.ts && tsx src/documents/dispatch/__tests__/dispatchDocumentPdf.test.ts",

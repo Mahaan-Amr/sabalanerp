@@ -1,0 +1,36 @@
+{
+  "name": "@sabalanerp/partner-sales-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  },
+  "scripts": {
+    "build": "npm --prefix ../contract-product-graph run build && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.frontend.json",
+    "pretest": "npm run build",
+    "test": "tsx --test tests/*.test.ts",
+    "test:consumer:backend": "npm run build && tsx --test tests/backend-consumer.test.ts",
+    "test:consumer:frontend": "npm run build && tsx --test tests/frontend-consumer.test.ts tests/frontend-roundtrip.test.ts",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@sabalanerp/contract-product-graph": "file:../contract-product-graph",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.2"
+  }
+}

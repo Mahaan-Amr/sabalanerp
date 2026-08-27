@@ -59,4 +59,3 @@ A path not listed is **not** implicitly owned. Owner coordination must be record
 2. Strict DTOs reject unknown fields. Adding a field can break an older strict reader: coordinate both producer and consumers before changing the wire schema, even if TypeScript calls it optional. Breaking wire changes require a new schema version and explicit old-reader handling; do not silently widen 1.0.0.
 3. Contract changes name every affected child, update fixtures and both consumer suites, and land through the shared writer. Each owner acknowledges the version in its issue.
 4. Runtime imports and Docker packaging are enabled together by #334. This delivery adds root build/install scripts and backend/frontend contract-test scripts, not runtime imports into running services. No broken file dependency is introduced into their Docker manifests.
-

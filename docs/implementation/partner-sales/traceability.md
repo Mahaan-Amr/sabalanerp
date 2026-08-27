@@ -34,4 +34,3 @@ Before implementation, local `CONTEXT.md` had exactly a 264-line Partner glossar
 Upstream also contains `docs/adr/0046-use-workspace-scoped-shared-duty-decisions.md`. The numeric prefix collides, so all Partner references must use the **full filename/title and issue #310**; this delivery does not renumber an already-approved linked ADR or overwrite the unrelated ADR. #312 explicitly resolves Partner exceptions to the global rule documented in ADR-0044; the ordinary Sales correction workflow remains unchanged.
 
 No tests here prove transaction atomicity or live permission enforcement: they prove the shared interface and consumer contracts. Real-schema failpoints, concurrency, full Product families/remainder replay, live outputs, permissions and release acceptance remain mandatory in the named dependent tickets.
-

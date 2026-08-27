@@ -4,6 +4,7 @@ import { ErpInlineState } from "@/components/erp";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { FaHistory, FaLink, FaPlus } from "react-icons/fa";
 import {
   ErpBadge,
@@ -19,6 +20,7 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { apiError, fromIsoDate, toIsoDate } from "@/features/hr/hrUi";
+import { hrDisplayLabel } from "@/features/hr/hrDisplay";
 import { personnelAssignmentHref } from "@/features/hr/foundationInteraction";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import { hrAPI } from "@/lib/api";
@@ -186,7 +188,7 @@ export default function PositionHistoryPage() {
             </div>
           </ErpSection>
           {(data.detail?.linked?.withdrawals || []).length > 0 && <ErpSection title="اصلاحات تخصیص"><div className="space-y-3">{data.detail.linked.withdrawals.map((row: any) => <ErpCard key={row.id} className="p-3"><p className="font-bold">{row.action === "CANCELLED" ? "لغو" : row.action === "VOIDED" ? "ابطال" : "پایان"} تخصیص</p><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{new Date(row.effectiveAt).toLocaleDateString("fa-IR")} · {row.reason}</p></ErpCard>)}</div></ErpSection>}
-          {(data.detail?.linked?.hiringApplications || []).length > 0 && <ErpSection title="پرونده‌های جذب مرتبط"><div className="space-y-3">{data.detail.linked.hiringApplications.map((row: any) => <ErpCard key={row.id} className="p-3"><div className="flex items-center justify-between gap-2"><p className="font-bold">{row.stage} · {row.outcome || "در جریان"}</p><ErpButton label="مشاهده" href={`/dashboard/hr/hiring/${row.id}`} variant="ghost" /></div></ErpCard>)}</div></ErpSection>}
+          {(data.detail?.linked?.hiringApplications || []).length > 0 && <ErpSection title="پرونده‌های جذب مرتبط"><div className="space-y-3">{data.detail.linked.hiringApplications.map((row: any) => <ErpCard key={row.id} className="p-3"><div className="flex items-center justify-between gap-2"><p className="font-bold">{hrDisplayLabel(row.stage)} · {row.outcome ? hrDisplayLabel(row.outcome) : "در جریان"}</p><ErpButton label="مشاهده" href={`/dashboard/hr/hiring/${row.id}`} variant="ghost" /></div></ErpCard>)}</div></ErpSection>}
           {(data.recruitmentRequests || []).length > 0 && (
             <ErpSection title="درخواست‌های جذب مرتبط">
               <div className="space-y-3">
@@ -221,18 +223,32 @@ function AssignmentSection({ title, rows, positionId }: { title: string; rows: a
     <ErpSection title={title}>
       <div className="space-y-3">
         {rows.map((row) => (
-          <ErpCard key={row.id} className="p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              {row.personnel?.id
-                ? <ErpButton label={row.personnel.name} href={personnelAssignmentHref(row.personnel.id, positionId)} variant="ghost" />
-                : <p className="font-bold">اطلاعات متصدی محدود است</p>}
-              <ErpBadge tone={row.type === "ACTING" ? "info" : "neutral"}>{assignmentTypeLabel[row.type]}</ErpBadge>
-            </div>
-            <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{relationshipLabel[row.relationshipStatus]} · {new Date(row.effectiveFrom).toLocaleDateString("fa-IR")} تا {row.effectiveTo ? new Date(row.effectiveTo).toLocaleDateString("fa-IR") : "ادامه دارد"}</p>
-          </ErpCard>
+          row.personnel?.id ? (
+            <Link href={personnelAssignmentHref(row.personnel.id, positionId)} key={row.id} className="block rounded-[var(--sds-radius-card)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]">
+              <ErpCard interactive className="p-3">
+                <AssignmentCardContent row={row} />
+              </ErpCard>
+            </Link>
+          ) : (
+            <ErpCard key={row.id} className="p-3">
+              <AssignmentCardContent row={row} />
+            </ErpCard>
+          )
         ))}
         {!rows.length && <ErpEmptyState icon={FaHistory} title="موردی در این گروه نیست" />}
       </div>
     </ErpSection>
+  );
+}
+
+function AssignmentCardContent({ row }: { row: any }) {
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-bold">{row.personnel?.name || "اطلاعات متصدی محدود است"}</p>
+        <ErpBadge tone={row.type === "ACTING" ? "info" : "neutral"}>{assignmentTypeLabel[row.type]}</ErpBadge>
+      </div>
+      <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{relationshipLabel[row.relationshipStatus]} · {new Date(row.effectiveFrom).toLocaleDateString("fa-IR")} تا {row.effectiveTo ? new Date(row.effectiveTo).toLocaleDateString("fa-IR") : "ادامه دارد"}</p>
+    </>
   );
 }

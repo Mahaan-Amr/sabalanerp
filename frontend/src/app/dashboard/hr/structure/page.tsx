@@ -875,9 +875,6 @@ export default function HrStructurePage() {
             {deleteError && <ErpInlineState kind="error" title={deleteError} />}
             {deletePreviewLoading && <ErpLoading />}
             {deletePreview && deletePreview.resolvable.length > 0 && <ErpInlineState kind="stale" title="ابتدا وابستگی‌های جاری را تعیین تکلیف کنید" actions={deletePreview.resolvable.map((dependency) => ({ label: `${foundationDependencyLabel(dependency.kind)} (${dependency.count.toLocaleString("fa-IR")})`, href: dependency.href, variant: "outline" }))} />}
-            {deletePreview && deletePreview.snapshotEligible.length > 0 && (
-              <ErpInlineState kind="empty" title={`${deletePreview.snapshotEligible.map((item) => `${foundationDependencyLabel(item.kind)}: ${item.count.toLocaleString("fa-IR")}`).join(" · ")} به‌صورت snapshot نسخه‌دار باقی می‌ماند و حذف نمی‌شود.`} />
-            )}
             {deletePreview?.eligible && (
               <>
                 <p className="text-sm text-[var(--sds-text-secondary)]">تعریف جاری از پایگاه داده حذف می‌شود؛ کد آن بعداً قابل استفاده مجدد است و سابقه با شماره نسخه متمایز می‌ماند. کد دقیق را وارد کنید: <b>{deleteTarget.item.code}</b></p>

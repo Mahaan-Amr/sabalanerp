@@ -50,6 +50,16 @@ assert.equal(legacyProjection?.length, '0.8');
 assert.equal(legacyProjection?.lengthUnit, 'm');
 assert.equal(legacyProjection?.width, '0.4');
 assert.equal(legacyProjection?.widthUnit, 'm');
+for (const [description, legacyDescription, expected] of [
+  [undefined, 'legacy note', 'legacy note'], ['canonical note', 'old note', 'canonical note'],
+  ['', 'cleared note', ''], [undefined, { invalid: true }, undefined], [undefined, undefined, undefined]
+] as const) {
+  const described: CanonicalProductGraph = { ...graph, rows: [{ ...graph.rows[0], description,
+    commercial: { ...graph.rows[0].commercial,
+      legacySnapshot: legacyDescription === undefined ? {} : { description: legacyDescription } } }] };
+  assert.equal(projectCanonicalGraphToLegacyProducts(described)[0].description, expected);
+  assert.equal(projectCanonicalProductGraph(described, 'pdf').products[0].description, expected);
+}
 
 const pricedLongitudinalGraph = parseCanonicalProductGraph({
   schemaVersion: 1,

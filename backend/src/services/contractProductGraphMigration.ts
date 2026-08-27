@@ -36,7 +36,8 @@ export const buildLegacyContractMigrationPlan = (contract: {
   readonly id: string;
   readonly totalAmount: Prisma.Decimal | number | string | null;
   readonly contractData: unknown;
-}, revision = 0, calculationPolicy: CalculationPolicySnapshot = CURRENT_CONTRACT_PRODUCT_POLICY) => {
+}, revision = 0, calculationPolicy: CalculationPolicySnapshot = CURRENT_CONTRACT_PRODUCT_POLICY,
+  recoverRemainingChildrenOnWrite = false) => {
   /*
    * SalesContract.totalAmount is the preserved contract-envelope total. It can
    * include standalone services and exclude a contract-level discount, while
@@ -48,6 +49,7 @@ export const buildLegacyContractMigrationPlan = (contract: {
     contractId: contract.id,
     revision,
     calculationPolicy,
+    recoverRemainingChildrenOnWrite,
     products: legacyProducts(contract.contractData)
   });
 };

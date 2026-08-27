@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - "backend/**"
+      - "packages/partner-sales-contracts/**"
       - "docker-compose.local.yml"
       - "docker-compose.prod.yml"
       - "scripts/check-database-client-ownership.mjs"
@@ -31,6 +32,8 @@ jobs:
       - run: npm run architecture:check
       - run: npm ci --prefix packages/contract-product-graph
       - run: npm run build:contract-product-graph
+      - run: npm ci --prefix packages/partner-sales-contracts
+      - run: npm run build:partner-sales-contracts
       - run: npm ci --prefix backend
       - run: npm run lint:backend
       - run: npm run build:backend

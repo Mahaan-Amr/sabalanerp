@@ -181,6 +181,8 @@ export {
 } from './operationIdentityRepair';
 export {
   projectCanonicalGraphToLegacyProducts,
+  projectCanonicalRemainderConsumption,
+  type CanonicalProjectedRemainderConsumption,
   projectCanonicalProductGraph,
   type CanonicalContractProjection,
   type CanonicalProjectedOperation,

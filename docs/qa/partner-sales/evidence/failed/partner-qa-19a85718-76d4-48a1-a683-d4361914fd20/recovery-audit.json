@@ -1,0 +1,40 @@
+{
+  "auditedAt": "2026-08-27T08:01:38.488Z",
+  "audit": [
+    {
+      "namespace": "partner-qa-0fde2540-086c-42fb-a2d2-fcced0abe4a0",
+      "before": 0,
+      "after": 0
+    },
+    {
+      "namespace": "partner-qa-ea4feec3-c012-4017-9baf-80e9a3b1adac",
+      "before": 0,
+      "after": 0
+    },
+    {
+      "namespace": "partner-qa-c8926512-5878-44b4-8cd9-dd3b8685b074",
+      "before": 0,
+      "after": 0
+    },
+    {
+      "namespace": "partner-qa-28661d16-ba13-4ea5-91d3-0c48f6ac275e",
+      "before": 4,
+      "after": 0
+    },
+    {
+      "namespace": "partner-qa-d5d00d5e-0325-4976-b2e7-ad79f1772115",
+      "before": 0,
+      "after": 0
+    },
+    {
+      "namespace": "partner-qa-62e1ccc7-aca8-4d82-b1b8-c67cb2d0d15d",
+      "before": 4,
+      "after": 0
+    },
+    {
+      "namespace": "partner-qa-5fed5efa-196a-44f5-af02-8caf261ca78b",
+      "before": 0,
+      "after": 0
+    }
+  ]
+}

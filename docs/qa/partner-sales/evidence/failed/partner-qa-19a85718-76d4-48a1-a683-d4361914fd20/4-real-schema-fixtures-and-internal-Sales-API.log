@@ -1,0 +1,71 @@
+TAP version 13
+# Partner QA fixture namespace: partner-qa-0fde2540-086c-42fb-a2d2-fcced0abe4a0
+# Subtest: internal Sales create grant permits Standard and Collaboration entry, but not edit; session identity is isolated
+ok 1 - internal Sales create grant permits Standard and Collaboration entry, but not edit; session identity is isolated
+  ---
+  duration_ms: 8692.2882
+  ...
+# Partner QA fixture namespace: partner-qa-ea4feec3-c012-4017-9baf-80e9a3b1adac
+# Partner QA fixture namespace: partner-qa-c8926512-5878-44b4-8cd9-dd3b8685b074
+# Partner QA fixture namespace: partner-qa-28661d16-ba13-4ea5-91d3-0c48f6ac275e
+# Subtest: fixture failure cleans only its own rows, preserving a concurrent namespace and existing data
+ok 2 - fixture failure cleans only its own rows, preserving a concurrent namespace and existing data
+  ---
+  duration_ms: 40243.9169
+  ...
+# Partner QA fixture namespace: partner-qa-28661d16-ba13-4ea5-91d3-0c48f6ac275e
+# Partner QA fixture namespace: partner-qa-d5d00d5e-0325-4976-b2e7-ad79f1772115
+# Subtest: duplicate seed fails atomically without replacing another run owner
+not ok 3 - duplicate seed fails atomically without replacing another run owner
+  ---
+  duration_ms: 14619.6706
+  location: 'D:\\sabalanerp\\tests\\partner-sales\\fixtures.integration.test.mjs:23:1'
+  failureType: 'testCodeFailure'
+  error: 'fetch failed'
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  stack: |-
+    node:internal/deps/undici/undici:13484:13
+    async preflight (file:///D:/sabalanerp/tests/partner-sales/harness/safety.mjs:75:22)
+    async localSql (file:///D:/sabalanerp/tests/partner-sales/harness/safety.mjs:83:3)
+    async removeFixture (file:///D:/sabalanerp/tests/partner-sales/harness/fixtures.mjs:27:3)
+    async TestContext.<anonymous> (file:///D:/sabalanerp/tests/partner-sales/fixtures.integration.test.mjs:28:15)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Partner QA fixture namespace: partner-qa-62e1ccc7-aca8-4d82-b1b8-c67cb2d0d15d
+# Partner QA fixture namespace: partner-qa-5fed5efa-196a-44f5-af02-8caf261ca78b
+# Subtest: cleanup refuses an unexpected foreign reference and rolls back its own deletions
+not ok 4 - cleanup refuses an unexpected foreign reference and rolls back its own deletions
+  ---
+  duration_ms: 34110.1874
+  location: 'D:\\sabalanerp\\tests\\partner-sales\\fixtures.integration.test.mjs:31:1'
+  failureType: 'hookFailed'
+  error: 'fetch failed'
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  stack: |-
+    node:internal/deps/undici/undici:13484:13
+    async preflight (file:///D:/sabalanerp/tests/partner-sales/harness/safety.mjs:75:22)
+    async localSql (file:///D:/sabalanerp/tests/partner-sales/harness/safety.mjs:83:3)
+    async removeFixture (file:///D:/sabalanerp/tests/partner-sales/harness/fixtures.mjs:27:3)
+    async TestHook.run (node:internal/test_runner/test:932:9)
+    async Test.runHook (node:internal/test_runner/test:850:9)
+    async after (node:internal/test_runner/test:890:9)
+    async Test.run (node:internal/test_runner/test:939:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: cleanup refuses a future cascading FK to a unique non-ID key
+ok 5 - cleanup refuses a future cascading FK to a unique non-ID key
+  ---
+  duration_ms: 17010.2197
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 3
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 115009.7686

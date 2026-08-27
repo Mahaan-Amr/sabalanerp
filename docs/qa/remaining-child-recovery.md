@@ -43,7 +43,7 @@ Frontend production build retains pre-existing lint/Browserslist warnings. The w
 | Failure/retry | Typed 422, row/source/producer/descendant guidance, preserved recovery journal, retry without duplicate submission |
 | Unrelated families | Independent legacy rows, canonical stair layers, longitudinal/stair/slab/prepared rows and existing broader suites |
 
-All runtime tests use the existing `sabalanerp-local` project and its local PostgreSQL on port 55432. No production connection, business correction, bulk historical rewrite, external message, or deployment is performed. The schema has 173 applied migrations. Real UI tests use namespaced QA customer/project/catalog fixtures; service integration tests roll back their own transaction. The frontend runtime is the repository's local development target; the separate production frontend build also passes.
+All runtime tests use the existing `sabalanerp-local` project and its local PostgreSQL on port 55432. No production connection, business correction, bulk historical rewrite, external message, or deployment is performed. The initial schema baseline had 173 applied migrations; the late upstream integration audit below records 181. Real UI tests use namespaced QA customer/project/catalog fixtures; service integration tests roll back their own transaction. The frontend runtime is the repository's local development target; the separate production frontend build also passes.
 
 ### Additional regressions caught before publication
 
@@ -93,9 +93,20 @@ The earlier full `docker:verify` passed. A final invocation was cancelled after 
 
 The final candidate also includes the independently reviewed, two-file CI setup correction from `5e8d036d5386daa9bac23163c12398234ea129b8`, cherry-picked as `3e368139005e95df7571ab5e5149970bc1d41386`: both Partner workflow checkouts initialize the pinned public Inquiry submodule and disable persisted credentials; path filters include the gitlink and `.gitmodules`. No runner, inventory, application or schema behavior changed. Hosted run `33055122225` failed at the unit step, but its log download timed out; the exact clean `678359aa` locally reproduced the missing-submodule ENOENT. Initializing the pinned gitlink made unit7 and inventory freshness pass without removing inventory entries. Hosted success must be verified after publication, not inferred from local checks.
 
+### Late upstream schema integration
+
+The publication fetch discovered that another task had published `7bd2821179f2da97474c040e5c589b8c46ce274f` (#315) after the agreed `678359aa` baseline. It adds 13 schema/migration/audit/test files, including eight Partner migrations, and was preserved by the conflict-free merge `a1ed943095ace31c583a524aa03aa3bcb9a694d4`. The remaining-stone/CI patch stayed byte-identical across that merge: SHA256 `B36081F32F8545D6046B0286784D58203808F17E4A2C19C50286AF93C29C9854`, approved independently by Standards and Spec before this report addendum. No upstream schema file was edited by this task.
+
+A fresh read-only audit found 181 applied migrations and confirmed all eight Partner SQL checksums against the integrated Git files, zero Partner rows, zero pair violations, zero disabled Partner triggers and closed activation. The #315 owner had already applied those migrations to the existing local database; this task performed no migration. The running backend image still contained the older 173-migration schema/client, so it is not represented as a newly rebuilt #315 runtime. Instead, the isolated worktree's Prisma client was regenerated from the integrated schema, the complete backend build passed, and the actual remaining-recovery create/edit/failed-save/read-only/signed-authorization transaction suite passed again against the 181-migration database and rolled back its fixtures. All six print suites and recovery-guidance tests passed again. This explicitly separates the earlier visual runtime evidence from the new-client integration evidence.
+
+After the frontend runtime handoff, the separate unpublished Partner UI lane reported a development-only module-loader failure. That lane and its fix are outside this 29-file candidate and its tested routes; the coordinator owns its separate acceptance. No success is claimed for unpublished Partner UI routes or for every possible platform action.
+
+The upstream #315 Backend architecture run `33055625370` also failed at the backend build. Unlike the inaccessible zipped logs, its hosted check annotations were accessible and explicitly reported missing `@sabalanerp/partner-sales-contracts` and `/testing` type declarations. The workflow built the graph package but omitted the new public package. The publication candidate now includes a narrow thirtieth file: build/install the public package before installing/building backend, and watch that package in PR path filters. All existing lint, architecture, deployment/recovery/notification tests and configuration checks remain enabled. This is build-order wiring, not an application behavior change.
+
 Scoped inventory (no production frontend component, database schema, or deployment change; PDF normalization and cache identity are included):
 
 ```text
+.github/workflows/backend-architecture-guardrails.yml
 .github/workflows/partner-sales.yml
 CONTEXT.md
 backend/package.json

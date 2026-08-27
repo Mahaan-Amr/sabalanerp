@@ -71,9 +71,32 @@ The local audit scanned 260 stored contracts (including two interrupted local QA
 
 Both independent Standards and Spec reviewers passed candidate v3: SHA256 `03DBE6C2680F647C10E2EE879D91AF04817037A9A902FE752B2F40012C9FC643`, retained locally at `.scratch/release-remaining-qa/candidate-v3.patch`. It contains 21 scoped files against the base above. Reviewers independently re-ran the remaining-recovery regressions and confirmed that the opaque historical-row exemption cannot expose new inventory. Diagnostic scripts, raw local IDs, screenshots and PDFs are not part of the committed application patch.
 
+After the PDF defects were fixed, both reviewers independently passed v6, SHA256 `086CECE514E8FB2D7513C5FF6EC904EA87650DFB3730F3947EBB6A393672AC99`, retained at `.scratch/release-remaining-qa/candidate-v6.patch`. It covers 27 scoped files against `58232f89b96f3877aabab4a6e0f3fca37c7891e8`. The final extra regression proves canonical already-paid material stays zero even without its redundant legacy marker and with contradictory copied legacy prices; the old print code failed with 999/999 and the corrected output is 0/0.
+
+The separately reviewed Partner package/dependency update `678359aa8ade8abc0e69e44dc4c5285936b3942d` was integrated without conflicts in merge `4e4dbd9786c081dd4b49b9271596bccb2cc0288d`. Its 24 package tests, package and whole-frontend typechecks, backend build, seven harness unit tests, three foundation tests and inventory freshness check passed locally. No uncommitted Partner application lane was included. The user's shared main checkout/index was not altered.
+
+### Browser acceptance execution
+
+The selected broad matrix contains 39 cases: 12 CRM/inventory convergence, five financial-review, 18 platform reference-surface, two dashboard-shell, one remaining-chain failure/recovery, and one real remaining-chain create/edit/PDF case. The initial run completed 27 unique cases before a coordinated runtime handoff; all remaining 11 non-persistence cases then completed successfully (nine first-attempt passes and two successful retries), bringing the broad total to 38 before the final real-flow rerun.
+
+The final 11-case run is retained at `.scratch/release-remaining-qa/browser-final-rest`. Its two first-attempt timing failures were a 15-second login navigation timeout before the Accounting route and a 120-second multi-route Guard navigation timeout. Neither required an application change, disabled assertion or increased test timeout; both passed the existing retry. Earlier cold-route compilation also caused an Accounting loop timeout, and an earlier real-flow run needed a login retry. These remain local development-runtime timing limitations, not evidence of a timing-flake-free suite.
+
+The final real-flow rerun passed on its first attempt in 52.7 seconds, completing all 39 selected cases. Command: `node scripts/run-design-system-e2e.mjs remaining-recovery-real.spec.ts --output=.scratch/release-remaining-qa/browser-real-final`. It verified actual HTTP 201 creation, reload, both PDF downloads, HTTP 200 authorized no-change edit, and the accounting view. All five row identities, 23,071,875 toman total, allocations 5/5/1 and final inventory remained unchanged; no console errors or HTTP 500 responses were observed. Desktop 1440px and mobile 390px screenshots in both themes, the edit/accounting screenshots, all three original-PDF pages and both summary-PDF pages were visually inspected. Source areas are 0.75/0.375/0.325 square meters with zero child material charge. Headers, RTL tables, page flow and totals were readable. Raw historical description text, including existing decimal artifacts, was preserved rather than silently rewritten.
+
+Artifacts are retained locally under `.scratch/release-remaining-qa/browser-real-final/remaining-recovery-real-re-5d039-ut-money-or-inventory-drift-desktop-chromium/`; final PDF page renders are `.scratch/release-remaining-qa/final-original-*.png` and `final-summary-*.png`. These diagnostic artifacts are excluded from publication.
+
+### Final integrated runtime and CI gate
+
+The final backend was built from the integrated application candidate at `4e4dbd9786c081dd4b49b9271596bccb2cc0288d`; later changes are CI/docs only. Its running image identity is `sha256:b496f2a20ac3bb2940dda44b150ea87063db3131db9a3073a1765aad4edb2de5`, with manifest `sha256:28aadb179ffbd8a5c567f53c2e972ada436639ae152c5f613cfc9179b27247ba`. Container and host backend builds, backend lint, whole-frontend typecheck and the integrated production frontend build passed. Final read-only checks confirmed all five Compose services healthy, backend and frontend-proxy database health `OK`, and Inquiry HTTP 200. The exact fixture audit returned empty customer, product and contract lists. The original local database/storage selection was retained throughout; no alternate stack was created.
+
+The earlier full `docker:verify` passed. A final invocation was cancelled after discovering that this command rebuilds/promotes services rather than only checking health; it is not counted as a final successful gate. No frontend or Inquiry container was recreated by that invocation. The final read-only checks above establish runtime health independently. The frontend runtime was explicitly returned to the coordinated Partner UI owner after browser testing, artifact retention and the cleanup audit.
+
+The final candidate also includes the independently reviewed, two-file CI setup correction from `5e8d036d5386daa9bac23163c12398234ea129b8`, cherry-picked as `3e368139005e95df7571ab5e5149970bc1d41386`: both Partner workflow checkouts initialize the pinned public Inquiry submodule and disable persisted credentials; path filters include the gitlink and `.gitmodules`. No runner, inventory, application or schema behavior changed. Hosted run `33055122225` failed at the unit step, but its log download timed out; the exact clean `678359aa` locally reproduced the missing-submodule ENOENT. Initializing the pinned gitlink made unit7 and inventory freshness pass without removing inventory entries. Hosted success must be verified after publication, not inferred from local checks.
+
 Scoped inventory (no production frontend component, database schema, or deployment change; PDF normalization and cache identity are included):
 
 ```text
+.github/workflows/partner-sales.yml
 CONTEXT.md
 backend/package.json
 backend/src/routes/sales.ts
@@ -86,6 +109,7 @@ backend/src/utils/__tests__/printTemplateRemainingRecovery.test.ts
 backend/src/utils/printTemplate.ts
 backend/src/utils/salesContractPdf.ts
 docs/adr/0054-recover-remaining-allocations-only-at-authorized-writes.md
+docs/qa/partner-sales/README.md
 docs/qa/remaining-child-recovery.md
 frontend/src/features/contract-creation/services/__tests__/contractSubmissionFailure.test.ts
 packages/contract-product-graph/package.json

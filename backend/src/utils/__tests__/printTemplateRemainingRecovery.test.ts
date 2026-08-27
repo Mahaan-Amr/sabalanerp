@@ -41,6 +41,12 @@ assert.deepEqual(sourceRows.slice(1, 4).map(row => [row[4], row[5], row[6], row[
 ], 'print uses consumed source geometry/count, not requested output quantity');
 assert.deepEqual(projected.map(row => row.description), products.map((row: any) => row.description ?? ''),
   'projection retains each row’s legacy note');
+const withoutLegacyPaidMarker = projected.map((row, index) => index >= 1 && index <= 3
+  ? { ...row, meta: {}, pricePerSquareMeter: 999, originalTotalPrice: 999 } : row);
+const canonicalPaidRows = rows(renderContractHtml({ ...contract,
+  contractData: { products: withoutLegacyPaidMarker } } as any), 'سنگ مصرفی');
+assert.deepEqual(canonicalPaidRows.slice(1, 4).map(row => row.slice(-2)), [['0', '0'], ['0', '0'], ['0', '0']],
+  'canonical paid-source allocation does not depend on a redundant legacy marker for zero material charge');
 for (const variant of ['original', 'summary'] as const) {
   const document = renderContractHtml(contract as any, { variant });
   if (variant === 'original') assert.ok(document.includes(products[0].description), 'root note survives canonical projection');

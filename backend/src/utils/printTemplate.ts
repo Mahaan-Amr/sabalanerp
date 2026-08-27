@@ -990,8 +990,9 @@ const normalizeProducts = (
 
       const remainingCount = Array.isArray(product?.remainingStones) ? product.remainingStones.length : 0;
       const usedRemainingCount = Array.isArray(product?.usedRemainingStones) ? product.usedRemainingStones.length : 0;
-      const sourceMaterials = buildSourceMaterialRows(product, consumption.filter(source => source.productRowId === rowId));
-      const isFromRemainingStone = Boolean(product?.meta?.remainingSource);
+      const rowConsumption = consumption.filter(source => source.productRowId === rowId);
+      const sourceMaterials = buildSourceMaterialRows(product, rowConsumption);
+      const isFromRemainingStone = rowConsumption.length > 0 || Boolean(product?.meta?.remainingSource);
       const sourceMaterialSummary = sourceMaterials.length > 0
         ? `${sourceMaterials[0].dimensionsOrAmount}، ${sourceMaterials[0].quantityOrArea}`
         : EMPTY;

@@ -569,10 +569,16 @@ router.get('/positions/capacity-summary', viewAccess, async (_req, res) => {
 
 router.get('/positions/:id/history', viewAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const editDecision = await authorizeHrUser(prisma, actorId(req), {
-      workspaceLevel: 'EDIT',
-      feature: { code: 'ORGANIZATIONAL_STRUCTURE', level: 'EDIT' },
-    });
+    const [editDecision, personnelViewDecision] = await Promise.all([
+      authorizeHrUser(prisma, actorId(req), {
+        workspaceLevel: 'EDIT',
+        feature: { code: 'ORGANIZATIONAL_STRUCTURE', level: 'EDIT' },
+      }),
+      authorizeHrUser(prisma, actorId(req), {
+        workspaceLevel: 'VIEW',
+        feature: { code: 'PERSONNEL', level: 'VIEW' },
+      }),
+    ]);
     const position = await prisma.hrPosition.findUnique({
       where: { id: req.params.id },
       include: {
@@ -619,7 +625,7 @@ router.get('/positions/:id/history', viewAccess, async (req: WorkspaceRequest, r
           effectiveFrom: assignment.effectiveFrom,
           effectiveTo: assignment.effectiveTo,
           hireConvertedAt: assignment.employmentRelationship.hiringApplication?.convertedAt ?? null,
-          personnel: editDecision.allowed ? {
+          personnel: personnelViewDecision.allowed ? {
             id: assignment.employmentRelationship.personnel.id,
             name: `${assignment.employmentRelationship.personnel.firstName} ${assignment.employmentRelationship.personnel.lastName}`,
           } : null,
@@ -643,7 +649,7 @@ router.get('/positions/:id/history', viewAccess, async (req: WorkspaceRequest, r
           changes: foundationHistoryDelta(change.afterJson),
           createdAt: change.createdAt,
         })),
-        capabilities: { canEditCapacity: editDecision.allowed, canViewAssigneeIdentity: editDecision.allowed },
+        capabilities: { canEditCapacity: editDecision.allowed, canViewAssigneeIdentity: personnelViewDecision.allowed },
       },
     });
   } catch (error) { handleError(res, error, 'HR position history'); }
@@ -1891,7 +1897,7 @@ router.post('/relationships/:id/transfer-primary', editAccess, async (req: Works
   } catch (error) { handleError(res, error, 'Transfer primary assignment'); }
 });
 
-const assignmentWithdrawalHandler = (action: 'CANCELLED' | 'VOIDED' | 'ENDED') => async (req: WorkspaceRequest, res: Response) => {
+const assignmentWithdrawalHandler = (action: 'CANCELLED' | 'ENDED') => async (req: WorkspaceRequest, res: Response) => {
   try {
     const reason = textValue(req.body.reason);
     if (!reason) throw new Error('دلیل برداشت تخصیص الزامی است.');
@@ -1907,9 +1913,8 @@ const assignmentWithdrawalHandler = (action: 'CANCELLED' | 'VOIDED' | 'ENDED') =
       if (!assignment) throw new Error('تخصیص پیدا نشد.');
       const now = new Date();
       const effectiveAt = action === 'ENDED' ? parseDate(req.body.effectiveTo || req.body.effectiveAt, 'تاریخ پایان') : now;
-      if (action === 'CANCELLED' && assignment.effectiveFrom <= now) throw new Error('فقط تخصیصی که هنوز آغاز نشده است قابل لغو است؛ برای تخصیص جاری از پایان یا ابطال استفاده کنید.');
+      if (action === 'CANCELLED' && assignment.effectiveFrom <= now) throw new Error('فقط تخصیصی که هنوز آغاز نشده است قابل لغو است؛ تخصیص جاری را پایان دهید.');
       if (action === 'CANCELLED' && assignment.effectiveTo) throw new Error('تخصیص پایان‌یافته قابل لغو نیست.');
-      if (action === 'VOIDED' && (assignment.effectiveTo || req.body.confirmNeverEffective !== true)) throw new Error('ابطال فقط برای ثبت بازیابی‌نشده‌ای مجاز است که هرگز واقعیت نداشته؛ تأیید صریح این طبقه‌بندی الزامی است.');
       if (action === 'ENDED' && (assignment.effectiveFrom > now || assignment.effectiveTo)) throw new Error('فقط تخصیص جاری و باز قابل پایان‌دادن است؛ تخصیص آینده را لغو کنید.');
       if (action === 'ENDED' && (effectiveAt < assignment.effectiveFrom || effectiveAt > now)) throw new Error('تاریخ پایان باید بین شروع تخصیص و زمان جاری باشد.');
       const withdrawal = await tx.hrEmploymentAssignmentWithdrawal.create({
@@ -1944,7 +1949,6 @@ const assignmentWithdrawalHandler = (action: 'CANCELLED' | 'VOIDED' | 'ENDED') =
 };
 
 router.post('/assignments/:id/cancel', editAccess, assignmentWithdrawalHandler('CANCELLED'));
-router.post('/assignments/:id/void', editAccess, assignmentWithdrawalHandler('VOIDED'));
 router.post('/assignments/:id/end', editAccess, assignmentWithdrawalHandler('ENDED'));
 router.put('/assignments/:id/end', editAccess, assignmentWithdrawalHandler('ENDED'));
 

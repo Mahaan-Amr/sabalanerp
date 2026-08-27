@@ -387,7 +387,6 @@ export const hrAPI = {
   createAssignment: (relationshipId: string, data: any) => api.post(`/hr/relationships/${relationshipId}/assignments`, data),
   transferPrimaryAssignment: (relationshipId: string, data: any) => api.post(`/hr/relationships/${relationshipId}/transfer-primary`, data),
   cancelAssignment: (id: string, data: { reason: string }) => api.post(`/hr/assignments/${id}/cancel`, data),
-  voidAssignment: (id: string, data: { reason: string; confirmNeverEffective: true }) => api.post(`/hr/assignments/${id}/void`, data),
   endAssignment: (id: string, data: { effectiveTo: string; reason: string }) => api.post(`/hr/assignments/${id}/end`, data),
   getSupervisorCandidates: (params: any) => api.get('/hr/supervisor-candidates', { params }),
   getMigrationPreview: () => api.get('/hr/migration/preview'),

@@ -1602,7 +1602,6 @@ function AssignmentRow({ item, endDate, setEndDate, run }: any) {
             <div className="flex flex-wrap justify-end gap-2">
               {isFuture && <ErpButton label="لغو تخصیص آینده" icon={FaUndo} tone="danger" variant="ghost" disabled={!withdrawalReason.trim()} onClick={() => run(() => hrAPI.cancelAssignment(item.id, { reason: withdrawalReason }), "تخصیص آینده لغو شد.")} />}
               {!isFuture && <ErpButton label="پایان تخصیص" icon={FaStop} tone="danger" variant="ghost" disabled={!endDate || !withdrawalReason.trim()} onClick={() => run(() => hrAPI.endAssignment(item.id, { effectiveTo: toIsoDate(endDate), reason: withdrawalReason }), "تخصیص در تاریخ انتخاب‌شده پایان یافت.")} />}
-              <ErpButton label="باطل‌کردن ثبت اشتباه" icon={FaTrash} tone="danger" variant="ghost" disabled={!withdrawalReason.trim()} onClick={() => run(() => hrAPI.voidAssignment(item.id, { reason: withdrawalReason, confirmNeverEffective: true }), "تخصیص اشتباه با حفظ سابقه ممیزی باطل شد.")} />
             </div>
           </div>
         )}

@@ -35,6 +35,7 @@ import {
   unitTypeLabel,
 } from "@/features/hr/hrUi";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
+import { foundationDependencyLabel, isFoundationDeleteCredentialError } from "@/features/hr/foundationInteraction";
 
 type Tab = "units" | "jobs" | "positions" | "contexts";
 type BlockedDependency = { kind: string; count: number; href: string };
@@ -101,6 +102,7 @@ export default function HrStructurePage() {
   const [deleteTarget, setDeleteTarget] = useState<{ entityType: FoundationEntityType; item: any } | null>(null);
   const [deletePreview, setDeletePreview] = useState<DeletionPreview | null>(null);
   const [deletePreviewLoading, setDeletePreviewLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [deleteForm, setDeleteForm] = useState({ confirmationCode: "", reason: "", adminPassword: "" });
   const load = useCallback(async () => {
     try {
@@ -167,16 +169,17 @@ export default function HrStructurePage() {
     },
   });
   const openPermanentDelete = async (entityType: FoundationEntityType, item: any) => {
+    setError("");
     setDeleteTarget({ entityType, item });
     setDeletePreview(null);
     setDeletePreviewLoading(true);
+    setDeleteError("");
     setDeleteForm({ confirmationCode: "", reason: "", adminPassword: "" });
     try {
       const response = await hrAPI.getFoundationDependencies(entityType, item.id, { purpose: "deletion" });
       setDeletePreview(response.data.data);
     } catch (cause) {
-      setError(apiError(cause));
-      setDeleteTarget(null);
+      setDeleteError(apiError(cause));
     } finally {
       setDeletePreviewLoading(false);
     }
@@ -213,20 +216,32 @@ export default function HrStructurePage() {
       () => setEditTarget(null),
     );
   };
-  const permanentlyDelete = () => {
-    if (!deleteTarget) return Promise.resolve();
-    return run(
-      () => hrAPI.permanentlyDeleteFoundation(deleteTarget.entityType, deleteTarget.item.id, {
+  const closePermanentDelete = () => {
+    setDeleteTarget(null);
+    setDeletePreview(null);
+    setDeleteError("");
+    setDeleteForm({ confirmationCode: "", reason: "", adminPassword: "" });
+  };
+  const permanentlyDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      setSaving(true);
+      setDeleteError("");
+      setSuccess("");
+      await hrAPI.permanentlyDeleteFoundation(deleteTarget.entityType, deleteTarget.item.id, {
         ...deleteForm,
         entityId: deleteTarget.item.id,
         expectedUpdatedAt: deleteTarget.item.updatedAt,
-      }),
-      "تعریف جاری حذف شد و سوابق تاریخی آن با شناسه نسخه‌دار حفظ شد.",
-      () => {
-        setDeleteTarget(null);
-        setDeleteForm({ confirmationCode: "", reason: "", adminPassword: "" });
-      },
-    );
+      });
+      closePermanentDelete();
+      setSuccess("تعریف جاری حذف شد و سوابق تاریخی آن با شناسه نسخه‌دار حفظ شد.");
+      await load();
+    } catch (cause) {
+      setDeleteError(apiError(cause));
+      if (isFoundationDeleteCredentialError(cause)) setDeleteForm((current) => ({ ...current, adminPassword: "" }));
+    } finally {
+      setSaving(false);
+    }
   };
   if (loading) return <ErpLoading />;
   return (
@@ -253,7 +268,7 @@ export default function HrStructurePage() {
             {blockedDependencies.map((dependency) => (
               <ErpButton
                 key={`${dependency.kind}:${dependency.href}`}
-                label={`${dependency.kind} · ${dependency.count.toLocaleString("fa-IR")}`}
+                label={`${foundationDependencyLabel(dependency.kind)} · ${dependency.count.toLocaleString("fa-IR")}`}
                 href={dependency.href}
                 tone="warning"
                 variant="outline"
@@ -844,23 +859,24 @@ export default function HrStructurePage() {
       </ErpSheet>
       <ErpSheet
         open={Boolean(deleteTarget)}
-        onClose={() => { if (!saving) setDeleteTarget(null); }}
+        onClose={() => { if (!saving) closePermanentDelete(); }}
         title="پیش‌نمایش حذف دائمی"
         presentation="modal"
         dismissible={!saving}
         footer={
           <div className="flex flex-wrap justify-end gap-2">
-            <ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setDeleteTarget(null)} />
+            <ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={closePermanentDelete} />
             <ErpButton label="حذف دائمی" icon={FaTrash} tone="danger" disabled={saving || deletePreviewLoading || !deletePreview?.eligible || !deleteForm.reason.trim() || deleteForm.confirmationCode !== deleteTarget?.item.code || !deleteForm.adminPassword} onClick={permanentlyDelete} />
           </div>
         }
       >
         {deleteTarget && (
           <div className="space-y-3">
+            {deleteError && <ErpInlineState kind="error" title={deleteError} />}
             {deletePreviewLoading && <ErpLoading />}
-            {deletePreview && deletePreview.resolvable.length > 0 && <ErpInlineState kind="stale" title="ابتدا وابستگی‌های جاری را تعیین تکلیف کنید" actions={deletePreview.resolvable.map((dependency) => ({ label: `${dependency.kind} (${dependency.count.toLocaleString("fa-IR")})`, href: dependency.href, variant: "outline" }))} />}
+            {deletePreview && deletePreview.resolvable.length > 0 && <ErpInlineState kind="stale" title="ابتدا وابستگی‌های جاری را تعیین تکلیف کنید" actions={deletePreview.resolvable.map((dependency) => ({ label: `${foundationDependencyLabel(dependency.kind)} (${dependency.count.toLocaleString("fa-IR")})`, href: dependency.href, variant: "outline" }))} />}
             {deletePreview && deletePreview.snapshotEligible.length > 0 && (
-              <ErpInlineState kind="empty" title={`${deletePreview.snapshotEligible.map((item) => `${item.kind}: ${item.count.toLocaleString("fa-IR")}`).join(" · ")} به‌صورت snapshot نسخه‌دار باقی می‌ماند و حذف نمی‌شود.`} />
+              <ErpInlineState kind="empty" title={`${deletePreview.snapshotEligible.map((item) => `${foundationDependencyLabel(item.kind)}: ${item.count.toLocaleString("fa-IR")}`).join(" · ")} به‌صورت snapshot نسخه‌دار باقی می‌ماند و حذف نمی‌شود.`} />
             )}
             {deletePreview?.eligible && (
               <>

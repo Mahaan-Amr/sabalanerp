@@ -19,6 +19,7 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { apiError, fromIsoDate, toIsoDate } from "@/features/hr/hrUi";
+import { personnelAssignmentHref } from "@/features/hr/foundationInteraction";
 import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
 import { hrAPI } from "@/lib/api";
 
@@ -170,7 +171,7 @@ export default function PositionHistoryPage() {
             ["ended", "تخصیص‌های پایان‌یافته"],
             ["future", "تخصیص‌های آینده"],
           ] as const).map(([key, title]) => (
-            <AssignmentSection key={key} title={title} rows={groups[key]} />
+            <AssignmentSection key={key} title={title} rows={groups[key]} positionId={id} />
           ))}
           <ErpSection title="تاریخچه ساختاری و ظرفیت">
             <div className="space-y-3">
@@ -215,14 +216,16 @@ export default function PositionHistoryPage() {
   );
 }
 
-function AssignmentSection({ title, rows }: { title: string; rows: any[] }) {
+function AssignmentSection({ title, rows, positionId }: { title: string; rows: any[]; positionId: string }) {
   return (
     <ErpSection title={title}>
       <div className="space-y-3">
         {rows.map((row) => (
           <ErpCard key={row.id} className="p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="font-bold">{row.personnel?.name || "اطلاعات متصدی محدود است"}</p>
+              {row.personnel?.id
+                ? <ErpButton label={row.personnel.name} href={personnelAssignmentHref(row.personnel.id, positionId)} variant="ghost" />
+                : <p className="font-bold">اطلاعات متصدی محدود است</p>}
               <ErpBadge tone={row.type === "ACTING" ? "info" : "neutral"}>{assignmentTypeLabel[row.type]}</ErpBadge>
             </div>
             <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{relationshipLabel[row.relationshipStatus]} · {new Date(row.effectiveFrom).toLocaleDateString("fa-IR")} تا {row.effectiveTo ? new Date(row.effectiveTo).toLocaleDateString("fa-IR") : "ادامه دارد"}</p>

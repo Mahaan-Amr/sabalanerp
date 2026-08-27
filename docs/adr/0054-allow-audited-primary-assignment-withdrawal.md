@@ -1,5 +1,7 @@
 # Allow audited Primary assignment withdrawal
 
+Status: superseded by ADR-0056
+
 Human Resources may cancel a future Employment Assignment, void one that was never true, or end a real current assignment without automatically replacing its Position or ending employment. This deliberately permits an Active Employment Relationship to remain visibly flagged without a Primary assignment, because truthful administrator-controlled correction is preferable to inventing a transfer or retaining a false placement; every operation is effective-dated or explicitly voided, reasoned, and audited.
 
 ## Consequences

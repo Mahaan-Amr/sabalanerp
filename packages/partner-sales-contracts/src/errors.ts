@@ -27,13 +27,15 @@ export function partnerError(code: PartnerErrorCode): PartnerError {
 }
 // Internal codes may distinguish causes. HTTP adapters must collapse hidden existence.
 export function publicError(error: PartnerError, supportReference: string) {
-  const safe = error.status === 404 ? partnerError('NOT_FOUND') : error;
+  const code = Object.prototype.hasOwnProperty.call(ERROR_CATALOG, error.code) ? error.code : 'INVALID_PAYLOAD';
+  const canonical = partnerError(code);
+  const safe = canonical.status === 404 ? partnerError('NOT_FOUND') : canonical;
   return { ...safe, supportReference: IdSchema.parse(supportReference) };
 }
 export const PartnerErrorSchema = z.object({
   code: z.enum(Object.keys(ERROR_CATALOG) as [PartnerErrorCode, ...PartnerErrorCode[]]),
   status: z.union([z.literal(400), z.literal(403), z.literal(404), z.literal(409)]), message: z.string(),
-}).strict().refine(error => ERROR_CATALOG[error.code][0] === error.status);
+}).strict().refine(error => ERROR_CATALOG[error.code][0] === error.status && ERROR_CATALOG[error.code][1] === error.message);
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PartnerError };
 
 export function checkExpectedRevision(expected: RevisionRef, actual: RevisionRef): PartnerError | null {

@@ -19,6 +19,12 @@ test('central authorization receives all four non-bypassable Partner restriction
   assert.deepEqual(publicError(partnerError('CUSTOMER_OUT_OF_SCOPE'), 'support-313'), publicError(partnerError('NOT_FOUND'), 'support-313'));
 });
 
+test('public errors never forward a caller-supplied validator message', () => {
+  const injected = { code: 'INVALID_PAYLOAD' as const, status: 400 as const, message: 'secret validator detail', privatePayload: 'hidden' };
+  assert.deepEqual(publicError(injected, 'support-313'),
+    { ...partnerError('INVALID_PAYLOAD'), supportReference: 'support-313' });
+});
+
 test('non-Admin actors retain the same exceptions and hidden/expired authority fails closed', () => {
   const context = PermissionContextSchema.parse({
     actorId: 'manager', persona: 'INTERNAL', isAdmin: false, partnerSellerId: 'partner', partnerStatus: 'ACTIVE',

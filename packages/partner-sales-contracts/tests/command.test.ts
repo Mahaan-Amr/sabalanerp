@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { PartnerCommandSchema, compareIdempotency, canonicalHash } from '../src';
+import { PartnerCommandSchema, compareIdempotency, canonicalHash, canonicalJson } from '../src';
 
 test('commands bind version, expected state/revision and scoped idempotency intent', async () => {
   const hash = 'sha256-v1:' + 'a'.repeat(64);
@@ -15,4 +15,11 @@ test('commands bind version, expected state/revision and scoped idempotency inte
   assert.equal(compareIdempotency(key, { ...key, payloadHash: 'sha256-v1:' + 'b'.repeat(64) }), 'CONFLICT');
   assert.equal(compareIdempotency(key, { ...key, actorId: 'other' }), 'DISTINCT');
   assert.equal(await canonicalHash({ b: 2, a: 1 }), 'sha256-v1:43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777');
+});
+
+test('hashing rejects sparse arrays instead of colliding with complete array shapes', () => {
+  assert.throws(() => canonicalJson(Array(1)), TypeError);
+  assert.throws(() => canonicalJson([1, , 3]), TypeError);
+  assert.equal(canonicalJson([]), '[]');
+  assert.equal(canonicalJson([null]), '[null]');
 });

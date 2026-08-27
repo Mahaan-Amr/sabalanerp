@@ -8,7 +8,14 @@ import { HashSchema, IdSchema } from './primitives';
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'number' && Number.isSafeInteger(value) && !Object.is(value, -0)) return JSON.stringify(value);
-  if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
+  if (Array.isArray(value)) {
+    const items: string[] = [];
+    for (let index = 0; index < value.length; index++) {
+      if (!Object.prototype.hasOwnProperty.call(value, index)) throw new TypeError('Sparse arrays are not canonical JSON');
+      items.push(canonicalJson(value[index]));
+    }
+    return '[' + items.join(',') + ']';
+  }
   if (typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype) {
     return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonicalJson((value as Record<string, unknown>)[key])).join(',') + '}';
   }

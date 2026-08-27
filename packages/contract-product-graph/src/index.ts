@@ -1,3 +1,10 @@
+export { calculateProductOperationsTechnical } from './operationsTechnical';
+export type {
+  ProductOperationsTechnicalInput, ProductOperationsTechnicalResult,
+  ProductOperationsTechnicalCalculation, TechnicalToolSelection, TechnicalFinishingSelection,
+  TechnicalToolSelectionResult, TechnicalFinishingSelectionResult,
+} from './operationsTechnical';
+
 export {
   parseCanonicalDecimal,
   type CanonicalDecimal

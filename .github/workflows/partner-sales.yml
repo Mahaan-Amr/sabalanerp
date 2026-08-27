@@ -28,6 +28,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm --prefix packages/contract-product-graph ci --ignore-scripts
       - run: npm run build:contract-product-graph
+      - run: npm --prefix packages/contract-product-graph run test:technical-operations
       - run: npm --prefix packages/partner-sales-contracts ci --ignore-scripts
       - run: npm run build:partner-sales-contracts
       - run: npm --prefix frontend ci --ignore-scripts

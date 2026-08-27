@@ -167,6 +167,28 @@ test('commercial decimal evidence is preserved exactly, not rounded by database 
   assert.equal((await db.query('SELECT quantity::text AS quantity FROM partner_case_row_bindings WHERE "productRowId"=$1',[`${id}-precise-row`])).rows[0].quantity,quantity);
 }));
 
+test('a sealed historical revision cannot acquire new payment plans or installments', () => transaction(async (db, id) => {
+  await seedPair(db, id);
+  await db.query(`INSERT INTO partner_payment_plans (id,"caseId","caseRevision",purpose,version,"effectiveDate",evidence,"integrityHash")
+    VALUES ($1,$1,1,'RETAIL',1,CURRENT_DATE,'{}',$2)`, [id, hash]);
+  await db.query(`INSERT INTO partner_payment_installments (id,"planId","dueDate",amount,currency,method,evidence)
+    VALUES ($2,$1,CURRENT_DATE,10,'IRT','CASH','{}')`, [id,`${id}-installment`]);
+  await db.query('SET CONSTRAINTS ALL IMMEDIATE');
+  // Historical fixture setup only, on the verified local superuser connection:
+  // mark this rollback-only fixture as assembled in an older transaction. Restore
+  // ALL constraint/trigger enforcement before exercising the SQL write boundary.
+  // This avoids committing a numbered Case that retention forbids cleaning up.
+  await db.query("SET LOCAL session_replication_role = 'replica'");
+  try { await db.query('UPDATE partner_case_revisions SET "assemblyTransaction"=0 WHERE "caseId"=$1', [id]); }
+  finally { await db.query("SET LOCAL session_replication_role = 'origin'"); }
+  await db.query('SAVEPOINT sealed_plan');
+  await assert.rejects(db.query(`INSERT INTO partner_payment_plans (id,"caseId","caseRevision",purpose,version,"effectiveDate",evidence,"integrityHash")
+    VALUES ($2,$1,1,'SABALAN',1,CURRENT_DATE,'{}',$3)`, [id,`${id}-late-plan`,hash]), { code: '23514' });
+  await db.query('ROLLBACK TO SAVEPOINT sealed_plan');
+  await assert.rejects(db.query(`INSERT INTO partner_payment_installments (id,"planId","dueDate",amount,currency,method,evidence)
+    VALUES ($2,$1,CURRENT_DATE,10,'IRT','CASH','{}')`, [id,`${id}-late-installment`]), { code: '23514' });
+}));
+
 test('concurrent command writers serialize at the unique idempotency key without leaving fixtures', async () => {
   const connectionString = localDatabaseUrl();
   const first = new Client({ connectionString });

@@ -9,3 +9,7 @@ export * from './commands';
 export * from './events';
 export * from './ports';
 export * from './graph-adapter';
+export * from './inquiry-v2';
+export * from './workspaces-v2';
+export * from './management-commands-v2';
+export * from './ports-v2';

@@ -15,6 +15,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "tsx src/__tests__/canonicalDecimal.test.ts && tsx src/__tests__/productGraphCommand.test.ts && tsx src/__tests__/packingPricing.test.ts && tsx src/__tests__/longitudinalPolicy.test.ts && tsx src/__tests__/operationsPolicy.test.ts && tsx src/__tests__/remainderPolicy.test.ts && tsx src/__tests__/stairPolicy.test.ts && tsx src/__tests__/stairLayerPolicy.test.ts && tsx src/__tests__/slabPolicy.test.ts && tsx src/__tests__/legacyMigration.test.ts && tsx src/__tests__/projections.test.ts",
+    "test:remaining-recovery": "tsx src/__tests__/remainingChildRecovery.test.ts",
     "typecheck": "tsc --noEmit",
     "prepack": "npm run build"
   },

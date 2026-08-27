@@ -1,10 +1,13 @@
 {
   "name": "@sabalanerp/partner-sales-contracts",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "commonjs",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": { "testing": ["dist/testing.d.ts"] }
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -18,10 +21,11 @@
   "scripts": {
     "build": "npm --prefix ../contract-product-graph run build && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.frontend.json",
+    "typecheck:backend:legacy": "tsc -p tsconfig.backend-legacy.json",
     "pretest": "npm run build",
     "test": "tsx --test tests/*.test.ts",
-    "test:consumer:backend": "npm run build && tsx --test tests/backend-consumer.test.ts",
-    "test:consumer:frontend": "npm run build && tsx --test tests/frontend-consumer.test.ts tests/frontend-roundtrip.test.ts",
+    "test:consumer:backend": "npm run build && npm run typecheck:backend:legacy && tsx --test tests/backend-consumer.test.ts tests/*v2.test.ts",
+    "test:consumer:frontend": "npm run build && tsx --test tests/frontend-consumer.test.ts tests/frontend-roundtrip.test.ts tests/*v2.test.ts",
     "prepack": "npm run build"
   },
   "dependencies": {

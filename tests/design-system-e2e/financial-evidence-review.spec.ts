@@ -177,6 +177,7 @@ test('list approval conflict reloads the affected summary before showing its cas
           customer: { id: 'customer-1', displayName: 'مشتری آزمون' },
           status: 'SIGNED',
           isInactive: false,
+          nextBestActions: [{ kind: 'APPROVE_FINANCIAL_INVOICE', labelFa: 'تایید مالی', visible: true, enabled: true }],
           accounting: {
             sourceStatus: 'READY', eligibleForFinancialRecords: true,
             invoiceStatus: 'DRAFT', receivableStatus: 'NONE', taxStatus: 'NOT_READY',

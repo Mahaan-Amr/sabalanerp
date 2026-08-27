@@ -1,5 +1,6 @@
 import { DecimalSchema, QuantitySchema, type Money } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
+import type { PartnerDraftIntent } from './partnerCaseSubmission';
 
 export interface PartnerRetailRow {
   productRowId: string;
@@ -13,6 +14,13 @@ export function defaultPartnerRetailRows(rows: Omit<PartnerRetailRow, 'retailUni
   return rows.map(row => {
     if (!row.inquiryRow.approvedPrice || !row.inquiryRow.approvedRowBinding) throw new Error('Approved row required');
     return { ...row, retailUnitPrice: { ...row.inquiryRow.approvedPrice } };
+  });
+}
+
+export function partnerRetailIntentRows(rows: PartnerRetailRow[]): PartnerDraftIntent['rows'] {
+  return rows.map(row => {
+    if (!row.inquiryRow.approvedRowBinding) throw new Error('Approved row required');
+    return { productRowId: row.productRowId, approvedRowBinding: row.inquiryRow.approvedRowBinding, retailUnitPrice: row.retailUnitPrice };
   });
 }
 
@@ -46,19 +54,22 @@ export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) 
   for (const row of rows) {
     const approved = row.inquiryRow.approvedPrice;
     if (!approved || approved.currency !== discount.currency || row.retailUnitPrice.currency !== discount.currency) {
-      return { valid: false as const, message: 'واحد پول ردیف‌ها یکسان نیست؛ قیمت تأییدشده را بررسی کنید.' };
+      return { valid: false as const, field: 'price' as const, productRowId: row.productRowId, message: 'واحد پول ردیف‌ها یکسان نیست؛ قیمت تأییدشده را بررسی کنید.' };
     }
+    if (!DecimalSchema.safeParse(row.retailUnitPrice.amount).success) return {
+      valid: false as const, field: 'price' as const, productRowId: row.productRowId, message: 'قیمت فروش را کامل و با عدد مثبت یا صفر وارد کنید.',
+    };
     try {
       QuantitySchema.parse(row.quantity);
       wholesale = add(wholesale, product(row.quantity, approved.amount));
       retail = add(retail, product(row.quantity, row.retailUnitPrice.amount));
     } catch {
-      return { valid: false as const, message: 'مقدار و قیمت فروش را کامل و با عدد مثبت یا صفر وارد کنید.' };
+      return { valid: false as const, field: 'quantity' as const, productRowId: row.productRowId, message: 'مقدار و قیمت تأییدشده را بررسی کنید.' };
     }
   }
   try { retail = add(retail, decimal(discount.amount), true); }
-  catch { return { valid: false as const, message: 'مبلغ تخفیف را کامل وارد کنید.' }; }
-  if (retail.digits < BigInt(0)) return { valid: false as const, message: 'تخفیف نمی‌تواند از جمع فروش بیشتر باشد.' };
+  catch { return { valid: false as const, field: 'discount' as const, message: 'مبلغ تخفیف را کامل وارد کنید.' }; }
+  if (retail.digits < BigInt(0)) return { valid: false as const, field: 'discount' as const, message: 'تخفیف نمی‌تواند از جمع فروش بیشتر باشد.' };
   const difference = add(retail, wholesale, true);
   return { valid: true as const, wholesale: display(wholesale), retail: display(retail), difference: display(difference), loss: difference.digits < BigInt(0) };
 }

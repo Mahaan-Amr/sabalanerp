@@ -3,7 +3,7 @@
 import React, { useRef, useState, useSyncExternalStore } from 'react';
 import { ErpButton, ErpCard, ErpInlineState, ErpLoading, ErpSheet } from '@/components/erp';
 import { PartnerRetailStep } from './PartnerRetailStep';
-import { partnerRetailSummary, type PartnerRetailRow } from './partnerRetail';
+import { partnerRetailSummary, partnerRetailIntentRows, type PartnerRetailRow } from './partnerRetail';
 import type { PartnerDraftIntent, createPartnerCaseSubmission } from './partnerCaseSubmission';
 import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 
@@ -91,7 +91,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
 
   const updateRetail = (rows: PartnerRetailRow[]) => onChange({ ...draft, rows, intent: {
     ...draft.intent, belowCostConfirmed: false,
-    rows: rows.map(row => ({ productRowId: row.productRowId, approvedRowBinding: row.inquiryRow.approvedRowBinding!, retailUnitPrice: row.retailUnitPrice })),
+    rows: partnerRetailIntentRows(rows),
   } });
   const move = (index: number) => {
     setError(null); onChange({ ...draft, step: steps[index].id });
@@ -115,9 +115,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     }
     // The visible rows own retail intent. A recovered or updated projection
     // must never submit stale hidden prices or approval bindings.
-    void submission.submit({ ...draft.intent, rows: draft.rows.map(row => ({
-      productRowId: row.productRowId, approvedRowBinding: row.inquiryRow.approvedRowBinding!, retailUnitPrice: row.retailUnitPrice,
-    })) });
+    void submission.submit({ ...draft.intent, rows: partnerRetailIntentRows(draft.rows) });
   };
   return <section dir="rtl" aria-label="ایجاد پرونده فروش همکار" className="min-w-0 space-y-4">
     <ol aria-label="مراحل ایجاد پرونده" className="flex flex-wrap gap-3 text-sm text-[var(--sds-text-secondary)]">

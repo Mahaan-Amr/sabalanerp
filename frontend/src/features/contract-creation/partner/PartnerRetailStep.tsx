@@ -22,14 +22,16 @@ export function PartnerRetailStep({ rows, discount, belowCostConfirmed, disabled
     {rows.map((row, index) => <ErpCard key={row.productRowId} className="space-y-3 p-4">
       <h3 className="break-words font-semibold">{row.inquiryRow.description}</h3>
       <p className="text-sm text-[var(--sds-text-secondary)]">قیمت فروش سبلان به شما: {row.inquiryRow.approvedPrice && partnerMoneyText(row.inquiryRow.approvedPrice.amount, row.inquiryRow.approvedPrice.currency)}</p>
-      <ErpField label={`قیمت فروش به مشتری — ${row.inquiryRow.description}`}>
+      <ErpField label={`قیمت فروش به مشتری — ${row.inquiryRow.description}`}
+        error={!summary.valid && summary.field === 'price' && summary.productRowId === row.productRowId ? summary.message : undefined}>
         <ErpInput inputMode="decimal" dir="ltr" disabled={disabled} value={row.retailUnitPrice.amount} onChange={event => {
           onConfirmLoss(false);
           onRowsChange(rows.map((item, itemIndex) => itemIndex === index ? { ...item, retailUnitPrice: { ...item.retailUnitPrice, amount: normalizeDigits(event.target.value) } } : item));
         }} />
       </ErpField>
     </ErpCard>)}
-    <ErpField label={`تخفیف فروش به مشتری (${discount.currency === 'IRR' ? 'ریال' : 'تومان'})`}>
+    <ErpField label={`تخفیف فروش به مشتری (${discount.currency === 'IRR' ? 'ریال' : 'تومان'})`}
+      error={!summary.valid && summary.field === 'discount' ? summary.message : undefined}>
       <ErpInput inputMode="decimal" dir="ltr" value={discount.amount} disabled={disabled} onChange={event => {
         onConfirmLoss(false);
         onDiscountChange({ ...discount, amount: normalizeDigits(event.target.value) });

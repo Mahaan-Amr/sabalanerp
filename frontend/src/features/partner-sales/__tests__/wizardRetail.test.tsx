@@ -34,3 +34,17 @@ test('retail preview keeps sub-unit differences exact above the safe integer ran
   assert.equal(summary.loss, false);
   assert.equal(partnerRetailSummary(rows, { amount: '1', currency: 'IRT' }).valid, false);
 });
+
+test('invalid retail and discount values are associated with the offending field', () => {
+  const { inquiry, configurationDraft } = createPartnerFixtures();
+  const rows = defaultPartnerRetailRows([{ productRowId: configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: inquiry.rows[0] }]);
+  const render = (amount: string) => renderToStaticMarkup(<PartnerRetailStep rows={rows} discount={{ amount, currency: 'IRR' }} belowCostConfirmed={false}
+    disabled={false} onRowsChange={() => undefined} onDiscountChange={() => undefined} onConfirmLoss={() => undefined} />);
+  rows[0].retailUnitPrice.amount = '';
+  assert.match(render('0'), /aria-invalid="true"/);
+  assert.match(render('0'), /aria-describedby="[^"]+-error"/);
+  rows[0].retailUnitPrice.amount = '800';
+  const discount = render('2000');
+  assert.match(discount, /aria-invalid="true"/);
+  assert.match(discount, /تخفیف نمی‌تواند/);
+});

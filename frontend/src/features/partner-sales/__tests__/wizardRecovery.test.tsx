@@ -7,6 +7,8 @@ import { PartnerContractWizard, type PartnerWizardDraft } from '../../contract-c
 import { createPartnerCaseSubmission } from '../../contract-creation/partner/partnerCaseSubmission';
 import { defaultPartnerRetailRows } from '../../contract-creation/partner/partnerRetail';
 import { PartnerCreationBoundary, PartnerCreationChannelProvider } from '../../contract-creation/partner/PartnerCreationChannel';
+import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
+import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
 
 const fixture = createPartnerFixtures();
 const rows = defaultPartnerRetailRows([{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm', inquiryRow: fixture.inquiry.rows[0] }]);
@@ -55,4 +57,18 @@ test('a changed technical row keeps the wizard inputs but blocks final submissio
   assert.match(html, /preserved-review/);
   assert.match(html, /disabled=""[^>]*><span>ثبت پرونده/);
   assert.match(html, /استعلام مجدد/);
+});
+
+test('reloading an uncertain inquiry exposes a reachable retry without a new submission', async () => {
+  let pending: PartnerInquirySubmitCommand | null = null;
+  const recovery = { pending: () => pending, savePending: async (command: PartnerInquirySubmitCommand) => { pending = command; }, clearPending: async () => undefined };
+  const commands = { execute: async () => { throw new Error('lost response'); } };
+  const original = createPartnerInquirySubmission({ actorId: fixture.profile.partnerSellerId, inquiryId: fixture.inquiry.inquiryId, commands, recovery });
+  await original.submit([{ rowId: 'reload-row', configuration: fixture.configurationDraft }]);
+  const html = renderToStaticMarkup(<PartnerInquiryWorkspace actorId={fixture.profile.partnerSellerId} inquiryId={fixture.inquiry.inquiryId}
+    queries={{ query: async () => { throw new Error('not used during SSR'); } }} commands={commands} recovery={recovery} writable
+    configuredRows={[]} configurationEditor={<p>preserved-configuration</p>} onEnterWizard={async () => undefined} onOpenInquiry={() => undefined}
+    prepareSuccessor={async () => { throw new Error('not used'); }} />);
+  assert.match(html, /بررسی نتیجه ارسال/);
+  assert.match(html, /preserved-configuration/);
 });

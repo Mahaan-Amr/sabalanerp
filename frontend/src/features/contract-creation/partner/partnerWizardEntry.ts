@@ -1,7 +1,7 @@
 import { QuantitySchema } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerInquiryView } from '../../partner-sales/inquiries/inquiryPresentation';
 import { usableInquiryRows } from '../../partner-sales/inquiries/inquiryPresentation';
-import { defaultPartnerRetailRows } from './partnerRetail';
+import { defaultPartnerRetailRows, partnerRetailIntentRows } from './partnerRetail';
 import type { PartnerWizardDraft } from './PartnerContractWizard';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
 
@@ -26,7 +26,7 @@ export function enterPartnerWizard({ inquiry, now, base, quantities, mismatchedR
   if (new Set(configured.map(row => row.productRowId)).size !== configured.length) return null;
   const rows = defaultPartnerRetailRows(configured);
   const intent = { ...base, belowCostConfirmed: false,
-    rows: rows.map(row => ({ productRowId: row.productRowId, approvedRowBinding: row.inquiryRow.approvedRowBinding!, retailUnitPrice: row.retailUnitPrice })),
+    rows: partnerRetailIntentRows(rows),
   };
   return { intent, rows, step: 'customer' };
 }

@@ -6,6 +6,9 @@ import { PartnerContractWizard, type PartnerWizardDraft } from '../../contract-c
 import { createPartnerCaseSubmission, type PartnerSubmitCommand } from '../../contract-creation/partner/partnerCaseSubmission';
 import { enterPartnerWizard } from '../../contract-creation/partner/partnerWizardEntry';
 import { createWizardFixtures } from './wizardFixtures';
+import { PartnerInquiryWorkspace } from '../inquiries/PartnerInquiryWorkspace';
+import type { PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
+import type { PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
 
 // Explicit browser fixture only. It cannot activate a persona, access a DB,
 // send a message, or become a fallback transport in the production boundary.
@@ -44,5 +47,32 @@ function Fixture() {
   </main>;
 }
 
+function ReinquiryFixture() {
+  const [calls, setCalls] = useState(0);
+  const composition = useMemo(() => {
+    const fixture = createWizardFixtures();
+    const inquiry = { ...fixture.inquiry, rows: fixture.inquiry.rows.map(row => ({ ...row, state: 'REJECTED' as const })) };
+    let pending: PartnerInquirySubmitCommand | null = null;
+    let sends = 0;
+    const queries: PartnerQueryV2Port = { query: async () => ({ ok: true, value: inquiry }) } as PartnerQueryV2Port;
+    return {
+      actorId: fixture.profile.partnerSellerId, inquiryId: inquiry.inquiryId, queries,
+      commands: { execute: async (command: PartnerInquirySubmitCommand) => {
+        sends++; setCalls(sends);
+        if (sends === 1) throw new Error('lost successor response');
+        return { ok: true as const, value: { commandId: command.commandId, replayed: true, eventIds: [] } };
+      } },
+      recovery: { pending: () => pending, savePending: async (command: PartnerInquirySubmitCommand) => { pending = command; }, clearPending: async () => { pending = null; } },
+      prepareSuccessor: async () => ({ rowId: 'new-successor', configuration: fixture.configurationDraft }),
+    };
+  }, []);
+  return <main className="mx-auto max-w-5xl p-4" dir="rtl">
+    <p role="status">تعداد ارسال: {calls}</p>
+    <PartnerInquiryWorkspace {...composition} commands={composition.commands as React.ComponentProps<typeof PartnerInquiryWorkspace>['commands']}
+      writable configuredRows={[]} configurationEditor={<p>مشخصات فنی محفوظ</p>}
+      onEnterWizard={async () => undefined} onOpenInquiry={() => undefined} />
+  </main>;
+}
+
 const root = document.getElementById('root');
-if (root) createRoot(root).render(<Fixture />);
+if (root) createRoot(root).render(new URLSearchParams(location.search).has('reinquiry') ? <ReinquiryFixture /> : <Fixture />);

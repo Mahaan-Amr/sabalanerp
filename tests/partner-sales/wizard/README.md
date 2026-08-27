@@ -4,6 +4,27 @@ Consumes `@sabalanerp/partner-sales-contracts@1.1.0` through its public root.
 Inquiry reads use `PartnerQueryV2Port` and the strict v2 inquiry projection;
 commands retain wire version 1. `/testing` is used only by explicit test fixtures.
 
+## Acceptance status
+
+**Not ready for module completion or publication.** Independent review identified
+a missing shared technical calculation contract. The shared owner confirmed that
+version 1.1.0 has no public rate-free editor/validation/save port. Graph/recovery
+owner 320 and technical catalog owner 317 must agree and publish that contract;
+inquiry owner 318 consumes the saved configuration, and integration owner 334
+composes them. Hiding rates is not evidence of product-form parity.
+
+Specifically, `calculateProductOperations` stops at `inventory-rate-missing`
+before deriving quantity and edge facts. The existing operations component then
+has no calculated selection and cannot open its quantity override editor. Slab
+and stair-layer calculations similarly couple geometry/source facts to pricing.
+The legacy whole product modal also requires priced calculation success before
+saving. Do not inject fake zero rates, expose private inputs or use
+`bindCanonicalCaseGraph` in the browser to bypass this missing interface.
+
+The remaining fixture browser and full Design System E2E runs also require the
+shared runtime owner's handoff. Earlier browser readiness timeouts occurred
+before UI assertions; they are not product failures or acceptance passes.
+
 ## Delivered module boundaries
 
 - `PartnerInquiryWorkspace` composes canonical technical product forms, durable
@@ -12,7 +33,8 @@ commands retain wire version 1. `/testing` is used only by explicit test fixture
 - `TechnicalProductConfiguration` suppresses internal pricing controls in the
   existing longitudinal, slab, prepared/volumetric, stair, layer and operations
   components. Existing remainder selection and canonical graph callbacks remain
-  unchanged. This presentation context is not a data redaction or permission layer.
+  unchanged. This presentation context is not a data redaction or permission layer
+  and does not yet establish rate-free technical calculation parity (see blocker).
 - `enterPartnerWizard` uses server-resolved product-row references, never inferred
   inquiry/catalog IDs. Only usable approvals enter the wizard; quantity is separate.
 - `PartnerContractWizard` owns progression, retail defaults/overrides, retail-only

@@ -55,7 +55,7 @@ export function PartnerInquiryWorkspace(props: PartnerInquiryWorkspaceProps) {
     await submission.retry();
     if (submission.getSnapshot().phase === 'submitted') { setSuccessor(null); setReason(''); await reader.refresh(); }
   };
-  const submissionFeedback = submit.message && <ErpInlineState kind={submit.phase === 'uncertain' ? 'stale' : 'error'} title={submit.message}
+  const submissionFeedback = (submit.message || submit.phase === 'uncertain') && <ErpInlineState kind={submit.phase === 'uncertain' ? 'stale' : 'error'} title={submit.message || 'نتیجه ارسال مشخص نیست؛ همان درخواست را دوباره بررسی کنید.'}
     action={submit.phase === 'uncertain' ? { label: 'بررسی نتیجه ارسال', onClick: () => void retry() } : undefined} />;
   const act = async (operation: () => Promise<void>) => {
     if (actionFlight.current || !writable) return;

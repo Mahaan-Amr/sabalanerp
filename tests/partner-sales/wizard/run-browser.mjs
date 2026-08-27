@@ -30,7 +30,7 @@ try {
   for (const theme of ['light', 'dark']) for (const width of [390, 1440]) {
     const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 1000 } });
     page.on('pageerror', error => errors.push(error.message));
-    await page.route('http://127.0.0.1:3000/__partner330-fixture', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="fa" dir="rtl" data-theme="${theme}" class="${theme === 'dark' ? 'dark' : ''}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${styles}</style></head><body><div id="root"></div><script>${js.replaceAll('</script', '<\\/script')}</script></body></html>` }));
+    await page.route('http://127.0.0.1:3000/__partner330-fixture**', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="fa" dir="rtl" data-theme="${theme}" class="${theme === 'dark' ? 'dark' : ''}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${styles}</style></head><body><div id="root"></div><script>${js.replaceAll('</script', '<\\/script')}</script></body></html>` }));
     await page.goto('http://127.0.0.1:3000/__partner330-fixture');
     const dock = page.getByRole('button', { name: 'ساخت پرونده و ورود به Wizard', exact: true });
     await dock.waitFor();
@@ -39,6 +39,7 @@ try {
     await page.screenshot({ path: path.join(output, `${theme}-${width}-inquiry.png`), fullPage: true });
     await dock.click();
     await page.getByRole('button', { name: 'ادامه', exact: true }).click();
+    assert.equal(await page.getByRole('heading', { name: 'قیمت فروش', exact: true }).evaluate(element => element === document.activeElement), true);
     const retail = page.getByRole('textbox', { name: 'قیمت فروش به مشتری — سنگ طولی آزمایشی' });
     await retail.fill('700');
     await page.getByRole('checkbox').check();
@@ -51,6 +52,8 @@ try {
     await page.getByRole('button', { name: 'آزمون بازیابی' }).click();
     await page.getByRole('button', { name: 'شروع پرونده جدید' }).click();
     await page.getByRole('dialog').waitFor();
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]'))), true);
     await page.keyboard.press('Escape');
     await page.getByRole('dialog').waitFor({ state: 'detached' });
     assert.equal(await page.getByRole('dialog').count(), 0);
@@ -59,7 +62,18 @@ try {
     await page.evaluate(() => { document.documentElement.style.zoom = '2'; });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.join(output, `${theme}-${width}-zoom200.png`), fullPage: true });
-    evidence.push({ theme, width, partial: true, retailOverride: true, lossConfirmation: true, expiryPreservesDraft: true, takeoverPreservesDraft: true, escape: true, zoom200: true });
+    await page.goto('http://127.0.0.1:3000/__partner330-fixture?reinquiry');
+    await page.getByRole('button', { name: 'استعلام مجدد', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('textbox', { name: 'دلیل استعلام مجدد' }).fill('تغییر مشخصات سنگ');
+    await dialog.getByRole('button', { name: 'ارسال استعلام مجدد', exact: true }).click();
+    await dialog.getByRole('button', { name: 'بررسی نتیجه ارسال', exact: true }).waitFor();
+    await page.keyboard.press('Escape');
+    assert.equal(await dialog.count(), 1);
+    await dialog.getByRole('button', { name: 'بررسی نتیجه ارسال', exact: true }).click();
+    await dialog.waitFor({ state: 'detached' });
+    await page.getByText('تعداد ارسال: 2', { exact: true }).waitFor();
+    evidence.push({ theme, width, partial: true, retailOverride: true, lossConfirmation: true, expiryPreservesDraft: true, takeoverPreservesDraft: true, escape: true, focus: true, uncertainSuccessorRetry: true, zoom200: true });
     await page.close();
   }
   assert.deepEqual(errors, []);

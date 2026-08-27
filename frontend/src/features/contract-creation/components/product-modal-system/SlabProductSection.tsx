@@ -428,23 +428,23 @@ export function SlabProductSection({
           </div>
         )}
         {!calculating && [
-          ['محصول نهایی', resolved
+          { key: 'finished', label: 'محصول نهایی', value: resolved
             ? `${resolved.quantity} × ${resolved.lengthMeters}m × ${resolved.widthMeters}m`
-            : '—'],
-          ['منبع مصرفی', resolved
+            : '—' },
+          { key: 'consumed', label: 'منبع مصرفی', value: resolved
             ? `${resolved.packingPlan.consumedSources.length} اسلب`
-            : '—'],
-          ['منبع استفاده‌نشده', resolved
+            : '—' },
+          { key: 'unused', label: 'منبع استفاده‌نشده', value: resolved
             ? `${resolved.packingPlan.unusedSources.length} اسلب کامل`
-            : '—'],
-          ['باقی‌مانده برش', resolved
+            : '—' },
+          { key: 'remainders', label: 'باقی‌مانده برش', value: resolved
             ? `${resolved.packingPlan.remainders.length} قطعه`
-            : '—'],
-          ['برش', resolved ? formatPrice(resolved.cuttingAmountToman) : '—'],
-          ['جمع', resolved ? formatPrice(resolved.totalAmountToman) : '—']
-        ].filter(([label]) => showPricing || (label !== 'برش' && label !== 'جمع')).map(([label, value]) => (
+            : '—' },
+          { key: 'cutting-price', pricing: true, label: 'برش', value: resolved ? formatPrice(resolved.cuttingAmountToman) : '—' },
+          { key: 'total-price', pricing: true, label: 'جمع', value: resolved ? formatPrice(resolved.totalAmountToman) : '—' }
+        ].filter(row => showPricing || !row.pricing).map(({ key, label, value }) => (
           <div
-            key={label}
+            key={key}
             className="grid min-h-9 grid-cols-[8rem_1fr] items-center gap-3 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs dark:border-[var(--sds-border-subtle)]"
           >
             <span className="text-[var(--sds-text-muted)]">{label}</span>

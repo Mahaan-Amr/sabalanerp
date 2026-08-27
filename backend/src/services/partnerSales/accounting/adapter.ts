@@ -43,8 +43,10 @@ export function createPartnerAccountingAdapter(repository: PartnerAccountingRepo
       if (!source.ok) return source;
       const prepared = await prepareCommittedAccountingSource(source.value, expected);
       if (!prepared.ok) return prepared;
-      const fact = await tx.readAccountingFact(factId);
+      const fact = await tx.readAccountingFact(factId, expected.caseId);
       if (!fact) return failure('NOT_FOUND');
+      if (fact.owner.caseId !== expected.caseId || fact.partnerSellerId !== source.value.partnerSellerId ||
+          fact.internalRecordId !== source.value.view.recordId) return failure('NOT_FOUND');
       const event = accountingFactEvent(source.value, fact);
       if (!event.ok) return event;
       await tx.appendEvent(event.value);
@@ -64,8 +66,11 @@ export function createPartnerAccountingAdapter(repository: PartnerAccountingRepo
       if (loaded.value.view.state !== 'COMMITTED') return failure('STATE_CONFLICT');
       const prepared = await prepareCommittedAccountingSource(loaded.value, expected);
       if (!prepared.ok) return prepared;
-      const invoice = await tx.readInvoice(invoiceRecordId);
+      const invoice = await tx.readInvoice(invoiceRecordId, expected);
       if (!invoice) return failure('NOT_FOUND');
+      if (invoice.preparation.owner.caseId !== expected.caseId || invoice.preparation.internalRecordId !== prepared.value.internalRecordId ||
+          invoice.preparation.debtor.partnerSellerId !== prepared.value.debtor.partnerSellerId ||
+          invoice.preparation.debtor.commercialAccountId !== prepared.value.debtor.commercialAccountId) return failure('NOT_FOUND');
       if (invoice.kind !== 'INVOICE_CANDIDATE' || !['ISSUED', 'POSTED'].includes(invoice.status) || !invoice.approval) return failure('STATE_CONFLICT');
       if (!contracts.MoneySchema.safeParse(invoice.amount).success || invoice.amount.currency !== prepared.value.amount.currency ||
           !equalAmounts(invoice.amount.amount, prepared.value.amount.amount)) return failure('INTEGRITY_CONFLICT');

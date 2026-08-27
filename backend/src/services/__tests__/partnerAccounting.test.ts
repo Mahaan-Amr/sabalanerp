@@ -269,3 +269,13 @@ test('approval replay after a retail-only successor returns original evidence wi
   assert.deepEqual(await adapter.acceptFinancialApproval(fixture.source.view.owner, invoice.invoiceRecordId), approved);
   assert.deepEqual({ receivables: fixture.receivables, events: fixture.events }, original);
 });
+
+test('foreign invoice identifiers have the same safe result as missing invoices', async () => {
+  const fixture = new PartnerAccountingFixture();
+  const adapter = createPartnerAccountingAdapter(fixture);
+  const invoice = await fixture.invoice();
+  invoice.preparation.owner = { ...invoice.preparation.owner, caseId: 'another-case' };
+  assert.deepEqual(await adapter.acceptFinancialApproval(fixture.source.view.owner, invoice.invoiceRecordId),
+    await adapter.acceptFinancialApproval(fixture.source.view.owner, 'missing-invoice'));
+  assert.equal(fixture.receivables.length, 0);
+});

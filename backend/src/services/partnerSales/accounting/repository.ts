@@ -71,7 +71,8 @@ export interface PartnerAccountingTransaction {
   findQueue(caseId: string): Promise<AccountingQueueEntry | null>;
   /** Unique on Case and original commitment; never replaces a queued snapshot. */
   insertQueue(entry: AccountingQueueEntry): Promise<void>;
-  readInvoice(invoiceRecordId: string): Promise<PartnerInvoiceEvidence | null>;
+  /** Scope lookup to the already-authorized Case; hidden and missing collapse. */
+  readInvoice(invoiceRecordId: string, expected: RevisionRef): Promise<PartnerInvoiceEvidence | null>;
   findReceivable(invoiceRecordId: string): Promise<PartnerReceivable | null>;
   /** Only currently effective obligations; replacement requires formal predecessor voiding. */
   findActiveReceivable(internalRecordId: string): Promise<PartnerReceivable | null>;
@@ -85,7 +86,7 @@ export interface PartnerAccountingTransaction {
   /** Only committed Accounting evidence, after its receipt/correction/void gates.
    * Historical revision provenance and original realization linkage are verified
    * here under the Case lock; no caller-supplied financial fact is accepted. */
-  readAccountingFact(factId: string): Promise<PartnerAccountingFact | null>;
+  readAccountingFact(factId: string, caseId: string): Promise<PartnerAccountingFact | null>;
 }
 
 export interface PartnerAccountingRepository {

@@ -6,7 +6,7 @@ This is the initial **Module harness**, not acceptance of Partner sales, the who
 
 QA owns `tests/partner-sales/`, `docs/qa/partner-sales/`, `playwright.partner-sales.config.ts`, `scripts/run-partner-sales-tests.mjs`, and `.github/workflows/partner-sales.yml`. No application, schema, lockfile, route, shell, or existing CI file is changed by this ticket. The #313 shared-file owner authored the three root script aliases below and explicitly handed that isolated `package.json` diff to #314 for publication.
 
-Harness interface: `partner-qa-harness/v1`. The consumer pins **`@sabalanerp/partner-sales-contracts@1.2.0`, schemaVersion 1**, using only public `.` and `/testing` exports owned by #313. The `foundation` check consumes `createPartnerFixtures`, `FixedTransactionClock`, `SandboxNotificationGateway` and `FixturePartnerQueryAdapter`; it verifies the exact expiry boundary, safe/retryable sandbox delivery and purpose-specific fixture queries. These are contract checks, not actual OTP verification, production authorization or live Partner submission. No substitute Case schema, invented Partner role, local fake clock or DTO is provided.
+Harness interface: `partner-qa-harness/v1`. The consumer pins **`@sabalanerp/partner-sales-contracts@1.3.0`, schemaVersion 1**, using only public `.` and `/testing` exports owned by #313. The `foundation` check consumes `createPartnerFixtures`, `FixedTransactionClock`, `SandboxNotificationGateway` and `FixturePartnerQueryAdapter`; it verifies the exact expiry boundary, safe/retryable sandbox delivery and purpose-specific fixture queries. These are contract checks, not actual OTP verification, production authorization or live Partner submission. No substitute Case schema, invented Partner role, local fake clock or DTO is provided.
 
 The coordinated 1.1.0 update adds separate v2 workspace exports while preserving the v1 wire schemas, ports and fixtures. This harness continues to exercise those v1 consumers and explicitly rejects schemaVersion 2 in the customer-output regression; it does not claim coverage of the new workspace exports. The published #314 runtime baseline in `baseline.md` and its immutable evidence used 1.0.0. Updating the current pin does not relabel that historical run as 1.1.0 runtime acceptance.
 
@@ -15,6 +15,11 @@ rate-free previews. Their public-seam tests live in the package; this harness pi
 update still tests the unchanged v1 consumers, not technical-save or runtime
 acceptance. Neither the historical 1.0.0 evidence nor the 1.1.0 module evidence is
 relabelled as a 1.2.0 runtime run.
+
+The additive 1.3.0 package introduces the technical recovery checkpoint/read
+interface. Its backend tests use rollback-isolated real PostgreSQL transactions;
+this harness continues to test original v1 consumers, not the new producer or
+validated-save acceptance. No historical evidence is relabelled as a 1.3.0 run.
 
 The #313 shared-file coordinator supplied these root scripts; #334 owns future shared wiring:
 

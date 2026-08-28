@@ -2,8 +2,9 @@ import { Prisma, type PrismaClient, type SalesContractEditSession } from '@prism
 import { randomUUID } from 'node:crypto';
 import {
   PartnerTechnicalCheckpointSchema, PartnerTechnicalRecoveryAccessSchema,
-  PartnerTechnicalCheckpointReceiptSchema, canonicalHash,
+  PartnerTechnicalCheckpointReceiptSchema, canonicalHash, canonicalJson,
   partnerError, type Result, type PartnerTechnicalRecoveryPort, type PartnerTechnicalRecoveryAccess,
+  type PartnerTechnicalDraft,
 } from '@sabalanerp/partner-sales-contracts';
 import { CONTRACT_EDIT_LEASE_TTL_MS, CONTRACT_CREATION_DRAFT_TTL_MS } from '../../contractEditSessionService';
 import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../../contractRecoveryProtection';
@@ -19,6 +20,11 @@ export interface PartnerTechnicalRecoveryDependencies {
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 const CHECKPOINT_OPERATION = 'PARTNER_TECHNICAL_CHECKPOINT_V1';
+
+const draftContent = (draft: PartnerTechnicalDraft): string => {
+  const { inputRevision: _correlation, dependents = [], stairSystems = [], editingValues = [], ...content } = draft;
+  return canonicalJson(json({ ...content, dependents, stairSystems, editingValues }));
+};
 
 /** Runtime uses the application's injected shared Prisma client. The promise
  * resolves only after commit; no module-owned client or second connection pool. */
@@ -92,7 +98,9 @@ export function createPartnerTechnicalRecoveryService(dependencies: PartnerTechn
           return { ok: false, error: partnerError('ROW_STALE') };
         }
         const next = { ...recovery, kind: PARTNER_TECHNICAL_RECOVERY_KIND, version: 1,
-          recoveryRevision: revision + 1, updatedAt: now.getTime(), draft: command.draft };
+          recoveryRevision: revision + 1,
+          updatedAt: recovery && draftContent(recovery.draft) === draftContent(command.draft)
+            ? recovery.updatedAt : now.getTime(), draft: command.draft };
         const written = await tx.salesContractEditSession.updateMany({ where: {
           draftId: session.draftId, leaseToken: session.leaseToken, baseRevision: session.baseRevision,
           recovery: { equals: session.recovery === null ? Prisma.AnyNull : json(session.recovery) },
@@ -100,7 +108,7 @@ export function createPartnerTechnicalRecoveryService(dependencies: PartnerTechn
         if (written.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
         const receipt = PartnerTechnicalCheckpointReceiptSchema.parse({ schemaVersion: 1, recoveryId: session.draftId,
           recoveryRevision: next.recoveryRevision, inputRevision: command.draft.inputRevision,
-          updatedAt: now.toISOString(), replayed: false });
+          updatedAt: new Date(next.updatedAt).toISOString(), replayed: false });
         await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...identity, payloadHash,
           outcome: json({ sessionId: session.id, receipt }), recordedAt: now } });
         return { ok: true, value: receipt };

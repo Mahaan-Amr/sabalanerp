@@ -10,6 +10,11 @@ Public package root exports `PartnerTechnicalRecoveryPort`, strict access/comman
 receipt and view schemas, and inferred TypeScript types. The actor is bound by the
 trusted adapter, never accepted in the command. `inputRevision` correlates UI work;
 `expectedRecoveryRevision` is the independent server-issued concurrency version.
+The public `updatedAt` records the last meaningful draft change for seven-day
+recovery retention. Identical content or an `inputRevision`-only change preserves
+that timestamp, while an accepted checkpoint still advances the server revision
+and refreshes lease presence. Absent and empty optional draft collections are
+equivalent for retention; unfinished editing text remains meaningful content.
 No private pricing, configuration hash, authorization context or configuration
 reference is accepted or returned by these checkpoint interfaces.
 
@@ -45,7 +50,8 @@ The dedicated PostgreSQL tests run solely in the existing `sabalanerp-local` and
 roll back each outer transaction, including immutable receipt rows. No append-only
 trigger is disabled and no evidence row is deleted. The tests exercise stored
 reload, same-intent replay, changed/stale commands, current authorization and lease,
-safe projection, session recreation, competing CAS and transaction rollback.
+safe projection, session recreation, competing CAS, meaningful-change retention
+and transaction rollback.
 Competing calls share the rollback transaction; they exercise CAS interleaving,
 not independent committed-connection scheduling. The existing generic recovery
 suite separately covers actual concurrent PostgreSQL transactions.

@@ -214,3 +214,32 @@ test('transaction failure rolls back both the checkpoint and its receipt before 
     assert.equal(retried.value.recoveryRevision, 1);
   });
 });
+
+test('no-op or input-revision-only checkpoints renew lease presence but not the seven-day meaningful-change clock', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const service = createPartnerTechnicalRecoveryService({ actorId,
+      transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: async () => ({ ok: true as const, value: undefined }) });
+    const command: PartnerTechnicalCheckpoint = { ...access, expectedRecoveryRevision: 0, idempotencyKey: 'initial',
+      draft: { schemaVersion: 1, inputRevision: 1, rows: [] } };
+    assert.equal((await service.checkpoint(command)).ok, true);
+    const lastMeaningfulChange = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    const row = await tx.salesContractEditSession.findUniqueOrThrow({ where: { draftId: access.recoveryId } });
+    await tx.salesContractEditSession.update({ where: { draftId: access.recoveryId }, data: {
+      recovery: { ...(row.recovery as Prisma.JsonObject), updatedAt: lastMeaningfulChange.getTime() } } });
+    const noOp = await service.checkpoint({ ...command, expectedRecoveryRevision: 1, idempotencyKey: 'no-op' });
+    if (!noOp.ok) throw new Error(noOp.error.code);
+    assert.equal(noOp.value.updatedAt, lastMeaningfulChange.toISOString());
+    const revisionOnly = await service.checkpoint({ ...command, expectedRecoveryRevision: 2, idempotencyKey: 'revision-only',
+      draft: { ...command.draft, inputRevision: 9 } });
+    if (!revisionOnly.ok) throw new Error(revisionOnly.error.code);
+    const unchanged = await service.read(access);
+    if (!unchanged.ok) throw new Error(unchanged.error.code);
+    assert.equal(unchanged.value.updatedAt, lastMeaningfulChange.toISOString());
+    assert.equal(unchanged.value.draft?.inputRevision, 9);
+    const changed = await service.checkpoint({ ...command, expectedRecoveryRevision: 3, idempotencyKey: 'meaningful',
+      draft: { ...command.draft, editingValues: [{ entityId: 'new-row', field: 'quantity', text: '۳' }] } });
+    if (!changed.ok) throw new Error(changed.error.code);
+    assert.ok(Date.parse(changed.value.updatedAt) > lastMeaningfulChange.getTime());
+  });
+});

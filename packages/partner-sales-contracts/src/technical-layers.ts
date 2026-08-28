@@ -98,6 +98,7 @@ export function previewTechnicalLayer(inputRevision: number, intent: PartnerTech
     return [{ side: side.side, scopeIntent: side.scopeIntent,
       operationCollectionId: parseStableIdentity('layer-operation-collection', side.operationCollectionId),
       operations: { productRowId: parseStableIdentity('product-row', intent.parentProductRowId), inputRevision,
+        operationScopeId: side.operationCollectionId,
         lengthMeters: strip.lengthMeters, widthMeters: strip.widthMeters, quantity: strip.quantity, intent: side.operations } }];
   });
   // Reuse the canonical side/scope checks and already-calculated strip facts;

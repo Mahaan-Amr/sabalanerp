@@ -32,7 +32,7 @@ export type PartnerTechnicalOperationsPreview =
  */
 export function previewTechnicalOperations(
   intent: PartnerTechnicalOperationsIntent,
-  geometry: { productRowId: string; inputRevision: number; lengthMeters: CanonicalDecimal; widthMeters: CanonicalDecimal; quantity?: number },
+  geometry: { productRowId: string; operationScopeId?: string; inputRevision: number; lengthMeters: CanonicalDecimal; widthMeters: CanonicalDecimal; quantity?: number },
   catalog: readonly PartnerTechnicalOperation[],
 ): PartnerTechnicalOperationsPreview {
   const missing: MissingOperation[] = [];

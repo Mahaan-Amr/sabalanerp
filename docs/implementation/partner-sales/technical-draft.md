@@ -46,6 +46,11 @@ equal-order kind/identity ties. Successful physical geometry reserves its consum
 stock even when a layer operation remains invalid, so subsequent preview facts do
 not spend the same piece twice. This is an invalid editing preview, never a partial
 persistence commitment. Duplicate graph identities block every ambiguous owner.
+This includes canonical automatic no-operation groups. Layer-side collections
+provide their own scope identity; ordinary priced product calls retain their
+existing row-based IDs. When blocking an ambiguous allocation frees stock for a
+later sibling, the preview rechecks newly usable identities until no new owner
+is blocked. Unaffected editing facts remain available.
 
 Layers bind only to their own stair parent; parent-material source identity/version
 must match that parent's snapshot. Explicit new material remains a distinct choice.
@@ -91,7 +96,7 @@ node scripts/run-partner-sales-tests.mjs check-inventory
 The exact-pin change preserves the schemaVersion 1 rejection guard. Prior QA
 evidence is historical and is not relabelled as acceptance of this new slice.
 
-Candidate verification: all 44 package tests (24 existing, 3 catalog, 17 technical
+Candidate verification: all 46 package tests (24 existing, 3 catalog, 19 technical
 draft) and both package typechecks pass; all 3 backend catalog projection tests
 pass. Full graph suites and remaining-child recovery pass. The read-only comparison
 of 62 complete priced results/hashes against the published remaining-stone graph
@@ -104,3 +109,6 @@ nested operation/group/collection IDs. Both have public-seam regression tests an
 are corrected before publication. The former now preserves a different stone's
 remaining inventory rather than relabelling it; the latter marks all affected
 owners across base rows, remainder children and layer sides.
+The follow-up review also caught generated no-operation identities, now covered
+by product-to-product and layer-to-product collision regressions plus independent
+layer-side automatic-group checks.

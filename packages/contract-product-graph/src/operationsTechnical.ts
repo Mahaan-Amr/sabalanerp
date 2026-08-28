@@ -13,6 +13,8 @@ export interface ProductOperationsTechnicalInput extends Pick<ProductOperationsI
   'productRowId' | 'lengthMeters' | 'widthMeters' | 'quantity' | 'groups'> {
   /** Caller revision for rejecting late previews; not a persisted recovery revision. */
   readonly inputRevision: number;
+  /** Independent layer-side collection; ordinary product calls retain their row identity. */
+  readonly operationScopeId?: string;
   readonly tools: readonly TechnicalToolSelection[];
   readonly finishings: readonly TechnicalFinishingSelection[];
 }
@@ -78,9 +80,10 @@ const validateTechnicalInput = (input: ProductOperationsTechnicalInput): void =>
       throw new TypeError('Invalid override resolution.');
     }
   };
-  shape(input, ['inputRevision', 'productRowId', 'lengthMeters', 'widthMeters', 'quantity', 'groups', 'tools', 'finishings']);
+  shape(input, ['inputRevision', 'productRowId', 'operationScopeId', 'lengthMeters', 'widthMeters', 'quantity', 'groups', 'tools', 'finishings']);
   decimal(input.lengthMeters); decimal(input.widthMeters);
   text(input.productRowId);
+  if (input.operationScopeId !== undefined) parseStableIdentity('layer-operation-collection', text(input.operationScopeId));
   array(input.groups).forEach(value => {
     const group = shape(value, ['operationGroupId', 'scope']);
     text(group.operationGroupId);
@@ -263,7 +266,7 @@ export const calculateProductOperationsTechnical = (
       allocated = allocated.plus(scope);
     }
     const noOperationScope = totalScope.minus(allocated);
-    if (noOperationScope.gt(0) && groupIds.includes(`${input.productRowId}:no-operations` as typeof groupIds[number])) {
+    if (noOperationScope.gt(0) && groupIds.includes(`${input.operationScopeId ?? input.productRowId}:no-operations` as typeof groupIds[number])) {
       return { ok: false, ...correlation, conflicts: [{
         code: 'duplicate-operation-identity', path: ['groups'],
         message: 'The automatic no-operation group requires an independent identity.',
@@ -411,7 +414,7 @@ export const calculateProductOperationsTechnical = (
       calculatedGroups.push({
         operationGroupId: parseStableIdentity(
           'operation-group',
-          `${input.productRowId}:no-operations`
+          `${input.operationScopeId ?? input.productRowId}:no-operations`
         ),
         scope: canonical(noOperationScope),
         basis,

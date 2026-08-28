@@ -3,6 +3,57 @@ import test from 'node:test';
 import { PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 
+test('generated no-operation groups cannot collide with another product explicit group', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const version = catalog.products[0].catalogSnapshotVersion;
+  const row = (id: string) => ({ productRowId: id, catalogItemId: 'fixture-technical-stone', catalogSnapshotVersion: version,
+    family: 'longitudinal', configuration: { sourceBatchId: `${id}-stock`, lengthMeters: '1', widthMeters: '0.1', quantity: 1,
+      lastManualField: 'length', lastManualDimension: 'length', lengthDisplayUnit: 'm', widthDisplayUnit: 'cm',
+      sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual' } });
+  const preview = previewPartnerTechnicalDraft({ schemaVersion: 1, inputRevision: 28, rows: [
+    { ...row('auto-a'), operations: { groups: [], tools: [], finishings: [] } },
+    { ...row('explicit-b'), operations: { groups: [{ operationGroupId: 'auto-a:no-operations', scope: '1' }], tools: [], finishings: [] } },
+    row('unaffected'),
+  ] }, catalog);
+  if (!preview.ok) throw new Error(preview.error.code);
+  assert.ok(preview.value.conflicts.filter(conflict => conflict.entityId === 'auto-a:no-operations').length >= 2);
+  assert.deepEqual(preview.value.rows.map(row => row.calculation.ok), [false, false, true]);
+  assert.deepEqual(preview.value.inventory.map(stock => stock.ownerProductRowId), ['unaffected']);
+});
+
+test('independent layer sides receive canonical scope-specific no-operation identities', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const version = catalog.products[0].catalogSnapshotVersion;
+  const parent = { productRowId: 'scope-parent', catalogItemId: 'fixture-technical-stone', catalogSnapshotVersion: version,
+    family: 'stair', configuration: { stairSystemId: 'stairs', part: 'tread', sourceBatchId: 'parent-stock',
+      lengthMeters: '1', crossDimensionMeters: '0.3', quantity: 1, lengthDisplayUnit: 'm', crossDimensionDisplayUnit: 'cm',
+      sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual' } };
+  const layer = { kind: 'layer', creationOrder: 0, layerConfigurationId: 'scoped-layer', parentProductRowId: 'scope-parent',
+    sourceBatchId: 'layer-stock', catalogItemId: 'fixture-technical-layer', catalogSnapshotVersion: version,
+    layersPerParentPiece: 1, widthMeters: '0.04', widthDisplayUnit: 'cm', targetSides: ['front', 'back'],
+    source: { kind: 'new-material', catalogItemId: parent.catalogItemId, catalogSnapshotVersion: version,
+      sourceRows: [{ sourceRowId: 'fresh', lengthMeters: '1', widthMeters: '0.1', quantity: 1 }] },
+    sawKerfEnabled: false, calibrationEnabled: false, sideOperations: ['front', 'back'].map(side => ({ side,
+      operationCollectionId: `collection-${side}`, scopeIntent: 'side', operations: { groups: [], tools: [], finishings: [] } })) };
+  const preview = previewPartnerTechnicalDraft({ schemaVersion: 1, inputRevision: 29, rows: [parent], dependents: [layer] }, catalog);
+  if (!preview.ok) throw new Error(preview.error.code);
+  assert.deepEqual(preview.value.conflicts, []);
+  const first = preview.value.dependents[0];
+  if (first.kind !== 'layer' || !first.calculation.ok) throw new Error('Layer failed');
+  assert.deepEqual(first.calculation.result.sideOperationResults.map(side => side.result.groups[0].operationGroupId),
+    ['collection-front:no-operations', 'collection-back:no-operations']);
+
+  const collision = previewPartnerTechnicalDraft({ schemaVersion: 1, inputRevision: 30, rows: [parent, {
+    ...parent, productRowId: 'other-parent', configuration: { ...parent.configuration, sourceBatchId: 'other-stock' },
+    operations: { groups: [{ operationGroupId: 'collection-front:no-operations', scope: '1' }], tools: [], finishings: [] },
+  }], dependents: [layer] }, catalog);
+  if (!collision.ok) throw new Error(collision.error.code);
+  assert.equal(collision.value.conflicts.filter(conflict => conflict.entityId === 'collection-front:no-operations').length, 2);
+  assert.deepEqual(collision.value.rows.map(row => row.calculation.ok), [true, false]);
+  assert.equal(collision.value.dependents[0].calculation.ok, false);
+  assert.ok(collision.value.inventory.every(stock => stock.sourceBatchId === 'parent-stock'));
+});
+
 test('operation and collection identity collisions mark every owner across rows, remainders and layer scopes', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();
   const version = catalog.products[0].catalogSnapshotVersion;

@@ -1,16 +1,38 @@
-import type { PartnerTechnicalDraft } from './technical-draft';
+import type { PartnerTechnicalDraft, PartnerTechnicalPreview } from './technical-draft';
 import type { PartnerTechnicalOperationsIntent } from './technical-operations';
+import type { ProductOperationsTechnicalResult } from '@sabalanerp/contract-product-graph';
 
 export interface TechnicalDraftConflict {
   code: 'duplicate-identity'; field: string; entityId: string; message: string;
 }
 export interface TechnicalIdentityFailure { ok: false; inputRevision: number; conflicts: readonly TechnicalDraftConflict[]; result?: undefined }
+type Owner = { collection: 'rows' | 'dependents'; index: number; field: string; id: string };
+
+/** Audit actual canonical automatic groups, not a second scope calculation. */
+export function collectGeneratedTechnicalIdentities(draft: PartnerTechnicalDraft, preview: PartnerTechnicalPreview): Owner[] {
+  const owners: Owner[] = [];
+  const add = (result: ProductOperationsTechnicalResult | undefined, owner: Omit<Owner, 'id'>) => {
+    result?.groups.filter(group => group.automaticNoOperations).forEach(group =>
+      owners.push({ ...owner, id: group.operationGroupId }));
+  };
+  preview.rows.forEach((row, index) => add(row.operations?.result,
+    { collection: 'rows', index, field: 'operations.groups.operationGroupId' }));
+  preview.dependents.forEach(dependent => {
+    const index = draft.dependents!.findIndex(intent => intent.kind === dependent.kind &&
+      (intent.kind === 'remainder' && dependent.kind === 'remainder' ? intent.allocationId === dependent.allocationId
+        : intent.kind === 'layer' && dependent.kind === 'layer' && intent.layerConfigurationId === dependent.layerConfigurationId));
+    if (dependent.kind === 'remainder') add(dependent.operations?.result,
+      { collection: 'dependents', index, field: 'operations.groups.operationGroupId' });
+    else dependent.calculation.result?.sideOperationResults.forEach(side => add(side.result,
+      { collection: 'dependents', index, field: `sideOperations.${side.side}.operations.groups.operationGroupId` }));
+  });
+  return owners;
+}
 
 /** Stable graph identities cannot name two editing entities. Mark every owner
  * of an ambiguity, instead of arbitrarily accepting the first row/command.
  */
-export function inspectTechnicalIdentities(draft: PartnerTechnicalDraft) {
-  type Owner = { collection: 'rows' | 'dependents'; index: number; field: string; id: string };
+export function inspectTechnicalIdentities(draft: PartnerTechnicalDraft, generated: readonly Owner[] = []) {
   const identities = new Map<string, Owner[]>();
   const add = (kind: string, id: string, owner: Omit<Owner, 'id'>) => {
     const key = `${kind}/${id}`;
@@ -46,6 +68,7 @@ export function inspectTechnicalIdentities(draft: PartnerTechnicalDraft) {
       });
     }
   });
+  generated.forEach(owner => add('operation-group', owner.id, owner));
   const rows = new Map<number, TechnicalDraftConflict[]>();
   const dependents = new Map<number, TechnicalDraftConflict[]>();
   const conflicts: TechnicalDraftConflict[] = [];

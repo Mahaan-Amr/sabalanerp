@@ -12,7 +12,7 @@ import { partnerError, type Result } from './errors';
 import { technicalDecimal as decimal, centimetersToMeters, optionalCanonicalDecimal } from './technical-values';
 import { PartnerTechnicalOperationsIntentSchema, previewTechnicalOperations, type PartnerTechnicalOperationsPreview } from './technical-operations';
 import { PartnerTechnicalDependentSchema, previewTechnicalDependents, type PartnerTechnicalDependentPreview } from './technical-dependents';
-import { inspectTechnicalIdentities, type TechnicalDraftConflict, type TechnicalIdentityFailure } from './technical-identities';
+import { inspectTechnicalIdentities, collectGeneratedTechnicalIdentities, type TechnicalDraftConflict, type TechnicalIdentityFailure } from './technical-identities';
 import type { TechnicalLayerParent } from './technical-layers';
 import { PartnerTechnicalStairSystemSchema, previewTechnicalStairSystems, type TechnicalStairSystemConflict } from './technical-stair-systems';
 
@@ -103,13 +103,34 @@ export function previewPartnerTechnicalDraft(input: unknown, catalogInput: unkno
   const catalog = PartnerTechnicalPreviewCatalogSchema.safeParse(catalogInput);
   if (!parsed.success || !catalog.success) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
   const draft = parsed.data;
-  const identities = inspectTechnicalIdentities(draft);
+  let identities = inspectTechnicalIdentities(draft);
+  const generated = new Map<string, ReturnType<typeof collectGeneratedTechnicalIdentities>[number]>();
+  // Blocking an ambiguous allocation can free stock for a later sibling. Audit
+  // those newly usable facts too. Owners only become blocked, so this loop is
+  // bounded by the number of draft entities; valid previews calculate once.
+  while (true) {
+    const preview = calculateTechnicalDraft(draft, catalog.data, identities);
+    for (const owner of collectGeneratedTechnicalIdentities(draft, preview)) {
+      generated.set(JSON.stringify(owner), owner);
+    }
+    const audited = inspectTechnicalIdentities(draft, [...generated.values()]);
+    if (audited.rows.size === identities.rows.size && audited.dependents.size === identities.dependents.size) {
+      return { ok: true, value: { ...preview, conflicts: [
+        ...audited.conflicts, ...preview.conflicts.filter(conflict => conflict.code !== 'duplicate-identity'),
+      ] } };
+    }
+    identities = audited;
+  }
+}
+
+function calculateTechnicalDraft(draft: PartnerTechnicalDraft, catalog: PartnerTechnicalPreviewCatalog,
+  identities: ReturnType<typeof inspectTechnicalIdentities>): PartnerTechnicalPreview {
   const stairSystems = previewTechnicalStairSystems(draft.stairSystems ?? []);
   const rows: PartnerTechnicalPreview['rows'] = draft.rows.map((row, index) => {
     const conflicts = identities.rows.get(index);
     if (conflicts) return { productRowId: row.productRowId, family: row.family,
       calculation: { ok: false, inputRevision: draft.inputRevision, conflicts } };
-    const product = catalog.data.products.find(item => item.catalogItemId === row.catalogItemId &&
+    const product = catalog.products.find(item => item.catalogItemId === row.catalogItemId &&
       item.catalogSnapshotVersion === row.catalogSnapshotVersion && item.families.includes(row.family));
     if (!product) return { productRowId: row.productRowId, family: row.family,
       calculation: { ok: false, inputRevision: draft.inputRevision,
@@ -121,7 +142,7 @@ export function previewPartnerTechnicalDraft(input: unknown, catalogInput: unkno
         widthMeters: optionalCanonicalDecimal(row.configuration.widthMeters),
         requestedAreaSquareMeters: optionalCanonicalDecimal(row.configuration.requestedAreaSquareMeters),
         motherWidthMeters: centimetersToMeters(product.dimensions.motherWidthCentimeters),
-        sawKerfMeters: parseCanonicalDecimal(catalog.data.sawKerfMeters),
+        sawKerfMeters: parseCanonicalDecimal(catalog.sawKerfMeters),
       }) };
     if (row.family === 'stair') {
       const { quantityMode, ...geometry } = row.configuration;
@@ -138,7 +159,7 @@ export function previewPartnerTechnicalDraft(input: unknown, catalogInput: unkno
         crossDimensionMeters: optionalCanonicalDecimal(row.configuration.crossDimensionMeters),
         motherLengthMeters: optionalCanonicalDecimal(row.configuration.motherLengthMeters),
         motherWidthMeters: centimetersToMeters(product.dimensions.motherWidthCentimeters),
-        sawKerfMeters: parseCanonicalDecimal(catalog.data.sawKerfMeters),
+        sawKerfMeters: parseCanonicalDecimal(catalog.sawKerfMeters),
       }) };
     }
     if (row.family === 'slab') {
@@ -156,7 +177,7 @@ export function previewPartnerTechnicalDraft(input: unknown, catalogInput: unkno
           sourceBatchId: parseStableIdentity('source-batch', config.sourceBatchId),
           lengthMeters: optionalCanonicalDecimal(config.lengthMeters), widthMeters: optionalCanonicalDecimal(config.widthMeters),
           areaSquareMeters: optionalCanonicalDecimal(config.areaSquareMeters),
-          kerfMeters: parseCanonicalDecimal(sawKerfEnabled ? catalog.data.sawKerfMeters : '0'),
+          kerfMeters: parseCanonicalDecimal(sawKerfEnabled ? catalog.sawKerfMeters : '0'),
           sourceRows: config.sourceRows.map(source => ({ ...source,
             sourceRowId: parseStableIdentity('slab-source-row', source.sourceRowId),
             lengthMeters: parseCanonicalDecimal(source.lengthMeters!), widthMeters: parseCanonicalDecimal(source.widthMeters!), quantity: source.quantity!,
@@ -177,7 +198,7 @@ export function previewPartnerTechnicalDraft(input: unknown, catalogInput: unkno
       productRowId: row.productRowId, inputRevision: draft.inputRevision, lengthMeters: facts.lengthMeters,
       widthMeters: 'widthMeters' in facts ? facts.widthMeters : facts.crossDimensionMeters,
       quantity: 'quantityMode' in facts ? longitudinalOperationsQuantity(facts) : facts.quantity,
-    }, catalog.data.operations) };
+    }, catalog.operations) };
   });
   const baseInventory = rows.flatMap((row, index) => {
     const intent = draft.rows[index];
@@ -192,9 +213,9 @@ export function previewPartnerTechnicalDraft(input: unknown, catalogInput: unkno
     parents.set(row.productRowId, { geometry: { lengthMeters, crossDimensionMeters, quantity },
       catalogItemId: draft.rows[index].catalogItemId, catalogSnapshotVersion: draft.rows[index].catalogSnapshotVersion });
   } });
-  const dependencies = previewTechnicalDependents(draft.inputRevision, draft.dependents ?? [], baseInventory, catalog.data, parents, identities.dependents);
+  const dependencies = previewTechnicalDependents(draft.inputRevision, draft.dependents ?? [], baseInventory, catalog, parents, identities.dependents);
   const pending = (draft.editingValues ?? []).map(value => ({ code: 'editing-value-pending' as const,
     field: value.field, entityId: value.entityId, message: 'ورودی در حال ویرایش را کامل کنید.' }));
-  return { ok: true, value: { schemaVersion: 1, inputRevision: draft.inputRevision,
-    conflicts: [...identities.conflicts, ...stairSystems.conflicts, ...pending], rows: withOperations, ...dependencies } };
+  return { schemaVersion: 1, inputRevision: draft.inputRevision,
+    conflicts: [...identities.conflicts, ...stairSystems.conflicts, ...pending], rows: withOperations, ...dependencies };
 }

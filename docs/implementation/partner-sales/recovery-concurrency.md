@@ -43,3 +43,26 @@ Still required: the Partner-specific authoritative recovery revision and durable
 idempotency receipt, strict technical draft projection, canonical validated save
 and owner-issued inquiry-ready references, then the actual UI/transport binding.
 Client autosave scheduling or this CAS fix alone is not that acceptance.
+# Protected Partner recovery prerequisite
+
+The existing recovery column may hold a server-owned
+`kind: partner-technical-recovery` envelope. Generic lease/recovery operations
+never return that envelope, including nested `session.recovery` and conflict
+responses. All versions are private; an unknown version cannot fall through as
+an ordinary browser journal. The ordinary creation-draft discovery skips these
+records without purging them or restoring them into the priced wizard.
+
+Generic checkpoints reject both a forged protected envelope and replacement of
+an existing one. Generic acquire cannot change its contract/schema/base-revision
+binding, including after losing an expired-lease CAS to a concurrent protected
+transition. Normal same-binding takeover, heartbeat and release remain available;
+takeover revokes the old token and retains the private record. The dedicated
+Partner producer must enforce its own current authorization, seven-day expiry,
+safe projection and durable checkpoint/save receipts. This prerequisite alone
+does not implement that producer or activate a route.
+
+Four added public-seam integration tests were observed failing before their
+corresponding fixes. All seven recovery PostgreSQL tests now pass on the existing
+`sabalanerp-local`, with unpredictable per-test draft IDs and exact cleanup in
+`finally`. Ordinary recovery tests and architecture checks also pass. No schema,
+migration, second database, service recreation or production action is included.

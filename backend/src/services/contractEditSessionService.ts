@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { isProtectedContractRecovery, publicContractRecovery } from './contractRecoveryProtection';
 
 export const CONTRACT_EDIT_LEASE_TTL_MS = 75_000;
 export const CONTRACT_CREATION_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -124,7 +125,17 @@ const isOwner = (
   session.browserSessionId === browserSessionId &&
   (leaseToken === undefined || session.leaseToken === leaseToken);
 
-export const acquireContractEditSession = async (
+const protectedBindingConflict = (session: ContractEditSessionRecord, input: AcquireContractEditSessionInput):
+  Extract<AcquireContractEditSessionResult, { ok: false }> | null => {
+  if (!isProtectedContractRecovery(session.recovery) ||
+      (session.baseRevision === input.baseRevision && session.schemaVersion === input.schemaVersion &&
+       session.contractId === input.contractId)) return null;
+  return { ok: false, code: 'revision-conflict', recovery: null,
+    ownerUserId: session.ownerUserId, updatedAt: session.updatedAt,
+    currentBaseRevision: session.baseRevision };
+};
+
+const acquireContractEditSessionInternal = async (
   store: ContractEditSessionStore,
   input: AcquireContractEditSessionInput
 ): Promise<AcquireContractEditSessionResult> => {
@@ -163,6 +174,9 @@ export const acquireContractEditSession = async (
       updatedAt: existing.updatedAt
     };
   }
+
+  const bindingConflict = protectedBindingConflict(existing, input);
+  if (bindingConflict) return bindingConflict;
 
   if (existing.baseRevision < input.baseRevision) {
     const replacement: ContractEditSessionRecord = {
@@ -232,6 +246,8 @@ export const acquireContractEditSession = async (
       };
     }
     existing = await store.load(input.draftId) ?? existing;
+    const currentBindingConflict = protectedBindingConflict(existing, input);
+    if (currentBindingConflict) return currentBindingConflict;
   }
 
   if (isOwner(existing, input.userId, input.browserSessionId)) {
@@ -277,7 +293,7 @@ export const acquireContractEditSession = async (
   };
 };
 
-export const assertContractEditOwnership = async (
+const assertContractEditOwnershipInternal = async (
   store: ContractEditSessionStore,
   input: AssertContractEditOwnershipInput
 ): Promise<ContractEditOwnershipResult> => {
@@ -310,12 +326,16 @@ export const assertContractEditOwnership = async (
   return { ok: true, session };
 };
 
-export const checkpointContractRecovery = async (
+const checkpointContractRecoveryInternal = async (
   store: ContractEditSessionStore,
   input: CheckpointContractRecoveryInput
 ): Promise<ContractEditOwnershipResult> => {
-  let ownership = await assertContractEditOwnership(store, input);
+  let ownership = await assertContractEditOwnershipInternal(store, input);
   if (!ownership.ok) return ownership;
+  if (isProtectedContractRecovery(input.recovery) || isProtectedContractRecovery(ownership.session.recovery)) {
+    return { ok: false, code: 'revision-conflict', recovery: null,
+      currentBaseRevision: ownership.session.baseRevision };
+  }
   const initial = ownership.session;
   // Heartbeats change presence, not recovery. Retry only that benign conflict;
   // a different recovery checkpoint must never be overwritten automatically.
@@ -328,7 +348,7 @@ export const checkpointContractRecovery = async (
     };
     const replaced = await store.compareAndReplace(ownership.session, next);
     if (replaced) return { ok: true, session: replaced };
-    ownership = await assertContractEditOwnership(store, input);
+    ownership = await assertContractEditOwnershipInternal(store, input);
     if (!ownership.ok) return ownership;
     if (ownership.session.schemaVersion !== initial.schemaVersion ||
         !isDeepStrictEqual(ownership.session.recovery, initial.recovery)) {
@@ -339,7 +359,7 @@ export const checkpointContractRecovery = async (
     currentBaseRevision: ownership.session.baseRevision };
 };
 
-export const heartbeatContractEditSession = async (
+const heartbeatContractEditSessionInternal = async (
   store: ContractEditSessionStore,
   input: HeartbeatContractEditSessionInput
 ): Promise<ContractEditOwnershipResult> => {
@@ -369,7 +389,7 @@ export const heartbeatContractEditSession = async (
   if (!renewed) {
     // A concurrent checkpoint/heartbeat may already have renewed this lease.
     // Revalidate the current owner; never retry the stale recovery snapshot.
-    return assertContractEditOwnership(store, input);
+    return assertContractEditOwnershipInternal(store, input);
   }
   return { ok: true, session: renewed };
 };
@@ -391,6 +411,9 @@ export const discoverRecoverableContractCreationDraft = async (
     .sort((left, right) => (right.recoveryUpdatedAt ?? 0) - (left.recoveryUpdatedAt ?? 0));
 
   for (const candidate of candidates) {
+    // A Partner producer reads its own safe projection. Never feed its private
+    // record into the ordinary priced wizard or purge it during that discovery.
+    if (isProtectedContractRecovery(candidate.record.recovery)) continue;
     if (
       candidate.recoveryUpdatedAt === null ||
       now.getTime() - candidate.recoveryUpdatedAt > CONTRACT_CREATION_DRAFT_TTL_MS
@@ -414,11 +437,11 @@ export const discardContractCreationDraft = (
   input: DiscardContractCreationDraftInput
 ) => store.discardCreationDraft(input.draftId, input.userId, input.now ?? new Date());
 
-export const releaseContractEditSession = async (
+const releaseContractEditSessionInternal = async (
   store: ContractEditSessionStore,
   input: AssertContractEditOwnershipInput
 ): Promise<ContractEditOwnershipResult | { readonly ok: true; readonly alreadyReleased: true }> => {
-  const ownership = await assertContractEditOwnership(store, input);
+  const ownership = await assertContractEditOwnershipInternal(store, input);
   if (!ownership.ok && ownership.code === 'edit-session-missing') {
     return { ok: true, alreadyReleased: true };
   }
@@ -433,6 +456,30 @@ export const releaseContractEditSession = async (
   }
   return ownership;
 };
+
+type SessionResult = AcquireContractEditSessionResult | ContractEditOwnershipResult |
+  { readonly ok: true; readonly alreadyReleased: true };
+
+/** One projection for every public success/error path, including the nested
+ * session returned by acquire/checkpoint/release. Internal CAS keeps raw JSON. */
+function publicSessionResult<T extends SessionResult>(result: T): T {
+  return { ...result,
+    ...('recovery' in result ? { recovery: publicContractRecovery(result.recovery) } : {}),
+    ...('session' in result ? { session: { ...result.session,
+      recovery: publicContractRecovery(result.session.recovery) } } : {}),
+  };
+}
+
+export const acquireContractEditSession = async (store: ContractEditSessionStore, input: AcquireContractEditSessionInput) =>
+  publicSessionResult(await acquireContractEditSessionInternal(store, input));
+export const assertContractEditOwnership = async (store: ContractEditSessionStore, input: AssertContractEditOwnershipInput) =>
+  publicSessionResult(await assertContractEditOwnershipInternal(store, input));
+export const checkpointContractRecovery = async (store: ContractEditSessionStore, input: CheckpointContractRecoveryInput) =>
+  publicSessionResult(await checkpointContractRecoveryInternal(store, input));
+export const heartbeatContractEditSession = async (store: ContractEditSessionStore, input: HeartbeatContractEditSessionInput) =>
+  publicSessionResult(await heartbeatContractEditSessionInternal(store, input));
+export const releaseContractEditSession = async (store: ContractEditSessionStore, input: AssertContractEditOwnershipInput) =>
+  publicSessionResult(await releaseContractEditSessionInternal(store, input));
 
 const toJson = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;

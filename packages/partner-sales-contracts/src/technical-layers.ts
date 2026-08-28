@@ -55,11 +55,12 @@ export function previewTechnicalLayer(inputRevision: number, intent: PartnerTech
   }
   // The canonical packing engine knows geometry, not the editor's parent
   // eligibility. Bind the selection before allowing it to consume inventory.
+  const parentMaterial = intent.source.kind === 'parent-material';
   if (intent.source.kind !== 'new-material' && intent.source.selectedRemainingStoneIds.some(id =>
     inventory.some(stock => (stock.remainingStoneId === id || stock.remainingStoneId.startsWith(`${id}:layer-remainder:`)) &&
-      stock.ownerProductRowId !== intent.parentProductRowId))) {
+      (stock.ownerProductRowId !== intent.parentProductRowId || (parentMaterial && stock.catalogProductId !== parent.catalogItemId))))) {
     return { ok: false, inputRevision, conflicts: [{ code: 'layer-parent-mismatch', field: 'source',
-      entityId: intent.layerConfigurationId, message: 'منبع لایه باید متعلق به همین محصول والد باشد.' }] };
+      entityId: intent.layerConfigurationId, message: 'منبع لایه باید به والد و نوع سنگ انتخاب‌شده تعلق داشته باشد.' }] };
   }
   let source: StairLayerTechnicalSource;
   if (intent.source.kind === 'paid-remainder') source = { kind: intent.source.kind,

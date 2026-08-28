@@ -91,9 +91,16 @@ node scripts/run-partner-sales-tests.mjs check-inventory
 The exact-pin change preserves the schemaVersion 1 rejection guard. Prior QA
 evidence is historical and is not relabelled as acceptance of this new slice.
 
-Candidate verification: all 42 package tests (24 existing, 3 catalog, 15 technical
+Candidate verification: all 44 package tests (24 existing, 3 catalog, 17 technical
 draft) and both package typechecks pass; all 3 backend catalog projection tests
 pass. Full graph suites and remaining-child recovery pass. The read-only comparison
 of 62 complete priced results/hashes against the published remaining-stone graph
 remains identical. Foundation 3, harness unit 7 and unchanged inventory freshness
 pass after initializing the existing pinned Inquiry gitlink in the isolated worktree.
+
+Independent review found two concrete gaps: parent-material selection checked the
+parent but not the actual stock's catalog identity, and identity inspection omitted
+nested operation/group/collection IDs. Both have public-seam regression tests and
+are corrected before publication. The former now preserves a different stone's
+remaining inventory rather than relabelling it; the latter marks all affected
+owners across base rows, remainder children and layer sides.

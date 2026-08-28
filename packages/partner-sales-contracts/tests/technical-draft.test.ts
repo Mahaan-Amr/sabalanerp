@@ -3,6 +3,63 @@ import test from 'node:test';
 import { PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 
+test('operation and collection identity collisions mark every owner across rows, remainders and layer scopes', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures();
+  const version = catalog.products[0].catalogSnapshotVersion;
+  const operations = (suffix: string) => ({ groups: [{ operationGroupId: `group-${suffix}`, scope: '1' }],
+    tools: [{ toolSelectionId: `tool-${suffix}`, operationGroupId: `group-${suffix}`, catalogItemId: 'fixture-technical-tool',
+      catalogSnapshotVersion: version, edges: ['front'] }],
+    finishings: [{ finishingSelectionId: `finishing-${suffix}`, operationGroupId: `group-${suffix}`,
+      catalogItemId: 'fixture-technical-finishing', catalogSnapshotVersion: version }] });
+  const row = (suffix: string) => ({ productRowId: `row-${suffix}`, catalogItemId: 'fixture-technical-stone', catalogSnapshotVersion: version,
+    family: 'longitudinal', configuration: { sourceBatchId: `source-${suffix}`, lengthMeters: '1', widthMeters: '0.1', quantity: 1,
+      lastManualField: 'length', lastManualDimension: 'length', lengthDisplayUnit: 'm', widthDisplayUnit: 'cm',
+      sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual' }, operations: operations(suffix) });
+  const preview = previewPartnerTechnicalDraft({ schemaVersion: 1, inputRevision: 27,
+    rows: [row('a'), { ...row('b'), operations: operations('a') }, row('independent')],
+    dependents: [{ kind: 'remainder', creationOrder: 0, productRowId: 'child', allocationId: 'child-cut', sourceProductRowId: 'row-a',
+      catalogItemId: 'fixture-technical-stone', catalogSnapshotVersion: version, lengthDisplayUnit: 'm', widthDisplayUnit: 'cm',
+      sawKerfEnabled: false, calibrationEnabled: false, operations: operations('a') },
+    ...['a', 'b'].map(suffix => ({ kind: 'layer', creationOrder: 1, layerConfigurationId: `layer-${suffix}`, parentProductRowId: 'row-a',
+      sourceBatchId: `layer-stock-${suffix}`, catalogItemId: 'fixture-technical-layer', catalogSnapshotVersion: version,
+      widthDisplayUnit: 'cm', targetSides: ['front'], sawKerfEnabled: false, calibrationEnabled: false,
+      sideOperations: [{ side: 'front', operationCollectionId: 'shared-collection', scopeIntent: 'side', operations: operations(`layer-${suffix}`) }] })),
+    ],
+  }, catalog);
+  if (!preview.ok) throw new Error(preview.error.code);
+  for (const identity of ['group-a', 'tool-a', 'finishing-a', 'shared-collection']) {
+    assert.ok(preview.value.conflicts.filter(conflict => conflict.entityId === identity).length >= 2, identity);
+  }
+  assert.deepEqual(preview.value.rows.map(item => item.calculation.ok), [false, false, true]);
+  assert.ok(preview.value.dependents.every(item => !item.calculation.ok));
+});
+
+test('parent-material replay never relabels a different-stone remainder produced by an earlier layer', () => {
+  const fixtures = createPartnerTechnicalCatalogFixtures();
+  const catalog = { ...fixtures, products: [...fixtures.products, { ...fixtures.products[0], catalogItemId: 'stone-b' }] };
+  const version = catalog.products[0].catalogSnapshotVersion;
+  const parent = { productRowId: 'parent-a', catalogItemId: 'fixture-technical-stone', catalogSnapshotVersion: version,
+    family: 'stair', configuration: { stairSystemId: 'stairs', part: 'tread', sourceBatchId: 'parent-stock',
+      lengthMeters: '1', crossDimensionMeters: '0.3', quantity: 1, lengthDisplayUnit: 'm', crossDimensionDisplayUnit: 'cm',
+      sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual' } };
+  const first = { kind: 'layer', creationOrder: 0, layerConfigurationId: 'layer-b', parentProductRowId: 'parent-a',
+    sourceBatchId: 'layer-b-stock', catalogItemId: 'fixture-technical-layer', catalogSnapshotVersion: version,
+    layersPerParentPiece: 1, widthMeters: '0.1', widthDisplayUnit: 'cm', targetSides: ['front'],
+    sawKerfEnabled: false, calibrationEnabled: false,
+    source: { kind: 'new-material', catalogItemId: 'stone-b', catalogSnapshotVersion: version,
+      sourceRows: [{ sourceRowId: 'fresh-b', lengthMeters: '3', widthMeters: '0.1', quantity: 1 }] } };
+  const second = { ...first, creationOrder: 1, layerConfigurationId: 'layer-a', sourceBatchId: 'layer-a-stock',
+    source: { kind: 'parent-material', catalogItemId: parent.catalogItemId, catalogSnapshotVersion: version,
+      selectedRemainingStoneIds: ['layer-b:remainder:1'], sourceRows: [] } };
+  const preview = previewPartnerTechnicalDraft({ schemaVersion: 1, inputRevision: 26, rows: [parent], dependents: [first, second] }, catalog);
+  if (!preview.ok) throw new Error(preview.error.code);
+  assert.equal(preview.value.dependents[0].calculation.ok, true);
+  assert.equal(preview.value.dependents[1].calculation.ok, false);
+  const retained = preview.value.inventory.find(stock => stock.remainingStoneId === 'layer-b:remainder:1');
+  assert.equal(retained?.catalogProductId, 'stone-b');
+  assert.equal(retained?.lengthMeters, '2');
+});
+
 test('system stair quantity is canonical while a manually edited sibling remains independent after reload', () => {
   const catalog = createPartnerTechnicalCatalogFixtures();
   const version = catalog.products[0].catalogSnapshotVersion;

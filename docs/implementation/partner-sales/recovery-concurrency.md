@@ -61,8 +61,13 @@ Partner producer must enforce its own current authorization, seven-day expiry,
 safe projection and durable checkpoint/save receipts. This prerequisite alone
 does not implement that producer or activate a route.
 
-Four added public-seam integration tests were observed failing before their
-corresponding fixes. All seven recovery PostgreSQL tests now pass on the existing
+Five added public-seam integration tests were observed failing before their
+corresponding fixes. All eight recovery PostgreSQL tests now pass on the existing
 `sabalanerp-local`, with unpredictable per-test draft IDs and exact cleanup in
 `finally`. Ordinary recovery tests and architecture checks also pass. No schema,
 migration, second database, service recreation or production action is included.
+
+Independent review found a cleanup race: a stale discovery snapshot could purge a
+new protected checkpoint. Cleanup now uses the same full snapshot predicate as
+replacement, atomically, so neither protected nor ordinary concurrent progress
+can be deleted by stale discovery. A real PostgreSQL regression covers that race.

@@ -163,6 +163,30 @@ test('a concurrent protected transition cannot be rebound when an expired generi
   }
 });
 
+test('ordinary discovery cannot purge a protected checkpoint installed after its draft listing', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: localDatabaseUrl() } } });
+  const draftId = `recovery-protected-discovery-${randomUUID()}`;
+  const now = new Date();
+  const envelope = { kind: 'partner-technical-recovery', version: 1, updatedAt: now.getTime(), privateEvidence: 'newly-saved' };
+  class SavingDuringDiscoveryStore extends PrismaContractEditSessionStore {
+    override async listCreationDrafts(ownerUserId: string) {
+      const snapshot = await super.listCreationDrafts(ownerUserId);
+      for (const record of snapshot) await super.compareAndReplace(record, { ...record, recovery: envelope });
+      return snapshot;
+    }
+  }
+  const store = new SavingDuringDiscoveryStore(database);
+  try {
+    await store.create({ draftId, contractId: null, ownerUserId: draftId, browserSessionId: 'browser-a', leaseToken: randomUUID(),
+      schemaVersion: 2, baseRevision: 0, recovery: null, createdAt: now, updatedAt: now, takenOverAt: null });
+    assert.equal(await discoverRecoverableContractCreationDraft(store, { userId: draftId, browserSessionId: 'browser-a', now }), null);
+    assert.deepEqual((await store.load(draftId))?.recovery, envelope, 'the newly saved protected draft survives stale cleanup');
+  } finally {
+    try { await database.salesContractEditSession.deleteMany({ where: { draftId } }); }
+    finally { await database.$disconnect(); }
+  }
+});
+
 test('same-lease same-millisecond concurrent checkpoints cannot both replace one persisted recovery revision', async () => {
   const database = new PrismaClient({ datasources: { db: { url: localDatabaseUrl() } } });
   const store = new PrismaContractEditSessionStore(database);

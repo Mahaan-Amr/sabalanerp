@@ -43,8 +43,8 @@ class MemoryStore implements ContractEditSessionStore {
       : [];
   }
 
-  async purge(draftId: string) {
-    if (this.record?.draftId !== draftId) return false;
+  async purgeIfUnchanged(expected: ContractEditSessionRecord) {
+    if (!isDeepStrictEqual(this.record, expected)) return false;
     this.record = null;
     return true;
   }

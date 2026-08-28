@@ -32,7 +32,7 @@ export interface ContractEditSessionStore {
   ): Promise<ContractEditSessionRecord | null>;
   remove(draftId: string, leaseToken: string): Promise<boolean>;
   listCreationDrafts(ownerUserId: string): Promise<ContractEditSessionRecord[]>;
-  purge(draftId: string): Promise<boolean>;
+  purgeIfUnchanged(expected: ContractEditSessionRecord): Promise<boolean>;
   discardCreationDraft(draftId: string, ownerUserId: string, discardedAt: Date): Promise<boolean>;
 }
 
@@ -418,7 +418,7 @@ export const discoverRecoverableContractCreationDraft = async (
       candidate.recoveryUpdatedAt === null ||
       now.getTime() - candidate.recoveryUpdatedAt > CONTRACT_CREATION_DRAFT_TTL_MS
     ) {
-      await store.purge(candidate.record.draftId);
+      await store.purgeIfUnchanged(candidate.record);
       continue;
     }
     const leaseActive = now.getTime() - candidate.record.updatedAt.getTime() <= CONTRACT_EDIT_LEASE_TTL_MS;
@@ -484,6 +484,15 @@ export const releaseContractEditSession = async (store: ContractEditSessionStore
 const toJson = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
+const snapshotWhere = (expected: ContractEditSessionRecord): Prisma.SalesContractEditSessionWhereInput => ({
+  draftId: expected.draftId, leaseToken: expected.leaseToken, ownerUserId: expected.ownerUserId,
+  browserSessionId: expected.browserSessionId, contractId: expected.contractId,
+  baseRevision: expected.baseRevision, schemaVersion: expected.schemaVersion,
+  createdAt: expected.createdAt, updatedAt: expected.updatedAt, takenOverAt: expected.takenOverAt,
+  // JSON equality matters even when both updates share a millisecond.
+  recovery: { equals: expected.recovery === null ? Prisma.AnyNull : toJson(expected.recovery) },
+});
+
 const fromPrismaRecord = (record: {
   draftId: string;
   contractId: string | null;
@@ -535,20 +544,7 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
     if (expected.draftId !== record.draftId) return null;
     return this.prisma.$transaction(async tx => {
       const updated = await tx.salesContractEditSession.updateMany({
-        where: {
-          draftId: record.draftId,
-          leaseToken: expected.leaseToken,
-          ownerUserId: expected.ownerUserId,
-          browserSessionId: expected.browserSessionId,
-          contractId: expected.contractId,
-          baseRevision: expected.baseRevision,
-          schemaVersion: expected.schemaVersion,
-          createdAt: expected.createdAt,
-          updatedAt: expected.updatedAt,
-          takenOverAt: expected.takenOverAt,
-          // JSON equality matters even when both updates share a millisecond.
-          recovery: { equals: expected.recovery === null ? Prisma.AnyNull : toJson(expected.recovery) }
-        },
+        where: snapshotWhere(expected),
         data: {
           contractId: record.contractId,
           ownerUserId: record.ownerUserId,
@@ -585,8 +581,8 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
     return records.map(fromPrismaRecord);
   }
 
-  async purge(draftId: string): Promise<boolean> {
-    const removed = await this.prisma.salesContractEditSession.deleteMany({ where: { draftId } });
+  async purgeIfUnchanged(expected: ContractEditSessionRecord): Promise<boolean> {
+    const removed = await this.prisma.salesContractEditSession.deleteMany({ where: snapshotWhere(expected) });
     return removed.count === 1;
   }
 

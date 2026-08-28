@@ -1,7 +1,8 @@
 # Partner central authorization — persisted root slices, issue 319
 
 Review base: `1609c4637f2cd28b1cae14f876bc5005291547b4` (user approved).
-Public contracts: `@sabalanerp/partner-sales-contracts@1.4.0`, authorization wire v1.
+Public contracts: `@sabalanerp/partner-sales-contracts@1.4.0`, authorization v1
+and its already-published v2 action companion. No package/schema change.
 No runtime registration, activation, schema, ordinary Sales policy or shared grant
 resolver changes are included. **This does not complete issue 319.**
 
@@ -15,6 +16,15 @@ resolver changes are included. **This does not complete issue 319.**
   explicit action/root-kind/purpose/scope evidence from the central owner (#296).
 - `projectActionAvailability` projects canonical Persian denials, omits hidden
   resources and deduplicates actions. It is advisory; it is not a write permit.
+- `createPartnerAuthorizationV2`, `createPrismaPartnerAuthorizationV2` and
+  `projectActionAvailabilityV2` consume the published v2 ports. They add only
+  COMMERCIAL_TERMS_MANAGE and PROFILE_CONVERSION_MANAGE on PROFILE/MANAGEMENT,
+  with explicit internal scoped grants or named ADMIN authority. Both versions
+  use one decision implementation and one persisted evidence reader. V1 still
+  rejects unknown actions; the fixed Partner bundle never grows. HR identity,
+  credit terms, responder assignment and all four ADMIN exceptions remain
+  independent. Permission does not execute or waive conversion/disposition,
+  terms-provenance or lifecycle gates owned by the profile command module.
 - `createAuthorizedCaseReader` covers the three private Case query purposes:
   Partner/management economics, Sabalan Accounting, and price-free fulfillment.
   It reauthorizes after IO, checks the exact revision/hash/root, and rejects
@@ -74,8 +84,8 @@ those facts or acquire database locks itself.
   existing generic feature/workspace rows have no complete Partner scope model.
 - Remaining child adapters (including approvals, payment and delivery targets),
   creation/recovery targets before a Case exists, and owning command integration.
-- Public v2 management actions, all non-Case query producers, safe list/count
-  database predicates, sensitive decision audit and Admin reason evidence.
+- All non-Case query producers, safe list/count database predicates, sensitive
+  decision audit and Admin reason evidence.
 - Cross-connection grant/assignment/lifecycle races and complete atomic command
   commit acceptance, operations/cohort/domain gates and durable audit integration.
 - #330 consumers, #334 live closed composition, #335 comprehensive acceptance.
@@ -108,4 +118,9 @@ Focused command (with the existing local DB URL supplied safely in the process
 environment): `node packages/partner-sales-contracts/node_modules/tsx/dist/cli.mjs
 --test backend/src/services/__tests__/partnerAuthorization.integration.test.ts
 backend/src/services/__tests__/partnerAuthorization.test.ts
-backend/src/services/__tests__/partnerAuthorizationProjection.test.ts`.
+backend/src/services/__tests__/partnerAuthorizationProjection.test.ts
+backend/src/services/__tests__/partnerAuthorizationV2.test.ts`.
+
+V2 regressions cover explicit action grants, expiry, unchanged v1 rejection,
+fixed Partner capabilities, the four ADMIN exceptions, safe availability and
+current persisted Profile/grant checks. The test grant adapter remains test-only.

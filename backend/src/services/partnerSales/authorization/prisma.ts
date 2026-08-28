@@ -1,20 +1,21 @@
 import type { Prisma } from '@prisma/client';
-import { partnerError, type PartnerAction, type PermissionContext, type Result } from '@sabalanerp/partner-sales-contracts';
-import { createPartnerAuthorization } from './service';
-import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot } from './contracts';
+import { partnerError, type PartnerAction, type PartnerActionV2, type PartnerAuthorizationV2Port,
+  type PermissionContext, type Result } from '@sabalanerp/partner-sales-contracts';
+import { createPartnerAuthorization, createPartnerAuthorizationV2 } from './service';
+import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot, AuthorizationSource } from './contracts';
 
 /** #296 composition contract. Resolve explicit action/scope grants using the
  * CENTRAL resolver; lock its grant rows/absence guards until this transaction
  * finishes. No route may implement a role/workspace fallback here. */
-export type ResolvePartnerAuthority = (tx: Prisma.TransactionClient, input: {
+export type ResolvePartnerAuthority<Action extends PartnerActionV2 = PartnerAction> = (tx: Prisma.TransactionClient, input: {
   actorId: string; root: AuthorizationRoot;
-}) => Promise<Pick<AuthorizationEvidence, 'grants' | 'authorizationRevision'>>;
+}) => Promise<Pick<AuthorizationEvidence<Action>, 'grants' | 'authorizationRevision'>>;
 
 /** Transaction-scoped, using the caller's shared Prisma transaction. Never owns
  * a PrismaClient or commits/disconnects. Unsupported roots fail closed. */
-export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
-  resolveAuthority: ResolvePartnerAuthority, target?: { correctionOpportunityId: string }) {
-  const authorization = createPartnerAuthorization({ read: async (actorId, root) => {
+function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Prisma.TransactionClient,
+  resolveAuthority: ResolvePartnerAuthority<Action>, target?: { correctionOpportunityId: string }): AuthorizationSource<Action> {
+  return { read: async (actorId, root) => {
     let resource: AuthorizationEvidence['resource'] = null;
     let profileId = root.kind === 'PROFILE' ? root.id : null;
     if (root.kind === 'INQUIRY') {
@@ -77,7 +78,19 @@ export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, b
       ...(actor?.departmentId ? { departmentId: actor.departmentId } : {}),
       ...(actor?.partnerProfile ? { partnerProfile: actor.partnerProfile } : {}),
     } };
-  } }, binding);
+  } };
+}
+
+/** The versioned public port shares all persisted evidence and lock behavior.
+ * It does not install a central grant provider or expand v1 action vocabulary. */
+export function createPrismaPartnerAuthorizationV2(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
+  resolveAuthority: ResolvePartnerAuthority<PartnerActionV2>, target?: { correctionOpportunityId: string }): PartnerAuthorizationV2Port {
+  return createPartnerAuthorizationV2(prismaAuthorizationSource(tx, resolveAuthority, target), binding);
+}
+
+export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
+  resolveAuthority: ResolvePartnerAuthority, target?: { correctionOpportunityId: string }) {
+  const authorization = createPartnerAuthorization(prismaAuthorizationSource(tx, resolveAuthority, target), binding);
   return { ...authorization,
     async authorizeCaseRecord(action: PartnerAction, target: { kind: 'PRODUCT_ROW' | 'INTERNAL_RECORD' | 'CUSTOMER_CONTRACT'; id: string },
       expectedCaseId: string): Promise<Result<PermissionContext>> {

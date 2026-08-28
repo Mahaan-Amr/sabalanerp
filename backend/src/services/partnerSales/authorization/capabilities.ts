@@ -1,4 +1,4 @@
-import type { PartnerAction, PermissionContext } from '@sabalanerp/partner-sales-contracts';
+import type { PartnerAction, PartnerActionV2, PermissionContext } from '@sabalanerp/partner-sales-contracts';
 
 type Capability = readonly [PermissionContext['root']['kind'], PermissionContext['purpose']];
 /** Approved fixed bundle (#309), not configurable feature grants. */
@@ -37,7 +37,13 @@ export const internalCapabilities: Partial<Record<PartnerAction, readonly Capabi
   VOID_REMEDIATION_REQUEST: [['CASE', 'MANAGEMENT']],
 };
 
-export const readActions: ReadonlySet<PartnerAction> = new Set([
+export const internalCapabilitiesV2: Partial<Record<PartnerActionV2, readonly Capability[]>> = {
+  ...internalCapabilities,
+  COMMERCIAL_TERMS_MANAGE: [['PROFILE', 'MANAGEMENT']],
+  PROFILE_CONVERSION_MANAGE: [['PROFILE', 'MANAGEMENT']],
+};
+
+export const readActions: ReadonlySet<PartnerActionV2> = new Set([
   'PROFILE_READ', 'CUSTOMER_READ', 'INQUIRY_READ', 'CASE_READ', 'CUSTOMER_OUTPUT',
   'ACCOUNTING_READ', 'FULFILLMENT_READ', 'REPORT_READ', 'AUDIT_READ',
 ]);

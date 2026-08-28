@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
-import { createPrismaPartnerAuthorization } from '../partnerSales/authorization/prisma';
+import { createPrismaPartnerAuthorization, createPrismaPartnerAuthorizationV2 } from '../partnerSales/authorization/prisma';
 import { seedAuthorizationCase } from './partnerAuthorizationFixture';
 
 function localDatabase(connectionLimit = 2) {
@@ -328,4 +328,23 @@ test('a responder deactivated by a competing transaction cannot pass authorizati
       email: { in: [`${partner}@example.invalid`, `${actor}@example.invalid`] } } }); }
     finally { await database.$disconnect(); }
   }
+});
+
+test('persisted v2 management uses the same current Profile and grant source without HR or workspace fallback', async () => {
+  await fixture(async (tx, partner, actor) => {
+    await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'PENDING' } });
+    const grant = await tx.featurePermission.create({ data: { userId: actor, workspace: 'sales',
+      feature: 'fixture-partner-v2-commercial', permissionLevel: 'edit' } });
+    const port = createPrismaPartnerAuthorizationV2(tx, { actorId: actor, purpose: 'MANAGEMENT', channel: 'API' }, async () => {
+      // Test-only persisted boundary adapter; no production permission mapping.
+      const current = await tx.featurePermission.findUniqueOrThrow({ where: { id: grant.id } });
+      return { authorizationRevision: 1, grants: current.isActive ? [{ action: 'COMMERCIAL_TERMS_MANAGE',
+        rootKind: 'PROFILE', purpose: 'MANAGEMENT', scope: 'COMPANY' }] : [] };
+    });
+    const root = { kind: 'PROFILE' as const, id: partner };
+    assert.equal((await port.authorize('COMMERCIAL_TERMS_MANAGE', root)).ok, true);
+    assert.equal((await port.authorize('IDENTITY_VERIFY', root)).ok, false, 'commercial authority never verifies HR identity');
+    await tx.featurePermission.update({ where: { id: grant.id }, data: { isActive: false } });
+    assert.equal((await port.authorize('COMMERCIAL_TERMS_MANAGE', root)).ok, false);
+  });
 });

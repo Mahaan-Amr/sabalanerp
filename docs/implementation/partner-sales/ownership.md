@@ -53,6 +53,16 @@ Issue #313; Epic #311. Package `@sabalanerp/partner-sales-contracts@1.1.0`, orig
 
 Coordinated follow-up reservations (recorded in the relevant issue before edits):
 
+- User-approved #296/#315/#319 scoped-action authority follow-up: root in
+  `codex/partner-technical-core` is sole writer for new
+  `backend/src/services/effectiveAuthorization/**`, the narrow shared
+  `effectiveAccessService.ts` entry-point export, Partner authorization adapter,
+  corresponding tests, Prisma schema and new additive authority/audit migrations.
+  The previous #315 owner explicitly confirmed no active writer. Coordination:
+  issue 296 comment 5457700822 and issue 315 comment 5457701063. Original
+  migrations, ordinary authorization behavior, deployment and activation remain
+  unchanged; no legacy grant is inferred into a Partner scope.
+
 - #313 is the sole writer for the bounded 1.1.0 public workspace/command/query
   extensions and frontend/backend dependency + Docker package wiring requested by
   #330/#331; #333 reviewed the narrow packaging scope. This does not include any

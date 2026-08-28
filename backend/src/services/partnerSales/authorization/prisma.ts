@@ -13,7 +13,7 @@ export type ResolvePartnerAuthority<Action extends PartnerActionV2 = PartnerActi
 
 /** Transaction-scoped, using the caller's shared Prisma transaction. Never owns
  * a PrismaClient or commits/disconnects. Unsupported roots fail closed. */
-function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Prisma.TransactionClient,
+export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Prisma.TransactionClient,
   resolveAuthority: ResolvePartnerAuthority<Action>, target?: { correctionOpportunityId: string }): AuthorizationSource<Action> {
   return { read: async (actorId, root) => {
     let resource: AuthorizationEvidence['resource'] = null;

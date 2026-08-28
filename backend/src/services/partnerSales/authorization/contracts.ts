@@ -12,7 +12,8 @@ export interface AuthorizationEvidence<Action extends PartnerActionV2 = PartnerA
     partnerStatus: PermissionContext['partnerStatus']; lifecycleRevision: number; departmentId?: string;
     assignment?: PermissionContext['assignment']; requesterId?: string } | null;
   grants: Array<{ action: Action; rootKind: AuthorizationRoot['kind']; purpose: PermissionContext['purpose'];
-    scope: PermissionContext['scope']; expiresAt?: string; boundRootId?: string }>;
+    scope: PermissionContext['scope']; expiresAt?: string; boundRootId?: string;
+    provenance?: { source: 'DIRECT_ACTION' | 'ROLE_ACTION'; grantId: string; version: 1 } }>;
 }
 
 /** #296 supplies resolved explicit action/scope evidence; no workspace fallback.

@@ -2,9 +2,10 @@
 
 Review base: `1609c4637f2cd28b1cae14f876bc5005291547b4` (user approved).
 Public contracts: `@sabalanerp/partner-sales-contracts@1.4.0`, authorization v1
-and its already-published v2 action companion. No package/schema change.
-No runtime registration, activation, schema, ordinary Sales policy or shared grant
-resolver changes are included. **This does not complete issue 319.**
+and its already-published v2 action companion. No public package change.
+The subsequently approved #296/#315 extension adds persisted central scoped
+action grants and decision audit. No runtime registration, activation or ordinary
+Sales policy changes are included. **This does not complete issue 319.**
 
 ## Interfaces
 
@@ -66,12 +67,25 @@ the central action grant still apply; historical `eligibilityEvidence` is not a
 current grant. The child methods refresh authority after waiting for child locks,
 so an earlier grant expiry timestamp cannot survive the wait as a permit.
 
-`ResolvePartnerAuthority` is a REQUIRED #296 integration adapter, not a new grant
-model or a route-local permission resolver. It must resolve current explicit
-actions/scopes, preserve direct narrowing, lock every relied-on grant and its
-absence/role guard against concurrent insert/revoke, and provide revision evidence.
-There is intentionally no workspace fallback or default grant provider. The
-test-only persisted grant adapter is never installed into runtime.
+`resolvePartnerScopedAuthority` now adapts the central scoped-action resolver
+exported by `effectiveAccessService.ts`. It reads explicit persisted grants,
+preserves direct narrowing, expiry and revocation, and holds the central authority
+revision/absence lock through commit. The injected `ResolvePartnerAuthority`
+seam remains available for non-runtime tests. There is no workspace fallback.
+See `../../effectiveAuthorization/README.md` for shared grant provenance,
+provisioning, lock order and migration boundaries.
+
+`createAuditedPartnerAuthorization` is the real, unmounted v2 composition using
+that provider and the same persisted root reader/policy. It records every valid
+resource decision, including denial, current lifecycle/assignment revisions and
+evaluated grant ids. Named ADMIN mutations additionally require a nonblank
+reason. All four domain restrictions still run first. Invalid transport shapes
+are rejected without copying raw inputs into retained audit. The caller must
+return denials from the transaction to commit their audit, and may perform no
+business write before authorization. A thrown/rolled-back transaction retains
+neither its business mutation nor its audit; transport failure audit remains an
+integration concern. `readPartnerAuthorizationAudit` authorizes and reauthorizes
+AUDIT_READ on the exact root, audits the read, and returns at most 100 records.
 
 The generic evidence adapter is also trusted: it must validate relationships,
 current assignment eligibility and requester evidence, and keep evidence stable
@@ -80,12 +94,13 @@ those facts or acquire database locks itself.
 
 ## Acceptance still open
 
-- #296 persisted action/scope/provenance adapter and coordinated shared hooks;
-  existing generic feature/workspace rows have no complete Partner scope model.
+- #296 legacy grant dry-run/cutover and ordinary cross-workspace parity remain
+  separate. New grants are explicit; existing generic feature/workspace rows
+  are never guessed into resource scopes.
 - Remaining child adapters (including approvals, payment and delivery targets),
   creation/recovery targets before a Case exists, and owning command integration.
-- All non-Case query producers, safe list/count database predicates, sensitive
-  decision audit and Admin reason evidence.
+- All non-Case query producers, safe list/count database predicates and transport
+  transaction composition retaining denial audit without partial writes.
 - Cross-connection grant/assignment/lifecycle races and complete atomic command
   commit acceptance, operations/cohort/domain gates and durable audit integration.
 - #330 consumers, #334 live closed composition, #335 comprehensive acceptance.

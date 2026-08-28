@@ -8,7 +8,71 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model EffectiveAuthorizationState {
+  id Int @id
+  revision Int
+  @@map("effective_authorization_state")
+}
+
+model EffectiveAuthorizationAudit {
+  id String @id
+  domain String
+  actorId String
+  action String
+  rootKind String
+  rootId String
+  purpose String
+  channel String
+  allowed Boolean
+  isAdmin Boolean
+  code String
+  scope String?
+  reason String?
+  correlationId String
+  authorizationRevision Int?
+  lifecycleRevision Int?
+  assignmentId String?
+  assignmentRevision Int?
+  evaluatedAt DateTime
+  evaluatedGrantIds Json
+  recordedAt DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamp(6)
+  @@index([domain, rootKind, rootId, recordedAt], map: "effective_authorization_audit_root_idx")
+  @@map("effective_authorization_audit")
+}
+
+model EffectiveActionGrant {
+  id String @id
+  principalKind String
+  principalId String
+  subjectUserId String?
+  domain String
+  action String
+  rootKind String
+  purpose String
+  scope String
+  effect String
+  boundRootId String?
+  effectiveFrom DateTime @default(now())
+  expiresAt DateTime?
+  grantedBy String
+  reason String
+  correlationId String
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  revokedBy String?
+  revocationReason String?
+  revocationCorrelationId String?
+  subject User? @relation("ScopedGrantSubject", fields: [subjectUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  issuer User @relation("ScopedGrantIssuer", fields: [grantedBy], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  revoker User? @relation("ScopedGrantRevoker", fields: [revokedBy], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([principalKind, principalId, domain], map: "effective_action_grants_principal_idx")
+  @@map("effective_action_grants")
+}
+
 model User {
+  scopedActionGrants EffectiveActionGrant[] @relation("ScopedGrantSubject")
+  issuedScopedActionGrants EffectiveActionGrant[] @relation("ScopedGrantIssuer")
+  revokedScopedActionGrants EffectiveActionGrant[] @relation("ScopedGrantRevoker")
   partnerProfile PartnerProfile?
   id                                         String                               @id @default(cuid())
   email                                      String                               @unique

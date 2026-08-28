@@ -4,6 +4,9 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { createPrismaPartnerAuthorization, createPrismaPartnerAuthorizationV2 } from '../partnerSales/authorization/prisma';
 import { seedAuthorizationCase } from './partnerAuthorizationFixture';
+import { grantScopedAction, revokeScopedAction } from '../effectiveAccessService';
+import { resolvePartnerScopedAuthority } from '../partnerSales/authorization/centralAuthority';
+import { createAuditedPartnerAuthorization, readPartnerAuthorizationAudit } from '../partnerSales/authorization/audited';
 
 function localDatabase(connectionLimit = 2) {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -11,6 +14,55 @@ function localDatabase(connectionLimit = 2) {
   url.searchParams.set('connection_limit', String(connectionLimit)); url.searchParams.set('pool_timeout', '10');
   return new PrismaClient({ datasources: { db: { url: url.toString() } } });
 }
+
+test('Partner policy consumes central persisted grants, not an injected fixture authority', async () => {
+  await fixture(async (tx, partner, actor) => {
+    await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
+    await tx.user.update({ where: { id: actor }, data: { role: 'ADMIN' } });
+    const receipt = await grantScopedAction(tx, { actorId: actor, reason: 'اعطای اختیار مستقل', correlationId: randomUUID() }, {
+      principal: { kind: 'USER', id: actor }, domain: 'PARTNER', action: 'COMMERCIAL_TERMS_MANAGE',
+      rootKind: 'PROFILE', purpose: 'MANAGEMENT', scope: 'COMPANY', effect: 'ALLOW',
+    });
+    await tx.user.update({ where: { id: actor }, data: { role: 'MANAGER' } });
+    const port = createPrismaPartnerAuthorizationV2(tx, { actorId: actor, purpose: 'MANAGEMENT', channel: 'API' }, resolvePartnerScopedAuthority);
+    const root = { kind: 'PROFILE' as const, id: partner };
+    assert.equal((await port.authorize('COMMERCIAL_TERMS_MANAGE', root)).ok, true);
+    assert.equal((await port.authorize('PROFILE_CONVERSION_MANAGE', root)).ok, false);
+    await tx.user.update({ where: { id: actor }, data: { role: 'ADMIN' } });
+    await revokeScopedAction(tx, { actorId: actor, reason: 'لغو اختیار', correlationId: randomUUID() }, receipt.id);
+    await tx.user.update({ where: { id: actor }, data: { role: 'MANAGER' } });
+    assert.equal((await port.authorize('COMMERCIAL_TERMS_MANAGE', root)).ok, false);
+  });
+});
+
+test('persisted ADMIN decisions require a mutation reason and expose audit only through current scoped audit authority', async () => {
+  await fixture(async (tx, partner, actor) => {
+    await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
+    await tx.user.update({ where: { id: actor }, data: { role: 'ADMIN' } });
+    const binding = { actorId: actor, purpose: 'MANAGEMENT' as const, channel: 'API' as const };
+    const root = { kind: 'PROFILE' as const, id: partner };
+    const unconfirmed = createAuditedPartnerAuthorization(tx, binding, { correlationId: 'test-missing-reason' });
+    assert.equal((await unconfirmed.authorize('COMMERCIAL_TERMS_MANAGE', root)).ok, false);
+    const confirmed = createAuditedPartnerAuthorization(tx, binding, { correlationId: 'test-with-reason', reason: 'تأیید آگاهانهٔ اقدام مدیریتی' });
+    assert.equal((await confirmed.authorize('COMMERCIAL_TERMS_MANAGE', root)).ok, true);
+    const events = await readPartnerAuthorizationAudit(tx, { ...binding, purpose: 'AUDIT' }, root);
+    assert.equal(events.ok, true);
+    if (events.ok) {
+      const decisions = events.value.filter(event => event.action === 'COMMERCIAL_TERMS_MANAGE');
+      assert.equal(decisions.length, 2);
+      assert.deepEqual(decisions.map(event => event.allowed), [false, true]);
+      assert.equal(decisions[1].reason, 'تأیید آگاهانهٔ اقدام مدیریتی');
+      assert.equal(decisions[1].correlationId, 'test-with-reason');
+      assert.equal(decisions[1].isAdmin, true);
+      assert.ok(events.value.some(event => event.action === 'AUDIT_READ'), 'reading sensitive audit is itself audited');
+      await tx.$executeRawUnsafe('SAVEPOINT immutable_authority_audit');
+      await assert.rejects(tx.$executeRaw`DELETE FROM effective_authorization_audit WHERE id = ${decisions[0].id}`, /immutable/);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT immutable_authority_audit');
+    }
+    await tx.user.update({ where: { id: actor }, data: { role: 'MANAGER' } });
+    assert.equal((await readPartnerAuthorizationAudit(tx, { ...binding, purpose: 'AUDIT' }, root)).ok, false);
+  });
+});
 
 async function fixture(run: (tx: Prisma.TransactionClient, partner: string, actor: string) => Promise<void>) {
   const database = localDatabase();

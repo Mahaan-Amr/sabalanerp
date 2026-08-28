@@ -1,4 +1,4 @@
-# Partner central authorization — first slice, issue 319
+# Partner central authorization — persisted root slices, issue 319
 
 Review base: `1609c4637f2cd28b1cae14f876bc5005291547b4` (user approved).
 Public contracts: `@sabalanerp/partner-sales-contracts@1.4.0`, authorization wire v1.
@@ -23,20 +23,38 @@ resolver changes are included. **This does not complete issue 319.**
   responsibility. Customer output continues through the separate #325 immutable
   snapshot/token authority; this reader cannot substitute for it.
 - `createPrismaPartnerAuthorization` uses a supplied transaction from the shared
-  Prisma client. The initial persisted adapters cover PROFILE and owned CRM
-  CUSTOMER; `authorizeProject` additionally checks actual Customer binding and
-  independent Project responsibility. Other persisted roots fail closed.
+  Prisma client. Persisted adapters cover PROFILE, CRM CUSTOMER, INQUIRY and CASE.
+  Inquiry/Case ownership comes from the immutable profile link, not current CRM
+  Customer ownership. `authorizeProject` additionally checks actual Customer
+  binding and independent Project responsibility.
+- `authorizeInquiryRow` and `authorizeCaseRecord` require an exact expected root.
+  The latter resolves PRODUCT_ROW, INTERNAL_RECORD and CUSTOMER_CONTRACT links;
+  ordinary Sales Contracts are not treated as Partner children. Neither direct
+  ids nor a valid child widens the requested action/purpose.
+- The optional fourth factory argument `{ correctionOpportunityId }` binds a
+  financial command to one persisted correction opportunity. The requester is
+  read from that exact immutable chain under lock, never from the Case creator
+  or the newest request. FINANCIAL_PROCESS/FINANCIAL_APPROVE without that binding
+  fail closed. The caller must use the same opportunity for its subsequent write;
+  workflow stage, scope, expiry and first-valid-commit are still command gates.
 
 ## Transaction contract
 
 Call authorization within the command transaction, immediately before its write,
 including on retry. Do not retain a port beyond its transaction. The adapter locks
-the resource/profile, then actor/owner Users in sorted-id order, then any Project
+the resource/profile, then actor/owner Users in sorted-id order, then any selected
 child. Owner department and Project linkage are read under locks. Callers and
 future profile/CRM writers must preserve that order. Database `clock_timestamp()`
 is read after evidence loading. The active owning Partner's `CASE_COMMIT` command
 uses PARTNER purpose; output preview/download permission does not authorize
 commitment. The Case writer still validates the signed/printed trigger atomically.
+
+Inquiry assignment uses the highest persisted assignment revision under the
+Inquiry root lock. The foreign-key lock excludes a competing assignment's commit
+until authorization's transaction finishes. Current actor activation/persona and
+the central action grant still apply; historical `eligibilityEvidence` is not a
+current grant. The child methods refresh authority after waiting for child locks,
+so an earlier grant expiry timestamp cannot survive the wait as a permit.
 
 `ResolvePartnerAuthority` is a REQUIRED #296 integration adapter, not a new grant
 model or a route-local permission resolver. It must resolve current explicit
@@ -54,8 +72,8 @@ those facts or acquire database locks itself.
 
 - #296 persisted action/scope/provenance adapter and coordinated shared hooks;
   existing generic feature/workspace rows have no complete Partner scope model.
-- Persisted Inquiry/Case and remaining child adapters, current assignment and
-  financial-chain binding, creation/recovery targets before a Case exists.
+- Remaining child adapters (including approvals, payment and delivery targets),
+  creation/recovery targets before a Case exists, and owning command integration.
 - Public v2 management actions, all non-Case query producers, safe list/count
   database predicates, sensitive decision audit and Admin reason evidence.
 - Cross-connection grant/assignment/lifecycle races and complete atomic command
@@ -75,3 +93,19 @@ only namespaced mutable User/CRM fixtures and deletes those exact fixtures in
 `finally`; all retained Partner evidence is rolled back. Every temporary client
 closes in `finally`. No retained evidence is deleted. This does not prove the
 remaining assignment/lifecycle first-valid-commit acceptance matrix.
+
+The persisted-root extension adds real-schema checks for immutable Inquiry and
+Case ownership, latest assignment/revocation, responder ADMIN restrictions,
+cross-root child ids, suspension, and exact correction-chain separation. A second
+cross-connection test observes an actual blocked User lock, commits responder
+deactivation, then verifies that the waiting authorization denies access. It
+cleans only its exact mutable User fixtures; Inquiry/profile evidence rolls back.
+Relational Case fixtures pass deferred pair constraints before authorization;
+their placeholder commercial JSON is not evidence of pricing or Case assembly
+acceptance. No fixture adapter is installed as the production #296 resolver.
+
+Focused command (with the existing local DB URL supplied safely in the process
+environment): `node packages/partner-sales-contracts/node_modules/tsx/dist/cli.mjs
+--test backend/src/services/__tests__/partnerAuthorization.integration.test.ts
+backend/src/services/__tests__/partnerAuthorization.test.ts
+backend/src/services/__tests__/partnerAuthorizationProjection.test.ts`.

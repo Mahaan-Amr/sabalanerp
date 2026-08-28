@@ -13,10 +13,18 @@ export type ResolvePartnerAuthority = (tx: Prisma.TransactionClient, input: {
 /** Transaction-scoped, using the caller's shared Prisma transaction. Never owns
  * a PrismaClient or commits/disconnects. Unsupported roots fail closed. */
 export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
-  resolveAuthority: ResolvePartnerAuthority) {
+  resolveAuthority: ResolvePartnerAuthority, target?: { correctionOpportunityId: string }) {
   const authorization = createPartnerAuthorization({ read: async (actorId, root) => {
     let resource: AuthorizationEvidence['resource'] = null;
     let profileId = root.kind === 'PROFILE' ? root.id : null;
+    if (root.kind === 'INQUIRY') {
+      await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${root.id} FOR UPDATE`;
+      profileId = (await tx.partnerInquiry.findUnique({ where: { id: root.id }, select: { profileId: true } }))?.profileId ?? null;
+    }
+    if (root.kind === 'CASE') {
+      await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${root.id} FOR UPDATE`;
+      profileId = (await tx.partnerSaleCase.findUnique({ where: { id: root.id }, select: { profileId: true } }))?.profileId ?? null;
+    }
     if (root.kind === 'CUSTOMER') {
       await tx.$queryRaw`SELECT id FROM crm_customers WHERE id = ${root.id} FOR UPDATE`;
       const customer = await tx.crmCustomer.findUnique({ where: { id: root.id }, select: { ownerUserId: true, isActive: true } });
@@ -40,6 +48,24 @@ export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, b
     const actor = await tx.user.findUnique({ where: { id: actorId }, select: {
       id: true, isActive: true, role: true, departmentId: true, partnerProfile: { select: { state: true, revision: true } },
     } });
+    if (root.kind === 'INQUIRY' && resource) {
+      // The root FOR UPDATE also excludes concurrent assignment INSERTs through
+      // their parent FK. Assignment evidence is append-only; never authorize
+      // using its historical eligibility snapshot instead of current authority.
+      const assignment = await tx.partnerInquiryAssignment.findFirst({ where: { inquiryId: root.id },
+        orderBy: { revision: 'desc' }, select: { id: true, revision: true, responderId: true } });
+      if (assignment) resource.assignment = { actorId: assignment.responderId, assignmentId: assignment.id,
+        revision: assignment.revision, eligible: assignment.responderId === actorId && Boolean(actor?.isActive) && !actor?.partnerProfile };
+    }
+    if (target && resource) {
+      // A financial chain must be explicitly selected by the owning command.
+      // Never infer the requester from the Case creator or the latest request.
+      await tx.$queryRaw`SELECT id FROM partner_correction_opportunities WHERE id = ${target.correctionOpportunityId} FOR UPDATE`;
+      const opportunity = await tx.partnerCorrectionOpportunity.findUnique({ where: { id: target.correctionOpportunityId },
+        select: { caseId: true, requesterId: true } });
+      if (root.kind !== 'CASE' || opportunity?.caseId !== root.id) resource = null;
+      else resource.requesterId = opportunity.requesterId;
+    }
     const authority = actor?.isActive && resource ? await resolveAuthority(tx, { actorId, root }) : { grants: [], authorizationRevision: 1 };
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
     return { ...authority, evaluatedAt: clock.now.toISOString(), resource, actor: {
@@ -49,6 +75,39 @@ export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, b
     } };
   } }, binding);
   return { ...authorization,
+    async authorizeCaseRecord(action: PartnerAction, target: { kind: 'PRODUCT_ROW' | 'INTERNAL_RECORD' | 'CUSTOMER_CONTRACT'; id: string },
+      expectedCaseId: string): Promise<Result<PermissionContext>> {
+      let caseId: string | null | undefined;
+      if (target.kind === 'PRODUCT_ROW') {
+        caseId = (await tx.partnerProductRow.findUnique({ where: { id: target.id }, select: { caseId: true } }))?.caseId;
+      } else if (target.kind === 'INTERNAL_RECORD') {
+        caseId = (await tx.sabalanToPartnerSaleRecord.findUnique({ where: { id: target.id }, select: { caseId: true } }))?.caseId;
+      } else if (target.kind === 'CUSTOMER_CONTRACT') {
+        const contract = await tx.salesContract.findUnique({ where: { id: target.id }, select: { partnerKind: true, partnerCaseId: true } });
+        if (contract?.partnerKind === 'PARTNER_CUSTOMER') caseId = contract.partnerCaseId;
+      }
+      if (!caseId || caseId !== expectedCaseId) return { ok: false, error: partnerError('NOT_FOUND') };
+      const root = { kind: 'CASE' as const, id: expectedCaseId };
+      const decision = await authorization.authorize(action, root);
+      if (!decision.ok) return decision;
+      if (target.kind === 'PRODUCT_ROW') await tx.$queryRaw`SELECT id FROM partner_product_rows WHERE id = ${target.id} FOR UPDATE`;
+      if (target.kind === 'INTERNAL_RECORD') await tx.$queryRaw`SELECT id FROM sabalan_to_partner_sale_records WHERE id = ${target.id} FOR UPDATE`;
+      if (target.kind === 'CUSTOMER_CONTRACT') await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${target.id} FOR UPDATE`;
+      // The three links are database-immutable. Recheck current grant/time after
+      // acquiring the child, never reuse a permit issued before a lock wait.
+      return authorization.authorize(action, root);
+    },
+    async authorizeInquiryRow(action: PartnerAction, rowId: string, expectedInquiryId: string): Promise<Result<PermissionContext>> {
+      // inquiryId is immutable. Resolve it without acquiring a child-before-root
+      // lock, and never infer a different root from a forged nested identifier.
+      const row = await tx.partnerInquiryRow.findUnique({ where: { id: rowId }, select: { inquiryId: true } });
+      if (!row || row.inquiryId !== expectedInquiryId) return { ok: false, error: partnerError('NOT_FOUND') };
+      const root = { kind: 'INQUIRY' as const, id: expectedInquiryId };
+      const decision = await authorization.authorize(action, root);
+      if (!decision.ok) return decision;
+      await tx.$queryRaw`SELECT id FROM partner_inquiry_rows WHERE id = ${rowId} FOR UPDATE`;
+      return authorization.authorize(action, root);
+    },
     async authorizeProject(action: PartnerAction, projectId: string, expectedCustomerId: string): Promise<Result<PermissionContext>> {
       // Root before child, matching callers that already authorized the Customer.
       const decision = await authorization.authorize(action, { kind: 'CUSTOMER', id: expectedCustomerId });

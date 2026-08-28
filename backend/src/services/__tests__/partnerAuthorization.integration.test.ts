@@ -3,6 +3,7 @@ import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { createPrismaPartnerAuthorization } from '../partnerSales/authorization/prisma';
+import { seedAuthorizationCase } from './partnerAuthorizationFixture';
 
 function localDatabase(connectionLimit = 2) {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -140,4 +141,186 @@ test('persisted Customer and Project share the Customer root but retain independ
       assert.equal((await port.authorizeProject('CUSTOMER_READ', project.id, customer.id)).ok, false);
       assert.equal((await port.authorize('CUSTOMER_READ', { kind: 'CUSTOMER', id: customer.id })).ok, true);
   });
+});
+
+test('persisted Inquiry authority follows its immutable Partner owner, not a supplied Customer or actor id', async () => {
+  await fixture(async (tx, partner, other) => {
+    await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
+    await tx.partnerProfile.create({ data: { id: other, userId: other, state: 'ACTIVE' } });
+    const inquiry = await tx.partnerInquiry.create({ data: { profileId: partner } });
+    const authority = async () => ({ authorizationRevision: 1, grants: [] });
+    const own = createPrismaPartnerAuthorization(tx, { actorId: partner, purpose: 'PARTNER', channel: 'DETAIL' }, authority);
+    const foreign = createPrismaPartnerAuthorization(tx, { actorId: other, purpose: 'PARTNER', channel: 'DETAIL' }, authority);
+    assert.equal((await own.authorize('INQUIRY_READ', { kind: 'INQUIRY', id: inquiry.id })).ok, true);
+    const denied = await foreign.authorize('INQUIRY_READ', { kind: 'INQUIRY', id: inquiry.id });
+    assert.deepEqual(denied, await foreign.authorize('INQUIRY_READ', { kind: 'INQUIRY', id: 'missing-inquiry' }));
+  });
+});
+
+test('only the latest persisted Inquiry assignment and current responder authority permit a response, including ADMIN', async () => {
+  await fixture(async (tx, partner, actor) => {
+    await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
+    const inquiry = await tx.partnerInquiry.create({ data: { profileId: partner } });
+    const assignment = await tx.partnerInquiryAssignment.create({ data: { inquiryId: inquiry.id, revision: 1,
+      responderId: actor, actorId: actor, reason: 'انتساب آزمون', eligibilityEvidence: { historical: true } } });
+    let granted = true;
+    const port = createPrismaPartnerAuthorization(tx, { actorId: actor, purpose: 'RESPONDER', channel: 'API' }, async () => ({
+      authorizationRevision: 1, grants: granted ? [{ action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED' }] : [],
+    }));
+    const root = { kind: 'INQUIRY' as const, id: inquiry.id };
+    const permitted = await port.authorize('INQUIRY_RESPOND', root);
+    assert.equal(permitted.ok, true);
+    if (permitted.ok) assert.deepEqual(permitted.value.assignment, { actorId: actor, assignmentId: assignment.id, revision: 1, eligible: true });
+    granted = false;
+    assert.equal((await port.authorize('INQUIRY_RESPOND', root)).ok, false, 'historical eligibility cannot replace a current grant');
+    await tx.user.update({ where: { id: actor }, data: { role: 'ADMIN' } });
+    assert.equal((await port.authorize('INQUIRY_RESPOND', root)).ok, true, 'named ADMIN action still requires the real assignment');
+    await tx.partnerInquiryAssignment.create({ data: { inquiryId: inquiry.id, revision: 2,
+      responderId: partner, actorId: actor, reason: 'انتساب مجدد آزمون', eligibilityEvidence: { historical: true } } });
+    const obsolete = await port.authorize('INQUIRY_RESPOND', root);
+    assert.equal(obsolete.ok ? null : obsolete.error.code, 'NOT_ASSIGNED');
+  });
+});
+
+test('direct Inquiry row ids inherit the exact root and current Partner lifecycle', async () => {
+  await fixture(async (tx, partner, actor) => {
+    await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
+    const inquiry = await tx.partnerInquiry.create({ data: { profileId: partner } });
+    const unrelated = await tx.partnerInquiry.create({ data: { profileId: partner } });
+    const row = await tx.partnerInquiryRow.create({ data: { inquiryId: inquiry.id, version: 1,
+      configurationHash: `sha256-v1:${'a'.repeat(64)}`, definition: {} } });
+    await tx.partnerInquiryAssignment.create({ data: { inquiryId: inquiry.id, revision: 1,
+      responderId: actor, actorId: actor, reason: 'انتساب آزمون', eligibilityEvidence: {} } });
+    await tx.user.update({ where: { id: actor }, data: { role: 'ADMIN' } });
+    const port = createPrismaPartnerAuthorization(tx, { actorId: actor, purpose: 'RESPONDER', channel: 'API' },
+      async () => ({ authorizationRevision: 1, grants: [] }));
+    assert.equal((await port.authorizeInquiryRow('INQUIRY_RESPOND', row.id, inquiry.id)).ok, true);
+    const mismatch = await port.authorizeInquiryRow('INQUIRY_RESPOND', row.id, unrelated.id);
+    assert.equal(mismatch.ok ? null : mismatch.error.status, 404);
+    await tx.partnerProfile.update({ where: { id: partner }, data: { state: 'SUSPENDED', revision: 2 } });
+    const suspended = await port.authorizeInquiryRow('INQUIRY_RESPOND', row.id, inquiry.id);
+    assert.equal(suspended.ok ? null : suspended.error.code, 'PARTNER_NOT_ACTIVE');
+    assert.equal((await port.authorizeInquiryRow('INQUIRY_READ', row.id, inquiry.id)).ok, true);
+  });
+});
+
+test('persisted Case authority follows the immutable Partner even after Customer ownership differs', async () => {
+  await fixture(async (tx, partner, other) => {
+    await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
+    await tx.partnerProfile.create({ data: { id: other, userId: other, state: 'ACTIVE' } });
+    const sale = await seedAuthorizationCase(tx, partner, other);
+    const authority = async () => ({ authorizationRevision: 1, grants: [] });
+    const own = createPrismaPartnerAuthorization(tx, { actorId: partner, purpose: 'PARTNER', channel: 'DETAIL' }, authority);
+    const customerOwner = createPrismaPartnerAuthorization(tx, { actorId: other, purpose: 'PARTNER', channel: 'DETAIL' }, authority);
+    assert.equal((await own.authorize('CASE_READ', { kind: 'CASE', id: sale.id })).ok, true);
+    const denied = await customerOwner.authorize('CASE_READ', { kind: 'CASE', id: sale.id });
+    assert.deepEqual(denied, await customerOwner.authorize('CASE_READ', { kind: 'CASE', id: 'missing-case' }));
+    const crm = createPrismaPartnerAuthorization(tx, { actorId: other, purpose: 'CRM', channel: 'DETAIL' }, authority);
+    assert.equal((await crm.authorize('CUSTOMER_READ', { kind: 'CUSTOMER', id: sale.customerId })).ok, true);
+  });
+});
+
+test('Case record and product ids cannot authorize a different aggregate or widen its purpose', async () => {
+  await fixture(async (tx, partner, other) => {
+    await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
+    await tx.partnerProfile.create({ data: { id: other, userId: other, state: 'ACTIVE' } });
+    const sale = await seedAuthorizationCase(tx, partner);
+    const foreign = await seedAuthorizationCase(tx, other);
+    const authority = async () => ({ authorizationRevision: 1, grants: [] });
+    const own = createPrismaPartnerAuthorization(tx, { actorId: partner, purpose: 'PARTNER', channel: 'LINK' }, authority);
+    const crm = createPrismaPartnerAuthorization(tx, { actorId: partner, purpose: 'CRM', channel: 'LINK' }, authority);
+    for (const [kind, id] of [['PRODUCT_ROW', sale.rowId], ['INTERNAL_RECORD', sale.internalId], ['CUSTOMER_CONTRACT', sale.contractId]] as const) {
+      assert.equal((await own.authorizeCaseRecord('CASE_READ', { kind, id }, sale.id)).ok, true, kind);
+      const mismatch = await own.authorizeCaseRecord('CASE_READ', { kind, id }, foreign.id);
+      assert.equal(mismatch.ok ? null : mismatch.error.status, 404, kind);
+      assert.equal((await crm.authorizeCaseRecord('CASE_READ', { kind, id }, sale.id)).ok, false, 'CRM purpose cannot expose Case economics');
+    }
+    const denied = await own.authorizeCaseRecord('CASE_READ', { kind: 'CUSTOMER_CONTRACT', id: foreign.contractId }, foreign.id);
+    const missing = await own.authorizeCaseRecord('CASE_READ', { kind: 'CUSTOMER_CONTRACT', id: 'missing' }, foreign.id);
+    assert.deepEqual(denied, missing);
+  });
+});
+
+test('financial authority uses the explicitly bound persisted correction requester, never another chain on the Case', async () => {
+  await fixture(async (tx, partner, actor) => {
+    await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
+    await tx.user.update({ where: { id: actor }, data: { role: 'ADMIN' } });
+    const sale = await seedAuthorizationCase(tx, partner);
+    const opportunities: string[] = [];
+    for (const requesterId of [actor, partner]) opportunities.push((await tx.partnerCorrectionOpportunity.create({ data: {
+      id: `authorization-correction-${randomUUID()}`, caseId: sale.id, predecessorRevision: 1, scope: 'SABALAN_TERMS',
+      scopeHash: `sha256-v1:${'a'.repeat(64)}`, requesterId, approvedBy: actor, approvedAt: new Date('2026-08-28T08:00:00Z'),
+      expiresAt: new Date('2026-09-01T08:00:00Z'), calendarVersion: 'fixture-calendar', evidence: {},
+    } })).id);
+    const binding = { actorId: actor, purpose: 'ACCOUNTING' as const, channel: 'API' as const };
+    const authority = async () => ({ authorizationRevision: 1, grants: [] });
+    const unbound = createPrismaPartnerAuthorization(tx, binding, authority);
+    const requested = createPrismaPartnerAuthorization(tx, binding, authority, { correctionOpportunityId: opportunities[0] });
+    const independent = createPrismaPartnerAuthorization(tx, binding, authority, { correctionOpportunityId: opportunities[1] });
+    const root = { kind: 'CASE' as const, id: sale.id };
+    for (const action of ['FINANCIAL_PROCESS', 'FINANCIAL_APPROVE'] as const) {
+      assert.equal((await unbound.authorize(action, root)).ok, false, 'Case alone cannot identify the financial chain');
+      const self = await requested.authorize(action, root);
+      assert.equal(self.ok ? null : self.error.code, 'FORBIDDEN', 'even ADMIN cannot process their own request');
+      const allowed = await independent.authorize(action, root);
+      assert.equal(allowed.ok, true);
+      if (allowed.ok) assert.equal(allowed.value.requesterId, partner);
+    }
+    const forged = await independent.authorize('FINANCIAL_PROCESS', { kind: 'CASE', id: 'another-case' });
+    assert.equal(forged.ok ? null : forged.error.status, 404);
+  });
+});
+
+test('a responder deactivated by a competing transaction cannot pass authorization after the User lock wait', async () => {
+  const database = localDatabase(3);
+  const partner = `authorization-${randomUUID()}`; const actor = `authorization-${randomUUID()}`;
+  const rollback = new Error('rollback retained inquiry');
+  function signal() {
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
+  }
+  const locked = signal(); const release = signal(); const ready = signal();
+  let blocker: Promise<unknown> | undefined; let request: Promise<unknown> | undefined;
+  let requestPid = 0;
+  let result: Awaited<ReturnType<ReturnType<typeof createPrismaPartnerAuthorization>['authorize']>> | undefined;
+  try {
+    for (const id of [partner, actor]) await database.user.create({ data: {
+      id, username: id, email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Fixture', lastName: 'Authorization',
+    } });
+    blocker = database.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${actor} FOR UPDATE`;
+      locked.resolve(); await release.promise;
+      await tx.user.update({ where: { id: actor }, data: { isActive: false } });
+    }, { timeout: 15_000 });
+    await Promise.race([locked.promise, blocker.then(() => { throw new Error('Lock fixture ended early'); })]);
+    request = database.$transaction(async tx => {
+      await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
+      const inquiry = await tx.partnerInquiry.create({ data: { profileId: partner } });
+      await tx.partnerInquiryAssignment.create({ data: { inquiryId: inquiry.id, revision: 1, responderId: actor,
+        actorId: partner, reason: 'انتساب آزمون', eligibilityEvidence: { activeAtAssignment: true } } });
+      const [connection] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+      requestPid = connection.pid; ready.resolve();
+      const port = createPrismaPartnerAuthorization(tx, { actorId: actor, purpose: 'RESPONDER', channel: 'API' }, async () => ({
+        authorizationRevision: 1, grants: [{ action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'ASSIGNED' }],
+      }));
+      result = await port.authorize('INQUIRY_RESPOND', { kind: 'INQUIRY', id: inquiry.id });
+      throw rollback;
+    }, { timeout: 15_000 }).catch(error => { if (error !== rollback) throw error; });
+    await Promise.race([ready.promise, request.then(() => { throw new Error('Request ended before authorization'); })]);
+    for (let attempt = 0; ; attempt++) {
+      const [wait] = await database.$queryRaw<Array<{ waiting: boolean }>>`SELECT cardinality(pg_blocking_pids(${requestPid}::integer)) > 0 AS waiting`;
+      if (wait.waiting) break;
+      if (attempt >= 200) throw new Error('Request never waited for the competing User lock');
+      await new Promise(done => setTimeout(done, 10));
+    }
+    release.resolve(); await Promise.all([blocker, request]);
+    assert.equal(result?.ok, false, 'current User activation must defeat historical assignment eligibility');
+  } finally {
+    release.resolve();
+    await Promise.allSettled([blocker, request].filter((item): item is Promise<unknown> => Boolean(item)));
+    try { await database.user.deleteMany({ where: { id: { in: [partner, actor] },
+      email: { in: [`${partner}@example.invalid`, `${actor}@example.invalid`] } } }); }
+    finally { await database.$disconnect(); }
+  }
 });

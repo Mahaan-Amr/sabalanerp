@@ -107,7 +107,7 @@ test('a real Project lock wait cannot carry an expired grant back to the caller'
       if (attempt >= 200) throw new Error('Database clock did not reach expiry');
       await new Promise(done => setTimeout(done, 10));
     }
-    assert.equal(result, undefined, 'the request must actually wait on the locked Project');
+    assert.equal({ current: result }.current, undefined, 'the request must actually wait on the locked Project');
     release.resolve();
     await Promise.all([blocker, request]);
     assert.equal(result?.ok, false, 'permission must be refreshed after the locked child is read');

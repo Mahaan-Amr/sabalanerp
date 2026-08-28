@@ -28,7 +28,14 @@ Immutable saved snapshots are retained only inside the protected recovery
 lifecycle. They are integrity-hashed and bind exact recovery/revision/row IDs.
 Generic checkpoint/read cannot expose or replace them. Historical saved reads
 still require the creator's current lease and authority. Discard/expiry uses the
-existing recovery lifecycle; the command receipt contains no graph or prices.
+existing recovery lifecycle. Permanent command outcomes retain only version,
+session-incarnation ID and saved revision; replay reconstructs the safe receipt
+from the protected snapshot while it exists. No draft row content survives in
+that permanent outcome. Validated revisions advance above every prior saved
+revision for the recovery ID across incarnations, including another actor's old
+incarnation, so discard/recreation cannot reissue an old public configuration ref.
+Callers must use the returned revision, not assume a consecutive increment after
+recreation. No new schema field or global mutable counter is introduced.
 Stable row IDs cannot move between families, catalog products, parents, sources,
 or stair identities, and a removed saved row cannot be resurrected under its old ID.
 
@@ -37,7 +44,8 @@ longitudinal requested meters (not optimizer packing count), slab finished squar
 meters, stair count, and explicit prepared/legacy-volumetric unit/quantity.
 Remainder children retain their canonical longitudinal measure; layers stay owned
 by their parent, not invented sale rows. Count is integral. This does not seal or
-round Accounting precision and never derives a quantity from money.
+round Accounting precision and never derives a quantity from money. Multiplication
+uses sufficient locally scoped precision without changing global Decimal settings.
 
 `configurationChange` compares exact owner-issued inquiry identity with the
 preceding validated save: NEW, UNCHANGED or CHANGED. It is **not** an approval

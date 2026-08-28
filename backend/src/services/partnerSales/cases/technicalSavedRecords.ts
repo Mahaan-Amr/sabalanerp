@@ -9,6 +9,15 @@ export interface TechnicalSavedSnapshot {
   identities: { productRowId: string; identity: InquiryIdentity }[];
 }
 
+export function decodeTechnicalSaveOutcome(value: unknown): { version: 1; sessionId: string; recoveryRevision: number } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some(key => !['version', 'sessionId', 'recoveryRevision'].includes(key)) ||
+      record.version !== 1 || typeof record.sessionId !== 'string' || !record.sessionId ||
+      typeof record.recoveryRevision !== 'number' || !Number.isSafeInteger(record.recoveryRevision) || record.recoveryRevision < 1) return undefined;
+  return { version: 1, sessionId: record.sessionId, recoveryRevision: record.recoveryRevision };
+}
+
 /** Private recovery evidence, not a public DTO. Hash is corruption detection;
  * authenticity still comes from the owning transaction and protected journal. */
 export async function encodeTechnicalSavedSnapshot(value: TechnicalSavedSnapshot) {

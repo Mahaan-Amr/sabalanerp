@@ -453,3 +453,45 @@ test('changed owner-issued inquiry evidence reports a configuration change witho
     assert.equal(original.value.rows[0].configurationRef.recoveryRevision, 1);
   });
 });
+
+test('discard erases saved draft content while permanent receipts retain only non-content replay identity', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { command, service } = preparedSaveSetup(tx, actorId, access);
+    assert.equal((await service.save(command)).ok, true);
+    await tx.salesContractEditSession.delete({ where: { draftId: access.recoveryId } });
+    const old = await service.readSaved({ ...access, recoveryRevision: 1 });
+    if (old.ok) throw new Error('Discarded technical content remained readable');
+    assert.equal(old.error.code, 'NOT_FOUND');
+    // This is the pre-agreed persistence/erasure boundary: immutable audit
+    // evidence must outlive discard, but must not retain discarded draft data.
+    const retained = await tx.partnerCommandOutcome.findMany({ where: { actorId, targetScope: access.recoveryId } });
+    assert.equal(retained.length, 1);
+    const outcome = retained[0].outcome as Prisma.JsonObject;
+    assert.deepEqual(Object.keys(outcome).sort(), ['recoveryRevision', 'sessionId', 'version']);
+    assert.equal(outcome.recoveryRevision, 1);
+    assert.equal(JSON.stringify(outcome).includes('prepared-row'), false);
+    assert.equal(JSON.stringify(outcome).includes('2.5'), false);
+  });
+});
+
+test('discard and recreation of the same recovery ID cannot reissue an old configuration reference for different content', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { command, service, dependencies } = preparedSaveSetup(tx, actorId, access);
+    const original = await service.save(command);
+    if (!original.ok) throw new Error(original.error.code);
+    await tx.salesContractEditSession.delete({ where: { draftId: access.recoveryId } });
+    await tx.salesContractEditSession.create({ data: { draftId: access.recoveryId, ownerUserId: actorId,
+      browserSessionId: access.browserSessionId, leaseToken: access.leaseToken, schemaVersion: 2, baseRevision: 0 } });
+    const fresh = await createPartnerTechnicalSaveService(dependencies).save({ ...command, idempotencyKey: 'new-incarnation',
+      draft: { ...command.draft, rows: [{ ...command.draft.rows[0], configuration: { ...command.draft.rows[0].configuration, quantity: '8' } }] } });
+    if (!fresh.ok) throw new Error(fresh.error.code);
+    assert.ok(fresh.value.recoveryRevision > original.value.recoveryRevision);
+    assert.notDeepEqual(fresh.value.rows[0].configurationRef, original.value.rows[0].configurationRef);
+    const stale = await service.readSaved({ ...access, recoveryRevision: original.value.recoveryRevision });
+    if (stale.ok) throw new Error('Old reference resolved to the new incarnation');
+    assert.equal(stale.error.code, 'NOT_FOUND');
+    const oldRetry = await service.save(command);
+    if (oldRetry.ok) throw new Error('Old receipt crossed recovery incarnation');
+    assert.equal(oldRetry.error.code, 'INTEGRITY_CONFLICT');
+  });
+});

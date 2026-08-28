@@ -316,3 +316,19 @@ test('longitudinal private graph uses canonical packing and costing without repl
   assert.equal(technical.result.packingPlan.placements[0].lengthMeters, '3.25');
   assert.equal(JSON.stringify(result.value.preview).includes('1700000'), false);
 });
+
+test('safe longitudinal measure preserves every supplied decimal digit instead of applying Decimal default precision', () => {
+  const catalog = createPartnerTechnicalCatalogFixtures(), product = catalog.products[0];
+  const result = compilePartnerTechnicalGraph({ schemaVersion: 1, inputRevision: 1, rows: [{
+    productRowId: 'precise-row', catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
+    family: 'longitudinal', configuration: { sourceBatchId: 'precise-source', lengthMeters: '1.23456789012345678901',
+      widthMeters: '0.4', quantity: 1, lastManualField: 'length', lastManualDimension: 'length',
+      lengthDisplayUnit: 'm', widthDisplayUnit: 'cm', sawKerfEnabled: false, calibrationEnabled: false, calibrationSelection: 'manual' },
+  }] }, { catalog, policy: { calculation: 'calc-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
+    products: [{ catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
+      longitudinal: { baseRateToman: c('100'), mandatoryEnabled: false, mandatoryPercentage: c('25'), rememberedMandatoryPercentage: c('25'),
+        longitudinalCutRateToman: c('10'), calibrationCutRateToman: c('10') } }] });
+  if (!result.ok) throw new Error(result.error.code);
+  assert.equal(result.value.graph.rows[0].commercial.requestedLengthMeters, '1.23456789012345678901');
+  assert.deepEqual(result.value.measures, [{ productRowId: 'precise-row', quantity: '1.23456789012345678901', unit: 'meter' }]);
+});

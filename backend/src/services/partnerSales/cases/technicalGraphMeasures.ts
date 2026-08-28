@@ -23,7 +23,13 @@ export function technicalGraphMeasures(graph: CanonicalProductGraph): TechnicalG
         const length = QuantitySchema.parse(facts.requestedLengthMeters);
         const mode = facts.calculationSnapshot?.quantityMode;
         if (mode === 'total-linear-meters') quantity = length;
-        else if (mode === 'piece-count') quantity = new Prisma.Decimal(length).mul(QuantitySchema.parse(facts.requestedQuantity)).toFixed();
+        else if (mode === 'piece-count') {
+          const count = QuantitySchema.parse(facts.requestedQuantity);
+          // Local precision covers the complete decimal product. Never alter
+          // Prisma's global arithmetic settings or round a frozen witness.
+          const ExactDecimal = Prisma.Decimal.clone({ precision: length.length + count.length + 2 });
+          quantity = new ExactDecimal(length).mul(count).toFixed();
+        }
         else throw new Error('Missing longitudinal quantity mode');
         break;
       }

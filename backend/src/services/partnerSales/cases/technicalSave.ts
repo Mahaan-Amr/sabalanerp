@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { canonicalHash, InquiryIdentitySchema, PartnerTechnicalSaveSchema, PartnerTechnicalSavedReadSchema,
-  PartnerTechnicalSavedViewSchema, PartnerTechnicalSaveReceiptSchema, partnerError,
-  type PartnerTechnicalSavePort, type PartnerTechnicalDraft, type InquiryIdentity, type Result } from '@sabalanerp/partner-sales-contracts';
+  PartnerTechnicalSavedViewSchema, partnerError,
+  type PartnerTechnicalSavePort, type PartnerTechnicalSavedView, type PartnerTechnicalDraft, type InquiryIdentity, type Result } from '@sabalanerp/partner-sales-contracts';
 import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../../contractRecoveryProtection';
 import { CONTRACT_EDIT_LEASE_TTL_MS, CONTRACT_CREATION_DRAFT_TTL_MS } from '../../contractEditSessionService';
 import { compilePartnerTechnicalGraph, type PartnerTechnicalGraphContext } from './technicalGraph';
 import { technicalRecoveryLease, technicalRecoveryJson as json, technicalDraftContent,
   type PartnerTechnicalRecoveryDependencies } from './technicalRecovery';
-import { encodeTechnicalSavedSnapshot, decodeTechnicalSavedSnapshot, type TechnicalSavedSnapshot } from './technicalSavedRecords';
+import { encodeTechnicalSavedSnapshot, decodeTechnicalSavedSnapshot, decodeTechnicalSaveOutcome, type TechnicalSavedSnapshot } from './technicalSavedRecords';
+
+const SAVE_OPERATION = 'PARTNER_TECHNICAL_SAVE_V1';
 
 export interface PartnerTechnicalSaveDependencies extends PartnerTechnicalRecoveryDependencies {
   /** Owner adapter must preserve frozen evidence for unchanged configuration;
@@ -63,21 +65,32 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
           }
           snapshots.push(snapshot);
         }
-        const identity = { actorId: dependencies.actorId, operation: 'PARTNER_TECHNICAL_SAVE_V1',
+        const identity = { actorId: dependencies.actorId, operation: SAVE_OPERATION,
           targetScope: session.draftId, key: command.idempotencyKey };
         const priorOutcome = await tx.partnerCommandOutcome.findUnique({ where: { actorId_operation_targetScope_key: identity } });
         if (priorOutcome) {
           if (priorOutcome.payloadHash !== payloadHash) return { ok: false, error: partnerError('IDEMPOTENCY_CONFLICT') };
-          const outcome = priorOutcome.outcome as { sessionId?: string; receipt?: unknown };
-          const receipt = PartnerTechnicalSaveReceiptSchema.safeParse(outcome?.receipt);
-          if (outcome?.sessionId !== session.id || !receipt.success || !snapshots.some(snapshot =>
-            JSON.stringify({ ...snapshot.view, replayed: false }) === JSON.stringify(receipt.data))) {
+          const outcome = decodeTechnicalSaveOutcome(priorOutcome.outcome);
+          const snapshot = snapshots.find(item => item.view.recoveryRevision === outcome?.recoveryRevision);
+          if (outcome?.sessionId !== session.id || !snapshot) {
             return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           }
-          return { ok: true, value: { ...receipt.data, replayed: true } };
+          return { ok: true, value: { ...snapshot.view, replayed: true } };
         }
         const revision = recovery?.recoveryRevision ?? 0;
         if (revision !== command.expectedRecoveryRevision || revision === Number.MAX_SAFE_INTEGER) return { ok: false, error: partnerError('ROW_STALE') };
+        // Public v1 refs have no session incarnation field. Reserve above all
+        // prior validated revisions for this recovery ID, even after discard
+        // and recreation by another actor. Permanent evidence contains no rows.
+        const reserved = await tx.partnerCommandOutcome.findMany({ where: { operation: SAVE_OPERATION, targetScope: session.draftId }, select: { outcome: true } });
+        let highestRevision = revision;
+        for (const record of reserved) {
+          const outcome = decodeTechnicalSaveOutcome(record.outcome);
+          if (!outcome) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+          highestRevision = Math.max(highestRevision, outcome.recoveryRevision);
+        }
+        if (highestRevision === Number.MAX_SAFE_INTEGER) return { ok: false, error: partnerError('ROW_STALE') };
+        const savedRevision = highestRevision + 1;
         const previous = snapshots.at(-1) ?? null;
         const evidence = await dependencies.resolveEvidence(tx, { actorId: dependencies.actorId, recoveryId: session.draftId,
           draft: command.draft, previous });
@@ -89,7 +102,7 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         if (identities.length !== graph.rows.length || new Set(identities.map(item => item.productRowId)).size !== identities.length) {
           return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         }
-        const rows = [];
+        const rows: PartnerTechnicalSavedView['rows'] = [];
         for (const row of graph.rows) {
           for (const saved of snapshots) {
             const original = saved.graph.rows.find(item => item.productRowId === row.productRowId);
@@ -112,12 +125,12 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
           }
           const old = previous?.identities.find(item => item.productRowId === row.productRowId);
           const configurationChange = !old ? 'NEW' : await canonicalHash(json(old.identity)) === await canonicalHash(json(inquiry.data)) ? 'UNCHANGED' : 'CHANGED';
-          rows.push({ configurationRef: { recoveryId: session.draftId, recoveryRevision: revision + 1, productRowId: row.productRowId },
+          rows.push({ configurationRef: { recoveryId: session.draftId, recoveryRevision: savedRevision, productRowId: row.productRowId },
             quantity: measure.quantity, unit: measure.unit, configurationChange });
         }
         const updatedAt = recovery && technicalDraftContent(recovery.draft) === technicalDraftContent(command.draft) ? recovery.updatedAt : now.getTime();
         const view = PartnerTechnicalSavedViewSchema.safeParse({ schemaVersion: 1, recoveryId: session.draftId,
-          recoveryRevision: revision + 1, inputRevision: command.draft.inputRevision, updatedAt: new Date(updatedAt).toISOString(), rows });
+          recoveryRevision: savedRevision, inputRevision: command.draft.inputRevision, updatedAt: new Date(updatedAt).toISOString(), rows });
         if (!view.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         const snapshot = await encodeTechnicalSavedSnapshot({ version: 1, sessionId: session.id, view: view.data, draft: command.draft,
           graph, context: evidence.value.context, identities });
@@ -133,7 +146,7 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         if (recovery && commitClock.now.getTime() - recovery.updatedAt > CONTRACT_CREATION_DRAFT_TTL_MS) {
           return { ok: false, error: partnerError('STATE_CONFLICT') };
         }
-        const next = { ...recovery, kind: PARTNER_TECHNICAL_RECOVERY_KIND, version: 1, recoveryRevision: revision + 1,
+        const next = { ...recovery, kind: PARTNER_TECHNICAL_RECOVERY_KIND, version: 1, recoveryRevision: savedRevision,
           updatedAt, draft: command.draft, validatedSnapshots: [...history, snapshot] };
         const written = await tx.salesContractEditSession.updateMany({ where: { draftId: session.draftId,
           leaseToken: session.leaseToken, baseRevision: session.baseRevision,
@@ -143,7 +156,7 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         if (written.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
         const receipt = { ...view.data, replayed: false };
         await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...identity, payloadHash,
-          outcome: json({ sessionId: session.id, receipt }), recordedAt: commitClock.now } });
+          outcome: json({ version: 1, sessionId: session.id, recoveryRevision: savedRevision }), recordedAt: commitClock.now } });
         return { ok: true, value: receipt };
       });
     },

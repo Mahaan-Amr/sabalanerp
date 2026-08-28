@@ -218,6 +218,30 @@ const parseDate = (value: unknown, name: string) => {
   return date;
 };
 const actorId = (req: AuthRequest) => req.user!.id;
+const applicationPositionTitle = (application: { position?: { title: string } | null; positionSnapshot?: unknown }) => {
+  if (application.position?.title) return application.position.title;
+  const snapshot = application.positionSnapshot;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return 'جایگاه حذف‌شده';
+  const value = snapshot as { title?: unknown; name?: unknown; displayName?: unknown };
+  return [value.title, value.name, value.displayName].find((candidate): candidate is string => typeof candidate === 'string') || 'جایگاه حذف‌شده';
+};
+const applicationPositionFromSnapshot = (application: { position?: Record<string, unknown> | null; positionSnapshot?: unknown }) => {
+  if (application.position) return application.position;
+  const snapshot = application.positionSnapshot;
+  const value = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
+    ? snapshot as Record<string, unknown>
+    : {};
+  const definition = value.definition && typeof value.definition === 'object' && !Array.isArray(value.definition)
+    ? value.definition as Record<string, unknown>
+    : {};
+  return {
+    ...definition,
+    id: String(value.entityId || definition.id || ''),
+    code: String(value.code || definition.code || ''),
+    title: applicationPositionTitle(application as any),
+    deleted: true,
+  };
+};
 const normalizedName = normalizePersianFullName;
 const latestSubmittedFullName = async (applicationId: string) => {
   const revision = await prisma.hrApplicationFormRevision.findFirst({
@@ -433,7 +457,7 @@ const notifyOfferDecision = async (
     actionUrl: `/dashboard/hr/hiring/${applicationId}`,
     payload: {
       candidateName: `${application.candidate.firstName} ${application.candidate.lastName}`,
-      positionTitle: application.position.title,
+      positionTitle: applicationPositionTitle(application),
       declineCategory: declineCategory ? declineCategoryLabels[declineCategory] || declineCategory : '',
       decisionNote: decisionNote || '',
     },
@@ -705,7 +729,7 @@ const syncAutomaticHiringWorkItems = async () => {
         const existing = await prisma.hrWorkItem.findUnique({ where: { sourceKey } });
         const values = {
           title: `${action.label}${candidateName ? ` — ${candidateName}` : ''}`,
-          description: `پرونده متقاضی · ${application.position.title}`,
+          description: `پرونده متقاضی · ${applicationPositionTitle(application)}`,
           sourceType: 'HIRING_ACTION' as const,
           destinationHref: `/dashboard/hr/hiring/${application.id}`,
           assignedToUserId,
@@ -1856,6 +1880,7 @@ router.post('/applications/:id/pre-identity/apply-template', requireActionPermis
     prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { position: true } }),
     prisma.hrRecruitmentChecklistTemplate.findUniqueOrThrow({ where: { id: String(req.body.templateId) }, include: { items: { orderBy: { sortOrder: 'asc' } } } })
   ]);
+  if (!application.position || !application.positionId) throw new Error('جایگاه این پرونده حذف شده است و قالب جدید قابل اعمال نیست.');
   if (!template.isActive || (template.scopeType === 'POSITION' && template.scopeId !== application.positionId) || (template.scopeType === 'JOB' && template.scopeId !== application.position.jobId)) throw new Error('این قالب برای شغل یا جایگاه پرونده قابل استفاده نیست.');
   const existingTemplateItems = new Set((await prisma.hrPreIdentityChecklistItem.findMany({ where: { applicationId: application.id, templateItemId: { not: null } }, select: { templateItemId: true } })).map((item) => item.templateItemId));
   const items = template.items.filter((item) => !existingTemplateItems.has(item.id));
@@ -1965,6 +1990,11 @@ router.get('/applications', asyncHandler(async (req: AuthRequest, res: Response)
   const projected = representedRows.map((source) => {
     const row = {
       ...source,
+      position: source.position || {
+        id: source.positionSnapshot && typeof source.positionSnapshot === 'object' && !Array.isArray(source.positionSnapshot) ? String((source.positionSnapshot as any).entityId || '') : '',
+        title: applicationPositionTitle(source),
+        job: null,
+      },
       companyEvaluationOccurrences: companyEvaluationsByApplication.get(source.id) || [],
       archivedByDisplayName: source.archivedBy ? archivedActorNames.get(source.archivedBy) || source.archivedBy : null,
       retentionCapabilities: projectRecordRetentionCapabilities({
@@ -2057,7 +2087,7 @@ router.get('/applications/:id', asyncHandler(async (req: AuthRequest, res: Respo
   const canSeeCompensation = canSeeFinanceSensitive
     || actionPermissions.has('MANAGE_COMPENSATION')
     || actionPermissions.has('MANAGE_PAYROLL');
-  const data: any = row;
+  const data: any = { ...row, position: applicationPositionFromSnapshot(row as any) };
   data.retentionCapabilities = projectRecordRetentionCapabilities({
     role: req.user!.role,
     authorities: [...authorities],
@@ -3925,6 +3955,7 @@ router.post('/applications/:id/reopen/authorize', requireActionPermission('MANAG
 
 router.post('/applications/:id/reopen/execute', requireActionPermission('MANAGE_RECRUITMENT_CASE'), asyncHandler(async (req: AuthRequest, res: Response) => {
   const application = await prisma.hrJobApplication.findUniqueOrThrow({ where: { id: req.params.id }, include: { position: true, candidate: true } });
+  if (!application.position || !application.positionId) throw new Error('جایگاه تاریخی این پرونده حذف شده است؛ ابتدا پرونده را به یک جایگاه جاری منتقل کنید.');
   if (application.stage !== 'CLOSED' || !application.outcome || application.outcome === 'HIRED') throw new Error('این پرونده قابل بازگشایی نیست.');
   const reopening = await prisma.hrApplicationReopening.findFirstOrThrow({ where: { applicationId: application.id, status: 'AUTHORIZED' }, orderBy: { createdAt: 'desc' } });
   const reason = String(req.body.reason || '').trim();
@@ -4291,17 +4322,20 @@ router.post('/applications/:id/convert', requireActionPermission('MANAGE_RECRUIT
   }
   await assertFormalAssessmentEvidenceComplete(req.params.id);
   const compensation = application.compensationSnapshots[0];
+  if (!application.position || !application.positionId) throw new Error('جایگاه پرونده حذف شده است؛ پیش از تبدیل، یک جایگاه جاری انتخاب کنید.');
+  const currentPosition = application.position;
+  const currentPositionId = application.positionId;
   if (application.identityClearance !== 'APPROVED' || application.collateralClearance !== 'APPROVED' || !application.acceptedOfferAt || !compensation?.candidateAcceptedAt || !isCompensationPayrollVerified(compensation)) {
     throw new Error('هویت، وثیقه و پیشنهاد جبران خدمات باید پیش از تبدیل کامل باشند.');
   }
   const startDate = parseDate(req.body.scheduledStartDate, 'تاریخ شروع برنامه‌ریزی‌شده');
   const result = await prisma.$transaction(async (tx) => {
     const occupied = await tx.hrEmploymentAssignment.count({ where: {
-      positionId: application.positionId, type: { in: ['PRIMARY', 'SECONDARY'] },
+      positionId: currentPositionId, type: { in: ['PRIMARY', 'SECONDARY'] },
       employmentRelationship: { status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } },
       OR: [{ effectiveTo: null }, { effectiveTo: { gte: startDate } }]
     }});
-    if (!application.position.isActive || occupied >= application.position.capacity) throw new Error('ظرفیت جایگاه در تاریخ شروع تکمیل یا جایگاه غیرفعال است.');
+    if (!currentPosition.isActive || occupied >= currentPosition.capacity) throw new Error('ظرفیت جایگاه در تاریخ شروع تکمیل یا جایگاه غیرفعال است.');
     let personnel = application.candidate.linkedPersonnelId ? await tx.personnel.findUnique({ where: { id: application.candidate.linkedPersonnelId } }) : null;
     if (!personnel) personnel = await tx.personnel.create({ data: { firstName: application.candidate.firstName, lastName: application.candidate.lastName, nationalCode: application.candidate.nationalCode, isActive: false } });
     await tx.hrCandidate.update({ where: { id: application.candidateId }, data: { linkedPersonnelId: personnel.id } });
@@ -4310,9 +4344,9 @@ router.post('/applications/:id/convert', requireActionPermission('MANAGE_RECRUIT
       startDateVerified: true, createdBy: actorId(req), hiringApplicationId: application.id
     }});
     await tx.hrEmploymentAssignment.create({ data: {
-      employmentRelationshipId: relationship.id, positionId: application.positionId, type: 'PRIMARY', effectiveFrom: startDate,
-      organizationalUnitId: application.position.organizationalUnitId, workplaceId: application.position.workplaceId,
-      costCenterId: application.position.costCenterId, responsibleSupervisorAssignmentId: req.body.responsibleSupervisorAssignmentId || null, createdBy: actorId(req)
+      employmentRelationshipId: relationship.id, positionId: currentPositionId, type: 'PRIMARY', effectiveFrom: startDate,
+      organizationalUnitId: currentPosition.organizationalUnitId, workplaceId: currentPosition.workplaceId,
+      costCenterId: currentPosition.costCenterId, responsibleSupervisorAssignmentId: req.body.responsibleSupervisorAssignmentId || null, createdBy: actorId(req)
     }});
     await tx.hrInsuranceEnrollment.upsert({ where: { applicationId: application.id }, create: { applicationId: application.id, status: 'NOT_STARTED', updatedBy: actorId(req) }, update: { updatedBy: actorId(req) } });
     await tx.hrOnboardingTask.createMany({ data: [
@@ -4618,6 +4652,7 @@ router.post('/applications/:id/planned-start-revision', requireActionPermission(
       },
     });
     if (!application.scheduledStartDate || !application.employmentRelationship) throw new Error('رابطهٔ استخدامی برنامه‌ریزی‌شده پیدا نشد.');
+    if (!application.position || !application.positionId) throw new Error('جایگاه پرونده حذف شده است؛ تاریخ شروع قابل تغییر نیست.');
     if (application.employmentRelationship.status !== 'PLANNED') throw new Error('فقط تاریخ رابطهٔ استخدامی Planned قابل تغییر است.');
     if (application.scheduledStartDate.getTime() === command.scheduledStartDate.getTime()) throw new Error('تاریخ جدید با تاریخ فعلی یکسان است.');
     const primary = application.employmentRelationship.assignments.find((item) => item.type === 'PRIMARY' && !item.effectiveTo);

@@ -249,6 +249,10 @@ export type { SlabTechnicalInput, SlabTechnicalResult, SlabTechnicalCalculation 
 export { calculateStairPartTechnical } from './stairTechnical';
 export type { StairPartTechnicalInput, StairPartTechnicalResult, StairPartTechnicalCalculation } from './stairTechnical';
 export { calculateStairLayerTechnical, replayStairLayerTechnical } from './stairLayerTechnical';
+export { calculateLayerSideOperations } from './layerSideOperations';
+export type { LayerSideResult } from './layerSideOperations';
+export { compareProductDependentOrder } from './dependentOrder';
+export type { ProductDependentOrder } from './dependentOrder';
 export type { StairLayerTechnicalInput, StairLayerTechnicalResult, StairLayerTechnicalCalculation,
   StairLayerTechnicalSource, StairLayerTechnicalSideOperations } from './stairLayerTechnical';
 export { replayRemainderTechnical } from './remainderTechnical';

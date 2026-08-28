@@ -28,7 +28,7 @@ export const calculateLayerSideOperations = <Operation extends OperationGeometry
   },
   strips: readonly StairLayerPhysicalStripDemand[],
   calculate: (input: Operation) => { readonly ok: true; readonly result: Result } |
-    { readonly ok: false; readonly conflicts: readonly ProductOperationsConflict[]; readonly result?: Result },
+    { readonly ok: false; readonly conflicts: readonly Pick<ProductOperationsConflict, 'path' | 'entityId' | 'message'>[]; readonly result?: Result },
 ): { readonly ok: true; readonly results: readonly LayerSideResult<Result>[] } |
    { readonly ok: false; readonly results: readonly LayerSideResult<Result>[]; readonly conflicts: readonly StairLayerConflict[] } => {
     const results: LayerSideResult<Result>[] = [];

@@ -5,10 +5,10 @@ import type { LongitudinalProductInput, LongitudinalProductResult, LongitudinalC
 import { projectTechnicalPacking, TECHNICAL_PACKING_VERSION, type TechnicalPackingPlan } from './technicalPacking';
 
 export type LongitudinalGeometryInput = Pick<LongitudinalProductInput,
-  'sourceBatchId' | 'motherWidthMeters' | 'lengthMeters' | 'widthMeters' |
+  'sourceBatchId' | 'lengthMeters' | 'widthMeters' |
   'requestedAreaSquareMeters' | 'quantity' | 'lastManualField' | 'lastManualDimension' |
   'lengthDisplayUnit' | 'widthDisplayUnit' | 'sawKerfEnabled' | 'sawKerfMeters' |
-  'calibrationEnabled' | 'calibrationSelection'>;
+  'calibrationEnabled' | 'calibrationSelection'> & { readonly motherWidthMeters?: CanonicalDecimal };
 export interface LongitudinalTechnicalInput extends LongitudinalGeometryInput {
   readonly inputRevision: number;
 }

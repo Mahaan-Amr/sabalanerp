@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { compareProductDependentOrder } from './dependentOrder';
 import { hashCanonicalValue } from './canonicalHash';
 import { findGraphIntegrityConflicts } from './graphIntegrity';
 import {
@@ -495,11 +496,7 @@ const replayCanonicalResourceConsumers = ({
       identity: intent.allocationId,
       intent
     }))
-  ].sort((left, right) =>
-    left.order - right.order ||
-    left.kind.localeCompare(right.kind) ||
-    left.identity.localeCompare(right.identity)
-  );
+  ].sort(compareProductDependentOrder);
   for (const event of events) {
     if (event.kind === 'layer') {
       const parent = parents.get(event.input.parentProductRowId);

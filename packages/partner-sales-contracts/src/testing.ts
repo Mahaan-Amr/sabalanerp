@@ -30,3 +30,4 @@ export class SandboxNotificationGateway implements NotificationGateway {
 export { createPartnerFixtures, createNegativePartnerFixtures } from './testing/fixtures';
 export { FixturePartnerQueryAdapter } from './testing/queryAdapter';
 export { createPartnerWorkspaceFixturesV2, FixturePartnerQueryV2Adapter } from './testing/workspaces-v2';
+export { createPartnerTechnicalCatalogFixtures, FixturePartnerTechnicalCatalogAdapter } from './testing/technical-catalog';

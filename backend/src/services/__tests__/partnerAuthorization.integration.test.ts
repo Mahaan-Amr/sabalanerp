@@ -266,7 +266,12 @@ test('financial authority uses the explicitly bound persisted correction request
       assert.equal(allowed.ok, true);
       if (allowed.ok) assert.equal(allowed.value.requesterId, partner);
     }
-    const forged = await independent.authorize('FINANCIAL_PROCESS', { kind: 'CASE', id: 'another-case' });
+    const foreignOwner = `authorization-${randomUUID()}`;
+    await tx.user.create({ data: { id: foreignOwner, username: foreignOwner, email: `${foreignOwner}@example.invalid`,
+      password: 'not-a-login', firstName: 'Fixture', lastName: 'Authorization' } });
+    await tx.partnerProfile.create({ data: { id: foreignOwner, userId: foreignOwner, state: 'ACTIVE' } });
+    const foreignCase = await seedAuthorizationCase(tx, foreignOwner);
+    const forged = await independent.authorize('FINANCIAL_PROCESS', { kind: 'CASE', id: foreignCase.id });
     assert.equal(forged.ok ? null : forged.error.status, 404);
   });
 });

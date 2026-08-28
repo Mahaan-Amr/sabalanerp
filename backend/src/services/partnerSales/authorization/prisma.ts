@@ -49,7 +49,7 @@ export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, b
       id: true, isActive: true, role: true, departmentId: true, partnerProfile: { select: { state: true, revision: true } },
     } });
     if (root.kind === 'INQUIRY' && resource) {
-      // The root FOR UPDATE also excludes concurrent assignment INSERTs through
+      // The root FOR UPDATE excludes concurrent assignment commits through
       // their parent FK. Assignment evidence is append-only; never authorize
       // using its historical eligibility snapshot instead of current authority.
       const assignment = await tx.partnerInquiryAssignment.findFirst({ where: { inquiryId: root.id },
@@ -60,11 +60,15 @@ export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, b
     if (target && resource) {
       // A financial chain must be explicitly selected by the owning command.
       // Never infer the requester from the Case creator or the latest request.
-      await tx.$queryRaw`SELECT id FROM partner_correction_opportunities WHERE id = ${target.correctionOpportunityId} FOR UPDATE`;
       const opportunity = await tx.partnerCorrectionOpportunity.findUnique({ where: { id: target.correctionOpportunityId },
         select: { caseId: true, requesterId: true } });
       if (root.kind !== 'CASE' || opportunity?.caseId !== root.id) resource = null;
-      else resource.requesterId = opportunity.requesterId;
+      else {
+        // Its root/requester are immutable. Reject mismatches before taking an
+        // unrelated aggregate's child lock; valid locks remain root-first.
+        await tx.$queryRaw`SELECT id FROM partner_correction_opportunities WHERE id = ${target.correctionOpportunityId} FOR UPDATE`;
+        resource.requesterId = opportunity.requesterId;
+      }
     }
     const authority = actor?.isActive && resource ? await resolveAuthority(tx, { actorId, root }) : { grants: [], authorizationRevision: 1 };
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;

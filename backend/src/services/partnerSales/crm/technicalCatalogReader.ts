@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { PartnerTechnicalCatalogQuerySchema, PartnerTechnicalCatalogPageSchema, partnerError,
-  type PartnerTechnicalCatalogPort, type PartnerTechnicalFamily, type PartnerTechnicalProduct } from '@sabalanerp/partner-sales-contracts';
+  type PartnerTechnicalCatalogPort, type PartnerTechnicalFamily, type PartnerTechnicalProduct,
+  type PartnerTechnicalOperation, type Result } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { projectPartnerTechnicalProduct, projectPartnerTechnicalOperation } from './technicalCatalog';
 
@@ -30,13 +31,14 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
     if (!allowed.ok) return allowed;
     const query = parsed.data;
     const limit = query.limit ?? 50;
+    let projectedRows: Array<{ id: string; result: Result<PartnerTechnicalProduct | PartnerTechnicalOperation> }>;
     if (query.kind !== 'PRODUCT') {
       const where = { isActive: true, ...(query.cursor ? { id: { gt: query.cursor } } : {}),
         ...(query.search ? { OR: [{ code: { contains: query.search, mode: 'insensitive' as const } },
           query.kind === 'LAYER' ? { name: { contains: query.search, mode: 'insensitive' as const } }
             : { namePersian: { contains: query.search, mode: 'insensitive' as const } }] } : {}) };
       const selection = { id: true, updatedAt: true, isActive: true, namePersian: true, calculationBase: true } as const;
-      const results = query.kind === 'TOOL'
+      projectedRows = query.kind === 'TOOL'
         ? (await tx.subService.findMany({ where, select: selection, take: limit + 1, orderBy: { id: 'asc' } }))
           .map(row => ({ id: row.id, result: projectPartnerTechnicalOperation({ ...row, kind: 'TOOL' }) }))
         : query.kind === 'FINISHING'
@@ -47,32 +49,23 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
           : (await tx.layerType.findMany({ where, select: { id: true, updatedAt: true, isActive: true, name: true, calculationUnit: true },
             take: limit + 1, orderBy: { id: 'asc' } }))
             .map(row => ({ id: row.id, result: projectPartnerTechnicalOperation({ ...row, kind: 'LAYER' }) }));
-      const items = [];
-      for (const { result } of results.slice(0, limit)) {
-        if (!result.ok) return result;
-        items.push(result.value);
-      }
-      const refreshed = await authority.authorize('CASE_READ', root);
-      if (!refreshed.ok) return refreshed;
-      const page = PartnerTechnicalCatalogPageSchema.safeParse({ schemaVersion: 1, purpose: query.purpose, kind: query.kind, items,
-        ...(results.length > limit ? { nextCursor: results[limit - 1].id } : {}) });
-      return page.success ? { ok: true, value: page.data } : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
-    }
-    const rows = await tx.product.findMany({ select: productSelect, orderBy: { id: 'asc' }, take: limit + 1,
+    } else {
+      const rows = await tx.product.findMany({ select: productSelect, orderBy: { id: 'asc' }, take: limit + 1,
       where: { isActive: true, deletedAt: null, ...(query.cursor ? { id: { gt: query.cursor } } : {}),
         AND: [query.family ? familyFilter[query.family] : { OR: Object.values(familyFilter) },
           ...(query.search ? [{ OR: [{ code: { contains: query.search, mode: 'insensitive' as const } },
             { namePersian: { contains: query.search, mode: 'insensitive' as const } }] }] : [])] } });
-    const items: PartnerTechnicalProduct[] = [];
-    for (const row of rows.slice(0, limit)) {
-      const projected = projectPartnerTechnicalProduct(row);
-      if (!projected.ok) return projected;
-      items.push(projected.value);
+      projectedRows = rows.map(row => ({ id: row.id, result: projectPartnerTechnicalProduct(row) }));
+    }
+    const items = [];
+    for (const { result } of projectedRows.slice(0, limit)) {
+      if (!result.ok) return result;
+      items.push(result.value);
     }
     const refreshed = await authority.authorize('CASE_READ', root);
     if (!refreshed.ok) return refreshed;
     const page = PartnerTechnicalCatalogPageSchema.safeParse({ schemaVersion: 1, purpose: query.purpose, kind: query.kind, items,
-      ...(rows.length > limit ? { nextCursor: rows[limit - 1].id } : {}) });
+      ...(projectedRows.length > limit ? { nextCursor: projectedRows[limit - 1].id } : {}) });
     return page.success ? { ok: true, value: page.data } : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   } };
 }

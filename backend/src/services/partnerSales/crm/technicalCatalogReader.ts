@@ -57,7 +57,7 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
             { namePersian: { contains: query.search, mode: 'insensitive' as const } }] }] : [])] } });
       projectedRows = rows.map(row => ({ id: row.id, result: projectPartnerTechnicalProduct(row) }));
     }
-    const items = [];
+    const items: Array<PartnerTechnicalProduct | PartnerTechnicalOperation> = [];
     for (const { result } of projectedRows.slice(0, limit)) {
       if (!result.ok) return result;
       items.push(result.value);

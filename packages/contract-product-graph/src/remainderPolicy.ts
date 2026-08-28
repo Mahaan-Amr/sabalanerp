@@ -54,6 +54,8 @@ export interface RemainderChildIntent {
 }
 
 export interface RemainderChildPolicyInput {
+  /** Preserve an existing draft's deterministic replay order on first graph import. */
+  readonly allocationOrder?: number;
   readonly sourcePieceQuantities?: readonly number[];
   readonly secondaryOwnerProductRowId?: StableIdentity<'product-row'>;
   readonly allocationId: StableIdentity<'allocation'>;
@@ -130,6 +132,10 @@ export const parseRemainderChildPolicyInput = (
     throw new TypeError('Remainder child policy input must be an object.');
   }
   const record = value as Record<string, unknown>;
+  if (record.allocationOrder !== undefined &&
+      (typeof record.allocationOrder !== 'number' || !Number.isSafeInteger(record.allocationOrder) || record.allocationOrder < 0)) {
+    throw new TypeError('allocationOrder must be a nonnegative safe integer.');
+  }
   const requiredString = (key: string) => {
     const item = record[key];
     if (typeof item !== 'string') throw new TypeError(`${key} must be a string.`);
@@ -142,6 +148,7 @@ export const parseRemainderChildPolicyInput = (
     throw new TypeError('calibrationEnabled must be boolean.');
   }
   const parsed: RemainderChildPolicyInput = {
+    ...(record.allocationOrder === undefined ? {} : { allocationOrder: record.allocationOrder as number }),
     allocationId: parseStableIdentity('allocation', requiredString('allocationId')),
     sourceProductRowId: parseStableIdentity(
       'product-row',
@@ -194,7 +201,7 @@ export const parseRemainderChildPolicyInput = (
   };
   validateIntent({
     ...parsed,
-    allocationOrder: 0,
+    allocationOrder: parsed.allocationOrder ?? 0,
     childProductRowId: parseStableIdentity('product-row', 'validation-child'),
     catalogProductId: 'validation-catalog'
   }, 0);

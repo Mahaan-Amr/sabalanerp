@@ -47,6 +47,8 @@ export interface FinishingSelectionDraft {
 }
 
 export interface ProductOperationsInput {
+  /** Optional independent collection scope; omitted preserves historical row-based IDs. */
+  readonly operationScopeId?: string;
   readonly policyVersion: string;
   readonly pricingPolicyVersion: string;
   readonly roundingPolicyVersion: string;
@@ -238,6 +240,7 @@ export const parseProductOperationsInput = (value: unknown): ProductOperationsIn
   }
   return {
     policyVersion: text(record.policyVersion, 'operations.policyVersion'),
+    ...(record.operationScopeId === undefined ? {} : { operationScopeId: text(record.operationScopeId, 'operations.operationScopeId') }),
     pricingPolicyVersion: text(
       record.pricingPolicyVersion,
       'operations.pricingPolicyVersion'
@@ -408,6 +411,7 @@ export const calculateProductOperations = (
     const technical = calculateProductOperationsTechnical({
       inputRevision: 0,
       productRowId: input.productRowId,
+      ...(input.operationScopeId === undefined ? {} : { operationScopeId: input.operationScopeId }),
       lengthMeters: input.lengthMeters, widthMeters: input.widthMeters,
       quantity: input.quantity, groups: input.groups,
       tools: input.tools.map(({ rateToman: _rate, ...selection }) => selection),

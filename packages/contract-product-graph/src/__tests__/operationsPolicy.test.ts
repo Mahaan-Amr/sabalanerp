@@ -5,6 +5,7 @@ import {
   convertOperationGroupBasis,
   refreshProductOperationsGeometry,
   splitOperationGroup,
+  parseProductOperationsInput,
   type ProductOperationsInput
 } from '../operationsPolicy';
 import { parseStableIdentity } from '../stableIdentity';
@@ -65,6 +66,15 @@ const input = (
 });
 
 const mixed = calculateProductOperations(input());
+for (const operationScopeId of [undefined, 'independent-layer-side']) {
+  const scoped = parseProductOperationsInput(input({ groups: [], tools: [], finishings: [],
+    ...(operationScopeId === undefined ? {} : { operationScopeId }) }));
+  const result = calculateProductOperations(scoped);
+  if (!result.ok) throw new Error('Expected scoped no-operation calculation');
+  assert.equal(result.result.groups[0].operationGroupId,
+    `${operationScopeId ?? 'row-operations'}:no-operations`);
+  assert.equal(result.result.totalAmountToman, '0');
+}
 assert.equal(mixed.ok, true);
 if (mixed.ok) {
   assert.equal(mixed.result.basis, 'piece-count');

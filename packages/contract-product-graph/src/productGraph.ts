@@ -1833,7 +1833,14 @@ export const executeProductGraphCommand = (
     )
     .map(allocation => allocation.intentSnapshot);
   const childPolicyInput = command.sellerIntent.remainderChildPolicyInput;
+  if (existingAllocation && childPolicyInput?.allocationOrder !== undefined &&
+      childPolicyInput.allocationOrder !== existingAllocation.allocationOrder) {
+    return { ok: false, conflicts: [{ code: 'remainder-allocation-conflict',
+      path: ['sellerIntent', 'remainderChildPolicyInput', 'allocationOrder'], productRowId: nextRow.productRowId,
+      message: 'An existing allocation must retain its original replay order.' }] };
+  }
   const nextAllocationOrder = existingAllocation?.allocationOrder ??
+    childPolicyInput?.allocationOrder ??
     (Math.max(
       nextGraphBase.allocations.reduce(
         (maximum, allocation) => Math.max(maximum, allocation.allocationOrder),

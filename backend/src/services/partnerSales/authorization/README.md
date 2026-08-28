@@ -48,6 +48,16 @@ Sales policy changes are included. **This does not complete issue 319.**
   or the newest request. FINANCIAL_PROCESS/FINANCIAL_APPROVE without that binding
   fail closed. The caller must use the same opportunity for its subsequent write;
   workflow stage, scope, expiry and first-valid-commit are still command gates.
+- `createPartnerTechnicalRecoveryAuthority({ actorId, correlationId })` binds
+  checkpoint/read/validated-save to the actual creator-owned, pre-Case recovery
+  session and current Profile. The fixed owner bundle accepts CASE_READ and
+  CASE_DRAFT_WRITE on PROFILE/PARTNER only for that pre-Case stage. This does not
+  grant submission/commit on a Profile or any internal actor draft authorship.
+  Pending is onboarding-only; suspension permits retained private reads, not
+  writes/replays; termination and inactive Users cannot access the draft.
+  Session -> Profile -> sorted Users -> central authority is the lock order.
+  The technical recovery/save modules retain lease/CAS/expiry/idempotency and
+  final-write reauthorization; no second draft store or authority journal exists.
 
 ## Transaction contract
 
@@ -98,7 +108,8 @@ those facts or acquire database locks itself.
   separate. New grants are explicit; existing generic feature/workspace rows
   are never guessed into resource scopes.
 - Remaining child adapters (including approvals, payment and delivery targets),
-  creation/recovery targets before a Case exists, and owning command integration.
+  creation/discovery transport and owning command integration. Pre-Case technical
+  recovery now has a real authorization adapter, but it is not route-mounted.
 - All non-Case query producers, safe list/count database predicates and transport
   transaction composition retaining denial audit without partial writes.
 - Cross-connection grant/assignment/lifecycle races and complete atomic command

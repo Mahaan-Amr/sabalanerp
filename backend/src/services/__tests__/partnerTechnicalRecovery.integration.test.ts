@@ -6,6 +6,7 @@ import { partnerError, type PartnerTechnicalCheckpoint, type PartnerTechnicalRec
 import { createPartnerTechnicalRecoveryService } from '../partnerSales/cases/technicalRecovery';
 import { createPartnerTechnicalSaveService } from '../partnerSales/cases/technicalSave';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
+import { createPartnerTechnicalRecoveryAuthority } from '../partnerSales/authorization/technicalRecovery';
 
 function localDatabaseUrl(): string {
   const value = process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL;
@@ -58,6 +59,49 @@ test('incomplete technical input is durably acknowledged and can be read by a ne
     if (!loaded.ok) throw new Error(loaded.error.code);
     assert.equal(loaded.value.recoveryRevision, 1);
     assert.deepEqual(loaded.value.draft, command.draft);
+  });
+});
+
+test('real pre-Case authority binds creator-private recovery to the current Partner lifecycle without an allow-all fixture', async () => {
+  await fixture(async (tx, actorId, access) => {
+    await tx.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`,
+      password: 'not-a-login', firstName: 'Fixture', lastName: 'Technical authority' } });
+    await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'ACTIVE' } });
+    const dependencies = { actorId, transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: createPartnerTechnicalRecoveryAuthority({ actorId, correlationId: 'technical-authority-test' }) };
+    const service = createPartnerTechnicalRecoveryService(dependencies);
+    const command: PartnerTechnicalCheckpoint = { ...access, expectedRecoveryRevision: 0, idempotencyKey: 'current-profile',
+      draft: { schemaVersion: 1, inputRevision: 1, rows: [], editingValues: [{ entityId: 'draft-row', field: 'quantity', text: '۲٫' }] } };
+    assert.equal((await service.checkpoint(command)).ok, true);
+    await tx.partnerProfile.update({ where: { id: actorId }, data: { state: 'SUSPENDED', revision: { increment: 1 } } });
+    const loaded = await createPartnerTechnicalRecoveryService(dependencies).read(access);
+    assert.equal(loaded.ok, true, 'suspension keeps creator-private read access');
+    if (loaded.ok) assert.deepEqual(loaded.value.draft, command.draft);
+    const denied = await service.checkpoint(command);
+    assert.equal(denied.ok ? null : denied.error.code, 'PARTNER_NOT_ACTIVE', 'even a receipt replay reauthorizes current mutation rights');
+    await tx.partnerProfile.update({ where: { id: actorId }, data: { state: 'TERMINATED', revision: { increment: 1 } } });
+    assert.equal((await service.read(access)).ok, false);
+  });
+});
+
+test('pre-Case technical authority rejects internal ADMIN, pending identity, foreign recovery ids and inactive creators', async () => {
+  await fixture(async (tx, actorId, access) => {
+    await tx.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`, password: 'not-a-login',
+      firstName: 'Fixture', lastName: 'Technical denial', role: 'ADMIN' } });
+    const authorize = createPartnerTechnicalRecoveryAuthority({ actorId, correlationId: 'technical-denial-test' });
+    const request = { actorId, recoveryId: access.recoveryId, operation: 'SAVE' as const };
+    assert.equal((await authorize(tx, request)).ok, false, 'internal ADMIN cannot author Partner technical input');
+    await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'PENDING' } });
+    assert.equal((await authorize(tx, request)).ok, false, 'pending identity is onboarding-only');
+    await tx.partnerProfile.update({ where: { id: actorId }, data: { state: 'ACTIVE', revision: { increment: 1 } } });
+    assert.equal((await authorize(tx, request)).ok, true, 'own active Partner bundle, even with a stray legacy role');
+    assert.equal((await authorize(tx, { ...request, actorId: 'forged-actor' })).ok, false);
+    await tx.salesContractEditSession.create({ data: { draftId: `foreign-${actorId}`, ownerUserId: 'another-creator',
+      browserSessionId: 'other-browser', leaseToken: randomUUID(), schemaVersion: 2, baseRevision: 0 } });
+    const foreign = await authorize(tx, { ...request, recoveryId: `foreign-${actorId}` });
+    assert.deepEqual(foreign, await authorize(tx, { ...request, recoveryId: `missing-${actorId}` }));
+    await tx.user.update({ where: { id: actorId }, data: { isActive: false } });
+    assert.equal((await authorize(tx, request)).ok, false);
   });
 });
 

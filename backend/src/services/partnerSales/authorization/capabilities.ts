@@ -6,7 +6,10 @@ export const partnerCapabilities: Partial<Record<PartnerAction, readonly Capabil
   PROFILE_READ: [['PROFILE', 'ONBOARDING']],
   CUSTOMER_READ: [['CUSTOMER', 'CRM']], CUSTOMER_WRITE: [['CUSTOMER', 'CRM']],
   INQUIRY_READ: [['INQUIRY', 'PARTNER']], INQUIRY_WRITE: [['INQUIRY', 'PARTNER']],
-  CASE_READ: [['CASE', 'PARTNER']], CASE_DRAFT_WRITE: [['CASE', 'PARTNER']], CASE_SUBMIT: [['CASE', 'PARTNER']],
+  // Before Case creation the creator-private technical draft is rooted in the
+  // owning Profile. This never grants another actor access to a recovery id.
+  CASE_READ: [['CASE', 'PARTNER'], ['PROFILE', 'PARTNER']],
+  CASE_DRAFT_WRITE: [['CASE', 'PARTNER'], ['PROFILE', 'PARTNER']], CASE_SUBMIT: [['CASE', 'PARTNER']],
   CASE_CANCEL: [['CASE', 'PARTNER']], CUSTOMER_OUTPUT: [['CASE', 'CUSTOMER_OUTPUT']],
   // Permission to execute the signed/printed command, not a lifecycle bypass.
   CASE_COMMIT: [['CASE', 'PARTNER']],

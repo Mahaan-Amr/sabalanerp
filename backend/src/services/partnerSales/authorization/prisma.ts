@@ -61,7 +61,9 @@ export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, b
       if (decision.value.persona === 'PARTNER' && project.responsibleSellerId !== decision.value.actorId) {
         return { ok: false, error: partnerError('NOT_FOUND') };
       }
-      return decision;
+      // The child lock may have waited past grant expiry. Refresh after that
+      // wait; the already-held root locks preserve the established lock order.
+      return authorization.authorize(action, { kind: 'CUSTOMER', id: project.customerId });
     },
   };
 }

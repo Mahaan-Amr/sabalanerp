@@ -68,6 +68,10 @@ Red/green tests exercise public authorization and Case query seams, including
 the fixed bundle, lifecycle, explicit scopes, current grant expiry/revocation,
 all four ADMIN exceptions, purpose restrictions, channel parity, safe availability,
 nested unknown-field rejection and exact Case ownership. The real existing-local
-PostgreSQL suite uses rollback-only namespaced fixtures and closes its temporary
-client; it proves current grant/user checks and CRM Project responsibility, not
-cross-connection first-valid-commit acceptance. No retained evidence is deleted.
+PostgreSQL suite proves current grant/user checks and CRM Project responsibility.
+One additional cross-connection regression holds a Project lock until the grant
+expires, then verifies that authorization refreshes after the wait. It commits
+only namespaced mutable User/CRM fixtures and deletes those exact fixtures in
+`finally`; all retained Partner evidence is rolled back. Every temporary client
+closes in `finally`. No retained evidence is deleted. This does not prove the
+remaining assignment/lifecycle first-valid-commit acceptance matrix.

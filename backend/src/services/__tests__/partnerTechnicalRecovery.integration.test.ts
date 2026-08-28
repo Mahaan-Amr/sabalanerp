@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { partnerError, type PartnerTechnicalCheckpoint, type PartnerTechnicalRecoveryAccess } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalRecoveryService } from '../partnerSales/cases/technicalRecovery';
+import { createPartnerTechnicalSaveService } from '../partnerSales/cases/technicalSave';
+import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 
 function localDatabaseUrl(): string {
   const value = process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL;
@@ -241,5 +243,213 @@ test('no-op or input-revision-only checkpoints renew lease presence but not the 
       draft: { ...command.draft, editingValues: [{ entityId: 'new-row', field: 'quantity', text: '۳' }] } });
     if (!changed.ok) throw new Error(changed.error.code);
     assert.ok(Date.parse(changed.value.updatedAt) > lastMeaningfulChange.getTime());
+  });
+});
+
+function preparedSaveSetup(tx: Prisma.TransactionClient, actorId: string, access: PartnerTechnicalRecoveryAccess) {
+    const catalog = createPartnerTechnicalCatalogFixtures(), product = catalog.products[0];
+    const dependencies = { actorId, transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: async () => ({ ok: true as const, value: undefined }),
+      resolveEvidence: async () => ({ ok: true as const, value: {
+        context: { catalog, policy: { calculation: 'calc-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
+          products: [{ catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
+            preparedRates: [{ kind: 'cubic' as const, unit: 'ton' as const, rateToman: '12345' }] }] },
+        identities: [{ productRowId: 'prepared-row', identity: {
+          schemaVersion: 1 as const, partnerSellerId: actorId, catalogProductId: product.catalogItemId,
+          family: 'prepared' as const, unit: 'ton', configuration: [{ key: 'kind', value: 'cubic' }],
+          materialRateEvidenceId: 'private-material', materialRateHash: 'sha256-v1:' + 'a'.repeat(64), components: [],
+          currency: 'IRT' as const, calculationPolicyVersion: 'calc-v1', roundingPolicyVersion: 'rounding-v1',
+        } }],
+      } }),
+    };
+    const service = createPartnerTechnicalSaveService(dependencies);
+    const command = { ...access, expectedRecoveryRevision: 0, idempotencyKey: 'validated',
+      draft: { schemaVersion: 1 as const, inputRevision: 7, rows: [{
+        productRowId: 'prepared-row', catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
+        family: 'prepared' as const, configuration: { kind: 'cubic' as const, unit: 'ton' as const, quantity: '2.5' },
+      }] } };
+    return { dependencies, service, command };
+}
+
+test('validated technical save returns exact canonical configuration references and reloads without disclosing its private graph', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { service, command, dependencies } = preparedSaveSetup(tx, actorId, access);
+    const result = await service.save(command);
+    if (!result.ok) throw new Error(result.error.code);
+    assert.deepEqual(result.value.rows, [{ configurationRef: {
+      recoveryId: access.recoveryId, recoveryRevision: 1, productRowId: 'prepared-row',
+    }, quantity: '2.5', unit: 'ton', configurationChange: 'NEW' }]);
+    assert.equal(result.value.inputRevision, 7);
+    assert.equal(result.value.replayed, false);
+    const loaded = await createPartnerTechnicalSaveService(dependencies).readSaved({ ...access, recoveryRevision: 1 });
+    if (!loaded.ok) throw new Error(loaded.error.code);
+    const { replayed: _replay, ...view } = result.value;
+    assert.deepEqual(loaded.value, view);
+    assert.equal(JSON.stringify(loaded).includes('12345'), false);
+    assert.equal(JSON.stringify(loaded).includes('private-material'), false);
+    const draft = await createPartnerTechnicalRecoveryService(dependencies).read(access);
+    if (!draft.ok) throw new Error(draft.error.code);
+    assert.deepEqual(draft.value.draft, command.draft);
+  });
+});
+
+test('quantity-only validated successors preserve configuration identity and retry history across incomplete checkpoints', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { service, command, dependencies } = preparedSaveSetup(tx, actorId, access);
+    const first = await service.save(command);
+    if (!first.ok) throw new Error(first.error.code);
+    const quantityDraft = { ...command.draft, inputRevision: 8, rows: [{ ...command.draft.rows[0],
+      configuration: { ...command.draft.rows[0].configuration, quantity: '3.75' } }] };
+    const next = await service.save({ ...command, expectedRecoveryRevision: 1, idempotencyKey: 'quantity-change', draft: quantityDraft });
+    if (!next.ok) throw new Error(next.error.code);
+    assert.equal(next.value.rows[0].configurationChange, 'UNCHANGED');
+    assert.equal(next.value.rows[0].quantity, '3.75');
+    assert.equal(next.value.rows[0].configurationRef.recoveryRevision, 2);
+    const checkpoint = createPartnerTechnicalRecoveryService(dependencies);
+    const incomplete = { ...quantityDraft, inputRevision: 9, editingValues: [{ entityId: 'prepared-row', field: 'quantity' as const, text: '۴٫' }] };
+    assert.equal((await checkpoint.checkpoint({ ...command, expectedRecoveryRevision: 2, idempotencyKey: 'editing', draft: incomplete })).ok, true);
+    const invalid = await service.save({ ...command, expectedRecoveryRevision: 3, idempotencyKey: 'invalid-save', draft: incomplete });
+    if (invalid.ok) throw new Error('Incomplete draft received an inquiry-ready reference');
+    assert.equal(invalid.error.code, 'INVALID_PAYLOAD');
+    assert.equal((await service.readSaved({ ...access, recoveryRevision: 3 })).ok, false);
+    const replay = await createPartnerTechnicalSaveService(dependencies).save(command);
+    if (!replay.ok) throw new Error(replay.error.code);
+    assert.deepEqual(replay.value, { ...first.value, replayed: true });
+    const old = await service.readSaved({ ...access, recoveryRevision: 1 });
+    if (!old.ok) throw new Error(old.error.code);
+    assert.equal(old.value.rows[0].quantity, '2.5');
+    const current = await checkpoint.read(access);
+    if (!current.ok) throw new Error(current.error.code);
+    assert.equal(current.value.recoveryRevision, 3);
+    assert.deepEqual(current.value.draft, incomplete);
+    const changedKey = await service.save({ ...command, draft: quantityDraft });
+    if (changedKey.ok) throw new Error('Idempotency key accepted changed intent');
+    assert.equal(changedKey.error.code, 'IDEMPOTENCY_CONFLICT');
+  });
+});
+
+test('validated saves cannot reuse a stable row identity for another product family even with matching owner evidence', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { service, command, dependencies } = preparedSaveSetup(tx, actorId, access);
+    assert.equal((await service.save(command)).ok, true);
+    const replacement = createPartnerTechnicalSaveService({ ...dependencies, resolveEvidence: async () => {
+      const evidence = await dependencies.resolveEvidence();
+      return { ok: true, value: { ...evidence.value,
+        identities: evidence.value.identities.map(item => ({ ...item, identity: { ...item.identity, family: 'volumetric' as const } })) } };
+    } });
+    const rebound = await replacement.save({ ...command, expectedRecoveryRevision: 1, idempotencyKey: 'rebind',
+      draft: { ...command.draft, inputRevision: 8, rows: [{ ...command.draft.rows[0], family: 'volumetric' }] } });
+    if (rebound.ok) throw new Error('Stable row ID rebound to a different family');
+    assert.equal(rebound.error.code, 'INTEGRITY_CONFLICT');
+    const current = await createPartnerTechnicalRecoveryService(dependencies).read(access);
+    if (!current.ok) throw new Error(current.error.code);
+    assert.equal(current.value.recoveryRevision, 1);
+    assert.equal(current.value.draft?.rows[0].family, 'prepared');
+  });
+});
+
+test('validated save reauthorizes after graph evidence resolution and never publishes a reference after authority is revoked', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { command, dependencies } = preparedSaveSetup(tx, actorId, access);
+    let allowed = true;
+    const service = createPartnerTechnicalSaveService({ ...dependencies,
+      authorize: async () => allowed ? { ok: true, value: undefined } : { ok: false, error: partnerError('FORBIDDEN') },
+      resolveEvidence: async () => { allowed = false; return dependencies.resolveEvidence(); },
+    });
+    const denied = await service.save(command);
+    if (denied.ok) throw new Error('Revoked writer issued a saved reference');
+    assert.equal(denied.error.code, 'FORBIDDEN');
+    const current = await createPartnerTechnicalRecoveryService(dependencies).read(access);
+    if (!current.ok) throw new Error(current.error.code);
+    assert.equal(current.value.recoveryRevision, 0);
+    const retried = await createPartnerTechnicalSaveService(dependencies).save(command);
+    if (!retried.ok) throw new Error(retried.error.code);
+    assert.equal(retried.value.replayed, false);
+  });
+});
+
+test('a lease that expires during owner evidence lookup cannot be renewed by a successful validated save', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { command, dependencies } = preparedSaveSetup(tx, actorId, access);
+    const service = createPartnerTechnicalSaveService({ ...dependencies, resolveEvidence: async () => {
+      await tx.salesContractEditSession.update({ where: { draftId: access.recoveryId }, data: { updatedAt: new Date(Date.now() - 90_000) } });
+      return dependencies.resolveEvidence();
+    } });
+    const expired = await service.save(command);
+    if (expired.ok) throw new Error('Expired writer renewed itself while publishing a reference');
+    assert.equal(expired.error.code, 'FORBIDDEN');
+    await tx.salesContractEditSession.update({ where: { draftId: access.recoveryId }, data: { updatedAt: new Date() } });
+    const current = await createPartnerTechnicalRecoveryService(dependencies).read(access);
+    if (!current.ok) throw new Error(current.error.code);
+    assert.equal(current.value.recoveryRevision, 0);
+  });
+});
+
+test('validated graph, safe references and idempotency receipt roll back together when the transaction fails', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { command, dependencies, service } = preparedSaveSetup(tx, actorId, access);
+    const failure = new Error('commit failed');
+    const failing = createPartnerTechnicalSaveService({ ...dependencies, transaction: async run => {
+      await tx.$executeRaw`SAVEPOINT technical_validated_failure`;
+      try { await run(tx); throw failure; }
+      finally { await tx.$executeRaw`ROLLBACK TO SAVEPOINT technical_validated_failure`; }
+    } });
+    await assert.rejects(failing.save(command), error => error === failure);
+    const missing = await service.readSaved({ ...access, recoveryRevision: 1 });
+    if (missing.ok) throw new Error('Rolled-back reference remained readable');
+    assert.equal(missing.error.code, 'NOT_FOUND');
+    const draft = await createPartnerTechnicalRecoveryService(dependencies).read(access);
+    if (!draft.ok) throw new Error(draft.error.code);
+    assert.equal(draft.value.recoveryRevision, 0);
+    const retry = await service.save(command);
+    if (!retry.ok) throw new Error(retry.error.code);
+    assert.equal(retry.value.recoveryRevision, 1);
+    assert.equal(retry.value.replayed, false);
+  });
+});
+
+test('saved references and their retries require current owner authority and reject corrupted private snapshots', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { command, dependencies, service } = preparedSaveSetup(tx, actorId, access);
+    assert.equal((await service.save(command)).ok, true);
+    const denied = createPartnerTechnicalSaveService({ ...dependencies,
+      authorize: async () => ({ ok: false, error: partnerError('FORBIDDEN') }) });
+    for (const outcome of [await denied.readSaved({ ...access, recoveryRevision: 1 }), await denied.save(command),
+      await service.readSaved({ ...access, leaseToken: 'stale-token', recoveryRevision: 1 }),
+      await service.save({ ...command, leaseToken: 'stale-token' })]) {
+      if (outcome.ok) throw new Error('Stale authority accessed saved evidence');
+      assert.equal(outcome.error.code, 'FORBIDDEN');
+    }
+    const foreign = await createPartnerTechnicalSaveService({ ...dependencies, actorId: 'different-owner' }).readSaved({ ...access, recoveryRevision: 1 });
+    if (foreign.ok) throw new Error('Another owner read the saved configuration');
+    assert.equal(foreign.error.code, 'NOT_FOUND');
+    const row = await tx.salesContractEditSession.findUniqueOrThrow({ where: { draftId: access.recoveryId } });
+    const recovery = JSON.parse(JSON.stringify(row.recovery));
+    recovery.validatedSnapshots[0].payload.graph.rows[0].commercial.baseRateToman = '99999';
+    await tx.salesContractEditSession.update({ where: { draftId: access.recoveryId }, data: { recovery } });
+    for (const outcome of [await service.readSaved({ ...access, recoveryRevision: 1 }), await service.save(command)]) {
+      if (outcome.ok) throw new Error('Corrupted private graph accepted');
+      assert.equal(outcome.error.code, 'INTEGRITY_CONFLICT');
+      assert.equal(JSON.stringify(outcome).includes('99999'), false);
+    }
+  });
+});
+
+test('changed owner-issued inquiry evidence reports a configuration change without rewriting the historical reference', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { command, dependencies, service } = preparedSaveSetup(tx, actorId, access);
+    assert.equal((await service.save(command)).ok, true);
+    const changed = createPartnerTechnicalSaveService({ ...dependencies, resolveEvidence: async () => {
+      const evidence = await dependencies.resolveEvidence();
+      return { ok: true, value: { ...evidence.value, identities: evidence.value.identities.map(item => ({ ...item,
+        identity: { ...item.identity, components: [{ componentId: 'new-component', evidenceHash: 'sha256-v1:' + 'b'.repeat(64) }] } })) } };
+    } });
+    const next = await changed.save({ ...command, expectedRecoveryRevision: 1, idempotencyKey: 'new-evidence' });
+    if (!next.ok) throw new Error(next.error.code);
+    assert.equal(next.value.rows[0].configurationChange, 'CHANGED');
+    const original = await service.readSaved({ ...access, recoveryRevision: 1 });
+    if (!original.ok) throw new Error(original.error.code);
+    assert.equal(original.value.rows[0].configurationChange, 'NEW');
+    assert.equal(original.value.rows[0].configurationRef.recoveryRevision, 1);
   });
 });

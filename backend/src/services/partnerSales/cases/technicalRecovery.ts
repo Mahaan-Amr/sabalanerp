@@ -14,14 +14,15 @@ export interface PartnerTechnicalRecoveryDependencies {
   readonly actorId: string;
   transaction<T>(work: (transaction: Prisma.TransactionClient) => Promise<T>): Promise<T>;
   authorize(transaction: Prisma.TransactionClient, input: {
-    actorId: string; recoveryId: string; operation: 'READ' | 'CHECKPOINT';
+    actorId: string; recoveryId: string; operation: 'READ' | 'CHECKPOINT' | 'SAVE';
   }): Promise<Result<void>>;
 }
 
-const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
+export const technicalRecoveryJson = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
+const json = technicalRecoveryJson;
 const CHECKPOINT_OPERATION = 'PARTNER_TECHNICAL_CHECKPOINT_V1';
 
-const draftContent = (draft: PartnerTechnicalDraft): string => {
+export const technicalDraftContent = (draft: PartnerTechnicalDraft): string => {
   const { inputRevision: _correlation, dependents = [], stairSystems = [], editingValues = [], ...content } = draft;
   return canonicalJson(json({ ...content, dependents, stairSystems, editingValues }));
 };
@@ -35,8 +36,9 @@ export function createPrismaPartnerTechnicalRecoveryService(input: {
     transaction: work => input.database.$transaction(work) });
 }
 
-export function createPartnerTechnicalRecoveryService(dependencies: PartnerTechnicalRecoveryDependencies): PartnerTechnicalRecoveryPort {
-  async function underLease<T>(access: PartnerTechnicalRecoveryAccess, operation: 'READ' | 'CHECKPOINT',
+/** Shared serialization and authority gate for checkpoint and validated save. */
+export function technicalRecoveryLease(dependencies: PartnerTechnicalRecoveryDependencies) {
+  return async function underLease<T>(access: PartnerTechnicalRecoveryAccess, operation: 'READ' | 'CHECKPOINT' | 'SAVE',
     work: (tx: Prisma.TransactionClient, session: SalesContractEditSession, recovery: TechnicalRecoveryRecord | null, now: Date) => Promise<Result<T>>,
   ): Promise<Result<T>> {
     return dependencies.transaction(async tx => {
@@ -62,7 +64,11 @@ export function createPartnerTechnicalRecoveryService(dependencies: PartnerTechn
       }
       return work(tx, session, recovery, now);
     });
-  }
+  };
+}
+
+export function createPartnerTechnicalRecoveryService(dependencies: PartnerTechnicalRecoveryDependencies): PartnerTechnicalRecoveryPort {
+  const underLease = technicalRecoveryLease(dependencies);
   return {
     async read(input) {
       const parsed = PartnerTechnicalRecoveryAccessSchema.safeParse(input);
@@ -99,7 +105,7 @@ export function createPartnerTechnicalRecoveryService(dependencies: PartnerTechn
         }
         const next = { ...recovery, kind: PARTNER_TECHNICAL_RECOVERY_KIND, version: 1,
           recoveryRevision: revision + 1,
-          updatedAt: recovery && draftContent(recovery.draft) === draftContent(command.draft)
+          updatedAt: recovery && technicalDraftContent(recovery.draft) === technicalDraftContent(command.draft)
             ? recovery.updatedAt : now.getTime(), draft: command.draft };
         const written = await tx.salesContractEditSession.updateMany({ where: {
           draftId: session.draftId, leaseToken: session.leaseToken, baseRevision: session.baseRevision,

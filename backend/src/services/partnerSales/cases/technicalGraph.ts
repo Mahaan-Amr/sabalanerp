@@ -13,6 +13,7 @@ import {
 import { technicalGraphOperations } from './technicalGraphOperations';
 import { technicalGraphRemainder } from './technicalGraphRemainder';
 import { technicalGraphLayer } from './technicalGraphLayers';
+import { technicalGraphMeasures, type TechnicalGraphMeasure } from './technicalGraphMeasures';
 
 /** Owner-resolved frozen calculation evidence, not approved wholesale prices.
  * Never accept this context from a Partner/browser or return it in safe views. */
@@ -49,7 +50,7 @@ function technicalProductSnapshot(product: PartnerTechnicalProduct): CatalogSnap
 /** Pure server-side compiler. No persistence, inquiry refs or approval authority.
  * All rows must validate; incomplete editing remains checkpoint-only. */
 export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTechnicalGraphContext): Result<{
-  graph: CanonicalProductGraph; preview: PartnerTechnicalPreview;
+  graph: CanonicalProductGraph; preview: PartnerTechnicalPreview; measures: TechnicalGraphMeasure[];
 }> {
   const parsed = PartnerTechnicalDraftSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
@@ -197,5 +198,6 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
       graph = applied.graph;
     }
   } catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
-  return { ok: true, value: { graph, preview: preview.value } };
+  try { return { ok: true, value: { graph, preview: preview.value, measures: technicalGraphMeasures(graph) } }; }
+  catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
 }

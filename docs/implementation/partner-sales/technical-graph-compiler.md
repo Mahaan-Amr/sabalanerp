@@ -50,9 +50,10 @@ backend/frontend typechecks and architecture checks. The existing read-only
 comparison harness checks 62 complete priced results and hashes against the
 released remaining-stone package; it is diagnostic evidence, not runtime authority.
 
-Still required: persist validated drafts atomically with current authorization,
-lease/revision/idempotency, retain owner-private frozen context and historical
-configuration references, define exact approval-impact evidence excluding quantity
-and Delivery, compose durable pending inquiry/Case commands, complete safe field
+The subsequent [validated-save module](technical-validated-save.md) adds the
+transactional storage and safe historical-reference interface, plus allowlisted
+canonical requested measures from this compiler. Real owner approval-impact
+evidence excluding quantity and Delivery remains required, along with durable
+pending inquiry/Case commands, complete safe field
 validation and user-authored presentation content, bind 330 UI, then 334 integration
 and 335 comprehensive acceptance. No issue is closed on compiler-only evidence.

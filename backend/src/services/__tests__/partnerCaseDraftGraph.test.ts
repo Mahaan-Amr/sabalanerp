@@ -25,6 +25,10 @@ test('private graph compilation preserves prepared and legacy volumetric identit
   assert.equal(result.value.graph.rows[0].commercial.calculationSnapshot?.unit, 'count');
   assert.equal(result.value.graph.rows[1].commercial.calculationSnapshot?.unit, 'ton');
   assert.equal(result.value.graph.rows[1].commercial.calculationSnapshot?.kind, 'cubic');
+  assert.deepEqual(result.value.measures, [
+    { productRowId: 'prepared-a', quantity: '3', unit: 'count' },
+    { productRowId: 'legacy-b', quantity: '2.5', unit: 'ton' },
+  ]);
   assert.deepEqual(result.value.graph.sourceBatches, []);
   assert.deepEqual(result.value.graph.allocations, []);
   assert.equal(JSON.stringify(result.value.preview).includes('123.4'), false);
@@ -244,6 +248,7 @@ test('slab private graph preserves explicit mother rows and charges only consume
   assert.equal(row.slab?.sourceRows[0].quantity, 2);
   assert.equal(row.commercial.baseAmountToman, '400');
   assert.equal(row.commercial.totalAmountToman, '500');
+  assert.deepEqual(result.value.measures, [{ productRowId: row.productRowId, quantity: '4', unit: 'squareMeter' }]);
   const technical = result.value.preview.rows[0].calculation;
   if (!technical.ok || !('packingPlan' in technical.result)) throw new Error('Missing slab facts');
   assert.equal(technical.result.packingPlan.unusedSources[0].quantity, 1);
@@ -270,6 +275,7 @@ test('private operation pricing uses canonical child-independent scope and does 
   if (!result.ok) throw new Error(result.error.code);
   assert.equal(result.value.graph.rows[0].commercial.baseAmountToman, '800000');
   assert.equal(result.value.graph.rows[0].commercial.totalAmountToman, '845000');
+  assert.deepEqual(result.value.measures, [{ productRowId: 'with-tool', quantity: '2', unit: 'meter' }]);
   const tool = result.value.graph.toolSelections[0];
   assert.equal(tool.toolSelectionId, 'own-tool');
   assert.equal(tool.automaticQuantity, '2');
@@ -301,6 +307,7 @@ test('longitudinal private graph uses canonical packing and costing without repl
   assert.equal(row.commercial.requestedAreaSquareMeters, '0.78');
   assert.equal(row.commercial.baseAmountToman, '1933750');
   assert.equal(row.commercial.totalAmountToman, '2063750');
+  assert.deepEqual(result.value.measures, [{ productRowId: 'long-a', quantity: '6.5', unit: 'meter' }]);
   assert.equal(result.value.graph.sourceBatches[0].ownerProductRowId, 'long-a');
   assert.equal(result.value.graph.sourceBatches[0].sourceBatchId, 'long-stock');
   const technical = result.value.preview.rows[0].calculation;

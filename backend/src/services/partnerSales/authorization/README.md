@@ -31,8 +31,12 @@ resolver changes are included. **This does not complete issue 319.**
 
 Call authorization within the command transaction, immediately before its write,
 including on retry. Do not retain a port beyond its transaction. The adapter locks
-the actor User, resource and profile; owner department and Project linkage are
-read under locks. Database `clock_timestamp()` is read after evidence loading.
+the resource/profile, then actor/owner Users in sorted-id order, then any Project
+child. Owner department and Project linkage are read under locks. Callers and
+future profile/CRM writers must preserve that order. Database `clock_timestamp()`
+is read after evidence loading. The active owning Partner's `CASE_COMMIT` command
+uses PARTNER purpose; output preview/download permission does not authorize
+commitment. The Case writer still validates the signed/printed trigger atomically.
 
 `ResolvePartnerAuthority` is a REQUIRED #296 integration adapter, not a new grant
 model or a route-local permission resolver. It must resolve current explicit

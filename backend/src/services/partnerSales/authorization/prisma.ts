@@ -15,12 +15,6 @@ export type ResolvePartnerAuthority = (tx: Prisma.TransactionClient, input: {
 export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
   resolveAuthority: ResolvePartnerAuthority) {
   const authorization = createPartnerAuthorization({ read: async (actorId, root) => {
-    await tx.$queryRaw`SELECT id FROM users WHERE id = ${actorId} FOR UPDATE`;
-    // This also prevents a concurrent Partner conversion from inserting a profile
-    // against this User while its internal persona is being used.
-    const actor = await tx.user.findUnique({ where: { id: actorId }, select: {
-      id: true, isActive: true, role: true, departmentId: true, partnerProfile: { select: { state: true, revision: true } },
-    } });
     let resource: AuthorizationEvidence['resource'] = null;
     let profileId = root.kind === 'PROFILE' ? root.id : null;
     if (root.kind === 'CUSTOMER') {
@@ -34,12 +28,18 @@ export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, b
       await tx.$queryRaw`SELECT id FROM partner_profiles WHERE id = ${profileId} FOR UPDATE`;
       const profile = await tx.partnerProfile.findUnique({ where: { id: profileId }, select: { userId: true, state: true, revision: true } });
       if (profile) {
-        await tx.$queryRaw`SELECT id FROM users WHERE id = ${profile.userId} FOR SHARE`;
+        // All callers lock root/profile before Users, never the inverse. Sorting
+        // the two User ids prevents actor/owner lock inversion across profiles.
+        const userIds = [...new Set([actorId, profile.userId])].sort();
+        for (const id of userIds) await tx.$queryRaw`SELECT id FROM users WHERE id = ${id} FOR UPDATE`;
         const owner = await tx.user.findUnique({ where: { id: profile.userId }, select: { departmentId: true } });
         resource = { root, partnerSellerId: profile.userId, partnerStatus: profile.state, lifecycleRevision: profile.revision,
           ...(owner?.departmentId ? { departmentId: owner.departmentId } : {}) };
       }
     }
+    const actor = await tx.user.findUnique({ where: { id: actorId }, select: {
+      id: true, isActive: true, role: true, departmentId: true, partnerProfile: { select: { state: true, revision: true } },
+    } });
     const authority = actor?.isActive && resource ? await resolveAuthority(tx, { actorId, root }) : { grants: [], authorizationRevision: 1 };
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
     return { ...authority, evaluatedAt: clock.now.toISOString(), resource, actor: {
@@ -50,13 +50,15 @@ export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, b
   } }, binding);
   return { ...authorization,
     async authorizeProject(action: PartnerAction, projectId: string, expectedCustomerId: string): Promise<Result<PermissionContext>> {
+      // Root before child, matching callers that already authorized the Customer.
+      const decision = await authorization.authorize(action, { kind: 'CUSTOMER', id: expectedCustomerId });
+      if (!decision.ok) return decision;
       await tx.$queryRaw`SELECT id FROM crm_potential_projects WHERE id = ${projectId} FOR UPDATE`;
       const project = await tx.crmPotentialProject.findUnique({ where: { id: projectId }, select: {
         customerId: true, responsibleSellerId: true, isActive: true,
       } });
       if (!project?.isActive || project.customerId !== expectedCustomerId) return { ok: false, error: partnerError('NOT_FOUND') };
-      const decision = await authorization.authorize(action, { kind: 'CUSTOMER', id: project.customerId });
-      if (decision.ok && decision.value.persona === 'PARTNER' && project.responsibleSellerId !== decision.value.actorId) {
+      if (decision.value.persona === 'PARTNER' && project.responsibleSellerId !== decision.value.actorId) {
         return { ok: false, error: partnerError('NOT_FOUND') };
       }
       return decision;

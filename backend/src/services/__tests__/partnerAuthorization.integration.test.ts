@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import { createPrismaPartnerAuthorization } from '../partnerSales/authorization/prisma';
 
-test('real transaction reads current user activation and current grant rather than a prior UI decision', async () => {
+async function fixture(run: (tx: Prisma.TransactionClient, partner: string, actor: string) => Promise<void>) {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
   if (!['localhost', '127.0.0.1', 'postgres'].includes(url.hostname) || url.pathname !== '/sabalanerp') throw new Error('Existing local DB required');
   url.searchParams.set('connection_limit', '2'); url.searchParams.set('pool_timeout', '10');
@@ -17,6 +17,15 @@ test('real transaction reads current user activation and current grant rather th
       for (const id of [partner, actor]) await tx.user.create({ data: {
         id, username: id, email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Fixture', lastName: 'Authorization',
       } });
+      await run(tx, partner, actor);
+      throw rollback;
+    }, { timeout: 20_000 });
+  } catch (error) { if (error !== rollback) throw error; }
+  finally { await database.$disconnect(); }
+}
+
+test('real transaction reads current user activation and current grant rather than a prior UI decision', async () => {
+  await fixture(async (tx, partner, actor) => {
       await tx.partnerProfile.create({ data: { id: partner, userId: partner } });
       await tx.featurePermission.create({ data: { userId: actor, workspace: 'hr', feature: 'fixture-partner-identity', permissionLevel: 'edit' } });
       // Test-only #296 adapter: persisted explicit grant. Never a production
@@ -39,25 +48,11 @@ test('real transaction reads current user activation and current grant rather th
       await tx.featurePermission.updateMany({ where: { userId: actor }, data: { expiresAt: null } });
       await tx.user.update({ where: { id: actor }, data: { isActive: false } });
       assert.equal((await port.authorize('IDENTITY_VERIFY', root)).ok, false);
-      throw rollback;
-    }, { timeout: 20_000 });
-  } catch (error) { if (error !== rollback) throw error; }
-  finally { await database.$disconnect(); }
+  });
 });
 
 test('persisted Customer and Project share the Customer root but retain independent Project responsibility', async () => {
-  const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
-  if (!['localhost', '127.0.0.1', 'postgres'].includes(url.hostname) || url.pathname !== '/sabalanerp') throw new Error('Existing local DB required');
-  url.searchParams.set('connection_limit', '2'); url.searchParams.set('pool_timeout', '10');
-  const database = new PrismaClient({ datasources: { db: { url: url.toString() } } });
-  const rollback = new Error('rollback namespaced fixture');
-  try {
-    await database.$transaction(async tx => {
-      const partner = `authorization-${randomUUID()}`;
-      const other = `authorization-${randomUUID()}`;
-      for (const id of [partner, other]) await tx.user.create({ data: {
-        id, username: id, email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Fixture', lastName: 'Authorization',
-      } });
+  await fixture(async (tx, partner, other) => {
       await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
       const customer = await tx.crmCustomer.create({ data: { ownerUserId: partner, firstName: 'Fixture', lastName: 'Customer' } });
       const project = await tx.crmPotentialProject.create({ data: { customerId: customer.id, responsibleSellerId: partner,
@@ -71,8 +66,5 @@ test('persisted Customer and Project share the Customer root but retain independ
       await tx.crmPotentialProject.update({ where: { id: project.id }, data: { responsibleSellerId: other } });
       assert.equal((await port.authorizeProject('CUSTOMER_READ', project.id, customer.id)).ok, false);
       assert.equal((await port.authorize('CUSTOMER_READ', { kind: 'CUSTOMER', id: customer.id })).ok, true);
-      throw rollback;
-    }, { timeout: 20_000 });
-  } catch (error) { if (error !== rollback) throw error; }
-  finally { await database.$disconnect(); }
+  });
 });

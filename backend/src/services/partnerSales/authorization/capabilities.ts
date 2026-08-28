@@ -8,6 +8,8 @@ export const partnerCapabilities: Partial<Record<PartnerAction, readonly Capabil
   INQUIRY_READ: [['INQUIRY', 'PARTNER']], INQUIRY_WRITE: [['INQUIRY', 'PARTNER']],
   CASE_READ: [['CASE', 'PARTNER']], CASE_DRAFT_WRITE: [['CASE', 'PARTNER']], CASE_SUBMIT: [['CASE', 'PARTNER']],
   CASE_CANCEL: [['CASE', 'PARTNER']], CUSTOMER_OUTPUT: [['CASE', 'CUSTOMER_OUTPUT']],
+  // Permission to execute the signed/printed command, not a lifecycle bypass.
+  CASE_COMMIT: [['CASE', 'PARTNER']],
   RETAIL_COLLECTION_WRITE: [['CASE', 'PARTNER']], CORRECTION_REQUEST: [['CASE', 'PARTNER']],
   RETAIL_CORRECTION_SAVE: [['CASE', 'PARTNER']], VOID_REQUEST: [['CASE', 'PARTNER']],
   ACCOUNTING_READ: [['PROFILE', 'PARTNER']], FULFILLMENT_READ: [['CASE', 'PARTNER']],

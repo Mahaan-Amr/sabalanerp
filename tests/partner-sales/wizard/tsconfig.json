@@ -1,0 +1,12 @@
+{
+  "extends": "../../../frontend/tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../../..",
+    "paths": {
+      "@/*": ["frontend/src/*"]
+    },
+    "incremental": false
+  },
+  "include": ["../../../frontend/src/features/partner-sales/__tests__/wizard*.test.tsx"],
+  "exclude": []
+}

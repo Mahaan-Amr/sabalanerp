@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpPressable, ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import {
@@ -238,6 +239,7 @@ export function StairPartSubsection({
   onCopyFromTread?: () => void;
   onChange: (draft: StairPartFieldDraft) => void;
 }) {
+  const showPricing = useProductPricingVisibility();
   const update = (changes: Partial<StairPartFieldDraft>) =>
     onChange({ ...draft, ...changes });
   return (
@@ -284,13 +286,13 @@ export function StairPartSubsection({
           onChange={quantity => update({ quantity })}
           error={errors.quantity}
         />
-        <CompactField
+        {showPricing && <CompactField
           label={`فی ${partLabel(draft.part)}`}
           value={draft.baseRateToman}
           monetary
           onChange={baseRateToman => update({ baseRateToman })}
           error={errors.baseRateToman}
-        />
+        />}
       </div>
       <label className="mt-3 block text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
         توضیحات

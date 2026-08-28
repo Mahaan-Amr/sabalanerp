@@ -28,6 +28,7 @@ const fieldClass =
 const errorClass = 'mt-1 min-h-4 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]';
 const isPricedInput = (input: LongitudinalProductInput | LongitudinalTechnicalInput): input is LongitudinalProductInput =>
   !('inputRevision' in input);
+const TechnicalEditing = React.createContext(false);
 
 const toDisplayUnit = (
   value: CanonicalDecimal | undefined,
@@ -66,7 +67,9 @@ function CompactDecimalField({
   monetary?: boolean;
   grouped?: boolean;
 }) {
+  const preserveIncompleteText = React.useContext(TechnicalEditing);
   const [draft, setDraft] = React.useState(value);
+  const [entryError, setEntryError] = React.useState<string>();
   const editingRef = React.useRef(false);
   React.useEffect(() => {
     if (!editingRef.current) setDraft(value);
@@ -124,19 +127,32 @@ function CompactDecimalField({
           }}
           onChange={event => {
             const next = event.target.value;
+            setEntryError(undefined);
             setDraft(next);
             onValueChange(next);
           }}
           onBlur={() => {
             editingRef.current = false;
+            if (preserveIncompleteText && draft.trim() !== '') {
+              try {
+                if (inputMode === 'numeric' && !parseLongitudinalQuantityEntry(draft).accepted) {
+                  setEntryError('تعداد صحیح وارد کنید');
+                  return;
+                }
+                parseCanonicalDecimal(draft);
+              } catch {
+                setEntryError('عدد معتبر وارد کنید');
+                return;
+              }
+            }
             setDraft(value);
           }}
-          aria-invalid={Boolean(error)}
-          aria-describedby={error ? `${id}-error` : undefined}
+          aria-invalid={Boolean(entryError || error)}
+          aria-describedby={entryError || error ? `${id}-error` : undefined}
           className={fieldClass}
         />
       )}
-      <div id={`${id}-error`} className={errorClass}>{error ?? ''}</div>
+      <div id={`${id}-error`} className={errorClass}>{entryError ?? error ?? ''}</div>
     </div>
   );
 }
@@ -276,7 +292,7 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
       ];
 
   return (
-    <div className="space-y-3">
+    <TechnicalEditing.Provider value={!pricedInput}><div className="space-y-3">
       <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-4">
         <CompactDecimalField
           id="longitudinal-length"
@@ -463,6 +479,6 @@ export function LongitudinalProductSection<Input extends LongitudinalProductInpu
           </div>
         ))}
       </section>
-    </div>
+    </div></TechnicalEditing.Provider>
   );
 }

@@ -124,7 +124,13 @@ function SlabField({
           onBlur={() => {
             editingRef.current = false;
             if (preserveIncompleteText && draft.trim() !== '') {
-              try { parseCanonicalDecimal(draft); } catch {
+              try {
+                const normalized = parseCanonicalDecimal(draft);
+                if (inputMode === 'numeric' && (!/^[1-9]\d*$/.test(normalized) || !Number.isSafeInteger(Number(normalized)))) {
+                  setEntryError('تعداد صحیح و مثبت وارد کنید');
+                  return;
+                }
+              } catch {
                 setEntryError('عدد معتبر وارد کنید');
                 return;
               }

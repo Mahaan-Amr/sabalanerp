@@ -27,10 +27,22 @@ export async function checkTechnicalForms(page, output, theme, width) {
   await long.getByRole('textbox', { name: 'مترمربع', exact: true }).press('Tab');
   // Existing longitudinal semantics retain width and derive length from area.
   await long.getByText('8 × 2m × 10cm', { exact: true }).waitFor();
+  for (const [name, text] of [['عرض', 'نامعتبر'], ['مترمربع', 'ناقص'], ['تعداد', '1.5']]) {
+    const field = long.getByRole('textbox', { name, exact: true });
+    await field.fill(text);
+    await field.press('Tab');
+    assert.equal(await field.inputValue(), text);
+    assert.equal(await field.getAttribute('aria-invalid'), 'true');
+  }
   const slab = page.getByRole('region', { name: 'اسلب فنی' });
   await slab.getByText('1 اسلب کامل', { exact: true }).waitFor();
   await slab.getByRole('switch', { name: 'خوراک اره', exact: true }).click();
   await slab.getByText('2 اسلب', { exact: true }).waitFor();
+  const slabQuantity = slab.locator('#slab-quantity');
+  await slabQuantity.fill('1.5');
+  await slabQuantity.press('Tab');
+  assert.equal(await slabQuantity.inputValue(), '1.5');
+  assert.equal(await slabQuantity.getAttribute('aria-invalid'), 'true');
   await slab.getByRole('textbox', { name: 'طول نهایی', exact: true }).fill('نامعتبر');
   await slab.getByRole('textbox', { name: 'طول نهایی', exact: true }).press('Tab');
   assert.equal(await slab.getByRole('textbox', { name: 'طول نهایی', exact: true }).inputValue(), 'نامعتبر');

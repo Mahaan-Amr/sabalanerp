@@ -7,7 +7,7 @@ test('validated-save wire binds exact recovery references and canonical measures
     expectedRecoveryRevision: 0, idempotencyKey: 'save', draft: { schemaVersion: 1, inputRevision: 1, rows: [] } };
   assert.deepEqual(PartnerTechnicalSaveSchema.parse(command), command);
   const receipt = { schemaVersion: 1, recoveryId: 'draft', recoveryRevision: 1, inputRevision: 1,
-    updatedAt: '2026-08-28T10:00:00.000Z', replayed: false, rows: [{
+    graphHash: `sha256-v1:${'a'.repeat(64)}`, updatedAt: '2026-08-28T10:00:00.000Z', replayed: false, rows: [{
       configurationRef: { recoveryId: 'draft', recoveryRevision: 1, productRowId: 'row-a' },
       quantity: '2.5', unit: 'ton', configurationChange: 'NEW',
     }] };

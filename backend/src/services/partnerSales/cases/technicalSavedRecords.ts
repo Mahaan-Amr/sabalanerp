@@ -33,9 +33,15 @@ export async function decodeTechnicalSavedSnapshot(value: unknown): Promise<Tech
     const payload = envelope.payload;
     if (payload.version !== 1 || typeof payload.sessionId !== 'string' || !payload.sessionId ||
         !Array.isArray(payload.identities)) return undefined;
-    const view = PartnerTechnicalSavedViewSchema.parse(payload.view);
     const draft = PartnerTechnicalDraftSchema.parse(payload.draft);
     const graph = parseCanonicalProductGraph(payload.graph);
+    const graphHash = await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph });
+    const rawView = payload.view as PartnerTechnicalSavedView & { graphHash?: string };
+    // Pre-1.7 snapshots are retained immutable evidence. Their envelope hash is
+    // verified above, then the newly public graph hash is deterministically
+    // projected from the exact retained graph rather than rewriting history.
+    const view = PartnerTechnicalSavedViewSchema.parse({ ...rawView, graphHash: rawView.graphHash ?? graphHash });
+    if (view.graphHash !== graphHash) return undefined;
     const identities = payload.identities.map(item => ({ productRowId: item.productRowId, identity: InquiryIdentitySchema.parse(item.identity) }));
     if (draft.inputRevision !== view.inputRevision || graph.rows.length !== view.rows.length || identities.length !== graph.rows.length ||
         new Set(identities.map(item => item.productRowId)).size !== identities.length ||

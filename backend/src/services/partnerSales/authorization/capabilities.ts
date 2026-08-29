@@ -12,7 +12,10 @@ export const partnerCapabilities: Partial<Record<PartnerAction, readonly Capabil
   // Before Case creation the creator-private technical draft is rooted in the
   // owning Profile. This never grants another actor access to a recovery id.
   CASE_READ: [['CASE', 'PARTNER'], ['PROFILE', 'PARTNER']],
-  CASE_DRAFT_WRITE: [['CASE', 'PARTNER'], ['PROFILE', 'PARTNER']], CASE_SUBMIT: [['CASE', 'PARTNER']],
+  CASE_DRAFT_WRITE: [['CASE', 'PARTNER'], ['PROFILE', 'PARTNER']],
+  // The Case does not exist at final submission time, so creation is rooted in
+  // the already-authorized Profile. Existing Case mutations remain Case-rooted.
+  CASE_SUBMIT: [['CASE', 'PARTNER'], ['PROFILE', 'PARTNER']],
   CASE_CANCEL: [['CASE', 'PARTNER']], CUSTOMER_OUTPUT: [['CASE', 'CUSTOMER_OUTPUT']],
   // Permission to execute the signed/printed command, not a lifecycle bypass.
   CASE_COMMIT: [['CASE', 'PARTNER']],

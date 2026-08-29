@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { InstantSchema, QuantitySchema, RevisionSchema } from './primitives';
+import { HashSchema, InstantSchema, QuantitySchema, RevisionSchema } from './primitives';
 import { PartnerConfigurationRefSchema } from './inquiry';
 import { PartnerTechnicalCheckpointSchema, PartnerTechnicalRecoveryAccessSchema } from './technical-recovery';
 import type { Result } from './errors';
@@ -10,7 +10,7 @@ export const PartnerTechnicalSavedReadSchema = PartnerTechnicalRecoveryAccessSch
 }).strict();
 const saved = z.object({
   schemaVersion: z.literal(1), recoveryId: PartnerConfigurationRefSchema.shape.recoveryId,
-  recoveryRevision: RevisionSchema, inputRevision: z.number().int().nonnegative().safe(), updatedAt: InstantSchema,
+  recoveryRevision: RevisionSchema, inputRevision: z.number().int().nonnegative().safe(), graphHash: HashSchema, updatedAt: InstantSchema,
   rows: z.array(z.object({
     configurationRef: PartnerConfigurationRefSchema, quantity: QuantitySchema,
     unit: z.enum(['meter', 'squareMeter', 'count', 'ton']),

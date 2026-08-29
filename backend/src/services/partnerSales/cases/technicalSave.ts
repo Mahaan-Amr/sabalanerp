@@ -98,6 +98,7 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         const compiled = compilePartnerTechnicalGraph(command.draft, evidence.value.context);
         if (!compiled.ok) return compiled;
         const graph = compiled.value.graph;
+        const graphHash = await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph });
         const identities = evidence.value.identities;
         if (identities.length !== graph.rows.length || new Set(identities.map(item => item.productRowId)).size !== identities.length) {
           return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
@@ -130,7 +131,8 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         }
         const updatedAt = recovery && technicalDraftContent(recovery.draft) === technicalDraftContent(command.draft) ? recovery.updatedAt : now.getTime();
         const view = PartnerTechnicalSavedViewSchema.safeParse({ schemaVersion: 1, recoveryId: session.draftId,
-          recoveryRevision: savedRevision, inputRevision: command.draft.inputRevision, updatedAt: new Date(updatedAt).toISOString(), rows });
+          recoveryRevision: savedRevision, inputRevision: command.draft.inputRevision, graphHash,
+          updatedAt: new Date(updatedAt).toISOString(), rows });
         if (!view.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
         const snapshot = await encodeTechnicalSavedSnapshot({ version: 1, sessionId: session.id, view: view.data, draft: command.draft,
           graph, context: evidence.value.context, identities });

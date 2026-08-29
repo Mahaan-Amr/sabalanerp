@@ -6,6 +6,7 @@ import { createPartnerTechnicalSession, openPartnerTechnicalSession } from '../.
 
 const access = { schemaVersion: 1 as const, recoveryId: 'technical-session',
   browserSessionId: 'browser-session', leaseToken: 'writer-token', baseRevision: 0 };
+const graphHash = `sha256-v1:${'a'.repeat(64)}`;
 const draft = (inputRevision: number, text: string) => PartnerTechnicalDraftSchema.parse({
   schemaVersion: 1, inputRevision, rows: [],
   editingValues: [{ entityId: 'unfinished-product', field: 'quantity', text }],
@@ -121,7 +122,7 @@ test('validated save returns owner-issued references but does not infer approval
     recovery: { read: async () => { throw new Error('No implicit reload'); }, checkpoint: async () => { throw new Error('Not used'); } },
     saved: { readSaved: async () => { throw new Error('Not used'); }, save: async command => {
       sent = command;
-      return { ok: true, value: { schemaVersion: 1, recoveryId: command.recoveryId,
+      return { ok: true, value: { schemaVersion: 1, graphHash, recoveryId: command.recoveryId,
         recoveryRevision: 6, inputRevision: command.draft.inputRevision, updatedAt: '2026-08-29T00:00:01.000Z', replayed: false,
         rows: [{ configurationRef: { recoveryId: command.recoveryId, recoveryRevision: 6, productRowId: 'configured-row' },
           quantity: '2', unit: 'count', configurationChange: 'UNCHANGED' }] } };
@@ -149,7 +150,7 @@ test('reload can restore the exact validated view and double save shares one fli
       catalogSnapshotVersion: '2026-08-29T00:00:00.000Z', family: 'prepared',
       configuration: { kind: 'readyPiece', unit: 'count', quantity: '2' } }],
   });
-  const validated = { schemaVersion: 1 as const, recoveryId: access.recoveryId, recoveryRevision: 4,
+  const validated = { schemaVersion: 1 as const, graphHash, recoveryId: access.recoveryId, recoveryRevision: 4,
     inputRevision: 5, updatedAt: '2026-08-29T00:00:01.000Z', rows: [{
       configurationRef: { recoveryId: access.recoveryId, recoveryRevision: 4, productRowId: 'configured-row' },
       quantity: '2', unit: 'count' as const, configurationChange: 'UNCHANGED' as const,
@@ -179,7 +180,7 @@ test('owner save may jump a permanent revision counter and older validated refs 
     rows: [{ productRowId: 'old-row', catalogItemId: 'catalog-row', catalogSnapshotVersion: '2026-08-29T00:00:00.000Z',
       family: 'prepared', configuration: { kind: 'readyPiece', unit: 'count', quantity: '1' } }],
   });
-  const old = { schemaVersion: 1 as const, recoveryId: access.recoveryId, recoveryRevision: 5, inputRevision: 2,
+  const old = { schemaVersion: 1 as const, graphHash, recoveryId: access.recoveryId, recoveryRevision: 5, inputRevision: 2,
     updatedAt: '2026-08-29T00:00:01.000Z', rows: [{ configurationRef: {
       recoveryId: access.recoveryId, recoveryRevision: 5, productRowId: 'old-row' },
       quantity: '1', unit: 'count' as const, configurationChange: 'NEW' as const }] };
@@ -189,7 +190,7 @@ test('owner save may jump a permanent revision counter and older validated refs 
       updatedAt: '2026-08-29T00:00:02.000Z', draft: current }, validated: old,
     recovery: { read: async () => { throw new Error('Not used'); }, checkpoint: async () => { throw new Error('Not used'); } },
     saved: { readSaved: async () => ({ ok: true, value: old }), save: async command => ({ ok: true, value: {
-      schemaVersion: 1, recoveryId: command.recoveryId, recoveryRevision: 7,
+      schemaVersion: 1, graphHash, recoveryId: command.recoveryId, recoveryRevision: 7,
       inputRevision: command.draft.inputRevision, updatedAt: '2026-08-29T00:00:03.000Z', replayed: false,
       rows: [{ configurationRef: { recoveryId: command.recoveryId, recoveryRevision: 7, productRowId: 'old-row' },
         quantity: '1', unit: 'count', configurationChange: 'UNCHANGED' }],
@@ -208,7 +209,7 @@ test('authenticated host opens one technical session from the current lease and 
     rows: [{ productRowId: 'configured-row', catalogItemId: 'catalog-row',
       catalogSnapshotVersion: '2026-08-29T00:00:00.000Z', family: 'prepared',
       configuration: { kind: 'readyPiece', unit: 'count', quantity: '2' } }] });
-  const validated = { schemaVersion: 1 as const, recoveryId: access.recoveryId, recoveryRevision: 4,
+  const validated = { schemaVersion: 1 as const, graphHash, recoveryId: access.recoveryId, recoveryRevision: 4,
     inputRevision: 3, updatedAt: '2026-08-29T00:00:01.000Z', rows: [{
       configurationRef: { recoveryId: access.recoveryId, recoveryRevision: 4, productRowId: 'configured-row' },
       quantity: '2', unit: 'count' as const, configurationChange: 'NEW' as const,

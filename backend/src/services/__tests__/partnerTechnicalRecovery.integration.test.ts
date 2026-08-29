@@ -400,6 +400,26 @@ test('validated technical save returns exact canonical configuration references 
   });
 });
 
+test('pre-graphHash validated snapshots remain readable through a verified deterministic projection', async () => {
+  await fixture(async (tx, actorId, access) => {
+    const { service, command, dependencies } = preparedSaveSetup(tx, actorId, access);
+    const saved = await service.save(command);
+    if (!saved.ok) throw new Error(saved.error.code);
+    const session = await tx.salesContractEditSession.findUniqueOrThrow({ where: { draftId: access.recoveryId } });
+    const recovery = structuredClone(session.recovery) as { validatedSnapshots: Array<{
+      payload: { view: Record<string, unknown> }; integrityHash: string;
+    }> };
+    const envelope = recovery.validatedSnapshots[0];
+    delete envelope.payload.view.graphHash;
+    envelope.integrityHash = await canonicalHash(envelope.payload);
+    await tx.salesContractEditSession.update({ where: { id: session.id },
+      data: { recovery: recovery as unknown as Prisma.InputJsonValue } });
+    const loaded = await createPartnerTechnicalSaveService(dependencies).readSaved({ ...access, recoveryRevision: 1 });
+    if (!loaded.ok) throw new Error(loaded.error.code);
+    assert.equal(loaded.value.graphHash, saved.value.graphHash);
+  });
+});
+
 test('quantity-only validated successors preserve configuration identity and retry history across incomplete checkpoints', async () => {
   await fixture(async (tx, actorId, access) => {
     const { service, command, dependencies } = preparedSaveSetup(tx, actorId, access);

@@ -4,6 +4,7 @@ import {
   CaseDraftIntentSchema, PaymentPlanSchema, canonicalHash, partnerError,
   type ApprovedInquiry, type PartnerCommand, type PartnerTechnicalSavedView, type Result,
 } from '@sabalanerp/partner-sales-contracts';
+import { technicalGraphMeasures } from './technicalGraphMeasures';
 
 export type DisplayParty = { displayName: string; phone: string; address: string };
 export type ResolvedCaseDraft = {
@@ -35,6 +36,9 @@ export async function validateResolvedDraft(command: Extract<PartnerCommand, { t
   try { graph = parseCanonicalProductGraph(resolved.graph); }
   catch { return { ok: false, error: partnerError('INTEGRITY_CONFLICT') }; }
   const graphHash = await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph });
+  let measures: ReturnType<typeof technicalGraphMeasures>;
+  try { measures = technicalGraphMeasures(graph); }
+  catch { return { ok: false, error: partnerError('CONFIG_MISMATCH') }; }
   const graphIds = graph.rows.map(row => row.productRowId);
   const savedIds = resolved.rows.map(row => row.productRowId);
   const intentIds = command.intent.rows.map(row => row.productRowId);
@@ -45,9 +49,9 @@ export async function validateResolvedDraft(command: Extract<PartnerCommand, { t
       snapshot.recoveryId !== command.intent.recoveryId || snapshot.recoveryRevision !== command.intent.recoveryRevision ||
       !exact(graphIds, savedIds) || !exact(graphIds, intentIds) || !exact(graphIds,
         snapshot.rows.map(row => row.configurationRef.productRowId)) || resolved.rows.some(row => {
-        const graphRow = graph.rows.find(item => item.productRowId === row.productRowId);
+        const measure = measures.find(item => item.productRowId === row.productRowId);
         const technical = snapshot.rows.find(item => item.configurationRef.productRowId === row.productRowId);
-        return !graphRow || !technical || graphRow.commercial.requestedQuantity !== row.quantity ||
+        return !measure || !technical || measure.quantity !== row.quantity || measure.unit !== row.unit ||
           technical.quantity !== row.quantity || technical.unit !== row.unit ||
           technical.configurationRef.recoveryId !== snapshot.recoveryId ||
           technical.configurationRef.recoveryRevision !== snapshot.recoveryRevision;

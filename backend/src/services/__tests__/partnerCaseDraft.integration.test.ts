@@ -5,7 +5,7 @@ import { PrismaClient, type Prisma } from '@prisma/client';
 import { parseCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { canonicalHash, type PartnerCommand } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerCaseService, type PartnerCaseDependencies } from '../partnerSales/cases/aggregate';
-import type { ResolvedCaseDraft } from '../partnerSales/cases/revisions';
+import { validateResolvedDraft, type ResolvedCaseDraft } from '../partnerSales/cases/revisions';
 
 function databaseUrl() {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -18,10 +18,44 @@ const graphFor = (productRowId: string) => parseCanonicalProductGraph({ schemaVe
   catalogSnapshots: [{ catalogProductId: 'catalog-case-stone', snapshotVersion: 'catalog-v1', facts: {} }],
   rows: [{ productRowId, catalogProductId: 'catalog-case-stone',
     catalogSnapshotVersion: 'catalog-v1', productType: 'prepared', contractualTitle: 'سنگ آماده پرونده',
-    commercial: { requestedQuantity: '2', totalAmountToman: '200' } }], stairSystems: [], layerConfigurations: [],
+    commercial: { requestedQuantity: '2', totalAmountToman: '200',
+      calculationSnapshot: { kind: 'readyPiece', unit: 'count', quantity: '2' } } }], stairSystems: [], layerConfigurations: [],
   sourceBatches: [], remainingStones: [], allocations: [], operationGroups: [], toolSelections: [], finishingSelections: [] });
 const configurationHash = `sha256-v1:${'1'.repeat(64)}`;
 const approvalEvidenceHash = `sha256-v1:${'2'.repeat(64)}`;
+
+test('family-aware technical measures bind longitudinal quantity instead of the raw piece count', async () => {
+  const ids = { caseId: 'measure-case', partnerId: 'measure-partner', customerId: 'measure-customer',
+    profileId: 'measure-profile', accountId: 'measure-account', departmentId: 'measure-department',
+    inquiryId: 'measure-inquiry', inquiryRowId: 'measure-inquiry-row' };
+  const submitted = await command(ids);
+  const productRowId = `${ids.caseId}-product-row`;
+  const graph = parseCanonicalProductGraph({ schemaVersion: 1, revision: 1,
+    calculationPolicy: { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v1' },
+    catalogSnapshots: [{ catalogProductId: 'catalog-case-stone', snapshotVersion: 'catalog-v1', facts: {} }],
+    rows: [{ productRowId, catalogProductId: 'catalog-case-stone', catalogSnapshotVersion: 'catalog-v1',
+      productType: 'longitudinal', contractualTitle: 'سنگ طولی پرونده', commercial: {
+        requestedLengthMeters: '1.5', requestedQuantity: '2', requestedAreaSquareMeters: '1.2',
+        calculationSnapshot: { quantityMode: 'piece-count' }, totalAmountToman: '200',
+      } }], stairSystems: [], layerConfigurations: [], sourceBatches: [], remainingStones: [], allocations: [],
+    operationGroups: [], toolSelections: [], finishingSelections: [] });
+  const graphHash = await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph });
+  const intent = { ...submitted.intent, graphHash };
+  const input = { ...submitted, intent };
+  const base = await resolved(ids, ids.caseId);
+  const exact: ResolvedCaseDraft = { ...base, graph,
+    technicalSnapshot: { ...base.technicalSnapshot, graphHash, rows: [{
+      ...base.technicalSnapshot.rows[0], quantity: '3', unit: 'meter',
+    }] },
+    rows: [{ ...base.rows[0], quantity: '3', unit: 'meter' }],
+  };
+  assert.equal((await validateResolvedDraft(input, exact)).ok, true);
+  const rawPieceCount = { ...exact, technicalSnapshot: { ...exact.technicalSnapshot,
+    rows: [{ ...exact.technicalSnapshot.rows[0], quantity: '2' }] },
+    rows: [{ ...exact.rows[0], quantity: '2' }] };
+  const mismatch = await validateResolvedDraft(input, rawPieceCount);
+  assert.equal(mismatch.ok ? null : mismatch.error.code, 'CONFIG_MISMATCH');
+});
 
 async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, string>) => Promise<void>,
   approvalTtlMs = 48 * 60 * 60 * 1000) {
@@ -116,10 +150,12 @@ async function resolved(ids: Record<string, string>, caseId: string, revision = 
 }
 
 function service(tx: Prisma.TransactionClient, ids: Record<string, string>, failpoint?: PartnerCaseDependencies['failpoint'],
-  recordEvidenceReview: PartnerCaseDependencies['recordEvidenceReview'] = async () => undefined) {
+  recordEvidenceReview: PartnerCaseDependencies['recordEvidenceReview'] = async () => undefined,
+  authorizeProject: PartnerCaseDependencies['authorizeProject'] = async () =>
+    ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } })) {
   return createPartnerCaseService({ actorId: ids.partnerId, transaction: work => work(tx),
     authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-authorization` } }),
-    authorizeProject: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } }),
+    authorizeProject,
     recordEvidenceReview,
     resolveDraft: async (_tx, input) => ({ ok: true, value: await resolved(ids, input.command.idempotency.targetId,
       input.command.type === 'CASE_DRAFT_REVISE' ? input.command.expected.revision + 1 : 1,
@@ -194,6 +230,9 @@ test('draft revision advances the atomic pair once and rejects a stale competing
     assert.equal(await tx.partnerInquiryUsage.count({ where: { caseId: ids.caseId } }), 2);
     const replay = await service(tx, ids).execute(revision);
     assert.equal(replay.ok && replay.value.replayed, true);
+    const originalReplay = await service(tx, ids).execute(submitted);
+    assert.equal(originalReplay.ok && originalReplay.value.replayed, true);
+    if (originalReplay.ok) assert.equal(originalReplay.value.case?.owner.revision, 2);
     const stale = await service(tx, ids).execute(await reviseCommand(ids, submitted, 1,
       created.value.case.owner.integrityHash, 'stale'));
     assert.equal(stale.ok ? null : stale.error.code, 'ROW_STALE');
@@ -251,8 +290,14 @@ test('an explicit Draft revision reauthorizes and snapshots a changed Customer a
     const revisedIntent = { ...draft.intent, customerId: ids.secondCustomerId, projectId: ids.secondProjectId };
     const revisedCommand = { ...draft, intent: revisedIntent, idempotency: { ...draft.idempotency,
       payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent: revisedIntent }) } };
-    const revised = await service(tx, ids).execute(revisedCommand);
+    const projectChecks: string[] = [];
+    const revised = await service(tx, ids, undefined, async () => undefined, async (_tx, request) => {
+      projectChecks.push(request.projectId);
+      return { ok: true, value: { evidenceId: `${request.projectId}-authorization` } };
+    }).execute(revisedCommand);
     assert.equal(revised.ok, true);
+    assert.deepEqual(projectChecks.sort(), [ids.firstProjectId, ids.firstProjectId,
+      ids.secondProjectId, ids.secondProjectId].sort());
     const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, select: {
       customerId: true, customerContract: { select: { customerId: true } },
       revisions: { orderBy: { revision: 'asc' }, select: { partySnapshots: true } },
@@ -276,6 +321,20 @@ test('graph mismatch and an injected pair failure leave no partial Case, records
     const mismatch = await service(tx, ids, undefined, async (_tx, review) => { reviews.push(review); }).execute(invalid);
     assert.equal(mismatch.ok ? null : mismatch.error.code, 'CONFIG_MISMATCH');
     assert.deepEqual(reviews.map(review => review.code), ['CONFIG_MISMATCH']);
+    assert.equal(await tx.partnerSaleCase.count({ where: { id: ids.caseId } }), 0);
+    const inconsistentPayment = createPartnerCaseService({ actorId: ids.partnerId, transaction: work => work(tx),
+      authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-authorization` } }),
+      authorizeProject: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } }),
+      recordEvidenceReview: async (_tx, review) => { reviews.push(review); },
+      resolveDraft: async () => {
+        const value = await resolved(ids, ids.caseId);
+        return { ok: true, value: { ...value, sabalanPaymentPlan: { ...value.sabalanPaymentPlan,
+          installments: value.sabalanPaymentPlan.installments.map(item => ({ ...item,
+            amount: { ...item.amount, amount: '201' } })) } } } as const;
+      }, consumeRecovery: async () => ({ ok: true, value: undefined }) });
+    const paymentMismatch = await inconsistentPayment.execute(valid);
+    assert.equal(paymentMismatch.ok ? null : paymentMismatch.error.code, 'INTEGRITY_CONFLICT');
+    assert.deepEqual(reviews.map(review => review.code), ['CONFIG_MISMATCH', 'INTEGRITY_CONFLICT']);
     assert.equal(await tx.partnerSaleCase.count({ where: { id: ids.caseId } }), 0);
     await tx.$executeRaw`SAVEPOINT partner_case_failpoint`;
     const failure = new Error('case failpoint');

@@ -60,6 +60,18 @@ async function readPartnerView(tx: Transaction, caseId: string) {
   return { view: parsed.data, root: row, projectId };
 }
 
+async function readPartnerRevisionView(tx: Transaction, caseId: string, revision: number, integrityHash: string) {
+  const row = await tx.partnerCaseRevision.findUnique({ where: { caseId_revision: { caseId, revision } },
+    select: { integrityHash: true, internalProjection: true } });
+  const source = row?.internalProjection;
+  const partner = source && typeof source === 'object' && !Array.isArray(source)
+    ? (source as Prisma.JsonObject).partner : undefined;
+  const parsed = PartnerCaseViewSchema.safeParse(partner);
+  return row && row.integrityHash === integrityHash && parsed.success && parsed.data.owner.caseId === caseId &&
+    parsed.data.owner.revision === revision && parsed.data.owner.integrityHash === integrityHash
+    ? parsed.data : undefined;
+}
+
 async function insertPaymentPlan(tx: Transaction, caseId: string, revision: number, purpose: 'RETAIL' | 'SABALAN',
   plan: ResolvedCaseDraft['sabalanPaymentPlan']) {
   const integrityHash = await canonicalHash({ purpose: `PARTNER_${purpose}_PAYMENT_PLAN`, schemaVersion: 1, caseId, revision, plan });
@@ -104,6 +116,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   }
   const previousContent = current.head.customerContent && typeof current.head.customerContent === 'object' &&
     !Array.isArray(current.head.customerContent) ? current.head.customerContent as Prisma.JsonObject : undefined;
+  const previousProjectId = typeof previousContent?.projectId === 'string' ? previousContent.projectId : undefined;
   const customerAccess = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'CUSTOMER_READ',
     purpose: 'CRM', root: { kind: 'CUSTOMER', id: resolved.value.customerId } });
   if (!customerAccess.ok) return customerAccess;
@@ -111,6 +124,10 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     actorId: dependencies.actorId, projectId: resolved.value.projectId, customerId: resolved.value.customerId,
   }) : undefined;
   if (projectAccess && !projectAccess.ok) return projectAccess;
+  const previousProjectAccess = previousProjectId && previousProjectId !== resolved.value.projectId
+    ? await dependencies.authorizeProject(tx, { actorId: dependencies.actorId,
+      projectId: previousProjectId, customerId: current.customerId }) : undefined;
+  if (previousProjectAccess && !previousProjectAccess.ok) return previousProjectAccess;
   const rollout = await authorizePartnerTechnicalRollout(tx, current.profileId, 'MUTATE');
   if (!rollout.ok) return rollout;
   const validated = await validateResolvedDraft(command, resolved.value);
@@ -167,7 +184,12 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   }
   const evidence = buildRevisionEvidence({ command, resolved: resolved.value, graph: validated.value.graph,
     graphHash: validated.value.graphHash, rows: approvedRows });
-  if (!evidence.ok) return evidence;
+  if (!evidence.ok) {
+    if (evidence.error.code === 'INTEGRITY_CONFLICT') await dependencies.recordEvidenceReview(tx, {
+      caseId, profileId: current.profileId, correlationId: command.correlationId, code: 'INTEGRITY_CONFLICT',
+      evidence: { expectedRevision: command.expected.revision, recoveryRevision: command.intent.recoveryRevision } });
+    return evidence;
+  }
   const revision = current.headRevision + 1;
   const integrityHash = await canonicalHash({ purpose: 'PARTNER_CASE_REVISION', schemaVersion: 1,
     predecessor: { revision: current.headRevision, integrityHash: current.integrityHash },
@@ -235,6 +257,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       predecessorRevision: current.headRevision, caseAuthorizationEvidenceId: caseAccess.value.evidenceId,
       customerAuthorizationEvidenceId: customerAccess.value.evidenceId, recoveryId: command.intent.recoveryId,
       ...(projectAccess?.ok ? { projectAuthorizationEvidenceId: projectAccess.value.evidenceId } : {}),
+      ...(previousProjectAccess?.ok ? { previousProjectAuthorizationEvidenceId: previousProjectAccess.value.evidenceId } : {}),
       recoveryRevision: command.intent.recoveryRevision, graphHash: evidence.value.graphHash }) } });
   const stillCase = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'CASE_DRAFT_WRITE',
     purpose: 'PARTNER', root: { kind: 'CASE', id: caseId } });
@@ -247,8 +270,10 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       projectId: resolved.value.projectId, customerId: resolved.value.customerId });
     if (!stillProject.ok) return stillProject;
   }
-  const previousProjectId = typeof previousContent?.projectId === 'string' ? previousContent.projectId : undefined;
   if (previousProjectId && previousProjectId !== resolved.value.projectId) {
+    const stillPreviousProject = await dependencies.authorizeProject(tx, { actorId: dependencies.actorId,
+      projectId: previousProjectId, customerId: current.customerId });
+    if (!stillPreviousProject.ok) return stillPreviousProject;
     await tx.crmPotentialProject.updateMany({ where: { id: previousProjectId,
       wonSalesContractId: current.customerContractId }, data: { wonSalesContractId: null } });
   }
@@ -294,9 +319,9 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
       if (prior) {
         if (prior.payloadHash !== intentHash) return { ok: false, error: partnerError('IDEMPOTENCY_CONFLICT') };
         const saved = receipt(prior.outcome);
+        const historical = saved && await readPartnerRevisionView(tx, saved.caseId, saved.revision, saved.integrityHash);
         const current = saved && await readPartnerView(tx, saved.caseId);
-        if (!saved || saved.commandId !== command.commandId || !current ||
-            saved.revision !== current.root.headRevision || saved.integrityHash !== current.root.integrityHash) {
+        if (!saved || saved.commandId !== command.commandId || !historical || !current) {
           await dependencies.recordEvidenceReview(tx, { caseId, correlationId: command.correlationId,
             code: 'INTEGRITY_CONFLICT', evidence: { receiptRevision: saved?.revision ?? 0 } });
           return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
@@ -368,7 +393,12 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
       }
       const evidence = buildRevisionEvidence({ command, resolved: resolved.value, graph: validated.value.graph,
         graphHash: validated.value.graphHash, rows: approvedRows });
-      if (!evidence.ok) return evidence;
+      if (!evidence.ok) {
+        if (evidence.error.code === 'INTEGRITY_CONFLICT') await dependencies.recordEvidenceReview(tx, {
+          profileId: resolved.value.profileId, correlationId: command.correlationId, code: 'INTEGRITY_CONFLICT',
+          evidence: { recoveryRevision: command.intent.recoveryRevision } });
+        return evidence;
+      }
       const integrityHash = await canonicalHash({ purpose: 'PARTNER_CASE_REVISION', schemaVersion: 1,
         graphHash: evidence.value.graphHash, graph: evidence.value.graph, partySnapshots: evidence.value.partySnapshots,
         wholesaleEnvelope: evidence.value.wholesaleEnvelope, retailEnvelope: evidence.value.retailEnvelope,

@@ -36,15 +36,18 @@ exact approval.
 Customer and Project changes are explicit Draft revisions. The transaction
 reauthorizes and snapshots the new Customer, reauthorizes the current Project
 binding before and after writes, updates both sides of the Case/contract pair and
-moves the Project link without rewriting prior revisions. Idempotent replay
-validates the current head projection and receipt revision/hash, then rechecks
-current Case, Customer, Project and rollout authority before returning data.
+moves the Project link only after separately reauthorizing the preceding Project.
+Idempotent replay validates its immutable historical revision/receipt, validates
+the current head projection, then rechecks current Case, Customer, Project and
+rollout authority before returning the current authorized view.
 
 Historical revisions, approval usages, deliveries and plans are append-only.
 Stale or changed-idempotency attempts return canonical errors without partial
 pair writes. Technical validated snapshots created before 1.7 remain immutable;
 their newly public `graphHash` is projected from the envelope-verified retained
-graph and checked before use.
+graph and checked before use. Quantity and unit binding uses the same canonical,
+family-aware technical measure projection as validated save (including
+longitudinal length modes and slab area), never a generic raw piece-count field.
 
 Configuration, approval, projection and receipt integrity mismatches call the
 required append-only evidence-review port inside the same transaction. #334 must

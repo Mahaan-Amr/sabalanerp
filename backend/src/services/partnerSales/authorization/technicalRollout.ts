@@ -6,7 +6,7 @@ import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
  * pause; mutations additionally lock and re-read the cohort so pause and write
  * commit have one winner. */
 export async function authorizePartnerTechnicalRollout(tx: Prisma.TransactionClient, profileId: string,
-  operation: 'READ' | 'MUTATE'): Promise<Result<void>> {
+  operation: 'READ' | 'MUTATE' | 'CONTROL'): Promise<Result<void>> {
   const memberships = await tx.partnerCohortMembership.findMany({ where: { profileId,
     cohort: { activationEnabled: true } }, select: { cohortId: true } });
   if (memberships.length !== 1) return { ok: false, error: partnerError('COHORT_NOT_READY') };
@@ -16,6 +16,8 @@ export async function authorizePartnerTechnicalRollout(tx: Prisma.TransactionCli
   const cohort = await tx.partnerReleaseCohort.findUnique({ where: { id: cohortId },
     select: { activationEnabled: true, operationalPaused: true } });
   if (!cohort?.activationEnabled) return { ok: false, error: partnerError('COHORT_NOT_READY') };
-  if (cohort.operationalPaused) return { ok: false, error: partnerError('OPERATIONAL_PAUSE') };
+  // A pause blocks new commercial facts, not the controls required to cancel
+  // pending work or replace an unavailable responder.
+  if (operation === 'MUTATE' && cohort.operationalPaused) return { ok: false, error: partnerError('OPERATIONAL_PAUSE') };
   return { ok: true, value: undefined };
 }

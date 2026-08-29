@@ -4,7 +4,7 @@ import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { createPrismaPartnerInquiryService, type PartnerInquiryDependencies } from '../services/partnerSales/inquiries/service';
-import { resolveEligibleResponder, resolveProfileResponder, resolveSavedTechnicalConfiguration } from '../services/partnerSales/inquiries/adapters';
+import { ensureMissingResponderSupport, resolveEligibleResponder, resolveProfileResponder, resolveSavedTechnicalConfiguration } from '../services/partnerSales/inquiries/adapters';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readAuthorizationDecisionByCorrelation } from '../services/effectiveAuthorization/audit';
 
@@ -40,7 +40,7 @@ export function createPartnerInquiryRouter() {
     };
     return createPrismaPartnerInquiryService({ database: prisma, actorId: request.user.id, authorize,
       resolveInitialResponder: resolveProfileResponder, resolveResponder: resolveEligibleResponder,
-      resolveConfiguration: resolveSavedTechnicalConfiguration });
+      resolveConfiguration: resolveSavedTechnicalConfiguration, ensureMissingResponderSupport });
   };
   router.post('/commands', async (request: AuthRequest, response) => {
     try { respond(response, await serviceFor(request).execute(request.body)); }

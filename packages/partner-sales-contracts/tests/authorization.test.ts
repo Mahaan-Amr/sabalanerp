@@ -25,6 +25,11 @@ test('public errors never forward a caller-supplied validator message', () => {
     { ...partnerError('INVALID_PAYLOAD'), supportReference: 'support-313' });
 });
 
+test('missing active responder has one canonical actionable operational message', () => {
+  assert.deepEqual(partnerError('RESPONDER_UNAVAILABLE'), { code: 'RESPONDER_UNAVAILABLE', status: 409,
+    message: 'برای حساب شما پاسخ‌دهنده قیمت فعال تعیین نشده است.' });
+});
+
 test('non-Admin actors retain the same exceptions and hidden/expired authority fails closed', () => {
   const context = PermissionContextSchema.parse({
     actorId: 'manager', persona: 'INTERNAL', isAdmin: false, partnerSellerId: 'partner', partnerStatus: 'ACTIVE',

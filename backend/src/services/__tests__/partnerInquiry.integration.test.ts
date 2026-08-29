@@ -5,6 +5,8 @@ import { PrismaClient, type Prisma } from '@prisma/client';
 import { canonicalHash, type InquiryIdentity, type PartnerCommand } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerInquiryService } from '../partnerSales/inquiries/service';
 import { appendAuthorizationDecision, readAuthorizationDecisionByCorrelation } from '../effectiveAuthorization/audit';
+import { ensureMissingResponderSupport } from '../partnerSales/inquiries/adapters';
+import { resolveApprovalForUse } from '../partnerSales/inquiries/approvalUsage';
 
 function localDatabaseUrl(): string {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -51,6 +53,7 @@ async function submit(actorId: string, inquiryId: string, rowId = 'row-1', prede
 
 test('submission binds owner-issued configuration evidence, replays exactly and projects no private rates', async () => {
   await fixture(async (tx, ids) => {
+    const published: string[] = [];
     const service = createPartnerInquiryService({ actorId: ids.actorId,
       transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
       authorize: async (_database, request) => request.actorId === ids.actorId ? { ok: true, value: { evidenceId: 'authorization-fixture' } } : { ok: false, error: { code: 'NOT_FOUND', status: 404, message: 'مورد در دسترس نیست.' } },
@@ -58,12 +61,14 @@ test('submission binds owner-issued configuration evidence, replays exactly and 
       resolveConfiguration: async (_database, request) => request.reference.productRowId === 'row-1'
         ? { ok: true, value: { identity: identity(ids.actorId), description: 'سنگ آماده تست', configuration: [{ label: 'تعداد', value: '۲' }] } }
         : { ok: false, error: { code: 'NOT_FOUND', status: 404, message: 'مورد در دسترس نیست.' } },
+      publishCommittedEvents: async eventIds => { published.push(...eventIds); throw new Error('simulated delivery outage'); },
     });
     const command = await submit(ids.actorId, ids.inquiryId);
     const first = await service.execute(command);
     assert.equal(first.ok, true);
     if (!first.ok) return;
     assert.equal(first.value.replayed, false);
+    assert.deepEqual(published, first.value.eventIds, 'post-commit handoff occurs and delivery failure does not change command success');
     const replay = await service.execute(command);
     assert.equal(replay.ok, true);
     if (replay.ok) assert.equal(replay.value.replayed, true);
@@ -94,8 +99,16 @@ test('submission rejects foreign configuration and preserves a linear successor'
     assert.equal(await tx.partnerInquiry.count({ where: { id: ids.inquiryId } }), 0);
     assert.equal((await service.execute(await submit(ids.actorId, ids.inquiryId))).ok, true);
     await tx.partnerInquiryRow.update({ where: { id: 'row-1' }, data: { outcome: 'REJECTED', revision: 2 } });
+    const otherInquiryId = `other-${ids.inquiryId}`;
+    assert.equal((await service.execute(await submit(ids.actorId, otherInquiryId, 'other-base'))).ok, true);
+    await tx.partnerInquiryRow.update({ where: { id: 'other-base' }, data: { outcome: 'REJECTED', revision: 2 } });
+    const crossInquiry = await service.execute(await submit(ids.actorId, ids.inquiryId, 'cross-successor',
+      { rowId: 'other-base', revision: 2, reason: 'اتصال نادرست بین دو استعلام' }));
+    assert.equal(crossInquiry.ok ? null : crossInquiry.error.code, 'NOT_FOUND');
     const successor = await service.execute(await submit(ids.actorId, ids.inquiryId, 'row-2', { rowId: 'row-1', revision: 2, reason: 'اصلاح مشخصات فنی' }));
     assert.equal(successor.ok, true);
+    const parallel = await service.execute(await submit(ids.actorId, ids.inquiryId, 'row-3', { rowId: 'row-1', revision: 2, reason: 'اصلاح موازی نامعتبر' }));
+    assert.equal(parallel.ok ? null : parallel.error.code, 'STATE_CONFLICT');
     const view = await service.query({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId: ids.inquiryId });
     if (!view.ok || view.value.purpose !== 'PARTNER_INQUIRY') throw new Error('Inquiry view unavailable');
     assert.equal(view.value.rows.find(row => row.rowId === 'row-2')?.predecessor?.rowId, 'row-1');
@@ -131,6 +144,10 @@ test('bulk responder decision commits valid rows independently, preserves stale 
       idempotency: { actorId: ids.responderId, operation: 'INQUIRY_DECIDE' as const,
         targetId: ids.inquiryId, key: 'bulk-decision-1', payloadHash: decisionHash } };
     const responder = createPartnerInquiryService({ actorId: ids.responderId, ...shared });
+    await tx.partnerReleaseCohort.update({ where: { id: ids.actorId }, data: { operationalPaused: true } });
+    const paused = await responder.execute(command);
+    assert.equal(paused.ok ? null : paused.error.code, 'OPERATIONAL_PAUSE');
+    await tx.partnerReleaseCohort.update({ where: { id: ids.actorId }, data: { operationalPaused: false } });
     const result = await responder.execute(command);
     assert.equal(result.ok, true);
     if (!result.ok || !result.value.batch) return;
@@ -138,6 +155,9 @@ test('bulk responder decision commits valid rows independently, preserves stale 
     assert.equal(result.value.batch.outcomes[1].ok ? null : result.value.batch.outcomes[1].error.code, 'ROW_STALE');
     const approval = await tx.partnerInquiryApproval.findUniqueOrThrow({ where: { rowId: 'row-1' } });
     assert.equal(approval.expiresAt.getTime() - approval.approvedAt.getTime(), 48 * 60 * 60 * 1000);
+    const reusable = await resolveApprovalForUse(tx, { binding: { inquiryId: ids.inquiryId, rowId: 'row-1', revision: 2 },
+      partnerSellerId: ids.actorId, configurationHash: (await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'row-1' } })).configurationHash });
+    assert.equal(reusable.ok, true);
     assert.equal((await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'row-2' } })).outcome, 'PENDING');
     const responderView = await responder.query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: ids.inquiryId });
     assert.equal(responderView.ok, true);
@@ -150,6 +170,29 @@ test('bulk responder decision commits valid rows independently, preserves stale 
     const replay = await responder.execute(command);
     assert.equal(replay.ok, true);
     if (replay.ok) { assert.equal(replay.value.replayed, true); assert.deepEqual(replay.value.batch, result.value.batch); }
+    const successor = await submit(ids.actorId, ids.inquiryId, 'row-3',
+      { rowId: 'row-1', revision: 2, reason: 'اصلاح فنی پس از قیمت قبلی' });
+    assert.equal((await partner.execute(successor)).ok, true);
+    const successorDecisions = [{ rowId: 'row-3', expectedRevision: 1, outcome: 'APPROVED' as const,
+      wholesaleUnitPrice: { amount: '1300000', currency: 'IRT' as const }, note: 'قیمت جانشین' }];
+    const successorIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: ids.inquiryId,
+      expectedAssignmentRevision: 1, decisions: successorDecisions };
+    const successorDecision = { ...successorIntent, commandId: 'successor-decision', correlationId: 'successor-decision',
+      idempotency: { actorId: ids.responderId, operation: 'INQUIRY_DECIDE' as const, targetId: ids.inquiryId,
+        key: 'successor-decision', payloadHash: await canonicalHash(successorIntent) } };
+    assert.equal((await responder.execute(successorDecision)).ok, true);
+    const successorApproval = await tx.partnerInquiryApproval.findUniqueOrThrow({ where: { rowId: 'row-3' } });
+    assert.equal(successorApproval.supersessionReason, 'اصلاح فنی پس از قیمت قبلی');
+    const finalView = await partner.query({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId: ids.inquiryId });
+    if (!finalView.ok || finalView.value.purpose !== 'PARTNER_INQUIRY') throw new Error('Partner view unavailable');
+    assert.equal(finalView.value.rows.find(row => row.rowId === 'row-1')?.state, 'SUPERSEDED');
+    const superseded = await resolveApprovalForUse(tx, { binding: { inquiryId: ids.inquiryId, rowId: 'row-1', revision: 2 },
+      partnerSellerId: ids.actorId, configurationHash: (await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'row-1' } })).configurationHash });
+    assert.equal(superseded.ok ? null : superseded.error.code, 'APPROVAL_SUPERSEDED');
+    await tx.partnerProfile.update({ where: { id: ids.actorId }, data: { state: 'TERMINATED', revision: { increment: 1 } } });
+    const terminated = await resolveApprovalForUse(tx, { binding: { inquiryId: ids.inquiryId, rowId: 'row-1', revision: 2 },
+      partnerSellerId: ids.actorId, configurationHash: (await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'row-1' } })).configurationHash });
+    assert.equal(terminated.ok ? null : terminated.error.code, 'PARTNER_NOT_ACTIVE');
   });
 });
 
@@ -175,6 +218,7 @@ test('reassignment is pending-only and cancellation retains immutable approvals 
       expectedAssignmentRevision: 1, responderId: replacementId, reason: 'تغییر پاسخ‌دهنده مصوب' };
     const reassignHash = await canonicalHash(reassignIntent);
     const manager = createPartnerInquiryService({ actorId: 'sales-manager-fixture', ...shared });
+    await tx.partnerReleaseCohort.update({ where: { id: ids.actorId }, data: { operationalPaused: true } });
     const reassigned = await manager.execute({ ...reassignIntent, commandId: 'reassign-command', correlationId: 'reassign-command',
       idempotency: { actorId: 'sales-manager-fixture', operation: 'INQUIRY_REASSIGN', targetId: ids.inquiryId,
         key: 'reassign-command', payloadHash: reassignHash } });
@@ -215,5 +259,28 @@ test('authorization evidence lookup is exact even after the bounded audit histor
       action: 'INQUIRY_WRITE', rootKind: 'PROFILE', rootId: ids.actorId, purpose: 'PARTNER', channel: 'API',
       correlationId: 'exact-inquiry-create', allowed: true });
     assert.equal(found?.id, expected.id);
+  });
+});
+
+test('missing active responder fails with the actionable message and creates one idempotent Admin support ticket', async () => {
+  await fixture(async (tx, ids) => {
+    const adminId = `admin-${randomUUID()}`;
+    await tx.user.create({ data: { id: adminId, username: adminId, email: `${adminId}@example.invalid`,
+      password: 'not-a-login', firstName: 'Admin', lastName: 'Fixture', role: 'ADMIN' } });
+    const service = createPartnerInquiryService({ actorId: ids.actorId,
+      transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: async () => ({ ok: true, value: { evidenceId: 'authorization-fixture' } }),
+      resolveInitialResponder: async () => ({ ok: false, error: { code: 'NOT_ASSIGNED', status: 403,
+        message: 'پاسخ این استعلام به شما واگذار نشده است.' } }),
+      ensureMissingResponderSupport,
+      resolveConfiguration: async () => ({ ok: true, value: { identity: identity(ids.actorId),
+        description: 'سنگ تست', configuration: [{ label: 'نوع', value: 'آماده' }] } }),
+    });
+    const first = await service.execute(await submit(ids.actorId, ids.inquiryId));
+    assert.deepEqual(first, { ok: false, error: { code: 'RESPONDER_UNAVAILABLE', status: 409,
+      message: 'برای حساب شما پاسخ‌دهنده قیمت فعال تعیین نشده است.' } });
+    assert.equal((await tx.supportTicket.count({ where: { reporterId: ids.actorId } })), 1);
+    assert.equal((await service.execute(await submit(ids.actorId, ids.inquiryId))).ok, false);
+    assert.equal((await tx.supportTicket.count({ where: { reporterId: ids.actorId } })), 1);
   });
 });

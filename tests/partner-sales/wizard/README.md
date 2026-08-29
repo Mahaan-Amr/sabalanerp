@@ -1,6 +1,6 @@
 # Partner inquiry and creation module (issue 330)
 
-Consumes `@sabalanerp/partner-sales-contracts@1.5.0` through its public root.
+Consumes `@sabalanerp/partner-sales-contracts@1.6.0` through its public root.
 Inquiry reads use `PartnerQueryV2Port` and the strict v2 inquiry projection;
 commands retain wire version 1. `/testing` is used only by explicit test fixtures.
 

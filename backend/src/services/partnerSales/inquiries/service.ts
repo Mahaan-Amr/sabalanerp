@@ -45,13 +45,29 @@ export interface PartnerInquiryDependencies {
   authorize(tx: Transaction, request: AuthorizationRequest): Promise<Result<{ evidenceId: string }>>;
   resolveInitialResponder(tx: Transaction, input: { profileId: string }): Promise<Result<{
     responderId: string; eligibilityEvidence: Prisma.JsonObject;
+    profileAssignmentId?: string; profileAssignmentRevision?: number; assignedByActorId?: string;
   }>>;
   resolveResponder?(tx: Transaction, input: { responderId: string }): Promise<Result<{
     responderId: string; eligibilityEvidence: Prisma.JsonObject;
   }>>;
+  ensureMissingResponderSupport?(tx: Transaction, input: { profileId: string; reporterId: string }): Promise<Result<{
+    id: string; referenceCode: string;
+  }>>;
+  /** Post-commit source event handoff. Delivery failure never rolls back the
+   * committed inquiry and the durable event id remains retryable by #334. */
+  publishCommittedEvents?(eventIds: readonly string[]): Promise<void>;
   resolveConfiguration(tx: Transaction, input: { actorId: string; reference: ConfigurationRef }): Promise<Result<{
     identity: InquiryIdentity; description: string; configuration: Array<{ label: string; value: string }>;
   }>>;
+}
+
+async function publishCommitted<T extends Result<{ replayed: boolean; eventIds: readonly string[] }>>(
+  dependencies: PartnerInquiryDependencies, work: Promise<T>): Promise<T> {
+  const result = await work;
+  if (result.ok && !result.value.replayed && result.value.eventIds.length && dependencies.publishCommittedEvents) {
+    try { await dependencies.publishCommittedEvents(result.value.eventIds); } catch { /* committed source remains retryable */ }
+  }
+  return result;
 }
 
 export function createPrismaPartnerInquiryService(input: Omit<PartnerInquiryDependencies, 'transaction'> & { database: PrismaClient }) {
@@ -114,7 +130,8 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
     }
     const rows = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id,
       id: { in: command.decisions.map(decision => decision.rowId) } }, select: {
-      id: true, revision: true, outcome: true, definition: true,
+      id: true, revision: true, outcome: true, definition: true, predecessorId: true,
+      predecessor: { select: { approval: { select: { id: true } } } },
     } });
     const outcomes: Array<{ ok: true; rowId: string; outcomeId: string; revision: number; outcome: 'APPROVED' | 'REJECTED' } |
       { ok: false; rowId: string; error: ReturnType<typeof partnerError> }> = [];
@@ -133,12 +150,18 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
         }
         const evidenceHash = await canonicalHash({ schemaVersion: 1, identity: definition.identity,
           wholesaleUnitPrice: decision.wholesaleUnitPrice, assignmentId: assignment.id,
-          assignmentRevision: assignment.revision, authorizationEvidenceId: authorization.value.evidenceId });
+          assignmentRevision: assignment.revision, authorizationEvidenceId: authorization.value.evidenceId,
+          ...(row.predecessorId ? { predecessorApprovalId: row.predecessor?.approval?.id,
+            supersessionReason: definition.predecessorReason } : {}) });
+        if (row.predecessorId && (!row.predecessor?.approval?.id || !definition.predecessorReason)) {
+          outcomes.push({ ok: false, rowId: row.id, error: partnerError('INTEGRITY_CONFLICT') }); continue;
+        }
         await tx.partnerInquiryApproval.create({ data: { id: outcomeId, rowId: row.id, assignmentId: assignment.id,
           actorId: dependencies.actorId, commandId: `${command.commandId}:${row.id}`,
           authorizationEvidenceId: authorization.value.evidenceId,
           wholesaleUnitPrice: decision.wholesaleUnitPrice.amount, currency: decision.wholesaleUnitPrice.currency,
-          evidenceHash, ...(decision.note ? { note: decision.note } : {}), approvedAt: clock.now,
+          evidenceHash, ...(decision.note ? { note: decision.note } : {}),
+          ...(definition.predecessorReason ? { supersessionReason: definition.predecessorReason } : {}), approvedAt: clock.now,
           expiresAt: new Date(clock.now.getTime() + 48 * 60 * 60 * 1000) } });
       }
       await tx.partnerInquiryRow.update({ where: { id: row.id }, data: { outcome: decision.outcome, revision } });
@@ -186,7 +209,7 @@ async function mutateInquiryLifecycle(dependencies: PartnerInquiryDependencies,
       purpose: command.type === 'INQUIRY_CANCEL' ? 'PARTNER' : 'MANAGEMENT', reason: command.reason,
       root: { kind: 'INQUIRY', id: inquiry.id } });
     if (!authorization.ok) return authorization;
-    const rollout = await authorizePartnerTechnicalRollout(tx, inquiry.profileId, 'MUTATE');
+    const rollout = await authorizePartnerTechnicalRollout(tx, inquiry.profileId, 'CONTROL');
     if (!rollout.ok) return rollout;
     const pending = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id, outcome: 'PENDING' },
       select: { id: true, revision: true } });
@@ -233,9 +256,9 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
     async execute(input) {
       const parsed = PartnerCommandSchema.safeParse(input);
       if (!parsed.success) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
-      if (parsed.data.type === 'INQUIRY_DECIDE') return decideInquiry(dependencies, parsed.data);
+      if (parsed.data.type === 'INQUIRY_DECIDE') return publishCommitted(dependencies, decideInquiry(dependencies, parsed.data));
       if (parsed.data.type === 'INQUIRY_CANCEL' || parsed.data.type === 'INQUIRY_REASSIGN') {
-        return mutateInquiryLifecycle(dependencies, parsed.data);
+        return publishCommitted(dependencies, mutateInquiryLifecycle(dependencies, parsed.data));
       }
       if (parsed.data.type !== 'INQUIRY_SUBMIT') return { ok: false, error: partnerError('INVALID_PAYLOAD') };
       const command = parsed.data;
@@ -246,7 +269,7 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           command.idempotency.operation !== command.type || command.idempotency.payloadHash !== expectedHash) {
         return { ok: false, error: partnerError('INVALID_PAYLOAD') };
       }
-      return dependencies.transaction(async tx => {
+      return publishCommitted(dependencies, dependencies.transaction(async tx => {
         const replay = await tx.partnerCommandOutcome.findUnique({ where: { actorId_operation_targetScope_key: {
           actorId: dependencies.actorId, operation: command.type, targetScope: scope, key: command.idempotency.key,
         } } });
@@ -282,10 +305,14 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           let version = 1, predecessorId: string | undefined;
           if (row.predecessor) {
             const predecessor = await tx.partnerInquiryRow.findUnique({ where: { id: row.predecessor.rowId },
-              select: { id: true, revision: true, version: true, outcome: true, inquiry: { select: { profileId: true } } } });
-            if (!predecessor || predecessor.inquiry.profileId !== profile.id) return { ok: false, error: partnerError('NOT_FOUND') };
+              select: { id: true, revision: true, version: true, outcome: true,
+                successor: { select: { id: true } }, inquiry: { select: { id: true, profileId: true } } } });
+            if (!predecessor || predecessor.inquiry.id !== scope || predecessor.inquiry.profileId !== profile.id) {
+              return { ok: false, error: partnerError('NOT_FOUND') };
+            }
             if (predecessor.revision !== row.predecessor.revision) return { ok: false, error: partnerError('ROW_STALE') };
             if (!['APPROVED', 'REJECTED'].includes(predecessor.outcome)) return { ok: false, error: partnerError('STATE_CONFLICT') };
+            if (predecessor.successor) return { ok: false, error: partnerError('STATE_CONFLICT') };
             predecessorId = predecessor.id; version = predecessor.version + 1;
           }
           const definition = parseDefinition({ version: 1, configurationRef: row.configuration,
@@ -303,15 +330,21 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
         const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
         if (!inquiry) {
           const responder = await dependencies.resolveInitialResponder(tx, { profileId: profile.id });
-          if (!responder.ok) return responder;
+          if (!responder.ok) {
+            if (responder.error.code !== 'NOT_ASSIGNED' || !dependencies.ensureMissingResponderSupport) return responder;
+            const support = await dependencies.ensureMissingResponderSupport(tx, { profileId: profile.id, reporterId: dependencies.actorId });
+            return support.ok ? { ok: false, error: partnerError('RESPONDER_UNAVAILABLE') } : support;
+          }
           const eligible = await tx.user.findUnique({ where: { id: responder.value.responderId },
             select: { isActive: true, partnerProfile: { select: { id: true } } } });
           if (!eligible?.isActive || eligible.partnerProfile) return { ok: false, error: partnerError('NOT_ASSIGNED') };
           inquiry = await tx.partnerInquiry.create({ data: { id: scope, profileId: profile.id, revision: 1, submittedAt: clock.now },
             select: { id: true, profileId: true, revision: true } });
           assignment = await tx.partnerInquiryAssignment.create({ data: { id: randomUUID(), inquiryId: inquiry.id, revision: 1,
-            responderId: responder.value.responderId, actorId: dependencies.actorId, reason: 'تخصیص پاسخ‌دهنده مصوب',
-            eligibilityEvidence: responder.value.eligibilityEvidence }, select: { id: true, revision: true } });
+            responderId: responder.value.responderId, actorId: responder.value.assignedByActorId ?? dependencies.actorId,
+            reason: 'تخصیص پاسخ‌دهنده مصوب', eligibilityEvidence: { ...responder.value.eligibilityEvidence,
+              ...(responder.value.profileAssignmentId ? { profileAssignmentId: responder.value.profileAssignmentId,
+                profileAssignmentRevision: responder.value.profileAssignmentRevision } : {}) } }, select: { id: true, revision: true } });
         } else {
           assignment = await tx.partnerInquiryAssignment.findFirst({ where: { inquiryId: inquiry.id }, orderBy: { revision: 'desc' },
             select: { id: true, revision: true } });
@@ -332,7 +365,7 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           operation: command.type, targetScope: scope, key: command.idempotency.key, payloadHash: expectedHash,
           outcome: receipt } });
         return { ok: true, value: { commandId: command.commandId, replayed: false, eventIds: [eventId] } };
-      });
+      }));
     },
     async query(input) {
       const parsed = PartnerQueryV2Schema.safeParse(input);
@@ -347,8 +380,7 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           events: { orderBy: { revision: 'asc' }, select: { type: true, reason: true, evidence: true } },
           rows: { orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }], include: {
             predecessor: { select: { id: true, revision: true } },
-            successors: { orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }], take: 1,
-              select: { id: true, revision: true, outcome: true, approval: { select: { expiresAt: true } } } },
+            successor: { select: { id: true, revision: true, outcome: true, approval: { select: { expiresAt: true } } } },
             approval: { include: { usages: { include: { binding: { include: {
               caseRevision: { include: { case: { select: { caseNumber: true } } },
               } } } } } } },
@@ -390,7 +422,7 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
             const definition = parseDefinition(row.definition);
             if (!definition) return null;
             const currentState = state(row.outcome, row.approval?.expiresAt,
-              row.successors.some(successor => successor.outcome === 'APPROVED'));
+              row.successor?.outcome === 'APPROVED');
             return { rowId: row.id, revision: row.revision, identity: definition.identity,
               ...(row.approval ? { approvedPrice: { amount: row.approval.wholesaleUnitPrice.toString(), currency: row.approval.currency },
                 approvedAt: row.approval.approvedAt.toISOString(), expiresAt: row.approval.expiresAt.toISOString(),
@@ -411,8 +443,8 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
           const definition = parseDefinition(row.definition);
           if (!definition) return null;
           const currentState = state(row.outcome, row.approval?.expiresAt,
-            row.successors.some(successor => successor.outcome === 'APPROVED'));
-          const successor = row.successors[0];
+            row.successor?.outcome === 'APPROVED');
+          const successor = row.successor;
           return { rowId: row.id, revision: row.revision, description: definition.description,
             state: currentState, configuration: definition.configuration,
             configurationRef: definition.configurationRef,

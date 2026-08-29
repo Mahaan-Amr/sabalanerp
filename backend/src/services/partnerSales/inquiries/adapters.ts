@@ -1,5 +1,7 @@
 import type { Prisma } from '@prisma/client';
-import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
+import { canonicalHash, partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
+import { randomUUID } from 'node:crypto';
+import { resolveScopedActions } from '../../effectiveAccessService';
 import { decodeTechnicalSavedSnapshot } from '../cases/technicalSavedRecords';
 import type { PartnerInquiryDependencies } from './service';
 
@@ -8,11 +10,16 @@ import type { PartnerInquiryDependencies } from './service';
  * independently rechecks the responder User before creating an assignment. */
 export const resolveProfileResponder: PartnerInquiryDependencies['resolveInitialResponder'] = async (tx, input) => {
   const assignment = await tx.partnerProfileResponderAssignment.findFirst({ where: { profileId: input.profileId },
-    orderBy: { revision: 'desc' }, select: { responderId: true, eligibilityEvidence: true } });
+    orderBy: { revision: 'desc' }, select: { id: true, revision: true, responderId: true,
+      actorId: true, eligibilityEvidence: true } });
   if (!assignment || !assignment.eligibilityEvidence || Array.isArray(assignment.eligibilityEvidence) ||
       typeof assignment.eligibilityEvidence !== 'object') return { ok: false, error: partnerError('NOT_ASSIGNED') };
-  return { ok: true, value: { responderId: assignment.responderId,
-    eligibilityEvidence: assignment.eligibilityEvidence as Prisma.JsonObject } };
+  const current = await resolveEligibleResponder(tx, { responderId: assignment.responderId });
+  if (!current.ok) return current;
+  return { ok: true, value: { responderId: assignment.responderId, profileAssignmentId: assignment.id,
+    profileAssignmentRevision: assignment.revision, assignedByActorId: assignment.actorId,
+    eligibilityEvidence: { ...(assignment.eligibilityEvidence as Prisma.JsonObject),
+      currentEligibility: current.value.eligibilityEvidence } } };
 };
 
 export const resolveEligibleResponder: NonNullable<PartnerInquiryDependencies['resolveResponder']> = async (tx, input) => {
@@ -20,8 +27,43 @@ export const resolveEligibleResponder: NonNullable<PartnerInquiryDependencies['r
     isActive: true, partnerProfile: { select: { id: true } }, role: true,
   } });
   if (!user?.isActive || user.partnerProfile) return { ok: false, error: partnerError('NOT_ASSIGNED') };
+  const authority = await resolveScopedActions(tx, input.responderId, 'PARTNER');
+  const grant = authority.grants.find(candidate => candidate.action === 'INQUIRY_RESPOND' &&
+    candidate.rootKind === 'INQUIRY' && candidate.purpose === 'RESPONDER' && candidate.scope === 'ASSIGNED');
+  if (user.role !== 'ADMIN' && !grant) return { ok: false, error: partnerError('NOT_ASSIGNED') };
   return { ok: true, value: { responderId: input.responderId,
-    eligibilityEvidence: { version: 1, source: 'CURRENT_USER_ELIGIBILITY', role: user.role } } };
+    eligibilityEvidence: { version: 1, source: 'CURRENT_RESPONDER_AUTHORITY', role: user.role,
+      authorizationRevision: authority.authorizationRevision,
+      ...(grant?.provenance ? { grantId: grant.provenance.grantId, grantVersion: grant.provenance.version } : {}) } } };
+};
+
+/** Creates one idempotent ordinary support ticket for a profile that cannot
+ * submit because its configured responder is absent or no longer authorized. */
+export const ensureMissingResponderSupport: NonNullable<PartnerInquiryDependencies['ensureMissingResponderSupport']> = async (tx, input) => {
+  const profile = await tx.partnerProfile.findUnique({ where: { id: input.profileId }, select: { revision: true,
+    responderAssignments: { orderBy: { revision: 'desc' }, take: 1, select: { revision: true } } } });
+  if (!profile) return { ok: false, error: partnerError('NOT_FOUND') };
+  const assignmentRevision = profile.responderAssignments[0]?.revision ?? 0;
+  const key = await canonicalHash({ schemaVersion: 1, purpose: 'PARTNER_RESPONDER_UNAVAILABLE',
+    profileId: input.profileId, profileRevision: profile.revision, assignmentRevision });
+  const existing = await tx.supportTicket.findUnique({ where: { idempotencyKey: key }, select: { id: true, referenceCode: true } });
+  if (existing) return { ok: true, value: existing };
+  const handlers = await tx.user.findMany({ where: { role: 'ADMIN', isActive: true, partnerProfile: null },
+    select: { id: true }, orderBy: { id: 'asc' } });
+  if (!handlers.length) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+  const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  const ticket = await tx.supportTicket.create({ data: { idempotencyKey: key, reporterId: input.reporterId,
+    referenceCode: `SUP-${clock.now.toISOString().slice(0, 10).replace(/-/g, '')}-${randomUUID().slice(0, 12).toUpperCase()}`,
+    title: 'تعیین پاسخ‌دهنده قیمت فروشنده همکار', type: 'ACCESS_PROBLEM', impact: 'BLOCKED', workaroundExists: false,
+    reportedWorkspace: 'sales', originRoute: '/dashboard/sales/partner-inquiries', suggestedPriority: 'HIGH',
+    diagnosticSnapshot: { source: 'PARTNER_RESPONDER_UNAVAILABLE', profileId: input.profileId,
+      profileRevision: profile.revision, assignmentRevision },
+    effectiveAccessSnapshot: { source: 'PARTNER_CENTRAL_AUTHORIZATION', capturedAt: clock.now.toISOString() },
+    entries: { create: { kind: 'REPORT', body: 'برای حساب فروشنده همکار، پاسخ‌دهنده قیمت فعال و مجاز تعیین نشده است.' } },
+    participants: { create: handlers.map(handler => ({ userId: handler.id, role: 'HANDLER' })) },
+    auditEvents: { create: { action: 'CREATED', afterData: { cause: 'RESPONDER_UNAVAILABLE', trackingKey: key } } },
+  }, select: { id: true, referenceCode: true } });
+  return { ok: true, value: ticket };
 };
 
 const familyLabels: Record<string, string> = {

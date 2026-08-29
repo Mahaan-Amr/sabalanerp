@@ -65,7 +65,7 @@ export function createPartnerResponderAssignmentService(
       const authorized = await dependencies.authorize(tx, { actorId: dependencies.actorId, action: 'RESPONDER_ASSIGN',
         purpose: 'MANAGEMENT', reason: command.reason, root: { kind: 'PROFILE', id: profile.id } });
       if (!authorized.ok) return authorized;
-      const rollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'MUTATE');
+      const rollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'CONTROL');
       if (!rollout.ok) return rollout;
       const responder = await dependencies.resolveResponder(tx, { responderId: command.responderId });
       if (!responder.ok) return responder;

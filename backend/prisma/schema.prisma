@@ -7432,14 +7432,14 @@ model PartnerInquiryRow {
   inquiryId     String
   version       Int
   revision      Int @default(1)
-  predecessorId String?
+  predecessorId String? @unique
   outcome       PartnerInquiryOutcome @default(PENDING)
   configurationHash String
   definition    Json
   submittedAt   DateTime @default(now()) @db.Timestamptz(3)
   inquiry       PartnerInquiry @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
   predecessor   PartnerInquiryRow? @relation("PartnerInquiryLineage", fields: [predecessorId], references: [id], onDelete: Restrict)
-  successors    PartnerInquiryRow[] @relation("PartnerInquiryLineage")
+  successor     PartnerInquiryRow? @relation("PartnerInquiryLineage")
   approval      PartnerInquiryApproval?
   events        PartnerInquiryEvent[]
   @@index([inquiryId, outcome])

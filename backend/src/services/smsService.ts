@@ -120,7 +120,7 @@ class SmsService {
       10
     );
     this.hiringInvitationTemplateId = parseInt(
-      process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || '363360',
+      process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID || '343360',
       10
     );
     this.hiringCorrectionTemplateId = parseInt(

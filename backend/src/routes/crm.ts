@@ -172,6 +172,7 @@ const projectInclude = {
   customer: {
     select: {
       id: true,
+      partnerOwnerProfileId: true,
       firstName: true,
       lastName: true,
       companyName: true,
@@ -209,6 +210,7 @@ const followUpInclude = {
   customer: {
     select: {
       id: true,
+      partnerOwnerProfileId: true,
       firstName: true,
       lastName: true,
       companyName: true
@@ -217,6 +219,7 @@ const followUpInclude = {
   potentialProject: {
     select: {
       id: true,
+      customerTransferSnapshot: true,
       title: true,
       status: true,
       responsibleSellerId: true
@@ -237,6 +240,7 @@ const nextActionInclude = {
   customer: {
     select: {
       id: true,
+      partnerOwnerProfileId: true,
       firstName: true,
       lastName: true,
       companyName: true
@@ -245,6 +249,7 @@ const nextActionInclude = {
   potentialProject: {
     select: {
       id: true,
+      customerTransferSnapshot: true,
       title: true,
       status: true,
       responsibleSellerId: true
@@ -259,6 +264,26 @@ const nextActionInclude = {
     }
   }
 } as const;
+
+export const ordinaryCrmResponse = (record: any) => {
+  const { customerTransferSnapshot, customer, potentialProject, ...rest } = record;
+  const nestedSnapshot = potentialProject?.customerTransferSnapshot;
+  const safeProject = potentialProject ? (({ customerTransferSnapshot: _snapshot, ...project }: any) => project)(potentialProject) : potentialProject;
+  if (!customer?.partnerOwnerProfileId) {
+    const safeCustomer = customer ? (({ partnerOwnerProfileId: _owner, ...value }: any) => value)(customer) : customer;
+    return { ...rest, ...(safeProject ? { potentialProject: safeProject } : {}), ...(safeCustomer ? { customer: safeCustomer } : {}) };
+  }
+  const snapshot = customerTransferSnapshot ?? nestedSnapshot;
+  const safeSnapshot = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) &&
+      snapshot.schemaVersion === 1 && typeof snapshot.firstName === 'string' && typeof snapshot.lastName === 'string'
+    ? { id: null, firstName: snapshot.firstName, lastName: snapshot.lastName,
+      companyName: typeof snapshot.companyName === 'string' ? snapshot.companyName : null,
+      phoneNumbers: Array.isArray(snapshot.phoneNumbers) ? snapshot.phoneNumbers.filter((phone: unknown) =>
+        phone && typeof phone === 'object' && typeof (phone as { number?: unknown }).number === 'string') : [] }
+    : null;
+  return { ...rest, ...(safeProject ? { potentialProject: safeProject } : {}), customer: safeSnapshot,
+    customerTransferred: true };
+};
 
 const ensureProjectAccessOrDeny = async (
   req: any,
@@ -2167,7 +2192,7 @@ router.get('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CRM
 
     res.json({
       success: true,
-      data: projects,
+      data: projects.map(ordinaryCrmResponse),
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
       permissions: { canManage }
     });
@@ -2205,7 +2230,8 @@ router.get('/potential-projects/:id', protect, requireWorkspaceAccess(WORKSPACES
       })
     ]);
 
-    res.json({ success: true, data: { project, followUps, nextActions, timeline } });
+    res.json({ success: true, data: { project: ordinaryCrmResponse(project),
+      followUps: followUps.map(ordinaryCrmResponse), nextActions: nextActions.map(ordinaryCrmResponse), timeline } });
   } catch (error) {
     console.error('Get CRM potential project error:', error);
     res.status(500).json({ success: false, error: 'خطا در دریافت جزئیات پروژه احتمالی' });
@@ -2273,7 +2299,7 @@ router.post('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CR
       return created;
     });
 
-    res.status(201).json({ success: true, data: project });
+    res.status(201).json({ success: true, data: ordinaryCrmResponse(project) });
   } catch (error) {
     console.error('Create CRM potential project error:', error);
     res.status(500).json({ success: false, error: 'خطا در ایجاد پروژه احتمالی' });
@@ -2337,7 +2363,7 @@ router.put('/potential-projects/:id', protect, requireWorkspaceAccess(WORKSPACES
       return next;
     });
 
-    res.json({ success: true, data: updated });
+    res.json({ success: true, data: ordinaryCrmResponse(updated) });
   } catch (error) {
     console.error('Update CRM potential project error:', error);
     res.status(500).json({ success: false, error: 'خطا در به‌روزرسانی پروژه احتمالی' });
@@ -2401,7 +2427,7 @@ router.put('/potential-projects/:id/reassign', protect, requireWorkspaceAccess(W
       return next;
     });
 
-    res.json({ success: true, data: updated });
+    res.json({ success: true, data: ordinaryCrmResponse(updated) });
   } catch (error) {
     console.error('Reassign CRM potential project error:', error);
     res.status(500).json({ success: false, error: 'خطا در تغییر مسئول پروژه احتمالی' });
@@ -2432,7 +2458,8 @@ router.get('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSP
       prisma.crmFollowUpReport.count({ where })
     ]);
 
-    res.json({ success: true, data: followUps, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+    res.json({ success: true, data: followUps.map(ordinaryCrmResponse),
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (error) {
     console.error('Get CRM follow-ups error:', error);
     res.status(500).json({ success: false, error: 'خطا در دریافت گزارش‌های پیگیری' });
@@ -2528,7 +2555,7 @@ router.post('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKS
       include: followUpInclude
     });
 
-    res.status(201).json({ success: true, data: fullReport });
+    res.status(201).json({ success: true, data: fullReport ? ordinaryCrmResponse(fullReport) : null });
   } catch (error) {
     console.error('Create CRM follow-up error:', error);
     res.status(500).json({ success: false, error: 'خطا در ثبت گزارش پیگیری' });
@@ -2551,7 +2578,7 @@ router.get('/next-actions', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORK
       take: 100
     });
 
-    res.json({ success: true, data: actions });
+    res.json({ success: true, data: actions.map(ordinaryCrmResponse) });
   } catch (error) {
     console.error('Get CRM next actions error:', error);
     res.status(500).json({ success: false, error: 'خطا در دریافت اقدام‌های بعدی' });
@@ -2587,7 +2614,7 @@ router.put('/next-actions/:id/complete', protect, requireWorkspaceAccess(WORKSPA
       }
     });
 
-    res.json({ success: true, data: updated });
+    res.json({ success: true, data: ordinaryCrmResponse(updated) });
   } catch (error) {
     console.error('Complete CRM next action error:', error);
     res.status(500).json({ success: false, error: 'خطا در تکمیل اقدام بعدی' });
@@ -2693,8 +2720,8 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
             : {}) },
         include: {
           actor: { select: { id: true, firstName: true, lastName: true, username: true } },
-          customer: { select: { id: true, firstName: true, lastName: true, companyName: true } },
-          potentialProject: { select: { id: true, title: true, status: true } }
+          customer: { select: { id: true, partnerOwnerProfileId: true, firstName: true, lastName: true, companyName: true } },
+          potentialProject: { select: { id: true, customerTransferSnapshot: true, title: true, status: true } }
         },
         orderBy: { createdAt: 'desc' },
         take: 10
@@ -2732,13 +2759,13 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
           estimatedPipelineValue: pipelineValue._sum.estimatedValue || 0
         },
         nextActions: {
-          overdue: overdueActions,
-          today: todayActions,
-          upcoming: upcomingActions
+          overdue: overdueActions.map(ordinaryCrmResponse),
+          today: todayActions.map(ordinaryCrmResponse),
+          upcoming: upcomingActions.map(ordinaryCrmResponse)
         },
         recentCustomers,
-        recentProjects,
-        recentTimeline
+        recentProjects: recentProjects.map(ordinaryCrmResponse),
+        recentTimeline: recentTimeline.map(ordinaryCrmResponse)
       }
     });
   } catch (error) {

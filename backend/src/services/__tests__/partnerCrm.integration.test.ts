@@ -92,6 +92,7 @@ test('masked duplicate and approved transfer expose no prior CRM history and pre
       assert.equal(request.ok, true);
       if (!request.ok) throw new Error('transfer request expected');
       assert.deepEqual(notices, [{ kind: 'REQUESTED', recipients: [oldOwnerId] }]);
+      await tx.user.update({ where: { id: oldOwnerId }, data: { isActive: false } });
 
       const decisionIntent = { schemaVersion: 1 as const, type: 'CUSTOMER_TRANSFER_DECIDE' as const,
         transferId: request.value.transferId, expectedRevision: 1, outcome: 'APPROVE' as const,
@@ -112,8 +113,15 @@ test('masked duplicate and approved transfer expose no prior CRM history and pre
         ownerUserId: true, partnerOwnerProfileId: true, partnerRevision: true } });
       assert.deepEqual(customer, { ownerUserId: partnerId, partnerOwnerProfileId: partnerId, partnerRevision: 1 });
       const project = await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId }, select: {
-        responsibleSellerId: true, partnerRevision: true, title: true } });
-      assert.deepEqual(project, { responsibleSellerId: oldOwnerId, partnerRevision: null, title: 'پروژه تاریخی محرمانه' });
+        responsibleSellerId: true, partnerRevision: true, title: true, customerTransferSnapshot: true } });
+      assert.equal(project.responsibleSellerId, oldOwnerId);
+      assert.equal(project.partnerRevision, null);
+      assert.equal(project.title, 'پروژه تاریخی محرمانه');
+      assert.equal((project.customerTransferSnapshot as { firstName?: string }).firstName, 'مالک');
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${partnerId}, true)`;
+      await tx.crmCustomer.update({ where: { id: customerId }, data: { firstName: 'نام زنده محرمانه', partnerRevision: 2 } });
+      assert.equal(((await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId }, select: {
+        customerTransferSnapshot: true } })).customerTransferSnapshot as { firstName?: string }).firstName, 'مالک');
       await tx.crmPotentialProject.update({ where: { id: projectId }, data: { status: 'در حال پیگیری' } });
       const retainedFollowUpId = `partner-crm-retained-follow-${suffix}`;
       await tx.crmFollowUpReport.create({ data: { id: retainedFollowUpId, customerId, potentialProjectId: projectId,
@@ -129,7 +137,7 @@ test('masked duplicate and approved transfer expose no prior CRM history and pre
         responsibleSellerId: partnerId }, select: { id: true } }), []);
       await tx.$executeRawUnsafe('SAVEPOINT retained_project_reassign');
       await assert.rejects(tx.crmPotentialProject.update({ where: { id: projectId }, data: {
-        responsibleSellerId: adminId } }), /current owner Profile/);
+        responsibleSellerId: adminId } }), /current owner Profile|owner or revision mismatch/);
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT retained_project_reassign');
       await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_legacy_reassignment', ${JSON.stringify({
         projectId, previousSellerId: oldOwnerId, nextSellerId: adminId, actorId: adminId,

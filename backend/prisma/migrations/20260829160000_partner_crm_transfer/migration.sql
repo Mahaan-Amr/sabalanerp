@@ -2,6 +2,7 @@ BEGIN;
 
 ALTER TABLE crm_customers ADD COLUMN "partnerRevision" integer;
 ALTER TABLE crm_potential_projects ADD COLUMN "partnerRevision" integer;
+ALTER TABLE crm_potential_projects ADD COLUMN "customerTransferSnapshot" jsonb;
 ALTER TABLE crm_next_actions ADD COLUMN "partnerRevision" integer;
 
 UPDATE crm_customers SET "partnerRevision" = 1 WHERE "partnerOwnerProfileId" IS NOT NULL;

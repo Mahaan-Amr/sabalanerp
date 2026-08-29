@@ -61,7 +61,7 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
           }
           const owner = await tx.user.findUnique({ where: { id: transfer.fromOwnerUserId }, select: {
             isActive: true, departmentId: true } });
-          if (owner?.isActive) resource = { root, partnerSellerId: transfer.fromOwnerUserId,
+          if (owner) resource = { root, partnerSellerId: transfer.fromOwnerUserId,
             partnerStatus: transfer.fromProfile?.state ?? 'ACTIVE',
             lifecycleRevision: transfer.fromProfile?.revision ?? customer.partnerRevision ?? transfer.revision,
             ...(owner.departmentId ? { departmentId: owner.departmentId } : {}) };

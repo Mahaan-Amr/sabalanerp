@@ -2196,6 +2196,7 @@ model CrmPotentialProject {
   wonSalesContractId  String?             @unique
   isActive            Boolean             @default(true)
   partnerRevision     Int?
+  customerTransferSnapshot Json?
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
   customer            CrmCustomer         @relation(fields: [customerId], references: [id], onDelete: Cascade)

@@ -58,7 +58,7 @@ export default function PotentialProjectDetailPage() {
       backHref="/dashboard/crm/potential-projects"
       actions={[
         { label: 'ثبت پیگیری', href: `/dashboard/crm/follow-ups/create?projectId=${project.id}&customerId=${project.customerId}`, icon: FaTasks, tone: 'primary', variant: 'solid' },
-        { label: 'شروع قرارداد', href: `/dashboard/sales/contracts/create?customerId=${project.customerId}&potentialProjectId=${project.id}`, icon: FaFileContract, tone: 'success', variant: 'outline', disabled: project.status !== 'آماده قرارداد' },
+        { label: 'شروع قرارداد', href: `/dashboard/sales/contracts/create?customerId=${project.customerId}&potentialProjectId=${project.id}`, icon: FaFileContract, tone: 'success', variant: 'outline', disabled: project.customerTransferred || project.status !== 'آماده قرارداد' },
       ]}
     >
 
@@ -129,9 +129,13 @@ export default function PotentialProjectDetailPage() {
         aside={
           <>
             <ErpSection title="مخاطب">
-              <Link href={`/dashboard/crm/customers/${project.customer.id}`} className="text-sm font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
-                {crmPersonName(project.customer)}
-              </Link>
+              {project.customerTransferred ? (
+                <ErpFieldView label="مخاطب منتقل‌شده" value={crmPersonName(project.customer)} />
+              ) : (
+                <Link href={`/dashboard/crm/customers/${project.customer.id}`} className="text-sm font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
+                  {crmPersonName(project.customer)}
+                </Link>
+              )}
             </ErpSection>
             <ErpSection title="تاریخچه">
               <div className="space-y-3">

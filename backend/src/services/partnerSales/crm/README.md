@@ -19,7 +19,10 @@ prior-owner Projects and their follow-ups remain available to that responsible
 seller through ordinary CRM, but are excluded from the new Partner owner's
 positive projection. Ordinary Customer list/detail/count/search responses exclude
 Partner-owned roots and continue to serve ordinary Customer data through their
-existing rules.
+existing rules. At transfer, each retained legacy Project captures one minimal
+immutable Customer witness; ordinary Project/activity responses use that frozen
+witness and never join later live Partner-owned Customer edits. The Customer link
+and ordinary contract action are disabled for that transferred-root presentation.
 
 Project status, work type and communication type use the closed Persian CRM
 vocabulary. A Partner cannot directly mark a Project `برنده شده`; only the

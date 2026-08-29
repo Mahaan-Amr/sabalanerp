@@ -512,7 +512,9 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
         if (transfer.revision !== command.expectedRevision) return { ok: false as const, error: partnerError('ROW_STALE') };
         if (transfer.status !== 'PENDING') return { ok: false as const, error: partnerError('STATE_CONFLICT') };
         const customer = await tx.crmCustomer.findUnique({ where: { id: transfer.customerId }, select: {
-          partnerOwnerProfileId: true, ownerUserId: true, partnerRevision: true } });
+          partnerOwnerProfileId: true, ownerUserId: true, partnerRevision: true, firstName: true, lastName: true,
+          companyName: true, phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { id: 'asc' }],
+            take: 2, select: { number: true, isPrimary: true } } } });
         if (customer?.partnerOwnerProfileId !== transfer.fromProfileId ||
             customer?.ownerUserId !== transfer.fromOwnerUserId ||
             (transfer.fromProfile && transfer.fromProfile.userId !== transfer.fromOwnerUserId) ||
@@ -530,6 +532,14 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           // its existing cancellation/remediation command before Customer
           // transfer can commit, so neither owner can continue a stale draft.
           if (unresolvedCase) return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
+          const [transferClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+          const customerSnapshot = { schemaVersion: 1, capturedAt: transferClock.now.toISOString(),
+            firstName: customer.firstName, lastName: customer.lastName, companyName: customer.companyName,
+            phoneNumbers: customer.phoneNumbers };
+          await tx.$executeRaw`UPDATE crm_potential_projects
+            SET "customerTransferSnapshot" = ${JSON.stringify(customerSnapshot)}::jsonb
+            WHERE "customerId" = ${transfer.customerId} AND "partnerRevision" IS NULL
+              AND "customerTransferSnapshot" IS NULL`;
           await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_transfer', ${transfer.id}, true)`;
           const changed = await tx.crmCustomer.updateMany({ where: { id: transfer.customerId,
             partnerOwnerProfileId: transfer.fromProfileId, ownerUserId: transfer.fromOwnerUserId,

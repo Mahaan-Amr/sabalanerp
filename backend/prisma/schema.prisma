@@ -7478,11 +7478,23 @@ model PartnerInquiryEvent {
   reason        String?
   evidence      Json
   recordedAt    DateTime @default(now()) @db.Timestamptz(3)
+  notificationDelivery PartnerInquiryNotificationDelivery?
   inquiry       PartnerInquiry @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
   row           PartnerInquiryRow? @relation(fields: [rowId], references: [id], onDelete: Restrict)
   @@unique([inquiryId, revision])
   @@index([commandId])
   @@map("partner_inquiry_events")
+}
+
+model PartnerInquiryNotificationDelivery {
+  eventId       String @id
+  attempts      Int @default(0)
+  lastAttemptAt DateTime? @db.Timestamptz(3)
+  handledAt     DateTime? @db.Timestamptz(3)
+  status        String?
+  event         PartnerInquiryEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  @@index([handledAt, lastAttemptAt])
+  @@map("partner_inquiry_notification_deliveries")
 }
 
 enum PartnerCaseState {

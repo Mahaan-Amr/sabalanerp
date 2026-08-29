@@ -48,8 +48,6 @@ export async function resolveApprovalForUse(tx: Prisma.TransactionClient, input:
 export async function bindApprovalUsage(tx: Prisma.TransactionClient, input: UseInput & {
   usageId?: string; caseId: string; caseRevision: number; productRowId: string;
 }): Promise<Result<{ usageId: string; approval: ApprovedInquiry; usedAt: string; replayed: boolean }>> {
-  const approval = await resolveApprovalForUse(tx, input);
-  if (!approval.ok) return approval;
   const binding = await tx.partnerCaseRowBinding.findUnique({ where: { caseId_revision_productRowId: {
     caseId: input.caseId, revision: input.caseRevision, productRowId: input.productRowId,
   } }, select: { configurationHash: true } });
@@ -57,15 +55,25 @@ export async function bindApprovalUsage(tx: Prisma.TransactionClient, input: Use
   const previous = await tx.partnerInquiryUsage.findUnique({ where: { caseId_caseRevision_productRowId: {
     caseId: input.caseId, caseRevision: input.caseRevision, productRowId: input.productRowId,
   } } });
-  const evidenceHash = await canonicalHash({ schemaVersion: 1, caseId: input.caseId, caseRevision: input.caseRevision,
-    productRowId: input.productRowId, approval: approval.value });
   if (previous) {
-    if (previous.approvalId !== approval.value.approvalId || previous.evidenceHash !== evidenceHash) {
+    const snapshot = ApprovedInquirySchema.safeParse(previous.approvalSnapshot);
+    if (!snapshot.success || snapshot.data.inquiryId !== input.binding.inquiryId ||
+        snapshot.data.rowId !== input.binding.rowId || snapshot.data.revision !== input.binding.revision ||
+        snapshot.data.partnerSellerId !== input.partnerSellerId || snapshot.data.configurationHash !== input.configurationHash) {
       return { ok: false, error: partnerError('IDEMPOTENCY_CONFLICT') };
     }
-    return { ok: true, value: { usageId: previous.id, approval: approval.value,
+    const replayHash = await canonicalHash({ schemaVersion: 1, caseId: input.caseId, caseRevision: input.caseRevision,
+      productRowId: input.productRowId, approval: snapshot.data });
+    if (previous.approvalId !== snapshot.data.approvalId || previous.evidenceHash !== replayHash) {
+      return { ok: false, error: partnerError('IDEMPOTENCY_CONFLICT') };
+    }
+    return { ok: true, value: { usageId: previous.id, approval: snapshot.data,
       usedAt: previous.usedAt.toISOString(), replayed: true } };
   }
+  const approval = await resolveApprovalForUse(tx, input);
+  if (!approval.ok) return approval;
+  const evidenceHash = await canonicalHash({ schemaVersion: 1, caseId: input.caseId, caseRevision: input.caseRevision,
+    productRowId: input.productRowId, approval: approval.value });
   const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
   const usage = await tx.partnerInquiryUsage.create({ data: { id: input.usageId ?? randomUUID(), caseId: input.caseId,
     caseRevision: input.caseRevision, productRowId: input.productRowId, approvalId: approval.value.approvalId,

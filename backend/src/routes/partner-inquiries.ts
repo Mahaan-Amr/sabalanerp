@@ -7,6 +7,7 @@ import { createPrismaPartnerInquiryService, type PartnerInquiryDependencies } fr
 import { ensureMissingResponderSupport, resolveEligibleResponder, resolveProfileResponder, resolveSavedTechnicalConfiguration } from '../services/partnerSales/inquiries/adapters';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readAuthorizationDecisionByCorrelation } from '../services/effectiveAuthorization/audit';
+import { dispatchPartnerInquiryEvents, inquiryNotificationAccess } from '../services/partnerSales/notifications/inquiryDelivery';
 
 function correlation(request: Request): string {
   const supplied = request.get('X-Correlation-Id');
@@ -40,7 +41,8 @@ export function createPartnerInquiryRouter() {
     };
     return createPrismaPartnerInquiryService({ database: prisma, actorId: request.user.id, authorize,
       resolveInitialResponder: resolveProfileResponder, resolveResponder: resolveEligibleResponder,
-      resolveConfiguration: resolveSavedTechnicalConfiguration, ensureMissingResponderSupport });
+      resolveConfiguration: resolveSavedTechnicalConfiguration, ensureMissingResponderSupport,
+      publishCommittedEvents: eventIds => dispatchPartnerInquiryEvents(prisma, eventIds, inquiryNotificationAccess) });
   };
   router.post('/commands', async (request: AuthRequest, response) => {
     try { respond(response, await serviceFor(request).execute(request.body)); }

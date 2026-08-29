@@ -6,6 +6,7 @@ import { canonicalHash, partnerError, type InquiryIdentity, type PartnerCommand 
 import { createPrismaPartnerInquiryService, type PartnerInquiryDependencies } from '../partnerSales/inquiries/service';
 import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
 import { readAuthorizationDecisionByCorrelation } from '../effectiveAuthorization/audit';
+import { dispatchPartnerInquiryEvents } from '../partnerSales/notifications/inquiryDelivery';
 
 function databaseUrl() {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -41,6 +42,8 @@ async function setup(database: PrismaClient, state: 'PENDING' | 'REJECTED' = 'PE
 async function cleanup(database: PrismaClient, fixture: Fixture) {
   await database.$transaction(async tx => {
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+    await tx.notificationEvent.deleteMany({ where: { resourceType: 'PARTNER_NOTIFICATION',
+      resourceId: { startsWith: fixture.prefix } } });
     await tx.partnerCommandOutcome.deleteMany({ where: { targetScope: fixture.inquiryId } });
     await tx.effectiveAuthorizationAudit.deleteMany({ where: { rootId: { in: [fixture.inquiryId, fixture.partnerId] } } });
     await tx.partnerInquiryApproval.deleteMany({ where: { row: { inquiryId: fixture.inquiryId } } });
@@ -55,6 +58,34 @@ async function cleanup(database: PrismaClient, fixture: Fixture) {
       `${fixture.prefix}-replacement-a`, `${fixture.prefix}-replacement-b`] } } });
   });
 }
+
+test('committed inquiry events are delivered once and retain durable attempt evidence', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } }); const fixture = await setup(database);
+  try {
+    const eventId = `${fixture.prefix}-event`;
+    await database.partnerInquiryEvent.create({ data: { id: eventId, inquiryId: fixture.inquiryId, revision: 2,
+      actorId: fixture.partnerId, commandId: `${fixture.prefix}-submit`, correlationId: `${fixture.prefix}-correlation`,
+      type: 'INQUIRY_SUBMITTED', evidence: { version: 1, assignmentId: `${fixture.prefix}-assignment`,
+        assignmentRevision: 1, rowIds: [`${fixture.prefix}-row`] } } });
+    await dispatchPartnerInquiryEvents(database, [eventId]);
+    await dispatchPartnerInquiryEvents(database, [eventId]);
+    const delivery = await database.partnerInquiryNotificationDelivery.findUniqueOrThrow({ where: { eventId } });
+    assert.deepEqual({ attempts: delivery.attempts, handled: Boolean(delivery.handledAt),
+      status: delivery.status }, { attempts: 1, handled: true, status: 'DELIVERED' });
+    assert.equal(await database.notificationEvent.count({ where: { resourceType: 'PARTNER_NOTIFICATION', resourceId: eventId } }), 1);
+    assert.equal(await database.notification.count({ where: { userId: fixture.responderId, type: 'PARTNER_INQUIRY_SUBMITTED' } }), 1);
+    const malformedId = `${fixture.prefix}-malformed-event`;
+    await database.partnerInquiryEvent.create({ data: { id: malformedId, inquiryId: fixture.inquiryId, revision: 3,
+      actorId: fixture.partnerId, commandId: `${fixture.prefix}-malformed`, correlationId: '', type: 'INQUIRY_SUBMITTED',
+      evidence: { version: 1, assignmentId: `${fixture.prefix}-assignment`, assignmentRevision: 1,
+        rowIds: [`${fixture.prefix}-row`] } } });
+    await dispatchPartnerInquiryEvents(database, [malformedId]);
+    const failedAttempt = await database.partnerInquiryNotificationDelivery.findUniqueOrThrow({ where: { eventId: malformedId } });
+    assert.equal(failedAttempt.attempts, 1);
+    assert.equal(failedAttempt.handledAt, null, 'planning failures stay pending for retry');
+    assert.equal(failedAttempt.status, null, 'private validator failures are not persisted');
+  } finally { await cleanup(database, fixture); await database.$disconnect(); }
+});
 
 const identity = (partnerId: string): InquiryIdentity => ({ schemaVersion: 1, partnerSellerId: partnerId,
   catalogProductId: 'catalog-race', family: 'prepared', unit: 'count',

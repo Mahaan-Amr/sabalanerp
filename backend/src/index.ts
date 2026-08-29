@@ -88,10 +88,13 @@ import { startNotificationOutboxDelivery } from "./services/notificationService"
 import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
 import { startDispatchBuyerSmsDelivery } from "./services/dispatchBuyerSmsWorker";
 import { startCrossWorkspaceDutyDeadlineMaintenance } from "./services/crossWorkspaceDutyModule";
+import { registerPartnerNotificationAccess } from "./services/partnerSales/notifications/access";
+import { inquiryNotificationAccess, startPartnerInquiryNotificationDelivery } from "./services/partnerSales/notifications/inquiryDelivery";
 import { verifyHrRedesignCutover } from "./services/hrRedesignCutover";
 import { resolveHrRedesignCutoverStartup } from "./services/hrRedesignCutoverStartup";
 
 initializeRecoveryRuntime();
+registerPartnerNotificationAccess(inquiryNotificationAccess);
 const app = express();
 app.set("trust proxy", 1);
 const server = createServer(app);
@@ -447,6 +450,7 @@ initializeSystemRecovery(prisma).then(async () => {
     startSupportTicketMaintenance(prisma);
     startDispatchBuyerSmsDelivery(prisma);
     startCrossWorkspaceDutyDeadlineMaintenance(prisma);
+    startPartnerInquiryNotificationDelivery(prisma);
   }
   server.listen(PORT, () => {
     console.log(`? Server running on port ${PORT}`);

@@ -151,6 +151,11 @@ BEGIN
       END IF;
       RETURN NEW;
     END IF;
+    IF TG_OP = 'UPDATE' AND OLD."partnerOwnerProfileId" IS NULL
+       AND NEW."partnerOwnerProfileId" IS NOT NULL THEN
+      RAISE EXCEPTION 'Ordinary Customer ownership requires an approved Partner transfer'
+        USING ERRCODE = '23514';
+    END IF;
     IF writer_profile_id IS DISTINCT FROM owner_profile_id THEN
       RAISE EXCEPTION 'Partner Customer mutation requires its current owner Profile' USING ERRCODE = '23514';
     END IF;

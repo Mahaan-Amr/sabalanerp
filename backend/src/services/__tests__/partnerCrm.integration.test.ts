@@ -130,6 +130,14 @@ test('database guards reject direct Partner Customer and nested CRM writes outsi
       await tx.user.create({ data: { id: partnerId, username: partnerId, email: `${partnerId}@example.invalid`,
         password: 'not-a-login', firstName: 'Fixture', lastName: 'Guard' } });
       await tx.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
+      const ordinaryCustomerId = `partner-crm-ordinary-${suffix}`;
+      await tx.crmCustomer.create({ data: { id: ordinaryCustomerId, ownerUserId: partnerId,
+        firstName: 'مشتری', lastName: 'عادی' } });
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${partnerId}, true)`;
+      await tx.$executeRawUnsafe('SAVEPOINT direct_ordinary_claim');
+      await assert.rejects(tx.crmCustomer.update({ where: { id: ordinaryCustomerId }, data: {
+        partnerOwnerProfileId: partnerId, partnerRevision: 1 } }), /approved Partner transfer/);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT direct_ordinary_claim');
       await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${partnerId}, true)`;
       await tx.crmCustomer.create({ data: { id: customerId, ownerUserId: partnerId, partnerOwnerProfileId: partnerId,
         partnerRevision: 1, firstName: 'مشتری', lastName: 'همکار' } });

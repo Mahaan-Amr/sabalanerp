@@ -81,3 +81,31 @@ export async function bindApprovalUsage(tx: Prisma.TransactionClient, input: Use
   return { ok: true, value: { usageId: usage.id, approval: approval.value,
     usedAt: usage.usedAt.toISOString(), replayed: false } };
 }
+
+/** Appends a new Case-revision usage from the preceding immutable snapshot.
+ * Draft edits with unchanged price-bearing configuration retain that exact
+ * wholesale truth even after inquiry expiry or supersession. */
+export async function bindFrozenApprovalUsage(tx: Prisma.TransactionClient, input: UseInput & {
+  caseId: string; caseRevision: number; productRowId: string; approval: ApprovedInquiry;
+}): Promise<Result<{ usageId: string; approval: ApprovedInquiry; usedAt: string; replayed: false }>> {
+  const approval = ApprovedInquirySchema.safeParse(input.approval);
+  if (!approval.success || approval.data.partnerSellerId !== input.partnerSellerId ||
+      approval.data.configurationHash !== input.configurationHash || approval.data.inquiryId !== input.binding.inquiryId ||
+      approval.data.rowId !== input.binding.rowId || approval.data.revision !== input.binding.revision) {
+    return { ok: false, error: partnerError('CONFIG_MISMATCH') };
+  }
+  const binding = await tx.partnerCaseRowBinding.findUnique({ where: { caseId_revision_productRowId: {
+    caseId: input.caseId, revision: input.caseRevision, productRowId: input.productRowId,
+  } }, select: { configurationHash: true } });
+  if (!binding || binding.configurationHash !== input.configurationHash) {
+    return { ok: false, error: partnerError('CONFIG_MISMATCH') };
+  }
+  const evidenceHash = await canonicalHash({ schemaVersion: 1, caseId: input.caseId,
+    caseRevision: input.caseRevision, productRowId: input.productRowId, approval: approval.data });
+  const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  const usageId = randomUUID();
+  await tx.partnerInquiryUsage.create({ data: { id: usageId, caseId: input.caseId,
+    caseRevision: input.caseRevision, productRowId: input.productRowId, approvalId: approval.data.approvalId,
+    approvalSnapshot: approval.data as Prisma.InputJsonValue, evidenceHash, usedAt: clock.now } });
+  return { ok: true, value: { usageId, approval: approval.data, usedAt: clock.now.toISOString(), replayed: false } };
+}

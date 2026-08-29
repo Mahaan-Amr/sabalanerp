@@ -23,14 +23,17 @@ const graphFor = (productRowId: string) => parseCanonicalProductGraph({ schemaVe
 const configurationHash = `sha256-v1:${'1'.repeat(64)}`;
 const approvalEvidenceHash = `sha256-v1:${'2'.repeat(64)}`;
 
-async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, string>) => Promise<void>) {
+async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, string>) => Promise<void>,
+  approvalTtlMs = 48 * 60 * 60 * 1000) {
   const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
   const rollback = new Error('rollback partner Case fixture');
   try {
     await database.$transaction(async tx => {
       const prefix = `partner-case-${randomUUID()}`;
       const ids = { partnerId: `${prefix}-partner`, responderId: `${prefix}-responder`, departmentId: `${prefix}-department`,
-        customerId: `${prefix}-customer`, profileId: `${prefix}-profile`, accountId: `${prefix}-account`,
+        customerId: `${prefix}-customer`, secondCustomerId: `${prefix}-customer-2`,
+        firstProjectId: `${prefix}-project-1`, secondProjectId: `${prefix}-project-2`,
+        profileId: `${prefix}-profile`, accountId: `${prefix}-account`,
         inquiryId: `${prefix}-inquiry`, inquiryRowId: `${prefix}-inquiry-row`, assignmentId: `${prefix}-assignment`,
         approvalId: `${prefix}-approval`, caseId: `${prefix}-case` };
       await tx.user.createMany({ data: [
@@ -48,6 +51,14 @@ async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, s
         cohortId: ids.profileId, actorId: ids.responderId, eligibilityEvidence: { fixture: true } } });
       await tx.crmCustomer.create({ data: { id: ids.customerId, firstName: 'Customer', lastName: 'Case',
         ownerUserId: ids.partnerId, createdBy: ids.partnerId } });
+      await tx.crmCustomer.create({ data: { id: ids.secondCustomerId, firstName: 'Customer', lastName: 'Revised',
+        ownerUserId: ids.partnerId, createdBy: ids.partnerId } });
+      await tx.crmPotentialProject.createMany({ data: [
+        { id: ids.firstProjectId, customerId: ids.customerId, responsibleSellerId: ids.partnerId,
+          createdBy: ids.partnerId, title: 'پروژه نخست', workType: 'سنگ' },
+        { id: ids.secondProjectId, customerId: ids.secondCustomerId, responsibleSellerId: ids.partnerId,
+          createdBy: ids.partnerId, title: 'پروژه دوم', workType: 'سنگ' },
+      ] });
       await tx.partnerInquiry.create({ data: { id: ids.inquiryId, profileId: ids.profileId, revision: 2, submittedAt: new Date() } });
       await tx.partnerInquiryAssignment.create({ data: { id: ids.assignmentId, inquiryId: ids.inquiryId, revision: 1,
         responderId: ids.responderId, actorId: ids.responderId, reason: 'انتساب تست پرونده', eligibilityEvidence: { fixture: true } } });
@@ -57,7 +68,7 @@ async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, s
       await tx.partnerInquiryApproval.create({ data: { id: ids.approvalId, rowId: ids.inquiryRowId,
         assignmentId: ids.assignmentId, actorId: ids.responderId, commandId: `${prefix}-approval-command`,
         authorizationEvidenceId: `${prefix}-approval-authorization`, wholesaleUnitPrice: '100', currency: 'IRT',
-        evidenceHash: approvalEvidenceHash, approvedAt: clock.now, expiresAt: new Date(clock.now.getTime() + 48 * 60 * 60 * 1000) } });
+        evidenceHash: approvalEvidenceHash, approvedAt: clock.now, expiresAt: new Date(clock.now.getTime() + approvalTtlMs) } });
       await run(tx, ids); throw rollback;
     }, { timeout: 30_000 });
   } catch (error) { if (error !== rollback) throw error; }
@@ -81,25 +92,38 @@ async function command(ids: Record<string, string>, caseId = ids.caseId, suffix 
       operation: 'CASE_SUBMIT', targetId: caseId, key: `${caseId}-key`, payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent }) } };
 }
 
-function resolved(ids: Record<string, string>, caseId: string, revision = 1): ResolvedCaseDraft {
+async function resolved(ids: Record<string, string>, caseId: string, revision = 1,
+  customerId = ids.customerId, projectId?: string): Promise<ResolvedCaseDraft> {
   const productRowId = `${caseId}-product-row`;
-  return { profileId: ids.profileId, partnerSellerId: ids.partnerId, customerId: ids.customerId,
-    commercialAccountId: ids.accountId, departmentId: ids.departmentId, sabalanTermsVersionId: 'terms-v1', graph: graphFor(productRowId),
+  const graph = graphFor(productRowId);
+  const graphHash = await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph });
+  return { profileId: ids.profileId, partnerSellerId: ids.partnerId, customerId, ...(projectId ? { projectId } : {}),
+    commercialAccountId: ids.accountId, departmentId: ids.departmentId, sabalanTermsVersionId: 'terms-v1', graph,
+    technicalSnapshot: { schemaVersion: 1, recoveryId: `${caseId}-recovery`, recoveryRevision: revision,
+      inputRevision: revision, graphHash, updatedAt: '2026-08-29T00:00:00.000Z', rows: [{
+        configurationRef: { recoveryId: `${caseId}-recovery`, recoveryRevision: revision, productRowId },
+        quantity: '2', unit: 'count', configurationChange: revision === 1 ? 'NEW' : 'UNCHANGED',
+      }] },
     rows: [{ productRowId, configurationHash, quantity: '2', unit: 'count',
       precisionPolicyVersion: 'canonical-count-v1', description: 'سنگ آماده پرونده' }],
     partner: { displayName: 'فروشنده همکار تست', phone: '09120000000', address: 'تهران، فروشنده تست' },
-    customer: { displayName: 'مشتری تست', phone: '09120000001', address: 'تهران، مشتری تست' },
+    customer: { displayName: customerId === ids.customerId ? 'مشتری تست' : 'مشتری بازنگری',
+      phone: '09120000001', address: 'تهران، مشتری تست' },
     legalText: 'متن حقوقی قرارداد تست', sabalanPaymentPlan: { planId: `${caseId}-sabalan-plan-${revision}`, version: revision,
       ...(revision > 1 ? { predecessorPlanId: `${caseId}-sabalan-plan-${revision - 1}` } : {}),
       effectiveDate: '2026-08-29', installments: [{ installmentId: `${caseId}-sabalan-installment-${revision}`, dueDate: '2026-08-30',
         amount: { amount: '200', currency: 'IRT' }, method: 'BANK_TRANSFER' }] } };
 }
 
-function service(tx: Prisma.TransactionClient, ids: Record<string, string>, failpoint?: PartnerCaseDependencies['failpoint']) {
+function service(tx: Prisma.TransactionClient, ids: Record<string, string>, failpoint?: PartnerCaseDependencies['failpoint'],
+  recordEvidenceReview: PartnerCaseDependencies['recordEvidenceReview'] = async () => undefined) {
   return createPartnerCaseService({ actorId: ids.partnerId, transaction: work => work(tx),
     authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-authorization` } }),
-    resolveDraft: async (_tx, input) => ({ ok: true, value: resolved(ids, input.command.idempotency.targetId,
-      input.command.type === 'CASE_DRAFT_REVISE' ? input.command.expected.revision + 1 : 1) }),
+    authorizeProject: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } }),
+    recordEvidenceReview,
+    resolveDraft: async (_tx, input) => ({ ok: true, value: await resolved(ids, input.command.idempotency.targetId,
+      input.command.type === 'CASE_DRAFT_REVISE' ? input.command.expected.revision + 1 : 1,
+      input.command.intent.customerId, input.command.intent.projectId) }),
     consumeRecovery: async () => ({ ok: true, value: undefined }), failpoint });
 }
 
@@ -177,14 +201,81 @@ test('draft revision advances the atomic pair once and rejects a stale competing
   });
 });
 
+test('an unchanged Draft row retains its frozen wholesale approval after inquiry expiry', async () => {
+  await fixture(async (tx, ids) => {
+    const submitted = await command(ids);
+    const created = await service(tx, ids).execute(submitted);
+    assert.equal(created.ok, true);
+    if (!created.ok || !created.value.case) return;
+    await tx.$queryRaw`SELECT pg_sleep(0.15)::text AS slept`;
+    const revised = await service(tx, ids).execute(await reviseCommand(ids, submitted, 1,
+      created.value.case.owner.integrityHash, 'after-expiry'));
+    assert.equal(revised.ok, true);
+    if (!revised.ok || !revised.value.case) return;
+    assert.equal(revised.value.case.products[0].wholesaleUnitPrice, '100');
+    const usages = await tx.partnerInquiryUsage.findMany({ where: { caseId: ids.caseId },
+      orderBy: { caseRevision: 'asc' }, select: { approvalSnapshot: true } });
+    assert.equal(usages.length, 2);
+    assert.deepEqual(usages[1].approvalSnapshot, usages[0].approvalSnapshot);
+  }, 75);
+});
+
+test('an idempotent replay still requires current Case authority', async () => {
+  await fixture(async (tx, ids) => {
+    const submitted = await command(ids);
+    assert.equal((await service(tx, ids).execute(submitted)).ok, true);
+    const denied = createPartnerCaseService({ actorId: ids.partnerId, transaction: work => work(tx),
+      authorize: async (_tx, request) => request.action === 'CASE_SUBMIT'
+        ? { ok: false, error: { code: 'PARTNER_NOT_ACTIVE', status: 409,
+          message: 'حساب فروشنده همکار فعال نیست.' } as const }
+        : { ok: true, value: { evidenceId: `${ids.caseId}-authorization` } },
+      authorizeProject: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } }),
+      recordEvidenceReview: async () => undefined,
+      resolveDraft: async () => ({ ok: true, value: await resolved(ids, ids.caseId) }),
+      consumeRecovery: async () => ({ ok: true, value: undefined }) });
+    const replay = await denied.execute(submitted);
+    assert.equal(replay.ok ? null : replay.error.code, 'PARTNER_NOT_ACTIVE');
+  });
+});
+
+test('an explicit Draft revision reauthorizes and snapshots a changed Customer and Project', async () => {
+  await fixture(async (tx, ids) => {
+    const base = await command(ids);
+    const initialIntent = { ...base.intent, projectId: ids.firstProjectId };
+    const submitted = { ...base, intent: initialIntent, idempotency: { ...base.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent: initialIntent }) } };
+    const created = await service(tx, ids).execute(submitted);
+    assert.equal(created.ok, true);
+    if (!created.ok || !created.value.case) return;
+    const draft = await reviseCommand(ids, submitted, 1, created.value.case.owner.integrityHash, 'parties');
+    const revisedIntent = { ...draft.intent, customerId: ids.secondCustomerId, projectId: ids.secondProjectId };
+    const revisedCommand = { ...draft, intent: revisedIntent, idempotency: { ...draft.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent: revisedIntent }) } };
+    const revised = await service(tx, ids).execute(revisedCommand);
+    assert.equal(revised.ok, true);
+    const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId }, select: {
+      customerId: true, customerContract: { select: { customerId: true } },
+      revisions: { orderBy: { revision: 'asc' }, select: { partySnapshots: true } },
+    } });
+    assert.equal(root.customerId, ids.secondCustomerId);
+    assert.equal(root.customerContract.customerId, ids.secondCustomerId);
+    assert.notDeepEqual(root.revisions[0].partySnapshots, root.revisions[1].partySnapshots);
+    assert.equal((await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: ids.firstProjectId } })).wonSalesContractId, null);
+    assert.equal((await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: ids.secondProjectId } })).wonSalesContractId,
+      (await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).customerContractId);
+  });
+});
+
 test('graph mismatch and an injected pair failure leave no partial Case, records or numbers', async () => {
   await fixture(async (tx, ids) => {
+    const reviews: Array<{ code: string }> = [];
     const valid = await command(ids);
     const invalidIntent = { ...valid.intent, graphHash: `sha256-v1:${'f'.repeat(64)}` };
     const invalid = { ...valid, intent: invalidIntent, idempotency: { ...valid.idempotency,
       payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent: invalidIntent }) } };
-    const mismatch = await service(tx, ids).execute(invalid);
+    const mismatch = await service(tx, ids, undefined, async (_tx, review) => { reviews.push(review); }).execute(invalid);
     assert.equal(mismatch.ok ? null : mismatch.error.code, 'CONFIG_MISMATCH');
+    assert.deepEqual(reviews.map(review => review.code), ['CONFIG_MISMATCH']);
     assert.equal(await tx.partnerSaleCase.count({ where: { id: ids.caseId } }), 0);
     await tx.$executeRaw`SAVEPOINT partner_case_failpoint`;
     const failure = new Error('case failpoint');
@@ -192,7 +283,9 @@ test('graph mismatch and an injected pair failure leave no partial Case, records
       transaction: async work => { try { return await work(tx); } catch (error) {
         await tx.$executeRaw`ROLLBACK TO SAVEPOINT partner_case_failpoint`; throw error;
       } }, authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-authorization` } }),
-      resolveDraft: async () => ({ ok: true, value: resolved(ids, ids.caseId) }),
+      authorizeProject: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } }),
+      recordEvidenceReview: async () => undefined,
+      resolveDraft: async () => ({ ok: true, value: await resolved(ids, ids.caseId) }),
       consumeRecovery: async () => ({ ok: true, value: undefined }),
       failpoint: point => { if (point === 'AFTER_PAIR') throw failure; } });
     await assert.rejects(failing.execute(valid), error => error === failure);

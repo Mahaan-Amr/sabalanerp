@@ -30,12 +30,15 @@ test('exact product-row references own entry; quantity and delivery changes do n
   const fixture = createPartnerFixtures();
   const base = { ...fixture.draftSubmissionReference, customerId: '', contractDate: '2026-08-27',
     customerPaymentPlan: fixture.partner.customerPaymentPlan, deliveries: [], retailDiscount: { amount: '0', currency: 'IRR' as const } };
-  const input = { inquiry: fixture.inquiry, now: Date.parse('2026-08-27T09:00:00.000Z'), base,
-    quantities: [{ productRowId: fixture.configurationDraft.productRowId, quantity: '250', unit: 'm' }] };
+  const { graphHash: _browserCannotSupplyGraphHash, ...safeBase } = base;
+  const input = { inquiry: fixture.inquiry, now: Date.parse('2026-08-27T09:00:00.000Z'), base: safeBase,
+    validated: { ...fixture.technicalSaved, rows: fixture.technicalSaved.rows.map(row => ({ ...row, quantity: '250' })) } };
   const draft = enterPartnerWizard(input);
   assert.equal(draft?.rows[0].quantity, '250');
+  assert.equal(draft?.intent.graphHash, fixture.technicalSaved.graphHash);
   assert.equal(draft?.intent.rows[0].retailUnitPrice.amount, '800');
-  assert.equal(enterPartnerWizard({ ...input, quantities: [{ productRowId: fixture.inquiry.rows[0].rowId, quantity: '250', unit: 'm' }] }), null);
+  assert.equal(enterPartnerWizard({ ...input, validated: { ...input.validated,
+    recoveryRevision: input.validated.recoveryRevision + 1 } }), null);
   assert.equal(enterPartnerWizard({ ...input, mismatchedRowIds: [fixture.inquiry.rows[0].rowId] }), null);
   assert.equal(enterPartnerWizard({ ...input, now: Date.parse(fixture.approval.expiresAt) }), null);
 });

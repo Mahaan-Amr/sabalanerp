@@ -1,4 +1,4 @@
-import { QuantitySchema } from '@sabalanerp/partner-sales-contracts';
+import { PartnerTechnicalSavedViewSchema, type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerInquiryView } from '../../partner-sales/inquiries/inquiryPresentation';
 import { usableInquiryRows } from '../../partner-sales/inquiries/inquiryPresentation';
 import { defaultPartnerRetailRows, partnerRetailIntentRows } from './partnerRetail';
@@ -8,24 +8,29 @@ import type { PartnerDraftIntent } from './partnerCaseSubmission';
 /** Quantity is supplied by the canonical graph's display projection; it is not
  * an inquiry fingerprint. No catalog-ID or array-position matching is allowed.
  */
-export function enterPartnerWizard({ inquiry, now, base, quantities, mismatchedRowIds = [] }: {
+export function enterPartnerWizard({ inquiry, now, base, validated, mismatchedRowIds = [] }: {
   inquiry: PartnerInquiryView;
   now: number;
-  base: Omit<PartnerDraftIntent, 'rows' | 'belowCostConfirmed'>;
-  quantities: ReadonlyArray<{ productRowId: string; quantity: string; unit: string }>;
+  base: Omit<PartnerDraftIntent, 'rows' | 'belowCostConfirmed' | 'graphHash'>;
+  validated: PartnerTechnicalSavedView;
   mismatchedRowIds?: readonly string[];
 }): PartnerWizardDraft | null {
+  const saved = PartnerTechnicalSavedViewSchema.safeParse(validated);
+  if (!saved.success || saved.data.recoveryId !== base.recoveryId ||
+      saved.data.recoveryRevision !== base.recoveryRevision) return null;
   const approved = usableInquiryRows(inquiry, now).filter(row => !mismatchedRowIds.includes(row.rowId));
-  if (!approved.length || new Set(quantities.map(row => row.productRowId)).size !== quantities.length) return null;
+  if (!approved.length) return null;
   const configured = [];
   for (const row of approved) {
-    const quantity = quantities.find(item => item.productRowId === row.configurationRef.productRowId);
-    if (!quantity || !QuantitySchema.safeParse(quantity.quantity).success || row.configurationRef.recoveryId !== base.recoveryId) return null;
-    configured.push({ ...quantity, inquiryRow: row });
+    const technical = saved.data.rows.find(item => item.configurationRef.productRowId === row.configurationRef.productRowId);
+    if (!technical || technical.configurationRef.recoveryId !== row.configurationRef.recoveryId ||
+        technical.configurationRef.recoveryRevision !== row.configurationRef.recoveryRevision) return null;
+    configured.push({ productRowId: technical.configurationRef.productRowId,
+      quantity: technical.quantity, unit: technical.unit, inquiryRow: row });
   }
-  if (new Set(configured.map(row => row.productRowId)).size !== configured.length) return null;
+  if (configured.length !== saved.data.rows.length || new Set(configured.map(row => row.productRowId)).size !== configured.length) return null;
   const rows = defaultPartnerRetailRows(configured);
-  const intent = { ...base, belowCostConfirmed: false,
+  const intent = { ...base, graphHash: saved.data.graphHash, belowCostConfirmed: false,
     rows: partnerRetailIntentRows(rows),
   };
   return { intent, rows, step: 'customer' };

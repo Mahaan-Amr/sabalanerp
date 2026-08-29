@@ -11,7 +11,9 @@ with wire `schemaVersion: 1`.
 customer payment plan. The writer resolves the retained private canonical graph,
 frozen Sabalan terms and wholesale approvals again inside the transaction. A
 browser cannot provide the private graph, rates, authorization context or policy
-evidence.
+evidence. Wizard entry derives the public `graphHash`, canonical quantities,
+units and exact row references from the owner-issued validated technical save;
+it cannot calculate or substitute those values locally.
 
 One database transaction creates the Case root, immutable revision, internal
 Sabalan record, customer contract, three commercial numbers, stable product-row
@@ -27,13 +29,27 @@ integrity hash. It appends a successor revision and purpose-specific projections
 then advances both paired documents and the Case head with one CAS. Existing row
 identities stay owned by the same Case; coherent new rows may be appended, while
 cross-Case reuse is rejected. Quantity, retail price, payment plan and delivery
-changes are allowed with a current approval for the unchanged configuration.
+changes retain the preceding immutable wholesale snapshot even after inquiry
+expiry. Only a new row or price-bearing configuration change requires a current
+exact approval.
+
+Customer and Project changes are explicit Draft revisions. The transaction
+reauthorizes and snapshots the new Customer, reauthorizes the current Project
+binding before and after writes, updates both sides of the Case/contract pair and
+moves the Project link without rewriting prior revisions. Idempotent replay
+validates the current head projection and receipt revision/hash, then rechecks
+current Case, Customer, Project and rollout authority before returning data.
 
 Historical revisions, approval usages, deliveries and plans are append-only.
 Stale or changed-idempotency attempts return canonical errors without partial
 pair writes. Technical validated snapshots created before 1.7 remain immutable;
 their newly public `graphHash` is projected from the envelope-verified retained
 graph and checked before use.
+
+Configuration, approval, projection and receipt integrity mismatches call the
+required append-only evidence-review port inside the same transaction. #334 must
+bind that port to durable persistence; it may not be replaced by logging or a
+route-local best-effort side effect.
 
 ## Activation boundary
 

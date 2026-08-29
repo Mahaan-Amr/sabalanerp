@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { parseCanonicalProductGraph, type CanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import {
   CaseDraftIntentSchema, PaymentPlanSchema, canonicalHash, partnerError,
-  type ApprovedInquiry, type PartnerCommand, type Result,
+  type ApprovedInquiry, type PartnerCommand, type PartnerTechnicalSavedView, type Result,
 } from '@sabalanerp/partner-sales-contracts';
 
 export type DisplayParty = { displayName: string; phone: string; address: string };
@@ -10,13 +10,14 @@ export type ResolvedCaseDraft = {
   profileId: string; partnerSellerId: string; customerId: string; projectId?: string;
   commercialAccountId: string; departmentId: string; sabalanTermsVersionId: string;
   graph: CanonicalProductGraph;
+  technicalSnapshot: PartnerTechnicalSavedView;
   rows: Array<{ productRowId: string; configurationHash: string; quantity: string; unit: string;
     precisionPolicyVersion: string; description: string }>;
   partner: DisplayParty; customer: DisplayParty; legalText: string;
   sabalanPaymentPlan: ReturnType<typeof PaymentPlanSchema.parse>;
 };
 export type ApprovedCaseRow = ResolvedCaseDraft['rows'][number] & {
-  retailUnitPrice: { amount: string; currency: 'IRR' | 'IRT' }; approval: ApprovedInquiry;
+  retailUnitPrice: { amount: string; currency: 'IRR' | 'IRT' }; approval: ApprovedInquiry; frozen?: boolean;
 };
 
 const decimal = (value: string) => new Prisma.Decimal(value);
@@ -39,8 +40,18 @@ export async function validateResolvedDraft(command: Extract<PartnerCommand, { t
   const intentIds = command.intent.rows.map(row => row.productRowId);
   const exact = (left: string[], right: string[]) => left.length === right.length &&
     new Set(left).size === left.length && left.every(id => right.includes(id));
-  if (graphHash !== command.intent.graphHash || !exact(graphIds, savedIds) || !exact(graphIds, intentIds) ||
-      resolved.rows.some(row => !graph.rows.some(graphRow => graphRow.productRowId === row.productRowId))) {
+  const snapshot = resolved.technicalSnapshot;
+  if (graphHash !== command.intent.graphHash || snapshot.graphHash !== graphHash ||
+      snapshot.recoveryId !== command.intent.recoveryId || snapshot.recoveryRevision !== command.intent.recoveryRevision ||
+      !exact(graphIds, savedIds) || !exact(graphIds, intentIds) || !exact(graphIds,
+        snapshot.rows.map(row => row.configurationRef.productRowId)) || resolved.rows.some(row => {
+        const graphRow = graph.rows.find(item => item.productRowId === row.productRowId);
+        const technical = snapshot.rows.find(item => item.configurationRef.productRowId === row.productRowId);
+        return !graphRow || !technical || graphRow.commercial.requestedQuantity !== row.quantity ||
+          technical.quantity !== row.quantity || technical.unit !== row.unit ||
+          technical.configurationRef.recoveryId !== snapshot.recoveryId ||
+          technical.configurationRef.recoveryRevision !== snapshot.recoveryRevision;
+      })) {
     return { ok: false, error: partnerError('CONFIG_MISMATCH') };
   }
   return { ok: true, value: { graph, graphHash } };

@@ -42,8 +42,11 @@ function Fixture() {
           { rowId: 'rejected-330', revision: 1, description: 'پله ردشده', state: 'REJECTED', configuration: [], configurationRef: { ...fixture.configurationDraft, productRowId: 'rejected-product' }, usedCaseNumbers: [], noteOrReason: 'این سنگ موجود نیست' },
         ] }} now={now} pending={false} onRefresh={() => undefined} onReinquire={() => undefined}
         onEnterWizard={() => setDraft(enterPartnerWizard({ inquiry: fixture.inquiry, now,
-          base: { ...fixture.draftSubmissionReference, contractDate: fixture.customer.contractDate, customerPaymentPlan: fixture.partner.customerPaymentPlan, deliveries: fixture.partner.deliveries, retailDiscount: { amount: '0', currency: 'IRR' } },
-          quantities: [{ productRowId: fixture.configurationDraft.productRowId, quantity: '2', unit: 'm' }],
+          base: { customerId: fixture.draftSubmissionReference.customerId, recoveryId: fixture.draftSubmissionReference.recoveryId,
+            recoveryRevision: fixture.draftSubmissionReference.recoveryRevision, sabalanTermsVersionId: fixture.draftSubmissionReference.sabalanTermsVersionId,
+            contractDate: fixture.customer.contractDate, customerPaymentPlan: fixture.partner.customerPaymentPlan,
+            deliveries: fixture.partner.deliveries, retailDiscount: { amount: '0', currency: 'IRR' } },
+          validated: fixture.technicalSaved,
         }))} />}
   </main>;
 }

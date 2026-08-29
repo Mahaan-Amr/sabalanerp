@@ -8,7 +8,8 @@ import { DuplicateCustomerMatchSchema, PartnerProfileViewSchema } from './projec
 
 // Additive vocabulary: v1 action readers and policies still reject unknown actions.
 export const PartnerActionV2Schema = z.enum([...PartnerActionSchema.options,
-  'COMMERCIAL_TERMS_MANAGE', 'PROFILE_CONVERSION_MANAGE']);
+  'COMMERCIAL_TERMS_MANAGE', 'PROFILE_CONVERSION_MANAGE',
+  'CUSTOMER_LIST', 'CUSTOMER_CREATE', 'CUSTOMER_DUPLICATE_MATCH', 'CUSTOMER_TRANSFER_REQUEST']);
 export type PartnerActionV2 = z.infer<typeof PartnerActionV2Schema>;
 export interface PartnerAuthorizationV2Port {
   /** Central owner resolves current evidence; unsupported actions fail closed. */

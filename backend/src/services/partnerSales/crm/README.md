@@ -1,4 +1,29 @@
-# Partner technical catalog producer — issue 317 subset
+# Partner CRM and technical catalog producer — issue 317
+
+`createPartnerCrmService` is the single transactional boundary for Partner-owned
+Customer, Project, follow-up and next-action reads/writes. The authenticated
+routes live under `/api/crm/partner/**`; they do not reuse ordinary CRM response
+objects. Every command decodes a strict input, recomputes its canonical payload
+hash, authorizes inside the write transaction, uses optimistic revision checks
+and records a replay-safe outcome. Partner Customer and nested CRM writes also
+have database guards, so bypassing the service fails closed.
+
+Duplicate lookup returns only name, person type, city and a masked four-digit
+witness. Its short-lived opaque evidence can request a transfer. A decision is
+retained as append-only evidence and notifies the current owner with fixed,
+in-app-only text. Approval changes only Customer ownership; Project
+responsibility, follow-up history, Case ownership and sales credit are not
+rewritten. Those prior-owner children are excluded from the new owner's positive
+projection. Ordinary CRM list/detail/count/related queries exclude Partner-owned
+roots and continue to serve ordinary Customer data through their existing rules.
+
+The migration adds Partner revision/CAS fields, immutable match/transfer/event
+evidence and transaction-local owner/transfer guards. It does not change an
+ordinary Customer until an approved transfer binds that Customer to an active
+Partner Profile. Public contracts 1.9.0 keep wire schemaVersion 1 and add only
+the v2 CRM action vocabulary plus the inferred masked-match type.
+
+## Technical catalog
 
 `createPartnerTechnicalCatalogReader(transaction, { actorId, correlationId })`
 implements public `PartnerTechnicalCatalogPort` from contracts 1.5.0. Call within

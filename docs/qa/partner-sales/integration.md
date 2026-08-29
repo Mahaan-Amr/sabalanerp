@@ -6,7 +6,7 @@ acceptance or permission to deploy.
 ## Technical product transport
 
 `registerPartnerTechnicalRoutes` defines five private/no-store endpoints for the
-public 1.8.0 catalog, lease acquisition, recovery checkpoint, validated-save and Sales policy interfaces. It is
+public 1.9.0 catalog, lease acquisition, recovery checkpoint, validated-save and Sales policy interfaces. It is
 mounted at `/api/partner/technical`; the Sales-owned policy transport is mounted
 at `/api/partner/management/technical-policy`. `createPartnerTechnicalRequestServices` composes real
 request-scoped ports over the injected application `PrismaClient`, current audited

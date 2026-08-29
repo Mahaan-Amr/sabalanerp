@@ -5,7 +5,7 @@ import { createPartnerFixtures, createNegativePartnerFixtures, FixturePartnerQue
 
 test('compiled UI consumer reads isolated retail fixtures without broadening customer output', async () => {
   const fixture = createPartnerFixtures();
-  assert.equal(PARTNER_CONTRACT_VERSION, '1.8.0');
+  assert.equal(PARTNER_CONTRACT_VERSION, '1.9.0');
   const adapter = new FixturePartnerQueryAdapter(['PARTNER_CASE', 'CUSTOMER_OUTPUT']);
   const query = { schemaVersion: 1 as const, purpose: 'PARTNER_CASE' as const, expected: fixture.case.head };
   const result = await adapter.query(query);

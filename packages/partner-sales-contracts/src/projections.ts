@@ -53,6 +53,7 @@ export const DuplicateCustomerMatchSchema = z.object({
   displayName: TextSchema, personType: z.enum(['NATURAL', 'LEGAL']), city: TextSchema,
   maskedWitness: z.string().regex(/^\*{4,}\d{4}$/),
 }).strict();
+export type DuplicateCustomerMatch = z.infer<typeof DuplicateCustomerMatchSchema>;
 export const PartnerProfileViewSchema = z.object({
   schemaVersion: z.literal(1), purpose: z.literal('ONBOARDING'), profileId: IdSchema, revision: RevisionSchema,
   partnerSellerId: IdSchema, status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'TERMINATED']),

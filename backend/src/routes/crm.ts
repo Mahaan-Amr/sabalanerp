@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma';
-import express, { Response } from 'express';
+import express, { Response, type NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
@@ -7,15 +7,60 @@ import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../mi
 import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES, FEATURE_WORKSPACE_MAP } from '../middleware/feature';
 import { expandPersianSearchTokenVariants, normalizePersianSearchTokens } from '../services/crmCustomerSearch';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
+import { randomUUID } from 'node:crypto';
+import { createPartnerCrmService } from '../services/partnerSales/crm/service';
+import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
+import { publishNotificationEvent } from '../services/notificationService';
+import type { Result } from '@sabalanerp/partner-sales-contracts';
 
 const router = express.Router();
 const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
 
+const partnerCorrelationId = (req: any): string => {
+  const header = req.get?.('x-correlation-id');
+  return typeof header === 'string' && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(header) ? header : randomUUID();
+};
+
+const partnerCrmForRequest = (req: any, correlationId: string) => createPartnerCrmService({
+  database: prisma,
+  actorId: req.user.id,
+  authorize: (tx, input) => createAuditedPartnerAuthorization(tx, {
+    actorId: req.user.id, purpose: 'CRM', channel: 'API',
+  }, { correlationId: input.correlationId, reason: input.reason }).authorize(input.action, input.root),
+  notifyTransfer: async (tx, notice) => {
+    await publishNotificationEvent(tx, {
+      type: notice.kind === 'REQUESTED' ? 'PARTNER_CUSTOMER_TRANSFER_REQUESTED' : 'PARTNER_CUSTOMER_TRANSFER_DECIDED',
+      deduplicationKey: `partner-customer-transfer:${notice.transferId}:${notice.kind}`,
+      recipientIds: notice.recipientIds,
+      actorId: notice.actorId,
+      workspace: 'crm',
+      feature: 'partner-customer-transfer',
+      resourceType: 'PARTNER_CUSTOMER_TRANSFER',
+      resourceId: notice.transferId,
+      referenceId: null,
+      actionUrl: '/dashboard/personal/notifications',
+      payload: { correlationId },
+    });
+  },
+});
+
+const sendPartnerResult = (res: Response, result: Result<unknown>): void => {
+  if (result.ok) res.json({ success: true, data: result.value });
+  else res.status(result.error.status).json({ success: false, code: result.error.code, error: result.error.message });
+};
+
+const partnerCrmEndpoint = (handler: (req: any, res: Response) => Promise<void>) =>
+  async (req: any, res: Response, _next: NextFunction): Promise<void> => {
+    try { await handler(req, res); }
+    catch { res.status(500).json({ success: false, code: 'INTERNAL_ERROR', error: 'Server error' }); }
+  };
+
 const isOwnerScopedUser = (req: any) => req?.user?.role && req.user.role !== 'ADMIN';
 
 export const customerScopeForActor = (input: { userId: string; role: string; canAssignOwner: boolean }) => {
-  if (input.role === 'ADMIN' || input.canAssignOwner) return {};
-  return { OR: [{ ownerUserId: input.userId }, { ownerUserId: null, createdBy: input.userId }] };
+  if (input.role === 'ADMIN' || input.canAssignOwner) return { partnerOwnerProfileId: null };
+  return { partnerOwnerProfileId: null,
+    OR: [{ ownerUserId: input.userId }, { ownerUserId: null, createdBy: input.userId }] };
 };
 
 const buildCustomerScope = async (req: any) => {
@@ -219,8 +264,8 @@ const ensureProjectAccessOrDeny = async (
   projectId: string,
   options: { allowSummaryOnly?: boolean } = {}
 ) => {
-  const project = await prisma.crmPotentialProject.findUnique({
-    where: { id: projectId },
+  const project = await prisma.crmPotentialProject.findFirst({
+    where: { id: projectId, customer: { partnerOwnerProfileId: null } },
     include: projectInclude
   });
 
@@ -476,6 +521,73 @@ router.get('/sellers', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE
 // @desc    Get all CRM customers
 // @route   GET /api/crm/customers
 // @access  Private/CRM or Sales Customer View Access
+// Partner CRM is deliberately separate from ordinary CRM projections. Every
+// request is decoded by the deep service and authorized again inside the same
+// database transaction; route/UI visibility is never permission evidence.
+router.get('/partner/customers', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  const limit = req.query.limit === undefined ? undefined : Number(req.query.limit);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).listCustomers({ correlationId,
+    ...(typeof req.query.cursor === 'string' ? { cursor: req.query.cursor } : {}),
+    ...(typeof req.query.query === 'string' ? { query: req.query.query } : {}), ...(limit === undefined ? {} : { limit }) }));
+}));
+
+router.get('/partner/customers/:id', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).readCustomer({ customerId: req.params.id, correlationId }));
+}));
+
+router.post('/partner/customers', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).createCustomer({ ...req.body, correlationId }));
+}));
+
+router.put('/partner/customers/:id', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).updateCustomer({ ...req.body,
+    customerId: req.params.id, correlationId }));
+}));
+
+router.post('/partner/customers/:id/projects', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).createProject({ ...req.body,
+    customerId: req.params.id, correlationId }));
+}));
+
+router.put('/partner/customers/:id/projects/:projectId', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).updateProject({ ...req.body,
+    customerId: req.params.id, projectId: req.params.projectId, correlationId }));
+}));
+
+router.post('/partner/customers/:id/follow-ups', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).createFollowUp({ ...req.body,
+    customerId: req.params.id, correlationId }));
+}));
+
+router.put('/partner/customers/:id/next-actions/:actionId/complete', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).completeNextAction({ ...req.body,
+    customerId: req.params.id, actionId: req.params.actionId, correlationId }));
+}));
+
+router.post('/partner/customer-duplicates/search', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).findDuplicate({ ...req.body, correlationId }));
+}));
+
+router.post('/partner/customer-transfers', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).requestTransfer({ ...req.body, correlationId }));
+}));
+
+router.post('/partner/customer-transfers/:id/decision', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
+  const correlationId = partnerCorrelationId(req);
+  sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).decideTransfer({ ...req.body,
+    transferId: req.params.id, correlationId }));
+}));
+
 router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
@@ -609,8 +721,8 @@ router.get('/customers', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMER
 // @access  Private/CRM or Sales Customer View Access
 router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUSTOMERS_VIEW, FEATURES.SALES_CUSTOMERS_VIEW], FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
   try {
-    const customer = await prisma.crmCustomer.findUnique({
-      where: { id: req.params.id },
+    const customer = await prisma.crmCustomer.findFirst({
+      where: { id: req.params.id, partnerOwnerProfileId: null },
       include: {
         primaryContact: true,
         contacts: {
@@ -2024,7 +2136,7 @@ router.get('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CRM
     const scope = String(req.query.scope || '').trim();
     const canManage = await canManageCrmPipeline(req);
 
-    const where: any = { isActive: true };
+    const where: any = { isActive: true, customer: { partnerOwnerProfileId: null } };
     if (status) where.status = status;
     if (workType) where.workType = workType;
     if (sellerId && canManage) where.responsibleSellerId = sellerId;
@@ -2119,7 +2231,8 @@ router.post('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CR
       return;
     }
 
-    const customer = await prisma.crmCustomer.findUnique({ where: { id: req.body.customerId }, select: { id: true } });
+    const customer = await prisma.crmCustomer.findFirst({ where: { id: req.body.customerId,
+      partnerOwnerProfileId: null }, select: { id: true } });
     if (!customer) {
       res.status(404).json({ success: false, error: 'مخاطب/مشتری پیدا نشد.' });
       return;
@@ -2291,7 +2404,7 @@ router.get('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSP
     const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
     const skip = (page - 1) * limit;
     const canManage = await canManageCrmPipeline(req);
-    const where: any = {};
+    const where: any = { customer: { partnerOwnerProfileId: null } };
     if (req.query.customerId) where.customerId = String(req.query.customerId);
     if (req.query.potentialProjectId) where.potentialProjectId = String(req.query.potentialProjectId);
     if (!canManage && req.user?.role !== 'ADMIN') where.sellerId = req.user.id;
@@ -2335,7 +2448,8 @@ router.post('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKS
       return;
     }
 
-    const customer = await prisma.crmCustomer.findUnique({ where: { id: req.body.customerId }, select: { id: true } });
+    const customer = await prisma.crmCustomer.findFirst({ where: { id: req.body.customerId,
+      partnerOwnerProfileId: null }, select: { id: true } });
     if (!customer) {
       res.status(404).json({ success: false, error: 'مخاطب/مشتری پیدا نشد.' });
       return;
@@ -2413,7 +2527,7 @@ router.post('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKS
 router.get('/next-actions', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_NEXT_ACTIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
   try {
     const canManage = await canManageCrmPipeline(req);
-    const where: any = {};
+    const where: any = { customer: { partnerOwnerProfileId: null } };
     if (req.query.status) where.status = String(req.query.status);
     if (req.query.customerId) where.customerId = String(req.query.customerId);
     if (req.query.potentialProjectId) where.potentialProjectId = String(req.query.potentialProjectId);
@@ -2435,7 +2549,8 @@ router.get('/next-actions', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORK
 
 router.put('/next-actions/:id/complete', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_NEXT_ACTIONS_EDIT, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response): Promise<void> => {
   try {
-    const action = await prisma.crmNextAction.findUnique({ where: { id: req.params.id }, include: nextActionInclude });
+    const action = await prisma.crmNextAction.findFirst({ where: { id: req.params.id,
+      customer: { partnerOwnerProfileId: null } }, include: nextActionInclude });
     if (!action) {
       res.status(404).json({ success: false, error: 'اقدام بعدی پیدا نشد.' });
       return;
@@ -2482,8 +2597,10 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
     startOfToday.setHours(0, 0, 0, 0);
     const endOfToday = new Date(now);
     endOfToday.setHours(23, 59, 59, 999);
-    const projectScope: any = canManage || req.user?.role === 'ADMIN' ? {} : { responsibleSellerId: req.user.id };
-    const actionScope: any = canManage || req.user?.role === 'ADMIN' ? {} : { assignedToId: req.user.id };
+    const projectScope: any = { customer: { partnerOwnerProfileId: null },
+      ...(canManage || req.user?.role === 'ADMIN' ? {} : { responsibleSellerId: req.user.id }) };
+    const actionScope: any = { customer: { partnerOwnerProfileId: null },
+      ...(canManage || req.user?.role === 'ADMIN' ? {} : { assignedToId: req.user.id }) };
 
     const [
       totalCustomers,
@@ -2502,8 +2619,8 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
       pipelineValue,
       recentTimeline
     ] = await Promise.all([
-      prisma.crmCustomer.count(),
-      prisma.crmCustomer.count({ where: { status: 'Active' } }),
+      prisma.crmCustomer.count({ where: { partnerOwnerProfileId: null } }),
+      prisma.crmCustomer.count({ where: { status: 'Active', partnerOwnerProfileId: null } }),
       prisma.crmPotentialProject.count({ where: { isActive: true, ...projectScope } }),
       prisma.crmNextAction.findMany({
         where: { status: 'باز', dueAt: { lt: startOfToday }, ...actionScope },
@@ -2524,6 +2641,7 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
         take: 20
       }),
       prisma.crmCustomer.findMany({
+        where: { partnerOwnerProfileId: null },
         take: 5,
         orderBy: { createdAt: 'desc' },
         include: {
@@ -2559,9 +2677,10 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
         _sum: { estimatedValue: true }
       }),
       prisma.crmTimelineEvent.findMany({
-        where: projectScope.responsibleSellerId
-          ? { potentialProject: { responsibleSellerId: projectScope.responsibleSellerId } }
-          : {},
+        where: { customer: { partnerOwnerProfileId: null },
+          ...(projectScope.responsibleSellerId
+            ? { potentialProject: { responsibleSellerId: projectScope.responsibleSellerId } }
+            : {}) },
         include: {
           actor: { select: { id: true, firstName: true, lastName: true, username: true } },
           customer: { select: { id: true, firstName: true, lastName: true, companyName: true } },

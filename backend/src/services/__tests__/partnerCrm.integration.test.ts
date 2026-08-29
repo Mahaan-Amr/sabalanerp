@@ -1,0 +1,231 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { randomUUID } from 'node:crypto';
+import { PrismaClient, type Prisma } from '@prisma/client';
+import { canonicalHash, type PartnerActionV2, type PermissionContext } from '@sabalanerp/partner-sales-contracts';
+import { createPartnerCrmService } from '../partnerSales/crm/service';
+import type { PartnerCustomerSummary, PartnerNextActionView, PartnerProjectView } from '../partnerSales/crm/contracts';
+
+const databaseUrl = () => {
+  const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
+  if (!['localhost', '127.0.0.1', 'postgres'].includes(url.hostname) || url.pathname !== '/sabalanerp') {
+    throw new Error('Existing sabalanerp-local database required');
+  }
+  url.searchParams.set('connection_limit', '2');
+  url.searchParams.set('pool_timeout', '10');
+  return url.toString();
+};
+
+const intentHash = async (value: Record<string, unknown>) => canonicalHash(Object.fromEntries(Object.entries(value)
+  .filter(([key]) => !['commandId', 'correlationId', 'idempotency', 'idempotencyKey', 'payloadHash'].includes(key))));
+
+const transactionDatabase = (tx: Prisma.TransactionClient): PrismaClient => ({
+  $transaction: async (run: (transaction: Prisma.TransactionClient) => unknown) => run(tx),
+} as unknown as PrismaClient);
+
+function authorize(actorId: string, partnerSellerId: string, persona: PermissionContext['persona']) {
+  return async (_tx: Prisma.TransactionClient, input: { action: PartnerActionV2; root: PermissionContext['root'] }) => ({
+    ok: true as const,
+    value: {
+      actorId,
+      persona,
+      isAdmin: persona === 'INTERNAL',
+      partnerSellerId,
+      partnerStatus: 'ACTIVE' as const,
+      root: input.root,
+      purpose: 'CRM' as const,
+      channel: 'API' as const,
+      scope: persona === 'PARTNER' ? 'OWN' as const : 'COMPANY' as const,
+      resourceVisible: true,
+      actionGranted: true,
+      authorizationRevision: 1,
+      lifecycleRevision: 1,
+      evaluatedAt: new Date().toISOString(),
+    },
+  });
+}
+
+test('masked duplicate and approved transfer expose no prior CRM history and preserve Project responsibility', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const rollback = new Error('rollback partner CRM fixture');
+  try {
+    await assert.rejects(database.$transaction(async tx => {
+      const suffix = randomUUID();
+      const oldOwnerId = `partner-crm-old-${suffix}`;
+      const partnerId = `partner-crm-new-${suffix}`;
+      const adminId = `partner-crm-admin-${suffix}`;
+      const customerId = `partner-crm-customer-${suffix}`;
+      const projectId = `partner-crm-project-${suffix}`;
+      for (const [id, role] of [[oldOwnerId, 'SALES'], [partnerId, 'SALES'], [adminId, 'ADMIN']] as const) {
+        await tx.user.create({ data: { id, username: id, email: `${id}@example.invalid`, password: 'not-a-login',
+          firstName: 'Fixture', lastName: 'Partner CRM', role } });
+      }
+      await tx.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
+      await tx.crmCustomer.create({ data: { id: customerId, ownerUserId: oldOwnerId, firstName: 'مالک',
+        lastName: 'قبلی', city: 'تهران', nationalCode: `9${suffix.replace(/-/g, '').slice(0, 9)}`,
+        phoneNumbers: { create: { number: '09121234567', type: 'mobile', isPrimary: true } } } });
+      await tx.crmPotentialProject.create({ data: { id: projectId, customerId, responsibleSellerId: oldOwnerId,
+        title: 'پروژه تاریخی محرمانه', workType: 'نما' } });
+
+      const notices: Array<{ kind: string; recipients: string[] }> = [];
+      const partner = createPartnerCrmService({ database: transactionDatabase(tx), actorId: partnerId,
+        authorize: authorize(partnerId, partnerId, 'PARTNER'),
+        notifyTransfer: async (_transaction, notice) => { notices.push({ kind: notice.kind, recipients: notice.recipientIds }); } });
+      const match = await partner.findDuplicate({ schemaVersion: 1, correlationId: `corr-${suffix}`, phone: '09121234567' });
+      assert.equal(match.ok, true);
+      if (!match.ok) throw new Error('duplicate match expected');
+      assert.equal(match.value.maskedWitness, '********4567');
+      assert.equal('customerId' in match.value, false);
+      assert.equal(JSON.stringify(match.value).includes(projectId), false);
+
+      const requestBase = { schemaVersion: 1 as const, commandId: `request-${suffix}`, correlationId: `corr-${suffix}`,
+        matchReference: match.value.matchReference, reason: 'درخواست انتقال برای پیگیری جاری', idempotencyKey: `key-${suffix}` };
+      const request = await partner.requestTransfer({ ...requestBase, payloadHash: await intentHash(requestBase) });
+      assert.equal(request.ok, true);
+      if (!request.ok) throw new Error('transfer request expected');
+      assert.deepEqual(notices, [{ kind: 'REQUESTED', recipients: [oldOwnerId] }]);
+
+      const decisionIntent = { schemaVersion: 1 as const, type: 'CUSTOMER_TRANSFER_DECIDE' as const,
+        transferId: request.value.transferId, expectedRevision: 1, outcome: 'APPROVE' as const,
+        reason: 'تأیید انتقال بدون جابه‌جایی تاریخچه' };
+      const decisionHash = await intentHash(decisionIntent);
+      const admin = createPartnerCrmService({ database: transactionDatabase(tx), actorId: adminId,
+        authorize: authorize(adminId, partnerId, 'INTERNAL'),
+        notifyTransfer: async (_transaction, notice) => { notices.push({ kind: notice.kind, recipients: notice.recipientIds }); } });
+      const decision = await admin.decideTransfer({ ...decisionIntent, commandId: `decision-${suffix}`,
+        correlationId: `decision-corr-${suffix}`, idempotency: { actorId: adminId,
+          operation: 'CUSTOMER_TRANSFER_DECIDE', targetId: request.value.transferId,
+          key: `decision-key-${suffix}`, payloadHash: decisionHash } });
+      assert.equal(decision.ok, true);
+
+      const customer = await tx.crmCustomer.findUniqueOrThrow({ where: { id: customerId }, select: {
+        ownerUserId: true, partnerOwnerProfileId: true, partnerRevision: true } });
+      assert.deepEqual(customer, { ownerUserId: partnerId, partnerOwnerProfileId: partnerId, partnerRevision: 1 });
+      const project = await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId }, select: {
+        responsibleSellerId: true, partnerRevision: true, title: true } });
+      assert.deepEqual(project, { responsibleSellerId: oldOwnerId, partnerRevision: null, title: 'پروژه تاریخی محرمانه' });
+
+      const detail = await partner.readCustomer({ customerId, correlationId: `read-${suffix}` });
+      assert.equal(detail.ok, true);
+      if (detail.ok) {
+        assert.deepEqual(detail.value.projects, []);
+        assert.equal(JSON.stringify(detail.value).includes('پروژه تاریخی محرمانه'), false);
+      }
+      assert.deepEqual(notices[1], { kind: 'APPROVED', recipients: [oldOwnerId, partnerId] });
+      throw rollback;
+    }, { timeout: 30_000 }), error => error === rollback);
+  } finally {
+    await database.$disconnect();
+  }
+});
+
+test('database guards reject direct Partner Customer and nested CRM writes outside the owner transaction', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const rollback = new Error('rollback partner CRM guard fixture');
+  try {
+    await assert.rejects(database.$transaction(async tx => {
+      const suffix = randomUUID();
+      const partnerId = `partner-crm-guard-${suffix}`;
+      const customerId = `partner-crm-guard-customer-${suffix}`;
+      await tx.user.create({ data: { id: partnerId, username: partnerId, email: `${partnerId}@example.invalid`,
+        password: 'not-a-login', firstName: 'Fixture', lastName: 'Guard' } });
+      await tx.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${partnerId}, true)`;
+      await tx.crmCustomer.create({ data: { id: customerId, ownerUserId: partnerId, partnerOwnerProfileId: partnerId,
+        partnerRevision: 1, firstName: 'مشتری', lastName: 'همکار' } });
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', '', true)`;
+      await tx.$executeRawUnsafe('SAVEPOINT direct_customer_write');
+      await assert.rejects(tx.crmCustomer.update({ where: { id: customerId }, data: { partnerRevision: 2, city: 'قم' } }),
+        /current owner Profile/);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT direct_customer_write');
+      await tx.$executeRawUnsafe('SAVEPOINT nested_phone_write');
+      await assert.rejects(tx.phoneNumber.create({ data: { customerId, number: '09120000000', type: 'mobile' } }),
+        /current owner Profile/);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT nested_phone_write');
+      throw rollback;
+    }, { timeout: 20_000 }), error => error === rollback);
+  } finally {
+    await database.$disconnect();
+  }
+});
+
+test('Partner CRM commands use CAS and idempotency while list/count/detail remain owner scoped', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const rollback = new Error('rollback partner CRM command fixture');
+  try {
+    await assert.rejects(database.$transaction(async tx => {
+      const suffix = randomUUID();
+      const partnerId = `partner-crm-command-${suffix}`;
+      await tx.user.create({ data: { id: partnerId, username: partnerId, email: `${partnerId}@example.invalid`,
+        password: 'not-a-login', firstName: 'Fixture', lastName: 'Commands', role: 'SALES' } });
+      await tx.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
+      const service = createPartnerCrmService({ database: transactionDatabase(tx), actorId: partnerId,
+        authorize: authorize(partnerId, partnerId, 'PARTNER'), notifyTransfer: async () => undefined });
+
+      const createBase = { schemaVersion: 1 as const, commandId: `create-${suffix}`, correlationId: `corr-${suffix}`,
+        firstName: 'مشتری', lastName: 'اختصاصی', customerType: 'Individual' as const, city: 'تهران',
+        phone: '09123334455', reason: 'ثبت مشتری توسط مالک جاری', idempotencyKey: `create-key-${suffix}` };
+      const createCommand = { ...createBase, payloadHash: await intentHash(createBase) };
+      const created = await service.createCustomer(createCommand);
+      assert.equal(created.ok, true);
+      if (!created.ok) throw new Error('customer create expected');
+      const replay = await service.createCustomer(createCommand);
+      assert.equal(replay.ok, true);
+      assert.equal(await tx.crmCustomer.count({ where: { partnerOwnerProfileId: partnerId } }), 1);
+      const conflictBase = { ...createBase, firstName: 'نام متفاوت' };
+      const conflict = await service.createCustomer({ ...conflictBase, payloadHash: await intentHash(conflictBase) });
+      assert.equal(conflict.ok, false);
+      if (!conflict.ok) assert.equal(conflict.error.code, 'IDEMPOTENCY_CONFLICT');
+
+      const customerId = (created.value.customer as PartnerCustomerSummary).customerId;
+      const updateBase = { ...createBase, commandId: `update-${suffix}`, customerId, expectedRevision: 1,
+        firstName: 'مشتری ویرایش‌شده', reason: 'اصلاح اطلاعات مشتری جاری', idempotencyKey: `update-key-${suffix}` };
+      const updated = await service.updateCustomer({ ...updateBase, payloadHash: await intentHash(updateBase) });
+      assert.equal(updated.ok, true);
+      const staleBase = { ...updateBase, commandId: `stale-${suffix}`, idempotencyKey: `stale-key-${suffix}` };
+      const stale = await service.updateCustomer({ ...staleBase, payloadHash: await intentHash(staleBase) });
+      assert.equal(stale.ok, false);
+      if (!stale.ok) assert.equal(stale.error.code, 'ROW_STALE');
+
+      const projectBase = { schemaVersion: 1 as const, commandId: `project-${suffix}`, correlationId: `project-corr-${suffix}`,
+        customerId, title: 'پروژه جاری', workType: 'نما', status: 'جدید', probability: 40,
+        reason: 'ثبت پروژه برای مشتری جاری', idempotencyKey: `project-key-${suffix}` };
+      const projectResult = await service.createProject({ ...projectBase, payloadHash: await intentHash(projectBase) });
+      assert.equal(projectResult.ok, true);
+      if (!projectResult.ok) throw new Error('project create expected');
+
+      const followUpBase = { schemaVersion: 1 as const, commandId: `follow-${suffix}`, correlationId: `follow-corr-${suffix}`,
+        customerId, projectId: (projectResult.value.project as PartnerProjectView).projectId, communicationType: 'تماس', workType: 'نما',
+        happenedAt: new Date().toISOString(), summary: 'گفت‌وگوی ثبت‌شده', outcome: 'ادامه پیگیری',
+        nextAction: { title: 'تماس بعدی', communicationType: 'تماس', dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+          instructions: 'پیگیری نتیجه' }, reason: 'ثبت تاریخچه پیگیری جاری', idempotencyKey: `follow-key-${suffix}` };
+      const followed = await service.createFollowUp({ ...followUpBase, payloadHash: await intentHash(followUpBase) });
+      assert.equal(followed.ok, true);
+      if (!followed.ok || !followed.value.nextAction) throw new Error('next action expected');
+
+      const completeBase = { schemaVersion: 1 as const, commandId: `complete-${suffix}`,
+        correlationId: `complete-corr-${suffix}`, customerId,
+        actionId: (followed.value.nextAction as PartnerNextActionView).actionId,
+        expectedRevision: 1, reason: 'تکمیل اقدام توسط مسئول جاری', idempotencyKey: `complete-key-${suffix}` };
+      const completed = await service.completeNextAction({ ...completeBase, payloadHash: await intentHash(completeBase) });
+      assert.equal(completed.ok, true);
+
+      const list = await service.listCustomers({ correlationId: `list-${suffix}`, limit: 10 });
+      assert.equal(list.ok, true);
+      if (list.ok) {
+        assert.equal(list.value.total, 1);
+        assert.deepEqual(list.value.items.map(item => item.customerId), [customerId]);
+      }
+      const detail = await service.readCustomer({ customerId, correlationId: `detail-${suffix}` });
+      assert.equal(detail.ok, true);
+      if (detail.ok) {
+        assert.equal(detail.value.projects.length, 1);
+        assert.equal(detail.value.followUps.length, 1);
+        assert.equal(detail.value.nextActions[0]?.status, 'انجام شده');
+      }
+      throw rollback;
+    }, { timeout: 30_000 }), error => error === rollback);
+  } finally {
+    await database.$disconnect();
+  }
+});

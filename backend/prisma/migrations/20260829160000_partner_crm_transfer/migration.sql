@@ -1,3 +1,5 @@
+BEGIN;
+
 ALTER TABLE crm_customers ADD COLUMN "partnerRevision" integer;
 ALTER TABLE crm_potential_projects ADD COLUMN "partnerRevision" integer;
 ALTER TABLE crm_next_actions ADD COLUMN "partnerRevision" integer;
@@ -133,7 +135,11 @@ BEGIN
       END IF;
       RETURN OLD;
     END IF;
-    owner_profile_id := COALESCE(OLD."partnerOwnerProfileId", NEW."partnerOwnerProfileId");
+    IF TG_OP = 'INSERT' THEN
+      owner_profile_id := NEW."partnerOwnerProfileId";
+    ELSE
+      owner_profile_id := COALESCE(OLD."partnerOwnerProfileId", NEW."partnerOwnerProfileId");
+    END IF;
     IF owner_profile_id IS NULL THEN RETURN NEW; END IF;
     IF transfer_id IS NOT NULL AND TG_OP = 'UPDATE' THEN
       SELECT EXISTS (SELECT 1 FROM partner_customer_transfers transfer
@@ -161,14 +167,19 @@ BEGIN
     END IF;
     SELECT "userId" INTO owner_user_id FROM partner_profiles WHERE id = owner_profile_id FOR UPDATE;
     IF NEW."ownerUserId" IS DISTINCT FROM owner_user_id OR NEW."partnerOwnerProfileId" IS DISTINCT FROM owner_profile_id
-       OR NEW."partnerRevision" IS NULL OR (TG_OP = 'INSERT' AND NEW."partnerRevision" <> 1)
-       OR (TG_OP = 'UPDATE' AND NEW."partnerRevision" <> OLD."partnerRevision" + 1) THEN
+       OR NEW."partnerRevision" IS NULL THEN
+      RAISE EXCEPTION 'Partner Customer owner or revision mismatch' USING ERRCODE = '23514';
+    END IF;
+    IF TG_OP = 'INSERT' AND NEW."partnerRevision" <> 1 THEN
+      RAISE EXCEPTION 'Partner Customer owner or revision mismatch' USING ERRCODE = '23514';
+    END IF;
+    IF TG_OP = 'UPDATE' AND NEW."partnerRevision" <> OLD."partnerRevision" + 1 THEN
       RAISE EXCEPTION 'Partner Customer owner or revision mismatch' USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
   END IF;
 
-  customer_id := COALESCE(NEW."customerId", OLD."customerId");
+  IF TG_OP = 'DELETE' THEN customer_id := OLD."customerId"; ELSE customer_id := NEW."customerId"; END IF;
   SELECT customer."partnerOwnerProfileId", profile."userId" INTO owner_profile_id, owner_user_id
     FROM crm_customers customer LEFT JOIN partner_profiles profile ON profile.id = customer."partnerOwnerProfileId"
     WHERE customer.id = customer_id FOR UPDATE OF customer;
@@ -176,14 +187,53 @@ BEGIN
     IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
     RETURN NEW;
   END IF;
+  -- A Customer transfer does not transfer an existing Project or its work.
+  -- Legacy child rows (partnerRevision NULL) retain their independent seller
+  -- responsibility and continue through ordinary CRM authorization. Partner
+  -- children (positive revision) remain exclusively owner-guarded below.
+  IF TG_TABLE_NAME = 'crm_potential_projects' AND TG_OP = 'UPDATE' THEN
+    IF OLD."partnerRevision" IS NULL AND NEW."partnerRevision" IS NULL
+       AND NEW."customerId" IS NOT DISTINCT FROM OLD."customerId"
+       AND NEW."responsibleSellerId" IS NOT DISTINCT FROM OLD."responsibleSellerId" THEN
+      RETURN NEW;
+    END IF;
+  END IF;
+  IF TG_TABLE_NAME = 'crm_follow_up_reports' THEN
+    IF TG_OP = 'INSERT' AND NEW."potentialProjectId" IS NOT NULL
+       AND EXISTS (SELECT 1 FROM crm_potential_projects project
+         WHERE project.id = NEW."potentialProjectId" AND project."customerId" = customer_id
+           AND project."partnerRevision" IS NULL AND project."responsibleSellerId" = NEW."sellerId") THEN
+      RETURN NEW;
+    END IF;
+  END IF;
+  IF TG_TABLE_NAME = 'crm_next_actions' AND TG_OP = 'INSERT' THEN
+    IF NEW."potentialProjectId" IS NOT NULL AND NEW."partnerRevision" IS NULL
+       AND EXISTS (SELECT 1 FROM crm_potential_projects project
+         WHERE project.id = NEW."potentialProjectId" AND project."customerId" = customer_id
+           AND project."partnerRevision" IS NULL AND project."responsibleSellerId" = NEW."assignedToId") THEN
+      RETURN NEW;
+    END IF;
+  END IF;
+  IF TG_TABLE_NAME = 'crm_next_actions' AND TG_OP = 'UPDATE' THEN
+    IF OLD."partnerRevision" IS NULL AND NEW."partnerRevision" IS NULL
+       AND NEW."customerId" IS NOT DISTINCT FROM OLD."customerId"
+       AND NEW."assignedToId" IS NOT DISTINCT FROM OLD."assignedToId" THEN
+      RETURN NEW;
+    END IF;
+  END IF;
   IF writer_profile_id IS DISTINCT FROM owner_profile_id THEN
     RAISE EXCEPTION 'Partner CRM child mutation requires its current owner Profile' USING ERRCODE = '23514';
   END IF;
   IF TG_TABLE_NAME = 'crm_potential_projects' THEN
     IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'Partner Project history is retained' USING ERRCODE = '23514'; END IF;
     IF NEW."responsibleSellerId" IS DISTINCT FROM owner_user_id OR NEW."customerId" IS DISTINCT FROM customer_id
-       OR NEW."partnerRevision" IS NULL OR (TG_OP = 'INSERT' AND NEW."partnerRevision" <> 1)
-       OR (TG_OP = 'UPDATE' AND NEW."partnerRevision" <> OLD."partnerRevision" + 1) THEN
+       OR NEW."partnerRevision" IS NULL THEN
+      RAISE EXCEPTION 'Partner Project owner or revision mismatch' USING ERRCODE = '23514';
+    END IF;
+    IF TG_OP = 'INSERT' AND NEW."partnerRevision" <> 1 THEN
+      RAISE EXCEPTION 'Partner Project owner or revision mismatch' USING ERRCODE = '23514';
+    END IF;
+    IF TG_OP = 'UPDATE' AND NEW."partnerRevision" <> OLD."partnerRevision" + 1 THEN
       RAISE EXCEPTION 'Partner Project owner or revision mismatch' USING ERRCODE = '23514';
     END IF;
   ELSIF TG_TABLE_NAME = 'crm_follow_up_reports' THEN
@@ -193,8 +243,13 @@ BEGIN
   ELSIF TG_TABLE_NAME = 'crm_next_actions' THEN
     IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'Partner next-action history is retained' USING ERRCODE = '23514'; END IF;
     IF NEW."assignedToId" IS DISTINCT FROM owner_user_id OR NEW."customerId" IS DISTINCT FROM customer_id
-       OR NEW."partnerRevision" IS NULL OR (TG_OP = 'INSERT' AND NEW."partnerRevision" <> 1)
-       OR (TG_OP = 'UPDATE' AND NEW."partnerRevision" <> OLD."partnerRevision" + 1) THEN
+       OR NEW."partnerRevision" IS NULL THEN
+      RAISE EXCEPTION 'Partner next action owner or revision mismatch' USING ERRCODE = '23514';
+    END IF;
+    IF TG_OP = 'INSERT' AND NEW."partnerRevision" <> 1 THEN
+      RAISE EXCEPTION 'Partner next action owner or revision mismatch' USING ERRCODE = '23514';
+    END IF;
+    IF TG_OP = 'UPDATE' AND NEW."partnerRevision" <> OLD."partnerRevision" + 1 THEN
       RAISE EXCEPTION 'Partner next action owner or revision mismatch' USING ERRCODE = '23514';
     END IF;
   END IF;
@@ -243,3 +298,5 @@ BEGIN
   END IF;
 END;
 $$;
+
+COMMIT;

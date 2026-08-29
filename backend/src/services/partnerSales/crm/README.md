@@ -13,9 +13,18 @@ witness. Its short-lived opaque evidence can request a transfer. A decision is
 retained as append-only evidence and notifies the current owner with fixed,
 in-app-only text. Approval changes only Customer ownership; Project
 responsibility, follow-up history, Case ownership and sales credit are not
-rewritten. Those prior-owner children are excluded from the new owner's positive
-projection. Ordinary CRM list/detail/count/related queries exclude Partner-owned
-roots and continue to serve ordinary Customer data through their existing rules.
+rewritten. Approval is blocked while the previous owner has an unresolved Partner
+Case; its cancellation/remediation workflow must finish first. Retained
+prior-owner Projects and their follow-ups remain available to that responsible
+seller through ordinary CRM, but are excluded from the new Partner owner's
+positive projection. Ordinary Customer list/detail/count/search responses exclude
+Partner-owned roots and continue to serve ordinary Customer data through their
+existing rules.
+
+Project status, work type and communication type use the closed Persian CRM
+vocabulary. A Partner cannot directly mark a Project `برنده شده`; only the
+existing Sales Contract linkage owns that transition. `از دست رفته` requires a
+lost reason, while `راکد` requires a dormant reason and may carry a revisit date.
 
 The migration adds Partner revision/CAS fields, immutable match/transfer/event
 evidence and transaction-local owner/transfer guards. It does not change an

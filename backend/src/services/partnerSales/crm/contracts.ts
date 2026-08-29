@@ -9,6 +9,13 @@ const PersianReasonSchema = TextSchema.refine(reason => /[\u0600-\u06ff]/u.test(
   'Persian business reason required');
 const InstantSchema = z.string().datetime({ precision: 3 });
 const RevisionSchema = z.number().int().positive().safe();
+export const PartnerProjectStatusSchema = z.enum(['جدید', 'در حال پیگیری', 'نیازمند پیشنهاد', 'آماده قرارداد',
+  'برنده شده', 'از دست رفته', 'راکد']);
+export const PartnerCrmCommunicationTypeSchema = z.enum(['تماس تلفنی', 'پیامک / پیام‌رسان',
+  'مراجعه حضوری به دفتر سبلان', 'بازدید از پروژه', 'جلسه حضوری', 'ارسال پیش‌فاکتور / پیشنهاد',
+  'پیگیری مالی', 'سایر']);
+export const PartnerCrmWorkTypeSchema = z.enum(['فروش سنگ پروژه ساختمانی', 'فروش همکاری',
+  'خدمات / ابزار / فرآوری', 'بارگیری یا تحویل مرتبط با فروش قبلی', 'استعلام قیمت', 'سایر']);
 
 const optionalText = TextSchema.max(500).optional();
 export const PartnerCustomerCreateSchema = z.object({ schemaVersion: z.literal(1), commandId: IdSchema,
@@ -31,9 +38,11 @@ export const PartnerCustomerUpdateSchema = z.object({ schemaVersion: z.literal(1
 export type PartnerCustomerUpdate = z.infer<typeof PartnerCustomerUpdateSchema>;
 
 export const PartnerProjectCreateSchema = z.object({ schemaVersion: z.literal(1), commandId: IdSchema,
-  correlationId: IdSchema, customerId: IdSchema, title: TextSchema.max(300), workType: TextSchema.max(200),
-  status: TextSchema.max(100), address: TextSchema.max(1000).optional(), probability: z.number().int().min(0).max(100).optional(),
-  expectedCloseDate: InstantSchema.optional(), description: TextSchema.max(2000).optional(), reason: PersianReasonSchema,
+  correlationId: IdSchema, customerId: IdSchema, title: TextSchema.max(300), workType: PartnerCrmWorkTypeSchema,
+  status: PartnerProjectStatusSchema, address: TextSchema.max(1000).optional(), probability: z.number().int().min(0).max(100).optional(),
+  expectedCloseDate: InstantSchema.optional(), description: TextSchema.max(2000).optional(),
+  lostReason: TextSchema.max(1000).optional(), dormantReason: TextSchema.max(1000).optional(),
+  revisitDate: InstantSchema.optional(), reason: PersianReasonSchema,
   idempotencyKey: IdSchema, payloadHash: z.string().regex(/^sha256-v1:[a-f0-9]{64}$/),
 }).strict();
 export type PartnerProjectCreate = z.infer<typeof PartnerProjectCreateSchema>;
@@ -44,10 +53,10 @@ export const PartnerProjectUpdateSchema = PartnerProjectCreateSchema.omit({ comm
 export type PartnerProjectUpdate = z.infer<typeof PartnerProjectUpdateSchema>;
 
 export const PartnerFollowUpCreateSchema = z.object({ schemaVersion: z.literal(1), commandId: IdSchema,
-  correlationId: IdSchema, customerId: IdSchema, projectId: IdSchema.optional(), communicationType: TextSchema.max(100),
-  workType: TextSchema.max(200), happenedAt: InstantSchema, summary: TextSchema.max(2000), outcome: TextSchema.max(1000),
-  nextAction: z.object({ title: TextSchema.max(300), communicationType: TextSchema.max(100),
-    workType: TextSchema.max(200).optional(), dueAt: InstantSchema, instructions: TextSchema.max(2000) }).strict().optional(),
+  correlationId: IdSchema, customerId: IdSchema, projectId: IdSchema.optional(), communicationType: PartnerCrmCommunicationTypeSchema,
+  workType: PartnerCrmWorkTypeSchema, happenedAt: InstantSchema, summary: TextSchema.max(2000), outcome: TextSchema.max(1000),
+  nextAction: z.object({ title: TextSchema.max(300), communicationType: PartnerCrmCommunicationTypeSchema,
+    workType: PartnerCrmWorkTypeSchema.optional(), dueAt: InstantSchema, instructions: TextSchema.max(2000) }).strict().optional(),
   reason: PersianReasonSchema, idempotencyKey: IdSchema,
   payloadHash: z.string().regex(/^sha256-v1:[a-f0-9]{64}$/),
 }).strict();
@@ -74,7 +83,8 @@ export type PartnerTransferRequest = z.infer<typeof PartnerTransferRequestSchema
 export type PartnerCustomerSummary = { schemaVersion: 1; purpose: 'PARTNER_CRM_CUSTOMER'; customerId: string;
   revision: number; displayName: string; personType: 'NATURAL' | 'LEGAL'; city?: string; phone: string };
 export type PartnerProjectView = { projectId: string; revision: number; title: string; status: string; workType: string;
-  address?: string; probability?: number; expectedCloseDate?: string; description?: string };
+  address?: string; probability?: number; expectedCloseDate?: string; description?: string; lostReason?: string;
+  dormantReason?: string; revisitDate?: string };
 export type PartnerFollowUpView = { followUpId: string; projectId?: string; communicationType: string; workType: string;
   happenedAt: string; summary: string; outcome: string; hasNextAction: boolean; noNextActionReason?: string };
 export type PartnerNextActionView = { actionId: string; projectId?: string; revision: number; title: string;

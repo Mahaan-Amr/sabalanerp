@@ -9,7 +9,7 @@ import { PartnerCustomerCreateSchema, PartnerCustomerUpdateSchema, PartnerDuplic
 
 type Root = PermissionContext['root'];
 type Authorization = (tx: Prisma.TransactionClient, input: { action: PartnerActionV2; root: Root;
-  correlationId: string; reason?: string }) => Promise<Result<PermissionContext>>;
+  correlationId: string; reason?: string; target?: { customerTransferId: string } }) => Promise<Result<PermissionContext>>;
 type TransferNotice = (tx: Prisma.TransactionClient, input: { kind: 'REQUESTED' | 'APPROVED' | 'REJECTED';
   transferId: string; recipientIds: string[]; actorId: string; correlationId: string }) => Promise<void>;
 
@@ -50,12 +50,22 @@ function customerSummary(row: { id: string; partnerRevision: number | null; firs
 }
 
 function projectView(row: { id: string; partnerRevision: number | null; title: string; status: string; workType: string;
-  address: string | null; probability: number | null; expectedCloseDate: Date | null; description: string | null }): PartnerProjectView | undefined {
+  address: string | null; probability: number | null; expectedCloseDate: Date | null; description: string | null;
+  lostReason: string | null; dormantReason: string | null; revisitDate: Date | null }): PartnerProjectView | undefined {
   if (!row.partnerRevision) return undefined;
   return { projectId: row.id, revision: row.partnerRevision, title: row.title, status: row.status, workType: row.workType,
     ...(row.address ? { address: row.address } : {}), ...(row.probability !== null ? { probability: row.probability } : {}),
     ...(row.expectedCloseDate ? { expectedCloseDate: row.expectedCloseDate.toISOString() } : {}),
-    ...(row.description ? { description: row.description } : {}) };
+    ...(row.description ? { description: row.description } : {}), ...(row.lostReason ? { lostReason: row.lostReason } : {}),
+    ...(row.dormantReason ? { dormantReason: row.dormantReason } : {}),
+    ...(row.revisitDate ? { revisitDate: row.revisitDate.toISOString() } : {}) };
+}
+
+function validProjectLifecycle(command: { status: string; lostReason?: string; dormantReason?: string; revisitDate?: string }) {
+  if (command.status === 'برنده شده') return false; // only Sales Contract linkage may win a Project
+  if (command.status === 'از دست رفته') return Boolean(command.lostReason) && !command.dormantReason && !command.revisitDate;
+  if (command.status === 'راکد') return Boolean(command.dormantReason) && !command.lostReason;
+  return !command.lostReason && !command.dormantReason && !command.revisitDate;
 }
 
 function followUpView(row: { id: string; potentialProjectId: string | null; communicationType: string; workType: string;
@@ -107,8 +117,8 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
     profileId: string, correlationId: string, reason?: string) => dependencies.authorize(tx,
     { action, root: { kind: 'PROFILE', id: profileId }, correlationId, reason });
   const authorizeCustomer = async (tx: Prisma.TransactionClient, action: PartnerActionV2,
-    customerId: string, correlationId: string, reason?: string) => dependencies.authorize(tx,
-    { action, root: { kind: 'CUSTOMER', id: customerId }, correlationId, reason });
+    customerId: string, correlationId: string, reason?: string, target?: { customerTransferId: string }) => dependencies.authorize(tx,
+    { action, root: { kind: 'CUSTOMER', id: customerId }, correlationId, reason, target });
   return {
     async listCustomers(input: { correlationId: string; cursor?: string; limit?: number; query?: string }) {
       if (!input.correlationId || (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 50))) {
@@ -145,7 +155,8 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           potentialProjects: { where: { isActive: true, responsibleSellerId: access.value.partnerSellerId },
             orderBy: { createdAt: 'desc' }, select: { id: true,
             partnerRevision: true, title: true, status: true, workType: true, address: true, probability: true,
-            expectedCloseDate: true, description: true, responsibleSellerId: true } },
+            expectedCloseDate: true, description: true, lostReason: true, dormantReason: true, revisitDate: true,
+            responsibleSellerId: true } },
           followUpReports: { where: { sellerId: access.value.partnerSellerId },
             orderBy: { happenedAt: 'desc' }, take: 100, select: { id: true, potentialProjectId: true,
             communicationType: true, workType: true, happenedAt: true, summary: true, outcome: true,
@@ -246,7 +257,9 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
 
     async createProject(raw: unknown) {
       const parsed = PartnerProjectCreateSchema.safeParse(raw);
-      if (!parsed.success || !await validatePayloadHash(parsed.data)) return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+      if (!parsed.success || !validProjectLifecycle(parsed.data) || !await validatePayloadHash(parsed.data)) {
+        return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+      }
       const command = parsed.data, operation = 'PARTNER_PROJECT_CREATE';
       return database.$transaction(async tx => {
         const replay = await priorOutcome(tx, dependencies.actorId, operation, command.customerId,
@@ -264,8 +277,10 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           responsibleSellerId: profile.userId, createdBy: dependencies.actorId, partnerRevision: 1,
           title: command.title, status: command.status, workType: command.workType, address: command.address,
           probability: command.probability, expectedCloseDate: command.expectedCloseDate ? new Date(command.expectedCloseDate) : undefined,
-          description: command.description }, select: { id: true, partnerRevision: true, title: true, status: true,
-          workType: true, address: true, probability: true, expectedCloseDate: true, description: true } });
+          description: command.description, lostReason: command.lostReason, dormantReason: command.dormantReason,
+          revisitDate: command.revisitDate ? new Date(command.revisitDate) : undefined }, select: { id: true,
+          partnerRevision: true, title: true, status: true, workType: true, address: true, probability: true,
+          expectedCloseDate: true, description: true, lostReason: true, dormantReason: true, revisitDate: true } });
         const project = projectView(created); if (!project) return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
         const outcome = { commandId: command.commandId, project };
         await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId, operation,
@@ -276,7 +291,9 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
 
     async updateProject(raw: unknown) {
       const parsed = PartnerProjectUpdateSchema.safeParse(raw);
-      if (!parsed.success || !await validatePayloadHash(parsed.data)) return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+      if (!parsed.success || !validProjectLifecycle(parsed.data) || !await validatePayloadHash(parsed.data)) {
+        return { ok: false as const, error: partnerError('INVALID_PAYLOAD') };
+      }
       const command = parsed.data, operation = 'PARTNER_PROJECT_UPDATE';
       return database.$transaction(async tx => {
         const replay = await priorOutcome(tx, dependencies.actorId, operation, command.projectId,
@@ -290,11 +307,12 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           isActive: true }, data: { title: command.title, status: command.status, workType: command.workType,
           address: command.address, probability: command.probability,
           expectedCloseDate: command.expectedCloseDate ? new Date(command.expectedCloseDate) : null,
-          description: command.description, partnerRevision: { increment: 1 } } });
+          description: command.description, lostReason: command.lostReason ?? null, dormantReason: command.dormantReason ?? null,
+          revisitDate: command.revisitDate ? new Date(command.revisitDate) : null, partnerRevision: { increment: 1 } } });
         if (written.count !== 1) return { ok: false as const, error: partnerError('ROW_STALE') };
         const row = await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: command.projectId }, select: { id: true,
           partnerRevision: true, title: true, status: true, workType: true, address: true, probability: true,
-          expectedCloseDate: true, description: true } });
+          expectedCloseDate: true, description: true, lostReason: true, dormantReason: true, revisitDate: true } });
         const project = projectView(row); if (!project) return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
         const outcome = { commandId: command.commandId, project };
         await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId, operation,
@@ -482,7 +500,10 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
       return database.$transaction(async tx => {
         const replay = await priorOutcome(tx, dependencies.actorId, command.type, command.transferId,
           command.idempotency.key, payloadHash); if (replay) return replay;
-        await tx.$queryRaw`SELECT id FROM partner_customer_transfers WHERE id = ${command.transferId} FOR UPDATE`;
+        const target = await tx.partnerCustomerTransfer.findUnique({ where: { id: command.transferId }, select: { customerId: true } });
+        if (!target) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        const access = await authorizeCustomer(tx, 'CUSTOMER_TRANSFER_DECIDE', target.customerId,
+          command.correlationId, command.reason, { customerTransferId: command.transferId }); if (!access.ok) return access;
         const transfer = await tx.partnerCustomerTransfer.findUnique({ where: { id: command.transferId }, include: {
           fromOwner: { select: { id: true } }, fromProfile: { select: { userId: true } },
           toProfile: { select: { userId: true, state: true } },
@@ -490,8 +511,6 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
         if (!transfer) return { ok: false as const, error: partnerError('NOT_FOUND') };
         if (transfer.revision !== command.expectedRevision) return { ok: false as const, error: partnerError('ROW_STALE') };
         if (transfer.status !== 'PENDING') return { ok: false as const, error: partnerError('STATE_CONFLICT') };
-        const access = await authorizeCustomer(tx, 'CUSTOMER_TRANSFER_DECIDE', transfer.customerId,
-          command.correlationId, command.reason); if (!access.ok) return access;
         const customer = await tx.crmCustomer.findUnique({ where: { id: transfer.customerId }, select: {
           partnerOwnerProfileId: true, ownerUserId: true, partnerRevision: true } });
         if (customer?.partnerOwnerProfileId !== transfer.fromProfileId ||
@@ -503,6 +522,12 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
         }
         if (command.outcome === 'APPROVE') {
           if (transfer.toProfile.state !== 'ACTIVE') return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
+          const unresolvedCase = await tx.partnerSaleCase.findFirst({ where: { customerId: transfer.customerId,
+            state: { in: ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'] } }, select: { id: true } });
+          // Ownership never rewrites a Case. A previous in-flight Case must use
+          // its existing cancellation/remediation command before Customer
+          // transfer can commit, so neither owner can continue a stale draft.
+          if (unresolvedCase) return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
           await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_transfer', ${transfer.id}, true)`;
           const changed = await tx.crmCustomer.updateMany({ where: { id: transfer.customerId,
             partnerOwnerProfileId: transfer.fromProfileId, ownerUserId: transfer.fromOwnerUserId,

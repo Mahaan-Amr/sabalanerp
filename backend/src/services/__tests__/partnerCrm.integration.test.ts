@@ -5,6 +5,8 @@ import { PrismaClient, type Prisma } from '@prisma/client';
 import { canonicalHash, type PartnerActionV2, type PermissionContext } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerCrmService } from '../partnerSales/crm/service';
 import type { PartnerCustomerSummary, PartnerNextActionView, PartnerProjectView } from '../partnerSales/crm/contracts';
+import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
+import { seedAuthorizationCase } from './partnerAuthorizationFixture';
 
 const databaseUrl = () => {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -90,7 +92,9 @@ test('masked duplicate and approved transfer expose no prior CRM history and pre
         reason: 'تأیید انتقال بدون جابه‌جایی تاریخچه' };
       const decisionHash = await intentHash(decisionIntent);
       const admin = createPartnerCrmService({ database: transactionDatabase(tx), actorId: adminId,
-        authorize: authorize(adminId, partnerId, 'INTERNAL'),
+        authorize: (transaction, input) => createAuditedPartnerAuthorization(transaction, {
+          actorId: adminId, purpose: 'CRM', channel: 'API',
+        }, { correlationId: input.correlationId, reason: input.reason }, input.target).authorize(input.action, input.root),
         notifyTransfer: async (_transaction, notice) => { notices.push({ kind: notice.kind, recipients: notice.recipientIds }); } });
       const decision = await admin.decideTransfer({ ...decisionIntent, commandId: `decision-${suffix}`,
         correlationId: `decision-corr-${suffix}`, idempotency: { actorId: adminId,
@@ -104,6 +108,15 @@ test('masked duplicate and approved transfer expose no prior CRM history and pre
       const project = await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId }, select: {
         responsibleSellerId: true, partnerRevision: true, title: true } });
       assert.deepEqual(project, { responsibleSellerId: oldOwnerId, partnerRevision: null, title: 'پروژه تاریخی محرمانه' });
+      await tx.crmPotentialProject.update({ where: { id: projectId }, data: { status: 'در حال پیگیری' } });
+      const retainedFollowUpId = `partner-crm-retained-follow-${suffix}`;
+      await tx.crmFollowUpReport.create({ data: { id: retainedFollowUpId, customerId, potentialProjectId: projectId,
+        sellerId: oldOwnerId, communicationType: 'تماس تلفنی', workType: 'فروش سنگ پروژه ساختمانی',
+        happenedAt: new Date(), summary: 'پیگیری پروژه باقی‌مانده برای مسئول قبلی', outcome: 'ادامه پروژه مستقل',
+        hasNextAction: true, nextAction: { create: { id: `partner-crm-retained-action-${suffix}`, customerId,
+          potentialProjectId: projectId, assignedToId: oldOwnerId, title: 'پیگیری پروژه باقی‌مانده',
+          communicationType: 'تماس تلفنی', dueAt: new Date(Date.now() + 86_400_000), instructions: 'ادامه پیگیری' } } } });
+      assert.equal(await tx.crmFollowUpReport.count({ where: { id: retainedFollowUpId, sellerId: oldOwnerId } }), 1);
 
       const detail = await partner.readCustomer({ customerId, correlationId: `read-${suffix}` });
       assert.equal(detail.ok, true);
@@ -112,6 +125,63 @@ test('masked duplicate and approved transfer expose no prior CRM history and pre
         assert.equal(JSON.stringify(detail.value).includes('پروژه تاریخی محرمانه'), false);
       }
       assert.deepEqual(notices[1], { kind: 'APPROVED', recipients: [oldOwnerId, partnerId] });
+      throw rollback;
+    }, { timeout: 30_000 }), error => error === rollback);
+  } finally {
+    await database.$disconnect();
+  }
+});
+
+test('approved Customer transfer is blocked while the previous owner has an unresolved Partner Case', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const rollback = new Error('rollback unresolved Partner Case transfer fixture');
+  try {
+    await assert.rejects(database.$transaction(async tx => {
+      const suffix = randomUUID();
+      const oldPartnerId = `partner-crm-case-old-${suffix}`;
+      const newPartnerId = `partner-crm-case-new-${suffix}`;
+      const adminId = `partner-crm-case-admin-${suffix}`;
+      for (const [id, role] of [[oldPartnerId, 'SALES'], [newPartnerId, 'SALES'], [adminId, 'ADMIN']] as const) {
+        await tx.user.create({ data: { id, username: id, email: `${id}@example.invalid`, password: 'not-a-login',
+          firstName: 'Fixture', lastName: 'Transfer Case', role } });
+      }
+      await tx.partnerProfile.createMany({ data: [
+        { id: oldPartnerId, userId: oldPartnerId, state: 'ACTIVE' },
+        { id: newPartnerId, userId: newPartnerId, state: 'ACTIVE' },
+      ] });
+      const seeded = await seedAuthorizationCase(tx, oldPartnerId, oldPartnerId);
+      await tx.phoneNumber.create({ data: { customerId: seeded.customerId, number: '09129876543', type: 'mobile', isPrimary: true } });
+
+      const requester = createPartnerCrmService({ database: transactionDatabase(tx), actorId: newPartnerId,
+        authorize: authorize(newPartnerId, newPartnerId, 'PARTNER'), notifyTransfer: async () => undefined });
+      const match = await requester.findDuplicate({ schemaVersion: 1, correlationId: `case-match-${suffix}`,
+        phone: '09129876543' });
+      assert.equal(match.ok, true);
+      if (!match.ok) throw new Error('duplicate expected');
+      const requestBase = { schemaVersion: 1 as const, commandId: `case-request-${suffix}`,
+        correlationId: `case-request-corr-${suffix}`, matchReference: match.value.matchReference,
+        reason: 'درخواست انتقال مشتری دارای پرونده جاری', idempotencyKey: `case-request-key-${suffix}` };
+      const request = await requester.requestTransfer({ ...requestBase, payloadHash: await intentHash(requestBase) });
+      assert.equal(request.ok, true);
+      if (!request.ok) throw new Error('request expected');
+
+      const decisionIntent = { schemaVersion: 1 as const, type: 'CUSTOMER_TRANSFER_DECIDE' as const,
+        transferId: request.value.transferId, expectedRevision: 1, outcome: 'APPROVE' as const,
+        reason: 'تلاش برای انتقال مشتری دارای پرونده ناتمام' };
+      const admin = createPartnerCrmService({ database: transactionDatabase(tx), actorId: adminId,
+        authorize: (transaction, input) => createAuditedPartnerAuthorization(transaction, {
+          actorId: adminId, purpose: 'CRM', channel: 'API',
+        }, { correlationId: input.correlationId, reason: input.reason }, input.target).authorize(input.action, input.root),
+        notifyTransfer: async () => undefined });
+      const decision = await admin.decideTransfer({ ...decisionIntent, commandId: `case-decision-${suffix}`,
+        correlationId: `case-decision-corr-${suffix}`, idempotency: { actorId: adminId,
+          operation: 'CUSTOMER_TRANSFER_DECIDE', targetId: request.value.transferId,
+          key: `case-decision-key-${suffix}`, payloadHash: await intentHash(decisionIntent) } });
+      assert.equal(decision.ok, false);
+      if (!decision.ok) assert.equal(decision.error.code, 'DEPENDENCY_BLOCKED');
+      const customer = await tx.crmCustomer.findUniqueOrThrow({ where: { id: seeded.customerId }, select: {
+        ownerUserId: true, partnerOwnerProfileId: true } });
+      assert.deepEqual(customer, { ownerUserId: oldPartnerId, partnerOwnerProfileId: null });
       throw rollback;
     }, { timeout: 30_000 }), error => error === rollback);
   } finally {
@@ -196,16 +266,27 @@ test('Partner CRM commands use CAS and idempotency while list/count/detail remai
       if (!stale.ok) assert.equal(stale.error.code, 'ROW_STALE');
 
       const projectBase = { schemaVersion: 1 as const, commandId: `project-${suffix}`, correlationId: `project-corr-${suffix}`,
-        customerId, title: 'پروژه جاری', workType: 'نما', status: 'جدید', probability: 40,
+        customerId, title: 'پروژه جاری', workType: 'فروش سنگ پروژه ساختمانی', status: 'جدید', probability: 40,
         reason: 'ثبت پروژه برای مشتری جاری', idempotencyKey: `project-key-${suffix}` };
       const projectResult = await service.createProject({ ...projectBase, payloadHash: await intentHash(projectBase) });
       assert.equal(projectResult.ok, true);
       if (!projectResult.ok) throw new Error('project create expected');
+      const invalidWon = { ...projectBase, commandId: `project-won-${suffix}`, idempotencyKey: `project-won-key-${suffix}`,
+        status: 'برنده شده' as const };
+      const won = await service.createProject({ ...invalidWon, payloadHash: await intentHash(invalidWon) });
+      assert.equal(won.ok, false);
+      if (!won.ok) assert.equal(won.error.code, 'INVALID_PAYLOAD');
+      const invalidLost = { ...projectBase, commandId: `project-lost-${suffix}`, idempotencyKey: `project-lost-key-${suffix}`,
+        status: 'از دست رفته' as const };
+      const lost = await service.createProject({ ...invalidLost, payloadHash: await intentHash(invalidLost) });
+      assert.equal(lost.ok, false);
+      if (!lost.ok) assert.equal(lost.error.code, 'INVALID_PAYLOAD');
 
       const followUpBase = { schemaVersion: 1 as const, commandId: `follow-${suffix}`, correlationId: `follow-corr-${suffix}`,
-        customerId, projectId: (projectResult.value.project as PartnerProjectView).projectId, communicationType: 'تماس', workType: 'نما',
+        customerId, projectId: (projectResult.value.project as PartnerProjectView).projectId,
+        communicationType: 'تماس تلفنی', workType: 'فروش سنگ پروژه ساختمانی',
         happenedAt: new Date().toISOString(), summary: 'گفت‌وگوی ثبت‌شده', outcome: 'ادامه پیگیری',
-        nextAction: { title: 'تماس بعدی', communicationType: 'تماس', dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+        nextAction: { title: 'تماس بعدی', communicationType: 'تماس تلفنی', dueAt: new Date(Date.now() + 86_400_000).toISOString(),
           instructions: 'پیگیری نتیجه' }, reason: 'ثبت تاریخچه پیگیری جاری', idempotencyKey: `follow-key-${suffix}` };
       const followed = await service.createFollowUp({ ...followUpBase, payloadHash: await intentHash(followUpBase) });
       assert.equal(followed.ok, true);

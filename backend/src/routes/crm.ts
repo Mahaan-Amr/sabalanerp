@@ -26,7 +26,7 @@ const partnerCrmForRequest = (req: any, correlationId: string) => createPartnerC
   actorId: req.user.id,
   authorize: (tx, input) => createAuditedPartnerAuthorization(tx, {
     actorId: req.user.id, purpose: 'CRM', channel: 'API',
-  }, { correlationId: input.correlationId, reason: input.reason }).authorize(input.action, input.root),
+  }, { correlationId: input.correlationId, reason: input.reason }, input.target).authorize(input.action, input.root),
   notifyTransfer: async (tx, notice) => {
     await publishNotificationEvent(tx, {
       type: notice.kind === 'REQUESTED' ? 'PARTNER_CUSTOMER_TRANSFER_REQUESTED' : 'PARTNER_CUSTOMER_TRANSFER_DECIDED',
@@ -264,8 +264,8 @@ const ensureProjectAccessOrDeny = async (
   projectId: string,
   options: { allowSummaryOnly?: boolean } = {}
 ) => {
-  const project = await prisma.crmPotentialProject.findFirst({
-    where: { id: projectId, customer: { partnerOwnerProfileId: null } },
+  const project = await prisma.crmPotentialProject.findUnique({
+    where: { id: projectId },
     include: projectInclude
   });
 
@@ -2136,7 +2136,7 @@ router.get('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CRM
     const scope = String(req.query.scope || '').trim();
     const canManage = await canManageCrmPipeline(req);
 
-    const where: any = { isActive: true, customer: { partnerOwnerProfileId: null } };
+    const where: any = { isActive: true };
     if (status) where.status = status;
     if (workType) where.workType = workType;
     if (sellerId && canManage) where.responsibleSellerId = sellerId;
@@ -2404,7 +2404,7 @@ router.get('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSP
     const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
     const skip = (page - 1) * limit;
     const canManage = await canManageCrmPipeline(req);
-    const where: any = { customer: { partnerOwnerProfileId: null } };
+    const where: any = {};
     if (req.query.customerId) where.customerId = String(req.query.customerId);
     if (req.query.potentialProjectId) where.potentialProjectId = String(req.query.potentialProjectId);
     if (!canManage && req.user?.role !== 'ADMIN') where.sellerId = req.user.id;
@@ -2448,21 +2448,20 @@ router.post('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKS
       return;
     }
 
-    const customer = await prisma.crmCustomer.findFirst({ where: { id: req.body.customerId,
-      partnerOwnerProfileId: null }, select: { id: true } });
-    if (!customer) {
-      res.status(404).json({ success: false, error: 'مخاطب/مشتری پیدا نشد.' });
-      return;
-    }
-
     let project: any = null;
     if (req.body.potentialProjectId) {
       project = await ensureProjectAccessOrDeny(req, res, String(req.body.potentialProjectId));
       if (!project) return;
-      if (project.customerId !== customer.id) {
+      if (project.customerId !== String(req.body.customerId)) {
         res.status(400).json({ success: false, error: 'پروژه احتمالی به مخاطب انتخاب‌شده تعلق ندارد.' });
         return;
       }
+    }
+    const customer = project ? { id: project.customerId } : await prisma.crmCustomer.findFirst({ where: {
+      id: req.body.customerId, partnerOwnerProfileId: null }, select: { id: true } });
+    if (!customer) {
+      res.status(404).json({ success: false, error: 'مخاطب/مشتری پیدا نشد.' });
+      return;
     }
 
     const report = await prisma.$transaction(async (tx) => {
@@ -2527,7 +2526,7 @@ router.post('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKS
 router.get('/next-actions', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_NEXT_ACTIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
   try {
     const canManage = await canManageCrmPipeline(req);
-    const where: any = { customer: { partnerOwnerProfileId: null } };
+    const where: any = {};
     if (req.query.status) where.status = String(req.query.status);
     if (req.query.customerId) where.customerId = String(req.query.customerId);
     if (req.query.potentialProjectId) where.potentialProjectId = String(req.query.potentialProjectId);
@@ -2549,8 +2548,7 @@ router.get('/next-actions', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORK
 
 router.put('/next-actions/:id/complete', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_NEXT_ACTIONS_EDIT, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response): Promise<void> => {
   try {
-    const action = await prisma.crmNextAction.findFirst({ where: { id: req.params.id,
-      customer: { partnerOwnerProfileId: null } }, include: nextActionInclude });
+    const action = await prisma.crmNextAction.findUnique({ where: { id: req.params.id }, include: nextActionInclude });
     if (!action) {
       res.status(404).json({ success: false, error: 'اقدام بعدی پیدا نشد.' });
       return;
@@ -2597,10 +2595,8 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
     startOfToday.setHours(0, 0, 0, 0);
     const endOfToday = new Date(now);
     endOfToday.setHours(23, 59, 59, 999);
-    const projectScope: any = { customer: { partnerOwnerProfileId: null },
-      ...(canManage || req.user?.role === 'ADMIN' ? {} : { responsibleSellerId: req.user.id }) };
-    const actionScope: any = { customer: { partnerOwnerProfileId: null },
-      ...(canManage || req.user?.role === 'ADMIN' ? {} : { assignedToId: req.user.id }) };
+    const projectScope: any = canManage || req.user?.role === 'ADMIN' ? {} : { responsibleSellerId: req.user.id };
+    const actionScope: any = canManage || req.user?.role === 'ADMIN' ? {} : { assignedToId: req.user.id };
 
     const [
       totalCustomers,
@@ -2677,10 +2673,9 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
         _sum: { estimatedValue: true }
       }),
       prisma.crmTimelineEvent.findMany({
-        where: { customer: { partnerOwnerProfileId: null },
-          ...(projectScope.responsibleSellerId
-            ? { potentialProject: { responsibleSellerId: projectScope.responsibleSellerId } }
-            : {}) },
+        where: projectScope.responsibleSellerId
+          ? { potentialProject: { responsibleSellerId: projectScope.responsibleSellerId } }
+          : {},
         include: {
           actor: { select: { id: true, firstName: true, lastName: true, username: true } },
           customer: { select: { id: true, firstName: true, lastName: true, companyName: true } },

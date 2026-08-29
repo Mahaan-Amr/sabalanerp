@@ -110,12 +110,14 @@ those facts or acquire database locks itself.
   are never guessed into resource scopes.
 - Remaining child adapters (including approvals, payment and delivery targets),
   creation/discovery transport and owning command integration. Pre-Case technical
-  recovery now has a real authorization adapter, but it is not route-mounted.
+  recovery and catalog now have authenticated, cohort-gated closed transport;
+  the central Partner creation UI/channel is not activated.
 - All non-Case query producers, safe list/count database predicates and transport
   transaction composition retaining denial audit without partial writes.
 - Cross-connection grant/assignment/lifecycle races and complete atomic command
   commit acceptance, operations/cohort/domain gates and durable audit integration.
-- #330 consumers, #334 live closed composition, #335 comprehensive acceptance.
+- Remaining #330 consumers, broader #334 producer/command composition and #335
+  comprehensive acceptance.
 
 ## Current verification
 

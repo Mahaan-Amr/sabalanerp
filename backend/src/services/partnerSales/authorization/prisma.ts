@@ -47,12 +47,16 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
       if (customer?.isActive && customer.ownerUserId && target && 'customerTransferId' in target) {
         await tx.$queryRaw`SELECT id FROM partner_customer_transfers WHERE id = ${target.customerTransferId} FOR UPDATE`;
         const transfer = await tx.partnerCustomerTransfer.findUnique({ where: { id: target.customerTransferId }, select: {
-          customerId: true, fromOwnerUserId: true, fromProfileId: true, revision: true, status: true,
-          fromProfile: { select: { state: true, revision: true } },
+          customerId: true, fromOwnerUserId: true, fromProfileId: true, toProfileId: true, revision: true, status: true,
+          fromProfile: { select: { state: true, revision: true } }, toProfile: { select: { userId: true } },
         } });
         if (transfer?.customerId === root.id && transfer.fromOwnerUserId === customer.ownerUserId &&
             transfer.status === 'PENDING') {
-          for (const id of [...new Set([actorId, transfer.fromOwnerUserId])].sort()) {
+          for (const id of [...new Set([transfer.fromProfileId, transfer.toProfileId]
+            .filter((item): item is string => Boolean(item)))].sort()) {
+            await tx.$queryRaw`SELECT id FROM partner_profiles WHERE id = ${id} FOR UPDATE`;
+          }
+          for (const id of [...new Set([actorId, transfer.fromOwnerUserId, transfer.toProfile.userId])].sort()) {
             await tx.$queryRaw`SELECT id FROM users WHERE id = ${id} FOR UPDATE`;
           }
           const owner = await tx.user.findUnique({ where: { id: transfer.fromOwnerUserId }, select: {

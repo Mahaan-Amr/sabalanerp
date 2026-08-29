@@ -63,8 +63,10 @@ export const customerScopeForActor = (input: { userId: string; role: string; can
     OR: [{ ownerUserId: input.userId }, { ownerUserId: null, createdBy: input.userId }] };
 };
 
+export const ordinaryCrmRelatedVisibility = { OR: [{ customer: { partnerOwnerProfileId: null } },
+  { potentialProject: { partnerRevision: null } }] };
+
 const buildCustomerScope = async (req: any) => {
-  if (!isOwnerScopedUser(req)) return {};
   return customerScopeForActor({
     userId: req.user.id, role: req.user.role, canAssignOwner: await canAssignCustomerOwner(req),
   });
@@ -264,8 +266,8 @@ const ensureProjectAccessOrDeny = async (
   projectId: string,
   options: { allowSummaryOnly?: boolean } = {}
 ) => {
-  const project = await prisma.crmPotentialProject.findUnique({
-    where: { id: projectId },
+  const project = await prisma.crmPotentialProject.findFirst({
+    where: { id: projectId, partnerRevision: null },
     include: projectInclude
   });
 
@@ -2136,7 +2138,7 @@ router.get('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CRM
     const scope = String(req.query.scope || '').trim();
     const canManage = await canManageCrmPipeline(req);
 
-    const where: any = { isActive: true };
+    const where: any = { isActive: true, partnerRevision: null };
     if (status) where.status = status;
     if (workType) where.workType = workType;
     if (sellerId && canManage) where.responsibleSellerId = sellerId;
@@ -2356,6 +2358,12 @@ router.put('/potential-projects/:id/reassign', protect, requireWorkspaceAccess(W
     const project = await ensureProjectAccessOrDeny(req, res, req.params.id);
     if (!project) return;
 
+    const canReassign = req.user?.role === 'ADMIN' || await canManageCrmPipeline(req);
+    if (!canReassign) {
+      res.status(403).json({ success: false, error: 'فقط مدیر CRM یا مدیر سیستم می‌تواند مسئول پروژه را تغییر دهد.' });
+      return;
+    }
+
     const nextSeller = await prisma.user.findUnique({
       where: { id: req.body.responsibleSellerId },
       select: { id: true, firstName: true, lastName: true, username: true, isActive: true }
@@ -2366,6 +2374,10 @@ router.put('/potential-projects/:id/reassign', protect, requireWorkspaceAccess(W
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_legacy_reassignment', ${JSON.stringify({
+        projectId: project.id, previousSellerId: project.responsibleSellerId, nextSellerId: nextSeller.id,
+        actorId: req.user.id, reason: String(req.body.reason),
+      })}, true)`;
       const next = await tx.crmPotentialProject.update({
         where: { id: project.id },
         data: { responsibleSellerId: nextSeller.id },
@@ -2404,7 +2416,7 @@ router.get('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSP
     const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
     const skip = (page - 1) * limit;
     const canManage = await canManageCrmPipeline(req);
-    const where: any = {};
+    const where: any = { ...ordinaryCrmRelatedVisibility };
     if (req.query.customerId) where.customerId = String(req.query.customerId);
     if (req.query.potentialProjectId) where.potentialProjectId = String(req.query.potentialProjectId);
     if (!canManage && req.user?.role !== 'ADMIN') where.sellerId = req.user.id;
@@ -2526,7 +2538,7 @@ router.post('/follow-ups', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKS
 router.get('/next-actions', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.VIEW), requireFeatureAccess(FEATURES.CRM_NEXT_ACTIONS_VIEW, FEATURE_PERMISSIONS.VIEW), async (req: any, res: Response): Promise<void> => {
   try {
     const canManage = await canManageCrmPipeline(req);
-    const where: any = {};
+    const where: any = { ...ordinaryCrmRelatedVisibility };
     if (req.query.status) where.status = String(req.query.status);
     if (req.query.customerId) where.customerId = String(req.query.customerId);
     if (req.query.potentialProjectId) where.potentialProjectId = String(req.query.potentialProjectId);
@@ -2595,8 +2607,10 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
     startOfToday.setHours(0, 0, 0, 0);
     const endOfToday = new Date(now);
     endOfToday.setHours(23, 59, 59, 999);
-    const projectScope: any = canManage || req.user?.role === 'ADMIN' ? {} : { responsibleSellerId: req.user.id };
-    const actionScope: any = canManage || req.user?.role === 'ADMIN' ? {} : { assignedToId: req.user.id };
+    const projectScope: any = { partnerRevision: null,
+      ...(canManage || req.user?.role === 'ADMIN' ? {} : { responsibleSellerId: req.user.id }) };
+    const actionScope: any = { ...ordinaryCrmRelatedVisibility,
+      ...(canManage || req.user?.role === 'ADMIN' ? {} : { assignedToId: req.user.id }) };
 
     const [
       totalCustomers,
@@ -2673,9 +2687,10 @@ router.get('/dashboard', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPA
         _sum: { estimatedValue: true }
       }),
       prisma.crmTimelineEvent.findMany({
-        where: projectScope.responsibleSellerId
-          ? { potentialProject: { responsibleSellerId: projectScope.responsibleSellerId } }
-          : {},
+        where: { ...ordinaryCrmRelatedVisibility,
+          ...(projectScope.responsibleSellerId
+            ? { potentialProject: { partnerRevision: null, responsibleSellerId: projectScope.responsibleSellerId } }
+            : {}) },
         include: {
           actor: { select: { id: true, firstName: true, lastName: true, username: true } },
           customer: { select: { id: true, firstName: true, lastName: true, companyName: true } },

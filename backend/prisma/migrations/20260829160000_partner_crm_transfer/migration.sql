@@ -126,6 +126,7 @@ DECLARE
   owner_user_id text;
   writer_profile_id text := current_setting('sabalan.partner_crm_profile', true);
   transfer_id text := current_setting('sabalan.partner_crm_transfer', true);
+  reassignment_context jsonb := nullif(current_setting('sabalan.partner_crm_legacy_reassignment', true), '')::jsonb;
   transfer_ok boolean := false;
 BEGIN
   IF TG_TABLE_NAME = 'crm_customers' THEN
@@ -195,6 +196,15 @@ BEGIN
     IF OLD."partnerRevision" IS NULL AND NEW."partnerRevision" IS NULL
        AND NEW."customerId" IS NOT DISTINCT FROM OLD."customerId"
        AND NEW."responsibleSellerId" IS NOT DISTINCT FROM OLD."responsibleSellerId" THEN
+      RETURN NEW;
+    END IF;
+    IF OLD."partnerRevision" IS NULL AND NEW."partnerRevision" IS NULL
+       AND NEW."customerId" IS NOT DISTINCT FROM OLD."customerId"
+       AND reassignment_context->>'projectId' = OLD.id
+       AND reassignment_context->>'previousSellerId' = OLD."responsibleSellerId"
+       AND reassignment_context->>'nextSellerId' = NEW."responsibleSellerId"
+       AND coalesce(reassignment_context->>'actorId', '') <> ''
+       AND coalesce(reassignment_context->>'reason', '') <> '' THEN
       RETURN NEW;
     END IF;
   END IF;

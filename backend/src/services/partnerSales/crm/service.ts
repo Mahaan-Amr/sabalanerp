@@ -506,7 +506,7 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           command.correlationId, command.reason, { customerTransferId: command.transferId }); if (!access.ok) return access;
         const transfer = await tx.partnerCustomerTransfer.findUnique({ where: { id: command.transferId }, include: {
           fromOwner: { select: { id: true } }, fromProfile: { select: { userId: true } },
-          toProfile: { select: { userId: true, state: true } },
+          toProfile: { select: { userId: true, state: true, user: { select: { isActive: true } } } },
           match: { select: { requesterProfileId: true, customerId: true, witnessHash: true } } } });
         if (!transfer) return { ok: false as const, error: partnerError('NOT_FOUND') };
         if (transfer.revision !== command.expectedRevision) return { ok: false as const, error: partnerError('ROW_STALE') };
@@ -521,7 +521,9 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
         }
         if (command.outcome === 'APPROVE') {
-          if (transfer.toProfile.state !== 'ACTIVE') return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
+          if (transfer.toProfile.state !== 'ACTIVE' || !transfer.toProfile.user.isActive) {
+            return { ok: false as const, error: partnerError('DEPENDENCY_BLOCKED') };
+          }
           const unresolvedCase = await tx.partnerSaleCase.findFirst({ where: { customerId: transfer.customerId,
             state: { in: ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED'] } }, select: { id: true } });
           // Ownership never rewrites a Case. A previous in-flight Case must use

@@ -8,12 +8,12 @@ import type { PartnerCustomerSummary, PartnerNextActionView, PartnerProjectView 
 import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
 import { seedAuthorizationCase } from './partnerAuthorizationFixture';
 
-const databaseUrl = () => {
+const databaseUrl = (connectionLimit = 2) => {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
   if (!['localhost', '127.0.0.1', 'postgres'].includes(url.hostname) || url.pathname !== '/sabalanerp') {
     throw new Error('Existing sabalanerp-local database required');
   }
-  url.searchParams.set('connection_limit', '2');
+  url.searchParams.set('connection_limit', String(connectionLimit));
   url.searchParams.set('pool_timeout', '10');
   return url.toString();
 };
@@ -45,6 +45,12 @@ function authorize(actorId: string, partnerSellerId: string, persona: Permission
       evaluatedAt: new Date().toISOString(),
     },
   });
+}
+
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
 }
 
 test('masked duplicate and approved transfer expose no prior CRM history and preserve Project responsibility', async () => {
@@ -117,6 +123,21 @@ test('masked duplicate and approved transfer expose no prior CRM history and pre
           potentialProjectId: projectId, assignedToId: oldOwnerId, title: 'پیگیری پروژه باقی‌مانده',
           communicationType: 'تماس تلفنی', dueAt: new Date(Date.now() + 86_400_000), instructions: 'ادامه پیگیری' } } } });
       assert.equal(await tx.crmFollowUpReport.count({ where: { id: retainedFollowUpId, sellerId: oldOwnerId } }), 1);
+      assert.deepEqual((await tx.crmPotentialProject.findMany({ where: { partnerRevision: null,
+        responsibleSellerId: oldOwnerId }, select: { id: true } })).map(item => item.id), [projectId]);
+      assert.deepEqual(await tx.crmPotentialProject.findMany({ where: { partnerRevision: null,
+        responsibleSellerId: partnerId }, select: { id: true } }), []);
+      await tx.$executeRawUnsafe('SAVEPOINT retained_project_reassign');
+      await assert.rejects(tx.crmPotentialProject.update({ where: { id: projectId }, data: {
+        responsibleSellerId: adminId } }), /current owner Profile/);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT retained_project_reassign');
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_legacy_reassignment', ${JSON.stringify({
+        projectId, previousSellerId: oldOwnerId, nextSellerId: adminId, actorId: adminId,
+        reason: 'تغییر مسئول پروژه قدیمی توسط مدیر CRM',
+      })}, true)`;
+      await tx.crmPotentialProject.update({ where: { id: projectId }, data: { responsibleSellerId: adminId } });
+      assert.equal((await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId }, select: {
+        responsibleSellerId: true } })).responsibleSellerId, adminId);
 
       const detail = await partner.readCustomer({ customerId, correlationId: `read-${suffix}` });
       assert.equal(detail.ok, true);
@@ -129,6 +150,89 @@ test('masked duplicate and approved transfer expose no prior CRM history and pre
     }, { timeout: 30_000 }), error => error === rollback);
   } finally {
     await database.$disconnect();
+  }
+});
+
+test('destination deactivation during transfer lock wait defeats approval', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl(3) } } });
+  const suffix = randomUUID();
+  const oldPartnerId = `partner-crm-race-old-${suffix}`;
+  const newPartnerId = `partner-crm-race-new-${suffix}`;
+  const adminId = `partner-crm-race-admin-${suffix}`;
+  const rollback = new Error('rollback transfer race fixture');
+  const locked = signal(); const release = signal(); const ready = signal(); const beginDecision = signal();
+  let blocker: Promise<unknown> | undefined; let request: Promise<unknown> | undefined;
+  let requestPid = 0; let decisionResult: Awaited<ReturnType<ReturnType<typeof createPartnerCrmService>['decideTransfer']>> | undefined;
+  try {
+    for (const [id, role] of [[oldPartnerId, 'SALES'], [newPartnerId, 'SALES'], [adminId, 'ADMIN']] as const) {
+      await database.user.create({ data: { id, username: id, email: `${id}@example.invalid`, password: 'not-a-login',
+        firstName: 'Fixture', lastName: 'Transfer Race', role } });
+    }
+    await database.partnerProfile.createMany({ data: [
+      { id: oldPartnerId, userId: oldPartnerId, state: 'ACTIVE' },
+      { id: newPartnerId, userId: newPartnerId, state: 'ACTIVE' },
+    ] });
+    request = database.$transaction(async tx => {
+      const customerId = `partner-crm-race-customer-${suffix}`;
+      await tx.crmCustomer.create({ data: { id: customerId, ownerUserId: oldPartnerId, firstName: 'مشتری',
+        lastName: 'رقابت انتقال', phoneNumbers: { create: { number: '09127776655', type: 'mobile', isPrimary: true } } } });
+      const matchId = `partner-crm-race-match-${suffix}`;
+      const transferId = `partner-crm-race-transfer-${suffix}`;
+      await tx.partnerDuplicateCustomerMatch.create({ data: { id: matchId, requesterProfileId: newPartnerId,
+        customerId, snapshot: { displayName: 'مشتری رقابت انتقال', personType: 'NATURAL', city: null,
+          maskedWitness: '********6655' }, witnessHash: `sha256-v1:${'b'.repeat(64)}`,
+        expiresAt: new Date(Date.now() + 300_000) } });
+      await tx.partnerCustomerTransfer.create({ data: { id: transferId, customerId, matchId,
+        fromOwnerUserId: oldPartnerId, fromProfileId: null, toProfileId: newPartnerId,
+        requestedBy: newPartnerId, requestReason: 'درخواست انتقال هم‌زمان با غیرفعال‌سازی',
+        correlationId: `race-request-corr-${suffix}` } });
+      const [connection] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+      requestPid = connection.pid; ready.resolve(); await beginDecision.promise;
+      const intent = { schemaVersion: 1 as const, type: 'CUSTOMER_TRANSFER_DECIDE' as const,
+        transferId, expectedRevision: 1, outcome: 'APPROVE' as const,
+        reason: 'بررسی مقصد جاری در همان تراکنش' };
+      const admin = createPartnerCrmService({ database: transactionDatabase(tx), actorId: adminId,
+        authorize: (transaction, input) => createAuditedPartnerAuthorization(transaction, {
+          actorId: adminId, purpose: 'CRM', channel: 'API',
+        }, { correlationId: input.correlationId, reason: input.reason }, input.target).authorize(input.action, input.root),
+        notifyTransfer: async () => undefined });
+      decisionResult = await admin.decideTransfer({ ...intent, commandId: `race-decision-${suffix}`,
+        correlationId: `race-decision-corr-${suffix}`, idempotency: { actorId: adminId,
+          operation: 'CUSTOMER_TRANSFER_DECIDE', targetId: transferId,
+          key: `race-decision-key-${suffix}`, payloadHash: await intentHash(intent) } });
+      throw rollback;
+    }, { timeout: 15_000 }).catch(error => { if (error !== rollback) throw error; });
+    await Promise.race([ready.promise, request.then(() => { throw new Error('Transfer request ended before authorization'); })]);
+    blocker = database.$transaction(async tx => {
+      // A non-key activation update is compatible with the transfer row's FK
+      // key-share lock, but must conflict with authorization's stronger lock.
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${newPartnerId} FOR NO KEY UPDATE`;
+      locked.resolve(); await release.promise;
+      await tx.user.update({ where: { id: newPartnerId }, data: { isActive: false } });
+    }, { timeout: 15_000 });
+    await Promise.race([locked.promise, blocker.then(() => { throw new Error('Destination lock ended early'); })]);
+    beginDecision.resolve();
+    for (let attempt = 0; ; attempt++) {
+      const [wait] = await database.$queryRaw<Array<{ waiting: boolean }>>`
+        SELECT cardinality(pg_blocking_pids(${requestPid}::integer)) > 0 AS waiting`;
+      if (wait.waiting) break;
+      if (attempt >= 200) throw new Error('Transfer never waited for the destination User lock');
+      await new Promise(done => setTimeout(done, 10));
+    }
+    release.resolve(); await Promise.all([blocker, request]);
+    assert.equal(decisionResult?.ok, false);
+    if (decisionResult && !decisionResult.ok) assert.equal(decisionResult.error.code, 'DEPENDENCY_BLOCKED');
+  } finally {
+    beginDecision.resolve(); release.resolve();
+    await Promise.allSettled([blocker, request].filter((item): item is Promise<unknown> => Boolean(item)));
+    try {
+      await database.$transaction(async tx => {
+        await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+        await tx.partnerProfile.deleteMany({ where: { id: { in: [oldPartnerId, newPartnerId] } } });
+        await tx.user.deleteMany({ where: { id: { in: [oldPartnerId, newPartnerId, adminId] },
+          email: { in: [`${oldPartnerId}@example.invalid`, `${newPartnerId}@example.invalid`, `${adminId}@example.invalid`] } } });
+      });
+    } finally { await database.$disconnect(); }
   }
 });
 

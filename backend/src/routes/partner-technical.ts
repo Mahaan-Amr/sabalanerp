@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { Router } from 'express';
 import { partnerError, type PartnerTechnicalCatalogPort, type PartnerTechnicalRecoveryPort,
   type PartnerTechnicalSavePort, type Result } from '@sabalanerp/partner-sales-contracts';
 import type { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { protect, type AuthRequest } from '../middleware/auth';
 import { createPartnerTechnicalCatalogReader } from '../services/partnerSales/crm/technicalCatalogReader';
 import { createPrismaPartnerTechnicalRecoveryService } from '../services/partnerSales/cases/technicalRecovery';
 import { createPrismaPartnerTechnicalSaveService, type PartnerTechnicalSaveDependencies } from '../services/partnerSales/cases/technicalSave';
+import { createPartnerTechnicalEvidenceResolver } from '../services/partnerSales/cases/technicalEvidence';
 import { createPartnerTechnicalRecoveryAuthority } from '../services/partnerSales/authorization/technicalRecovery';
 
 export type TechnicalRequest = { body: unknown };
@@ -31,7 +35,7 @@ export function createPartnerTechnicalRequestServices(input: {
   database: PrismaClient;
   actorId: string;
   correlationId: string;
-  resolveEvidence: PartnerTechnicalSaveDependencies['resolveEvidence'];
+  resolveEvidence?: PartnerTechnicalSaveDependencies['resolveEvidence'];
 }): PartnerTechnicalServices {
   const binding = { actorId: input.actorId, correlationId: input.correlationId };
   const authorize = createPartnerTechnicalRecoveryAuthority(binding);
@@ -41,7 +45,7 @@ export function createPartnerTechnicalRequestServices(input: {
     recovery: createPrismaPartnerTechnicalRecoveryService({ database: input.database,
       actorId: input.actorId, authorize }),
     saved: createPrismaPartnerTechnicalSaveService({ database: input.database,
-      actorId: input.actorId, authorize, resolveEvidence: input.resolveEvidence }),
+      actorId: input.actorId, authorize, resolveEvidence: input.resolveEvidence ?? createPartnerTechnicalEvidenceResolver() }),
   };
 }
 
@@ -73,3 +77,20 @@ export function registerPartnerTechnicalRoutes(router: TechnicalRouter, dependen
   router.post('/recoveries/read-saved', handle((ports, body) => ports.saved.readSaved(body as never)));
   return router;
 }
+
+/** Authenticated runtime adapter. Domain authorization, rollout state and the
+ * current edit lease are still rechecked inside the owning transaction. */
+export function createPartnerTechnicalRouter(database: PrismaClient = prisma) {
+  const router = Router();
+  router.use(protect);
+  registerPartnerTechnicalRoutes(router as unknown as TechnicalRouter, { servicesFor: async request => {
+    const authenticated = request as AuthRequest;
+    if (!authenticated.user) throw new Error('Authentication required');
+    const supplied = authenticated.get?.('X-Correlation-Id');
+    const correlationId = supplied && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(supplied) ? supplied : randomUUID();
+    return createPartnerTechnicalRequestServices({ database, actorId: authenticated.user.id, correlationId });
+  } });
+  return router;
+}
+
+export default createPartnerTechnicalRouter();

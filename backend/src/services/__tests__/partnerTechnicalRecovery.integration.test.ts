@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
-import { partnerError, type PartnerTechnicalCheckpoint, type PartnerTechnicalRecoveryAccess } from '@sabalanerp/partner-sales-contracts';
+import { canonicalHash, partnerError, type PartnerTechnicalCheckpoint, type PartnerTechnicalRecoveryAccess } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerTechnicalRecoveryService } from '../partnerSales/cases/technicalRecovery';
 import { createPartnerTechnicalSaveService } from '../partnerSales/cases/technicalSave';
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { createPartnerTechnicalRecoveryAuthority } from '../partnerSales/authorization/technicalRecovery';
+import { createPartnerTechnicalEvidenceResolver } from '../partnerSales/cases/technicalEvidence';
 
 function localDatabaseUrl(): string {
   const value = process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL;
@@ -67,6 +68,10 @@ test('real pre-Case authority binds creator-private recovery to the current Part
     await tx.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`,
       password: 'not-a-login', firstName: 'Fixture', lastName: 'Technical authority' } });
     await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'ACTIVE' } });
+    await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
+      enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
+      actorId, eligibilityEvidence: { fixture: true } } });
     const dependencies = { actorId, transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => run(tx),
       authorize: createPartnerTechnicalRecoveryAuthority({ actorId, correlationId: 'technical-authority-test' }) };
     const service = createPartnerTechnicalRecoveryService(dependencies);
@@ -94,6 +99,11 @@ test('pre-Case technical authority rejects internal ADMIN, pending identity, for
     await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'PENDING' } });
     assert.equal((await authorize(tx, request)).ok, false, 'pending identity is onboarding-only');
     await tx.partnerProfile.update({ where: { id: actorId }, data: { state: 'ACTIVE', revision: { increment: 1 } } });
+    assert.equal((await authorize(tx, request)).ok, false, 'active identity outside a release cohort cannot write');
+    await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
+      enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
+      actorId, eligibilityEvidence: { fixture: true } } });
     assert.equal((await authorize(tx, request)).ok, true, 'own active Partner bundle, even with a stray legacy role');
     assert.equal((await authorize(tx, { ...request, actorId: 'forged-actor' })).ok, false);
     await tx.salesContractEditSession.create({ data: { draftId: `foreign-${actorId}`, ownerUserId: 'another-creator',
@@ -102,6 +112,47 @@ test('pre-Case technical authority rejects internal ADMIN, pending identity, for
     assert.deepEqual(foreign, await authorize(tx, { ...request, recoveryId: `missing-${actorId}` }));
     await tx.user.update({ where: { id: actorId }, data: { isActive: false } });
     assert.equal((await authorize(tx, request)).ok, false);
+  });
+});
+
+test('real database policy and private catalog evidence produce a validated safe reference without exposing rates', async () => {
+  await fixture(async (tx, actorId, access) => {
+    await tx.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`,
+      password: 'not-a-login', firstName: 'Fixture', lastName: 'Technical evidence' } });
+    await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'ACTIVE',
+      commercialAccount: { create: { id: actorId } } } });
+    await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
+      enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
+      actorId, eligibilityEvidence: { fixture: true } } });
+    const product = await tx.product.create({ data: { id: actorId, code: actorId, name: actorId, namePersian: 'سنگ تست فنی',
+      cuttingDimensionCode: 'technical', cuttingDimensionName: 'technical', cuttingDimensionNamePersian: 'فنی',
+      stoneTypeCode: 'technical', stoneTypeName: 'technical', stoneTypeNamePersian: 'تراورتن', widthCode: '40',
+      widthValue: '40', widthName: '40', motherLengthValue: '2', thicknessCode: '2', thicknessValue: '2', thicknessName: '2',
+      mineCode: 'technical', mineName: 'technical', mineNamePersian: 'معدن تست', finishCode: 'technical', finishName: 'technical',
+      finishNamePersian: 'سابیده', colorCode: 'technical', colorName: 'technical', colorNamePersian: 'کرم', qualityCode: 'technical',
+      qualityName: 'technical', qualityNamePersian: 'درجه یک', basePrice: '12000000', images: [] } });
+    const terms = { schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_PRICING',
+      calculationPolicy: { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v2' },
+      mandatoryPercentage: '20', mandatoryEnabled: true, slabCuttingPricingMethod: 'lineBased', sawKerfMeters: '0.005',
+      materialRateScale: '0.1', currency: 'IRT', rates: { longitudinalCutRateToman: '1200', crossCutRateToman: '1400',
+        calibrationCutRateToman: '900', verticalCutRateToman: '1600', squareMeterCutRateToman: '4500' } };
+    const effectiveDate = new Date('2026-08-29T00:00:00.000Z');
+    const integrityHash = await canonicalHash({ accountId: actorId, version: 1, effectiveDate: '2026-08-29', terms,
+      actorId, reason: 'سیاست فنی تست تراکنشی' });
+    await tx.partnerCommercialTerms.create({ data: { id: actorId, accountId: actorId, version: 1, effectiveDate,
+      terms, integrityHash, actorId, reason: 'سیاست فنی تست تراکنشی' } });
+    const dependencies = { actorId, transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: createPartnerTechnicalRecoveryAuthority({ actorId, correlationId: 'real-technical-evidence' }),
+      resolveEvidence: createPartnerTechnicalEvidenceResolver() };
+    const result = await createPartnerTechnicalSaveService(dependencies).save({ ...access, expectedRecoveryRevision: 0,
+      idempotencyKey: 'real-evidence', draft: { schemaVersion: 1, inputRevision: 1, rows: [{ productRowId: 'prepared-row',
+        catalogItemId: product.id, catalogSnapshotVersion: product.updatedAt.toISOString(), family: 'prepared',
+        configuration: { kind: 'readyPiece', unit: 'count', quantity: '2' } }] } });
+    if (!result.ok) throw new Error(result.error.code);
+    assert.equal(result.value.rows[0].quantity, '2');
+    assert.equal(JSON.stringify(result.value).includes('1200000'), false);
+    assert.equal(JSON.stringify(result.value).includes('mandatoryPercentage'), false);
   });
 });
 

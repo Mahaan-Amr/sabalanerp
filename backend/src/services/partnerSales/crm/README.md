@@ -1,7 +1,7 @@
 # Partner technical catalog producer — issue 317 subset
 
 `createPartnerTechnicalCatalogReader(transaction, { actorId, correlationId })`
-implements public `PartnerTechnicalCatalogPort` from contracts 1.4.0. Call within
+implements public `PartnerTechnicalCatalogPort` from contracts 1.5.0. Call within
 the existing shared Prisma transaction. No runtime route is mounted here.
 
 The reader binds the authenticated actor to their current Profile and invokes

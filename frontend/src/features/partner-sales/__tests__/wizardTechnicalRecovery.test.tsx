@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PartnerTechnicalDraftSchema, type PartnerTechnicalCheckpoint,
   type PartnerTechnicalCheckpointReceipt, type PartnerTechnicalSave, type Result, partnerError } from '@sabalanerp/partner-sales-contracts';
-import { createPartnerTechnicalSession } from '../../contract-creation/partner/partnerTechnicalSession';
+import { createPartnerTechnicalSession, openPartnerTechnicalSession } from '../../contract-creation/partner/partnerTechnicalSession';
 
 const access = { schemaVersion: 1 as const, recoveryId: 'technical-session',
   browserSessionId: 'browser-session', leaseToken: 'writer-token', baseRevision: 0 };
@@ -201,4 +201,28 @@ test('owner save may jump a permanent revision counter and older validated refs 
   assert.equal(session.getSnapshot().phase, 'editing');
   assert.equal(session.getSnapshot().validated?.recoveryRevision, 7);
   assert.equal(session.getSnapshot().isCurrentValidated, true);
+});
+
+test('authenticated host opens one technical session from the current lease and restores only its exact saved revision', async () => {
+  const currentDraft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 3,
+    rows: [{ productRowId: 'configured-row', catalogItemId: 'catalog-row',
+      catalogSnapshotVersion: '2026-08-29T00:00:00.000Z', family: 'prepared',
+      configuration: { kind: 'readyPiece', unit: 'count', quantity: '2' } }] });
+  const validated = { schemaVersion: 1 as const, recoveryId: access.recoveryId, recoveryRevision: 4,
+    inputRevision: 3, updatedAt: '2026-08-29T00:00:01.000Z', rows: [{
+      configurationRef: { recoveryId: access.recoveryId, recoveryRevision: 4, productRowId: 'configured-row' },
+      quantity: '2', unit: 'count' as const, configurationChange: 'NEW' as const,
+    }] };
+  const reads: number[] = [];
+  const opened = await openPartnerTechnicalSession({ access,
+    recovery: { read: async () => ({ ok: true, value: { schemaVersion: 1, recoveryId: access.recoveryId,
+      recoveryRevision: 4, updatedAt: '2026-08-29T00:00:01.000Z', draft: currentDraft } }),
+      checkpoint: async () => { throw new Error('unused'); } },
+    saved: { readSaved: async input => { reads.push(input.recoveryRevision); return { ok: true, value: validated }; },
+      save: async () => { throw new Error('unused'); } },
+  });
+  assert.ok(opened.ok);
+  assert.deepEqual(reads, [4]);
+  assert.equal(opened.value.getSnapshot().isCurrentValidated, true);
+  assert.equal(opened.value.getSnapshot().validated?.rows[0].configurationRef.productRowId, 'configured-row');
 });

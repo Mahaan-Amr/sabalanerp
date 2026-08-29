@@ -3,11 +3,12 @@ import {
   PartnerTechnicalRecoveryViewSchema, PartnerTechnicalCheckpointReceiptSchema,
   PartnerTechnicalSaveReceiptSchema,
   PartnerTechnicalSavedViewSchema,
-  PartnerErrorSchema, type PartnerError,
+  PartnerErrorSchema, partnerError, type PartnerError,
   type PartnerTechnicalDraft, type PartnerTechnicalRecoveryAccess,
   type PartnerTechnicalRecoveryView, type PartnerTechnicalRecoveryPort,
   type PartnerTechnicalCheckpoint,
   type PartnerTechnicalSave, type PartnerTechnicalSavePort, type PartnerTechnicalSavedView,
+  type Result,
 } from '@sabalanerp/partner-sales-contracts';
 
 interface TechnicalSessionState {
@@ -144,4 +145,27 @@ export function createPartnerTechnicalSession(input: {
       state = { ...state, phase: 'closed' };
     },
   };
+}
+
+export async function openPartnerTechnicalSession(input: {
+  access: PartnerTechnicalRecoveryAccess;
+  recovery: PartnerTechnicalRecoveryPort;
+  saved: PartnerTechnicalSavePort;
+}): Promise<Result<ReturnType<typeof createPartnerTechnicalSession>>> {
+  const access = PartnerTechnicalRecoveryAccessSchema.safeParse(input.access);
+  if (!access.success) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
+  const recovered = await input.recovery.read(access.data);
+  if (!recovered.ok) return recovered;
+  let validated: PartnerTechnicalSavedView | undefined;
+  if (recovered.value.recoveryRevision > 0) {
+    const saved = await input.saved.readSaved({ ...access.data, recoveryRevision: recovered.value.recoveryRevision });
+    if (saved.ok) validated = saved.value;
+    else if (saved.error.code !== 'NOT_FOUND') return saved;
+  }
+  try {
+    return { ok: true, value: createPartnerTechnicalSession({ ...input, access: access.data,
+      recovered: recovered.value, ...(validated ? { validated } : {}) }) };
+  } catch {
+    return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+  }
 }

@@ -64,6 +64,8 @@ import dispatchConfirmationRoutes from "./routes/dispatch-confirmation";
 import shipmentQuantityRoutes from "./routes/shipment-quantities";
 import dispatchCaseRoutes from "./routes/dispatch-cases";
 import dispatchCutoverRoutes from "./routes/dispatch-cutover";
+import partnerTechnicalRoutes from "./routes/partner-technical";
+import partnerTechnicalPolicyRoutes from "./routes/partner-technical-policy";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -249,6 +251,8 @@ app.use("/api/dispatch-confirmation", dispatchConfirmationRoutes);
 app.use("/api/shipment-quantities", shipmentQuantityRoutes);
 app.use("/api/dispatch-cases", dispatchCaseRoutes);
 app.use("/api/dispatch-cutover", dispatchCutoverRoutes);
+app.use("/api/partner/technical", partnerTechnicalRoutes);
+app.use("/api/partner/management/technical-policy", partnerTechnicalPolicyRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/orders", orderRoutes);

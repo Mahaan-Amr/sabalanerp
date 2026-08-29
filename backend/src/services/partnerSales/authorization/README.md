@@ -1,7 +1,7 @@
 # Partner central authorization — persisted root slices, issue 319
 
 Review base: `1609c4637f2cd28b1cae14f876bc5005291547b4` (user approved).
-Public contracts: `@sabalanerp/partner-sales-contracts@1.4.0`, authorization v1
+Public contracts: `@sabalanerp/partner-sales-contracts@1.5.0`, authorization v1
 and its already-published v2 action companion. No public package change.
 The subsequently approved #296/#315 extension adds persisted central scoped
 action grants and decision audit. No runtime registration, activation or ordinary

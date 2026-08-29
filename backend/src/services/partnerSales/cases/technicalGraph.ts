@@ -18,6 +18,16 @@ import { technicalGraphMeasures, type TechnicalGraphMeasure } from './technicalG
 /** Owner-resolved frozen calculation evidence, not approved wholesale prices.
  * Never accept this context from a Partner/browser or return it in safe views. */
 export interface PartnerTechnicalGraphContext {
+  /** Private frozen owner policy. Persisted only inside the protected recovery
+   * envelope so later saves can preserve the first validated policy. */
+  technicalPolicy?: {
+    policyId: string; version: number; effectiveDate: string; integrityHash: string;
+    mandatoryPercentage: string; mandatoryEnabled: boolean;
+    slabCuttingPricingMethod: 'lineBased' | 'squareMeter'; sawKerfMeters: string; materialRateScale: string; currency: 'IRT';
+    calculationPolicy: CalculationPolicySnapshot;
+    rates: { longitudinalCutRateToman: string; crossCutRateToman: string; calibrationCutRateToman: string;
+      verticalCutRateToman: string; squareMeterCutRateToman: string };
+  };
   catalog: PartnerTechnicalPreviewCatalog;
   policy: CalculationPolicySnapshot;
   products: readonly {

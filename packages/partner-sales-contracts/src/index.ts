@@ -17,6 +17,7 @@ export * from './technical-catalog';
 export * from './technical-draft';
 export * from './technical-recovery';
 export * from './technical-save';
+export * from './technical-policy';
 export { PartnerTechnicalOperationsIntentSchema } from './technical-operations';
 export type { PartnerTechnicalOperationsIntent, PartnerTechnicalOperationsPreview } from './technical-operations';
 export { PartnerTechnicalDependentSchema } from './technical-dependents';

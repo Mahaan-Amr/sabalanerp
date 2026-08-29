@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PartnerActivationGates, PartnerProfileRecord, PartnerProfileStore } from './service';
 import { resolveEligibleResponder } from '../inquiries/adapters';
+import { validatePartnerConversionDispositions } from './managementPrismaStore';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
@@ -39,14 +40,14 @@ async function readGates(tx: Prisma.TransactionClient, profile: PartnerProfileRe
   for (const cohortId of [...new Set(profileSource?.cohortMemberships.map(item => item.cohortId) ?? [])].sort()) {
     await tx.$queryRaw`SELECT id FROM partner_release_cohorts WHERE id = ${cohortId} FOR UPDATE`;
   }
-  const [source, terms, cohort, openDuty, openDraft, responsibleContract,
-    workspaceGrant, featureGrant, scopedGrant, responderConflict] = await Promise.all([
+  const [source, terms, cohort, openDuty, openDraft, responsibleContract, openCorrection,
+    workspaceGrant, featureGrant, scopedGrant, responderConflict, conversionEvent] = await Promise.all([
     tx.partnerProfile.findUnique({ where: { id: profile.id }, select: { user: { select: {
       isActive: true, role: true,
     } }, commercialAccount: { select: { identities: { orderBy: { version: 'desc' }, take: 1,
-      select: { id: true } } } } } }),
+      select: { id: true, identifiers: true, integrityHash: true } } } } } }),
     tx.partnerCommercialTerms.findMany({ where: { account: { profileId: profile.id }, effectiveDate: { lte: clock.now } },
-      orderBy: { version: 'desc' }, select: { id: true, terms: true } }),
+      orderBy: { version: 'desc' }, select: { id: true, terms: true, integrityHash: true, effectiveDate: true } }),
     tx.partnerCohortMembership.findMany({ where: { profileId: profile.id }, select: { id: true, cohort: { select: {
       activationEnabled: true, enrollmentPaused: true, operationalPaused: true,
     } } } }),
@@ -54,6 +55,7 @@ async function readGates(tx: Prisma.TransactionClient, profile: PartnerProfileRe
     tx.salesContractEditSession.count({ where: { ownerUserId: profile.userId, purpose: 'STANDARD' } }),
     tx.salesContract.count({ where: { responsibleSellerId: profile.userId, isInactive: false,
       status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SIGNED', 'PRINTED'] } } }),
+    tx.accountingCorrectionRequest.count({ where: { assignedToUserId: profile.userId, status: 'OPEN' } }),
     tx.workspacePermission.count({ where: { userId: profile.userId, isActive: true,
       OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }] } }),
     tx.featurePermission.count({ where: { userId: profile.userId, isActive: true,
@@ -62,21 +64,68 @@ async function readGates(tx: Prisma.TransactionClient, profile: PartnerProfileRe
       domain: { not: 'PARTNER' }, effect: 'ALLOW',
       OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }] } }),
     currentResponderConflict(tx, profile.userId),
+    tx.$queryRaw<Array<{ id: string; transition: string | null; evidence: Prisma.JsonValue }>>`
+      SELECT id, evidence->>'transition' AS transition, evidence FROM partner_profile_events
+      WHERE "profileId" = ${profile.id} AND evidence->>'type' = 'PROFILE_CONVERSION'
+      ORDER BY revision DESC LIMIT 1`,
   ]);
-  const currentTerms = new Map<string, { id: string }>();
+  const currentTerms = new Map<string, { id: string; terms: Prisma.JsonValue; integrityHash: string; effectiveDate: Date }>();
   for (const item of terms) {
     const kind = purpose(item.terms);
-    if (kind && !currentTerms.has(kind)) currentTerms.set(kind, { id: item.id });
+    if (kind && !currentTerms.has(kind)) currentTerms.set(kind, item);
   }
+  const identityProjection = source?.commercialAccount?.identities[0];
+  const identityEvidenceId = identityProjection?.identifiers && typeof identityProjection.identifiers === 'object' &&
+    !Array.isArray(identityProjection.identifiers) && typeof (identityProjection.identifiers as Prisma.JsonObject).evidenceId === 'string'
+    ? (identityProjection.identifiers as Prisma.JsonObject).evidenceId as string : undefined;
+  const commercialProjection = currentTerms.get('PARTNER_TECHNICAL_PRICING');
+  const creditProjection = currentTerms.get('PARTNER_CREDIT_TERMS');
+  const policyId = (item: typeof commercialProjection) => item?.terms && typeof item.terms === 'object' &&
+    !Array.isArray(item.terms) && typeof (item.terms as Prisma.JsonObject).policyId === 'string'
+    ? (item.terms as Prisma.JsonObject).policyId as string : undefined;
+  const commercialPolicyId = policyId(commercialProjection), creditPolicyId = policyId(creditProjection);
+  if (identityEvidenceId) await tx.$queryRaw`SELECT id FROM partner_identity_evidence WHERE id = ${identityEvidenceId} FOR UPDATE`;
+  for (const id of [commercialPolicyId, creditPolicyId].filter((value): value is string => Boolean(value)).sort()) {
+    await tx.$queryRaw`SELECT id FROM partner_terms_policies WHERE id = ${id} FOR UPDATE`;
+  }
+  const [identityEvidence, commercialPolicy, creditPolicy] = await Promise.all([
+    identityEvidenceId ? tx.partnerIdentityEvidence.findUnique({ where: { id: identityEvidenceId } }) : null,
+    commercialPolicyId ? tx.partnerTermsPolicy.findUnique({ where: { id: commercialPolicyId } }) : null,
+    creditPolicyId ? tx.partnerTermsPolicy.findUnique({ where: { id: creditPolicyId } }) : null,
+  ]);
+  const identityCurrent = identityEvidence && identityProjection && identityEvidence.userId === profile.userId &&
+    !identityEvidence.revokedAt && identityEvidence.issuedAt <= clock.now &&
+    (!identityEvidence.expiresAt || identityEvidence.expiresAt > clock.now) &&
+    identityEvidence.integrityHash === identityProjection.integrityHash ? identityEvidence : undefined;
+  const currentPolicy = (policy: typeof commercialPolicy, projection: typeof commercialProjection,
+    expectedPurpose: 'PARTNER_TECHNICAL_PRICING' | 'PARTNER_CREDIT_TERMS') => policy && projection &&
+    policy.purpose === expectedPurpose && !policy.revokedAt && policy.issuedAt <= clock.now &&
+    policy.effectiveDate <= clock.now && (!policy.expiresAt || policy.expiresAt > clock.now) &&
+    policy.integrityHash === projection.integrityHash && policy.effectiveDate.getTime() === projection.effectiveDate.getTime()
+    ? policy : undefined;
+  const currentCommercial = currentPolicy(commercialPolicy, commercialProjection, 'PARTNER_TECHNICAL_PRICING');
+  const currentCredit = currentPolicy(creditPolicy, creditProjection, 'PARTNER_CREDIT_TERMS');
   const responderAssignment = profileSource?.responderAssignments[0];
   const responder = responderAssignment
     ? await resolveEligibleResponder(tx, { responderId: responderAssignment.responderId })
     : null;
   const internalConflict = source?.user.role !== 'USER' || workspaceGrant > 0 || featureGrant > 0 ||
-    scopedGrant > 0 || openDuty > 0 || openDraft > 0 || responsibleContract > 0 || responderConflict;
-  const identityId = source?.commercialAccount?.identities[0]?.id;
-  const commercialId = currentTerms.get('PARTNER_TECHNICAL_PRICING')?.id;
-  const creditId = currentTerms.get('PARTNER_CREDIT_TERMS')?.id;
+    scopedGrant > 0 || openDuty > 0 || openDraft > 0 || responsibleContract > 0 || openCorrection > 0 || responderConflict;
+  const conversionInProgress = conversionEvent[0]?.transition === 'START';
+  const conversionRecord = conversionEvent[0];
+  const conversionPayload = conversionRecord?.evidence && typeof conversionRecord.evidence === 'object' &&
+    !Array.isArray(conversionRecord.evidence) ? conversionRecord.evidence as Prisma.JsonObject : undefined;
+  const blockerIds = Array.isArray(conversionPayload?.blockerIds)
+    ? conversionPayload.blockerIds.filter((id): id is string => typeof id === 'string') : [];
+  const dispositionEvidenceIds = Array.isArray(conversionPayload?.dispositionEvidenceIds)
+    ? conversionPayload.dispositionEvidenceIds.filter((id): id is string => typeof id === 'string') : [];
+  const resolvedConversionValid = conversionRecord?.transition === 'RESOLVE' &&
+    await validatePartnerConversionDispositions(tx, { profileId: profile.id, profileUserId: profile.userId,
+      blockerIds, evidenceIds: dispositionEvidenceIds, now: clock.now });
+  const conversionEvidenceId = resolvedConversionValid ? conversionRecord?.id : undefined;
+  const identityId = identityCurrent?.id;
+  const commercialId = currentCommercial?.id;
+  const creditId = currentCredit?.id;
   const cohortMembership = cohort.length === 1 && cohort[0].cohort.activationEnabled &&
     !cohort[0].cohort.enrollmentPaused && !cohort[0].cohort.operationalPaused ? cohort[0] : undefined;
   return {
@@ -84,12 +133,14 @@ async function readGates(tx: Prisma.TransactionClient, profile: PartnerProfileRe
     commercialTermsReady: Boolean(commercialId),
     creditTermsReady: Boolean(creditId),
     responderReady: Boolean(responder?.ok),
-    conversionCleared: !internalConflict,
+    conversionCleared: !internalConflict && !conversionInProgress &&
+      (conversionRecord?.transition !== 'RESOLVE' || resolvedConversionValid),
     cohortReady: Boolean(cohortMembership),
     userActive: source?.user.isActive ?? false,
     conflictingInternalAuthority: internalConflict,
     evidenceIds: [identityId, commercialId, creditId,
-      responder?.ok ? responderAssignment?.id : undefined, cohortMembership?.id].filter((id): id is string => Boolean(id)),
+      responder?.ok ? responderAssignment?.id : undefined, cohortMembership?.id,
+      conversionEvidenceId].filter((id): id is string => Boolean(id)),
   };
 }
 

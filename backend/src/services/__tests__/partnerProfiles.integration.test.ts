@@ -25,6 +25,18 @@ test('Prisma profile gates re-read current identity, terms, responder, cohort an
         email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Profile', lastName: 'Fixture',
         ...(id === ids.responder ? { role: 'ADMIN' as const } : {}) })) });
       await tx.partnerProfile.create({ data: { id: ids.profile, userId: ids.partner } });
+      await tx.partnerIdentityEvidence.create({ data: { id: `${prefix}-evidence`, userId: ids.partner,
+        legalName: 'فروشنده همکار تست', personType: 'NATURAL', identifiers: { fixture: true },
+        phone: '+989120000000', address: 'تهران، نشانی تست', integrityHash: `sha256-v1:${'1'.repeat(64)}`,
+        issuedBy: ids.actor } });
+      await tx.partnerTermsPolicy.createMany({ data: [
+        { id: `${prefix}-commercial-policy`, purpose: 'PARTNER_TECHNICAL_PRICING', label: 'شرایط تجاری تست',
+          effectiveDate: new Date('2026-01-01'), terms: { fixture: true }, integrityHash: `sha256-v1:${'2'.repeat(64)}`,
+          issuedBy: ids.actor },
+        { id: `${prefix}-credit-policy`, purpose: 'PARTNER_CREDIT_TERMS', label: 'شرایط اعتباری تست',
+          effectiveDate: new Date('2026-01-01'), terms: { fixture: true }, integrityHash: `sha256-v1:${'3'.repeat(64)}`,
+          issuedBy: ids.actor },
+      ] });
       await tx.partnerCommercialAccount.create({ data: { id: ids.account, profileId: ids.profile } });
       await tx.partnerCommercialIdentity.create({ data: { id: `${prefix}-identity`, accountId: ids.account,
         version: 1, legalName: 'فروشنده همکار تست', identifiers: { evidenceId: `${prefix}-evidence` },
@@ -32,10 +44,10 @@ test('Prisma profile gates re-read current identity, terms, responder, cohort an
         actorId: ids.actor } });
       await tx.partnerCommercialTerms.createMany({ data: [
         { id: `${prefix}-commercial`, accountId: ids.account, version: 1, effectiveDate: new Date('2026-01-01'),
-          terms: { purpose: 'PARTNER_TECHNICAL_PRICING' }, integrityHash: `sha256-v1:${'2'.repeat(64)}`,
+          terms: { purpose: 'PARTNER_TECHNICAL_PRICING', policyId: `${prefix}-commercial-policy` }, integrityHash: `sha256-v1:${'2'.repeat(64)}`,
           actorId: ids.actor, reason: 'شرایط تجاری تست' },
         { id: `${prefix}-credit`, accountId: ids.account, version: 2, effectiveDate: new Date('2026-01-01'),
-          terms: { purpose: 'PARTNER_CREDIT_TERMS' }, integrityHash: `sha256-v1:${'3'.repeat(64)}`,
+          terms: { purpose: 'PARTNER_CREDIT_TERMS', policyId: `${prefix}-credit-policy` }, integrityHash: `sha256-v1:${'3'.repeat(64)}`,
           actorId: ids.actor, reason: 'شرایط اعتباری تست' },
       ] });
       await tx.partnerProfileResponderAssignment.create({ data: { id: `${prefix}-assignment`, profileId: ids.profile,
@@ -50,8 +62,8 @@ test('Prisma profile gates re-read current identity, terms, responder, cohort an
       const ready = await store.readActivationGates(tx, profile);
       assert.deepEqual(ready, { identityVerified: true, commercialTermsReady: true, creditTermsReady: true,
         responderReady: true, conversionCleared: true, cohortReady: true, userActive: true,
-        conflictingInternalAuthority: false, evidenceIds: [`${prefix}-identity`, `${prefix}-commercial`,
-          `${prefix}-credit`, `${prefix}-assignment`, `${prefix}-membership`] });
+        conflictingInternalAuthority: false, evidenceIds: [`${prefix}-evidence`, `${prefix}-commercial-policy`,
+          `${prefix}-credit-policy`, `${prefix}-assignment`, `${prefix}-membership`] });
       await tx.workspacePermission.create({ data: { userId: ids.partner, workspace: 'sales',
         permissionLevel: 'EDIT', grantedBy: ids.actor } });
       const staleUiMustLose = await store.readActivationGates(tx, profile);
@@ -111,6 +123,14 @@ test('Prisma profile gates re-read current identity, terms, responder, cohort an
       assert.ok(suspendedProfile);
       assert.equal((await store.readActivationGates(tx, suspendedProfile)).conversionCleared, true,
         'a frozen Partner technical recovery is preserved and does not block reactivation');
+      const revokedAt = new Date();
+      await tx.partnerIdentityEvidence.update({ where: { id: `${prefix}-evidence` }, data: { revokedAt } });
+      await tx.partnerTermsPolicy.updateMany({ where: { id: { in: [`${prefix}-commercial-policy`, `${prefix}-credit-policy`] } },
+        data: { revokedAt } });
+      const revoked = await store.readActivationGates(tx, suspendedProfile);
+      assert.equal(revoked.identityVerified, false);
+      assert.equal(revoked.commercialTermsReady, false);
+      assert.equal(revoked.creditTermsReady, false);
       throw rollback;
     }, { timeout: 20_000 });
   } catch (error) { if (error !== rollback) throw error; }

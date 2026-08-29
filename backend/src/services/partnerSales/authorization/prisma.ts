@@ -10,14 +10,27 @@ import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot, Au
 export type ResolvePartnerAuthority<Action extends PartnerActionV2 = PartnerAction> = (tx: Prisma.TransactionClient, input: {
   actorId: string; root: AuthorizationRoot;
 }) => Promise<Pick<AuthorizationEvidence<Action>, 'grants' | 'authorizationRevision'>>;
+export type PartnerAuthorizationTarget = { correctionOpportunityId: string } | { prospectiveProfileOwnerId: string };
 
 /** Transaction-scoped, using the caller's shared Prisma transaction. Never owns
  * a PrismaClient or commits/disconnects. Unsupported roots fail closed. */
 export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Prisma.TransactionClient,
-  resolveAuthority: ResolvePartnerAuthority<Action>, target?: { correctionOpportunityId: string }): AuthorizationSource<Action> {
+  resolveAuthority: ResolvePartnerAuthority<Action>, target?: PartnerAuthorizationTarget): AuthorizationSource<Action> {
   return { read: async (actorId, root) => {
     let resource: AuthorizationEvidence['resource'] = null;
     let profileId = root.kind === 'PROFILE' ? root.id : null;
+    if (root.kind === 'PROFILE' && target && 'prospectiveProfileOwnerId' in target) {
+      for (const id of [...new Set([actorId, target.prospectiveProfileOwnerId])].sort()) {
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${id} FOR UPDATE`;
+      }
+      const prospective = await tx.user.findUnique({ where: { id: target.prospectiveProfileOwnerId },
+        select: { isActive: true, departmentId: true, partnerProfile: { select: { id: true } } } });
+      if (prospective?.isActive && !prospective.partnerProfile) {
+        resource = { root, partnerSellerId: target.prospectiveProfileOwnerId, partnerStatus: 'PENDING',
+          lifecycleRevision: 1, ...(prospective.departmentId ? { departmentId: prospective.departmentId } : {}) };
+      }
+      profileId = null;
+    }
     if (root.kind === 'INQUIRY') {
       await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${root.id} FOR UPDATE`;
       profileId = (await tx.partnerInquiry.findUnique({ where: { id: root.id }, select: { profileId: true } }))?.profileId ?? null;
@@ -58,7 +71,7 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
       if (assignment) resource.assignment = { actorId: assignment.responderId, assignmentId: assignment.id,
         revision: assignment.revision, eligible: assignment.responderId === actorId && Boolean(actor?.isActive) && !actor?.partnerProfile };
     }
-    if (target && resource) {
+    if (target && 'correctionOpportunityId' in target && resource) {
       // A financial chain must be explicitly selected by the owning command.
       // Never infer the requester from the Case creator or the latest request.
       const opportunity = await tx.partnerCorrectionOpportunity.findUnique({ where: { id: target.correctionOpportunityId },
@@ -84,7 +97,7 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
 /** The versioned public port shares all persisted evidence and lock behavior.
  * It does not install a central grant provider or expand v1 action vocabulary. */
 export function createPrismaPartnerAuthorizationV2(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
-  resolveAuthority: ResolvePartnerAuthority<PartnerActionV2>, target?: { correctionOpportunityId: string }): PartnerAuthorizationV2Port {
+  resolveAuthority: ResolvePartnerAuthority<PartnerActionV2>, target?: PartnerAuthorizationTarget): PartnerAuthorizationV2Port {
   return createPartnerAuthorizationV2(prismaAuthorizationSource(tx, resolveAuthority, target), binding);
 }
 

@@ -74,6 +74,9 @@ model User {
   issuedScopedActionGrants EffectiveActionGrant[] @relation("ScopedGrantIssuer")
   revokedScopedActionGrants EffectiveActionGrant[] @relation("ScopedGrantRevoker")
   partnerProfile PartnerProfile?
+  partnerIdentityEvidence PartnerIdentityEvidence[] @relation("PartnerIdentityEvidenceSubject")
+  issuedPartnerIdentityEvidence PartnerIdentityEvidence[] @relation("PartnerIdentityEvidenceIssuer")
+  issuedPartnerTermsPolicies PartnerTermsPolicy[] @relation("PartnerTermsPolicyIssuer")
   id                                         String                               @id @default(cuid())
   email                                      String                               @unique
   username                                   String                               @unique
@@ -2009,6 +2012,8 @@ model SalesReportPreset {
 
 model CrmCustomer {
   partnerSaleCases         PartnerSaleCase[]
+  partnerOwnerProfileId    String?
+  partnerOwnerProfile      PartnerProfile? @relation(fields: [partnerOwnerProfileId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   id                       String                    @id @default(cuid())
   ownerUserId              String?
   createdBy                String?
@@ -2060,6 +2065,7 @@ model CrmCustomer {
   securityVehicleMovements SecurityVehicleMovement[]
 
   @@index([ownerUserId])
+  @@index([partnerOwnerProfileId])
   @@index([createdBy])
   @@map("crm_customers")
 }
@@ -7231,6 +7237,52 @@ enum PartnerProfileState {
   TERMINATED
 }
 
+enum PartnerIdentityPersonType {
+  NATURAL
+  LEGAL
+}
+
+enum PartnerTermsPurpose {
+  PARTNER_TECHNICAL_PRICING
+  PARTNER_CREDIT_TERMS
+}
+
+model PartnerIdentityEvidence {
+  id            String @id
+  userId        String
+  legalName     String
+  tradeName     String?
+  personType    PartnerIdentityPersonType
+  identifiers   Json
+  phone         String
+  address       String
+  integrityHash String
+  issuedBy      String
+  issuedAt      DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt     DateTime? @db.Timestamptz(3)
+  revokedAt     DateTime? @db.Timestamptz(3)
+  subject       User @relation("PartnerIdentityEvidenceSubject", fields: [userId], references: [id], onDelete: Restrict)
+  issuer        User @relation("PartnerIdentityEvidenceIssuer", fields: [issuedBy], references: [id], onDelete: Restrict)
+  @@index([userId, issuedAt])
+  @@map("partner_identity_evidence")
+}
+
+model PartnerTermsPolicy {
+  id            String @id
+  purpose       PartnerTermsPurpose
+  label         String
+  effectiveDate DateTime @db.Date
+  expiresAt     DateTime? @db.Timestamptz(3)
+  terms         Json
+  integrityHash String
+  issuedBy      String
+  issuedAt      DateTime @default(now()) @db.Timestamptz(3)
+  revokedAt     DateTime? @db.Timestamptz(3)
+  issuer        User @relation("PartnerTermsPolicyIssuer", fields: [issuedBy], references: [id], onDelete: Restrict)
+  @@index([purpose, effectiveDate])
+  @@map("partner_terms_policies")
+}
+
 model PartnerProfile {
   id                  String @id @default(cuid())
   userId              String @unique
@@ -7247,6 +7299,7 @@ model PartnerProfile {
   inquiries           PartnerInquiry[]
   responderAssignments PartnerProfileResponderAssignment[]
   saleCases           PartnerSaleCase[]
+  customers           CrmCustomer[]
   @@map("partner_profiles")
 }
 

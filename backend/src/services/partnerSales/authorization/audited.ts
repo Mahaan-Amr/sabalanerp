@@ -4,6 +4,7 @@ import { PartnerActionV2Schema, PermissionContextSchema, partnerError, type Part
 import { appendAuthorizationDecision, readAuthorizationDecisions } from '../../effectiveAuthorization/audit';
 import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot } from './contracts';
 import { prismaAuthorizationSource } from './prisma';
+import type { PartnerAuthorizationTarget } from './prisma';
 import { resolvePartnerScopedAuthority } from './centralAuthority';
 import { createPartnerAuthorizationV2 } from './service';
 import { readActions } from './capabilities';
@@ -12,7 +13,7 @@ import { readActions } from './capabilities';
  * the transaction (not thrown) to retain its audit. Business commands must not
  * mutate before authorization. Rollback rolls back both mutation and evidence. */
 export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
-  audit: { correlationId: string; reason?: string }, target?: { correctionOpportunityId: string }): PartnerAuthorizationV2Port {
+  audit: { correlationId: string; reason?: string }, target?: PartnerAuthorizationTarget): PartnerAuthorizationV2Port {
   if (!audit.correlationId.trim() || audit.correlationId.length > 200 || (audit.reason?.length ?? 0) > 2000) {
     throw new Error('Valid authorization audit context required');
   }

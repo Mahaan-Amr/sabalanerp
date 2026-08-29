@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import type { Prisma } from '@prisma/client';
-import { partnerError, type PartnerCommandPort, type PartnerManagementCommandV2Port, type Result } from '@sabalanerp/partner-sales-contracts';
+import { PartnerManagementCommandV2Schema, partnerError, type PartnerCommandPort,
+  type PartnerManagementCommandV2Port, type Result } from '@sabalanerp/partner-sales-contracts';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
@@ -10,6 +11,8 @@ import { resolveEligibleResponder } from '../services/partnerSales/inquiries/ada
 import { createPrismaPartnerResponderAssignmentService } from '../services/partnerSales/management/responderAssignment';
 import { createPartnerProfileService } from '../services/partnerSales/profiles/service';
 import { createPrismaPartnerProfileStore } from '../services/partnerSales/profiles/prismaStore';
+import { createPartnerProfileManagementService } from '../services/partnerSales/profiles/management';
+import { createPrismaPartnerProfileManagementStore } from '../services/partnerSales/profiles/managementPrismaStore';
 
 function correlation(request: Request): string {
   const supplied = request.get('X-Correlation-Id');
@@ -41,11 +44,14 @@ export function createPartnerManagementRouter(dependencies: {
 }
 
 function authorizeFor(request: AuthRequest, correlationId: string) {
-  return async (tx: Prisma.TransactionClient, input: { action: 'RESPONDER_ASSIGN' | 'PROFILE_ACTIVATE' |
-    'PROFILE_SUSPEND' | 'PROFILE_TERMINATE'; purpose: 'MANAGEMENT' | 'ONBOARDING'; reason: string;
-    root: { kind: 'PROFILE'; id: string } }) => {
+  return async (tx: Prisma.TransactionClient, input: { action: 'RESPONDER_ASSIGN' | 'PROFILE_CREATE' |
+    'IDENTITY_VERIFY' | 'COMMERCIAL_TERMS_MANAGE' | 'CREDIT_TERMS_MANAGE' | 'PROFILE_ACTIVATE' |
+    'PROFILE_CONVERSION_MANAGE' | 'PROFILE_SUSPEND' | 'PROFILE_TERMINATE';
+    purpose: 'MANAGEMENT' | 'ONBOARDING' | 'ACCOUNTING'; reason: string;
+    root: { kind: 'PROFILE'; id: string }; prospectiveOwnerId?: string }) => {
     const policy = createAuditedPartnerAuthorization(tx, { actorId: request.user!.id,
-      purpose: input.purpose, channel: 'API' }, { correlationId, reason: input.reason });
+      purpose: input.purpose, channel: 'API' }, { correlationId, reason: input.reason },
+      input.prospectiveOwnerId ? { prospectiveProfileOwnerId: input.prospectiveOwnerId } : undefined);
     const result = await policy.authorize(input.action, input.root);
     if (!result.ok) return result;
     const evidence = await readAuthorizationDecisionByCorrelation(tx, { domain: 'PARTNER', actorId: request.user!.id,
@@ -59,9 +65,17 @@ function authorizeFor(request: AuthRequest, correlationId: string) {
 export default createPartnerManagementRouter({ serviceFor(request) {
   if (!request.user) throw new Error('Authentication required');
   const correlationId = correlation(request);
-  return createPrismaPartnerResponderAssignmentService({ database: prisma, actorId: request.user.id,
+  const responder = createPrismaPartnerResponderAssignmentService({ database: prisma, actorId: request.user.id,
     resolveResponder: resolveEligibleResponder,
     authorize: authorizeFor(request, correlationId) });
+  const profile = createPartnerProfileManagementService({ actorId: request.user.id,
+    store: createPrismaPartnerProfileManagementStore(prisma), newId: randomUUID,
+    authorize: authorizeFor(request, correlationId) });
+  return { execute(input) {
+    const parsed = PartnerManagementCommandV2Schema.safeParse(input);
+    if (!parsed.success) return Promise.resolve({ ok: false as const, error: partnerError('INVALID_PAYLOAD') });
+    return parsed.data.type === 'RESPONDER_ASSIGN' ? responder.execute(parsed.data) : profile.execute(parsed.data);
+  } };
 }, profileServiceFor(request) {
   if (!request.user) throw new Error('Authentication required');
   const correlationId = correlation(request);

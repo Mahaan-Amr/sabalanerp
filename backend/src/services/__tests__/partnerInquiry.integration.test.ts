@@ -226,10 +226,11 @@ test('reassignment is pending-only and cancellation retains immutable approvals 
     const latest = await tx.partnerInquiryAssignment.findFirstOrThrow({ where: { inquiryId: ids.inquiryId }, orderBy: { revision: 'desc' } });
     assert.equal(latest.revision, 2); assert.equal(latest.responderId, replacementId);
     const cancelIntent = { schemaVersion: 1 as const, type: 'INQUIRY_CANCEL' as const, inquiryId: ids.inquiryId,
-      expectedRevision: 2, reason: 'لغو استعلام توسط فروشنده' };
+      expectedRevision: 2, reason: 'لغو پشتیبانی استعلام تعلیق‌شده' };
     const cancelHash = await canonicalHash(cancelIntent);
-    const cancelled = await partner.execute({ ...cancelIntent, commandId: 'cancel-command', correlationId: 'cancel-command',
-      idempotency: { actorId: ids.actorId, operation: 'INQUIRY_CANCEL', targetId: ids.inquiryId,
+    await tx.partnerProfile.update({ where: { id: ids.actorId }, data: { state: 'SUSPENDED' } });
+    const cancelled = await manager.execute({ ...cancelIntent, commandId: 'cancel-command', correlationId: 'cancel-command',
+      idempotency: { actorId: 'sales-manager-fixture', operation: 'INQUIRY_CANCEL', targetId: ids.inquiryId,
         key: 'cancel-command', payloadHash: cancelHash } });
     assert.equal(cancelled.ok, true);
     assert.equal((await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: 'row-1' } })).outcome, 'CANCELLED');

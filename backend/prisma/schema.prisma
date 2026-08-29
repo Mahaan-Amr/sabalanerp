@@ -1920,6 +1920,7 @@ model SalesContractEditSession {
   draftId          String    @unique
   contractId       String?
   ownerUserId      String
+  purpose          String    @default("STANDARD")
   browserSessionId String
   leaseToken       String    @unique
   schemaVersion    Int

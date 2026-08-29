@@ -1,9 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PartnerTechnicalCheckpointSchema, PartnerTechnicalCheckpointReceiptSchema,
+  PartnerTechnicalLeaseRequestSchema, PartnerTechnicalLeaseReceiptSchema,
   PartnerTechnicalRecoveryViewSchema } from '@sabalanerp/partner-sales-contracts';
 
 test('technical recovery wire preserves incomplete input but rejects actor authority, private fields and configuration refs', () => {
+  const lease = { schemaVersion: 1 as const, recoveryId: 'draft', browserSessionId: 'browser',
+    baseRevision: 0, takeover: false };
+  assert.deepEqual(PartnerTechnicalLeaseRequestSchema.parse(lease), lease);
+  assert.equal(PartnerTechnicalLeaseRequestSchema.safeParse({ ...lease, purpose: 'PARTNER_TECHNICAL' }).success, false,
+    'the browser cannot select trusted session provenance');
+  const acquired = { schemaVersion: 1 as const, recoveryId: 'draft', browserSessionId: 'browser',
+    leaseToken: 'lease', baseRevision: 0, updatedAt: '2026-08-28T10:00:00.000Z', takenOver: false };
+  assert.deepEqual(PartnerTechnicalLeaseReceiptSchema.parse(acquired), acquired);
   const command = { schemaVersion: 1, recoveryId: 'draft', browserSessionId: 'browser', leaseToken: 'lease', baseRevision: 0,
     expectedRecoveryRevision: 0, idempotencyKey: 'request', draft: { schemaVersion: 1, inputRevision: 1, rows: [],
       editingValues: [{ entityId: 'row', field: 'quantity', text: '۲٫' }] } };

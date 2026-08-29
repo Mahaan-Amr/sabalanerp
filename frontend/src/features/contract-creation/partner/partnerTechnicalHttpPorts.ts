@@ -1,13 +1,14 @@
 import {
   PartnerTechnicalCatalogPageSchema, PartnerTechnicalCatalogQuerySchema,
   PartnerTechnicalCheckpointReceiptSchema, PartnerTechnicalCheckpointSchema,
+  PartnerTechnicalLeaseRequestSchema, PartnerTechnicalLeaseReceiptSchema,
   PartnerTechnicalRecoveryAccessSchema, PartnerTechnicalRecoveryViewSchema,
   PartnerTechnicalSaveReceiptSchema, PartnerTechnicalSaveSchema,
   PartnerTechnicalSavedReadSchema, PartnerTechnicalSavedViewSchema,
   PartnerTechnicalPolicyPublishSchema, PartnerTechnicalPolicyReceiptSchema,
   PartnerTechnicalPolicyViewSchema, IdSchema,
   partnerError, type PartnerErrorCode, type Result,
-  type PartnerTechnicalCatalogPort, type PartnerTechnicalRecoveryPort,
+  type PartnerTechnicalCatalogPort, type PartnerTechnicalLeasePort, type PartnerTechnicalRecoveryPort,
   type PartnerTechnicalSavePort,
   type PartnerTechnicalPolicyPort,
 } from '@sabalanerp/partner-sales-contracts';
@@ -63,6 +64,12 @@ async function request<T>(operation: () => Promise<HttpResponse>, schema: Public
  * It returns only public package views; network ambiguity remains throwable so
  * the session coordinator retries the same idempotent command. */
 export function createPartnerTechnicalHttpPorts(client: PartnerTechnicalHttpClient = api) {
+  const lease: PartnerTechnicalLeasePort = { async acquire(input) {
+    const parsed = PartnerTechnicalLeaseRequestSchema.safeParse(input);
+    if (!parsed.success) return invalid();
+    return request(() => client.post('/partner/technical/recoveries/acquire', parsed.data),
+      PartnerTechnicalLeaseReceiptSchema);
+  } };
   const catalog: PartnerTechnicalCatalogPort = { async read(input) {
     const parsed = PartnerTechnicalCatalogQuerySchema.safeParse(input);
     if (!parsed.success) return invalid();
@@ -92,7 +99,7 @@ export function createPartnerTechnicalHttpPorts(client: PartnerTechnicalHttpClie
       return request(() => client.post('/partner/technical/recoveries/read-saved', parsed.data), PartnerTechnicalSavedViewSchema);
     },
   };
-  return { catalog, recovery, saved };
+  return { lease, catalog, recovery, saved };
 }
 
 export function createPartnerTechnicalPolicyHttpPort(client: PartnerTechnicalPolicyHttpClient = api): PartnerTechnicalPolicyPort {

@@ -145,7 +145,7 @@ test('a concurrent protected transition cannot be rebound when an expired generi
   }
   const store = new TransitioningStore(database);
   try {
-    await store.create({ draftId, contractId: null, ownerUserId: draftId, browserSessionId: 'browser-a', leaseToken: 'old-lease',
+    await store.create({ draftId, contractId: null, ownerUserId: draftId, purpose: 'STANDARD', browserSessionId: 'browser-a', leaseToken: 'old-lease',
       schemaVersion: 2, baseRevision: 0, recovery: null, createdAt: new Date(now.getTime() - 90_000),
       updatedAt: new Date(now.getTime() - 90_000), takenOverAt: null });
     const result = await acquireContractEditSession(store, { draftId, contractId: null, userId: draftId,
@@ -177,7 +177,7 @@ test('ordinary discovery cannot purge a protected checkpoint installed after its
   }
   const store = new SavingDuringDiscoveryStore(database);
   try {
-    await store.create({ draftId, contractId: null, ownerUserId: draftId, browserSessionId: 'browser-a', leaseToken: randomUUID(),
+    await store.create({ draftId, contractId: null, ownerUserId: draftId, purpose: 'STANDARD', browserSessionId: 'browser-a', leaseToken: randomUUID(),
       schemaVersion: 2, baseRevision: 0, recovery: null, createdAt: now, updatedAt: now, takenOverAt: null });
     assert.equal(await discoverRecoverableContractCreationDraft(store, { userId: draftId, browserSessionId: 'browser-a', now }), null);
     assert.deepEqual((await store.load(draftId))?.recovery, envelope, 'the newly saved protected draft survives stale cleanup');
@@ -194,7 +194,7 @@ test('same-lease same-millisecond concurrent checkpoints cannot both replace one
   try {
     const now = new Date();
     const initial: ContractEditSessionRecord = {
-      draftId, contractId: null, ownerUserId: draftId, browserSessionId: 'browser-a', leaseToken: randomUUID(),
+      draftId, contractId: null, ownerUserId: draftId, purpose: 'STANDARD', browserSessionId: 'browser-a', leaseToken: randomUUID(),
       schemaVersion: 2, baseRevision: 0, recovery: { sequence: 1, payload: { input: 'initial' } },
       createdAt: now, updatedAt: now, takenOverAt: null,
     };

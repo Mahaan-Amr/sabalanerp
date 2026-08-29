@@ -10,6 +10,10 @@ test('technical HTTP ports validate requests and successful public responses at 
   const client = {
     post: async (path: string, body: unknown) => {
       requests.push({ method: 'POST', path, body });
+      if (path.endsWith('/recoveries/acquire')) return { data: { success: true, data: {
+        schemaVersion: 1, recoveryId: 'recovery-1', browserSessionId: 'browser-1', leaseToken: 'lease-1',
+        baseRevision: 0, updatedAt: '2026-08-29T00:00:00.000Z', takenOver: false,
+      } } };
       if (path.endsWith('/catalog/query')) return { data: { success: true, data: {
         schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG', kind: 'PRODUCT', items: [],
       } } };
@@ -26,11 +30,14 @@ test('technical HTTP ports validate requests and successful public responses at 
     },
   };
   const ports = createPartnerTechnicalHttpPorts(client);
+  const lease = await ports.lease.acquire({ schemaVersion: 1, recoveryId: 'recovery-1',
+    browserSessionId: 'browser-1', baseRevision: 0, takeover: false });
+  assert.equal(lease.ok, true);
   const invalid = await ports.catalog.read({ schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG',
     kind: 'PRODUCT', limit: 101 } as never);
   assert.equal(invalid.ok, false);
   assert.equal(invalid.ok ? '' : invalid.error.code, 'INVALID_PAYLOAD');
-  assert.equal(requests.length, 0);
+  assert.equal(requests.length, 1);
 
   const catalog = await ports.catalog.read({ schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG', kind: 'PRODUCT' });
   const recovered = await ports.recovery.read(access);
@@ -40,6 +47,7 @@ test('technical HTTP ports validate requests and successful public responses at 
   assert.equal(recovered.ok && recovered.value.recoveryId, 'draft-1');
   assert.equal(checkpoint.ok && checkpoint.value.recoveryRevision, 1);
   assert.deepEqual(requests.map(request => `${request.method} ${request.path}`), [
+    'POST /partner/technical/recoveries/acquire',
     'POST /partner/technical/catalog/query',
     'POST /partner/technical/recoveries/read',
     'PUT /partner/technical/recoveries/checkpoint',

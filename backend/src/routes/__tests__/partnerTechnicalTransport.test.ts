@@ -10,7 +10,8 @@ test('technical transport resolves request-bound ports and keeps every response 
   let boundRequest: TechnicalRequest | undefined;
   registerPartnerTechnicalRoutes(router, { servicesFor: async request => {
     boundRequest = request;
-    return { catalog: { read: async () => ({ ok: false, error: partnerError('INVALID_PAYLOAD') }) },
+    return { lease: { acquire: async () => ({ ok: false, error: partnerError('FORBIDDEN') }) },
+      catalog: { read: async () => ({ ok: false, error: partnerError('INVALID_PAYLOAD') }) },
       recovery: { read: async () => ({ ok: false, error: partnerError('NOT_FOUND') }),
         checkpoint: async () => ({ ok: false, error: partnerError('ROW_STALE') }) },
       saved: { save: async () => ({ ok: false, error: partnerError('FORBIDDEN') }),
@@ -27,5 +28,9 @@ test('technical transport resolves request-bound ports and keeps every response 
   assert.match(body.supportReference, /^[0-9a-f-]{36}$/);
   assert.equal(headers.get('Cache-Control'), 'private, no-store');
   assert.equal(headers.get('X-Content-Type-Options'), 'nosniff');
-  assert.equal(handlers.size, 5);
+  status = 200; body = undefined;
+  await handlers.get('POST /recoveries/acquire')!(request, response);
+  assert.equal(status, 403);
+  assert.equal(body.code, 'FORBIDDEN');
+  assert.equal(handlers.size, 6);
 });

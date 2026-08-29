@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
-import { partnerError, type PartnerTechnicalCatalogPort, type PartnerTechnicalRecoveryPort,
+import { PartnerTechnicalLeaseRequestSchema, PartnerTechnicalLeaseReceiptSchema, partnerError,
+  type PartnerTechnicalCatalogPort, type PartnerTechnicalLeasePort, type PartnerTechnicalRecoveryPort,
   type PartnerTechnicalSavePort, type Result } from '@sabalanerp/partner-sales-contracts';
 import type { PrismaClient } from '@prisma/client';
 import { prisma } from '../lib/prisma';
@@ -10,6 +11,10 @@ import { createPrismaPartnerTechnicalRecoveryService } from '../services/partner
 import { createPrismaPartnerTechnicalSaveService, type PartnerTechnicalSaveDependencies } from '../services/partnerSales/cases/technicalSave';
 import { createPartnerTechnicalEvidenceResolver } from '../services/partnerSales/cases/technicalEvidence';
 import { createPartnerTechnicalRecoveryAuthority } from '../services/partnerSales/authorization/technicalRecovery';
+import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
+import { authorizePartnerTechnicalRollout } from '../services/partnerSales/authorization/technicalRollout';
+import { acquirePartnerTechnicalContractEditSession,
+  PrismaContractEditSessionStore } from '../services/contractEditSessionService';
 
 export type TechnicalRequest = { body: unknown };
 export type TechnicalResponse = {
@@ -23,6 +28,7 @@ export interface TechnicalRouter {
   put(path: string, handler: Handler): unknown;
 }
 export interface PartnerTechnicalServices {
+  lease: PartnerTechnicalLeasePort;
   catalog: PartnerTechnicalCatalogPort;
   recovery: PartnerTechnicalRecoveryPort;
   saved: PartnerTechnicalSavePort;
@@ -40,6 +46,34 @@ export function createPartnerTechnicalRequestServices(input: {
   const binding = { actorId: input.actorId, correlationId: input.correlationId };
   const authorize = createPartnerTechnicalRecoveryAuthority(binding);
   return {
+    lease: { acquire: request => {
+      const parsed = PartnerTechnicalLeaseRequestSchema.safeParse(request);
+      if (!parsed.success) return Promise.resolve({ ok: false, error: partnerError('INVALID_PAYLOAD') });
+      return input.database.$transaction(async tx => {
+        await tx.$queryRaw`SELECT "draftId" FROM sales_contract_edit_sessions
+          WHERE "draftId" = ${parsed.data.recoveryId} FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM partner_profiles WHERE "userId" = ${input.actorId} FOR UPDATE`;
+        const profile = await tx.partnerProfile.findUnique({ where: { userId: input.actorId }, select: { id: true } });
+        if (!profile) return { ok: false, error: partnerError('NOT_FOUND') };
+        const decision = await createAuditedPartnerAuthorization(tx, { actorId: input.actorId,
+          purpose: 'PARTNER', channel: 'API' }, { correlationId: input.correlationId })
+          .authorize('CASE_DRAFT_WRITE', { kind: 'PROFILE', id: profile.id });
+        if (!decision.ok) return decision;
+        const rollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'MUTATE');
+        if (!rollout.ok) return rollout;
+        const acquired = await acquirePartnerTechnicalContractEditSession(new PrismaContractEditSessionStore(tx), {
+          draftId: parsed.data.recoveryId, userId: input.actorId,
+          browserSessionId: parsed.data.browserSessionId, schemaVersion: 1,
+          baseRevision: parsed.data.baseRevision, takeover: parsed.data.takeover,
+        });
+        if (!acquired.ok) return { ok: false, error: partnerError(acquired.code === 'revision-conflict'
+          ? 'ROW_STALE' : acquired.code === 'draft-owner-mismatch' ? 'NOT_FOUND' : 'FORBIDDEN') };
+        return { ok: true, value: PartnerTechnicalLeaseReceiptSchema.parse({ schemaVersion: 1,
+          recoveryId: acquired.session.draftId, browserSessionId: acquired.session.browserSessionId,
+          leaseToken: acquired.session.leaseToken, baseRevision: acquired.session.baseRevision,
+          updatedAt: acquired.session.updatedAt.toISOString(), takenOver: acquired.takenOver }) };
+      });
+    } },
     catalog: { read: query => input.database.$transaction(tx =>
       createPartnerTechnicalCatalogReader(tx, binding).read(query)) },
     recovery: createPrismaPartnerTechnicalRecoveryService({ database: input.database,
@@ -69,7 +103,8 @@ export function registerPartnerTechnicalRoutes(router: TechnicalRouter, dependen
         response.status(error.status).json({ success: false, code: error.code,
           error: error.message, supportReference: randomUUID() });
       }
-    };
+  };
+  router.post('/recoveries/acquire', handle((ports, body) => ports.lease.acquire(body as never)));
   router.post('/catalog/query', handle((ports, body) => ports.catalog.read(body as never)));
   router.post('/recoveries/read', handle((ports, body) => ports.recovery.read(body as never)));
   router.put('/recoveries/checkpoint', handle((ports, body) => ports.recovery.checkpoint(body as never)));

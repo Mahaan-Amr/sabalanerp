@@ -6,7 +6,7 @@ This is the initial **Module harness**, not acceptance of Partner sales, the who
 
 QA owns `tests/partner-sales/`, `docs/qa/partner-sales/`, `playwright.partner-sales.config.ts`, `scripts/run-partner-sales-tests.mjs`, and `.github/workflows/partner-sales.yml`. No application, schema, lockfile, route, shell, or existing CI file is changed by this ticket. The #313 shared-file owner authored the three root script aliases below and explicitly handed that isolated `package.json` diff to #314 for publication.
 
-Harness interface: `partner-qa-harness/v1`. The consumer pins **`@sabalanerp/partner-sales-contracts@1.7.0`, schemaVersion 1**, using only public `.` and `/testing` exports owned by #313/#334. The `foundation` check consumes `createPartnerFixtures`, `FixedTransactionClock`, `SandboxNotificationGateway` and `FixturePartnerQueryAdapter`; it verifies the exact expiry boundary, safe/retryable sandbox delivery and purpose-specific fixture queries. These are contract checks, not actual OTP verification, production authorization or live Partner submission. No substitute Case schema, invented Partner role, local fake clock or DTO is provided.
+Harness interface: `partner-qa-harness/v1`. The consumer pins **`@sabalanerp/partner-sales-contracts@1.8.0`, schemaVersion 1**, using only public `.` and `/testing` exports owned by #313/#334. The `foundation` check consumes `createPartnerFixtures`, `FixedTransactionClock`, `SandboxNotificationGateway` and `FixturePartnerQueryAdapter`; it verifies the exact expiry boundary, safe/retryable sandbox delivery and purpose-specific fixture queries. These are contract checks, not actual OTP verification, production authorization or live Partner submission. No substitute Case schema, invented Partner role, local fake clock or DTO is provided.
 
 The coordinated 1.1.0 update adds separate v2 workspace exports while preserving the v1 wire schemas, ports and fixtures. This harness continues to exercise those v1 consumers and explicitly rejects schemaVersion 2 in the customer-output regression; it does not claim coverage of the new workspace exports. The published #314 runtime baseline in `baseline.md` and its immutable evidence used 1.0.0. Updating the current pin does not relabel that historical run as 1.1.0 runtime acceptance.
 
@@ -36,6 +36,10 @@ harness pin does not claim live policy administration or activation acceptance.
 The additive 1.7.0 package preserves schemaVersion 1 and adds the canonical
 operational error used when an active price responder has not been assigned.
 It does not broaden responder authority or activate Partner traffic.
+
+The additive 1.8.0 package preserves schemaVersion 1 and adds the strict,
+creator-private technical lease acquisition request/receipt. Session purpose is
+server-owned; the browser cannot request trusted Partner provenance.
 
 The #313 shared-file coordinator supplied these root scripts; #334 owns future shared wiring:
 

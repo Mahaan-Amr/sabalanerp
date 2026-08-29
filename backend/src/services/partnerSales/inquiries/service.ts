@@ -9,7 +9,8 @@ import { authorizePartnerTechnicalRollout } from '../authorization/technicalRoll
 import { parseInquiryDefinition, type ConfigurationRef, type InquiryDefinition } from './definition';
 import { createPartnerInquiryQuery } from './query';
 type Transaction = Prisma.TransactionClient;
-type AuthorizationRequest = { actorId: string; action: 'INQUIRY_READ' | 'INQUIRY_WRITE' | 'INQUIRY_RESPOND' | 'RESPONDER_REASSIGN';
+type AuthorizationRequest = { actorId: string; action: 'INQUIRY_READ' | 'INQUIRY_WRITE' | 'INQUIRY_RESPOND' |
+  'RESPONDER_REASSIGN' | 'INTERNAL_REMEDIATION';
   purpose: 'PARTNER' | 'RESPONDER' | 'MANAGEMENT'; reason?: string;
   root: { kind: 'PROFILE' | 'INQUIRY'; id: string } };
 
@@ -176,15 +177,25 @@ async function mutateInquiryLifecycle(dependencies: PartnerInquiryDependencies,
     }
     await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${command.inquiryId} FOR UPDATE`;
     const inquiry = await tx.partnerInquiry.findUnique({ where: { id: command.inquiryId },
-      select: { id: true, profileId: true, revision: true } });
+      select: { id: true, profileId: true, revision: true,
+        profile: { select: { userId: true } } } });
     if (!inquiry) return { ok: false, error: partnerError('NOT_FOUND') } as const;
-    const action = command.type === 'INQUIRY_CANCEL' ? 'INQUIRY_WRITE' : 'RESPONDER_REASSIGN';
+    const internalRemediation = command.type === 'INQUIRY_CANCEL' && dependencies.actorId !== inquiry.profile.userId;
+    const action = command.type === 'INQUIRY_CANCEL'
+      ? internalRemediation ? 'INTERNAL_REMEDIATION' : 'INQUIRY_WRITE'
+      : 'RESPONDER_REASSIGN';
     const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId, action,
-      purpose: command.type === 'INQUIRY_CANCEL' ? 'PARTNER' : 'MANAGEMENT', reason: command.reason,
+      purpose: command.type === 'INQUIRY_CANCEL' && !internalRemediation ? 'PARTNER' : 'MANAGEMENT', reason: command.reason,
       root: { kind: 'INQUIRY', id: inquiry.id } });
     if (!authorization.ok) return authorization;
     const rollout = await authorizePartnerTechnicalRollout(tx, inquiry.profileId, 'CONTROL');
     if (!rollout.ok) return rollout;
+    if (internalRemediation) {
+      // Authorization above decides whether this is owner cancellation or
+      // internal support remediation. The transaction-local marker lets the
+      // database lifecycle guard admit this exact Profile only.
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_remediation_profile', ${inquiry.profileId}, true)`;
+    }
     const pending = await tx.partnerInquiryRow.findMany({ where: { inquiryId: inquiry.id, outcome: 'PENDING' },
       select: { id: true, revision: true } });
     if (!pending.length) return { ok: false, error: partnerError('STATE_CONFLICT') } as const;

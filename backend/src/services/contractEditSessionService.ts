@@ -11,6 +11,7 @@ export interface ContractEditSessionRecord {
   readonly draftId: string;
   readonly contractId: string | null;
   readonly ownerUserId: string;
+  readonly purpose: 'STANDARD' | 'PARTNER_TECHNICAL';
   readonly browserSessionId: string;
   readonly leaseToken: string;
   readonly schemaVersion: number;
@@ -40,6 +41,7 @@ interface AcquireContractEditSessionInput {
   readonly draftId: string;
   readonly contractId: string | null;
   readonly userId: string;
+  readonly purpose?: 'STANDARD' | 'PARTNER_TECHNICAL';
   readonly browserSessionId: string;
   readonly schemaVersion: number;
   readonly baseRevision: number;
@@ -147,6 +149,7 @@ const acquireContractEditSessionInternal = async (
         draftId: input.draftId,
         contractId: input.contractId,
         ownerUserId: input.userId,
+        purpose: input.purpose ?? 'STANDARD',
         browserSessionId: input.browserSessionId,
         leaseToken: (input.createToken ?? randomUUID)(),
         schemaVersion: input.schemaVersion,
@@ -163,6 +166,12 @@ const acquireContractEditSessionInternal = async (
       existing = await store.load(input.draftId);
       if (!existing) throw error;
     }
+  }
+
+  if (existing.purpose !== (input.purpose ?? 'STANDARD')) {
+    return { ok: false, code: 'revision-conflict', recovery: null,
+      ownerUserId: existing.ownerUserId, updatedAt: existing.updatedAt,
+      currentBaseRevision: existing.baseRevision };
   }
 
   if (existing.contractId === null && existing.ownerUserId !== input.userId) {
@@ -183,6 +192,7 @@ const acquireContractEditSessionInternal = async (
       draftId: existing.draftId,
       contractId: input.contractId ?? existing.contractId,
       ownerUserId: input.userId,
+      purpose: existing.purpose,
       browserSessionId: input.browserSessionId,
       leaseToken: (input.createToken ?? randomUUID)(),
       schemaVersion: input.schemaVersion,
@@ -472,6 +482,14 @@ function publicSessionResult<T extends SessionResult>(result: T): T {
 
 export const acquireContractEditSession = async (store: ContractEditSessionStore, input: AcquireContractEditSessionInput) =>
   publicSessionResult(await acquireContractEditSessionInternal(store, input));
+/** Trusted Partner transport calls this only after current Profile authorization.
+ * The purpose is server-owned and never accepted from the generic Sales route. */
+export const acquirePartnerTechnicalContractEditSession = async (
+  store: ContractEditSessionStore,
+  input: Omit<AcquireContractEditSessionInput, 'purpose' | 'contractId'>,
+) => publicSessionResult(await acquireContractEditSessionInternal(store, {
+  ...input, contractId: null, purpose: 'PARTNER_TECHNICAL',
+}));
 export const assertContractEditOwnership = async (store: ContractEditSessionStore, input: AssertContractEditOwnershipInput) =>
   publicSessionResult(await assertContractEditOwnershipInternal(store, input));
 export const checkpointContractRecovery = async (store: ContractEditSessionStore, input: CheckpointContractRecoveryInput) =>
@@ -486,7 +504,7 @@ const toJson = (value: unknown): Prisma.InputJsonValue =>
 
 const snapshotWhere = (expected: ContractEditSessionRecord): Prisma.SalesContractEditSessionWhereInput => ({
   draftId: expected.draftId, leaseToken: expected.leaseToken, ownerUserId: expected.ownerUserId,
-  browserSessionId: expected.browserSessionId, contractId: expected.contractId,
+  browserSessionId: expected.browserSessionId, contractId: expected.contractId, purpose: expected.purpose,
   baseRevision: expected.baseRevision, schemaVersion: expected.schemaVersion,
   createdAt: expected.createdAt, updatedAt: expected.updatedAt, takenOverAt: expected.takenOverAt,
   // JSON equality matters even when both updates share a millisecond.
@@ -497,6 +515,7 @@ const fromPrismaRecord = (record: {
   draftId: string;
   contractId: string | null;
   ownerUserId: string;
+  purpose: string;
   browserSessionId: string;
   leaseToken: string;
   schemaVersion: number;
@@ -507,11 +526,18 @@ const fromPrismaRecord = (record: {
   takenOverAt: Date | null;
 }): ContractEditSessionRecord => ({
   ...record,
+  purpose: record.purpose === 'PARTNER_TECHNICAL' ? 'PARTNER_TECHNICAL' : 'STANDARD',
   recovery: record.recovery
 });
 
 export class PrismaContractEditSessionStore implements ContractEditSessionStore {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(private readonly prisma: PrismaClient | Prisma.TransactionClient) {}
+
+  private transaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return '$transaction' in this.prisma
+      ? (this.prisma as PrismaClient).$transaction(work)
+      : work(this.prisma as Prisma.TransactionClient);
+  }
 
   async load(draftId: string): Promise<ContractEditSessionRecord | null> {
     const record = await this.prisma.salesContractEditSession.findUnique({ where: { draftId } });
@@ -524,6 +550,7 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
         draftId: record.draftId,
         contractId: record.contractId,
         ownerUserId: record.ownerUserId,
+        purpose: record.purpose,
         browserSessionId: record.browserSessionId,
         leaseToken: record.leaseToken,
         schemaVersion: record.schemaVersion,
@@ -542,12 +569,13 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
     record: ContractEditSessionRecord
   ): Promise<ContractEditSessionRecord | null> {
     if (expected.draftId !== record.draftId) return null;
-    return this.prisma.$transaction(async tx => {
+    return this.transaction(async tx => {
       const updated = await tx.salesContractEditSession.updateMany({
         where: snapshotWhere(expected),
         data: {
           contractId: record.contractId,
           ownerUserId: record.ownerUserId,
+          purpose: record.purpose,
           browserSessionId: record.browserSessionId,
           leaseToken: record.leaseToken,
           schemaVersion: record.schemaVersion,
@@ -587,7 +615,7 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
   }
 
   async discardCreationDraft(draftId: string, ownerUserId: string, discardedAt: Date): Promise<boolean> {
-    return this.prisma.$transaction(async tx => {
+    return this.transaction(async tx => {
       const removed = await tx.salesContractEditSession.deleteMany({
         where: { draftId, ownerUserId, contractId: null }
       });
@@ -605,6 +633,10 @@ const prismaStore = new PrismaContractEditSessionStore(prisma);
 export const acquireSalesContractEditSession = (
   input: AcquireContractEditSessionInput
 ) => acquireContractEditSession(prismaStore, input);
+
+export const acquirePartnerTechnicalSalesContractEditSession = (
+  input: Omit<AcquireContractEditSessionInput, 'purpose' | 'contractId'>,
+) => acquirePartnerTechnicalContractEditSession(prismaStore, input);
 
 export const checkpointSalesContractRecovery = (
   input: CheckpointContractRecoveryInput

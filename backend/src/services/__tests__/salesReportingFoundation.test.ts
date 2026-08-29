@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { AccountingRecordStatus, FinancialRecordKind } from '@prisma/client';
-import { snapshotRealizedSale, recordRealizedAdjustment, recordContractCancellation } from '../salesAttributionService';
+import { snapshotRealizedSale, recordRealizedAdjustment, recordContractCancellation, reassignContractSeller } from '../salesAttributionService';
 import { buildRealizedSalesHeadline, buildSalesPipelineHeadline, buildSalesReportContractWhere, buildSalesReportScope, resolveAllTimeSalesReportPeriod, resolveSalesReportPeriod, selectAccountingRegisteredRecord } from '../salesReportingService';
 
 const contract: any = {
@@ -167,6 +167,39 @@ const run = async () => {
     },
     'active pipeline remains point-in-time while period pipeline follows contract creation',
   );
+
+  let profileLockTaken = false;
+  const irreversiblePartnerPrisma: any = {
+    $transaction: async (operation: (client: any) => unknown) => operation({
+      $queryRaw: async () => { profileLockTaken = true; return [{ id: 'partner-profile-1' }]; },
+      salesContract: {
+        findUnique: async () => ({
+          id: 'ordinary-contract-1',
+          departmentId: 'sales-department',
+          responsibleSellerId: 'ordinary-seller',
+          partnerKind: 'NONE',
+        }),
+        update: async () => { throw new Error('ordinary contract must not be reassigned'); },
+      },
+      user: {
+        findUnique: async () => ({
+          id: 'irreversible-partner',
+          isActive: true,
+          departmentId: 'sales-department',
+          partnerProfile: { irreversibleAt: new Date('2026-08-29T00:00:00.000Z') },
+        }),
+      },
+      salesContractSellerAudit: { create: async () => undefined },
+    }),
+  };
+  await assert.rejects(
+    reassignContractSeller(irreversiblePartnerPrisma, {
+      contractId: 'ordinary-contract-1', nextSellerId: 'irreversible-partner', actorId: 'manager', reason: 'test',
+    }),
+    /Irreversible Partner persona/,
+    'ordinary Sales responsibility cannot be assigned after Partner conversion',
+  );
+  assert.equal(profileLockTaken, true, 'responsibility reassignment takes the Partner lifecycle lock');
 
   console.log('salesReportingFoundation tests passed');
 };

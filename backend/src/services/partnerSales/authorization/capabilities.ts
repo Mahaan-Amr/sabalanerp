@@ -5,7 +5,10 @@ type Capability = readonly [PermissionContext['root']['kind'], PermissionContext
 export const partnerCapabilities: Partial<Record<PartnerAction, readonly Capability[]>> = {
   PROFILE_READ: [['PROFILE', 'ONBOARDING']],
   CUSTOMER_READ: [['CUSTOMER', 'CRM']], CUSTOMER_WRITE: [['CUSTOMER', 'CRM']],
-  INQUIRY_READ: [['INQUIRY', 'PARTNER']], INQUIRY_WRITE: [['INQUIRY', 'PARTNER']],
+  INQUIRY_READ: [['INQUIRY', 'PARTNER']],
+  // The first inquiry does not exist yet, so creation is authorized against
+  // the owning Profile. Existing inquiry mutations remain rooted in Inquiry.
+  INQUIRY_WRITE: [['INQUIRY', 'PARTNER'], ['PROFILE', 'PARTNER']],
   // Before Case creation the creator-private technical draft is rooted in the
   // owning Profile. This never grants another actor access to a recovery id.
   CASE_READ: [['CASE', 'PARTNER'], ['PROFILE', 'PARTNER']],

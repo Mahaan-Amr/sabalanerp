@@ -8,6 +8,7 @@ import { createPartnerTechnicalSaveService } from '../partnerSales/cases/technic
 import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import { createPartnerTechnicalRecoveryAuthority } from '../partnerSales/authorization/technicalRecovery';
 import { createPartnerTechnicalEvidenceResolver } from '../partnerSales/cases/technicalEvidence';
+import { resolveSavedTechnicalConfiguration } from '../partnerSales/inquiries/adapters';
 
 function localDatabaseUrl(): string {
   const value = process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL;
@@ -155,6 +156,15 @@ test('real database policy and private catalog evidence produce a validated safe
     assert.equal(result.value.rows[0].quantity, '2');
     assert.equal(JSON.stringify(result.value).includes('1200000'), false);
     assert.equal(JSON.stringify(result.value).includes('mandatoryPercentage'), false);
+    const inquiryConfiguration = await resolveSavedTechnicalConfiguration(tx, { actorId,
+      reference: result.value.rows[0].configurationRef });
+    assert.equal(inquiryConfiguration.ok, true);
+    if (inquiryConfiguration.ok) {
+      assert.equal(inquiryConfiguration.value.description, 'سنگ تست فنی');
+      assert.equal(inquiryConfiguration.value.identity.catalogProductId, product.id);
+      assert.equal(JSON.stringify(inquiryConfiguration.value).includes('12000000'), false);
+      assert.equal(JSON.stringify(inquiryConfiguration.value).includes('mandatoryPercentage'), false);
+    }
   });
 });
 

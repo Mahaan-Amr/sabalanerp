@@ -7244,8 +7244,24 @@ model PartnerProfile {
   conversionDispositions PartnerConversionDisposition[]
   events              PartnerProfileEvent[]
   inquiries           PartnerInquiry[]
+  responderAssignments PartnerProfileResponderAssignment[]
   saleCases           PartnerSaleCase[]
   @@map("partner_profiles")
+}
+
+model PartnerProfileResponderAssignment {
+  id                  String @id @default(cuid())
+  profileId           String
+  revision            Int
+  responderId         String
+  actorId             String
+  reason              String
+  eligibilityEvidence Json
+  assignedAt          DateTime @default(now()) @db.Timestamptz(3)
+  profile             PartnerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  @@unique([profileId, revision])
+  @@index([responderId, assignedAt])
+  @@map("partner_profile_responder_assignments")
 }
 
 model PartnerCommercialAccount {

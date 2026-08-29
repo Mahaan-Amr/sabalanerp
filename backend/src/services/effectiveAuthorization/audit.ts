@@ -32,3 +32,21 @@ export async function readAuthorizationDecisions(tx: Prisma.TransactionClient, d
     FROM effective_authorization_audit WHERE domain = ${domain} AND "rootKind" = ${rootKind} AND "rootId" = ${rootId}
     ORDER BY "recordedAt", id LIMIT 100`;
 }
+
+/** Resolve the evidence created for one authorization attempt without relying
+ * on the bounded chronological audit listing. Correlation is transport-scoped;
+ * the remaining fields make the lookup exact and non-ambiguous. */
+export async function readAuthorizationDecisionByCorrelation(tx: Prisma.TransactionClient, input: {
+  domain: string; actorId: string; action: string; rootKind: string; rootId: string;
+  purpose: string; channel: string; correlationId: string; allowed: boolean;
+}) {
+  const rows = await tx.$queryRaw<Array<AuthorizationDecisionAudit & { id: string }>>`
+    SELECT id, domain, "actorId", action, "rootKind", "rootId", purpose, channel, allowed, "isAdmin", code, scope, reason,
+      "correlationId", "authorizationRevision", "lifecycleRevision", "assignmentId", "assignmentRevision", "evaluatedAt", "evaluatedGrantIds"
+    FROM effective_authorization_audit
+    WHERE domain = ${input.domain} AND "actorId" = ${input.actorId} AND action = ${input.action}
+      AND "rootKind" = ${input.rootKind} AND "rootId" = ${input.rootId} AND purpose = ${input.purpose}
+      AND channel = ${input.channel} AND "correlationId" = ${input.correlationId} AND allowed = ${input.allowed}
+    ORDER BY "recordedAt" DESC, id DESC LIMIT 1`;
+  return rows[0] ?? null;
+}

@@ -190,7 +190,8 @@ test('fixed Partner capabilities ignore internal grants and preserve pending/sus
   const cases: Array<[PartnerAction, PermissionContext['root']['kind'], PermissionContext['purpose']]> = [
     ['PROFILE_READ', 'PROFILE', 'ONBOARDING'], ['CUSTOMER_READ', 'CUSTOMER', 'CRM'],
     ['CUSTOMER_WRITE', 'CUSTOMER', 'CRM'], ['INQUIRY_READ', 'INQUIRY', 'PARTNER'],
-    ['INQUIRY_WRITE', 'INQUIRY', 'PARTNER'], ['CASE_READ', 'CASE', 'PARTNER'],
+    ['INQUIRY_WRITE', 'INQUIRY', 'PARTNER'], ['INQUIRY_WRITE', 'PROFILE', 'PARTNER'],
+    ['CASE_READ', 'CASE', 'PARTNER'],
     ['CASE_DRAFT_WRITE', 'CASE', 'PARTNER'], ['CASE_SUBMIT', 'CASE', 'PARTNER'],
     ['CASE_COMMIT', 'CASE', 'PARTNER'],
     ['CASE_CANCEL', 'CASE', 'PARTNER'], ['CUSTOMER_OUTPUT', 'CASE', 'CUSTOMER_OUTPUT'],

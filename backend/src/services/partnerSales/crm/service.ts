@@ -536,11 +536,11 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           const customerSnapshot = { schemaVersion: 1, capturedAt: transferClock.now.toISOString(),
             firstName: customer.firstName, lastName: customer.lastName, companyName: customer.companyName,
             phoneNumbers: customer.phoneNumbers };
+          await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_transfer', ${transfer.id}, true)`;
           await tx.$executeRaw`UPDATE crm_potential_projects
             SET "customerTransferSnapshot" = ${JSON.stringify(customerSnapshot)}::jsonb
             WHERE "customerId" = ${transfer.customerId} AND "partnerRevision" IS NULL
               AND "customerTransferSnapshot" IS NULL`;
-          await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_transfer', ${transfer.id}, true)`;
           const changed = await tx.crmCustomer.updateMany({ where: { id: transfer.customerId,
             partnerOwnerProfileId: transfer.fromProfileId, ownerUserId: transfer.fromOwnerUserId,
             partnerRevision: customer.partnerRevision }, data: { partnerOwnerProfileId: transfer.toProfileId,

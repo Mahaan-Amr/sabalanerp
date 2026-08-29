@@ -7,6 +7,7 @@ import { createPartnerCrmService } from '../partnerSales/crm/service';
 import type { PartnerCustomerSummary, PartnerNextActionView, PartnerProjectView } from '../partnerSales/crm/contracts';
 import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
 import { seedAuthorizationCase } from './partnerAuthorizationFixture';
+import { ordinaryProjectSearch } from '../../routes/crm';
 
 const databaseUrl = (connectionLimit = 2) => {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -122,6 +123,15 @@ test('masked duplicate and approved transfer expose no prior CRM history and pre
       await tx.crmCustomer.update({ where: { id: customerId }, data: { firstName: 'نام زنده محرمانه', partnerRevision: 2 } });
       assert.equal(((await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId }, select: {
         customerTransferSnapshot: true } })).customerTransferSnapshot as { firstName?: string }).firstName, 'مالک');
+      assert.equal(await tx.crmPotentialProject.count({ where: { id: projectId,
+        ...ordinaryProjectSearch('نام زنده محرمانه') } }), 0);
+      assert.equal(await tx.crmPotentialProject.count({ where: { id: projectId,
+        ...ordinaryProjectSearch('مالک') } }), 1);
+      await tx.$executeRawUnsafe('SAVEPOINT immutable_customer_witness');
+      await assert.rejects(tx.crmPotentialProject.update({ where: { id: projectId }, data: {
+        customerTransferSnapshot: { schemaVersion: 1, firstName: 'بازنویسی', lastName: 'ممنوع' },
+      } }), /Transferred Customer witness is immutable/);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT immutable_customer_witness');
       await tx.crmPotentialProject.update({ where: { id: projectId }, data: { status: 'در حال پیگیری' } });
       const retainedFollowUpId = `partner-crm-retained-follow-${suffix}`;
       await tx.crmFollowUpReport.create({ data: { id: retainedFollowUpId, customerId, potentialProjectId: projectId,

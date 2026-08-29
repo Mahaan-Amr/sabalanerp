@@ -66,6 +66,20 @@ export const customerScopeForActor = (input: { userId: string; role: string; can
 export const ordinaryCrmRelatedVisibility = { OR: [{ customer: { partnerOwnerProfileId: null } },
   { potentialProject: { partnerRevision: null } }] };
 
+export const ordinaryProjectSearch = (search: string) => ({ OR: [
+  { title: { contains: search, mode: 'insensitive' as const } },
+  { address: { contains: search, mode: 'insensitive' as const } },
+  { description: { contains: search, mode: 'insensitive' as const } },
+  { customer: { partnerOwnerProfileId: null, OR: [
+    { firstName: { contains: search, mode: 'insensitive' as const } },
+    { lastName: { contains: search, mode: 'insensitive' as const } },
+    { companyName: { contains: search, mode: 'insensitive' as const } },
+  ] } },
+  { customerTransferSnapshot: { path: ['firstName'], string_contains: search } },
+  { customerTransferSnapshot: { path: ['lastName'], string_contains: search } },
+  { customerTransferSnapshot: { path: ['companyName'], string_contains: search } },
+] });
+
 const buildCustomerScope = async (req: any) => {
   return customerScopeForActor({
     userId: req.user.id, role: req.user.role, canAssignOwner: await canAssignCustomerOwner(req),
@@ -278,8 +292,10 @@ export const ordinaryCrmResponse = (record: any) => {
       snapshot.schemaVersion === 1 && typeof snapshot.firstName === 'string' && typeof snapshot.lastName === 'string'
     ? { id: null, firstName: snapshot.firstName, lastName: snapshot.lastName,
       companyName: typeof snapshot.companyName === 'string' ? snapshot.companyName : null,
-      phoneNumbers: Array.isArray(snapshot.phoneNumbers) ? snapshot.phoneNumbers.filter((phone: unknown) =>
-        phone && typeof phone === 'object' && typeof (phone as { number?: unknown }).number === 'string') : [] }
+      phoneNumbers: Array.isArray(snapshot.phoneNumbers) ? snapshot.phoneNumbers.flatMap((phone: unknown) =>
+        phone && typeof phone === 'object' && typeof (phone as { number?: unknown }).number === 'string' &&
+          typeof (phone as { isPrimary?: unknown }).isPrimary === 'boolean'
+          ? [{ number: (phone as { number: string }).number, isPrimary: (phone as { isPrimary: boolean }).isPrimary }] : []) : [] }
     : null;
   return { ...rest, ...(safeProject ? { potentialProject: safeProject } : {}), customer: safeSnapshot,
     customerTransferred: true };
@@ -2169,14 +2185,7 @@ router.get('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CRM
     if (sellerId && canManage) where.responsibleSellerId = sellerId;
     if (scope === 'mine' || (!canManage && req.user?.role !== 'ADMIN')) where.responsibleSellerId = req.user.id;
     if (search) {
-      where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { address: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-        { customer: { firstName: { contains: search, mode: 'insensitive' } } },
-        { customer: { lastName: { contains: search, mode: 'insensitive' } } },
-        { customer: { companyName: { contains: search, mode: 'insensitive' } } }
-      ];
+      where.AND = [ordinaryProjectSearch(search)];
     }
 
     const [projects, total] = await Promise.all([

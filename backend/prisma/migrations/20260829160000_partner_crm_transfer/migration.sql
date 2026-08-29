@@ -185,6 +185,22 @@ BEGIN
   SELECT customer."partnerOwnerProfileId", profile."userId" INTO owner_profile_id, owner_user_id
     FROM crm_customers customer LEFT JOIN partner_profiles profile ON profile.id = customer."partnerOwnerProfileId"
     WHERE customer.id = customer_id FOR UPDATE OF customer;
+  IF TG_TABLE_NAME = 'crm_potential_projects' AND TG_OP = 'UPDATE'
+     AND (to_jsonb(OLD)->'customerTransferSnapshot') IS DISTINCT FROM
+       (to_jsonb(NEW)->'customerTransferSnapshot') THEN
+    IF OLD."partnerRevision" IS NULL AND NEW."partnerRevision" IS NULL
+       AND (to_jsonb(OLD)->>'customerTransferSnapshot') IS NULL
+       AND (to_jsonb(NEW)->>'customerTransferSnapshot') IS NOT NULL
+       AND NEW."customerId" IS NOT DISTINCT FROM OLD."customerId"
+       AND NEW."responsibleSellerId" IS NOT DISTINCT FROM OLD."responsibleSellerId"
+       AND transfer_id IS NOT NULL
+       AND EXISTS (SELECT 1 FROM partner_customer_transfers transfer
+         WHERE transfer.id = transfer_id AND transfer.status = 'PENDING'
+           AND transfer."customerId" = OLD."customerId") THEN
+      RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'Transferred Customer witness is immutable' USING ERRCODE = '23514';
+  END IF;
   IF owner_profile_id IS NULL THEN
     IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
     RETURN NEW;
@@ -196,7 +212,9 @@ BEGIN
   IF TG_TABLE_NAME = 'crm_potential_projects' AND TG_OP = 'UPDATE' THEN
     IF OLD."partnerRevision" IS NULL AND NEW."partnerRevision" IS NULL
        AND NEW."customerId" IS NOT DISTINCT FROM OLD."customerId"
-       AND NEW."responsibleSellerId" IS NOT DISTINCT FROM OLD."responsibleSellerId" THEN
+       AND NEW."responsibleSellerId" IS NOT DISTINCT FROM OLD."responsibleSellerId"
+       AND (to_jsonb(NEW)->'customerTransferSnapshot') IS NOT DISTINCT FROM
+         (to_jsonb(OLD)->'customerTransferSnapshot') THEN
       RETURN NEW;
     END IF;
     IF OLD."partnerRevision" IS NULL AND NEW."partnerRevision" IS NULL
@@ -204,6 +222,8 @@ BEGIN
        AND reassignment_context->>'projectId' = OLD.id
        AND reassignment_context->>'previousSellerId' = OLD."responsibleSellerId"
        AND reassignment_context->>'nextSellerId' = NEW."responsibleSellerId"
+       AND (to_jsonb(NEW)->'customerTransferSnapshot') IS NOT DISTINCT FROM
+         (to_jsonb(OLD)->'customerTransferSnapshot')
        AND coalesce(reassignment_context->>'actorId', '') <> ''
        AND coalesce(reassignment_context->>'reason', '') <> '' THEN
       RETURN NEW;

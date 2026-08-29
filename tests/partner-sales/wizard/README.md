@@ -24,6 +24,18 @@ The legacy whole modal's priced save gate is not a Partner save adapter. Do not
 inject fake rates, expose private inputs or call `bindCanonicalCaseGraph` in the
 browser to bypass these remaining gates.
 
+`createPartnerTechnicalSession` now coordinates the public leased checkpoint and
+validated-save ports without introducing a browser journal. It serializes writes,
+retains the exact request after an uncertain response, blocks a revoked/stale
+writer, ignores acknowledgements after the actor/recovery session is disposed,
+and restores only a saved view whose recovery and input revisions match. Newer
+visible edits cannot be replaced by an older acknowledgement. Owner-issued saved
+references remain visible as historical evidence, but are current only for their
+exact input revision; the browser does not infer approval impact from quantity or
+geometry changes. The host still has to bind this coordinator to the existing
+creator-private recovery hook and real authenticated ports before it is runtime
+evidence. Automatic checkpoint scheduling alone is not a durable acknowledgement.
+
 After the shared runtime handoff, the fixture browser passed all four theme/width
 scenarios, including actual progression at 200% zoom and fixture Case submission.
 The six relevant existing Design System reference-surface regressions also passed.

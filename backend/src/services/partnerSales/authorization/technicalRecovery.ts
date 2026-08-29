@@ -1,6 +1,7 @@
 import { partnerError } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerTechnicalRecoveryDependencies } from '../cases/technicalRecovery';
 import { createAuditedPartnerAuthorization } from './audited';
+import { authorizePartnerTechnicalRollout } from './technicalRollout';
 
 /** Creator-private pre-Case authority. The recovery module still owns lease,
  * CAS, expiry and idempotency. This adapter supplies only current domain rights;
@@ -23,20 +24,6 @@ export function createPartnerTechnicalRecoveryAuthority(binding: { actorId: stri
       { correlationId: binding.correlationId });
     const decision = await port.authorize(input.operation === 'READ' ? 'CASE_READ' : 'CASE_DRAFT_WRITE', { kind: 'PROFILE', id: profile.id });
     if (!decision.ok) return decision;
-    if (input.operation === 'READ') return { ok: true, value: undefined };
-    const memberships = await tx.partnerCohortMembership.findMany({ where: { profileId: profile.id,
-      cohort: { activationEnabled: true } }, select: { cohortId: true, cohort: { select: {
-        activationEnabled: true, operationalPaused: true,
-      } } } });
-    if (memberships.length !== 1) return { ok: false, error: partnerError('COHORT_NOT_READY') };
-    const cohortId = memberships[0].cohortId;
-    // The rollout row is the last lock before a technical mutation. Re-read it
-    // after any wait so pause and save/checkpoint have one commit winner.
-    await tx.$queryRaw`SELECT id FROM partner_release_cohorts WHERE id = ${cohortId} FOR UPDATE`;
-    const cohort = await tx.partnerReleaseCohort.findUnique({ where: { id: cohortId },
-      select: { activationEnabled: true, operationalPaused: true } });
-    if (!cohort?.activationEnabled) return { ok: false, error: partnerError('COHORT_NOT_READY') };
-    if (cohort.operationalPaused) return { ok: false, error: partnerError('OPERATIONAL_PAUSE') };
-    return { ok: true, value: undefined };
+    return authorizePartnerTechnicalRollout(tx, profile.id, input.operation === 'READ' ? 'READ' : 'MUTATE');
   };
 }

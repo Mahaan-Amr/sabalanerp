@@ -2,15 +2,18 @@
 
 `createPartnerTechnicalCatalogReader(transaction, { actorId, correlationId })`
 implements public `PartnerTechnicalCatalogPort` from contracts 1.5.0. Call within
-the existing shared Prisma transaction. No runtime route is mounted here.
+the existing shared Prisma transaction. The authenticated technical transport
+mounts this reader at `/api/partner/technical/catalog/query`; central Partner UI
+composition and navigation remain closed.
 
 The reader binds the authenticated actor to their current Profile and invokes
 the same audited pre-Case read policy before querying and after IO. This is the
 Partner form's catalog, not a replacement for internal Inventory access. Pending,
 terminated, inactive and internal-only identities cannot use it; a suspended
-Partner keeps read-only access. The request cannot supply actor or permission
-context. Creation, editing and save still require their independent mutation
-authority and lease gates.
+Partner keeps read-only access only while enrolled in exactly one active release
+cohort. Operational pause preserves that enrolled read path but blocks technical
+mutations. The request cannot supply actor or permission context. Creation,
+editing and save still require their independent mutation authority and lease gates.
 
 Queries use positive Prisma selects, then the existing explicit technical
 projectors and strict public schema. Product family eligibility, active/deleted

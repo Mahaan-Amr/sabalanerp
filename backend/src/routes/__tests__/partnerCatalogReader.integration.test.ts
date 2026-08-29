@@ -16,6 +16,10 @@ async function fixture(run: (tx: Prisma.TransactionClient, actorId: string, pref
       await tx.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`, password: 'not-a-login',
         firstName: 'Fixture', lastName: 'Catalog authority' } });
       await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'ACTIVE' } });
+      await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
+        enrollmentPaused: false, operationalPaused: false } });
+      await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
+        actorId, eligibilityEvidence: { fixture: true } } });
       await run(tx, actorId, prefix); throw rollback;
     }, { timeout: 20_000 });
   } catch (error) { if (error !== rollback) throw error; }
@@ -110,6 +114,11 @@ test('catalog authority is current for every request and cannot be supplied in t
     const internal = createPartnerTechnicalCatalogReader(tx, { actorId: internalId, correlationId: prefix });
     assert.equal((await internal.read(query)).ok, false);
     assert.equal((await reader.read(query)).ok, true);
+    await tx.partnerReleaseCohort.update({ where: { id: actorId }, data: { activationEnabled: false } });
+    const outsideCohort = await reader.read(query);
+    assert.equal(outsideCohort.ok ? null : outsideCohort.error.code, 'COHORT_NOT_READY');
+    await tx.partnerReleaseCohort.update({ where: { id: actorId }, data: { activationEnabled: true, operationalPaused: true } });
+    assert.equal((await reader.read(query)).ok, true, 'operational pause keeps enrolled read-only catalog access');
     await tx.partnerProfile.update({ where: { id: actorId }, data: { state: 'SUSPENDED', revision: { increment: 1 } } });
     assert.equal((await reader.read(query)).ok, true);
     await tx.partnerProfile.update({ where: { id: actorId }, data: { state: 'TERMINATED', revision: { increment: 1 } } });

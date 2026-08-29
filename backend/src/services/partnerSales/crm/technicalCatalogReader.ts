@@ -3,6 +3,7 @@ import { PartnerTechnicalCatalogQuerySchema, PartnerTechnicalCatalogPageSchema, 
   type PartnerTechnicalCatalogPort, type PartnerTechnicalFamily, type PartnerTechnicalProduct,
   type PartnerTechnicalOperation, type Result } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
+import { authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
 import { projectPartnerTechnicalProduct, projectPartnerTechnicalOperation } from './technicalCatalog';
 
 // Query only the public technical projection's source fields. Prices, notes,
@@ -29,6 +30,8 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
     const authority = createAuditedPartnerAuthorization(tx, { actorId: binding.actorId, purpose: 'PARTNER', channel: 'SEARCH' }, binding);
     const allowed = await authority.authorize('CASE_READ', root);
     if (!allowed.ok) return allowed;
+    const rollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'READ');
+    if (!rollout.ok) return rollout;
     const query = parsed.data;
     const limit = query.limit ?? 50;
     let projectedRows: Array<{ id: string; result: Result<PartnerTechnicalProduct | PartnerTechnicalOperation> }>;
@@ -64,6 +67,8 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
     }
     const refreshed = await authority.authorize('CASE_READ', root);
     if (!refreshed.ok) return refreshed;
+    const refreshedRollout = await authorizePartnerTechnicalRollout(tx, profile.id, 'READ');
+    if (!refreshedRollout.ok) return refreshedRollout;
     const page = PartnerTechnicalCatalogPageSchema.safeParse({ schemaVersion: 1, purpose: query.purpose, kind: query.kind, items,
       ...(projectedRows.length > limit ? { nextCursor: projectedRows[limit - 1].id } : {}) });
     return page.success ? { ok: true, value: page.data } : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };

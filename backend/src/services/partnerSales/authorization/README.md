@@ -85,8 +85,9 @@ seam remains available for non-runtime tests. There is no workspace fallback.
 See `../../effectiveAuthorization/README.md` for shared grant provenance,
 provisioning, lock order and migration boundaries.
 
-`createAuditedPartnerAuthorization` is the real, unmounted v2 composition using
-that provider and the same persisted root reader/policy. It records every valid
+`createAuditedPartnerAuthorization` is the real persisted v2 composition used by
+the mounted authenticated technical and policy transports; broader Partner
+command/query registration remains #334-owned. It records every valid
 resource decision, including denial, current lifecycle/assignment revisions and
 evaluated grant ids. Named ADMIN mutations additionally require a nonblank
 reason. All four domain restrictions still run first. Invalid transport shapes

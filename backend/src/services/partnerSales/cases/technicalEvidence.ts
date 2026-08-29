@@ -199,8 +199,6 @@ async function dependentConfigurationHash(row: Extract<NonNullable<PartnerTechni
  * save interface. */
 export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDependencies['resolveEvidence'] {
   return async (tx, input) => {
-    const policy = await readPartnerTechnicalSalesPolicy(tx, input.actorId);
-    if (!policy.ok) return policy;
     const previousContext = input.previous?.context as Partial<PartnerTechnicalGraphContext> | undefined;
     const priorPolicy = previousContext?.technicalPolicy;
     const parsedPriorPolicy = priorPolicy && parsePartnerTechnicalSalesPolicySnapshot({
@@ -210,6 +208,31 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
       materialRateScale: priorPolicy.materialRateScale, currency: priorPolicy.currency, rates: priorPolicy.rates,
     }, { id: priorPolicy.policyId, version: priorPolicy.version,
       effectiveDate: priorPolicy.effectiveDate, integrityHash: priorPolicy.integrityHash });
+    const identityRows = [
+      ...input.draft.rows.map(row => ({ productRowId: row.productRowId, catalogItemId: row.catalogItemId,
+        family: row.family, unit: identityUnit(row), hash: technicalDraftRowConfigurationHash(row, input.draft) })),
+      ...(input.draft.dependents ?? []).filter((item): item is Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'remainder' }> => item.kind === 'remainder')
+        .map(row => ({ productRowId: row.productRowId, catalogItemId: row.catalogItemId,
+          family: 'longitudinal' as const, unit: identityUnit(row), hash: dependentConfigurationHash(row) })),
+    ];
+    if (parsedPriorPolicy && previousContext && input.previous?.identities.length === identityRows.length) {
+      const unchanged = await Promise.all(identityRows.map(async row => {
+        const prior = input.previous!.identities.find(item => item.productRowId === row.productRowId);
+        const configurationHash = await row.hash;
+        return prior?.identity.catalogProductId === row.catalogItemId && prior.identity.family === row.family &&
+          prior.identity.unit === row.unit && prior.identity.configuration.some(item =>
+            item.key === 'technicalConfigurationHash' && item.value === configurationHash);
+      }));
+      // A protected, integrity-checked prior snapshot is the owner evidence for
+      // an unchanged technical identity. Do not turn a later catalog edit into
+      // an approval mismatch when only quantity/display intent changed.
+      if (unchanged.every(Boolean)) return { ok: true, value: {
+        context: previousContext as PartnerTechnicalGraphContext,
+        identities: input.previous!.identities,
+      } };
+    }
+    const policy = await readPartnerTechnicalSalesPolicy(tx, input.actorId);
+    if (!policy.ok) return policy;
     const frozenPolicy = parsedPriorPolicy ?? policy.value;
     const references = productReferences(input.draft);
     const products = await tx.product.findMany({ where: { id: { in: references.map(item => item.catalogItemId) } },
@@ -286,13 +309,6 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
     if (previousContext?.layers && Array.isArray(previousContext.layers)) context.layers = (context.layers ?? []).map(current =>
       previousContext.layers!.find(previous => previous.catalogItemId === current.catalogItemId &&
         previous.catalogSnapshotVersion === current.catalogSnapshotVersion) ?? current);
-    const identityRows = [
-      ...input.draft.rows.map(row => ({ productRowId: row.productRowId, catalogItemId: row.catalogItemId,
-        family: row.family, unit: identityUnit(row), hash: technicalDraftRowConfigurationHash(row, input.draft) })),
-      ...(input.draft.dependents ?? []).filter((item): item is Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'remainder' }> => item.kind === 'remainder')
-        .map(row => ({ productRowId: row.productRowId, catalogItemId: row.catalogItemId,
-          family: 'longitudinal' as const, unit: identityUnit(row), hash: dependentConfigurationHash(row) })),
-    ];
     const identities: Array<{ productRowId: string; identity: InquiryIdentity }> = [];
     for (const row of identityRows) {
       const prior = input.previous?.identities.find(item => item.productRowId === row.productRowId);

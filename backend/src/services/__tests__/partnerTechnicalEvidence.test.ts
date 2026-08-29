@@ -83,6 +83,8 @@ test('real evidence resolver binds current private rates and reuses frozen ident
   changedRates.integrityHash = await canonicalHash({ accountId: changedRates.accountId, version: changedRates.version,
     effectiveDate: '2026-08-29', terms: changedRates.terms, actorId: changedRates.actorId, reason: changedRates.reason });
   transaction.partnerCommercialTerms.findMany = async () => [changedRates];
+  product.updatedAt = new Date('2026-08-29T13:00:00.000Z');
+  product.basePrice = new Prisma.Decimal('99000000');
   const successorDraft = PartnerTechnicalDraftSchema.parse({ ...draft, inputRevision: 2,
     rows: [{ ...draft.rows[0], configuration: { ...draft.rows[0].configuration, quantity: '7' } }] });
   const successor = await resolver(transaction, { actorId: 'partner-1', recoveryId: 'draft-1',

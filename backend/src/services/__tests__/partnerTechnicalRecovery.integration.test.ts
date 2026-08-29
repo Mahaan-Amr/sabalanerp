@@ -100,6 +100,8 @@ test('pre-Case technical authority rejects internal ADMIN, pending identity, for
     assert.equal((await authorize(tx, request)).ok, false, 'pending identity is onboarding-only');
     await tx.partnerProfile.update({ where: { id: actorId }, data: { state: 'ACTIVE', revision: { increment: 1 } } });
     assert.equal((await authorize(tx, request)).ok, false, 'active identity outside a release cohort cannot write');
+    assert.equal((await authorize(tx, { ...request, operation: 'READ' })).ok, false,
+      'active identity outside a release cohort cannot read the mounted technical surface');
     await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
       enrollmentPaused: false, operationalPaused: false } });
     await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,

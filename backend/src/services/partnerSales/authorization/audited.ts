@@ -8,7 +8,7 @@ import { resolvePartnerScopedAuthority } from './centralAuthority';
 import { createPartnerAuthorizationV2 } from './service';
 import { readActions } from './capabilities';
 
-/** Real persisted composition, still unmounted. A denial must be returned from
+/** Real persisted composition used by authenticated Partner transports. A denial must be returned from
  * the transaction (not thrown) to retain its audit. Business commands must not
  * mutate before authorization. Rollback rolls back both mutation and evidence. */
 export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,

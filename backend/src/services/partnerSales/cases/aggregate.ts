@@ -16,6 +16,11 @@ type DraftCommand = Submit | Revise;
 type AuthorizationRequest = { actorId: string; action: 'CASE_SUBMIT' | 'CASE_DRAFT_WRITE' | 'CUSTOMER_READ';
   purpose: 'PARTNER' | 'CRM'; root: { kind: 'PROFILE' | 'CUSTOMER' | 'CASE'; id: string } };
 type FailurePoint = 'AFTER_CASE_ROOT' | 'AFTER_PAIR' | 'AFTER_BINDINGS';
+type CaseExecutionResult = Awaited<ReturnType<PartnerCommandPort['execute']>>;
+
+class RollbackCaseResult extends Error {
+  constructor(readonly result: CaseExecutionResult) { super('rollback Partner Case result'); }
+}
 
 export interface PartnerCaseDependencies {
   actorId: string;
@@ -84,7 +89,8 @@ async function insertPaymentPlan(tx: Transaction, caseId: string, revision: numb
 }
 
 async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencies, command: Revise,
-  intentHash: string, key: { actorId: string; operation: string; targetScope: string; key: string }) {
+  intentHash: string, key: { actorId: string; operation: string; targetScope: string; key: string },
+  markMutated: () => void) {
   const caseId = command.expected.caseId;
   await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
   const current = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
@@ -208,6 +214,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   }
   const eventId = randomUUID();
   const maximum = await tx.partnerCaseEvent.aggregate({ where: { caseId }, _max: { sequence: true } });
+  markMutated();
   await tx.partnerCaseRevision.create({ data: { caseId, revision, predecessorRevision: current.headRevision, integrityHash,
     graphHash: evidence.value.graphHash, graph: json(evidence.value.graph), partySnapshots: json(evidence.value.partySnapshots),
     wholesaleEnvelope: json(evidence.value.wholesaleEnvelope), retailEnvelope: json(evidence.value.retailEnvelope),
@@ -278,8 +285,11 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       wonSalesContractId: current.customerContractId }, data: { wonSalesContractId: null } });
   }
   if (resolved.value.projectId && previousProjectId !== resolved.value.projectId) {
-    await tx.crmPotentialProject.update({ where: { id: resolved.value.projectId },
-      data: { wonSalesContractId: current.customerContractId } });
+    const linked = await tx.crmPotentialProject.updateMany({ where: { id: resolved.value.projectId,
+      customerId: resolved.value.customerId, OR: [
+        { wonSalesContractId: null }, { wonSalesContractId: current.customerContractId },
+      ] }, data: { wonSalesContractId: current.customerContractId } });
+    if (linked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
   }
   const consumed = await dependencies.consumeRecovery(tx, { actorId: dependencies.actorId,
     recoveryId: command.intent.recoveryId, recoveryRevision: command.intent.recoveryRevision,
@@ -312,7 +322,9 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
     if (command.idempotency.actorId !== dependencies.actorId || command.idempotency.payloadHash !== intentHash) {
       return { ok: false, error: partnerError('INVALID_PAYLOAD') };
     }
-    return dependencies.transaction(async tx => {
+    try { return await dependencies.transaction(async tx => {
+      let mutated = false;
+      const result = await (async (): Promise<CaseExecutionResult> => {
       const key = { actorId: dependencies.actorId, operation: command.type, targetScope: caseId,
         key: command.idempotency.key };
       const prior = await tx.partnerCommandOutcome.findUnique({ where: { actorId_operation_targetScope_key: key } });
@@ -321,7 +333,7 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         const saved = receipt(prior.outcome);
         const historical = saved && await readPartnerRevisionView(tx, saved.caseId, saved.revision, saved.integrityHash);
         const current = saved && await readPartnerView(tx, saved.caseId);
-        if (!saved || saved.commandId !== command.commandId || !historical || !current) {
+        if (!saved || saved.commandId !== command.commandId || saved.caseId !== caseId || !historical || !current) {
           await dependencies.recordEvidenceReview(tx, { caseId, correlationId: command.correlationId,
             code: 'INTEGRITY_CONFLICT', evidence: { receiptRevision: saved?.revision ?? 0 } });
           return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
@@ -343,7 +355,8 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         return { ok: true, value: { commandId: saved.commandId, replayed: true,
           case: current.view, eventIds: saved.eventIds } };
       }
-      if (command.type === 'CASE_DRAFT_REVISE') return reviseDraft(tx, dependencies, command, intentHash, key);
+      if (command.type === 'CASE_DRAFT_REVISE') return reviseDraft(tx, dependencies, command, intentHash, key,
+        () => { mutated = true; });
       if (await tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: { id: true } })) {
         return { ok: false, error: partnerError('STATE_CONFLICT') };
       }
@@ -415,6 +428,7 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
           evidence: { recoveryRevision: command.intent.recoveryRevision } });
         return projections;
       }
+      mutated = true;
       await tx.partnerSaleCase.create({ data: { id: caseId, caseNumber: ids.caseNumber, profileId: resolved.value.profileId,
         customerId: resolved.value.customerId, internalRecordId: ids.internalRecordId,
         customerContractId: ids.customerContractId, headRevision: 1, integrityHash } });
@@ -436,8 +450,12 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
         partnerKind: 'PARTNER_CUSTOMER', partnerCaseId: caseId, partnerRevision: 1, partnerIntegrityHash: integrityHash,
         totalAmount: evidence.value.retailEnvelope.totals.payable,
         currency: evidence.value.retailEnvelope.totals.currency, contractData: json(projections.value.customer) } });
-      if (resolved.value.projectId) await tx.crmPotentialProject.update({ where: { id: resolved.value.projectId },
-        data: { wonSalesContractId: ids.customerContractId } });
+      if (resolved.value.projectId) {
+        const linked = await tx.crmPotentialProject.updateMany({ where: { id: resolved.value.projectId,
+          customerId: resolved.value.customerId, wonSalesContractId: null },
+          data: { wonSalesContractId: ids.customerContractId } });
+        if (linked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
+      }
       dependencies.failpoint?.('AFTER_PAIR');
       await tx.partnerProductRow.createMany({ data: approvedRows.map(row => ({ id: row.productRowId, caseId })) });
       await tx.partnerCaseRowBinding.createMany({ data: approvedRows.map(row => ({ caseId, revision: 1,
@@ -485,6 +503,12 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
       await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), ...key, payloadHash: intentHash, outcome: json(outcome) } });
       return { ok: true, value: { commandId: command.commandId, replayed: false,
         case: projections.value.partner, eventIds: [ids.eventId] } };
-    });
+      })();
+      if (!result.ok && mutated) throw new RollbackCaseResult(result);
+      return result;
+    }); } catch (error) {
+      if (error instanceof RollbackCaseResult) return error.result;
+      throw error;
+    }
   } };
 }

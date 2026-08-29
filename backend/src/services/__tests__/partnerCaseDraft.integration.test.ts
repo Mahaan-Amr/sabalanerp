@@ -153,7 +153,18 @@ function service(tx: Prisma.TransactionClient, ids: Record<string, string>, fail
   recordEvidenceReview: PartnerCaseDependencies['recordEvidenceReview'] = async () => undefined,
   authorizeProject: PartnerCaseDependencies['authorizeProject'] = async () =>
     ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } })) {
-  return createPartnerCaseService({ actorId: ids.partnerId, transaction: work => work(tx),
+  return createPartnerCaseService({ actorId: ids.partnerId, transaction: async work => {
+    await tx.$executeRaw`SAVEPOINT partner_case_service`;
+    try {
+      const result = await work(tx);
+      await tx.$executeRaw`RELEASE SAVEPOINT partner_case_service`;
+      return result;
+    } catch (error) {
+      await tx.$executeRaw`ROLLBACK TO SAVEPOINT partner_case_service`;
+      await tx.$executeRaw`RELEASE SAVEPOINT partner_case_service`;
+      throw error;
+    }
+  },
     authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-authorization` } }),
     authorizeProject,
     recordEvidenceReview,
@@ -311,6 +322,35 @@ test('an explicit Draft revision reauthorizes and snapshots a changed Customer a
   });
 });
 
+test('a Project already won by another Case cannot be stolen by submit or Draft revision', async () => {
+  await fixture(async (tx, ids) => {
+    const otherCaseId = `${ids.caseId}-other`;
+    const otherBase = await command(ids, otherCaseId, 'other');
+    const otherIntent = { ...otherBase.intent, customerId: ids.secondCustomerId, projectId: ids.secondProjectId };
+    const other = { ...otherBase, intent: otherIntent, idempotency: { ...otherBase.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent: otherIntent }) } };
+    assert.equal((await service(tx, ids).execute(other)).ok, true);
+
+    const base = await command(ids);
+    const initialIntent = { ...base.intent, projectId: ids.firstProjectId };
+    const submitted = { ...base, intent: initialIntent, idempotency: { ...base.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent: initialIntent }) } };
+    const created = await service(tx, ids).execute(submitted);
+    assert.equal(created.ok, true);
+    if (!created.ok || !created.value.case) return;
+    const draft = await reviseCommand(ids, submitted, 1, created.value.case.owner.integrityHash, 'steal-project');
+    const intent = { ...draft.intent, customerId: ids.secondCustomerId, projectId: ids.secondProjectId };
+    const attempted = { ...draft, intent, idempotency: { ...draft.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent }) } };
+    const rejected = await service(tx, ids).execute(attempted);
+    assert.equal(rejected.ok ? null : rejected.error.code, 'ROW_STALE');
+    const target = await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: ids.secondProjectId } });
+    assert.equal(target.wonSalesContractId,
+      (await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: otherCaseId } })).customerContractId);
+    assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, 1);
+  });
+});
+
 test('graph mismatch and an injected pair failure leave no partial Case, records or numbers', async () => {
   await fixture(async (tx, ids) => {
     const reviews: Array<{ code: string }> = [];
@@ -336,6 +376,20 @@ test('graph mismatch and an injected pair failure leave no partial Case, records
     assert.equal(paymentMismatch.ok ? null : paymentMismatch.error.code, 'INTEGRITY_CONFLICT');
     assert.deepEqual(reviews.map(review => review.code), ['CONFIG_MISMATCH', 'INTEGRITY_CONFLICT']);
     assert.equal(await tx.partnerSaleCase.count({ where: { id: ids.caseId } }), 0);
+    await tx.$executeRaw`SAVEPOINT partner_case_result_failure`;
+    const recoveryDenied = createPartnerCaseService({ actorId: ids.partnerId,
+      transaction: async work => { try { return await work(tx); } catch (error) {
+        await tx.$executeRaw`ROLLBACK TO SAVEPOINT partner_case_result_failure`; throw error;
+      } }, authorize: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-authorization` } }),
+      authorizeProject: async () => ({ ok: true, value: { evidenceId: `${ids.caseId}-project-authorization` } }),
+      recordEvidenceReview: async () => undefined,
+      resolveDraft: async () => ({ ok: true, value: await resolved(ids, ids.caseId) }),
+      consumeRecovery: async () => ({ ok: false, error: { code: 'ROW_STALE', status: 409,
+        message: 'اطلاعات تغییر کرده است؛ صفحه را تازه کنید.' } as const }) });
+    const denied = await recoveryDenied.execute(valid);
+    assert.equal(denied.ok ? null : denied.error.code, 'ROW_STALE');
+    assert.equal(await tx.partnerSaleCase.count({ where: { id: ids.caseId } }), 0,
+      'a canonical failure returned after writes must roll the aggregate transaction back');
     await tx.$executeRaw`SAVEPOINT partner_case_failpoint`;
     const failure = new Error('case failpoint');
     const failing = createPartnerCaseService({ actorId: ids.partnerId,

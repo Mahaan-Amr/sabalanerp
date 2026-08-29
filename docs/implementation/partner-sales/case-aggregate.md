@@ -37,8 +37,10 @@ Customer and Project changes are explicit Draft revisions. The transaction
 reauthorizes and snapshots the new Customer, reauthorizes the current Project
 binding before and after writes, updates both sides of the Case/contract pair and
 moves the Project link only after separately reauthorizing the preceding Project.
+Project attachment uses an exact conditional write, so an existing winning
+contract cannot be overwritten by another concurrent Case.
 Idempotent replay validates its immutable historical revision/receipt, validates
-the current head projection, then rechecks current Case, Customer, Project and
+the receipt's exact target scope and current head projection, then rechecks current Case, Customer, Project and
 rollout authority before returning the current authorized view.
 
 Historical revisions, approval usages, deliveries and plans are append-only.

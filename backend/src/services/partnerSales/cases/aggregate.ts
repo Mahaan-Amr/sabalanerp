@@ -134,6 +134,11 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     ? await dependencies.authorizeProject(tx, { actorId: dependencies.actorId,
       projectId: previousProjectId, customerId: current.customerId }) : undefined;
   if (previousProjectAccess && !previousProjectAccess.ok) return previousProjectAccess;
+  if (previousProjectId && previousProjectId === resolved.value.projectId &&
+      await tx.crmPotentialProject.count({ where: { id: previousProjectId, customerId: current.customerId,
+        wonSalesContractId: current.customerContractId } }) !== 1) {
+    return { ok: false, error: partnerError('ROW_STALE') } as const;
+  }
   const rollout = await authorizePartnerTechnicalRollout(tx, current.profileId, 'MUTATE');
   if (!rollout.ok) return rollout;
   const validated = await validateResolvedDraft(command, resolved.value);
@@ -281,8 +286,9 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     const stillPreviousProject = await dependencies.authorizeProject(tx, { actorId: dependencies.actorId,
       projectId: previousProjectId, customerId: current.customerId });
     if (!stillPreviousProject.ok) return stillPreviousProject;
-    await tx.crmPotentialProject.updateMany({ where: { id: previousProjectId,
+    const unlinked = await tx.crmPotentialProject.updateMany({ where: { id: previousProjectId,
       wonSalesContractId: current.customerContractId }, data: { wonSalesContractId: null } });
+    if (unlinked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
   }
   if (resolved.value.projectId && previousProjectId !== resolved.value.projectId) {
     const linked = await tx.crmPotentialProject.updateMany({ where: { id: resolved.value.projectId,

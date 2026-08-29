@@ -351,6 +351,23 @@ test('a Project already won by another Case cannot be stolen by submit or Draft 
   });
 });
 
+test('an unchanged Project binding must still belong to the exact current customer contract', async () => {
+  await fixture(async (tx, ids) => {
+    const base = await command(ids);
+    const intent = { ...base.intent, projectId: ids.firstProjectId };
+    const submitted = { ...base, intent, idempotency: { ...base.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent }) } };
+    const created = await service(tx, ids).execute(submitted);
+    assert.equal(created.ok, true);
+    if (!created.ok || !created.value.case) return;
+    await tx.crmPotentialProject.update({ where: { id: ids.firstProjectId }, data: { wonSalesContractId: null } });
+    const revised = await service(tx, ids).execute(await reviseCommand(ids, submitted, 1,
+      created.value.case.owner.integrityHash, 'missing-project-binding'));
+    assert.equal(revised.ok ? null : revised.error.code, 'ROW_STALE');
+    assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, 1);
+  });
+});
+
 test('graph mismatch and an injected pair failure leave no partial Case, records or numbers', async () => {
   await fixture(async (tx, ids) => {
     const reviews: Array<{ code: string }> = [];

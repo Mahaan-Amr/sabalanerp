@@ -33,15 +33,14 @@ export function createPartnerTechnicalSession(input: {
   const recovered = PartnerTechnicalRecoveryViewSchema.parse(input.recovered);
   if (recovered.recoveryId !== access.recoveryId) throw new Error('Recovery scope mismatch');
   const validated = input.validated && PartnerTechnicalSavedViewSchema.parse(input.validated);
-  if (validated && (validated.recoveryId !== recovered.recoveryId ||
-    validated.recoveryRevision !== recovered.recoveryRevision ||
-    validated.inputRevision !== recovered.draft?.inputRevision)) throw new Error('Validated recovery mismatch');
+  if (validated && validated.recoveryId !== recovered.recoveryId) throw new Error('Validated recovery mismatch');
   let state: TechnicalSessionState = {
     phase: 'editing', recoveryRevision: recovered.recoveryRevision,
     draft: recovered.draft ?? { schemaVersion: 1, inputRevision: 0, rows: [] },
     checkpointedInputRevision: recovered.draft?.inputRevision ?? null,
     ...(validated ? { validated } : {}),
-    isCurrentValidated: validated !== undefined,
+    isCurrentValidated: validated !== undefined && validated.recoveryRevision === recovered.recoveryRevision &&
+      validated.inputRevision === recovered.draft?.inputRevision,
   };
   let flight: Promise<void> | null = null;
   let pending: PartnerTechnicalCheckpoint | null = null;
@@ -92,7 +91,7 @@ export function createPartnerTechnicalSession(input: {
       }
       const receipt = PartnerTechnicalSaveReceiptSchema.parse(result.value);
       if (receipt.recoveryId !== access.recoveryId || receipt.inputRevision !== command.draft.inputRevision ||
-        receipt.recoveryRevision !== command.expectedRecoveryRevision + 1) throw new Error('Save response mismatch');
+        receipt.recoveryRevision <= command.expectedRecoveryRevision) throw new Error('Save response mismatch');
       pendingSave = null;
       publish({ ...state, phase: 'editing', recoveryRevision: receipt.recoveryRevision,
         checkpointedInputRevision: receipt.inputRevision, validated: receipt,
@@ -141,8 +140,8 @@ export function createPartnerTechnicalSession(input: {
       disposed = true;
       pending = null;
       pendingSave = null;
-      publish({ ...state, phase: 'closed' });
       listeners.clear();
+      state = { ...state, phase: 'closed' };
     },
   };
 }

@@ -122,14 +122,14 @@ test('validated save returns owner-issued references but does not infer approval
     saved: { readSaved: async () => { throw new Error('Not used'); }, save: async command => {
       sent = command;
       return { ok: true, value: { schemaVersion: 1, recoveryId: command.recoveryId,
-        recoveryRevision: 4, inputRevision: command.draft.inputRevision, updatedAt: '2026-08-29T00:00:01.000Z', replayed: false,
-        rows: [{ configurationRef: { recoveryId: command.recoveryId, recoveryRevision: 4, productRowId: 'configured-row' },
+        recoveryRevision: 6, inputRevision: command.draft.inputRevision, updatedAt: '2026-08-29T00:00:01.000Z', replayed: false,
+        rows: [{ configurationRef: { recoveryId: command.recoveryId, recoveryRevision: 6, productRowId: 'configured-row' },
           quantity: '2', unit: 'count', configurationChange: 'UNCHANGED' }] } };
     } },
   });
   await session.save();
   assert.ok(sent);
-  assert.equal(session.getSnapshot().validated?.rows[0].configurationRef.recoveryRevision, 4);
+  assert.equal(session.getSnapshot().validated?.rows[0].configurationRef.recoveryRevision, 6);
   assert.equal(session.getSnapshot().isCurrentValidated, true);
   session.edit(PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 6,
     rows: [{ productRowId: 'configured-row', catalogItemId: 'catalog-row',
@@ -172,4 +172,33 @@ test('reload can restore the exact validated view and double save shares one fli
     rows: validated.rows.map(row => ({ ...row, configurationRef: { ...row.configurationRef, recoveryRevision: 5 } })) } });
   await first;
   assert.equal(writes, 1);
+});
+
+test('owner save may jump a permanent revision counter and older validated refs remain historical', async () => {
+  const oldDraft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: 2,
+    rows: [{ productRowId: 'old-row', catalogItemId: 'catalog-row', catalogSnapshotVersion: '2026-08-29T00:00:00.000Z',
+      family: 'prepared', configuration: { kind: 'readyPiece', unit: 'count', quantity: '1' } }],
+  });
+  const old = { schemaVersion: 1 as const, recoveryId: access.recoveryId, recoveryRevision: 5, inputRevision: 2,
+    updatedAt: '2026-08-29T00:00:01.000Z', rows: [{ configurationRef: {
+      recoveryId: access.recoveryId, recoveryRevision: 5, productRowId: 'old-row' },
+      quantity: '1', unit: 'count' as const, configurationChange: 'NEW' as const }] };
+  const current = PartnerTechnicalDraftSchema.parse({ ...oldDraft, inputRevision: 3 });
+  const session = createPartnerTechnicalSession({ access,
+    recovered: { schemaVersion: 1, recoveryId: access.recoveryId, recoveryRevision: 6,
+      updatedAt: '2026-08-29T00:00:02.000Z', draft: current }, validated: old,
+    recovery: { read: async () => { throw new Error('Not used'); }, checkpoint: async () => { throw new Error('Not used'); } },
+    saved: { readSaved: async () => ({ ok: true, value: old }), save: async command => ({ ok: true, value: {
+      schemaVersion: 1, recoveryId: command.recoveryId, recoveryRevision: 7,
+      inputRevision: command.draft.inputRevision, updatedAt: '2026-08-29T00:00:03.000Z', replayed: false,
+      rows: [{ configurationRef: { recoveryId: command.recoveryId, recoveryRevision: 7, productRowId: 'old-row' },
+        quantity: '1', unit: 'count', configurationChange: 'UNCHANGED' }],
+    } }) },
+  });
+  assert.equal(session.getSnapshot().validated?.recoveryRevision, 5);
+  assert.equal(session.getSnapshot().isCurrentValidated, false);
+  await session.save();
+  assert.equal(session.getSnapshot().phase, 'editing');
+  assert.equal(session.getSnapshot().validated?.recoveryRevision, 7);
+  assert.equal(session.getSnapshot().isCurrentValidated, true);
 });

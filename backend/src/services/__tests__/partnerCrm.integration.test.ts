@@ -490,6 +490,7 @@ test('pending Partner onboarding records legacy Project responsibility and ACTIV
     await database.$transaction(async tx => {
       await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
       await tx.partnerProfile.deleteMany({ where: { id: profileId } });
+      await tx.crmTimelineEvent.deleteMany({ where: { potentialProjectId: projectId } });
       await tx.crmPotentialProject.deleteMany({ where: { id: projectId } });
       await tx.crmCustomer.deleteMany({ where: { id: customerId } });
       await tx.user.deleteMany({ where: { id: { in: [actorId, previousSellerId, destinationId] } } });

@@ -225,7 +225,11 @@ BEGIN
        AND (to_jsonb(NEW)->'customerTransferSnapshot') IS NOT DISTINCT FROM
          (to_jsonb(OLD)->'customerTransferSnapshot')
        AND coalesce(reassignment_context->>'actorId', '') <> ''
-       AND coalesce(reassignment_context->>'reason', '') <> '' THEN
+       AND coalesce(reassignment_context->>'reason', '') <> ''
+       AND EXISTS (SELECT 1 FROM users destination
+         WHERE destination.id = NEW."responsibleSellerId" AND destination."isActive")
+       AND NOT EXISTS (SELECT 1 FROM partner_profiles destination_profile
+         WHERE destination_profile."userId" = NEW."responsibleSellerId") THEN
       RETURN NEW;
     END IF;
   END IF;

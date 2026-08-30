@@ -8,6 +8,8 @@ import type { PartnerCustomerSummary, PartnerNextActionView, PartnerProjectView 
 import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
 import { seedAuthorizationCase } from './partnerAuthorizationFixture';
 import { findOrdinaryCrmNextAction, ordinaryProjectSearch, reassignOrdinaryCrmProject } from '../../routes/crm';
+import { FEATURES } from '../../middleware/feature';
+import { WORKSPACES } from '../../middleware/workspace';
 
 const databaseUrl = (connectionLimit = 2) => {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -260,13 +262,15 @@ test('destination deactivation during legacy Project reassignment lock wait defe
   const actorId = `partner-crm-reassign-admin-${suffix}`;
   const previousSellerId = `partner-crm-reassign-old-${suffix}`;
   const nextSellerId = `partner-crm-reassign-new-${suffix}`;
+  const partnerDestinationId = `partner-crm-reassign-partner-${suffix}`;
   const customerId = `partner-crm-reassign-customer-${suffix}`;
   const projectId = `partner-crm-reassign-project-${suffix}`;
   const locked = signal();
   const release = signal();
   let blocker: Promise<unknown> | undefined;
   try {
-    for (const [id, role] of [[actorId, 'ADMIN'], [previousSellerId, 'SALES'], [nextSellerId, 'SALES']] as const) {
+    for (const [id, role] of [[actorId, 'ADMIN'], [previousSellerId, 'SALES'], [nextSellerId, 'SALES'],
+      [partnerDestinationId, 'SALES']] as const) {
       await database.user.create({ data: { id, username: id, email: `${id}@example.invalid`, password: 'not-a-login',
         firstName: 'Fixture', lastName: 'Reassignment Race', role } });
     }
@@ -274,6 +278,9 @@ test('destination deactivation during legacy Project reassignment lock wait defe
       firstName: 'مشتری', lastName: 'پروژه قدیمی' } });
     await database.crmPotentialProject.create({ data: { id: projectId, customerId,
       responsibleSellerId: previousSellerId, title: 'پروژه نگه‌داری‌شده', workType: 'نما' } });
+    await database.partnerProfile.create({ data: { id: partnerDestinationId, userId: partnerDestinationId, state: 'ACTIVE' } });
+    assert.deepEqual(await reassignOrdinaryCrmProject(database, { projectId, nextSellerId: partnerDestinationId,
+      actorId, reason: 'مقصد Partner برای پروژه قدیمی مجاز نیست' }), { ok: false, code: 'DESTINATION_NOT_FOUND' });
 
     blocker = database.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM users WHERE id = ${nextSellerId} FOR UPDATE`;
@@ -302,11 +309,128 @@ test('destination deactivation during legacy Project reassignment lock wait defe
   } finally {
     release.resolve();
     await blocker?.catch(() => undefined);
-    await database.crmTimelineEvent.deleteMany({ where: { potentialProjectId: projectId } });
-    await database.crmPotentialProject.deleteMany({ where: { id: projectId } });
-    await database.crmCustomer.deleteMany({ where: { id: customerId } });
-    await database.user.deleteMany({ where: { id: { in: [actorId, previousSellerId, nextSellerId] } } });
+    await database.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.crmTimelineEvent.deleteMany({ where: { potentialProjectId: projectId } });
+      await tx.crmPotentialProject.deleteMany({ where: { id: projectId } });
+      await tx.crmCustomer.deleteMany({ where: { id: customerId } });
+      await tx.partnerProfile.deleteMany({ where: { id: partnerDestinationId } });
+      await tx.user.deleteMany({ where: { id: { in: [actorId, previousSellerId, nextSellerId, partnerDestinationId] } } });
+    });
     await database.$disconnect();
+  }
+});
+
+test('feature revocation during legacy Project reassignment lock wait defeats current manager authority', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl(4) } } });
+  const suffix = randomUUID();
+  const actorId = `partner-crm-grant-manager-${suffix}`;
+  const previousSellerId = `partner-crm-grant-old-${suffix}`;
+  const nextSellerId = `partner-crm-grant-new-${suffix}`;
+  const customerId = `partner-crm-grant-customer-${suffix}`;
+  const projectId = `partner-crm-grant-project-${suffix}`;
+  const grantId = `partner-crm-grant-${suffix}`;
+  const locked = signal(); const release = signal();
+  let blocker: Promise<unknown> | undefined;
+  try {
+    for (const id of [actorId, previousSellerId, nextSellerId]) await database.user.create({ data: {
+      id, username: id, email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Fixture',
+      lastName: 'Grant Race', role: 'SALES' } });
+    await database.featurePermission.create({ data: { id: grantId, userId: actorId, workspace: WORKSPACES.CRM,
+      feature: FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN, permissionLevel: 'edit' } });
+    await database.crmCustomer.create({ data: { id: customerId, ownerUserId: previousSellerId,
+      firstName: 'مشتری', lastName: 'لغو مجوز' } });
+    await database.crmPotentialProject.create({ data: { id: projectId, customerId,
+      responsibleSellerId: previousSellerId, title: 'پروژه رقابت مجوز', workType: 'نما' } });
+    blocker = database.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM feature_permissions WHERE id = ${grantId} FOR UPDATE`;
+      locked.resolve(); await release.promise;
+      await tx.featurePermission.update({ where: { id: grantId }, data: { isActive: false } });
+    }, { timeout: 15_000 });
+    await locked.promise;
+    const reassignment = reassignOrdinaryCrmProject(database, { projectId, nextSellerId, actorId,
+      reason: 'تغییر مسئول با بازبینی مجوز جاری' });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const [waiting] = await database.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*)::bigint AS count FROM pg_stat_activity
+        WHERE datname = current_database() AND "wait_event_type" = 'Lock'
+          AND query LIKE '%FROM feature_permissions%'`;
+      if (Number(waiting?.count ?? 0) > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      if (attempt === 99) throw new Error('reassignment did not reach the authority source lock');
+    }
+    release.resolve(); await blocker;
+    assert.deepEqual(await reassignment, { ok: false, code: 'FORBIDDEN' });
+    assert.equal((await database.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId },
+      select: { responsibleSellerId: true } })).responsibleSellerId, previousSellerId);
+  } finally {
+    release.resolve(); await blocker?.catch(() => undefined);
+    await database.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.featurePermission.deleteMany({ where: { id: grantId } });
+      await tx.crmPotentialProject.deleteMany({ where: { id: projectId } });
+      await tx.crmCustomer.deleteMany({ where: { id: customerId } });
+      await tx.user.deleteMany({ where: { id: { in: [actorId, previousSellerId, nextSellerId] } } });
+    });
+    await database.$disconnect();
+  }
+});
+
+test('Customer transfer and retained Project reassignment serialize without a deadlock', async () => {
+  const transferDatabase = new PrismaClient({ datasources: { db: { url: databaseUrl(3) } } });
+  const reassignmentDatabase = new PrismaClient({ datasources: { db: { url: databaseUrl(3) } } });
+  const suffix = randomUUID();
+  const oldOwnerId = `partner-crm-cross-old-${suffix}`;
+  const partnerId = `partner-crm-cross-partner-${suffix}`;
+  const adminId = `partner-crm-cross-admin-${suffix}`;
+  const nextSellerId = `partner-crm-cross-next-${suffix}`;
+  const customerId = `partner-crm-cross-customer-${suffix}`;
+  const projectId = `partner-crm-cross-project-${suffix}`;
+  const matchId = `partner-crm-cross-match-${suffix}`;
+  const transferId = `partner-crm-cross-transfer-${suffix}`;
+  try {
+    for (const [id, role] of [[oldOwnerId, 'SALES'], [partnerId, 'SALES'], [adminId, 'ADMIN'],
+      [nextSellerId, 'SALES']] as const) await transferDatabase.user.create({ data: { id, username: id,
+      email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Fixture', lastName: 'Cross Race', role } });
+    await transferDatabase.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
+    await transferDatabase.crmCustomer.create({ data: { id: customerId, ownerUserId: oldOwnerId,
+      firstName: 'مشتری', lastName: 'انتقال هم‌زمان' } });
+    await transferDatabase.crmPotentialProject.create({ data: { id: projectId, customerId,
+      responsibleSellerId: oldOwnerId, title: 'پروژه انتقال هم‌زمان', workType: 'نما' } });
+    await transferDatabase.partnerDuplicateCustomerMatch.create({ data: { id: matchId,
+      requesterProfileId: partnerId, customerId, snapshot: { displayName: 'مشتری انتقال هم‌زمان',
+        personType: 'NATURAL', city: null, maskedWitness: '********0000' },
+      witnessHash: `sha256-v1:${'c'.repeat(64)}`, expiresAt: new Date(Date.now() + 300_000) } });
+    await transferDatabase.partnerCustomerTransfer.create({ data: { id: transferId, customerId, matchId,
+      fromOwnerUserId: oldOwnerId, fromProfileId: null, toProfileId: partnerId, requestedBy: partnerId,
+      requestReason: 'انتقال هم‌زمان با تغییر مسئول پروژه', correlationId: `cross-request-${suffix}` } });
+    const intent = { schemaVersion: 1 as const, type: 'CUSTOMER_TRANSFER_DECIDE' as const, transferId,
+      expectedRevision: 1, outcome: 'APPROVE' as const, reason: 'تأیید انتقال با ترتیب قفل ثابت' };
+    const admin = createPartnerCrmService({ database: transferDatabase, actorId: adminId,
+      authorize: (tx, input) => createAuditedPartnerAuthorization(tx, { actorId: adminId, purpose: 'CRM', channel: 'API' },
+        { correlationId: input.correlationId, reason: input.reason }, input.target).authorize(input.action, input.root),
+      notifyTransfer: async () => undefined });
+    const [decision, reassigned] = await Promise.all([
+      admin.decideTransfer({ ...intent, commandId: `cross-decision-${suffix}`, correlationId: `cross-corr-${suffix}`,
+        idempotency: { actorId: adminId, operation: 'CUSTOMER_TRANSFER_DECIDE', targetId: transferId,
+          key: `cross-key-${suffix}`, payloadHash: await intentHash(intent) } }),
+      reassignOrdinaryCrmProject(reassignmentDatabase, { projectId, nextSellerId, actorId: adminId,
+        reason: 'حفظ مسئولیت مستقل پروژه قدیمی' }),
+    ]);
+    assert.equal(decision.ok, true);
+    assert.equal(reassigned.ok, true);
+    assert.deepEqual(await transferDatabase.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId }, select: {
+      responsibleSellerId: true, partnerRevision: true, customerTransferSnapshot: true } }).then(project => ({
+        responsibleSellerId: project.responsibleSellerId, partnerRevision: project.partnerRevision,
+        snapshotFirstName: (project.customerTransferSnapshot as { firstName?: string }).firstName,
+      })), { responsibleSellerId: nextSellerId, partnerRevision: null, snapshotFirstName: 'مشتری' });
+  } finally {
+    await transferDatabase.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.partnerProfile.deleteMany({ where: { id: partnerId } });
+      await tx.user.deleteMany({ where: { id: { in: [oldOwnerId, partnerId, adminId, nextSellerId] } } });
+    });
+    await Promise.all([transferDatabase.$disconnect(), reassignmentDatabase.$disconnect()]);
   }
 });
 

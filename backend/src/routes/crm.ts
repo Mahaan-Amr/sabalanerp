@@ -291,12 +291,19 @@ export const reassignOrdinaryCrmProject = async (database: PrismaClient, input: 
   nextSellerId: string;
   actorId: string;
   reason: string;
-}): Promise<OrdinaryProjectReassignmentResult> => database.$transaction(async tx => {
+}): Promise<OrdinaryProjectReassignmentResult> => {
+  const candidate = await database.crmPotentialProject.findUnique({ where: { id: input.projectId },
+    select: { customerId: true } });
+  if (!candidate) return { ok: false, code: 'NOT_FOUND' };
+  return database.$transaction(async tx => {
+  await tx.$queryRaw`SELECT id FROM crm_customers WHERE id = ${candidate.customerId} FOR UPDATE`;
   const [project] = await tx.$queryRaw<Array<{ id: string; customerId: string;
     responsibleSellerId: string; partnerRevision: number | null }>>`
     SELECT id, "customerId", "responsibleSellerId", "partnerRevision"
     FROM crm_potential_projects WHERE id = ${input.projectId} FOR UPDATE`;
-  if (!project || project.partnerRevision !== null) return { ok: false, code: 'NOT_FOUND' };
+  if (!project || project.customerId !== candidate.customerId || project.partnerRevision !== null) {
+    return { ok: false, code: 'NOT_FOUND' };
+  }
 
   const userIds = [...new Set([input.actorId, input.nextSellerId, project.responsibleSellerId])].sort();
   const users = await tx.$queryRaw<Array<{ id: string; role: string; isActive: boolean;
@@ -307,6 +314,18 @@ export const reassignOrdinaryCrmProject = async (database: PrismaClient, input: 
   const nextSeller = users.find(user => user.id === input.nextSellerId);
   if (!nextSeller?.isActive) return { ok: false, code: 'DESTINATION_NOT_FOUND' };
   if (!actor?.isActive) return { ok: false, code: 'FORBIDDEN' };
+  const destinationProfile = await tx.partnerProfile.findUnique({ where: { userId: nextSeller.id }, select: { id: true } });
+  if (destinationProfile) return { ok: false, code: 'DESTINATION_NOT_FOUND' };
+  await tx.$queryRaw`SELECT id FROM feature_permissions
+    WHERE "userId" = ${actor.id} AND workspace = ${WORKSPACES.CRM}
+      AND feature = ${FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM workspace_permissions
+    WHERE "userId" = ${actor.id} AND workspace = ${WORKSPACES.CRM} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM role_feature_permissions
+    WHERE role = ${actor.role} AND workspace = ${WORKSPACES.CRM}
+      AND feature = ${FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM role_workspace_permissions
+    WHERE role = ${actor.role} AND workspace = ${WORKSPACES.CRM} FOR UPDATE`;
   try {
     await resolveEffectiveNarrowAuthority(tx as unknown as PrismaClient, {
       userId: actor.id,
@@ -337,7 +356,8 @@ export const reassignOrdinaryCrmProject = async (database: PrismaClient, input: 
     metadata: { previousSellerId: project.responsibleSellerId, nextSellerId: nextSeller.id, reason: input.reason },
   } });
   return { ok: true, project: updated, nextSeller };
-});
+  });
+};
 
 export const ordinaryCrmResponse = (record: any) => {
   const { customerTransferSnapshot, customer, potentialProject, ...rest } = record;

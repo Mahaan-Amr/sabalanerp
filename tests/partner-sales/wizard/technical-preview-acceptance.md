@@ -73,7 +73,7 @@ normal minimal discard audit remains. No Partner business rows were created.
 The historical `browser-acceptance.md` and `evidence/browser.json` remain unchanged;
 their August 27 results do not certify this new technical implementation.
 
-## Remaining acceptance
+## Module completion and integration handoff
 
 The follow-up adapter checkpoint adds one revisioned writer for prepared,
 volumetric, longitudinal, slab and stair rows plus remainder/layer dependents.
@@ -95,6 +95,6 @@ remain unchanged.
 
 Production host/persona binding, a real Case command transport, customer/delivery/
 payment host adapters, authoritative private pricing-policy production and final
-route-level integration remain unfinished. No configuration reference, pricing
-identity or permission may be invented by UI. Full integration and release
-acceptance remain issues 334–336.
+route-level integration remain outside this completed module ticket. No
+configuration reference, pricing identity or permission may be invented by UI.
+Full integration and release acceptance remain issues 334–336.

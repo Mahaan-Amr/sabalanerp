@@ -6,10 +6,11 @@ commands retain wire version 1. `/testing` is used only by explicit test fixture
 
 ## Acceptance status
 
-**Not ready for full module completion or activation.** The original checkpoint
-was blocked on public technical contracts. Versions 1.2–1.4 subsequently supplied
-canonical rate-free calculation, safe catalog, leased recovery and validated-save
-interfaces. Current work binds these public interfaces into the canonical forms.
+**Module delivery is complete; production activation remains blocked by the
+integration tickets.** The original checkpoint was blocked on public technical
+contracts. Versions 1.2–1.4 subsequently supplied canonical rate-free calculation,
+safe catalog, leased recovery and validated-save interfaces. The completed module
+binds these public interfaces into the canonical forms and draft adapters.
 Inquiry owner 318 consumes saved configurations; integration owner 334 composes
 real producers. Hiding rates alone is not evidence of product-form parity.
 
@@ -17,12 +18,12 @@ The operations, longitudinal and slab sections now accept canonical technical
 inputs directly; the layer summary accepts revision-bound technical results.
 Ordinary priced inputs retain their existing path. `TechnicalProductConfiguration`
 can preview a strict public draft/catalog without issuing saved references.
-Remaining work includes public row/input adapters, all-family editing and
-remainder interactions, durable incomplete-text checkpoint binding, validated
-save/inquiry linkage, private pricing-policy production and actual transport.
+The module includes public row/input adapters, all-family editing, nested remainder
+interactions, durable incomplete-text retention and validated save/inquiry linkage.
+Private pricing-policy production and actual transport remain integration work.
 The legacy whole modal's priced save gate is not a Partner save adapter. Do not
 inject fake rates, expose private inputs or call `bindCanonicalCaseGraph` in the
-browser to bypass these remaining gates.
+browser to bypass those integration gates.
 
 `createPartnerTechnicalSession` now coordinates the public leased checkpoint and
 validated-save ports without introducing a browser journal. It serializes writes,
@@ -49,9 +50,9 @@ it does not certify the new technical bindings or full product parity.
   evidence, inline re-inquiry and one Contract Dock entry action.
 - `TechnicalProductConfiguration` suppresses internal pricing controls in the
   existing longitudinal, slab, prepared/volumetric, stair, layer and operations
-  components. Existing remainder selection and canonical graph callbacks remain
-  unchanged. This presentation context is not a data redaction or permission layer
-  and does not yet establish rate-free technical calculation parity (see blocker).
+  components. Public canonical preview and draft adapters retain their technical
+  identities and behavior. This presentation context is not itself a data
+  redaction or permission layer; server authorization remains mandatory.
 - `enterPartnerWizard` uses server-resolved product-row references, never inferred
   inquiry/catalog IDs. Only usable approvals enter the wizard; quantity is separate.
 - `PartnerContractWizard` owns progression, retail defaults/overrides, retail-only

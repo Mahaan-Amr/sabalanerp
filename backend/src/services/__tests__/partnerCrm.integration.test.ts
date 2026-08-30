@@ -9,7 +9,8 @@ import { createPartnerCrmService } from '../partnerSales/crm/service';
 import type { PartnerCustomerSummary, PartnerNextActionView, PartnerProjectView } from '../partnerSales/crm/contracts';
 import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
 import { seedAuthorizationCase } from './partnerAuthorizationFixture';
-import { findOrdinaryCrmNextAction, ordinaryProjectSearch, reassignOrdinaryCrmProject } from '../../routes/crm';
+import { createOrdinaryCrmProject, findOrdinaryCrmNextAction, ordinaryProjectSearch,
+  reassignOrdinaryCrmProject } from '../../routes/crm';
 import { FEATURES } from '../../middleware/feature';
 import { WORKSPACES } from '../../middleware/workspace';
 
@@ -379,6 +380,62 @@ test('feature revocation during legacy Project reassignment lock wait defeats cu
       await tx.crmPotentialProject.deleteMany({ where: { id: projectId } });
       await tx.crmCustomer.deleteMany({ where: { id: customerId } });
       await tx.user.deleteMany({ where: { id: { in: [actorId, previousSellerId, nextSellerId] } } });
+    });
+    await database.$disconnect();
+  }
+});
+
+test('CREATE revocation while Project creation waits on authority locks defeats the stale middleware decision', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl(4) } } });
+  const suffix = randomUUID();
+  const actorId = `partner-crm-create-grant-${suffix}`;
+  const customerId = `partner-crm-create-grant-customer-${suffix}`;
+  const projectId = `partner-crm-create-grant-project-${suffix}`;
+  const grantId = `partner-crm-create-feature-${suffix}`;
+  const workspaceGrantId = `partner-crm-create-workspace-${suffix}`;
+  const locked = signal(); const release = signal();
+  let blocker: Promise<unknown> | undefined;
+  try {
+    await database.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`,
+      password: 'not-a-login', firstName: 'Fixture', lastName: 'Create Grant', role: 'SALES' } });
+    await database.workspacePermission.create({ data: { id: workspaceGrantId, userId: actorId,
+      workspace: WORKSPACES.CRM, permissionLevel: 'edit' } });
+    await database.featurePermission.create({ data: { id: grantId, userId: actorId, workspace: WORKSPACES.CRM,
+      feature: FEATURES.CRM_POTENTIAL_PROJECTS_CREATE, permissionLevel: 'edit' } });
+    await database.crmCustomer.create({ data: { id: customerId, ownerUserId: actorId,
+      firstName: 'مشتری', lastName: 'لغو ایجاد' } });
+    blocker = database.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM workspace_permissions WHERE id = ${workspaceGrantId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM feature_permissions WHERE id = ${grantId} FOR UPDATE`;
+      locked.resolve(); await release.promise;
+      await tx.workspacePermission.update({ where: { id: workspaceGrantId }, data: { isActive: false } });
+      await tx.featurePermission.update({ where: { id: grantId }, data: { isActive: false } });
+    }, { timeout: 15_000 });
+    await locked.promise;
+    const creation = createOrdinaryCrmProject(database, { actorId, responsibleSellerId: actorId,
+      data: { id: projectId, customerId, title: 'پروژه مجوز منقضی', workType: 'نما' } });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const [waiting] = await database.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*)::bigint AS count FROM pg_stat_activity
+        WHERE datname = current_database() AND "wait_event_type" = 'Lock'
+          AND query LIKE '%FROM workspace_permissions%'`;
+      if (Number(waiting?.count ?? 0) > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      if (attempt === 99) throw new Error('creation did not reach the current CREATE authority lock');
+    }
+    release.resolve(); await blocker;
+    assert.equal(await creation, null);
+    assert.equal(await database.crmPotentialProject.count({ where: { id: projectId } }), 0);
+  } finally {
+    release.resolve(); await blocker?.catch(() => undefined);
+    await database.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.crmTimelineEvent.deleteMany({ where: { potentialProjectId: projectId } });
+      await tx.crmPotentialProject.deleteMany({ where: { id: projectId } });
+      await tx.featurePermission.deleteMany({ where: { id: grantId } });
+      await tx.workspacePermission.deleteMany({ where: { id: workspaceGrantId } });
+      await tx.crmCustomer.deleteMany({ where: { id: customerId } });
+      await tx.user.deleteMany({ where: { id: actorId } });
     });
     await database.$disconnect();
   }

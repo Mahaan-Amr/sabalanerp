@@ -140,8 +140,6 @@ test('conversion resolve requires current semantic transfer evidence and revalid
         data: { departmentId: department.id } });
       const customer = await tx.crmCustomer.create({ data: { firstName: 'Conversion', lastName: 'Fixture',
         createdBy: actorId } });
-      const profileId = `conversion-profile-record-${suffix}`;
-      await tx.partnerProfile.create({ data: { id: profileId, userId, state: 'PENDING', revision: 1 } });
       const contract = await tx.salesContract.create({ data: { id: `conversion-contract-${suffix}`,
         contractNumber: `CONVERSION-${suffix}`, title: 'Conversion responsibility',
         titlePersian: 'انتقال مسئولیت تبدیل', content: 'fixture', customerId: customer.id,
@@ -151,6 +149,8 @@ test('conversion resolve requires current semantic transfer evidence and revalid
         createdBy: actorId, assignedToUserId: userId } });
       const crmProject = await tx.crmPotentialProject.create({ data: { id: `conversion-crm-project-${suffix}`,
         customerId: customer.id, responsibleSellerId: userId, title: 'پروژه قدیمی پیش از تبدیل', workType: 'نما' } });
+      const profileId = `conversion-profile-record-${suffix}`;
+      await tx.partnerProfile.create({ data: { id: profileId, userId, state: 'PENDING', revision: 1 } });
       const store = createPrismaPartnerProfileManagementStore(database);
       const service = createPartnerProfileManagementService({ actorId, newId: randomUUID,
         store: { ...store, transaction: <T>(run: (inner: Prisma.TransactionClient) => Promise<T>) => run(tx) },

@@ -330,12 +330,15 @@ test('feature revocation during legacy Project reassignment lock wait defeats cu
   const customerId = `partner-crm-grant-customer-${suffix}`;
   const projectId = `partner-crm-grant-project-${suffix}`;
   const grantId = `partner-crm-grant-${suffix}`;
+  const workspaceGrantId = `partner-crm-workspace-grant-${suffix}`;
   const locked = signal(); const release = signal();
   let blocker: Promise<unknown> | undefined;
   try {
     for (const id of [actorId, previousSellerId, nextSellerId]) await database.user.create({ data: {
       id, username: id, email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Fixture',
       lastName: 'Grant Race', role: 'SALES' } });
+    await database.workspacePermission.create({ data: { id: workspaceGrantId, userId: actorId,
+      workspace: WORKSPACES.CRM, permissionLevel: 'edit' } });
     await database.featurePermission.create({ data: { id: grantId, userId: actorId, workspace: WORKSPACES.CRM,
       feature: FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN, permissionLevel: 'edit' } });
     await database.crmCustomer.create({ data: { id: customerId, ownerUserId: previousSellerId,
@@ -343,8 +346,10 @@ test('feature revocation during legacy Project reassignment lock wait defeats cu
     await database.crmPotentialProject.create({ data: { id: projectId, customerId,
       responsibleSellerId: previousSellerId, title: 'پروژه رقابت مجوز', workType: 'نما' } });
     blocker = database.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM workspace_permissions WHERE id = ${workspaceGrantId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM feature_permissions WHERE id = ${grantId} FOR UPDATE`;
       locked.resolve(); await release.promise;
+      await tx.workspacePermission.update({ where: { id: workspaceGrantId }, data: { isActive: false } });
       await tx.featurePermission.update({ where: { id: grantId }, data: { isActive: false } });
     }, { timeout: 15_000 });
     await locked.promise;
@@ -354,7 +359,7 @@ test('feature revocation during legacy Project reassignment lock wait defeats cu
       const [waiting] = await database.$queryRaw<Array<{ count: bigint }>>`
         SELECT count(*)::bigint AS count FROM pg_stat_activity
         WHERE datname = current_database() AND "wait_event_type" = 'Lock'
-          AND query LIKE '%FROM feature_permissions%'`;
+          AND query LIKE '%FROM workspace_permissions%'`;
       if (Number(waiting?.count ?? 0) > 0) break;
       await new Promise(resolve => setTimeout(resolve, 20));
       if (attempt === 99) throw new Error('reassignment did not reach the authority source lock');
@@ -368,9 +373,63 @@ test('feature revocation during legacy Project reassignment lock wait defeats cu
     await database.$transaction(async tx => {
       await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
       await tx.featurePermission.deleteMany({ where: { id: grantId } });
+      await tx.workspacePermission.deleteMany({ where: { id: workspaceGrantId } });
       await tx.crmPotentialProject.deleteMany({ where: { id: projectId } });
       await tx.crmCustomer.deleteMany({ where: { id: customerId } });
       await tx.user.deleteMany({ where: { id: { in: [actorId, previousSellerId, nextSellerId] } } });
+    });
+    await database.$disconnect();
+  }
+});
+
+test('Partner profile creation and retained Project reassignment cannot both claim one User persona', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl(4) } } });
+  const suffix = randomUUID();
+  const actorId = `partner-crm-profile-race-admin-${suffix}`;
+  const previousSellerId = `partner-crm-profile-race-old-${suffix}`;
+  const destinationId = `partner-crm-profile-race-destination-${suffix}`;
+  const customerId = `partner-crm-profile-race-customer-${suffix}`;
+  const projectId = `partner-crm-profile-race-project-${suffix}`;
+  const profileId = `partner-crm-profile-race-profile-${suffix}`;
+  const created = signal(); const release = signal();
+  let profileWriter: Promise<unknown> | undefined;
+  try {
+    for (const [id, role] of [[actorId, 'ADMIN'], [previousSellerId, 'SALES'], [destinationId, 'USER']] as const) {
+      await database.user.create({ data: { id, username: id, email: `${id}@example.invalid`, password: 'not-a-login',
+        firstName: 'Fixture', lastName: 'Profile Race', role } });
+    }
+    await database.crmCustomer.create({ data: { id: customerId, ownerUserId: previousSellerId,
+      firstName: 'مشتری', lastName: 'رقابت پروفایل' } });
+    await database.crmPotentialProject.create({ data: { id: projectId, customerId,
+      responsibleSellerId: previousSellerId, title: 'پروژه رقابت پروفایل', workType: 'نما' } });
+    profileWriter = database.$transaction(async tx => {
+      await tx.partnerProfile.create({ data: { id: profileId, userId: destinationId, state: 'PENDING' } });
+      created.resolve(); await release.promise;
+    }, { timeout: 15_000 });
+    await created.promise;
+    const reassignment = reassignOrdinaryCrmProject(database, { projectId, nextSellerId: destinationId,
+      actorId, reason: 'رقابت ساخت پروفایل با تغییر مسئول' });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const [waiting] = await database.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*)::bigint AS count FROM pg_stat_activity
+        WHERE datname = current_database() AND "wait_event_type" = 'Lock'
+          AND query LIKE '%FROM users WHERE id IN%'`;
+      if (Number(waiting?.count ?? 0) > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      if (attempt === 99) throw new Error('reassignment did not wait for profile creation User lock');
+    }
+    release.resolve(); await profileWriter;
+    assert.deepEqual(await reassignment, { ok: false, code: 'DESTINATION_NOT_FOUND' });
+    assert.equal((await database.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId },
+      select: { responsibleSellerId: true } })).responsibleSellerId, previousSellerId);
+  } finally {
+    release.resolve(); await profileWriter?.catch(() => undefined);
+    await database.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.partnerProfile.deleteMany({ where: { id: profileId } });
+      await tx.crmPotentialProject.deleteMany({ where: { id: projectId } });
+      await tx.crmCustomer.deleteMany({ where: { id: customerId } });
+      await tx.user.deleteMany({ where: { id: { in: [actorId, previousSellerId, destinationId] } } });
     });
     await database.$disconnect();
   }

@@ -316,16 +316,16 @@ export const reassignOrdinaryCrmProject = async (database: PrismaClient, input: 
   if (!actor?.isActive) return { ok: false, code: 'FORBIDDEN' };
   const destinationProfile = await tx.partnerProfile.findUnique({ where: { userId: nextSeller.id }, select: { id: true } });
   if (destinationProfile) return { ok: false, code: 'DESTINATION_NOT_FOUND' };
+  await tx.$queryRaw`SELECT id FROM workspace_permissions
+    WHERE "userId" = ${actor.id} AND workspace = ${WORKSPACES.CRM} FOR UPDATE`;
   await tx.$queryRaw`SELECT id FROM feature_permissions
     WHERE "userId" = ${actor.id} AND workspace = ${WORKSPACES.CRM}
       AND feature = ${FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN} FOR UPDATE`;
-  await tx.$queryRaw`SELECT id FROM workspace_permissions
-    WHERE "userId" = ${actor.id} AND workspace = ${WORKSPACES.CRM} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM role_workspace_permissions
+    WHERE role = ${actor.role} AND workspace = ${WORKSPACES.CRM} FOR UPDATE`;
   await tx.$queryRaw`SELECT id FROM role_feature_permissions
     WHERE role = ${actor.role} AND workspace = ${WORKSPACES.CRM}
       AND feature = ${FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN} FOR UPDATE`;
-  await tx.$queryRaw`SELECT id FROM role_workspace_permissions
-    WHERE role = ${actor.role} AND workspace = ${WORKSPACES.CRM} FOR UPDATE`;
   try {
     await resolveEffectiveNarrowAuthority(tx as unknown as PrismaClient, {
       userId: actor.id,

@@ -310,6 +310,26 @@ CREATE TRIGGER partner_contact_owner_write_guard BEFORE INSERT OR UPDATE OR DELE
 CREATE TRIGGER partner_communication_owner_write_guard BEFORE INSERT OR UPDATE OR DELETE ON crm_communications
   FOR EACH ROW EXECUTE FUNCTION partner_guard_crm_owner_write();
 
+-- A legacy CRM Project remains an internal responsibility. Profile creation or
+-- activation and reassignment both serialize on the destination User, so only
+-- one persona can own the responsibility after either transaction commits.
+CREATE FUNCTION partner_guard_profile_legacy_crm_responsibility() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM id FROM users WHERE id = NEW."userId" FOR UPDATE;
+  IF EXISTS (SELECT 1 FROM crm_potential_projects project
+    WHERE project."responsibleSellerId" = NEW."userId" AND project."partnerRevision" IS NULL
+      AND project."isActive") THEN
+    RAISE EXCEPTION 'Legacy CRM Project responsibility must be reassigned before Partner profile creation or activation'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER partner_profile_legacy_crm_responsibility_guard
+  BEFORE INSERT OR UPDATE OF "userId", state ON partner_profiles
+  FOR EACH ROW EXECUTE FUNCTION partner_guard_profile_legacy_crm_responsibility();
+
 DO $$
 BEGIN
   IF EXISTS (

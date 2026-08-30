@@ -1,7 +1,8 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { ActionAvailabilityV2Schema, PartnerManagementWorkspaceViewV2Schema,
-  ResponderWorkspaceViewV2Schema, partnerError } from '@sabalanerp/partner-sales-contracts';
+  PartnerActionV2Schema, ResponderWorkspaceViewV2Schema, partnerError,
+  type DuplicateCustomerMatch } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 
 test('management gives authorized identity creation a safe evidence selection without raw writes or permission contexts', () => {
@@ -54,4 +55,13 @@ test('management reassignment carries the pending inquiry assignment revision ra
   const view = PartnerManagementWorkspaceViewV2Schema.parse(input);
   assert.equal(view.profiles[0].responder?.pendingInquiries[0].inquiryId, 'inquiry-1');
   assert.equal(view.profiles[0].responder?.pendingInquiries[0].assignmentRevision, 3);
+});
+
+test('CRM v2 actions are additive and duplicate witnesses remain the narrow public type', () => {
+  for (const action of ['CUSTOMER_LIST', 'CUSTOMER_CREATE', 'CUSTOMER_DUPLICATE_MATCH',
+    'CUSTOMER_TRANSFER_REQUEST'] as const) assert.equal(PartnerActionV2Schema.parse(action), action);
+  const witness: DuplicateCustomerMatch = { schemaVersion: 1, purpose: 'DUPLICATE_MATCH',
+    matchReference: 'match-1', displayName: 'مشتری نمونه', personType: 'NATURAL', city: 'تهران',
+    maskedWitness: '********1234' };
+  assert.equal('customerId' in witness, false);
 });

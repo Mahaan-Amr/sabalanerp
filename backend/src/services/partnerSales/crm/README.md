@@ -1,4 +1,41 @@
-# Partner technical catalog producer — issue 317 subset
+# Partner CRM and technical catalog producer — issue 317
+
+`createPartnerCrmService` is the single transactional boundary for Partner-owned
+Customer, Project, follow-up and next-action reads/writes. The authenticated
+routes live under `/api/crm/partner/**`; they do not reuse ordinary CRM response
+objects. Every command decodes a strict input, recomputes its canonical payload
+hash, authorizes inside the write transaction, uses optimistic revision checks
+and records a replay-safe outcome. Partner Customer and nested CRM writes also
+have database guards, so bypassing the service fails closed.
+
+Duplicate lookup returns only name, person type, city and a masked four-digit
+witness. Its short-lived opaque evidence can request a transfer. A decision is
+retained as append-only evidence and notifies the current owner with fixed,
+in-app-only text. Approval changes only Customer ownership; Project
+responsibility, follow-up history, Case ownership and sales credit are not
+rewritten. Approval is blocked while the previous owner has an unresolved Partner
+Case; its cancellation/remediation workflow must finish first. Retained
+prior-owner Projects and their follow-ups remain available to that responsible
+seller through ordinary CRM, but are excluded from the new Partner owner's
+positive projection. Ordinary Customer list/detail/count/search responses exclude
+Partner-owned roots and continue to serve ordinary Customer data through their
+existing rules. At transfer, each retained legacy Project captures one minimal
+immutable Customer witness; ordinary Project/activity responses use that frozen
+witness and never join later live Partner-owned Customer edits. The Customer link
+and ordinary contract action are disabled for that transferred-root presentation.
+
+Project status, work type and communication type use the closed Persian CRM
+vocabulary. A Partner cannot directly mark a Project `برنده شده`; only the
+existing Sales Contract linkage owns that transition. `از دست رفته` requires a
+lost reason, while `راکد` requires a dormant reason and may carry a revisit date.
+
+The migration adds Partner revision/CAS fields, immutable match/transfer/event
+evidence and transaction-local owner/transfer guards. It does not change an
+ordinary Customer until an approved transfer binds that Customer to an active
+Partner Profile. Public contracts 1.9.0 keep wire schemaVersion 1 and add only
+the v2 CRM action vocabulary plus the inferred masked-match type.
+
+## Technical catalog
 
 `createPartnerTechnicalCatalogReader(transaction, { actorId, correlationId })`
 implements public `PartnerTechnicalCatalogPort` from contracts 1.5.0. Call within

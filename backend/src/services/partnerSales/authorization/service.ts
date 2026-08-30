@@ -1,7 +1,7 @@
 import { checkPartnerDomainRestrictions, partnerError, PartnerActionSchema, PartnerActionV2Schema, PermissionContextSchema,
   type PartnerActionV2, type PartnerAuthorizationPort, type PartnerAuthorizationV2Port, type PermissionContext } from '@sabalanerp/partner-sales-contracts';
 import type { AuthorizationBinding, AuthorizationSource } from './contracts';
-import { internalCapabilities, internalCapabilitiesV2, partnerCapabilities, readActions } from './capabilities';
+import { internalCapabilities, internalCapabilitiesV2, partnerCapabilities, partnerCapabilitiesV2, readActions } from './capabilities';
 
 /** Actor/purpose/channel are trusted composition bindings, not request overrides. */
 export function createPartnerAuthorization(source: AuthorizationSource, binding: AuthorizationBinding): PartnerAuthorizationPort {
@@ -46,7 +46,8 @@ function createAuthorization(source: AuthorizationSource<PartnerActionV2>, bindi
       return { ok: false, error: partnerError('NOT_ASSIGNED') };
     }
     const actionGrant = grants.find(grant => grant.action === action);
-    const capabilities: typeof internalCapabilitiesV2 = partner ? partnerCapabilities : internal;
+    const capabilities: typeof internalCapabilitiesV2 = partner
+      ? (version === 1 ? partnerCapabilities : partnerCapabilitiesV2) : internal;
     const context: PermissionContext = {
       ...binding, root: { kind: root.kind, id: root.id }, persona: partner ? 'PARTNER' : 'INTERNAL', isAdmin: admin,
       partnerSellerId: resource.partnerSellerId, partnerStatus: resource.partnerStatus,

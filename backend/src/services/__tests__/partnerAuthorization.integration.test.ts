@@ -227,8 +227,11 @@ test('only the latest persisted Inquiry assignment and current responder authori
     assert.equal((await port.authorize('INQUIRY_RESPOND', root)).ok, false, 'historical eligibility cannot replace a current grant');
     await tx.user.update({ where: { id: actor }, data: { role: 'ADMIN' } });
     assert.equal((await port.authorize('INQUIRY_RESPOND', root)).ok, true, 'named ADMIN action still requires the real assignment');
+    const replacement = `authorization-${randomUUID()}`;
+    await tx.user.create({ data: { id: replacement, username: replacement, email: `${replacement}@example.invalid`,
+      password: 'not-a-login', firstName: 'Fixture', lastName: 'Replacement' } });
     await tx.partnerInquiryAssignment.create({ data: { inquiryId: inquiry.id, revision: 2,
-      responderId: partner, actorId: actor, reason: 'انتساب مجدد آزمون', eligibilityEvidence: { historical: true } } });
+      responderId: replacement, actorId: actor, reason: 'انتساب مجدد آزمون', eligibilityEvidence: { historical: true } } });
     const obsolete = await port.authorize('INQUIRY_RESPOND', root);
     assert.equal(obsolete.ok ? null : obsolete.error.code, 'NOT_ASSIGNED');
   });

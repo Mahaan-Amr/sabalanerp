@@ -140,8 +140,6 @@ test('conversion resolve requires current semantic transfer evidence and revalid
         data: { departmentId: department.id } });
       const customer = await tx.crmCustomer.create({ data: { firstName: 'Conversion', lastName: 'Fixture',
         createdBy: actorId } });
-      const profileId = `conversion-profile-record-${suffix}`;
-      await tx.partnerProfile.create({ data: { id: profileId, userId, state: 'PENDING', revision: 1 } });
       const contract = await tx.salesContract.create({ data: { id: `conversion-contract-${suffix}`,
         contractNumber: `CONVERSION-${suffix}`, title: 'Conversion responsibility',
         titlePersian: 'انتقال مسئولیت تبدیل', content: 'fixture', customerId: customer.id,
@@ -149,6 +147,10 @@ test('conversion resolve requires current semantic transfer evidence and revalid
       const correction = await tx.accountingCorrectionRequest.create({ data: { id: `conversion-correction-${suffix}`,
         contractId: contract.id, category: 'OTHER', accountantNote: 'انتقال درخواست اصلاح باز',
         createdBy: actorId, assignedToUserId: userId } });
+      const crmProject = await tx.crmPotentialProject.create({ data: { id: `conversion-crm-project-${suffix}`,
+        customerId: customer.id, responsibleSellerId: userId, title: 'پروژه قدیمی پیش از تبدیل', workType: 'نما' } });
+      const profileId = `conversion-profile-record-${suffix}`;
+      await tx.partnerProfile.create({ data: { id: profileId, userId, state: 'PENDING', revision: 1 } });
       const store = createPrismaPartnerProfileManagementStore(database);
       const service = createPartnerProfileManagementService({ actorId, newId: randomUUID,
         store: { ...store, transaction: <T>(run: (inner: Prisma.TransactionClient) => Promise<T>) => run(tx) },
@@ -158,7 +160,8 @@ test('conversion resolve requires current semantic transfer evidence and revalid
       assert.equal(started.ok, true);
       const startedEvent = await tx.partnerProfileEvent.findUniqueOrThrow({ where: { commandId: `start-${suffix}` } });
       assert.deepEqual((startedEvent.evidence as { blockerIds: string[] }).blockerIds,
-        [`CONTRACT_RESPONSIBILITY:${contract.id}`, `CORRECTION_REQUEST:${correction.id}`]);
+        [`CONTRACT_RESPONSIBILITY:${contract.id}`, `CORRECTION_REQUEST:${correction.id}`,
+          `CRM_PROJECT_RESPONSIBILITY:${crmProject.id}`]);
 
       await tx.salesContract.update({ where: { id: contract.id }, data: { responsibleSellerId: inactiveSuccessorId } });
       await tx.salesContractSellerAudit.create({ data: { contractId: contract.id, previousSellerId: userId,
@@ -183,15 +186,28 @@ test('conversion resolve requires current semantic transfer evidence and revalid
         nextSellerId: activeSuccessorId, changedBy: actorId, changeType: 'RESPONSIBILITY_REASSIGNED',
         reason: 'تست انتقال معتبر مسئولیت' } });
       await tx.accountingCorrectionRequest.update({ where: { id: correction.id }, data: { assignedToUserId: activeSuccessorId } });
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_legacy_reassignment', ${JSON.stringify({
+        projectId: crmProject.id, previousSellerId: userId, nextSellerId: activeSuccessorId, actorId,
+        reason: 'واگذاری پروژه قدیمی برای تکمیل تبدیل Partner',
+      })}, true)`;
+      await tx.crmPotentialProject.update({ where: { id: crmProject.id }, data: { responsibleSellerId: activeSuccessorId } });
+      await tx.crmTimelineEvent.create({ data: { customerId: customer.id, potentialProjectId: crmProject.id,
+        actorId, eventType: 'reassigned', title: 'واگذاری مسئولیت پروژه قدیمی',
+        description: 'واگذاری معتبر پیش از فعال‌سازی Partner', metadata: { previousSellerId: userId,
+          nextSellerId: activeSuccessorId, reason: 'واگذاری پروژه قدیمی برای تکمیل تبدیل Partner' } } });
       const contractEvidence = `z-contract-disposition-${suffix}`, correctionEvidence = `z-correction-disposition-${suffix}`;
+      const crmProjectEvidence = `z-crm-project-disposition-${suffix}`;
       await tx.partnerConversionDisposition.createMany({ data: [
         { id: contractEvidence, profileId, sourceType: 'CONTRACT_RESPONSIBILITY', sourceId: contract.id,
           disposition: 'TRANSFERRED', successorId: activeSuccessorId, actorId, evidence: { approvedBy: actorId } },
         { id: correctionEvidence, profileId, sourceType: 'CORRECTION_REQUEST', sourceId: correction.id,
           disposition: 'TRANSFERRED', successorId: activeSuccessorId, actorId, evidence: { approvedBy: actorId } },
+        { id: crmProjectEvidence, profileId, sourceType: 'CRM_PROJECT_RESPONSIBILITY', sourceId: crmProject.id,
+          disposition: 'TRANSFERRED', successorId: activeSuccessorId, actorId, evidence: { approvedBy: actorId } },
       ] });
       const resolved = await service.execute(await command(actorId, { type: 'PROFILE_CONVERSION', profileId,
-        expectedRevision: 2, transition: 'RESOLVE', dispositionEvidenceIds: [contractEvidence, correctionEvidence] },
+        expectedRevision: 2, transition: 'RESOLVE', dispositionEvidenceIds: [contractEvidence, correctionEvidence,
+          crmProjectEvidence] },
       `resolve-${suffix}`));
       assert.equal(resolved.ok, true);
       const lifecycleStore = createPrismaPartnerProfileStore(database);

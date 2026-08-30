@@ -25,6 +25,17 @@ export const partnerCapabilities: Partial<Record<PartnerAction, readonly Capabil
   REPORT_READ: [['PROFILE', 'PARTNER'], ['CASE', 'PARTNER']],
 };
 
+export const partnerCapabilitiesV2: Partial<Record<PartnerActionV2, readonly Capability[]>> = {
+  ...partnerCapabilities,
+  CUSTOMER_LIST: [['PROFILE', 'CRM']],
+  CUSTOMER_CREATE: [['PROFILE', 'CRM']],
+  // Cross-owner duplicate disclosure is produced only after authorizing the
+  // active requester's own Profile. The service then returns the fixed masked
+  // witness; this Profile capability never grants target Customer access.
+  CUSTOMER_DUPLICATE_MATCH: [['PROFILE', 'CRM']],
+  CUSTOMER_TRANSFER_REQUEST: [['PROFILE', 'CRM']],
+};
+
 export const internalCapabilities: Partial<Record<PartnerAction, readonly Capability[]>> = {
   PROFILE_READ: [['PROFILE', 'ONBOARDING']], IDENTITY_VERIFY: [['PROFILE', 'ONBOARDING']],
   PROFILE_CREATE: [['PROFILE', 'ONBOARDING']], PROFILE_ACTIVATE: [['PROFILE', 'ONBOARDING']],
@@ -51,9 +62,11 @@ export const internalCapabilitiesV2: Partial<Record<PartnerActionV2, readonly Ca
   ...internalCapabilities,
   COMMERCIAL_TERMS_MANAGE: [['PROFILE', 'MANAGEMENT']],
   PROFILE_CONVERSION_MANAGE: [['PROFILE', 'MANAGEMENT']],
+  CUSTOMER_DUPLICATE_MATCH: [['CUSTOMER', 'CRM']],
+  CUSTOMER_TRANSFER_REQUEST: [['CUSTOMER', 'CRM']],
 };
 
 export const readActions: ReadonlySet<PartnerActionV2> = new Set([
   'PROFILE_READ', 'CUSTOMER_READ', 'INQUIRY_READ', 'CASE_READ', 'CUSTOMER_OUTPUT',
-  'ACCOUNTING_READ', 'FULFILLMENT_READ', 'REPORT_READ', 'AUDIT_READ',
+  'ACCOUNTING_READ', 'FULFILLMENT_READ', 'REPORT_READ', 'AUDIT_READ', 'CUSTOMER_LIST',
 ]);

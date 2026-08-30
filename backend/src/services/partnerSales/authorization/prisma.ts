@@ -10,7 +10,8 @@ import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot, Au
 export type ResolvePartnerAuthority<Action extends PartnerActionV2 = PartnerAction> = (tx: Prisma.TransactionClient, input: {
   actorId: string; root: AuthorizationRoot;
 }) => Promise<Pick<AuthorizationEvidence<Action>, 'grants' | 'authorizationRevision'>>;
-export type PartnerAuthorizationTarget = { correctionOpportunityId: string } | { prospectiveProfileOwnerId: string };
+export type PartnerAuthorizationTarget = { correctionOpportunityId: string } | { prospectiveProfileOwnerId: string }
+  | { customerTransferId: string };
 
 /** Transaction-scoped, using the caller's shared Prisma transaction. Never owns
  * a PrismaClient or commits/disconnects. Unsupported roots fail closed. */
@@ -41,8 +42,32 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
     }
     if (root.kind === 'CUSTOMER') {
       await tx.$queryRaw`SELECT id FROM crm_customers WHERE id = ${root.id} FOR UPDATE`;
-      const customer = await tx.crmCustomer.findUnique({ where: { id: root.id }, select: { ownerUserId: true, isActive: true } });
-      if (customer?.isActive && customer.ownerUserId) {
+      const customer = await tx.crmCustomer.findUnique({ where: { id: root.id }, select: {
+        ownerUserId: true, partnerRevision: true, isActive: true } });
+      if (customer?.isActive && customer.ownerUserId && target && 'customerTransferId' in target) {
+        await tx.$queryRaw`SELECT id FROM partner_customer_transfers WHERE id = ${target.customerTransferId} FOR UPDATE`;
+        const transfer = await tx.partnerCustomerTransfer.findUnique({ where: { id: target.customerTransferId }, select: {
+          customerId: true, fromOwnerUserId: true, fromProfileId: true, toProfileId: true, revision: true, status: true,
+          fromProfile: { select: { state: true, revision: true } }, toProfile: { select: { userId: true } },
+        } });
+        if (transfer?.customerId === root.id && transfer.fromOwnerUserId === customer.ownerUserId &&
+            transfer.status === 'PENDING') {
+          for (const id of [...new Set([transfer.fromProfileId, transfer.toProfileId]
+            .filter((item): item is string => Boolean(item)))].sort()) {
+            await tx.$queryRaw`SELECT id FROM partner_profiles WHERE id = ${id} FOR UPDATE`;
+          }
+          for (const id of [...new Set([actorId, transfer.fromOwnerUserId, transfer.toProfile.userId])].sort()) {
+            await tx.$queryRaw`SELECT id FROM users WHERE id = ${id} FOR UPDATE`;
+          }
+          const owner = await tx.user.findUnique({ where: { id: transfer.fromOwnerUserId }, select: {
+            isActive: true, departmentId: true } });
+          if (owner) resource = { root, partnerSellerId: transfer.fromOwnerUserId,
+            partnerStatus: transfer.fromProfile?.state ?? 'ACTIVE',
+            lifecycleRevision: transfer.fromProfile?.revision ?? customer.partnerRevision ?? transfer.revision,
+            ...(owner.departmentId ? { departmentId: owner.departmentId } : {}) };
+        }
+        profileId = null;
+      } else if (customer?.isActive && customer.ownerUserId) {
         profileId = (await tx.partnerProfile.findUnique({ where: { userId: customer.ownerUserId }, select: { id: true } }))?.id ?? null;
       }
     }

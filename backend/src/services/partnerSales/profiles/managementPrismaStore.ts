@@ -87,6 +87,19 @@ export async function validatePartnerConversionDispositions(tx: Prisma.Transacti
           !['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SIGNED', 'PRINTED'].includes(source.status) ||
           source.responsibleSellerId !== row.successorId || !transfer ||
           !await activeInternal(tx, row.successorId, source.departmentId)) return false;
+    } else if (kind === 'CRM_PROJECT_RESPONSIBILITY') {
+      // Profile/User locks held by the conversion aggregate serialize the
+      // reassignment writer. A non-locking current read avoids reversing its
+      // Customer -> Project -> User lock order.
+      const source = await tx.crmPotentialProject.findUnique({ where: { id: sourceId }, select: {
+        responsibleSellerId: true, partnerRevision: true, isActive: true } });
+      const audit = await tx.crmTimelineEvent.findFirst({ where: { potentialProjectId: sourceId,
+        eventType: 'reassigned' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { metadata: true } });
+      const metadata = audit?.metadata && typeof audit.metadata === 'object' && !Array.isArray(audit.metadata)
+        ? audit.metadata as Prisma.JsonObject : undefined;
+      if (row.disposition !== 'TRANSFERRED' || !source?.isActive || source.partnerRevision !== null ||
+          source.responsibleSellerId !== row.successorId || metadata?.previousSellerId !== input.profileUserId ||
+          metadata?.nextSellerId !== row.successorId || !await activeInternal(tx, row.successorId)) return false;
     } else if (kind === 'CORRECTION_REQUEST') {
       await tx.$queryRaw`SELECT id FROM accounting_correction_requests WHERE id = ${sourceId} FOR UPDATE`;
       const source = await tx.accountingCorrectionRequest.findUnique({ where: { id: sourceId },
@@ -235,7 +248,7 @@ export function createPrismaPartnerProfileManagementStore(database: PrismaClient
     async readConversion(tx, profile) {
       const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
       await tx.$queryRaw`SELECT id FROM users WHERE id = ${profile.userId} FOR UPDATE`;
-      const [current, events, dispositions, workspace, features, grants, duties, drafts, contracts, corrections,
+      const [current, events, dispositions, workspace, features, grants, duties, drafts, contracts, crmProjects, corrections,
         profileAssignments, inquiryAssignments] = await Promise.all([
         tx.partnerProfile.findUniqueOrThrow({ where: { id: profile.id }, select: { irreversibleAt: true } }),
         tx.partnerProfileEvent.findMany({ where: { profileId: profile.id }, orderBy: { revision: 'desc' },
@@ -252,6 +265,8 @@ export function createPrismaPartnerProfileManagementStore(database: PrismaClient
         tx.salesContractEditSession.findMany({ where: { ownerUserId: profile.userId, purpose: 'STANDARD' }, select: { id: true } }),
         tx.salesContract.findMany({ where: { responsibleSellerId: profile.userId, isInactive: false,
           status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SIGNED', 'PRINTED'] } }, select: { id: true } }),
+        tx.crmPotentialProject.findMany({ where: { responsibleSellerId: profile.userId,
+          partnerRevision: null, isActive: true }, select: { id: true } }),
         tx.accountingCorrectionRequest.findMany({ where: { assignedToUserId: profile.userId, status: 'OPEN' },
           select: { id: true } }),
         tx.partnerProfileResponderAssignment.findMany({ where: { responderId: profile.userId },
@@ -286,6 +301,7 @@ export function createPrismaPartnerProfileManagementStore(database: PrismaClient
         ...duties.map(item => `DUTY:${item.id}`),
         ...drafts.map(item => `STANDARD_DRAFT:${item.id}`),
         ...contracts.map(item => `CONTRACT_RESPONSIBILITY:${item.id}`),
+        ...crmProjects.map(item => `CRM_PROJECT_RESPONSIBILITY:${item.id}`),
         ...corrections.map(item => `CORRECTION_REQUEST:${item.id}`),
         ...[...latestProfileAssignments.values()].map(item => `PROFILE_RESPONDER:${item.id}`),
         ...[...latestInquiryAssignments.values()].map(item => `INQUIRY_RESPONDER:${item.id}`),

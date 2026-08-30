@@ -82,7 +82,12 @@ it never derives relationships from array position or catalog identity. Removing
 a parent cascades only its exact dependents, while unfinished field text remains
 in `editingValues` until the same entity/field commits a canonical value.
 
-Verified on the `origin/main` 4d8e3b75 baseline: 3 focused adapter tests, all 40
+Follow-up candidate identity: `8baaca1b` plus integrity review fix
+`40efb64f`, based on `origin/main` `4d8e3b75`. Public interface:
+`@sabalanerp/partner-sales-contracts@1.8.0`, wire `schemaVersion: 1`,
+canonical graph `@sabalanerp/contract-product-graph@0.1.0`.
+
+Verified on the `origin/main` 4d8e3b75 baseline: 4 focused adapter tests, all 40
 wizard tests, 50 shared-contract tests, the full contract-creation and canonical
 graph suites, frontend no-emit typecheck and production build, Design System
 check, foundation 25/25 and adoption 14/14. Existing repository lint warnings

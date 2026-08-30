@@ -52,18 +52,24 @@ export function addPartnerTechnicalProduct(
 
 type DependentInput =
   | { kind: 'remainder'; parentProductRowId: string; product: PartnerTechnicalProduct; allocationId: string;
-      productRowId: string; sourceBatchId: string; creationOrder: number }
+      productRowId: string; creationOrder: number; selectedRemainingStoneId?: string;
+      sourcePieceQuantities?: number[]; secondaryOwnerProductRowId?: string }
   | { kind: 'layer'; parentProductRowId: string; layer: Extract<PartnerTechnicalOperation, { kind: 'LAYER' }>;
       layerConfigurationId: string; sourceBatchId: string; creationOrder: number };
 
 export function addPartnerTechnicalDependent(draft: PartnerTechnicalDraft, input: DependentInput): PartnerTechnicalDraft {
-  if (!draft.rows.some(row => row.productRowId === input.parentProductRowId)) throw new Error('Parent row is unavailable');
+  const parentExists = draft.rows.some(row => row.productRowId === input.parentProductRowId) ||
+    (draft.dependents ?? []).some(item => item.kind === 'remainder' && item.productRowId === input.parentProductRowId);
+  if (!parentExists) throw new Error('Parent row is unavailable');
   const dependent = input.kind === 'remainder'
     ? { kind: 'remainder' as const, creationOrder: input.creationOrder, allocationId: input.allocationId,
         productRowId: input.productRowId, sourceProductRowId: input.parentProductRowId,
         catalogItemId: input.product.catalogItemId, catalogSnapshotVersion: input.product.catalogSnapshotVersion,
         lengthDisplayUnit: 'm' as const, widthDisplayUnit: 'm' as const,
-        sawKerfEnabled: false, calibrationEnabled: false }
+        sawKerfEnabled: false, calibrationEnabled: false,
+        ...(input.selectedRemainingStoneId ? { selectedRemainingStoneId: input.selectedRemainingStoneId } : {}),
+        ...(input.sourcePieceQuantities ? { sourcePieceQuantities: input.sourcePieceQuantities } : {}),
+        ...(input.secondaryOwnerProductRowId ? { secondaryOwnerProductRowId: input.secondaryOwnerProductRowId } : {}) }
     : { kind: 'layer' as const, creationOrder: input.creationOrder, layerConfigurationId: input.layerConfigurationId,
         parentProductRowId: input.parentProductRowId, sourceBatchId: input.sourceBatchId,
         catalogItemId: input.layer.catalogItemId, catalogSnapshotVersion: input.layer.catalogSnapshotVersion,
@@ -76,10 +82,26 @@ export function removePartnerTechnicalProduct(draft: PartnerTechnicalDraft, prod
   const rows = draft.rows.filter(row => row.productRowId !== productRowId);
   if (rows.length === draft.rows.length) return draft;
   const removedRows = draft.rows.filter(row => row.productRowId === productRowId);
-  const removedDependents = (draft.dependents ?? []).filter(item => item.kind === 'remainder'
-    ? item.sourceProductRowId === productRowId || item.productRowId === productRowId || item.secondaryOwnerProductRowId === productRowId
-    : item.parentProductRowId === productRowId);
-  const dependents = (draft.dependents ?? []).filter(item => !removedDependents.includes(item));
+  const allDependents = draft.dependents ?? [];
+  const removedProductRowIds = new Set([productRowId]);
+  const removedDependentSet = new Set<(typeof allDependents)[number]>();
+  let foundDependent = true;
+  while (foundDependent) {
+    foundDependent = false;
+    allDependents.forEach(item => {
+      if (removedDependentSet.has(item)) return;
+      const remove = item.kind === 'remainder'
+        ? removedProductRowIds.has(item.sourceProductRowId) || removedProductRowIds.has(item.productRowId) ||
+          (item.secondaryOwnerProductRowId !== undefined && removedProductRowIds.has(item.secondaryOwnerProductRowId))
+        : removedProductRowIds.has(item.parentProductRowId);
+      if (!remove) return;
+      removedDependentSet.add(item);
+      if (item.kind === 'remainder') removedProductRowIds.add(item.productRowId);
+      foundDependent = true;
+    });
+  }
+  const removedDependents = allDependents.filter(item => removedDependentSet.has(item));
+  const dependents = allDependents.filter(item => !removedDependentSet.has(item));
   const removedEntityIds = new Set<string>([productRowId]);
   const collectOperations = (operations: { groups: Array<{ operationGroupId: string }>;
     tools: Array<{ toolSelectionId: string }>; finishings: Array<{ finishingSelectionId: string }> } | undefined) => {

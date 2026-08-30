@@ -41,17 +41,24 @@ test('remainder and layer adapters bind stable parent identity and cascade only 
   });
   draft = addPartnerTechnicalDependent(draft, {
     kind: 'remainder', parentProductRowId: 'parent-row', product,
-    allocationId: 'allocation-1', productRowId: 'child-row', sourceBatchId: 'child-source', creationOrder: 0,
+    allocationId: 'allocation-1', productRowId: 'child-row', creationOrder: 0,
   });
   draft = addPartnerTechnicalDependent(draft, {
     kind: 'layer', parentProductRowId: 'parent-row', layer: catalog.operations.find(item => item.kind === 'LAYER')!,
     layerConfigurationId: 'layer-1', sourceBatchId: 'layer-source', creationOrder: 1,
   });
+  draft = addPartnerTechnicalDependent(draft, {
+    kind: 'remainder', parentProductRowId: 'child-row', product,
+    allocationId: 'allocation-2', productRowId: 'grandchild-row', creationOrder: 2,
+    selectedRemainingStoneId: 'remaining-stone-2', sourcePieceQuantities: [1],
+    secondaryOwnerProductRowId: 'parent-row',
+  });
   draft = retainPartnerTechnicalFieldText(draft, 'child-row', 'lengthMeters', '1x');
+  draft = retainPartnerTechnicalFieldText(draft, 'grandchild-row', 'lengthMeters', '2x');
   draft = retainPartnerTechnicalFieldText(draft, 'layer-1', 'layersPerParentPiece', '2x');
   assert.deepEqual(draft.dependents?.map(item => [item.kind,
     item.kind === 'layer' ? item.parentProductRowId : item.sourceProductRowId]), [
-    ['remainder', 'parent-row'], ['layer', 'parent-row'],
+    ['remainder', 'parent-row'], ['layer', 'parent-row'], ['remainder', 'child-row'],
   ]);
   const removed = removePartnerTechnicalProduct(draft, 'parent-row');
   assert.equal(removed.rows.length, 0);
@@ -79,7 +86,7 @@ test('remainder and layer field text commits on the owning dependent rather than
   let draft = addPartnerTechnicalProduct(empty, product, { family: 'stair', productRowId: 'parent-row',
     sourceBatchId: 'parent-source', stairSystemId: 'stairs-1' });
   draft = addPartnerTechnicalDependent(draft, { kind: 'remainder', parentProductRowId: 'parent-row', product,
-    allocationId: 'allocation-1', productRowId: 'child-row', sourceBatchId: 'child-source', creationOrder: 0 });
+    allocationId: 'allocation-1', productRowId: 'child-row', creationOrder: 0 });
   draft = addPartnerTechnicalDependent(draft, { kind: 'layer', parentProductRowId: 'parent-row', layer,
     layerConfigurationId: 'layer-1', sourceBatchId: 'layer-source', creationOrder: 1 });
   draft = retainPartnerTechnicalFieldText(draft, 'child-row', 'widthMeters', '0.2');

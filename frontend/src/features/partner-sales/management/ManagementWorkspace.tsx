@@ -74,7 +74,8 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
         transition: conversion, dispositionEvidenceIds: conversion === 'RESOLVE' ? choice!.profile!.conversion.dispositionEvidenceIds : [] }, target.profileId);
       else if (target && ['PROFILE_ACTIVATE', 'PROFILE_SUSPEND', 'PROFILE_TERMINATE'].includes(choice!.action)) outcome = await session.submit({ type: 'PROFILE_TRANSITION', ...target,
         to: choice!.action === 'PROFILE_ACTIVATE' ? 'ACTIVE' : choice!.action === 'PROFILE_SUSPEND' ? 'SUSPENDED' : 'TERMINATED',
-        // No client-produced gate truth. The owner must evaluate all current gates in its transaction.
+        // Activation remains unavailable in the production projection until a
+        // versioned evidence transport is composed; other transitions need none.
         gateEvidenceIds: [] }, target.profileId);
       else outcome = { kind: 'error', error: partnerError('FORBIDDEN') };
       setFeedback(outcome);

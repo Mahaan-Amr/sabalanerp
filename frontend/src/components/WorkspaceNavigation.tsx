@@ -89,6 +89,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [canOpenSecurityShiftReport, setCanOpenSecurityShiftReport] =
     useState(false);
+  const [partnerRouteAccess, setPartnerRouteAccess] = useState<Record<string, boolean>>({});
   const pathname = usePathname();
   const dutyCount = useCrossWorkspaceDutyCount(currentWorkspace || null);
 
@@ -97,6 +98,21 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   useEffect(() => {
     loadCurrentUser();
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    let active = true;
+    const paths = ['/dashboard/sales/partners', '/dashboard/sales/partner-inquiries'];
+    Promise.all(paths.map(async path => {
+      try {
+        const response = await dashboardAPI.getRouteAvailability(path);
+        return [path, response.data.data.allowed === true] as const;
+      } catch {
+        return [path, false] as const;
+      }
+    })).then(entries => { if (active) setPartnerRouteAccess(Object.fromEntries(entries)); });
+    return () => { active = false; };
+  }, [currentUser]);
 
   useEffect(() => {
     if (currentWorkspace !== WORKSPACES.SECURITY) {
@@ -386,6 +402,20 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
                 show: true,
               },
             ],
+          },
+          {
+            name: "Partner Management",
+            namePersian: "مدیریت فروشندگان همکار",
+            href: "/dashboard/sales/partners",
+            icon: FaHandshake,
+            show: partnerRouteAccess['/dashboard/sales/partners'] === true,
+          },
+          {
+            name: "Partner Inquiries",
+            namePersian: "پاسخ‌گویی استعلام همکاران",
+            href: "/dashboard/sales/partner-inquiries",
+            icon: FaClipboardList,
+            show: partnerRouteAccess['/dashboard/sales/partner-inquiries'] === true,
           },
           {
             name: "Reports",

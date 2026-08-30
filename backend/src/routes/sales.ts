@@ -66,6 +66,8 @@ import salesReportsRouter from './salesReports';
 import { publishNotificationEvent } from '../services/notificationService';
 import { resolveWorkspaceRecipientIds } from '../services/domainNotificationRecipients';
 import { ContractPartyIdentityValidationError } from '../services/contractPartyIdentity';
+import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
+import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
 
 const router = express.Router();
 const rejectContractGraphWritesWhenReadOnly = (_req: any, res: Response, next: () => void) => {
@@ -775,9 +777,40 @@ router.get('/contracts/:id', protect, requireWorkspaceAccess(WORKSPACES.SALES, W
       });
     }
 
+    let responseContract: typeof contract & { partnerCaseView?: unknown; partnerActions?: Record<string, boolean> } = contract;
+    if (contract.partnerKind === 'PARTNER_CUSTOMER') {
+      const correlationId = typeof req.headers['x-correlation-id'] === 'string'
+        && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(req.headers['x-correlation-id'])
+        ? req.headers['x-correlation-id'] : randomUUID();
+      const projected = await prisma.$transaction(async tx => {
+        if (!contract.partnerCaseId || !contract.partnerRevision || !contract.partnerIntegrityHash) return null;
+        const current = await readCurrentPartnerCaseViews(tx, contract.partnerCaseId);
+        if (!current || current.row.customerContractId !== contract.id ||
+            current.row.headRevision !== contract.partnerRevision ||
+            current.row.integrityHash !== contract.partnerIntegrityHash) return null;
+        const caseRead = await createAuditedPartnerAuthorization(tx, {
+          actorId: req.user.id, purpose: 'PARTNER', channel: 'DETAIL',
+        }, { correlationId }).authorize('CASE_READ', { kind: 'CASE', id: contract.partnerCaseId });
+        if (caseRead.ok === false) return { ok: false as const, error: caseRead.error };
+        const output = await createAuditedPartnerAuthorization(tx, {
+          actorId: req.user.id, purpose: 'CUSTOMER_OUTPUT', channel: 'API',
+        }, { correlationId }).authorize('CUSTOMER_OUTPUT', { kind: 'CASE', id: contract.partnerCaseId });
+        return { ok: true as const, view: current.partner, output: output.ok };
+      });
+      if (!projected || projected.ok === false) {
+        const status = projected && 'error' in projected ? projected.error.status : 409;
+        return res.status(status).json({ success: false,
+          error: status === 404 ? 'Contract not found' : 'Partner case evidence is unavailable' });
+      }
+      responseContract = { ...contract, partnerCaseView: projected.view,
+        partnerActions: { canPreview: projected.output, canIssue: projected.output,
+          canSendConfirmation: projected.output } };
+    }
+
+    res.setHeader('Cache-Control', contract.partnerKind === 'PARTNER_CUSTOMER' ? 'private, no-store' : 'private');
     res.json({
       success: true,
-      data: contract
+      data: responseContract
     });
     return;
   } catch (error: any) {

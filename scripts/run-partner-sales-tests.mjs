@@ -10,11 +10,11 @@ import { foundationInterface } from '../tests/partner-sales/harness/foundation.m
 
 const [mode = 'unit', ...args] = process.argv.slice(2);
 try {
-  if (!['unit', 'foundation', 'inventory', 'check-inventory', 'typecheck', 'db', 'browser', 'all', 'cleanup'].includes(mode)) throw new Error();
+  if (!['unit', 'integration', 'foundation', 'inventory', 'check-inventory', 'typecheck', 'db', 'browser', 'all', 'cleanup'].includes(mode)) throw new Error();
   if (mode === 'cleanup') { if (args.length !== 1) throw new Error(); validateNamespace(args[0]); }
   else if (args.length) throw new Error();
 } catch {
-  console.error('Partner QA usage: node scripts/run-partner-sales-tests.mjs unit|foundation|inventory|check-inventory|typecheck|db|browser|all|cleanup <namespace for cleanup only>');
+  console.error('Partner QA usage: node scripts/run-partner-sales-tests.mjs unit|integration|foundation|inventory|check-inventory|typecheck|db|browser|all|cleanup <namespace for cleanup only>');
   process.exit(2);
 }
 
@@ -45,7 +45,8 @@ async function hashFiles(root) {
 
 function run(name, commandArgs) {
   const result = spawnSync(process.execPath, commandArgs, {
-    cwd: repositoryRoot, env: { ...process.env, PARTNER_QA_RUN_ID: runId },
+    cwd: repositoryRoot, env: { ...process.env, PARTNER_QA_RUN_ID: runId,
+      NODE_PATH: path.join(repositoryRoot, 'backend/node_modules') },
     encoding: 'utf8', timeout: 10 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
   });
   const log = `${result.stdout || ''}${result.stderr || ''}`;
@@ -78,6 +79,11 @@ try {
     manifest.checks.push({ name: 'inventory freshness', status: 'pass' });
   }
   if (['unit', 'all'].includes(mode)) run('harness contracts', ['--test', 'tests/partner-sales/safety.test.mjs', 'tests/partner-sales/inventory.test.mjs', 'tests/partner-sales/runner.test.mjs']);
+  if (['integration', 'all'].includes(mode)) run('authenticated workspace integration', [
+    'backend/node_modules/tsx/dist/cli.mjs', '--test',
+    'tests/partner-sales/integration/workspace-query.test.ts',
+    'tests/partner-sales/integration/workspace-transport.test.ts',
+  ]);
   if (['foundation', 'all'].includes(mode)) run('foundation consumer contract', ['--test', 'tests/partner-sales/foundation-contract.test.mjs']);
   if (['typecheck', 'all'].includes(mode)) run('typecheck', ['frontend/node_modules/typescript/bin/tsc', '-p', 'tests/partner-sales/tsconfig.json']);
   if (['db', 'browser', 'all', 'cleanup'].includes(mode)) {
@@ -87,7 +93,9 @@ try {
       'migrationHash', md5(string_agg(migration_name || ':' || checksum, ',' ORDER BY migration_name))
     ) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;`));
   }
-  if (['db', 'all'].includes(mode)) run('real-schema fixtures and internal Sales API', ['--test', '--test-concurrency=1', 'tests/partner-sales/fixtures.integration.test.mjs', 'tests/partner-sales/api.integration.test.mjs']);
+  if (['db', 'all'].includes(mode)) run('real-schema fixtures and authenticated APIs', ['--test', '--test-concurrency=1',
+    'tests/partner-sales/fixtures.integration.test.mjs', 'tests/partner-sales/api.integration.test.mjs',
+    'tests/partner-sales/integration/live-workspace.integration.test.mjs']);
   if (['browser', 'all'].includes(mode)) run('anonymous browser baseline', ['node_modules/@playwright/test/cli.js', 'test', '--config=playwright.partner-sales.config.ts']);
   if (mode === 'cleanup') { await removeFixture(args[0]); manifest.checks.push({ name: 'exact namespace cleanup', status: 'pass' }); }
   for (const file of [...manifest.sourceFiles, ...(manifest.foundationBuildFiles || [])]) {

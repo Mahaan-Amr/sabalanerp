@@ -68,6 +68,7 @@ import partnerTechnicalRoutes from "./routes/partner-technical";
 import partnerTechnicalPolicyRoutes from "./routes/partner-technical-policy";
 import partnerInquiryRoutes from "./routes/partner-inquiries";
 import partnerManagementRoutes from "./routes/partner-management";
+import partnerWorkspaceRoutes from "./routes/partner-workspaces";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -260,6 +261,7 @@ app.use("/api/partner/technical", partnerTechnicalRoutes);
 app.use("/api/partner/management/technical-policy", partnerTechnicalPolicyRoutes);
 app.use("/api/partner/inquiries", partnerInquiryRoutes);
 app.use("/api/partner/management", partnerManagementRoutes);
+app.use("/api/partner/workspaces", partnerWorkspaceRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/orders", orderRoutes);

@@ -99,8 +99,7 @@ async function clock(tx: Transaction) {
   return { date: instant.slice(0, 10), instant };
 }
 
-async function lockCase(tx: Transaction, caseId: string) {
-  await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
+async function readCase(tx: Transaction, caseId: string) {
   return tx.partnerSaleCase.findUnique({ where: { id: caseId }, select: {
     id: true, caseNumber: true, profileId: true, headRevision: true, integrityHash: true, state: true,
     stateRevision: true, internalRecordId: true, customerContractId: true, commitmentEventId: true,
@@ -113,6 +112,11 @@ async function lockCase(tx: Transaction, caseId: string) {
     customerContract: { select: { contractNumber: true, partnerRevision: true, partnerIntegrityHash: true,
       status: true, signedAt: true, printedAt: true } },
   } });
+}
+
+async function lockCase(tx: Transaction, caseId: string) {
+  await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
+  return readCase(tx, caseId);
 }
 
 type LockedCase = NonNullable<Awaited<ReturnType<typeof lockCase>>>;
@@ -170,6 +174,16 @@ async function parseViews(tx: Transaction, row: LockedCase) {
       customer.data.revision !== row.headRevision || customer.data.contractNumber !== row.customerContract.contractNumber ||
       computedOutputHash !== outputHash) return undefined;
   return { partner: { ...partner.data, state: row.state }, accounting: { ...accounting.data, state: row.state } };
+}
+
+/** Read-only consumer seam. It performs the same hash/provenance rebuild as the
+ * lifecycle writer without taking its mutation lock. Authorization remains the
+ * caller's responsibility and must execute in the same transaction snapshot. */
+export async function readCurrentPartnerCaseViews(tx: Transaction, caseId: string) {
+  const row = await readCase(tx, caseId);
+  if (!row) return undefined;
+  const views = await parseViews(tx, row);
+  return views ? { row, ...views } : undefined;
 }
 
 async function historicalPartner(tx: Transaction, saved: ReturnType<typeof receipt>) {

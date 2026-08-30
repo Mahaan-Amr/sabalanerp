@@ -53,6 +53,10 @@ test('remainder and layer adapters bind stable parent identity and cascade only 
     selectedRemainingStoneId: 'remaining-stone-2', sourcePieceQuantities: [1],
     secondaryOwnerProductRowId: 'parent-row',
   });
+  assert.throws(() => addPartnerTechnicalDependent(draft, {
+    kind: 'layer', parentProductRowId: 'child-row', layer: catalog.operations.find(item => item.kind === 'LAYER')!,
+    layerConfigurationId: 'invalid-layer', sourceBatchId: 'invalid-layer-source', creationOrder: 3,
+  }), /Parent row is unavailable/);
   draft = retainPartnerTechnicalFieldText(draft, 'child-row', 'lengthMeters', '1x');
   draft = retainPartnerTechnicalFieldText(draft, 'grandchild-row', 'lengthMeters', '2x');
   draft = retainPartnerTechnicalFieldText(draft, 'layer-1', 'layersPerParentPiece', '2x');

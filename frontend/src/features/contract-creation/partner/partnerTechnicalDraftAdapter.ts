@@ -58,8 +58,10 @@ type DependentInput =
       layerConfigurationId: string; sourceBatchId: string; creationOrder: number };
 
 export function addPartnerTechnicalDependent(draft: PartnerTechnicalDraft, input: DependentInput): PartnerTechnicalDraft {
-  const parentExists = draft.rows.some(row => row.productRowId === input.parentProductRowId) ||
-    (draft.dependents ?? []).some(item => item.kind === 'remainder' && item.productRowId === input.parentProductRowId);
+  const parentExists = input.kind === 'layer'
+    ? draft.rows.some(row => row.family === 'stair' && row.productRowId === input.parentProductRowId)
+    : draft.rows.some(row => row.productRowId === input.parentProductRowId) ||
+      (draft.dependents ?? []).some(item => item.kind === 'remainder' && item.productRowId === input.parentProductRowId);
   if (!parentExists) throw new Error('Parent row is unavailable');
   const dependent = input.kind === 'remainder'
     ? { kind: 'remainder' as const, creationOrder: input.creationOrder, allocationId: input.allocationId,

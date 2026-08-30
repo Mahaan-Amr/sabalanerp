@@ -7,7 +7,7 @@ import { createPartnerCrmService } from '../partnerSales/crm/service';
 import type { PartnerCustomerSummary, PartnerNextActionView, PartnerProjectView } from '../partnerSales/crm/contracts';
 import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
 import { seedAuthorizationCase } from './partnerAuthorizationFixture';
-import { ordinaryProjectSearch } from '../../routes/crm';
+import { findOrdinaryCrmNextAction, ordinaryProjectSearch, reassignOrdinaryCrmProject } from '../../routes/crm';
 
 const databaseUrl = (connectionLimit = 2) => {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -254,6 +254,62 @@ test('destination deactivation during transfer lock wait defeats approval', asyn
   }
 });
 
+test('destination deactivation during legacy Project reassignment lock wait defeats the reassignment', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl(4) } } });
+  const suffix = randomUUID();
+  const actorId = `partner-crm-reassign-admin-${suffix}`;
+  const previousSellerId = `partner-crm-reassign-old-${suffix}`;
+  const nextSellerId = `partner-crm-reassign-new-${suffix}`;
+  const customerId = `partner-crm-reassign-customer-${suffix}`;
+  const projectId = `partner-crm-reassign-project-${suffix}`;
+  const locked = signal();
+  const release = signal();
+  let blocker: Promise<unknown> | undefined;
+  try {
+    for (const [id, role] of [[actorId, 'ADMIN'], [previousSellerId, 'SALES'], [nextSellerId, 'SALES']] as const) {
+      await database.user.create({ data: { id, username: id, email: `${id}@example.invalid`, password: 'not-a-login',
+        firstName: 'Fixture', lastName: 'Reassignment Race', role } });
+    }
+    await database.crmCustomer.create({ data: { id: customerId, ownerUserId: previousSellerId,
+      firstName: 'مشتری', lastName: 'پروژه قدیمی' } });
+    await database.crmPotentialProject.create({ data: { id: projectId, customerId,
+      responsibleSellerId: previousSellerId, title: 'پروژه نگه‌داری‌شده', workType: 'نما' } });
+
+    blocker = database.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${nextSellerId} FOR UPDATE`;
+      locked.resolve();
+      await release.promise;
+      await tx.user.update({ where: { id: nextSellerId }, data: { isActive: false } });
+    }, { timeout: 15_000 });
+    await locked.promise;
+    const reassignment = reassignOrdinaryCrmProject(database, { projectId, nextSellerId, actorId,
+      reason: 'تغییر مسئول با کنترل هم‌زمان مقصد' });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const [waiting] = await database.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*)::bigint AS count FROM pg_stat_activity
+        WHERE datname = current_database() AND "wait_event_type" = 'Lock'
+          AND query LIKE '%FROM users WHERE id IN%'`;
+      if (Number(waiting?.count ?? 0) > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      if (attempt === 99) throw new Error('reassignment did not reach the destination User lock');
+    }
+    release.resolve();
+    await blocker;
+    const result = await reassignment;
+    assert.deepEqual(result, { ok: false, code: 'DESTINATION_NOT_FOUND' });
+    assert.equal((await database.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId },
+      select: { responsibleSellerId: true } })).responsibleSellerId, previousSellerId);
+  } finally {
+    release.resolve();
+    await blocker?.catch(() => undefined);
+    await database.crmTimelineEvent.deleteMany({ where: { potentialProjectId: projectId } });
+    await database.crmPotentialProject.deleteMany({ where: { id: projectId } });
+    await database.crmCustomer.deleteMany({ where: { id: customerId } });
+    await database.user.deleteMany({ where: { id: { in: [actorId, previousSellerId, nextSellerId] } } });
+    await database.$disconnect();
+  }
+});
+
 test('approved Customer transfer is blocked while the previous owner has an unresolved Partner Case', async () => {
   const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
   const rollback = new Error('rollback unresolved Partner Case transfer fixture');
@@ -333,6 +389,11 @@ test('database guards reject direct Partner Customer and nested CRM writes outsi
       await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${partnerId}, true)`;
       await tx.crmCustomer.create({ data: { id: customerId, ownerUserId: partnerId, partnerOwnerProfileId: partnerId,
         partnerRevision: 1, firstName: 'مشتری', lastName: 'همکار' } });
+      const privateActionId = `partner-crm-private-action-${suffix}`;
+      await tx.crmNextAction.create({ data: { id: privateActionId, customerId, assignedToId: partnerId,
+        partnerRevision: 1, title: 'اقدام محرمانه همکار', communicationType: 'تماس تلفنی',
+        dueAt: new Date(Date.now() + 86_400_000), instructions: 'نباید از مسیر CRM عادی دیده شود' } });
+      assert.equal(await findOrdinaryCrmNextAction(tx as unknown as PrismaClient, privateActionId), null);
       await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', '', true)`;
       await tx.$executeRawUnsafe('SAVEPOINT direct_customer_write');
       await assert.rejects(tx.crmCustomer.update({ where: { id: customerId }, data: { partnerRevision: 2, city: 'قم' } }),

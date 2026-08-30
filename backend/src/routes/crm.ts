@@ -1,12 +1,12 @@
 import { prisma } from '../lib/prisma';
 import express, { Response, type NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES, FEATURE_WORKSPACE_MAP } from '../middleware/feature';
 import { expandPersianSearchTokenVariants, normalizePersianSearchTokens } from '../services/crmCustomerSearch';
-import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
+import { resolveEffectiveNarrowAuthority, resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import { randomUUID } from 'node:crypto';
 import { createPartnerCrmService } from '../services/partnerSales/crm/service';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
@@ -278,6 +278,66 @@ const nextActionInclude = {
     }
   }
 } as const;
+
+export const findOrdinaryCrmNextAction = (database: Pick<PrismaClient, 'crmNextAction'>, actionId: string) =>
+  database.crmNextAction.findFirst({ where: { id: actionId, ...ordinaryCrmRelatedVisibility }, include: nextActionInclude });
+
+type OrdinaryProjectReassignmentResult =
+  | { ok: true; project: any; nextSeller: { id: string; firstName: string; lastName: string; username: string } }
+  | { ok: false; code: 'NOT_FOUND' | 'DESTINATION_NOT_FOUND' | 'FORBIDDEN' | 'CONFLICT' };
+
+export const reassignOrdinaryCrmProject = async (database: PrismaClient, input: {
+  projectId: string;
+  nextSellerId: string;
+  actorId: string;
+  reason: string;
+}): Promise<OrdinaryProjectReassignmentResult> => database.$transaction(async tx => {
+  const [project] = await tx.$queryRaw<Array<{ id: string; customerId: string;
+    responsibleSellerId: string; partnerRevision: number | null }>>`
+    SELECT id, "customerId", "responsibleSellerId", "partnerRevision"
+    FROM crm_potential_projects WHERE id = ${input.projectId} FOR UPDATE`;
+  if (!project || project.partnerRevision !== null) return { ok: false, code: 'NOT_FOUND' };
+
+  const userIds = [...new Set([input.actorId, input.nextSellerId, project.responsibleSellerId])].sort();
+  const users = await tx.$queryRaw<Array<{ id: string; role: string; isActive: boolean;
+    firstName: string; lastName: string; username: string }>>(Prisma.sql`
+      SELECT id, role::text AS role, "isActive", "firstName", "lastName", username
+      FROM users WHERE id IN (${Prisma.join(userIds)}) ORDER BY id FOR UPDATE`);
+  const actor = users.find(user => user.id === input.actorId);
+  const nextSeller = users.find(user => user.id === input.nextSellerId);
+  if (!nextSeller?.isActive) return { ok: false, code: 'DESTINATION_NOT_FOUND' };
+  if (!actor?.isActive) return { ok: false, code: 'FORBIDDEN' };
+  try {
+    await resolveEffectiveNarrowAuthority(tx as unknown as PrismaClient, {
+      userId: actor.id,
+      workspace: WORKSPACES.CRM,
+      feature: FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN,
+      requiredPermission: 'edit',
+    });
+  } catch {
+    return { ok: false, code: 'FORBIDDEN' };
+  }
+
+  await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_legacy_reassignment', ${JSON.stringify({
+    projectId: project.id, previousSellerId: project.responsibleSellerId, nextSellerId: nextSeller.id,
+    actorId: actor.id, reason: input.reason,
+  })}, true)`;
+  const changed = await tx.crmPotentialProject.updateMany({ where: { id: project.id, partnerRevision: null,
+    responsibleSellerId: project.responsibleSellerId }, data: { responsibleSellerId: nextSeller.id } });
+  if (changed.count !== 1) return { ok: false, code: 'CONFLICT' };
+  const updated = await tx.crmPotentialProject.findUniqueOrThrow({ where: { id: project.id }, include: projectInclude });
+  const previousSeller = users.find(user => user.id === project.responsibleSellerId);
+  await tx.crmTimelineEvent.create({ data: {
+    customerId: updated.customerId,
+    potentialProjectId: updated.id,
+    actorId: actor.id,
+    eventType: 'reassigned',
+    title: 'تغییر فروشنده مسئول پروژه احتمالی',
+    description: `از ${fullName(previousSeller)} به ${fullName(nextSeller)} - ${input.reason}`,
+    metadata: { previousSellerId: project.responsibleSellerId, nextSellerId: nextSeller.id, reason: input.reason },
+  } });
+  return { ok: true, project: updated, nextSeller };
+});
 
 export const ordinaryCrmResponse = (record: any) => {
   const { customerTransferSnapshot, customer, potentialProject, ...rest } = record;
@@ -2399,44 +2459,18 @@ router.put('/potential-projects/:id/reassign', protect, requireWorkspaceAccess(W
       return;
     }
 
-    const nextSeller = await prisma.user.findUnique({
-      where: { id: req.body.responsibleSellerId },
-      select: { id: true, firstName: true, lastName: true, username: true, isActive: true }
-    });
-    if (!nextSeller || !nextSeller.isActive) {
-      res.status(404).json({ success: false, error: 'فروشنده جدید پیدا نشد یا غیرفعال است.' });
+    const reassigned = await reassignOrdinaryCrmProject(prisma, { projectId: project.id,
+      nextSellerId: String(req.body.responsibleSellerId), actorId: req.user.id, reason: String(req.body.reason) });
+    if (!reassigned.ok) {
+      if (reassigned.code === 'DESTINATION_NOT_FOUND' || reassigned.code === 'NOT_FOUND') {
+        res.status(404).json({ success: false, error: 'پروژه یا فروشنده جدید پیدا نشد یا غیرفعال است.' });
+      } else if (reassigned.code === 'FORBIDDEN') {
+        res.status(403).json({ success: false, error: 'اختیار جاری تغییر مسئول پروژه وجود ندارد.' });
+      } else res.status(409).json({ success: false, error: 'مسئول پروژه هم‌زمان تغییر کرده است.' });
       return;
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_legacy_reassignment', ${JSON.stringify({
-        projectId: project.id, previousSellerId: project.responsibleSellerId, nextSellerId: nextSeller.id,
-        actorId: req.user.id, reason: String(req.body.reason),
-      })}, true)`;
-      const next = await tx.crmPotentialProject.update({
-        where: { id: project.id },
-        data: { responsibleSellerId: nextSeller.id },
-        include: projectInclude
-      });
-      await tx.crmTimelineEvent.create({
-        data: {
-          customerId: next.customerId,
-          potentialProjectId: next.id,
-          actorId: req.user.id,
-          eventType: 'reassigned',
-          title: 'تغییر فروشنده مسئول پروژه احتمالی',
-          description: `از ${fullName(project.responsibleSeller)} به ${fullName(nextSeller)} - ${req.body.reason}`,
-          metadata: {
-            previousSellerId: project.responsibleSellerId,
-            nextSellerId: nextSeller.id,
-            reason: req.body.reason
-          }
-        }
-      });
-      return next;
-    });
-
-    res.json({ success: true, data: ordinaryCrmResponse(updated) });
+    res.json({ success: true, data: ordinaryCrmResponse(reassigned.project) });
   } catch (error) {
     console.error('Reassign CRM potential project error:', error);
     res.status(500).json({ success: false, error: 'خطا در تغییر مسئول پروژه احتمالی' });
@@ -2596,7 +2630,7 @@ router.get('/next-actions', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORK
 
 router.put('/next-actions/:id/complete', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.CRM_NEXT_ACTIONS_EDIT, FEATURE_PERMISSIONS.EDIT), async (req: any, res: Response): Promise<void> => {
   try {
-    const action = await prisma.crmNextAction.findUnique({ where: { id: req.params.id }, include: nextActionInclude });
+    const action = await findOrdinaryCrmNextAction(prisma, req.params.id);
     if (!action) {
       res.status(404).json({ success: false, error: 'اقدام بعدی پیدا نشد.' });
       return;

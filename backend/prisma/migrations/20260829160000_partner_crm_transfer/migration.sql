@@ -315,11 +315,12 @@ CREATE TRIGGER partner_communication_owner_write_guard BEFORE INSERT OR UPDATE O
 -- one persona can own the responsibility after either transaction commits.
 CREATE FUNCTION partner_guard_profile_legacy_crm_responsibility() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+  IF NEW.state::text <> 'ACTIVE' AND NEW."irreversibleAt" IS NULL THEN RETURN NEW; END IF;
   PERFORM id FROM users WHERE id = NEW."userId" FOR UPDATE;
   IF EXISTS (SELECT 1 FROM crm_potential_projects project
     WHERE project."responsibleSellerId" = NEW."userId" AND project."partnerRevision" IS NULL
       AND project."isActive") THEN
-    RAISE EXCEPTION 'Legacy CRM Project responsibility must be reassigned before Partner profile creation or activation'
+    RAISE EXCEPTION 'Legacy CRM Project responsibility must be reassigned before Partner profile activation'
       USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
@@ -349,6 +350,15 @@ BEGIN
     WHERE action."assignedToId" IS DISTINCT FROM profile."userId"
   ) THEN
     RAISE EXCEPTION 'existing Partner CRM child responsibility requires explicit remediation'
+      USING ERRCODE = '23514';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM crm_potential_projects project
+    JOIN partner_profiles profile ON profile."userId" = project."responsibleSellerId"
+    WHERE project."partnerRevision" IS NULL AND project."isActive"
+      AND (profile.state::text = 'ACTIVE' OR profile."irreversibleAt" IS NOT NULL)
+  ) THEN
+    RAISE EXCEPTION 'existing active Partner Profile has unresolved legacy CRM Project responsibility'
       USING ERRCODE = '23514';
   END IF;
 END;

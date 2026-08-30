@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { canonicalHash, type PartnerActionV2, type PermissionContext } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerCrmService } from '../partnerSales/crm/service';
@@ -382,7 +384,7 @@ test('feature revocation during legacy Project reassignment lock wait defeats cu
   }
 });
 
-test('Partner profile creation and retained Project reassignment cannot both claim one User persona', async () => {
+test('pending Partner onboarding records legacy Project responsibility and ACTIVE remains blocked until reassignment', async () => {
   const database = new PrismaClient({ datasources: { db: { url: databaseUrl(4) } } });
   const suffix = randomUUID();
   const actorId = `partner-crm-profile-race-admin-${suffix}`;
@@ -409,19 +411,23 @@ test('Partner profile creation and retained Project reassignment cannot both cla
     await created.promise;
     const reassignment = reassignOrdinaryCrmProject(database, { projectId, nextSellerId: destinationId,
       actorId, reason: 'رقابت ساخت پروفایل با تغییر مسئول' });
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const [waiting] = await database.$queryRaw<Array<{ count: bigint }>>`
-        SELECT count(*)::bigint AS count FROM pg_stat_activity
-        WHERE datname = current_database() AND "wait_event_type" = 'Lock'
-          AND query LIKE '%FROM users WHERE id IN%'`;
-      if (Number(waiting?.count ?? 0) > 0) break;
-      await new Promise(resolve => setTimeout(resolve, 20));
-      if (attempt === 99) throw new Error('reassignment did not wait for profile creation User lock');
-    }
+    await new Promise(resolve => setTimeout(resolve, 100));
     release.resolve(); await profileWriter;
-    assert.deepEqual(await reassignment, { ok: false, code: 'DESTINATION_NOT_FOUND' });
+    const raced = await reassignment;
+    if (!raced.ok) {
+      assert.equal(raced.code, 'DESTINATION_NOT_FOUND');
+      await database.partnerProfile.delete({ where: { id: profileId } });
+      const transferred = await reassignOrdinaryCrmProject(database, { projectId, nextSellerId: destinationId,
+        actorId, reason: 'ثبت مانع پروژه در ورود محدود Partner' });
+      assert.equal(transferred.ok, true);
+      await database.partnerProfile.create({ data: { id: profileId, userId: destinationId, state: 'PENDING' } });
+    }
     assert.equal((await database.crmPotentialProject.findUniqueOrThrow({ where: { id: projectId },
-      select: { responsibleSellerId: true } })).responsibleSellerId, previousSellerId);
+      select: { responsibleSellerId: true } })).responsibleSellerId, destinationId);
+    await assert.rejects(database.partnerProfile.update({ where: { id: profileId }, data: { state: 'ACTIVE' } }),
+      /Legacy CRM Project responsibility must be reassigned before Partner profile activation/);
+    assert.equal((await database.partnerProfile.findUniqueOrThrow({ where: { id: profileId },
+      select: { state: true } })).state, 'PENDING');
   } finally {
     release.resolve(); await profileWriter?.catch(() => undefined);
     await database.$transaction(async tx => {
@@ -431,6 +437,40 @@ test('Partner profile creation and retained Project reassignment cannot both cla
       await tx.crmCustomer.deleteMany({ where: { id: customerId } });
       await tx.user.deleteMany({ where: { id: { in: [actorId, previousSellerId, destinationId] } } });
     });
+    await database.$disconnect();
+  }
+});
+
+test('migration preflight rejects an existing active Partner profile with legacy Project responsibility', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const rollback = new Error('rollback CRM migration preflight fixture');
+  const migration = readFileSync(path.resolve(process.cwd(),
+    'prisma/migrations/20260829160000_partner_crm_transfer/migration.sql'), 'utf8');
+  const preflights = [...migration.matchAll(/DO \$\$[\s\S]*?\$\$;/g)];
+  const preflight = preflights.at(-1)?.[0];
+  if (!preflight) throw new Error('CRM migration preflight not found');
+  try {
+    await assert.rejects(database.$transaction(async tx => {
+      const suffix = randomUUID();
+      const userId = `partner-crm-upgrade-user-${suffix}`;
+      const customerId = `partner-crm-upgrade-customer-${suffix}`;
+      const projectId = `partner-crm-upgrade-project-${suffix}`;
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.user.create({ data: { id: userId, username: userId, email: `${userId}@example.invalid`,
+        password: 'not-a-login', firstName: 'Fixture', lastName: 'Upgrade Preflight', role: 'USER' } });
+      await tx.partnerProfile.create({ data: { id: userId, userId, state: 'ACTIVE' } });
+      await tx.crmCustomer.create({ data: { id: customerId, ownerUserId: userId,
+        firstName: 'مشتری', lastName: 'داده قدیمی' } });
+      await tx.crmPotentialProject.create({ data: { id: projectId, customerId, responsibleSellerId: userId,
+        title: 'پروژه ناسازگار پیش از مهاجرت', workType: 'نما' } });
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = origin');
+      await tx.$executeRawUnsafe('SAVEPOINT crm_upgrade_preflight');
+      await assert.rejects(tx.$executeRawUnsafe(preflight),
+        /existing active Partner Profile has unresolved legacy CRM Project responsibility/);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT crm_upgrade_preflight');
+      throw rollback;
+    }, { timeout: 20_000 }), error => error === rollback);
+  } finally {
     await database.$disconnect();
   }
 });
@@ -486,6 +526,14 @@ test('Customer transfer and retained Project reassignment serialize without a de
   } finally {
     await transferDatabase.$transaction(async tx => {
       await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.partnerCustomerTransferEvent.deleteMany({ where: { transferId } });
+      await tx.partnerCommandOutcome.deleteMany({ where: { OR: [{ targetScope: transferId }, { actorId: adminId }] } });
+      await tx.effectiveAuthorizationAudit.deleteMany({ where: { OR: [{ actorId: adminId }, { rootId: customerId }] } });
+      await tx.crmTimelineEvent.deleteMany({ where: { potentialProjectId: projectId } });
+      await tx.partnerCustomerTransfer.deleteMany({ where: { id: transferId } });
+      await tx.partnerDuplicateCustomerMatch.deleteMany({ where: { id: matchId } });
+      await tx.crmPotentialProject.deleteMany({ where: { id: projectId } });
+      await tx.crmCustomer.deleteMany({ where: { id: customerId } });
       await tx.partnerProfile.deleteMany({ where: { id: partnerId } });
       await tx.user.deleteMany({ where: { id: { in: [oldOwnerId, partnerId, adminId, nextSellerId] } } });
     });

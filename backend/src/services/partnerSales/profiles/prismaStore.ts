@@ -40,7 +40,7 @@ async function readGates(tx: Prisma.TransactionClient, profile: PartnerProfileRe
   for (const cohortId of [...new Set(profileSource?.cohortMemberships.map(item => item.cohortId) ?? [])].sort()) {
     await tx.$queryRaw`SELECT id FROM partner_release_cohorts WHERE id = ${cohortId} FOR UPDATE`;
   }
-  const [source, terms, cohort, openDuty, openDraft, responsibleContract, openCorrection,
+  const [source, terms, cohort, openDuty, openDraft, responsibleContract, legacyProjectResponsibility, openCorrection,
     workspaceGrant, featureGrant, scopedGrant, responderConflict, conversionEvent] = await Promise.all([
     tx.partnerProfile.findUnique({ where: { id: profile.id }, select: { user: { select: {
       isActive: true, role: true,
@@ -55,6 +55,7 @@ async function readGates(tx: Prisma.TransactionClient, profile: PartnerProfileRe
     tx.salesContractEditSession.count({ where: { ownerUserId: profile.userId, purpose: 'STANDARD' } }),
     tx.salesContract.count({ where: { responsibleSellerId: profile.userId, isInactive: false,
       status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SIGNED', 'PRINTED'] } } }),
+    tx.crmPotentialProject.count({ where: { responsibleSellerId: profile.userId, partnerRevision: null, isActive: true } }),
     tx.accountingCorrectionRequest.count({ where: { assignedToUserId: profile.userId, status: 'OPEN' } }),
     tx.workspacePermission.count({ where: { userId: profile.userId, isActive: true,
       OR: [{ expiresAt: null }, { expiresAt: { gt: clock.now } }] } }),
@@ -110,7 +111,8 @@ async function readGates(tx: Prisma.TransactionClient, profile: PartnerProfileRe
     ? await resolveEligibleResponder(tx, { responderId: responderAssignment.responderId })
     : null;
   const internalConflict = source?.user.role !== 'USER' || workspaceGrant > 0 || featureGrant > 0 ||
-    scopedGrant > 0 || openDuty > 0 || openDraft > 0 || responsibleContract > 0 || openCorrection > 0 || responderConflict;
+    scopedGrant > 0 || openDuty > 0 || openDraft > 0 || responsibleContract > 0 ||
+    legacyProjectResponsibility > 0 || openCorrection > 0 || responderConflict;
   const conversionInProgress = conversionEvent[0]?.transition === 'START';
   const conversionRecord = conversionEvent[0];
   const conversionPayload = conversionRecord?.evidence && typeof conversionRecord.evidence === 'object' &&

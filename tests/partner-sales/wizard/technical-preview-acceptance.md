@@ -75,8 +75,21 @@ their August 27 results do not certify this new technical implementation.
 
 ## Remaining acceptance
 
-Public row/input adapters, all-family editing/remainder interactions, durable
-incomplete checkpoints, owner-validated save/inquiry linkage, authoritative
-private pricing-policy production and real transport remain unfinished. No
-configuration reference, pricing identity or permission may be invented by UI.
-Full integration and release acceptance remain issues 334–336.
+The follow-up adapter checkpoint adds one revisioned writer for prepared,
+volumetric, longitudinal, slab and stair rows plus remainder/layer dependents.
+It takes stable caller-issued row, allocation, layer, source and stair identities;
+it never derives relationships from array position or catalog identity. Removing
+a parent cascades only its exact dependents, while unfinished field text remains
+in `editingValues` until the same entity/field commits a canonical value.
+
+Verified on the `origin/main` 4d8e3b75 baseline: 3 focused adapter tests, all 40
+wizard tests, 50 shared-contract tests, the full contract-creation and canonical
+graph suites, frontend no-emit typecheck and production build, Design System
+check, foundation 25/25 and adoption 14/14. Existing repository lint warnings
+remain unchanged.
+
+Production host/persona binding, a real Case command transport, customer/delivery/
+payment host adapters, authoritative private pricing-policy production and final
+route-level integration remain unfinished. No configuration reference, pricing
+identity or permission may be invented by UI. Full integration and release
+acceptance remain issues 334–336.

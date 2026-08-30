@@ -16,9 +16,40 @@ export type RequestSalesContractCorrectionInput = {
 
 export type RequestAccountingSalesContractCorrectionInput = RequestSalesContractCorrectionInput;
 
+export type PartnerFinancialCorrectionTarget = {
+  caseId: string;
+  customerContractId: string;
+  actorUserId: string;
+};
+
+export type ExecutePartnerFinancialCorrectionDutyInput<Result> = {
+  contractId: string;
+  actorUserId: string;
+  /** #329-owned adapter callback. It receives the existing shared transaction;
+   * route/registry composition remains with #334's integration writer. */
+  execute(tx: Prisma.TransactionClient, target: PartnerFinancialCorrectionTarget): Promise<Result>;
+};
+
 const inTransaction = <Result>(database: Database, work: (tx: Prisma.TransactionClient) => Promise<Result>) => (
   '$transaction' in database ? database.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }) : work(database)
 );
+
+/** Narrow hook from the global correction duty into the Partner Case aggregate.
+ * It never treats the customer-facing contract as an independently writable
+ * retail contract and never constructs a second Prisma client. */
+export const executePartnerFinancialCorrectionDuty = <Result>(
+  database: Database,
+  input: ExecutePartnerFinancialCorrectionDutyInput<Result>,
+) => inTransaction(database, async (tx) => {
+  const contract = await tx.salesContract.findUnique({ where: { id: input.contractId }, select: {
+    id: true, partnerKind: true, partnerCaseId: true,
+  } });
+  if (!contract || contract.partnerKind !== 'PARTNER_CUSTOMER' || !contract.partnerCaseId) {
+    throw new Error('PARTNER_CORRECTION_TARGET_NOT_FOUND');
+  }
+  return input.execute(tx, { caseId: contract.partnerCaseId,
+    customerContractId: contract.id, actorUserId: input.actorUserId });
+});
 
 export const requestAccountingSalesContractCorrection = (
   database: Database,

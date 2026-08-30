@@ -38,10 +38,17 @@ Sales policy changes are included. **This does not complete issue 319.**
   Inquiry/Case ownership comes from the immutable profile link, not current CRM
   Customer ownership. `authorizeProject` additionally checks actual Customer
   binding and independent Project responsibility.
-- `authorizeInquiryRow` and `authorizeCaseRecord` require an exact expected root.
-  The latter resolves PRODUCT_ROW, INTERNAL_RECORD and CUSTOMER_CONTRACT links;
-  ordinary Sales Contracts are not treated as Partner children. Neither direct
-  ids nor a valid child widens the requested action/purpose.
+- `authorizeInquiryRecord` and `authorizeCaseRecord` require an exact expected
+  root. Every persisted Inquiry descendant and every persisted Case descendant
+  (revision/row, approval usage, delivery, payment/allocation, event/output,
+  correction/adjustment and outbox evidence) is resolved from its persisted
+  relationship. `authorizeInquiryRow` remains the compatible row entry point.
+  Ordinary Sales Contracts are not treated as Partner children.
+  Neither direct ids nor a valid child widens the requested action/purpose. Every
+  child is locked, its relationship is checked again, and authority is refreshed
+  after the lock wait. Partner access to the Sabalan payment plan is read-only;
+  Accounting cannot use its Case authority to read the retail plan, and
+  Fulfillment cannot use a payment child to widen its purpose.
 - The optional fourth factory argument `{ correctionOpportunityId }` binds a
   financial command to one persisted correction opportunity. The requester is
   read from that exact immutable chain under lock, never from the Case creator
@@ -108,8 +115,7 @@ those facts or acquire database locks itself.
 - #296 legacy grant dry-run/cutover and ordinary cross-workspace parity remain
   separate. New grants are explicit; existing generic feature/workspace rows
   are never guessed into resource scopes.
-- Remaining child adapters (including approvals, payment and delivery targets),
-  creation/discovery transport and owning command integration. Pre-Case technical
+- Creation/discovery transport and owning command integration. Pre-Case technical
   recovery and catalog now have authenticated, cohort-gated closed transport;
   the central Partner creation UI/channel is not activated.
 - All non-Case query producers, safe list/count database predicates and transport
@@ -142,6 +148,13 @@ cleans only its exact mutable User fixtures; Inquiry/profile evidence rolls back
 Relational Case fixtures pass deferred pair constraints before authorization;
 their placeholder commercial JSON is not evidence of pricing or Case assembly
 acceptance. No fixture adapter is installed as the production #296 resolver.
+
+The completion child-target regression uses the existing local schema to prove
+that Inquiry assignment/row/approval/event/notification plus Case revision/row,
+delivery/item and retail payment/allocation ids authorize only through their
+exact expected root. Cross-root ids are the same safe 404 as missing ids, every
+successful path reauthorizes after the exact child lock, and the Sabalan payment
+plan is read-only for its owning Partner.
 
 Focused command (with the existing local DB URL supplied safely in the process
 environment): `node packages/partner-sales-contracts/node_modules/tsx/dist/cli.mjs

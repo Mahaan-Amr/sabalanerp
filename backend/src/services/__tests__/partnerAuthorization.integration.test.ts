@@ -130,8 +130,9 @@ test('a real Project lock wait cannot carry an expired grant back to the caller'
       for (const id of [partner, actor]) await tx.user.create({ data: {
         id, username: id, email: `${id}@example.invalid`, password: 'not-a-login', firstName: 'Fixture', lastName: 'Authorization',
       } });
-      await tx.crmCustomer.create({ data: { id: customerId, ownerUserId: partner, firstName: 'Fixture', lastName: 'Customer' } });
-      await tx.crmPotentialProject.create({ data: { id: projectId, customerId, responsibleSellerId: partner,
+      await tx.crmCustomer.create({ data: { id: customerId, ownerUserId: partner,
+        firstName: 'Fixture', lastName: 'Customer' } });
+      await tx.crmPotentialProject.create({ data: { id: projectId, customerId, responsibleSellerId: actor,
         title: 'Fixture project', workType: 'Fixture' } });
     });
     blocker = database.$transaction(async tx => {
@@ -140,8 +141,7 @@ test('a real Project lock wait cannot carry an expired grant back to the caller'
     }, { timeout: 15_000 });
     await Promise.race([locked.promise, blocker.then(() => { throw new Error('Lock fixture ended early'); })]);
     request = database.$transaction(async tx => {
-      // Only mutable CRM/User fixtures are committed. Retained Partner evidence
-      // is visible to this command transaction and always rolled back.
+      // Retained Partner evidence is transaction-local and always rolled back.
       await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
       const port = createPrismaPartnerAuthorization(tx, { actorId: actor, purpose: 'CRM', channel: 'API' }, async () => {
         if (!expiresAt) {
@@ -177,19 +177,22 @@ test('a real Project lock wait cannot carry an expired grant back to the caller'
   }
 });
 
-test('persisted Customer and Project share the Customer root but retain independent Project responsibility', async () => {
+test('persisted Customer and Project share the Customer root but retain an independent Project active gate', async () => {
   await fixture(async (tx, partner, other) => {
       await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
-      const customer = await tx.crmCustomer.create({ data: { ownerUserId: partner, firstName: 'Fixture', lastName: 'Customer' } });
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${partner}, true)`;
+      const customer = await tx.crmCustomer.create({ data: { ownerUserId: partner, partnerOwnerProfileId: partner,
+        partnerRevision: 1, firstName: 'Fixture', lastName: 'Customer' } });
       const project = await tx.crmPotentialProject.create({ data: { customerId: customer.id, responsibleSellerId: partner,
-        title: 'Fixture project', workType: 'Fixture' } });
+        partnerRevision: 1, title: 'Fixture project', workType: 'Fixture' } });
       const port = createPrismaPartnerAuthorization(tx, { actorId: partner, purpose: 'CRM', channel: 'DETAIL' },
         async () => ({ authorizationRevision: 1, grants: [] }));
       assert.equal((await port.authorize('CUSTOMER_READ', { kind: 'CUSTOMER', id: customer.id })).ok, true);
       assert.equal((await port.authorizeProject('CUSTOMER_WRITE', project.id, customer.id)).ok, true);
       const forged = await port.authorizeProject('CUSTOMER_READ', project.id, 'foreign-customer');
       assert.equal(forged.ok ? null : forged.error.status, 404);
-      await tx.crmPotentialProject.update({ where: { id: project.id }, data: { responsibleSellerId: other } });
+      await tx.crmPotentialProject.update({ where: { id: project.id },
+        data: { isActive: false, partnerRevision: { increment: 1 } } });
       assert.equal((await port.authorizeProject('CUSTOMER_READ', project.id, customer.id)).ok, false);
       assert.equal((await port.authorize('CUSTOMER_READ', { kind: 'CUSTOMER', id: customer.id })).ok, true);
   });
@@ -293,6 +296,113 @@ test('Case record and product ids cannot authorize a different aggregate or wide
     const denied = await own.authorizeCaseRecord('CASE_READ', { kind: 'CUSTOMER_CONTRACT', id: foreign.contractId }, foreign.id);
     const missing = await own.authorizeCaseRecord('CASE_READ', { kind: 'CUSTOMER_CONTRACT', id: 'missing' }, foreign.id);
     assert.deepEqual(denied, missing);
+  });
+});
+
+test('persisted approval, delivery and payment ids inherit only their exact authorization root', async () => {
+  await fixture(async (tx, partner, other) => {
+    await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
+    await tx.partnerProfile.create({ data: { id: other, userId: other, state: 'ACTIVE' } });
+    const sale = await seedAuthorizationCase(tx, partner);
+    const foreignSale = await seedAuthorizationCase(tx, other);
+    const hash = `sha256-v1:${'b'.repeat(64)}`;
+    const commercialNumber = (await tx.partnerCommercialNumber.findFirstOrThrow({ where: { caseId: sale.id },
+      select: { number: true } })).number;
+    const deliveryId = `${sale.id}-delivery`;
+    await tx.partnerCaseDelivery.create({ data: { id: deliveryId, caseId: sale.id, revision: 1,
+      date: new Date('2026-08-30'), destination: 'انبار آزمون' } });
+    await tx.partnerCaseDeliveryItem.create({ data: { caseId: sale.id, revision: 1, deliveryId,
+      productRowId: sale.rowId, quantity: 1 } });
+    const plan = await tx.partnerPaymentPlan.create({ data: { id: `${sale.id}-plan`, caseId: sale.id,
+      caseRevision: 1, purpose: 'RETAIL', version: 1, effectiveDate: new Date('2026-08-30'),
+      evidence: {}, integrityHash: hash } });
+    const installment = await tx.partnerPaymentInstallment.create({ data: { id: `${sale.id}-installment`,
+      planId: plan.id, dueDate: new Date('2026-09-30'), amount: 100, currency: 'IRR', method: 'CASH', evidence: {} } });
+    const receipt = await tx.partnerRetailReceipt.create({ data: { id: `${sale.id}-receipt`, caseId: sale.id,
+      planId: plan.id, kind: 'RECEIPT', amount: 100, currency: 'IRR', effectiveDate: new Date('2026-08-30'),
+      actorId: partner, commandId: `${sale.id}-receipt-command`, evidence: {} } });
+    await tx.partnerRetailReceiptAllocation.create({ data: { receiptId: receipt.id, planId: plan.id,
+      installmentId: installment.id, amount: 100 } });
+    const sabalanPlan = await tx.partnerPaymentPlan.create({ data: { id: `${sale.id}-sabalan-plan`, caseId: sale.id,
+      caseRevision: 1, purpose: 'SABALAN', version: 1, effectiveDate: new Date('2026-08-30'),
+      evidence: {}, integrityHash: hash } });
+
+    const inquiry = await tx.partnerInquiry.create({ data: { profileId: partner } });
+    const foreignInquiry = await tx.partnerInquiry.create({ data: { profileId: other } });
+    const responder = `authorization-${randomUUID()}`;
+    await tx.user.create({ data: { id: responder, username: responder, email: `${responder}@example.invalid`,
+      password: 'not-a-login', firstName: 'Fixture', lastName: 'Responder' } });
+    const assignment = await tx.partnerInquiryAssignment.create({ data: { inquiryId: inquiry.id, revision: 1,
+      responderId: responder, actorId: partner, reason: 'انتساب آزمون', eligibilityEvidence: {} } });
+    const row = await tx.partnerInquiryRow.create({ data: { inquiryId: inquiry.id, version: 1,
+      configurationHash: hash, definition: {} } });
+    const approval = await tx.partnerInquiryApproval.create({ data: { rowId: row.id, assignmentId: assignment.id,
+      actorId: responder, commandId: `${inquiry.id}-approval`, authorizationEvidenceId: `${inquiry.id}-authority`,
+      wholesaleUnitPrice: 100, currency: 'IRR', evidenceHash: hash } });
+    const usage = await tx.partnerInquiryUsage.create({ data: { id: `${sale.id}-usage`, caseId: sale.id,
+      caseRevision: 1, productRowId: sale.rowId, approvalId: approval.id, approvalSnapshot: {}, evidenceHash: hash } });
+    const inquiryEvent = await tx.partnerInquiryEvent.create({ data: { inquiryId: inquiry.id, rowId: row.id,
+      revision: 1, actorId: responder, commandId: `${inquiry.id}-event-command`, correlationId: `${inquiry.id}-event`,
+      type: 'APPROVED', evidence: {} } });
+    await tx.partnerInquiryNotificationDelivery.create({ data: { eventId: inquiryEvent.id } });
+    const output = await tx.partnerCustomerOutputSnapshot.create({ data: { id: `${sale.id}-output`, caseId: sale.id,
+      caseRevision: 1, integrityHash: hash, contentHash: hash, contractNumber: sale.contractId, recipient: '09120000000',
+      expiresAt: new Date('2026-09-30'), content: {}, commandId: `${sale.id}-output-command` } });
+    const correction = await tx.partnerCorrectionOpportunity.create({ data: { id: `${sale.id}-correction`, caseId: sale.id,
+      predecessorRevision: 1, scope: 'RETAIL_ONLY', scopeHash: hash, requesterId: partner, approvedBy: responder,
+      approvedAt: new Date('2026-08-30'), expiresAt: new Date('2026-09-30'), calendarVersion: 'fixture-v1', evidence: {} } });
+    const gate = await tx.partnerCorrectionGate.create({ data: { id: `${sale.id}-gate`, opportunityId: correction.id,
+      kind: 'FIXTURE', outcome: 'PASS', actorId: responder, commandId: `${sale.id}-gate-command`, evidence: {} } });
+    const dependency = await tx.partnerCorrectionDependency.create({ data: { id: `${sale.id}-dependency`,
+      opportunityId: correction.id, domain: 'FIXTURE', sourceId: sale.id, sourceVersion: '1', disposition: 'CLEAR',
+      actorId: responder, evidence: {} } });
+    const outbox = await tx.partnerOutboxMessage.create({ data: { id: `${sale.id}-outbox`, eventId: `${sale.id}-event`,
+      purpose: 'FIXTURE', deduplicationKey: `${sale.id}-outbox-key`, safePayload: {} } });
+    const attempt = await tx.partnerOutboxAttempt.create({ data: { id: `${sale.id}-attempt`, messageId: outbox.id, attempt: 1,
+      outcome: 'DELIVERED' } });
+
+    const authority = async () => ({ authorizationRevision: 1, grants: [] });
+    const casePort = createPrismaPartnerAuthorization(tx,
+      { actorId: partner, purpose: 'PARTNER', channel: 'LINK' }, authority);
+    const caseTargets = [
+      { kind: 'REVISION' as const, revision: 1 },
+      { kind: 'COMMERCIAL_NUMBER' as const, number: commercialNumber },
+      { kind: 'ROW_BINDING' as const, revision: 1, productRowId: sale.rowId },
+      { kind: 'INQUIRY_USAGE' as const, id: usage.id },
+      { kind: 'EVENT' as const, id: `${sale.id}-event` },
+      { kind: 'CUSTOMER_OUTPUT' as const, id: output.id },
+      { kind: 'CORRECTION_OPPORTUNITY' as const, id: correction.id },
+      { kind: 'CORRECTION_GATE' as const, id: gate.id },
+      { kind: 'CORRECTION_DEPENDENCY' as const, id: dependency.id },
+      { kind: 'OUTBOX_MESSAGE' as const, id: outbox.id },
+      { kind: 'OUTBOX_ATTEMPT' as const, id: attempt.id },
+      { kind: 'DELIVERY' as const, id: deliveryId, revision: 1 },
+      { kind: 'DELIVERY_ITEM' as const, deliveryId, productRowId: sale.rowId, revision: 1 },
+      { kind: 'PAYMENT_PLAN' as const, id: plan.id },
+      { kind: 'PAYMENT_INSTALLMENT' as const, id: installment.id },
+      { kind: 'RETAIL_RECEIPT' as const, id: receipt.id },
+      { kind: 'RECEIPT_ALLOCATION' as const, receiptId: receipt.id, installmentId: installment.id },
+    ];
+    for (const target of caseTargets) {
+      assert.equal((await casePort.authorizeCaseRecord('CASE_READ', target, sale.id)).ok, true, target.kind);
+      const mismatch = await casePort.authorizeCaseRecord('CASE_READ', target, foreignSale.id);
+      assert.equal(mismatch.ok ? null : mismatch.error.status, 404, target.kind);
+    }
+
+    const sabalanWrite = await casePort.authorizeCaseRecord('CASE_DRAFT_WRITE',
+      { kind: 'PAYMENT_PLAN', id: sabalanPlan.id }, sale.id);
+    assert.equal(sabalanWrite.ok ? null : sabalanWrite.error.code, 'FORBIDDEN');
+    assert.equal((await casePort.authorizeCaseRecord('CASE_READ',
+      { kind: 'PAYMENT_PLAN', id: sabalanPlan.id }, sale.id)).ok, true, 'Sabalan plan is Partner read-only');
+
+    for (const target of [{ kind: 'ASSIGNMENT' as const, id: assignment.id },
+      { kind: 'ROW' as const, id: row.id }, { kind: 'APPROVAL' as const, id: approval.id },
+      { kind: 'EVENT' as const, id: inquiryEvent.id },
+      { kind: 'NOTIFICATION_DELIVERY' as const, id: inquiryEvent.id }]) {
+      assert.equal((await casePort.authorizeInquiryRecord('INQUIRY_READ', target, inquiry.id)).ok, true, target.kind);
+      const mismatch = await casePort.authorizeInquiryRecord('INQUIRY_READ', target, foreignInquiry.id);
+      assert.equal(mismatch.ok ? null : mismatch.error.status, 404, target.kind);
+    }
   });
 });
 

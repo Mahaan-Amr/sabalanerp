@@ -12,6 +12,20 @@ export type ResolvePartnerAuthority<Action extends PartnerActionV2 = PartnerActi
 }) => Promise<Pick<AuthorizationEvidence<Action>, 'grants' | 'authorizationRevision'>>;
 export type PartnerAuthorizationTarget = { correctionOpportunityId: string } | { prospectiveProfileOwnerId: string }
   | { customerTransferId: string };
+export type PartnerInquiryRecordTarget = {
+  kind: 'ASSIGNMENT' | 'ROW' | 'APPROVAL' | 'EVENT' | 'NOTIFICATION_DELIVERY'; id: string;
+};
+export type PartnerCaseRecordTarget =
+  | { kind: 'PRODUCT_ROW' | 'INTERNAL_RECORD' | 'CUSTOMER_CONTRACT' | 'INQUIRY_USAGE' | 'PAYMENT_PLAN'
+      | 'PAYMENT_INSTALLMENT' | 'RETAIL_RECEIPT' | 'EVENT' | 'CUSTOMER_OUTPUT' | 'CORRECTION_OPPORTUNITY'
+      | 'CORRECTION_SAVE' | 'CORRECTION_GATE' | 'CORRECTION_DEPENDENCY' | 'FINANCIAL_ADJUSTMENT'
+      | 'OUTBOX_MESSAGE' | 'OUTBOX_ATTEMPT'; id: string }
+  | { kind: 'COMMERCIAL_NUMBER'; number: string }
+  | { kind: 'REVISION'; revision: number }
+  | { kind: 'ROW_BINDING'; revision: number; productRowId: string }
+  | { kind: 'DELIVERY'; id: string; revision: number }
+  | { kind: 'DELIVERY_ITEM'; deliveryId: string; productRowId: string; revision: number }
+  | { kind: 'RECEIPT_ALLOCATION'; receiptId: string; installmentId: string };
 
 /** Transaction-scoped, using the caller's shared Prisma transaction. Never owns
  * a PrismaClient or commits/disconnects. Unsupported roots fail closed. */
@@ -129,39 +143,172 @@ export function createPrismaPartnerAuthorizationV2(tx: Prisma.TransactionClient,
 export function createPrismaPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
   resolveAuthority: ResolvePartnerAuthority, target?: { correctionOpportunityId: string }) {
   const authorization = createPartnerAuthorization(prismaAuthorizationSource(tx, resolveAuthority, target), binding);
+  type ChildRelationship = { rootId: string; paymentPurpose?: 'RETAIL' | 'SABALAN' };
+  type ChildGuard = { resolve(): Promise<ChildRelationship | null | undefined>; lock(): Promise<unknown> };
+  function inquiryRecordGuard(record: PartnerInquiryRecordTarget): ChildGuard {
+    if (record.kind === 'ASSIGNMENT') return {
+      resolve: async () => { const row = await tx.partnerInquiryAssignment.findUnique({ where: { id: record.id }, select: { inquiryId: true } });
+        return row && { rootId: row.inquiryId }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_inquiry_assignments WHERE id = ${record.id} FOR UPDATE`,
+    };
+    if (record.kind === 'ROW') return {
+      resolve: async () => { const row = await tx.partnerInquiryRow.findUnique({ where: { id: record.id }, select: { inquiryId: true } });
+        return row && { rootId: row.inquiryId }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_inquiry_rows WHERE id = ${record.id} FOR UPDATE`,
+    };
+    if (record.kind === 'APPROVAL') return {
+      resolve: async () => { const row = await tx.partnerInquiryApproval.findUnique({ where: { id: record.id },
+        select: { row: { select: { inquiryId: true } } } }); return row && { rootId: row.row.inquiryId }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_inquiry_approvals WHERE id = ${record.id} FOR UPDATE`,
+    };
+    if (record.kind === 'EVENT') return {
+      resolve: async () => { const row = await tx.partnerInquiryEvent.findUnique({ where: { id: record.id }, select: { inquiryId: true } });
+        return row && { rootId: row.inquiryId }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_inquiry_events WHERE id = ${record.id} FOR UPDATE`,
+    };
+    return {
+      resolve: async () => { const row = await tx.partnerInquiryNotificationDelivery.findUnique({ where: { eventId: record.id },
+        select: { event: { select: { inquiryId: true } } } }); return row && { rootId: row.event.inquiryId }; },
+      lock: () => tx.$queryRaw`SELECT "eventId" FROM partner_inquiry_notification_deliveries WHERE "eventId" = ${record.id} FOR UPDATE`,
+    };
+  }
+  function caseRecordGuard(record: PartnerCaseRecordTarget, expectedCaseId: string): ChildGuard {
+    const direct = (model: { findUnique(input: unknown): Promise<{ caseId: string } | null> }, id: string) =>
+      async () => { const row = await model.findUnique({ where: { id }, select: { caseId: true } }); return row && { rootId: row.caseId }; };
+    if (record.kind === 'PRODUCT_ROW') return { resolve: direct(tx.partnerProductRow, record.id),
+      lock: () => tx.$queryRaw`SELECT id FROM partner_product_rows WHERE id = ${record.id} FOR UPDATE` };
+    if (record.kind === 'INTERNAL_RECORD') return { resolve: direct(tx.sabalanToPartnerSaleRecord, record.id),
+      lock: () => tx.$queryRaw`SELECT id FROM sabalan_to_partner_sale_records WHERE id = ${record.id} FOR UPDATE` };
+    if (record.kind === 'CUSTOMER_CONTRACT') return {
+      resolve: async () => { const row = await tx.salesContract.findUnique({ where: { id: record.id },
+        select: { partnerKind: true, partnerCaseId: true } }); return row?.partnerKind === 'PARTNER_CUSTOMER' && row.partnerCaseId
+          ? { rootId: row.partnerCaseId } : null; },
+      lock: () => tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${record.id} FOR UPDATE`,
+    };
+    if (record.kind === 'COMMERCIAL_NUMBER') return {
+      resolve: async () => { const row = await tx.partnerCommercialNumber.findUnique({ where: { number: record.number },
+        select: { caseId: true } }); return row && { rootId: row.caseId }; },
+      lock: () => tx.$queryRaw`SELECT number FROM partner_commercial_numbers WHERE number = ${record.number} FOR UPDATE`,
+    };
+    if (record.kind === 'REVISION') return {
+      resolve: async () => (await tx.partnerCaseRevision.findUnique({ where: { caseId_revision: {
+        caseId: expectedCaseId, revision: record.revision } }, select: { caseId: true } })) && { rootId: expectedCaseId },
+      lock: () => tx.$queryRaw`SELECT revision FROM partner_case_revisions WHERE "caseId" = ${expectedCaseId}
+        AND revision = ${record.revision} FOR UPDATE`,
+    };
+    if (record.kind === 'ROW_BINDING') return {
+      resolve: async () => (await tx.partnerCaseRowBinding.findUnique({ where: { caseId_revision_productRowId: {
+        caseId: expectedCaseId, revision: record.revision, productRowId: record.productRowId } }, select: { caseId: true } }))
+        && { rootId: expectedCaseId },
+      lock: () => tx.$queryRaw`SELECT "productRowId" FROM partner_case_row_bindings WHERE "caseId" = ${expectedCaseId}
+        AND revision = ${record.revision} AND "productRowId" = ${record.productRowId} FOR UPDATE`,
+    };
+    if (record.kind === 'INQUIRY_USAGE') return { resolve: direct(tx.partnerInquiryUsage, record.id),
+      lock: () => tx.$queryRaw`SELECT id FROM partner_inquiry_usages WHERE id = ${record.id} FOR UPDATE` };
+    if (record.kind === 'DELIVERY') return {
+      resolve: async () => (await tx.partnerCaseDelivery.findUnique({ where: { caseId_revision_id: {
+        caseId: expectedCaseId, revision: record.revision, id: record.id } }, select: { caseId: true } }))
+        && { rootId: expectedCaseId },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_case_deliveries WHERE "caseId" = ${expectedCaseId}
+        AND revision = ${record.revision} AND id = ${record.id} FOR UPDATE`,
+    };
+    if (record.kind === 'DELIVERY_ITEM') return {
+      resolve: async () => (await tx.partnerCaseDeliveryItem.findUnique({ where: { caseId_revision_deliveryId_productRowId: {
+        caseId: expectedCaseId, revision: record.revision, deliveryId: record.deliveryId, productRowId: record.productRowId } },
+        select: { caseId: true } })) && { rootId: expectedCaseId },
+      lock: () => tx.$queryRaw`SELECT "productRowId" FROM partner_case_delivery_items WHERE "caseId" = ${expectedCaseId}
+        AND revision = ${record.revision} AND "deliveryId" = ${record.deliveryId}
+        AND "productRowId" = ${record.productRowId} FOR UPDATE`,
+    };
+    if (record.kind === 'PAYMENT_PLAN') return {
+      resolve: async () => { const row = await tx.partnerPaymentPlan.findUnique({ where: { id: record.id },
+        select: { caseId: true, purpose: true } }); return row && { rootId: row.caseId, paymentPurpose: row.purpose }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_payment_plans WHERE id = ${record.id} FOR UPDATE`,
+    };
+    if (record.kind === 'PAYMENT_INSTALLMENT') return {
+      resolve: async () => { const row = await tx.partnerPaymentInstallment.findUnique({ where: { id: record.id },
+        select: { plan: { select: { caseId: true, purpose: true } } } });
+        return row && { rootId: row.plan.caseId, paymentPurpose: row.plan.purpose }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_payment_installments WHERE id = ${record.id} FOR UPDATE`,
+    };
+    if (record.kind === 'RETAIL_RECEIPT') return {
+      resolve: async () => { const row = await tx.partnerRetailReceipt.findUnique({ where: { id: record.id },
+        select: { caseId: true } }); return row && { rootId: row.caseId, paymentPurpose: 'RETAIL' }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_retail_receipts WHERE id = ${record.id} FOR UPDATE` };
+    if (record.kind === 'RECEIPT_ALLOCATION') return {
+      resolve: async () => { const row = await tx.partnerRetailReceiptAllocation.findUnique({ where: {
+        receiptId_installmentId: { receiptId: record.receiptId, installmentId: record.installmentId } },
+        select: { receipt: { select: { caseId: true } } } });
+        return row && { rootId: row.receipt.caseId, paymentPurpose: 'RETAIL' }; },
+      lock: () => tx.$queryRaw`SELECT "receiptId" FROM partner_retail_receipt_allocations
+        WHERE "receiptId" = ${record.receiptId} AND "installmentId" = ${record.installmentId} FOR UPDATE`,
+    };
+    if (record.kind === 'EVENT') return { resolve: direct(tx.partnerCaseEvent, record.id),
+      lock: () => tx.$queryRaw`SELECT id FROM partner_case_events WHERE id = ${record.id} FOR UPDATE` };
+    if (record.kind === 'CUSTOMER_OUTPUT') return { resolve: direct(tx.partnerCustomerOutputSnapshot, record.id),
+      lock: () => tx.$queryRaw`SELECT id FROM partner_customer_output_snapshots WHERE id = ${record.id} FOR UPDATE` };
+    if (record.kind === 'CORRECTION_OPPORTUNITY') return { resolve: direct(tx.partnerCorrectionOpportunity, record.id),
+      lock: () => tx.$queryRaw`SELECT id FROM partner_correction_opportunities WHERE id = ${record.id} FOR UPDATE` };
+    if (record.kind === 'CORRECTION_SAVE') return {
+      resolve: async () => { const row = await tx.partnerCorrectionSave.findUnique({ where: { opportunityId: record.id },
+        select: { opportunity: { select: { caseId: true } } } }); return row && { rootId: row.opportunity.caseId }; },
+      lock: () => tx.$queryRaw`SELECT "opportunityId" FROM partner_correction_saves WHERE "opportunityId" = ${record.id} FOR UPDATE`,
+    };
+    if (record.kind === 'CORRECTION_GATE') return {
+      resolve: async () => { const row = await tx.partnerCorrectionGate.findUnique({ where: { id: record.id },
+        select: { opportunity: { select: { caseId: true } } } }); return row && { rootId: row.opportunity.caseId }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_correction_gates WHERE id = ${record.id} FOR UPDATE`,
+    };
+    if (record.kind === 'CORRECTION_DEPENDENCY') return {
+      resolve: async () => { const row = await tx.partnerCorrectionDependency.findUnique({ where: { id: record.id },
+        select: { opportunity: { select: { caseId: true } } } }); return row && { rootId: row.opportunity.caseId }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_correction_dependencies WHERE id = ${record.id} FOR UPDATE`,
+    };
+    if (record.kind === 'FINANCIAL_ADJUSTMENT') return { resolve: direct(tx.partnerFinancialAdjustment, record.id),
+      lock: () => tx.$queryRaw`SELECT id FROM partner_financial_adjustments WHERE id = ${record.id} FOR UPDATE` };
+    if (record.kind === 'OUTBOX_MESSAGE') return {
+      resolve: async () => { const row = await tx.partnerOutboxMessage.findUnique({ where: { id: record.id },
+        select: { event: { select: { caseId: true } } } }); return row && { rootId: row.event.caseId }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_outbox_messages WHERE id = ${record.id} FOR UPDATE`,
+    };
+    return {
+      resolve: async () => { const row = await tx.partnerOutboxAttempt.findUnique({ where: { id: record.id },
+        select: { message: { select: { event: { select: { caseId: true } } } } } });
+        return row && { rootId: row.message.event.caseId }; },
+      lock: () => tx.$queryRaw`SELECT id FROM partner_outbox_attempts WHERE id = ${record.id} FOR UPDATE`,
+    };
+  }
+  async function authorizeChild(action: PartnerAction, root: AuthorizationRoot, guard: ChildGuard,
+    validate: (context: PermissionContext, relationship: ChildRelationship) => boolean = () => true): Promise<Result<PermissionContext>> {
+    const relationship = await guard.resolve();
+    if (!relationship || relationship.rootId !== root.id) return { ok: false, error: partnerError('NOT_FOUND') };
+    const decision = await authorization.authorize(action, root);
+    if (!decision.ok) return decision;
+    if (!validate(decision.value, relationship)) return { ok: false, error: partnerError('FORBIDDEN') };
+    await guard.lock();
+    const currentRelationship = await guard.resolve();
+    if (!currentRelationship || currentRelationship.rootId !== root.id) return { ok: false, error: partnerError('NOT_FOUND') };
+    const current = await authorization.authorize(action, root);
+    if (!current.ok) return current;
+    return validate(current.value, currentRelationship) ? current : { ok: false, error: partnerError('FORBIDDEN') };
+  }
   return { ...authorization,
-    async authorizeCaseRecord(action: PartnerAction, target: { kind: 'PRODUCT_ROW' | 'INTERNAL_RECORD' | 'CUSTOMER_CONTRACT'; id: string },
+    async authorizeCaseRecord(action: PartnerAction, target: PartnerCaseRecordTarget,
       expectedCaseId: string): Promise<Result<PermissionContext>> {
-      let caseId: string | null | undefined;
-      if (target.kind === 'PRODUCT_ROW') {
-        caseId = (await tx.partnerProductRow.findUnique({ where: { id: target.id }, select: { caseId: true } }))?.caseId;
-      } else if (target.kind === 'INTERNAL_RECORD') {
-        caseId = (await tx.sabalanToPartnerSaleRecord.findUnique({ where: { id: target.id }, select: { caseId: true } }))?.caseId;
-      } else if (target.kind === 'CUSTOMER_CONTRACT') {
-        const contract = await tx.salesContract.findUnique({ where: { id: target.id }, select: { partnerKind: true, partnerCaseId: true } });
-        if (contract?.partnerKind === 'PARTNER_CUSTOMER') caseId = contract.partnerCaseId;
-      }
-      if (!caseId || caseId !== expectedCaseId) return { ok: false, error: partnerError('NOT_FOUND') };
       const root = { kind: 'CASE' as const, id: expectedCaseId };
-      const decision = await authorization.authorize(action, root);
-      if (!decision.ok) return decision;
-      if (target.kind === 'PRODUCT_ROW') await tx.$queryRaw`SELECT id FROM partner_product_rows WHERE id = ${target.id} FOR UPDATE`;
-      if (target.kind === 'INTERNAL_RECORD') await tx.$queryRaw`SELECT id FROM sabalan_to_partner_sale_records WHERE id = ${target.id} FOR UPDATE`;
-      if (target.kind === 'CUSTOMER_CONTRACT') await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${target.id} FOR UPDATE`;
-      // The three links are database-immutable. Recheck current grant/time after
-      // acquiring the child, never reuse a permit issued before a lock wait.
-      return authorization.authorize(action, root);
+      return authorizeChild(action, root, caseRecordGuard(target, expectedCaseId), (context, relationship) => {
+        if (!relationship.paymentPurpose) return true;
+        if (context.persona === 'PARTNER' && relationship.paymentPurpose === 'SABALAN') return action === 'CASE_READ';
+        if (context.purpose === 'ACCOUNTING' && relationship.paymentPurpose === 'RETAIL') return false;
+        return context.purpose !== 'FULFILLMENT';
+      });
+    },
+    async authorizeInquiryRecord(action: PartnerAction, target: PartnerInquiryRecordTarget,
+      expectedInquiryId: string): Promise<Result<PermissionContext>> {
+      return authorizeChild(action, { kind: 'INQUIRY', id: expectedInquiryId }, inquiryRecordGuard(target));
     },
     async authorizeInquiryRow(action: PartnerAction, rowId: string, expectedInquiryId: string): Promise<Result<PermissionContext>> {
-      // inquiryId is immutable. Resolve it without acquiring a child-before-root
-      // lock, and never infer a different root from a forged nested identifier.
-      const row = await tx.partnerInquiryRow.findUnique({ where: { id: rowId }, select: { inquiryId: true } });
-      if (!row || row.inquiryId !== expectedInquiryId) return { ok: false, error: partnerError('NOT_FOUND') };
-      const root = { kind: 'INQUIRY' as const, id: expectedInquiryId };
-      const decision = await authorization.authorize(action, root);
-      if (!decision.ok) return decision;
-      await tx.$queryRaw`SELECT id FROM partner_inquiry_rows WHERE id = ${rowId} FOR UPDATE`;
-      return authorization.authorize(action, root);
+      return authorizeChild(action, { kind: 'INQUIRY', id: expectedInquiryId }, inquiryRecordGuard({ kind: 'ROW', id: rowId }));
     },
     async authorizeProject(action: PartnerAction, projectId: string, expectedCustomerId: string): Promise<Result<PermissionContext>> {
       // Root before child, matching callers that already authorized the Customer.

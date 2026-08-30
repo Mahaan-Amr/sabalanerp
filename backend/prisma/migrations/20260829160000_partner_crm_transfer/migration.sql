@@ -185,6 +185,17 @@ BEGIN
   SELECT customer."partnerOwnerProfileId", profile."userId" INTO owner_profile_id, owner_user_id
     FROM crm_customers customer LEFT JOIN partner_profiles profile ON profile.id = customer."partnerOwnerProfileId"
     WHERE customer.id = customer_id FOR UPDATE OF customer;
+  IF TG_TABLE_NAME = 'crm_potential_projects' AND TG_OP = 'INSERT'
+     AND (to_jsonb(NEW)->>'partnerRevision') IS NULL THEN
+    PERFORM id FROM users WHERE id = to_jsonb(NEW)->>'responsibleSellerId' FOR UPDATE;
+    IF NOT EXISTS (SELECT 1 FROM users destination
+         WHERE destination.id = to_jsonb(NEW)->>'responsibleSellerId' AND destination."isActive")
+       OR EXISTS (SELECT 1 FROM partner_profiles destination_profile
+         WHERE destination_profile."userId" = to_jsonb(NEW)->>'responsibleSellerId') THEN
+      RAISE EXCEPTION 'Legacy CRM Project responsibility requires an active internal non-Partner User'
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
   IF TG_TABLE_NAME = 'crm_potential_projects' AND TG_OP = 'UPDATE'
      AND (to_jsonb(OLD)->'customerTransferSnapshot') IS DISTINCT FROM
        (to_jsonb(NEW)->'customerTransferSnapshot') THEN

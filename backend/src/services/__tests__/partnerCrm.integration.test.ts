@@ -617,6 +617,11 @@ test('database guards reject direct Partner Customer and nested CRM writes outsi
       await assert.rejects(tx.crmCustomer.update({ where: { id: ordinaryCustomerId }, data: {
         partnerOwnerProfileId: partnerId, partnerRevision: 1 } }), /approved Partner transfer/);
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT direct_ordinary_claim');
+      await tx.$executeRawUnsafe('SAVEPOINT direct_partner_project_responsibility');
+      await assert.rejects(tx.crmPotentialProject.create({ data: { id: `partner-crm-forbidden-project-${suffix}`,
+        customerId: ordinaryCustomerId, responsibleSellerId: partnerId, title: 'مسئولیت ناسازگار', workType: 'نما' } }),
+      /active internal non-Partner User/);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT direct_partner_project_responsibility');
       await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${partnerId}, true)`;
       await tx.crmCustomer.create({ data: { id: customerId, ownerUserId: partnerId, partnerOwnerProfileId: partnerId,
         partnerRevision: 1, firstName: 'مشتری', lastName: 'همکار' } });
@@ -638,6 +643,50 @@ test('database guards reject direct Partner Customer and nested CRM writes outsi
     }, { timeout: 20_000 }), error => error === rollback);
   } finally {
     await database.$disconnect();
+  }
+});
+
+test('legacy Project creation racing Partner activation cannot assign the activated User', async () => {
+  const activationDatabase = new PrismaClient({ datasources: { db: { url: databaseUrl(3) } } });
+  const projectDatabase = new PrismaClient({ datasources: { db: { url: databaseUrl(3) } } });
+  const suffix = randomUUID();
+  const actorId = `partner-crm-create-race-admin-${suffix}`;
+  const destinationId = `partner-crm-create-race-destination-${suffix}`;
+  const customerId = `partner-crm-create-race-customer-${suffix}`;
+  const projectId = `partner-crm-create-race-project-${suffix}`;
+  const activated = signal(); const release = signal();
+  let activation: Promise<unknown> | undefined;
+  try {
+    await activationDatabase.user.createMany({ data: [
+      { id: actorId, username: actorId, email: `${actorId}@example.invalid`, password: 'not-a-login',
+        firstName: 'Fixture', lastName: 'Create Race', role: 'ADMIN' },
+      { id: destinationId, username: destinationId, email: `${destinationId}@example.invalid`, password: 'not-a-login',
+        firstName: 'Fixture', lastName: 'Create Race', role: 'USER' },
+    ] });
+    await activationDatabase.partnerProfile.create({ data: { id: destinationId, userId: destinationId, state: 'PENDING' } });
+    await activationDatabase.crmCustomer.create({ data: { id: customerId, ownerUserId: actorId,
+      firstName: 'مشتری', lastName: 'رقابت ایجاد پروژه' } });
+    activation = activationDatabase.$transaction(async tx => {
+      await tx.partnerProfile.update({ where: { id: destinationId }, data: { state: 'ACTIVE' } });
+      activated.resolve(); await release.promise;
+    }, { timeout: 15_000 });
+    await activated.promise;
+    const projectWrite = projectDatabase.crmPotentialProject.create({ data: { id: projectId, customerId,
+      responsibleSellerId: destinationId, title: 'پروژه هم‌زمان با فعال‌سازی', workType: 'نما' } });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    release.resolve(); await activation;
+    await assert.rejects(projectWrite, /active internal non-Partner User/);
+    assert.equal(await activationDatabase.crmPotentialProject.count({ where: { id: projectId } }), 0);
+  } finally {
+    release.resolve(); await activation?.catch(() => undefined);
+    await activationDatabase.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.crmPotentialProject.deleteMany({ where: { id: projectId } });
+      await tx.crmCustomer.deleteMany({ where: { id: customerId } });
+      await tx.partnerProfile.deleteMany({ where: { id: destinationId } });
+      await tx.user.deleteMany({ where: { id: { in: [actorId, destinationId] } } });
+    });
+    await Promise.all([activationDatabase.$disconnect(), projectDatabase.$disconnect()]);
   }
 });
 

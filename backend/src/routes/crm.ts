@@ -286,6 +286,27 @@ type OrdinaryProjectReassignmentResult =
   | { ok: true; project: any; nextSeller: { id: string; firstName: string; lastName: string; username: string } }
   | { ok: false; code: 'NOT_FOUND' | 'DESTINATION_NOT_FOUND' | 'FORBIDDEN' | 'CONFLICT' };
 
+type LockedCrmActor = { id: string; role: string; isActive: boolean };
+
+const lockCurrentCrmManagerAuthority = async (tx: Prisma.TransactionClient, actor: LockedCrmActor) => {
+  if (!actor.isActive) return false;
+  await tx.$queryRaw`SELECT id FROM workspace_permissions
+    WHERE "userId" = ${actor.id} AND workspace = ${WORKSPACES.CRM} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM feature_permissions
+    WHERE "userId" = ${actor.id} AND workspace = ${WORKSPACES.CRM}
+      AND feature = ${FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM role_workspace_permissions
+    WHERE role = ${actor.role} AND workspace = ${WORKSPACES.CRM} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM role_feature_permissions
+    WHERE role = ${actor.role} AND workspace = ${WORKSPACES.CRM}
+      AND feature = ${FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN} FOR UPDATE`;
+  try {
+    await resolveEffectiveNarrowAuthority(tx as unknown as PrismaClient, { userId: actor.id,
+      workspace: WORKSPACES.CRM, feature: FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN, requiredPermission: 'edit' });
+    return true;
+  } catch { return false; }
+};
+
 export const reassignOrdinaryCrmProject = async (database: PrismaClient, input: {
   projectId: string;
   nextSellerId: string;
@@ -316,26 +337,7 @@ export const reassignOrdinaryCrmProject = async (database: PrismaClient, input: 
   if (!actor?.isActive) return { ok: false, code: 'FORBIDDEN' };
   const destinationProfile = await tx.partnerProfile.findUnique({ where: { userId: nextSeller.id }, select: { id: true } });
   if (destinationProfile) return { ok: false, code: 'DESTINATION_NOT_FOUND' };
-  await tx.$queryRaw`SELECT id FROM workspace_permissions
-    WHERE "userId" = ${actor.id} AND workspace = ${WORKSPACES.CRM} FOR UPDATE`;
-  await tx.$queryRaw`SELECT id FROM feature_permissions
-    WHERE "userId" = ${actor.id} AND workspace = ${WORKSPACES.CRM}
-      AND feature = ${FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN} FOR UPDATE`;
-  await tx.$queryRaw`SELECT id FROM role_workspace_permissions
-    WHERE role = ${actor.role} AND workspace = ${WORKSPACES.CRM} FOR UPDATE`;
-  await tx.$queryRaw`SELECT id FROM role_feature_permissions
-    WHERE role = ${actor.role} AND workspace = ${WORKSPACES.CRM}
-      AND feature = ${FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN} FOR UPDATE`;
-  try {
-    await resolveEffectiveNarrowAuthority(tx as unknown as PrismaClient, {
-      userId: actor.id,
-      workspace: WORKSPACES.CRM,
-      feature: FEATURES.CRM_POTENTIAL_PROJECTS_REASSIGN,
-      requiredPermission: 'edit',
-    });
-  } catch {
-    return { ok: false, code: 'FORBIDDEN' };
-  }
+  if (!await lockCurrentCrmManagerAuthority(tx, actor)) return { ok: false, code: 'FORBIDDEN' };
 
   await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_legacy_reassignment', ${JSON.stringify({
     projectId: project.id, previousSellerId: project.responsibleSellerId, nextSellerId: nextSeller.id,
@@ -2356,6 +2358,19 @@ router.post('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CR
     }
 
     const project = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM crm_customers WHERE id = ${customer.id} FOR UPDATE`;
+      const userIds = [...new Set([req.user.id, responsibleSellerId])].sort();
+      const users = await tx.$queryRaw<Array<{ id: string; role: string; isActive: boolean }>>(Prisma.sql`
+        SELECT id, role::text AS role, "isActive" FROM users
+        WHERE id IN (${Prisma.join(userIds)}) ORDER BY id FOR UPDATE`);
+      const actor = users.find(user => user.id === req.user.id);
+      const destination = users.find(user => user.id === responsibleSellerId);
+      if (!actor?.isActive || !destination?.isActive) return null;
+      if (await tx.partnerProfile.findUnique({ where: { userId: destination.id }, select: { id: true } })) return null;
+      if (destination.id !== actor.id && actor.role !== 'ADMIN' && !await lockCurrentCrmManagerAuthority(tx, actor)) return null;
+      const currentCustomer = await tx.crmCustomer.findUnique({ where: { id: customer.id }, select: {
+        partnerOwnerProfileId: true } });
+      if (currentCustomer?.partnerOwnerProfileId) return null;
       const created = await tx.crmPotentialProject.create({
         data: {
           customerId: req.body.customerId,
@@ -2387,6 +2402,11 @@ router.post('/potential-projects', protect, requireWorkspaceAccess(WORKSPACES.CR
 
       return created;
     });
+
+    if (!project) {
+      res.status(404).json({ success: false, error: 'مخاطب یا فروشنده داخلی فعال پیدا نشد.' });
+      return;
+    }
 
     res.status(201).json({ success: true, data: ordinaryCrmResponse(project) });
   } catch (error) {

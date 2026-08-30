@@ -82,8 +82,8 @@ it never derives relationships from array position or catalog identity. Removing
 a parent cascades only its exact dependents, while unfinished field text remains
 in `editingValues` until the same entity/field commits a canonical value.
 
-Follow-up candidate identity: `8baaca1b` plus integrity review fix
-`40efb64f`, merged with `origin/main` `92da4d8b` by `e74264ee`.
+Follow-up candidate identity: `8baaca1b` plus integrity fixes `40efb64f`,
+`8f03ce93` and `1c6bb443`, merged with `origin/main` `92da4d8b` by `e74264ee`.
 Public interface: `@sabalanerp/partner-sales-contracts@1.9.0`, wire `schemaVersion: 1`,
 canonical graph `@sabalanerp/contract-product-graph@0.1.0`.
 

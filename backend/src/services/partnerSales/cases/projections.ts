@@ -4,11 +4,11 @@ import {
 } from '@sabalanerp/partner-sales-contracts';
 import type { buildRevisionEvidence } from './revisions';
 
-type Evidence = Extract<ReturnType<typeof buildRevisionEvidence>, { ok: true }>['value'];
+export type CaseRevisionProjectionEvidence = Extract<ReturnType<typeof buildRevisionEvidence>, { ok: true }>['value'];
 
 export async function buildCaseProjections(input: { caseId: string; revision: number; integrityHash: string;
   caseNumber: string; internalRecordId: string; internalRecordNumber: string; customerContractNumber: string;
-  commercialAccountId: string; state: 'DRAFT'; evidence: Evidence }): Promise<Result<{
+  commercialAccountId: string; state: 'DRAFT'; evidence: CaseRevisionProjectionEvidence }): Promise<Result<{
     partner: ReturnType<typeof PartnerCaseViewSchema.parse>;
     accounting: ReturnType<typeof SabalanInternalRecordViewSchema.parse>;
     fulfillment: ReturnType<typeof FulfillmentViewSchema.parse>;
@@ -16,7 +16,7 @@ export async function buildCaseProjections(input: { caseId: string; revision: nu
   }>> {
   try {
     const owner = { caseId: input.caseId, revision: input.revision, integrityHash: input.integrityHash };
-    const product = (row: Evidence['products'][number]) => ({ productRowId: row.productRowId,
+    const product = (row: CaseRevisionProjectionEvidence['products'][number]) => ({ productRowId: row.productRowId,
       description: row.description, quantity: row.quantity, unit: row.unit });
     const deliveries = input.evidence.customerContent.deliveries;
     const customerCore = { schemaVersion: 1 as const, purpose: 'CUSTOMER_OUTPUT' as const,

@@ -32,6 +32,7 @@ import {
   calculateStairPart,
   parseCanonicalDecimal,
   parseStableIdentity,
+  refreshProductOperationsGeometry,
   type PaidRemainderStock,
   type ProductOperationsInput,
   type StairLayerCalculation,
@@ -45,6 +46,48 @@ import {
 
 const toCanonicalDecimal = (value: number) =>
   parseCanonicalDecimal(String(value));
+
+export const createStairOperationInput = (
+  part: StairStepperPart,
+  draft: StairPartDraftV2,
+  productId: string
+): ProductOperationsInput => {
+  const lengthMeters = toCanonicalDecimal(getActualLengthMeters(draft));
+  const widthMeters = toCanonicalDecimal(Number(draft.widthCm || 0) / 100);
+  const quantity =
+    Number.isSafeInteger(draft.quantity) && Number(draft.quantity) > 0
+      ? Number(draft.quantity)
+      : undefined;
+  const current = draft.operationPolicyInput;
+  if (current) {
+    return {
+      ...refreshProductOperationsGeometry({
+        input: current,
+        lengthMeters,
+        widthMeters,
+        quantity
+      }),
+      policyVersion: 'calculation-v1',
+      pricingPolicyVersion: 'pricing-v1',
+      roundingPolicyVersion: 'rounding-v1'
+    };
+  }
+  return {
+    policyVersion: 'calculation-v1',
+    pricingPolicyVersion: 'pricing-v1',
+    roundingPolicyVersion: 'rounding-v1',
+    productRowId: parseStableIdentity(
+      'product-row',
+      `stair-draft:${productId}:${part}`
+    ),
+    lengthMeters,
+    widthMeters,
+    ...(quantity === undefined ? {} : { quantity }),
+    groups: [],
+    tools: [],
+    finishings: []
+  };
+};
 
 export const toCanonicalLayerInventory = ({
   stones,

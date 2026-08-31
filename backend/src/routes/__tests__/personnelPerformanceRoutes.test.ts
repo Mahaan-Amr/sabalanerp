@@ -10,12 +10,40 @@ const registeredRoutes = (router as unknown as {
     .map(([method]) => `${method.toUpperCase()} ${layer.route!.path}`)
   : []);
 
-assert.deepEqual(registeredRoutes, ['GET /capabilities', 'GET /rollout']);
+assert.deepEqual(registeredRoutes, [
+  'GET /capabilities',
+  'GET /rollout',
+  'GET /criteria',
+  'POST /criteria',
+  'PUT /criteria/:versionId',
+  'POST /criteria/:versionId/schedule',
+  'GET /templates',
+  'POST /templates',
+  'PUT /templates/:versionId',
+  'POST /templates/:versionId/schedule',
+  'GET /policies',
+  'POST /policies',
+  'PUT /policies/:versionId',
+  'POST /policies/:versionId/preview',
+  'POST /policies/:versionId/schedule',
+  'POST /:artifactType/:versionId/cancel',
+  'POST /:artifactType/:versionId/retire',
+  'POST /activation/run-due-policies',
+  'POST /activation/run-due-artifacts',
+  'GET /traces/:traceId',
+]);
 
 const rolloutLayer = (router as unknown as {
   stack: Array<{ route?: { path: string; stack: Array<{ handle: RequestHandler }> } }>;
 }).stack.find((layer) => layer.route?.path === '/rollout');
 assert.ok(rolloutLayer && rolloutLayer.route!.stack.length >= 2, 'rollout metadata must retain server-side authorization middleware');
+
+for (const path of ['/criteria', '/templates', '/policies', '/activation/run-due-policies', '/activation/run-due-artifacts']) {
+  const writeLayer = (router as unknown as {
+    stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
+  }).stack.find((layer) => layer.route?.path === path && layer.route.methods.post);
+  assert.ok(writeLayer && writeLayer.route!.stack.length >= 3, `${path} writes require permission and server-side rollout middleware`);
+}
 
 assert.deepEqual(projectPersonnelPerformanceCapabilities([
   'PERSONNEL',

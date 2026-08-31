@@ -86,6 +86,8 @@ import { startDispatchBuyerSmsDelivery } from "./services/dispatchBuyerSmsWorker
 import { startCrossWorkspaceDutyDeadlineMaintenance } from "./services/crossWorkspaceDutyModule";
 import { verifyHrRedesignCutover } from "./services/hrRedesignCutover";
 import { resolveHrRedesignCutoverStartup } from "./services/hrRedesignCutoverStartup";
+import { validatePerformanceVaultEnvironment } from "./services/personnelPerformancePayloadStore";
+import { startPersonnelPerformanceMaintenance } from "./services/personnelPerformanceMaintenance";
 
 initializeRecoveryRuntime();
 const app = express();
@@ -119,6 +121,8 @@ const validateProductionEnvironment = () => {
     "SMS_IR_DISPATCH_CONFIRM_OTP_TEMPLATE_ID",
     "SMS_IR_DISPATCH_EXIT_TEMPLATE_ID",
     "SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID",
+    "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID",
+    "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64",
   ];
   const missingVars = requiredVars.filter((key) => !process.env[key]);
   const hiringTemplateId =
@@ -157,6 +161,12 @@ const validateProductionEnvironment = () => {
   } catch {
     hasInvalidPublicAppUrl = true;
   }
+  let hasInvalidPerformanceVault = false;
+  try {
+    validatePerformanceVaultEnvironment(process.env);
+  } catch {
+    hasInvalidPerformanceVault = true;
+  }
 
   if (
     missingVars.length > 0 ||
@@ -167,7 +177,8 @@ const validateProductionEnvironment = () => {
     hasInvalidHiringOfferParameters ||
     hasInvalidSmsEnvironment ||
     hasInvalidDispatchTemplates ||
-    hasInvalidPublicAppUrl
+    hasInvalidPublicAppUrl ||
+    hasInvalidPerformanceVault
   ) {
     const details = [
       missingVars.length > 0 ? `Missing vars: ${missingVars.join(", ")}` : "",
@@ -192,6 +203,9 @@ const validateProductionEnvironment = () => {
         : "",
       hasInvalidPublicAppUrl
         ? "PUBLIC_APP_URL must be a valid HTTPS origin used for the fixed applicant entry page."
+        : "",
+      hasInvalidPerformanceVault
+        ? "Personnel performance encryption key id and exact 32-byte base64 key must be production-ready."
         : "",
     ].filter(Boolean);
     throw new Error(`Invalid production environment. ${details.join(" ")}`);
@@ -439,6 +453,7 @@ initializeSystemRecovery(prisma).then(async () => {
     startSupportTicketMaintenance(prisma);
     startDispatchBuyerSmsDelivery(prisma);
     startCrossWorkspaceDutyDeadlineMaintenance(prisma);
+    startPersonnelPerformanceMaintenance(prisma);
   }
   server.listen(PORT, () => {
     console.log(`? Server running on port ${PORT}`);

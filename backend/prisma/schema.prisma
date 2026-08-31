@@ -7340,6 +7340,19 @@ model PerformancePolicyActivationPreview {
   @@map("performance_policy_activation_previews")
 }
 
+model PerformanceOperationReceipt {
+  id                 String   @id @default(cuid())
+  idempotencyKeyHash String   @unique
+  operationKind      String
+  policyVersionId    String?
+  intentHash         String
+  encryptedPayloadId String   @unique
+  completedAt        DateTime @default(now())
+
+  @@index([operationKind, completedAt])
+  @@map("performance_operation_receipts")
+}
+
 model PerformanceCriterionIdentity {
   id              String   @id @default(cuid())
   stableKey       String   @unique
@@ -7357,6 +7370,7 @@ model PerformanceCriterionVersion {
   lifecycle           PerformanceArtifactLifecycle @default(DRAFT)
   predecessorId       String?
   effectiveFrom       DateTime?
+  retiredAt           DateTime?
   contentHash         String
   encryptedPayloadId  String?                      @unique
   publicationReason   String?
@@ -7379,6 +7393,7 @@ model PerformanceTemplateVersion {
   lifecycle          PerformanceArtifactLifecycle @default(DRAFT)
   predecessorId      String?
   effectiveFrom      DateTime?
+  retiredAt          DateTime?
   contentHash        String
   encryptedPayloadId String?                      @unique
   publicationReason  String?
@@ -7524,6 +7539,23 @@ model PerformanceSnapshot {
   @@unique([evaluationId, sectionId, snapshotKind, version])
   @@index([evaluationId, capturedAt])
   @@map("performance_snapshots")
+}
+
+model PerformanceArtifactSnapshotBinding {
+  id                 String   @id @default(cuid())
+  snapshotId         String
+  artifactType       String
+  policyVersionId    String?
+  criterionVersionId String?
+  templateVersionId  String?
+  contentHash        String
+  createdAt          DateTime @default(now())
+
+  @@index([snapshotId, artifactType])
+  @@index([policyVersionId])
+  @@index([criterionVersionId])
+  @@index([templateVersionId])
+  @@map("performance_artifact_snapshot_bindings")
 }
 
 model PerformanceDraft {

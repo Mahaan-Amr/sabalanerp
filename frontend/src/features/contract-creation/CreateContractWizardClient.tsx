@@ -274,6 +274,7 @@ import {
   applyInventoryLayerTypeSelection,
   createCanonicalLayerCalculationRequest,
   createCanonicalStairDraftInput,
+  createStairOperationInput,
   formatCanonicalLayerConflict,
   normalizeAutomaticLayerOperationGroups,
   toCanonicalLayerInventory,
@@ -375,28 +376,6 @@ const materializeOperationSnapshots = (
     )
   };
 };
-
-const createStairOperationInput = (
-  part: StairStepperPart,
-  draft: StairPartDraftV2,
-  productId: string
-): ProductOperationsInput => ({
-  policyVersion: 'calculation-v1',
-  pricingPolicyVersion: 'pricing-v1',
-  roundingPolicyVersion: 'rounding-v1',
-  productRowId: draft.operationPolicyInput?.productRowId || parseStableIdentity(
-    'product-row',
-    `stair-draft:${productId}:${part}`
-  ),
-  lengthMeters: parseCanonicalDecimal(String(getActualLengthMeters(draft))),
-  widthMeters: parseCanonicalDecimal(String(Number(draft.widthCm || 0) / 100)),
-  ...(Number.isSafeInteger(draft.quantity) && Number(draft.quantity) > 0
-    ? { quantity: Number(draft.quantity) }
-    : {}),
-  groups: draft.operationPolicyInput?.groups ?? [],
-  tools: draft.operationPolicyInput?.tools ?? [],
-  finishings: draft.operationPolicyInput?.finishings ?? []
-});
 
 const createLayerSideOperationInput = (
   part: StairStepperPart,

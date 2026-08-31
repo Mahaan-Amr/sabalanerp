@@ -216,7 +216,7 @@ test('opportunity integrity binds the approved calendar window and Sales evidenc
     expiresAt: '2026-09-30T08:00:00.000Z' };
   const save = await command('partner-328', 'RETAIL_CORRECTION_SAVE', {
     expected: predecessor, expectedState: 'COMMITTED', opportunityId: opportunity.opportunityId,
-    retailPrices: tampered.repository.record.effective.retailPrices,
+    retailPrices: [...tampered.repository.record.effective.retailPrices],
     customerPaymentPlan: initialPlan,
   }, 'tampered-window-save');
   const tamperedResult = await tampered.service.execute(save);
@@ -274,7 +274,7 @@ test('payment-plan correction starts after today and cannot rewrite current or p
   const todayPlan = { ...successorPlan, effectiveDate: '2026-09-01' };
   const invalid = await command('partner-328', 'RETAIL_CORRECTION_SAVE', {
     expected: predecessor, expectedState: 'COMMITTED', opportunityId: opportunity.opportunityId,
-    retailPrices: f.repository.record.effective.retailPrices, customerPaymentPlan: todayPlan,
+    retailPrices: [...f.repository.record.effective.retailPrices], customerPaymentPlan: todayPlan,
   }, 'today-plan');
   const result = await f.service.execute(invalid);
   assert.equal(result.ok, false);

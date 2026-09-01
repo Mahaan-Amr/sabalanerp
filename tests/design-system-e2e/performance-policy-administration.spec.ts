@@ -82,22 +82,23 @@ test('accepted performance prototypes open on the approved analytics list and pr
   await page.goto('/dashboard/hr/personnel/performance-analytics-prototype');
   await expect(page.getByRole('heading', { name: 'فهرست تحلیلی Personnel' })).toBeVisible();
 
-  await page.goto('/dashboard/hr/personnel/performance-criteria-prototype?variant=A&save=fail');
+  await page.goto('/dashboard/hr/personnel/performance-criteria-prototype?variant=D&save=fail');
   await page.getByRole('button', { name: 'ساخت معیار جدید' }).click();
   const editor = page.getByRole('dialog', { name: 'ساخت معیار جدید' });
   await editor.getByRole('textbox', { name: 'نام معیار' }).fill('معیار بازیابی ذخیره');
   await expect(editor.getByText('ذخیره نشد', { exact: true })).toBeVisible();
-  await editor.getByRole('button', { name: 'بستن' }).click();
+  const closeDraftButton = editor.getByRole('contentinfo').getByRole('button', { name: 'بستن' });
+  await closeDraftButton.click();
   await expect(editor).toBeVisible();
   await editor.getByRole('button', { name: 'تلاش دوباره' }).click();
   await expect(editor.getByText('پیش‌نویس با دکمه ذخیره شد')).toBeVisible();
-  await editor.getByRole('button', { name: 'بستن' }).click();
+  await closeDraftButton.click();
   await expect(editor).toBeHidden();
 });
 
 test('criteria publication rejects a missing or non-future effective date', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/dashboard/hr/personnel/performance-criteria-prototype?variant=A');
+  await page.goto('/dashboard/hr/personnel/performance-criteria-prototype?variant=D');
   await page.getByRole('button', { name: 'ساخت معیار جدید' }).click();
   const editor = page.getByRole('dialog', { name: 'ساخت معیار جدید' });
   await editor.getByRole('textbox', { name: 'سهم این معیار' }).fill('۳۰');

@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { FEATURES, getUserFeatures } from '../middleware/feature';
 import { getUserWorkspaces } from '../middleware/workspace';
 import { canAccessTicket } from './supportTicketPolicy';
+import { canReadPartnerNotification, PARTNER_NOTIFICATION_RESOURCE } from './partnerSales/notifications/access';
 
 export type NotificationAuthorizationUser = {
   id: string;
@@ -61,7 +62,15 @@ export const filterCurrentlyAuthorizedNotifications = async <
   rows: T[],
 ) => {
   if (user.isActive === false) return [];
+  // Partner restrictions precede the general ADMIN override. Unwired central
+  // authorization, revoked grants and old assignments all deny access.
+  const partnerRows = rows.filter(row => row.event?.resourceType === PARTNER_NOTIFICATION_RESOURCE);
+  const partnerAllowed = new Set((await Promise.all(partnerRows.map(async row =>
+    await canReadPartnerNotification(database, user.id, row.id) ? row.id : null,
+  ))).filter((id): id is string => id !== null));
+  rows = rows.filter(row => row.event?.resourceType !== PARTNER_NOTIFICATION_RESOURCE || partnerAllowed.has(row.id));
   if (user.role === 'ADMIN') return rows;
+  if (rows.every(row => row.event?.resourceType === PARTNER_NOTIFICATION_RESOURCE)) return rows;
   const [workspaceRows, featureRows] = await Promise.all([
     getUserWorkspaces(user.id, user.role),
     getUserFeatures(user.id, user.role),
@@ -133,6 +142,7 @@ export const filterCurrentlyAuthorizedNotifications = async <
   }] as const));
   return rows.filter((row) => {
     const event = row.event;
+    if (event?.resourceType === PARTNER_NOTIFICATION_RESOURCE) return partnerAllowed.has(row.id);
     if (!event) return true;
     if (event.resourceType === 'support-ticket' && event.resourceId) {
       const ticket = ticketById.get(event.resourceId);

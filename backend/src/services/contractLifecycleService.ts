@@ -11,6 +11,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import {
+  PARTNER_CASE_RETENTION_BLOCKER,
   contractDeactivationEligibility,
   contractHardDeleteEligibility,
   type ContractLifecycleAction,
@@ -136,6 +137,7 @@ export const getContractLifecyclePreview = async (contractId: string) => {
       inactiveAt: true,
       inactiveBy: true,
       inactiveReason: true,
+      partnerCaseId: true,
     },
   });
   if (!contract) throw new Error('Contract not found');
@@ -147,7 +149,8 @@ export const getContractLifecyclePreview = async (contractId: string) => {
   return {
     contract,
     dependencies,
-    deleteEligibility: contractHardDeleteEligibility({ status: contract.status, dependencies }),
+    deleteEligibility: contractHardDeleteEligibility({ status: contract.status,
+      numberedPartnerCase: contract.partnerCaseId !== null, dependencies }),
     deactivationEligibility: contractDeactivationEligibility({
       alreadyInactive: contract.isInactive,
       openOperations: dependencies.openOperationsByKind,
@@ -184,6 +187,9 @@ export const createContractLifecycleRequest = async ({
   const normalizedReason = requireReason(reason);
   const contract = await prisma.salesContract.findUnique({ where: { id: contractId } });
   if (!contract) throw new Error('Contract not found');
+  if (kind === ContractLifecycleRequestKind.DELETE && contract.partnerCaseId) {
+    throw new Error(`${PARTNER_CASE_RETENTION_BLOCKER.label} قابل حذف نیست؛ برای نگهداری سابقه، پرونده را لغو کنید`);
+  }
   if (kind === ContractLifecycleRequestKind.DELETE && contract.status !== ContractStatus.DRAFT && contract.status !== ContractStatus.CANCELLED) {
     throw new Error('Only draft or voided contracts can be requested for hard deletion');
   }
@@ -282,7 +288,8 @@ export const executeContractLifecycleAction = async ({
     if (!lockedContract) throw new Error('Contract not found');
     const lockedDependencies = await getContractLifecycleDependencies(contractId, tx);
     const lockedEligibility = action === 'DELETE'
-      ? contractHardDeleteEligibility({ status: lockedContract.status, dependencies: lockedDependencies })
+      ? contractHardDeleteEligibility({ status: lockedContract.status,
+        numberedPartnerCase: lockedContract.partnerCaseId !== null, dependencies: lockedDependencies })
       : action === 'DEACTIVATE'
         ? contractDeactivationEligibility({ alreadyInactive: lockedContract.isInactive, openOperations: lockedDependencies.openOperationsByKind })
         : { eligible: lockedContract.isInactive, blockers: [] as ContractLifecycleBlocker[] };

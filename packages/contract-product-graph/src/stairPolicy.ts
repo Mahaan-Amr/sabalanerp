@@ -1,8 +1,8 @@
+import { calculateStairPartGeometry } from './stairTechnical';
 import Decimal from 'decimal.js';
 import { parseCanonicalDecimal, type CanonicalDecimal } from './canonicalDecimal';
 import { hashCanonicalValue } from './canonicalHash';
 import {
-  calculatePackingPlan,
   calculatePricing,
   type PackingPlan,
   type PricedLine
@@ -399,88 +399,6 @@ export const calculateStairPart = (
     normalizedVersion(input.packingPolicyVersion, 'packingPolicyVersion');
     normalizedVersion(input.pricingPolicyVersion, 'pricingPolicyVersion');
     normalizedVersion(input.roundingPolicyVersion, 'roundingPolicyVersion');
-    parseStableIdentity('stair-system', input.stairSystemId);
-    parseStableIdentity('source-batch', input.sourceBatchId);
-
-    if (!input.lengthMeters || !input.crossDimensionMeters) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'stair-geometry-required',
-          field: 'dimensions',
-          message: 'Complete both stair-part dimensions.'
-        }]
-      };
-    }
-    if (!input.motherWidthMeters) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'stair-mother-dimensions-required',
-          field: 'motherWidthMeters',
-          message: 'Mother width must be registered in inventory.'
-        }]
-      };
-    }
-    const length = decimal(input.lengthMeters);
-    const crossDimension = decimal(input.crossDimensionMeters);
-    const motherLengthMode = input.motherLengthMeters === undefined
-      ? 'derived-from-finished' as const
-      : 'explicit' as const;
-    const motherLength = input.motherLengthMeters === undefined
-      ? length
-      : decimal(input.motherLengthMeters);
-    const motherLengthDisplayUnit =
-      input.motherLengthDisplayUnit ?? input.lengthDisplayUnit;
-    const motherWidth = decimal(input.motherWidthMeters);
-    if (
-      motherLength.lte(0) ||
-      motherWidth.lte(0) ||
-      length.lte(0) ||
-      crossDimension.lte(0)
-    ) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'stair-geometry-required',
-          field: 'dimensions',
-          message: 'Stair-part and mother dimensions must be positive.'
-        }]
-      };
-    }
-    if (length.gt(motherLength)) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'stair-maximum-mother-length-exceeded',
-          field: 'lengthMeters',
-          message: `Maximum length is ${motherLength.toFixed()}m.`
-        }]
-      };
-    }
-    if (crossDimension.gt(motherWidth)) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'stair-maximum-mother-width-exceeded',
-          field: 'crossDimensionMeters',
-          message: `Maximum width is ${motherWidth.toFixed()}m.`
-        }]
-      };
-    }
-    let quantity: number;
-    try {
-      quantity = positiveInteger(input.quantity, 'quantity');
-    } catch {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'stair-quantity-required',
-          field: 'quantity',
-          message: 'Enter a positive stair-part quantity.'
-        }]
-      };
-    }
     if (!input.baseRateToman || decimal(input.baseRateToman).lte(0)) {
       return {
         ok: false,
@@ -491,51 +409,19 @@ export const calculateStairPart = (
         }]
       };
     }
-    const kerf = decimal(input.sawKerfMeters);
-    if (kerf.lt(0)) throw new TypeError('sawKerfMeters cannot be negative.');
-    const packed = calculatePackingPlan({
-      policyVersion: input.packingPolicyVersion,
-      kerfMeters: canonical(input.sawKerfEnabled ? kerf : new Decimal(0)),
-      calibrationEnabled: false,
-      sources: [{
-        sourceBatchId: input.sourceBatchId,
-        lengthMeters: canonical(motherLength),
-        widthMeters: canonical(motherWidth),
-        quantity
-      }],
-      demands: [{
-        demandId: `${input.stairSystemId}:${input.part}`,
-        lengthMeters: canonical(length),
-        widthMeters: canonical(crossDimension),
-        quantity
-      }]
-    });
-    if (!packed.ok) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'invalid-stair-input',
-          field: 'packing',
-          message: packed.conflict.message
-        }]
-      };
-    }
-    const hasLongitudinalCut = decimal(packed.plan.longitudinalCutMeters).gt(0);
-    const hasWidthRemainder = packed.plan.remainders.some(remainder =>
-      decimal(remainder.widthMeters).gt(0) &&
-      decimal(remainder.widthMeters).lt(motherWidth)
-    );
-    const automaticCalibration =
-      crossDimension.lt(motherWidth) && hasLongitudinalCut && !hasWidthRemainder;
-    const calibrationEnabled =
-      crossDimension.eq(motherWidth) || !hasLongitudinalCut
-        ? false
-        : input.calibrationSelection === 'manual'
-          ? input.calibrationEnabled
-          : automaticCalibration;
-    const calibrationMeters = calibrationEnabled
-      ? packed.plan.longitudinalCutMeters
-      : canonical(0);
+    const technical = calculateStairPartGeometry(input, input.packingPolicyVersion);
+    if (!technical.ok) return technical;
+    const facts = technical.result;
+    const packed = { plan: facts.packingPlan };
+    const calibrationMeters = facts.packingPlan.calibrationMeters;
+    const calibrationEnabled = facts.calibrationEnabled;
+    const motherLengthMode = facts.motherLengthMode;
+    const motherLengthDisplayUnit = facts.motherLengthDisplayUnit;
+    const motherLength = decimal(facts.motherLengthMeters);
+    const motherWidth = decimal(facts.motherWidthMeters);
+    const length = decimal(facts.lengthMeters);
+    const crossDimension = decimal(facts.crossDimensionMeters);
+    const quantity = facts.quantity;
     const requiredRates = [
       {
         field: 'longitudinalCutRateToman',
@@ -566,15 +452,9 @@ export const calculateStairPart = (
         }))
       };
     }
-    const area = length.times(crossDimension).times(quantity);
-    const consumedMotherArea = motherLength
-      .times(motherWidth)
-      .times(packed.plan.consumedSources.length);
-    const paidRemainderArea = packed.plan.remainders.reduce(
-      (sum, remainder) =>
-        sum.plus(decimal(remainder.lengthMeters).times(remainder.widthMeters)),
-      new Decimal(0)
-    );
+    const area = decimal(facts.requestedAreaSquareMeters);
+    const consumedMotherArea = decimal(facts.consumedMotherAreaSquareMeters);
+    const paidRemainderArea = decimal(facts.paidRemainderAreaSquareMeters);
     const lines = [
       {
         lineId: 'base-material',

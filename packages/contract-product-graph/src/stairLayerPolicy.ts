@@ -1,8 +1,10 @@
+import { calculateStairLayerGeometry } from './stairLayerTechnical';
+import { replayLayerSequence } from './layerReplay';
+import { calculateLayerSideOperations } from './layerSideOperations';
 import Decimal from 'decimal.js';
 import { hashCanonicalValue } from './canonicalHash';
 import { parseCanonicalDecimal, type CanonicalDecimal } from './canonicalDecimal';
 import {
-  calculatePackingPlan,
   calculatePricing,
   type PackingPlan,
   type PricedLine
@@ -430,53 +432,6 @@ export const parseStairLayerConfigurationInput = (
   };
 };
 
-const physicalStripDemands = (
-  input: StairLayerConfigurationInput,
-  parent: StairLayerParentGeometry
-): StairLayerPhysicalStripDemand[] => {
-  const quantity = parent.quantity * input.layersPerParentPiece;
-  return input.targetSides.map(side => ({
-    side,
-    quantity,
-    lengthMeters:
-      side === 'front' || side === 'back'
-        ? parent.lengthMeters
-        : parent.crossDimensionMeters,
-    widthMeters: input.widthMeters
-  }));
-};
-
-const pricingQuantity = (
-  unit: StairLayerCatalogUnit,
-  commercialLayerSets: number,
-  strips: readonly StairLayerPhysicalStripDemand[]
-): CanonicalDecimal => {
-  if (unit === 'set') return canonical(commercialLayerSets);
-  if (unit === 'physicalPiece') {
-    return canonical(strips.reduce((sum, strip) => sum + strip.quantity, 0));
-  }
-  if (unit === 'meter') {
-    return canonical(strips.reduce(
-      (sum, strip) => sum.plus(d(strip.lengthMeters).times(strip.quantity)),
-      d(0)
-    ));
-  }
-  return canonical(strips.reduce(
-    (sum, strip) => sum.plus(
-      d(strip.lengthMeters).times(strip.widthMeters).times(strip.quantity)
-    ),
-    d(0)
-  ));
-};
-
-const consumedCountByBatch = (plan: PackingPlan) => {
-  const counts = new Map<string, number>();
-  plan.consumedSources.forEach(source => {
-    counts.set(source.sourceBatchId, (counts.get(source.sourceBatchId) ?? 0) + 1);
-  });
-  return counts;
-};
-
 const sumAmounts = (values: readonly CanonicalDecimal[]) =>
   canonical(values.reduce((sum, value) => sum.plus(value), d(0)));
 
@@ -494,25 +449,6 @@ export const calculateStairLayerConfiguration = ({
     normalizedText(input.packingPolicyVersion, 'packingPolicyVersion');
     normalizedText(input.pricingPolicyVersion, 'pricingPolicyVersion');
     normalizedText(input.roundingPolicyVersion, 'roundingPolicyVersion');
-    normalizedText(input.layerCatalogItemId, 'layerCatalogItemId');
-    normalizedText(input.layerCatalogSnapshotVersion, 'layerCatalogSnapshotVersion');
-    normalizedText(input.layerTitle, 'layerTitle');
-    parseStableIdentity('layer-configuration', input.layerConfigurationId);
-    parseStableIdentity('product-row', input.parentProductRowId);
-    parseStableIdentity('source-batch', input.sourceBatchId);
-    positiveInteger(input.layersPerParentPiece, 'layersPerParentPiece');
-    positiveInteger(parent.quantity, 'parent.quantity');
-    if (!Number.isSafeInteger(input.creationOrder) || input.creationOrder < 0) {
-      throw new TypeError('creationOrder must be a non-negative integer.');
-    }
-    if (
-      d(parent.lengthMeters).lte(0) ||
-      d(parent.crossDimensionMeters).lte(0) ||
-      d(input.widthMeters).lte(0) ||
-      d(input.kerfMeters).lt(0)
-    ) {
-      throw new TypeError('Layer and parent geometry must be positive.');
-    }
     if (d(input.layerRateToman).lte(0)) {
       return {
         ok: false,
@@ -520,104 +456,6 @@ export const calculateStairLayerConfiguration = ({
           code: 'layer-rate-required',
           field: 'layerRateToman',
           message: 'Layer rate must be greater than zero.'
-        }]
-      };
-    }
-    if (input.targetSides.length === 0) {
-      throw new TypeError('At least one target side is required.');
-    }
-    if (new Set(input.targetSides).size !== input.targetSides.length) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'duplicate-layer-side',
-          field: 'targetSides',
-          message: 'A target side may appear only once inside one layer configuration.'
-        }]
-      };
-    }
-
-    const strips = physicalStripDemands(input, parent);
-    const stockBySyntheticBatch = new Map<
-      string,
-      { stock: PaidRemainderStock; batchId: StableIdentity<'source-batch'> }
-    >();
-    const selectedIds = new Set<string>();
-    const paidSourceIds =
-      input.source.kind === 'paid-remainder' ||
-      input.source.kind === 'parent-material'
-        ? input.source.selectedRemainingStoneIds
-        : [];
-    const paidPackingSources = paidSourceIds.flatMap((remainingStoneId, index) => {
-      parseStableIdentity('remaining-stone', remainingStoneId);
-      if (selectedIds.has(remainingStoneId)) {
-        throw new TypeError(
-          `selectedRemainingStoneIds.${index} duplicates a selected source.`
-        );
-      }
-      selectedIds.add(remainingStoneId);
-      const matchingStocks = availableInventory.filter(
-        item =>
-          item.remainingStoneId === remainingStoneId ||
-          item.remainingStoneId.startsWith(
-            `${remainingStoneId}:layer-remainder:`
-          )
-      );
-      if (matchingStocks.length === 0) {
-        throw new RangeError(`Selected remaining stone ${remainingStoneId} is unavailable.`);
-      }
-      return matchingStocks.map(stock => {
-        if ([...stockBySyntheticBatch.values()].some(
-          item => item.stock.remainingStoneId === stock.remainingStoneId
-        )) {
-          throw new TypeError(
-            `selectedRemainingStoneIds.${index} overlaps another selected source.`
-          );
-        }
-        const batchId = parseStableIdentity(
-          'source-batch',
-          `${input.sourceBatchId}:paid:${stock.remainingStoneId}`
-        );
-        stockBySyntheticBatch.set(batchId, { stock, batchId });
-        return {
-          sourceBatchId: batchId,
-          lengthMeters: stock.lengthMeters,
-          widthMeters: stock.widthMeters,
-          quantity: stock.quantity,
-          allocationPriority: 0
-        };
-      });
-    });
-    const newSourceRows =
-      input.source.kind === 'new-material' ||
-      input.source.kind === 'parent-material'
-        ? input.source.sourceRows
-        : [];
-    const newPackingSources = newSourceRows.map((source, index) => {
-          parseStableIdentity('layer-source-row', source.sourceRowId);
-          positiveInteger(source.quantity, `sourceRows.${index}.quantity`);
-          if (d(source.lengthMeters).lte(0) || d(source.widthMeters).lte(0)) {
-            throw new TypeError(`sourceRows.${index} dimensions must be positive.`);
-          }
-          return {
-            sourceBatchId: parseStableIdentity(
-              'source-batch',
-              `${input.sourceBatchId}:new:${source.sourceRowId}`
-            ),
-            lengthMeters: source.lengthMeters,
-            widthMeters: source.widthMeters,
-            quantity: source.quantity,
-            allocationPriority: input.source.kind === 'parent-material' ? 1 : 0
-          };
-        });
-    const packingSources = [...paidPackingSources, ...newPackingSources];
-    if (packingSources.length === 0) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'explicit-layer-source-required',
-          field: 'source',
-          message: 'A layer source must be selected explicitly.'
         }]
       };
     }
@@ -636,29 +474,12 @@ export const calculateStairLayerConfiguration = ({
       };
     }
 
-    const packing = calculatePackingPlan({
-      policyVersion: input.packingPolicyVersion,
-      kerfMeters: input.kerfMeters,
-      calibrationEnabled: input.calibrationEnabled,
-      sources: packingSources,
-      demands: strips.map(strip => ({
-        demandId: `${input.layerConfigurationId}:${strip.side}`,
-        lengthMeters: strip.lengthMeters,
-        widthMeters: strip.widthMeters,
-        quantity: strip.quantity
-      }))
-    });
-    if (!packing.ok) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'layer-source-insufficient',
-          field: 'source',
-          message: packing.conflict.message
-        }]
-      };
-    }
-
+    const technical = calculateStairLayerGeometry({ input, parent, availableInventory,
+      packingPolicyVersion: input.packingPolicyVersion });
+    if (!technical.ok) return technical;
+    const facts = technical.result;
+    const strips = facts.physicalStrips;
+    const packing = { plan: facts.packingPlan };
     const missingRates: StairLayerConflict[] = [];
     if (
       d(packing.plan.longitudinalCutMeters).gt(0) &&
@@ -692,103 +513,12 @@ export const calculateStairLayerConfiguration = ({
     }
     if (missingRates.length > 0) return { ok: false, conflicts: missingRates };
 
-    const sideOperationResults: Array<{
-      side: StairLayerSide;
-      operationCollectionId: StableIdentity<'layer-operation-collection'>;
-      scopeIntent: 'all-strips' | 'side' | 'side-subset';
-      result: ProductOperationsResult;
-    }> = [];
-    const operationSides = new Set<StairLayerSide>();
-    for (const sideOperation of input.sideOperations) {
-      if (operationSides.has(sideOperation.side)) {
-        return {
-          ok: false,
-          conflicts: [{
-            code: 'layer-operation-invalid',
-            field: `sideOperations.${sideOperation.side}`,
-            entityId: sideOperation.side,
-            message: 'Each selected side must own one combined operation draft.'
-          }]
-        };
-      }
-      operationSides.add(sideOperation.side);
-      const strip = strips.find(item => item.side === sideOperation.side);
-      if (!strip) {
-        return {
-          ok: false,
-          conflicts: [{
-            code: 'layer-operation-invalid',
-            field: 'sideOperations',
-            entityId: sideOperation.side,
-            message: 'Layer operations may target only a selected physical side.'
-          }]
-        };
-      }
-      if (
-        sideOperation.operations.productRowId !== input.parentProductRowId ||
-        sideOperation.operations.lengthMeters !== strip.lengthMeters ||
-        sideOperation.operations.widthMeters !== strip.widthMeters ||
-        sideOperation.operations.quantity !== strip.quantity
-      ) {
-        return {
-          ok: false,
-          conflicts: [{
-            code: 'layer-parent-mismatch',
-            field: `sideOperations.${sideOperation.side}`,
-            entityId: sideOperation.side,
-            message: 'Layer operations must use authoritative strip geometry.'
-          }]
-        };
-      }
-      const operations = calculateProductOperations(sideOperation.operations);
-      if (!operations.ok) {
-        return {
-          ok: false,
-          conflicts: operations.conflicts.map(conflict => ({
-            code: 'layer-operation-invalid' as const,
-            field: `sideOperations.${sideOperation.side}.${conflict.path.join('.')}`,
-            entityId: conflict.entityId,
-            message: conflict.message
-          }))
-        };
-      }
-      sideOperationResults.push({
-        side: sideOperation.side,
-        operationCollectionId:
-          sideOperation.operationCollectionId ||
-          parseStableIdentity(
-            'layer-operation-collection',
-            `${input.layerConfigurationId}:operation:${sideOperation.side}`
-          ),
-        scopeIntent: sideOperation.scopeIntent || 'side',
-        result: operations.result
-      });
-    }
-
-    const layerQuantity = pricingQuantity(
-      input.layerUnit,
-      parent.quantity * input.layersPerParentPiece,
-      strips
-    );
-    const consumedByBatch = consumedCountByBatch(packing.plan);
-    const newMaterialQuantity =
-      input.source.kind === 'new-material' ||
-      input.source.kind === 'parent-material'
-        ? canonical(newPackingSources.reduce((sum, source) => {
-          const consumed = consumedByBatch.get(source.sourceBatchId) ?? 0;
-          return sum.plus(
-            d(source.lengthMeters).times(source.widthMeters).times(consumed)
-          );
-        }, d(0)))
-        : canonical(0);
-    const paidMaterialQuantity = canonical(
-      [...stockBySyntheticBatch.values()].reduce((sum, { stock, batchId }) => {
-        const consumed = consumedByBatch.get(batchId) ?? 0;
-        return sum.plus(
-          d(stock.lengthMeters).times(stock.widthMeters).times(consumed)
-        );
-      }, d(0))
-    );
+    const sideOperations = calculateLayerSideOperations(input, strips, calculateProductOperations);
+    if (!sideOperations.ok) return { ok: false, conflicts: sideOperations.conflicts };
+    const sideOperationResults = sideOperations.results;
+    const layerQuantity = facts.catalogQuantity;
+    const newMaterialQuantity = facts.materialSourceSplit.newMaterialSquareMeters;
+    const paidMaterialQuantity = facts.materialSourceSplit.paidMaterialSquareMeters;
     const pricing = calculatePricing({
       policyVersion: input.pricingPolicyVersion,
       roundingPolicyVersion: input.roundingPolicyVersion,
@@ -839,74 +569,13 @@ export const calculateStairLayerConfiguration = ({
       line.lineId.includes(':cut:')
     );
 
-    let inventory = availableInventory.map(cloneStock);
-    if (
-      input.source.kind === 'paid-remainder' ||
-      input.source.kind === 'parent-material'
-    ) {
-      const byId = new Map(inventory.map(stock => [stock.remainingStoneId, stock]));
-      stockBySyntheticBatch.forEach(({ stock, batchId }) => {
-        const consumed = consumedByBatch.get(batchId) ?? 0;
-        if (consumed === 0) return;
-        const current = byId.get(stock.remainingStoneId);
-        if (!current || current.quantity < consumed) {
-          throw new RangeError('Selected paid layer source is no longer sufficient.');
-        }
-        if (current.quantity === consumed) byId.delete(stock.remainingStoneId);
-        else {
-          byId.set(stock.remainingStoneId, {
-            ...current,
-            quantity: current.quantity - consumed
-          });
-        }
-      });
-      inventory = [...byId.values()];
-    }
-
-    const generatedRemainders = packing.plan.remainders.map((remainder, index) => {
-      const paidSource = stockBySyntheticBatch.get(remainder.sourceBatchId)?.stock;
-      const paidRootId = paidSource?.remainingStoneId.split(
-        ':layer-remainder:'
-      )[0];
-      return {
-        remainingStoneId: parseStableIdentity(
-          'remaining-stone',
-          paidRootId
-            ? `${paidRootId}:layer-remainder:${input.layerConfigurationId}:${index + 1}`
-            : `${input.layerConfigurationId}:remainder:${index + 1}`
-        ),
-        ownerProductRowId: input.parentProductRowId,
-        catalogProductId:
-          input.source.kind === 'new-material' ||
-          input.source.kind === 'parent-material'
-          ? input.source.catalogProductId
-          : stockBySyntheticBatch.get(remainder.sourceBatchId)
-              ?.stock.catalogProductId ?? '',
-        sourceBatchId: input.sourceBatchId,
-        lengthMeters: remainder.lengthMeters,
-        widthMeters: remainder.widthMeters,
-        quantity: 1,
-        creationOrder: input.creationOrder * 1000 + index,
-        materialPaid: true as const
-      };
-    });
-    if (generatedRemainders.some(stock => !stock.catalogProductId)) {
-      throw new TypeError('Generated layer remainder lost its catalog identity.');
-    }
-    inventory = [...inventory, ...generatedRemainders];
+    const inventory = technical.inventory;
+    const generatedRemainders = facts.generatedRemainders;
 
     const layerAmountToman = layerPricingLine.amountToman;
     const materialAmountToman = materialPricingLine?.amountToman ?? canonical(0);
-    const paidSourceCount = paidPackingSources.reduce(
-      (sum, source) =>
-        sum + (consumedByBatch.get(source.sourceBatchId) ?? 0),
-      0
-    );
-    const newSourceCount = newPackingSources.reduce(
-      (sum, source) =>
-        sum + (consumedByBatch.get(source.sourceBatchId) ?? 0),
-      0
-    );
+    const paidSourceCount = facts.materialSourceSplit.paidSourceCount;
+    const newSourceCount = facts.materialSourceSplit.newSourceCount;
     const cuttingAmountToman = sumAmounts(
       cuttingPricingLines.map(line => line.amountToman)
     );
@@ -998,59 +667,8 @@ export const replayStairLayerConfigurations = ({
 }):
   | { readonly ok: true; readonly result: StairLayerReplayResult }
   | { readonly ok: false; readonly conflicts: readonly StairLayerConflict[] } => {
-  const identities = new Set<string>();
-  let inventory = baseInventory.map(cloneStock);
-  const configurations: Array<
-    StairLayerReplayResult['configurations'][number]
-  > = [];
-  const ordered = [...inputs].sort(
-    (left, right) =>
-      left.creationOrder - right.creationOrder ||
-      left.layerConfigurationId.localeCompare(right.layerConfigurationId)
-  );
-  for (const input of ordered) {
-    if (identities.has(input.layerConfigurationId)) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'invalid-layer-input',
-          field: 'layerConfigurationId',
-          entityId: input.layerConfigurationId,
-          message: 'Layer configuration identity is duplicated.'
-        }]
-      };
-    }
-    identities.add(input.layerConfigurationId);
-    const parent = parents.get(input.parentProductRowId);
-    if (!parent) {
-      return {
-        ok: false,
-        conflicts: [{
-          code: 'layer-parent-mismatch',
-          field: 'parentProductRowId',
-          entityId: input.layerConfigurationId,
-          message: 'Layer configuration references a missing stair parent.'
-        }]
-      };
-    }
-    const calculated = calculateStairLayerConfiguration({
-      input,
-      parent,
-      availableInventory: inventory
-    });
-    if (!calculated.ok) {
-      return {
-        ok: false,
-        conflicts: calculated.conflicts.map(conflict => ({
-          ...conflict,
-          field: `${input.layerConfigurationId}.${conflict.field}`
-        }))
-      };
-    }
-    configurations.push({ input, result: calculated.result });
-    inventory = calculated.inventory.map(cloneStock);
-  }
-  return { ok: true, result: { configurations, inventory } };
+  const replay = replayLayerSequence({ inputs, parents, baseInventory }, calculateStairLayerConfiguration);
+  return replay.ok ? replay : { ok: false, conflicts: replay.conflicts };
 };
 
 export const duplicateStairLayerConfigurationDraft = ({

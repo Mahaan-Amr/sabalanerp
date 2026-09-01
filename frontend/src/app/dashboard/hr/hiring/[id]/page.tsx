@@ -507,8 +507,11 @@ export default function HiringCasePage() {
       })
     : null;
   const openIdentityConflict = data.identityConflicts?.find((item: any) => item.status === "OPEN");
-  const currentCollateralItems = (data.collateralItems || []).filter((item: any) => !item.supersededBy);
-  const collateralExplicitlyNotRequired = data.collateralRequirements?.[0]?.type === "NO_PRE_HIRE_COLLATERAL";
+  const activeCollateralRequirement = data.collateralRequirements?.[0];
+  const currentCollateralItems = (data.collateralItems || []).filter((item: any) =>
+    item.collateralRequirementId === activeCollateralRequirement?.id && item.required,
+  );
+  const collateralExplicitlyNotRequired = activeCollateralRequirement?.type === "NO_PRE_HIRE_COLLATERAL";
   const collateralRecorded = collateralExplicitlyNotRequired || currentCollateralItems.length > 0
     && currentCollateralItems.every((item: any) => item.status !== "MISSING");
   const collateralVerified = data.collateralClearance === "APPROVED";
@@ -711,14 +714,14 @@ export default function HiringCasePage() {
         <FinalHiringRejection applicationId={id} busy={busy} run={run} />
       )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-        <Metric label="مرحله" value={data.stage} />
-        <Metric label="هویت" value={data.identityClearance} />
-        <Metric label="جبران" value={data.compensationClearance} />
-        <Metric label="وثیقه" value={data.collateralClearance} />
-        <Metric label="قرارداد" value={data.contractClearance} />
+        <Metric label="مرحله" value={hrDisplayLabel(data.stage)} />
+        <Metric label="هویت" value={hrDisplayLabel(data.identityClearance)} />
+        <Metric label="جبران" value={hrDisplayLabel(data.compensationClearance)} />
+        <Metric label="وثیقه" value={hrDisplayLabel(data.collateralClearance)} />
+        <Metric label="قرارداد" value={hrDisplayLabel(data.contractClearance)} />
         <Metric
           label="اشتغال"
-          value={data.employmentRelationship?.status || "CANDIDATE"}
+          value={hrDisplayLabel(data.employmentRelationship?.status || "CANDIDATE")}
         />
       </div>
       {data.lifecycle && selectedLifecyclePhase && (
@@ -911,9 +914,7 @@ export default function HiringCasePage() {
                     >
                       <span className="flex flex-col gap-1">
                         <span>
-                          {invitation.accessConfirmedAt
-                            ? "تحویل‌شده (ورود موفق متقاضی)"
-                            : invitation.providerDeliveryState
+                          {invitation.providerDeliveryState
                               ? `گزارش SMS.ir: ${hrDisplayLabel(invitation.providerDeliveryState)}`
                               : "در انتظار گزارش ارسال"}
                         </span>
@@ -926,25 +927,18 @@ export default function HiringCasePage() {
                           )}
                       </span>
                       <span>اعتبار تا {dateTimeFa(invitation.expiresAt)}</span>
-                      {invitation.providerMessageId &&
-                        !invitation.accessConfirmedAt && (
-                          <ErpPressable
-                            type="submit"
-                            className="rounded-lg border px-3 py-1"
-                            onClick={() =>
-                              run(
-                                () =>
-                                  hiringAPI.refreshInvitationDelivery(
-                                    id,
-                                    invitation.id,
-                                  ),
-                                "آخرین گزارش تحویل SMS.ir دریافت شد.",
-                              )
-                            }
-                          >
-                            به‌روزرسانی گزارش تحویل
-                          </ErpPressable>
-                        )}
+                      <div className="w-full">
+                        <CandidateSmsDeliveryPanel
+                          applicationId={id}
+                          purpose="INVITATION"
+                          referenceId={invitation.id}
+                          attempts={data.candidateSmsAttempts || []}
+                          canRetry={!invitation.accessConfirmedAt && actionPermissions.includes("MANAGE_RECRUITMENT_CASE")}
+                          busy={busy}
+                          run={run}
+                          retry={() => hiringAPI.retryInvitation(id, invitation.id)}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1069,13 +1063,16 @@ export default function HiringCasePage() {
                 </ErpCard>
                 <ErpCard className="p-4">
                   <h3 className="font-black">کنترل فیلد به فیلد</h3>
-                  {data.formRevisions?.[0]?.correctionNotificationStatus ===
-                    "FAILED" && (
-                    <ErpInlineState
-                      className="mt-3"
-                      kind="error"
-                      title={data.formRevisions[0].correctionNotificationError || "ارسال پیامک درخواست اصلاح ناموفق بود."}
-                      action={{ label: "ارسال مجدد پیامک درخواست اصلاح", disabled: busy, onClick: () => run(() => hiringAPI.retryCorrectionNotification(id), "پیامک درخواست اصلاح ارسال شد."), tone: "warning" }}
+                  {data.formRevisions?.[0]?.status === "RETURNED" && (
+                    <CandidateSmsDeliveryPanel
+                      applicationId={id}
+                      purpose="CORRECTION"
+                      referenceId={data.formRevisions[0].id}
+                      attempts={data.candidateSmsAttempts || []}
+                      canRetry={actionPermissions.includes("MANAGE_RECRUITMENT_CASE")}
+                      busy={busy}
+                      run={run}
+                      retry={() => hiringAPI.retryCorrectionNotification(id)}
                     />
                   )}
                   <div className="mt-3 space-y-2">
@@ -1709,12 +1706,16 @@ export default function HiringCasePage() {
                         </div>
                       ))}
                     </div>
-                    {compensation.candidateNotificationStatus === "FAILED" && (
-                      <ErpInlineState
-                        className="mt-3"
-                        kind="error"
-                        title={compensation.candidateNotificationError || "ارسال پیامک پیشنهاد همکاری ناموفق بود."}
-                        action={hasActionPermission("MANAGE_RECRUITMENT_CASE") ? { label: "ارسال مجدد پیامک پیشنهاد", disabled: busy, onClick: () => run(() => hiringAPI.retryOfferNotification(id, compensation.id), "پیامک پیشنهاد همکاری ارسال شد.") } : undefined}
+                    {compensation.candidateNotificationStatus && (
+                      <CandidateSmsDeliveryPanel
+                        applicationId={id}
+                        purpose="OFFER"
+                        referenceId={compensation.id}
+                        attempts={data.candidateSmsAttempts || []}
+                        canRetry={hasActionPermission("MANAGE_RECRUITMENT_CASE")}
+                        busy={busy}
+                        run={run}
+                        retry={() => hiringAPI.retryOfferNotification(id, compensation.id)}
                       />
                     )}
                     {hasActionPermission("MANAGE_RECRUITMENT_CASE") &&
@@ -2561,6 +2562,91 @@ type CaseActionOptions = {
   awaitRefresh?: boolean;
   showSuccessMessage?: boolean;
 };
+
+function CandidateSmsDeliveryPanel({
+  applicationId,
+  purpose,
+  referenceId,
+  attempts,
+  canRetry,
+  busy,
+  run,
+  retry,
+}: {
+  applicationId: string;
+  purpose: "INVITATION" | "CORRECTION" | "OFFER";
+  referenceId: string;
+  attempts: any[];
+  canRetry: boolean;
+  busy: boolean;
+  run: CaseActionRunner;
+  retry: () => Promise<any>;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const ordered = attempts
+    .filter((attempt) => attempt.purpose === purpose && attempt.referenceId === referenceId)
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  const latest = ordered[0];
+  const delivered = ordered.find((attempt) => attempt.providerDeliveryState === "DELIVERED");
+  const age = latest ? now - new Date(latest.createdAt).getTime() : 0;
+  const retryEnabled = Boolean(latest) && !delivered && age >= 2 * 60_000 && (
+    latest.providerDeliveryState === "FAILED"
+    || (["UNKNOWN", "ACCEPTED", "PENDING"].includes(latest.providerDeliveryState) && age >= 24 * 60 * 60_000)
+  );
+  if (!latest) return null;
+  const overallState = delivered
+    ? "DELIVERED"
+    : latest.providerDeliveryState === "PENDING" && age >= 24 * 60 * 60_000
+      ? "UNKNOWN"
+      : latest.providerDeliveryState;
+  return (
+    <ErpCard className="mt-2 space-y-2 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <span>وضعیت کلی اعلان: <b>{hrDisplayLabel(overallState)}</b></span>
+        <span>آخرین تلاش: {dateTimeFa(latest.createdAt)}</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <ErpButton
+          label="به‌روزرسانی وضعیت تحویل"
+          variant="outline"
+          disabled={busy || !latest.providerMessageId || Boolean(delivered)}
+          onClick={() => run(
+            () => hiringAPI.refreshCandidateSmsDelivery(applicationId, purpose, referenceId),
+            "آخرین گزارش تحویل SMS.ir دریافت شد.",
+          )}
+        />
+        {canRetry && (
+          <ErpButton
+            label="تلاش مجدد ارسال پیامک"
+            tone="warning"
+            disabled={busy || !retryEnabled}
+            title={!retryEnabled ? "ارسال مجدد فقط پس از شکست قطعی یا نامشخص‌ماندن بیش از ۲۴ ساعت فعال می‌شود." : undefined}
+            onClick={() => run(retry, "تلاش جدید پیامک ثبت و ارسال شد.")}
+          />
+        )}
+      </div>
+      <details className="text-xs">
+        <summary className="cursor-pointer font-bold">تاریخچه همه تلاش‌ها ({ordered.length.toLocaleString("fa-IR")})</summary>
+        <div className="mt-2 space-y-2">
+          {ordered.map((attempt) => (
+            <div key={attempt.id} className="rounded-lg border border-[var(--sds-border-subtle)] p-2">
+              تلاش {Number(attempt.attemptNumber).toLocaleString("fa-IR")} · {hrDisplayLabel(attempt.providerDeliveryState)} · {dateTimeFa(attempt.createdAt)}
+              {attempt.providerMessageId && <span dir="ltr" className="ms-2 font-mono">messageId: {attempt.providerMessageId}</span>}
+              {attempt.providerDeliveryCode != null && <span className="ms-2">کد گزارش: {attempt.providerDeliveryCode}</span>}
+              {attempt.providerFailureKind && <span className="ms-2">نوع خطا: {attempt.providerFailureKind}</span>}
+              {attempt.providerHttpStatus && <span className="ms-2">HTTP: {attempt.providerHttpStatus}</span>}
+              {attempt.immediateError && <p className="mt-1 text-[var(--sds-danger)]">{attempt.immediateError}</p>}
+            </div>
+          ))}
+        </div>
+      </details>
+    </ErpCard>
+  );
+}
 
 function CompanyEvaluationPlan({ applicationId, actionPermissions, busy, run, onPendingChange }: { applicationId: string; actionPermissions: string[]; busy: boolean; run: CaseActionRunner; onPendingChange: (pending: boolean) => void }) {
   const types = [["MANAGEMENT_INTERVIEW", "مصاحبه با مدیریت"], ["HR_MANAGER_INTERVIEW", "مصاحبه با مدیر منابع انسانی"], ["DEPARTMENT_SUPERVISOR_INTERVIEW", "مصاحبه با سرپرست بخش"], ["THERAPIST_CONSULTATION", "ارجاع مشاور/روان‌شناس"], ["OTHER", "سایر"]];
@@ -3546,12 +3632,27 @@ function CollateralRequirementPanel({
   busy: boolean;
   run: CaseActionRunner;
 }) {
-  const [draft, setDraft] = useState({
-    type: current?.type || "PROMISSORY_NOTE",
-    amountRials: current?.amountRials || "",
-    dueTiming: current?.dueTiming || "",
-    candidateExplanation: current?.candidateExplanation || "",
+  const initialLines = current?.lines?.length
+    ? current.lines.map((line: any) => ({
+        lineKey: line.lineKey,
+        type: line.type,
+        amountRials: line.amountRials || "",
+        customTitle: line.customTitle || "",
+      }))
+    : [{ lineKey: "line-1", type: "PROMISSORY_NOTE", amountRials: "", customTitle: "" }];
+  const [lines, setLines] = useState(initialLines);
+  const updateLine = (index: number, patch: Record<string, string>) =>
+    setLines((rows: any[]) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
+  const moveLine = (index: number, direction: -1 | 1) => setLines((rows: any[]) => {
+    const target = index + direction;
+    if (target < 0 || target >= rows.length) return rows;
+    const next = [...rows];
+    [next[index], next[target]] = [next[target], next[index]];
+    return next;
   });
+  const invalid = !lines.length || lines.some((line: any) =>
+    (["PROMISSORY_NOTE", "CHEQUE"].includes(line.type) && !line.amountRials)
+    || (line.type === "OTHER" && !line.customTitle.trim()));
   return (
     <ErpCard className="mb-4 space-y-3 p-4">
       <div>
@@ -3562,33 +3663,62 @@ function CollateralRequirementPanel({
           </p>
         )}
       </div>
-      <div className="grid gap-2 md:grid-cols-4">
-        <ErpSelect
-          value={draft.type}
-          onChange={(event) => setDraft({ ...draft, type: event.target.value })}
-        >
-          <option value="PROMISSORY_NOTE">سفته</option>
-          <option value="CHEQUE">چک ضمانت</option>
-          <option value="GUARANTEE">ضامن</option>
-          <option value="UNDERTAKING">تعهدنامه</option>
-          <option value="OTHER">سایر</option>
-        </ErpSelect>
-        <ErpRialInput
-          aria-label="مبلغ وثیقه پیشنهادی به ریال"
-          placeholder="مبلغ (ریال)"
-          value={draft.amountRials}
-          onValueChange={(amountRials) => setDraft({ ...draft, amountRials })}
-        />
+      <div className="space-y-3">
+        {lines.map((line: any, index: number) => (
+          <ErpCard key={line.lineKey} className="space-y-2 p-3">
+            <div className="grid gap-2 md:grid-cols-3">
+              <ErpSelect
+                aria-label={`نوع وثیقه ردیف ${index + 1}`}
+                value={line.type}
+                onChange={(event) => updateLine(index, { type: event.target.value, customTitle: event.target.value === "OTHER" ? line.customTitle : "" })}
+              >
+                <option value="PROMISSORY_NOTE">سفته</option>
+                <option value="CHEQUE">چک ضمانت</option>
+                <option value="GUARANTEE">ضامن</option>
+                <option value="UNDERTAKING">تعهدنامه</option>
+                <option value="OTHER">سایر</option>
+              </ErpSelect>
+              <ErpRialInput
+                aria-label={`مبلغ وثیقه ردیف ${index + 1} به ریال`}
+                placeholder={["PROMISSORY_NOTE", "CHEQUE"].includes(line.type) ? "مبلغ الزامی (ریال)" : "مبلغ اختیاری (ریال)"}
+                value={line.amountRials}
+                onValueChange={(amountRials) => updateLine(index, { amountRials })}
+              />
+              {line.type === "OTHER" && (
+                <ErpInput
+                  aria-label={`عنوان اختصاصی وثیقه ردیف ${index + 1}`}
+                  placeholder="عنوان اختصاصی"
+                  value={line.customTitle}
+                  onChange={(event) => updateLine(index, { customTitle: event.target.value })}
+                />
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <ErpButton label="بالاتر" variant="soft" disabled={index === 0} onClick={() => moveLine(index, -1)} />
+              <ErpButton label="پایین‌تر" variant="soft" disabled={index === lines.length - 1} onClick={() => moveLine(index, 1)} />
+              <ErpButton label="حذف ردیف" tone="danger" variant="soft" disabled={lines.length === 1} onClick={() => setLines((rows: any[]) => rows.filter((_, rowIndex) => rowIndex !== index))} />
+            </div>
+          </ErpCard>
+        ))}
       </div>
+      <ErpButton
+        label="افزودن وثیقه"
+        variant="outline"
+        disabled={busy || lines.length >= 20}
+        onClick={() => setLines((rows: any[]) => [...rows, {
+          lineKey: globalThis.crypto?.randomUUID?.() || `line-${Date.now()}`,
+          type: "PROMISSORY_NOTE", amountRials: "", customTitle: "",
+        }])}
+      />
       <p className="text-sm text-[var(--sds-text-secondary)]">
         متن اطلاع‌رسانی متقاضی پس از ثبت، به‌صورت خودکار از نوع وثیقه و مبلغ ساخته می‌شود.
       </p>
       <ErpButton
         label={current ? "ثبت نسخه جدید الزام وثیقه" : "ثبت الزام وثیقه"}
-        disabled={busy}
+        disabled={busy || invalid}
         onClick={() =>
           run(
-            () => hiringAPI.addCollateralRequirement(applicationId, draft),
+            () => hiringAPI.addCollateralRequirement(applicationId, { items: lines }),
             current
               ? "نسخه جدید الزام وثیقه ثبت شد؛ پیشنهاد باید دوباره پذیرفته شود."
               : "الزام وثیقه ثبت شد.",

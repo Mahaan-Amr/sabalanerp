@@ -14,6 +14,7 @@ import {
   ErpSelect,
 } from "@/components/erp";
 import { dateTimeFa } from "@/features/hr/hrUi";
+import { applicantBirthDateDisplay } from "@/features/hr-hiring/applicantInformationPresentation";
 import { hrCandidateDocumentStatusLabel, hrDisplayLabel } from "@/features/hr/hrDisplay";
 import { hiringAPI, hiringError } from "@/lib/hiringApi";
 import { formatDisplayNumber } from "@/lib/numberFormat";
@@ -57,7 +58,7 @@ function ProfileGroup({ group }: { group: any }) {
       <RevisionHeader revision={revision} />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <ErpFieldView label="نام و نام خانوادگی" value={`${value(revision.identity.firstName)} ${value(revision.identity.lastName)}`} />
-        <ErpFieldView label="تاریخ تولد" value={value(revision.identity.birthDate)} />
+        <ErpFieldView label="تاریخ تولد" value={applicantBirthDateDisplay(revision.identity.birthDate)} />
         <ErpFieldView label="کد ملی / شناسه" value={value(revision.identity.nationalCode || revision.identity.foreignIdentityNumber)} />
         <ErpFieldView label="شماره همراه" value={value(revision.contact.mobile)} />
         <ErpFieldView label="ایمیل" value={value(revision.contact.email)} />

@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ErpInlineState, ErpLoading } from '@/components/erp';
+import { ErpCard, ErpInlineState, ErpLoading } from '@/components/erp';
 import { dashboardAPI, salesAPI } from '@/lib/api';
 import { getContractPermissions, type User } from '@/lib/permissions';
 import type { ContractWizardData } from '@/features/contract-creation/types/contract.types';
@@ -11,6 +11,7 @@ import {
   contractCorrectionBannerTitle,
   contractCorrectionCategoryLabel,
 } from '@/features/contract-creation/services/contractCorrectionPresentation';
+import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
 
 const CreateContractWizardClient = dynamic(
   () => import('@/features/contract-creation/CreateContractWizardClient'),
@@ -40,6 +41,10 @@ interface ContractForEdit {
   createdByUser?: {
     id: string;
   };
+  partnerKind?: string | null;
+  partnerCaseId?: string | null;
+  partnerRevision?: number | null;
+  partnerIntegrityHash?: string | null;
 }
 
 export default function SalesContractEditPage() {
@@ -69,6 +74,12 @@ export default function SalesContractEditPage() {
         const nextContract = contractResponse.data.data as ContractForEdit;
         const user = profileResponse.data?.data as User | undefined;
         const permissions = user ? getContractPermissions(user) : null;
+
+        if (resolvePartnerContractRoute(nextContract).kind !== 'ordinary') {
+          setContract(nextContract);
+          setError(null);
+          return;
+        }
 
         if (!permissions?.canEdit && nextContract.createdByUser?.id !== user?.id) {
           setError('شما مجاز به ویرایش این قرارداد نیستید');
@@ -115,7 +126,7 @@ export default function SalesContractEditPage() {
     );
   }
 
-  if (error || !contract?.contractData) {
+  if (error || !contract) {
     return (
       <div className="sds-workspace py-8" dir="rtl">
         <ErpInlineState
@@ -128,6 +139,19 @@ export default function SalesContractEditPage() {
         />
       </div>
     );
+  }
+
+  const partnerRoute = resolvePartnerContractRoute(contract);
+  if (partnerRoute.kind !== 'ordinary') {
+    return <ErpCard className="py-8"><ErpInlineState
+      kind={partnerRoute.kind === 'blocked' ? 'error' : 'permission'}
+      title={partnerRoute.kind === 'blocked' ? 'شواهد نسخه پرونده فروش همکار کامل نیست؛ ویرایش متوقف شد.' : 'اصلاح پرونده فروش همکار از جریان نسخه‌دار و یک‌بار ذخیره انجام می‌شود، نه ویرایش قرارداد عادی.'}
+      action={{ label: 'مشاهده پرونده', href: `/dashboard/sales/contracts/${contractId}` }} /></ErpCard>;
+  }
+
+  if (!contract.contractData) {
+    return <ErpCard className="py-8"><ErpInlineState kind="error" title="اطلاعات قابل ویرایش قرارداد موجود نیست"
+      action={{ label: 'مشاهده قرارداد', href: `/dashboard/sales/contracts/${contractId}` }} /></ErpCard>;
   }
 
   return (

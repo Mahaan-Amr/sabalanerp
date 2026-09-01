@@ -13,6 +13,9 @@ export type HiringSmsResult = {
   messageId?: number;
   error?: string;
   rawResponse?: unknown;
+  failureKind?: "PROVIDER_REJECTION" | "HTTP" | "NETWORK";
+  httpStatus?: number;
+  errorCode?: string;
 };
 
 type TestMode = "success" | "failure";
@@ -51,7 +54,7 @@ class HrHiringSmsGateway {
   async sendCorrection(params: {
     phoneNumber: string;
     details: string;
-    replacementCode?: string;
+    replacementCode: string;
   }): Promise<HiringSmsResult> {
     if (!this.usesTestAdapter) {
       return smsService.sendHiringCorrection(params);

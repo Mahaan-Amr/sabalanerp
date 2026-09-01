@@ -7,6 +7,61 @@ import type {
   CanonicalToolSelection
 } from './productGraph';
 import { parseCanonicalDecimal } from './canonicalDecimal';
+import Decimal from 'decimal.js';
+import { aggregateSecondaryRemainders, type PaidRemainderStock } from './remainderPolicy';
+
+const descriptionFor = (row: CanonicalProductRow): string | undefined => row.description ??
+  (typeof row.commercial.legacySnapshot?.description === 'string' ? row.commercial.legacySnapshot.description : undefined);
+
+export interface CanonicalProjectedRemainderConsumption {
+  readonly productRowId: string;
+  readonly sourceRemainingStoneId: string;
+  readonly lengthMeters: string;
+  readonly widthMeters: string;
+  readonly quantity: number;
+  readonly areaSquareMeters: string;
+}
+
+/** Read-only facts from a validated graph; never reoptimizes or persists inventory. */
+export const projectCanonicalRemainderConsumption = (
+  graph: CanonicalProductGraph
+): CanonicalProjectedRemainderConsumption[] => {
+  // Project historical geometry, not current availability: a fully consumed
+  // source is absent from final inventory, but remains in its producer evidence.
+  const stocks = new Map<string, PaidRemainderStock>();
+  const rememberSource = (stock: PaidRemainderStock) => {
+    const previous = stocks.get(stock.remainingStoneId);
+    if (previous && (previous.lengthMeters !== stock.lengthMeters || previous.widthMeters !== stock.widthMeters ||
+      previous.sourceBatchId !== stock.sourceBatchId || previous.catalogProductId !== stock.catalogProductId)) {
+      throw new Error(`Remaining source ${stock.remainingStoneId} has conflicting geometry`);
+    }
+    stocks.set(stock.remainingStoneId, stock);
+  };
+  [
+    ...graph.sourceBatches.flatMap(batch => batch.initialRemainders ?? []),
+    ...graph.layerConfigurations.flatMap(layer => layer.result.generatedRemainders)
+  ].forEach(rememberSource);
+  return [...graph.allocations].sort((a, b) => a.allocationOrder - b.allocationOrder).map(allocation => {
+    const source = stocks.get(allocation.sourceRemainingStoneId);
+    if (!source) {
+      throw new Error(`Allocation ${allocation.allocationId} has no provable source consumption`);
+    }
+    const secondary = aggregateSecondaryRemainders({
+      intent: allocation.intentSnapshot, plan: allocation.packingPlan,
+      sourceBatchId: source.sourceBatchId,
+      startingCreationOrder: 1_000_000_000 + allocation.allocationOrder * 1000
+    });
+    secondary.forEach(rememberSource);
+    return {
+      productRowId: allocation.targetProductRowId,
+      sourceRemainingStoneId: source.remainingStoneId,
+      lengthMeters: source.lengthMeters, widthMeters: source.widthMeters,
+      quantity: allocation.consumedSourcePieces,
+      areaSquareMeters: String(parseCanonicalDecimal(new Decimal(source.lengthMeters)
+        .times(source.widthMeters).times(allocation.consumedSourcePieces).toFixed()))
+    };
+  });
+};
 
 const sumCanonicalDecimals = (values: readonly string[]): string => {
   const parsed = values.map(value => String(parseCanonicalDecimal(value)).split('.'));
@@ -272,7 +327,7 @@ export const projectCanonicalProductGraph = (
     ...(row.sourceProductRowId ? { sourceProductRowId: row.sourceProductRowId } : {}),
     productType: row.productType,
     contractualTitle: row.contractualTitle,
-    ...(row.description ? { description: row.description } : {}),
+    description: descriptionFor(row),
     ...(row.commercial.requestedQuantity !== undefined
       ? { quantity: row.commercial.requestedQuantity } : {}),
     ...(row.commercial.requestedLengthMeters !== undefined
@@ -315,7 +370,7 @@ export const projectCanonicalGraphToLegacyProducts = (graph: CanonicalProductGra
     productType: row.productType,
     name: row.contractualTitle,
     stoneName: row.contractualTitle,
-    description: row.description ?? '',
+    description: descriptionFor(row),
     quantity: row.commercial.requestedQuantity ?? undefined,
     length: row.commercial.requestedLengthMeters ?? undefined,
     ...(row.commercial.requestedLengthMeters === undefined ? {} : { lengthUnit: 'm' }),

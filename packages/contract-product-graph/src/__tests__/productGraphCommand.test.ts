@@ -697,6 +697,31 @@ const addRowCommand = (
   assert.equal(childAdded.graph.allocations[0]?.materialAmountToman, '0');
   assert.equal(childAdded.graph.allocations[0]?.cuttingAmountToman, '150');
   assert.equal(childAdded.graph.rows[1]?.commercial.totalAmountToman, '150');
+  assert.equal(childAdded.graph.allocations[0].allocationOrder, 0);
+  const importedChildCommand = {
+    ...sourceCommand, baseRevision: sourceAdded.graph.revision,
+    sellerIntent: { row: childRow, productPolicyInput: childInput,
+      remainderChildPolicyInput: { ...childAdded.graph.allocations[0].intentSnapshot, allocationOrder: 7 } },
+  };
+  const importedChild = executeProductGraphCommand({ graph: sourceAdded.graph, command: importedChildCommand });
+  if (!importedChild.ok) throw new Error('Expected exact recovery allocation order to survive import');
+  assert.equal(importedChild.graph.allocations[0].allocationOrder, 7);
+  for (const allocationOrder of [7, 8]) {
+    const replacement = executeProductGraphCommand({ graph: importedChild.graph, command: {
+      ...importedChildCommand, type: 'replace-row', baseRevision: importedChild.graph.revision,
+      sellerIntent: { ...importedChildCommand.sellerIntent,
+        remainderChildPolicyInput: { ...importedChildCommand.sellerIntent.remainderChildPolicyInput, allocationOrder } },
+    } });
+    assert.equal(replacement.ok, allocationOrder === 7);
+    assert.equal(importedChild.graph.allocations[0].allocationOrder, 7);
+  }
+  for (const allocationOrder of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, null]) {
+    const malformed = executeProductGraphCommand({ graph: sourceAdded.graph, command: {
+      ...importedChildCommand, sellerIntent: { ...importedChildCommand.sellerIntent,
+        remainderChildPolicyInput: { ...importedChildCommand.sellerIntent.remainderChildPolicyInput, allocationOrder } },
+    } as unknown as typeof importedChildCommand });
+    assert.equal(malformed.ok, false, `Invalid allocation order ${allocationOrder} was accepted`);
+  }
   assert.equal(childAdded.graph.remainingStones[0]?.ownerProductRowId, childRowId);
   assert.equal(childAdded.graph.remainingStones[0]?.widthMeters, '0.04');
   assert.deepEqual(

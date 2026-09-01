@@ -16,6 +16,7 @@ assert.equal(hrBaseFeatureLevelForRequest('PUT', '/personnel/person-1'), 'EDIT')
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications'), 'VIEW');
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications/app-1/decisions/HR_PRELIMINARY_APPROVAL'), 'VIEW');
 assert.equal(hrHiringBaseFeatureLevelForRequest('PUT', '/applications/app-1/onboarding-tasks/task-1'), 'VIEW');
+assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/applications/app-1/sms/OFFER/ref-1/delivery/refresh'), 'VIEW');
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/authorities'), 'ADMIN');
 assert.equal(hrHiringBaseFeatureLevelForRequest('POST', '/unclassified-mutation'), 'EDIT');
 assert.equal(
@@ -70,9 +71,17 @@ for (const route of [
   'GET /positions/:id/history',
   'POST /positions/:id/capacity-changes',
   'GET /foundation/:entityType/:id/dependencies',
+  'GET /foundation/:entityType/:id/detail',
   'POST /foundation/:entityType/:id/lifecycle',
   'DELETE /foundation/:entityType/:id/permanent',
+  'POST /assignments/:id/cancel',
+  'POST /assignments/:id/end',
 ]) assert.ok(registeredRoutes.includes(route), `missing lifecycle-safe organization route: ${route}`);
+
+assert.ok(
+  !registeredRoutes.includes('POST /assignments/:id/void'),
+  'new assignment voids must remain retired; current assignments end and future assignments cancel',
+);
 
 const drilldownPositions = [
   { id: 'p1', supervisorPositionId: 's1', organizationalUnitId: 'u1', jobId: 'j1', workplaceId: 'w1', costCenterId: 'c1', isActive: true, capacityBreakdown: { vacancy: 0, inUse: 1, reservedForStart: 0, acting: 0, ended: 0, future: 0 }, _count: { subordinatePositions: 0 } },

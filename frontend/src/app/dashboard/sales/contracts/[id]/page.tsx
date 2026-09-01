@@ -39,6 +39,9 @@ import { getPreparedKindLabel, getPreparedQuantity, getPreparedUnit, getPrepared
 import { normalizeProductFinishing } from '@/features/contract-creation/utils/finishingUtils';
 import { invoiceStatusLabels, receivableStatusLabels, sourceStatusLabels, StatusBadge, taxStatusLabels } from '@/features/accounting/accountingUi';
 import { buildContractPaymentPresentation } from '@/features/sales/contractPaymentPresentation';
+import { PartnerAccountViewSchema, PartnerCaseViewSchema, type PartnerAccountView, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
+import { PartnerCaseWorkspace } from '@/features/partner-sales/cases/PartnerCaseWorkspace';
+import { resolvePartnerContractRoute } from '@/features/partner-sales/cases/partnerContractRouting';
 
 interface Contract {
   id: string;
@@ -55,6 +58,13 @@ interface Contract {
   updatedAt: string;
   signedAt?: string;
   printedAt?: string;
+  partnerKind?: string | null;
+  partnerCaseId?: string | null;
+  partnerRevision?: number | null;
+  partnerIntegrityHash?: string | null;
+  partnerCaseView?: PartnerCaseView | null;
+  partnerAccountView?: PartnerAccountView | null;
+  partnerActions?: { canPreview?: boolean; canIssue?: boolean; canSendConfirmation?: boolean; canRequestCorrection?: boolean; canCancel?: boolean; canRequestVoid?: boolean } | null;
   isSigned?: boolean;
   isInactive?: boolean;
   inactiveAt?: string | null;
@@ -436,6 +446,34 @@ export default function ContractDetailPage() {
         action={{ label: 'بازگشت به لیست قراردادها', href: '/dashboard/sales/contracts', tone: 'primary', variant: 'solid' }}
       />
     );
+  }
+
+  const partnerRoute = resolvePartnerContractRoute(contract);
+  if (partnerRoute.kind === 'blocked') {
+    return <ErpInlineState kind="error" title="شواهد نسخه پرونده فروش همکار کامل نیست؛ برای جلوگیری از نمایش نادرست، دسترسی متوقف شد." />;
+  }
+  if (partnerRoute.kind === 'partner') {
+    const projection = PartnerCaseViewSchema.safeParse(contract.partnerCaseView);
+    if (!projection.success || projection.data.owner.caseId !== partnerRoute.caseId
+      || projection.data.owner.revision !== partnerRoute.expected.revision
+      || projection.data.owner.integrityHash !== partnerRoute.expected.integrityHash) {
+      return <ErpInlineState kind="error" title="نمای مجاز پرونده فروش همکار در دسترس نیست؛ اطلاعات قرارداد عادی جایگزین نمی‌شود."
+        action={{ label: 'دریافت دوباره', onClick: () => void loadContract() }} />;
+    }
+    const capabilities = contract.partnerActions || {};
+    const account = PartnerAccountViewSchema.safeParse(contract.partnerAccountView);
+    return <PartnerCaseWorkspace view={projection.data} account={account.success ? account.data : undefined} actions={{
+      canPreview: capabilities.canPreview === true,
+      canIssue: capabilities.canIssue === true,
+      canSendConfirmation: capabilities.canSendConfirmation === true,
+      canRequestCorrection: false,
+      // Command transport for these mutations is registered by the integration owner.
+      canCancel: false,
+      canRequestVoid: false,
+      onPreview: () => void handleDownloadPdf(),
+      onIssue: () => void handlePrintContract(),
+      onSendConfirmation: () => void handleResendConfirmation(),
+    }} />;
   }
 
   const totalAmount =

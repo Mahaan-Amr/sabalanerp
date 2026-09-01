@@ -1,0 +1,81 @@
+name: Partner sales harness
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths: ['tests/partner-sales/**', 'docs/qa/partner-sales/**', 'scripts/run-partner-sales-tests.mjs', 'playwright.partner-sales.config.ts', 'frontend/src/app/**', 'apps/sabalan-inquiry', 'apps/sabalan-inquiry/app/**', '.gitmodules', 'backend/src/middleware/feature.ts', 'backend/src/services/hrActionPermissionCatalog.ts', 'backend/prisma/schema.prisma', 'packages/partner-sales-contracts/**', 'packages/contract-product-graph/**', 'package*.json', 'frontend/package*.json', 'scripts/design-system-e2e-preflight.mjs', 'docker-compose.local.yml', '.github/workflows/partner-sales.yml']
+  push:
+    branches: [main]
+    paths: ['tests/partner-sales/**', 'docs/qa/partner-sales/**', 'scripts/run-partner-sales-tests.mjs', 'playwright.partner-sales.config.ts', 'frontend/src/app/**', 'apps/sabalan-inquiry', 'apps/sabalan-inquiry/app/**', '.gitmodules', 'backend/src/middleware/feature.ts', 'backend/src/services/hrActionPermissionCatalog.ts', 'backend/prisma/schema.prisma', 'packages/partner-sales-contracts/**', 'packages/contract-product-graph/**', 'package*.json', 'frontend/package*.json', 'scripts/design-system-e2e-preflight.mjs', 'docker-compose.local.yml', '.github/workflows/partner-sales.yml']
+  workflow_dispatch:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Inventory includes Inquiry at the parent commit's gitlink, never its latest branch.
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm --prefix packages/contract-product-graph ci --ignore-scripts
+      - run: npm run build:contract-product-graph
+      - run: npm --prefix packages/contract-product-graph run test:technical-operations
+      - run: npm --prefix packages/contract-product-graph run test:technical-products
+      - run: npm --prefix packages/partner-sales-contracts ci --ignore-scripts
+      - run: npm run build:partner-sales-contracts
+      - run: npm --prefix frontend ci --ignore-scripts
+      - run: node scripts/run-partner-sales-tests.mjs unit
+      - run: node scripts/run-partner-sales-tests.mjs foundation
+      - run: node scripts/run-partner-sales-tests.mjs typecheck
+      - run: node scripts/run-partner-sales-tests.mjs check-inventory
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: partner-harness-contracts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/partner-sales/
+          retention-days: 14
+
+  local-baseline:
+    # Explicit trusted run only: never execute PR code on the shared local stack.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: contracts
+    runs-on: [self-hosted, sabalanerp-local]
+    environment: partner-sales-qa
+    concurrency:
+      group: sabalanerp-local-partner-sales
+      cancel-in-progress: false
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+          persist-credentials: false
+          submodules: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm --prefix packages/contract-product-graph ci --ignore-scripts
+      - run: npm run build:contract-product-graph
+      - run: npm --prefix packages/partner-sales-contracts ci --ignore-scripts
+      - run: npm run build:partner-sales-contracts
+      - run: npm --prefix frontend ci --ignore-scripts
+      - run: npx playwright install chrome
+      # Runtime owner prepares the existing stack. This workflow never starts or rebuilds it.
+      - run: node scripts/run-partner-sales-tests.mjs all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: partner-local-baseline-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/partner-sales/
+          retention-days: 14

@@ -1,3 +1,5 @@
+import { PARTNER_NOTIFICATION_EVENTS } from './partnerSales/notifications/definitions';
+
 export type NotificationPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
 export type NotificationChannel = 'IN_APP' | 'REALTIME' | 'WEB_PUSH';
 export type NotificationRecipientResolver =
@@ -31,6 +33,7 @@ export interface NotificationPolicyDraft {
 }
 
 const REGISTERED_NOTIFICATION_EVENTS = {
+  ...PARTNER_NOTIFICATION_EVENTS,
   HR_DUTY_ASSIGNED: {
     type: 'HR_DUTY_ASSIGNED', mandatory: true,
     titleTemplate: 'وظیفه جدید', messageTemplate: 'یک وظیفه جدید در فضای کاری شما آماده رسیدگی است.',
@@ -134,9 +137,19 @@ const REGISTERED_NOTIFICATION_EVENTS = {
     type: 'HIRING_OFFER_DECLINED',
     mandatory: true,
     titleTemplate: 'رد پیشنهاد همکاری',
-    messageTemplate: '{{candidateName}} پیشنهاد جایگاه {{positionTitle}} را رد کرد.',
+    messageTemplate: '{{candidateName}} پیشنهاد جایگاه {{positionTitle}} را رد کرد. دسته دلیل: {{declineCategory}} — توضیح متقاضی: {{decisionNote}}',
     priority: 'HIGH',
-    allowedVariables: ['candidateName', 'positionTitle'],
+    allowedVariables: ['candidateName', 'positionTitle', 'declineCategory', 'decisionNote'],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['HR_AUTHORITIES'],
+  },
+  HIRING_OFFER_ACCEPTED: {
+    type: 'HIRING_OFFER_ACCEPTED',
+    mandatory: true,
+    titleTemplate: 'پذیرش پیشنهاد همکاری',
+    messageTemplate: '{{candidateName}} پیشنهاد جایگاه {{positionTitle}} را پذیرفت.',
+    priority: 'HIGH',
+    allowedVariables: ['candidateName', 'positionTitle', 'declineCategory', 'decisionNote'],
     allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
     allowedRecipientResolvers: ['HR_AUTHORITIES'],
   },

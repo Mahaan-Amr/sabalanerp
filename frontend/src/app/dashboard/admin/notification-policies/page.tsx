@@ -60,6 +60,7 @@ const eventLabels: Record<string, string> = {
   HIRING_CHECKLIST_OVERDUE: 'پیگیری الزام معوق جذب',
   HIRING_INVITATION_SMS_FAILED: 'عدم تحویل پیامک دعوت استخدام',
   HIRING_OFFER_DECLINED: 'رد پیشنهاد همکاری',
+  HIRING_OFFER_ACCEPTED: 'پذیرش پیشنهاد همکاری',
   NEW_BROWSER_LOGIN: 'ورود از مرورگر جدید',
   RECOVERY_BACKUP_STALE: 'نسخه پشتیبان بازیابی به‌روز نیست',
   SYSTEM_RECOVERY_COMPLETED: 'تکمیل بازیابی کامل سامانه',

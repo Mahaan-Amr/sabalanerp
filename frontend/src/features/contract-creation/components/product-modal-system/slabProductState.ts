@@ -5,6 +5,7 @@ import {
   type SlabCuttingPricingMethod,
   type SlabManualField,
   type SlabPolicyInput,
+  type SlabTechnicalInput,
   type SlabSourceRowInput,
   type StableIdentity
 } from '@sabalanerp/contract-product-graph';
@@ -60,12 +61,12 @@ export const removeSlabSourceRow = (
 ): readonly SlabSourceRowInput[] =>
   rows.filter(row => row.sourceRowId !== sourceRowId);
 
-export const commitSlabDecimal = (
-  input: SlabPolicyInput,
+export const commitSlabDecimal = <Input extends SlabPolicyInput | SlabTechnicalInput>(
+  input: Input,
   field: 'lengthMeters' | 'widthMeters' | 'areaSquareMeters' | 'baseMaterialRateToman' | 'squareMeterCutRateToman',
   rawValue: string,
   manualField?: SlabManualField
-): SlabPolicyInput => {
+): Input => {
   const value = rawValue.trim() === ''
     ? undefined
     : parseCanonicalDecimal(rawValue);
@@ -122,4 +123,3 @@ export const firstSlabValidationTarget = (
   }
   return undefined;
 };
-

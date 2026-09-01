@@ -6,6 +6,7 @@ import {
   type StairQuantityState
 } from '../StairProductSection';
 import {
+  calculateProductOperations,
   createNewStairPartPolicyInput,
   copyStairPartOperations,
   copyStairPartPolicyFromTread,
@@ -17,7 +18,8 @@ import {
 } from '../../../utils/productConfigurationController';
 import {
   applyInventoryLayerTypeSelection,
-  createCanonicalStairDraftInput
+  createCanonicalStairDraftInput,
+  createStairOperationInput
 } from '../../../services/stairCalculationService';
 import {
   validateDraftRequiredFields
@@ -268,5 +270,128 @@ assert.equal(selectedInventoryLayer.layerTypeId, 'inventory-double-layer');
 assert.equal(selectedInventoryLayer.layerTypeName, 'لایه دوبل');
 assert.equal(selectedInventoryLayer.layerTypePrice, 125000);
 assert.equal(selectedInventoryLayer.layerTypeCalculationUnit, 'physicalPiece');
+
+const savedWholeProductGroupId = parseStableIdentity(
+  'operation-group',
+  'saved-stair-whole-product'
+);
+const savedWholeProductOperations = {
+  policyVersion: 'calculation-v1',
+  pricingPolicyVersion: 'pricing-v1',
+  roundingPolicyVersion: 'rounding-v1',
+  productRowId: parseStableIdentity('product-row', 'saved-stair-row'),
+  lengthMeters: parseCanonicalDecimal('1.1'),
+  widthMeters: parseCanonicalDecimal('0.33'),
+  quantity: 24,
+  groups: [{
+    operationGroupId: savedWholeProductGroupId,
+    scope: parseCanonicalDecimal('24')
+  }],
+  tools: [{
+    toolSelectionId: parseStableIdentity(
+      'tool-selection',
+      'saved-stair-tool'
+    ),
+    operationGroupId: savedWholeProductGroupId,
+    catalogItemId: 'tool-half-round',
+    catalogSnapshotVersion: 'inventory-v1',
+    name: 'نیم لول',
+    unit: 'meter' as const,
+    rateToman: parseCanonicalDecimal('50000'),
+    edges: ['front', 'left'] as const
+  }],
+  finishings: []
+};
+const quantityReducedOperations = createStairOperationInput(
+  'tread',
+  {
+    ...freshDraft,
+    lengthValue: 1.1,
+    widthCm: 33,
+    quantity: 23,
+    operationPolicyInput: savedWholeProductOperations
+  },
+  stairStone.id
+);
+assert.equal(quantityReducedOperations.quantity, 23);
+assert.equal(quantityReducedOperations.groups[0]?.scope, '23');
+assert.equal(
+  quantityReducedOperations.groups[0]?.operationGroupId,
+  savedWholeProductGroupId
+);
+assert.equal(quantityReducedOperations.tools[0]?.edges?.join(','), 'front,left');
+assert.equal(calculateProductOperations(quantityReducedOperations).ok, true);
+
+const splitSecondGroupId = parseStableIdentity(
+  'operation-group',
+  'saved-stair-split-second'
+);
+const explicitlySplitOperations = createStairOperationInput(
+  'tread',
+  {
+    ...freshDraft,
+    lengthValue: 1.1,
+    widthCm: 33,
+    quantity: 23,
+    operationPolicyInput: {
+      ...savedWholeProductOperations,
+      groups: [
+        {
+          operationGroupId: savedWholeProductGroupId,
+          scope: parseCanonicalDecimal('10')
+        },
+        {
+          operationGroupId: splitSecondGroupId,
+          scope: parseCanonicalDecimal('14')
+        }
+      ]
+    }
+  },
+  stairStone.id
+);
+assert.deepEqual(
+  explicitlySplitOperations.groups.map(group => group.scope),
+  ['10', '14']
+);
+const splitCalculation = calculateProductOperations(explicitlySplitOperations);
+assert.equal(splitCalculation.ok, false);
+if (!splitCalculation.ok) {
+  assert.equal(
+    splitCalculation.conflicts[0]?.code,
+    'group-scope-exceeds-product'
+  );
+}
+
+const manualOverrideOperations = createStairOperationInput(
+  'tread',
+  {
+    ...freshDraft,
+    lengthValue: 1.1,
+    widthCm: 33,
+    quantity: 23,
+    operationPolicyInput: {
+      ...savedWholeProductOperations,
+      tools: [{
+        ...savedWholeProductOperations.tools[0],
+        quantityOverride: {
+          value: parseCanonicalDecimal('30'),
+          automaticQuantitySnapshot: parseCanonicalDecimal('34.32')
+        }
+      }]
+    }
+  },
+  stairStone.id
+);
+assert.equal(manualOverrideOperations.groups[0]?.scope, '23');
+const manualOverrideCalculation = calculateProductOperations(
+  manualOverrideOperations
+);
+assert.equal(manualOverrideCalculation.ok, false);
+if (!manualOverrideCalculation.ok) {
+  assert.equal(
+    manualOverrideCalculation.conflicts[0]?.code,
+    'manual-override-stale'
+  );
+}
 
 console.log('stair product state tests passed');

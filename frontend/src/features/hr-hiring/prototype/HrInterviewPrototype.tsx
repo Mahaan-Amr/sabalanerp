@@ -47,6 +47,7 @@ import {
   customCriterionIsComplete,
   hydrateInterviewState,
   InterviewSnapshotError,
+  initialInterviewScoreSummary,
   normalizeInitialInterviewPayload,
   publishedCriteriaForInterview,
   type CustomCriterion,
@@ -1597,6 +1598,22 @@ export function ProductionInterviewReport({
   history?: Array<{ version: number; outcome?: string; explanation?: string | null; evidenceJson?: InterviewEvidencePayload }>;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const scoreSummary = initialInterviewScoreSummary(payload);
+  const scoreSummaryCard = (
+    <ErpCard className="p-4">
+      <p className="text-xs text-[var(--sds-text-muted)]">میانگین امتیاز مصاحبه</p>
+      <p className="mt-1 text-xl font-bold text-[var(--sds-text-primary)]">
+        {scoreSummary.average === null
+          ? "میانگین قابل محاسبه نیست"
+          : `${scoreSummary.average.toLocaleString("fa-IR", { maximumFractionDigits: 1 })} از ۵`}
+      </p>
+      {scoreSummary.scoredCount > 0 && (
+        <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
+          بر اساس {scoreSummary.scoredCount.toLocaleString("fa-IR")} معیار امتیازدار
+        </p>
+      )}
+    </ErpCard>
+  );
   if ((payload as ProductionInterviewPayload).schemaVersion !== 2) {
     const legacy = payload as LegacyInterviewPayload;
     const legacyById = new Map((legacy.criteria || []).map((criterion) => [criterion.criterionId, criterion]));
@@ -1606,6 +1623,7 @@ export function ProductionInterviewReport({
         <span className="text-sm text-[var(--sds-text-secondary)]">گزارش قدیمی نسخه {version.toLocaleString("fa-IR")}</span>
       </div>
       <ErpInlineState kind="stale" title="این گزارش با ساختار نسخه قدیمی ثبت شده و بدون تغییر در داده‌های اصلی نمایش داده می‌شود." />
+      {scoreSummaryCard}
       <div className="grid gap-3 md:grid-cols-2">
         {interviewCriteria.map((criterion) => {
           const answer = legacyById.get(criterion.id);
@@ -1639,6 +1657,7 @@ export function ProductionInterviewReport({
       <ErpBadge tone={state.decision === "POSITIVE" ? "success" : "danger"}>{state.decision === "POSITIVE" ? "نتیجه مثبت" : "نتیجه منفی"}</ErpBadge>
       <span className="text-sm text-[var(--sds-text-secondary)]">گزارش نسخه {version.toLocaleString("fa-IR")}</span>
     </div>
+    {scoreSummaryCard}
     <div className="grid gap-3 md:grid-cols-2">
       {criteria.map((criterion) => {
         const answer = state.answers[criterion.id];

@@ -1,18 +1,21 @@
 'use client';
 
 import React from 'react';
+import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpInlineState, ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { formatPrice } from '@/lib/numberFormat';
 import {
   calculateLongitudinalProduct,
+  calculateLongitudinalTechnical,
   parseCanonicalDecimal,
   parseLongitudinalQuantityEntry,
   transitionLongitudinalQuantity,
   type CanonicalDecimal,
   type LongitudinalManualField,
   type LongitudinalProductCalculation,
-  type LongitudinalProductInput
+  type LongitudinalProductInput,
+  type LongitudinalTechnicalInput
 } from '@sabalanerp/contract-product-graph';
 import {
   CompactSwitch,
@@ -23,6 +26,9 @@ import { convertCompactLengthUnit } from './productModalState';
 const fieldClass =
   'min-h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-accent)] focus:ring-1 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-default)]';
 const errorClass = 'mt-1 min-h-4 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]';
+const isPricedInput = (input: LongitudinalProductInput | LongitudinalTechnicalInput): input is LongitudinalProductInput =>
+  !('inputRevision' in input);
+const TechnicalEditing = React.createContext(false);
 
 const toDisplayUnit = (
   value: CanonicalDecimal | undefined,
@@ -61,7 +67,9 @@ function CompactDecimalField({
   monetary?: boolean;
   grouped?: boolean;
 }) {
+  const preserveIncompleteText = React.useContext(TechnicalEditing);
   const [draft, setDraft] = React.useState(value);
+  const [entryError, setEntryError] = React.useState<string>();
   const editingRef = React.useRef(false);
   React.useEffect(() => {
     if (!editingRef.current) setDraft(value);
@@ -119,43 +127,61 @@ function CompactDecimalField({
           }}
           onChange={event => {
             const next = event.target.value;
+            setEntryError(undefined);
             setDraft(next);
             onValueChange(next);
           }}
           onBlur={() => {
             editingRef.current = false;
+            if (preserveIncompleteText && draft.trim() !== '') {
+              try {
+                if (inputMode === 'numeric' && !parseLongitudinalQuantityEntry(draft).accepted) {
+                  setEntryError('تعداد صحیح وارد کنید');
+                  return;
+                }
+                parseCanonicalDecimal(draft);
+              } catch {
+                setEntryError('عدد معتبر وارد کنید');
+                return;
+              }
+            }
             setDraft(value);
           }}
-          aria-invalid={Boolean(error)}
-          aria-describedby={error ? `${id}-error` : undefined}
+          aria-invalid={Boolean(entryError || error)}
+          aria-describedby={entryError || error ? `${id}-error` : undefined}
           className={fieldClass}
         />
       )}
-      <div id={`${id}-error`} className={errorClass}>{error ?? ''}</div>
+      <div id={`${id}-error`} className={errorClass}>{entryError ?? error ?? ''}</div>
     </div>
   );
 }
 
-export function LongitudinalProductSection({
+export function LongitudinalProductSection<Input extends LongitudinalProductInput | LongitudinalTechnicalInput>({
   input,
   onChange,
   showValidation = false,
   calculation: workerCalculation,
   calculating = false
 }: {
-  input: LongitudinalProductInput;
-  onChange: (input: LongitudinalProductInput) => void;
+  input: Input;
+  onChange: (input: Input) => void;
   showValidation?: boolean;
   calculation?: LongitudinalProductCalculation | null;
   calculating?: boolean;
 }) {
+  const pricingVisible = useProductPricingVisibility();
+  const pricedInput = isPricedInput(input) ? input : undefined;
+  const showPricing = pricingVisible && pricedInput !== undefined;
+  const technicalCalculation = React.useMemo(() => 'inputRevision' in input
+    ? calculateLongitudinalTechnical(input) : null, [input]);
   const localCalculation = React.useMemo(
-    () => workerCalculation === undefined && !calculating
-      ? calculateLongitudinalProduct(input)
+    () => pricedInput && workerCalculation === undefined && !calculating
+      ? calculateLongitudinalProduct(pricedInput)
       : null,
-    [calculating, input, workerCalculation]
+    [calculating, pricedInput, workerCalculation]
   );
-  const calculation = workerCalculation ?? localCalculation;
+  const calculation = technicalCalculation ?? workerCalculation ?? localCalculation;
   const missingLongRate = calculation?.ok === false &&
     calculation.conflicts.some(conflict =>
       conflict.code === 'longitudinal-cut-rate-missing' ||
@@ -163,7 +189,7 @@ export function LongitudinalProductSection({
     );
   const cutRateErrorRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
-    if (!showValidation || !missingLongRate) return;
+    if (!showPricing || !showValidation || !missingLongRate) return;
     const frame = requestAnimationFrame(() => {
       const target = cutRateErrorRef.current;
       target?.scrollIntoView({
@@ -175,14 +201,14 @@ export function LongitudinalProductSection({
       target?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [missingLongRate, showValidation]);
+  }, [missingLongRate, showPricing, showValidation]);
   const geometryPreviewCalculation = React.useMemo(() => {
-    if (!missingLongRate) return null;
+    if (!pricedInput || !missingLongRate) return null;
     const zero = parseCanonicalDecimal('0');
     const hasUsableBaseRate =
-      input.baseRateToman !== undefined && Number(input.baseRateToman) > 0;
+      pricedInput.baseRateToman !== undefined && Number(pricedInput.baseRateToman) > 0;
     return calculateLongitudinalProduct({
-      ...input,
+      ...pricedInput,
       ...(!hasUsableBaseRate
         ? {
             baseMaterialPricing: 'paid-source-zero' as const,
@@ -190,10 +216,10 @@ export function LongitudinalProductSection({
             mandatoryEnabled: false
           }
         : {}),
-      longitudinalCutRateToman: input.longitudinalCutRateToman ?? zero,
-      calibrationCutRateToman: input.calibrationCutRateToman ?? zero
+      longitudinalCutRateToman: pricedInput.longitudinalCutRateToman ?? zero,
+      calibrationCutRateToman: pricedInput.calibrationCutRateToman ?? zero
     });
-  }, [input, missingLongRate]);
+  }, [pricedInput, missingLongRate]);
   const rawConflictFor = (field: string) => calculation?.ok
     ? undefined
     : calculation?.conflicts.find(conflict => conflict.field === field)?.message;
@@ -245,7 +271,7 @@ export function LongitudinalProductSection({
     input.requestedAreaSquareMeters;
   const noPhysicalCut = effectiveWidth === input.motherWidthMeters;
   const summaryRows = resolved
-    ? resolved.summary.map(row => row.key === 'cutting' &&
+    ? resolved.summary.map(row => row.key === 'cutting' && 'billableLongitudinalCutMeters' in resolved &&
         Number(resolved.billableLongitudinalCutMeters) > 0
       ? {
           ...row,
@@ -266,7 +292,7 @@ export function LongitudinalProductSection({
       ];
 
   return (
-    <div className="space-y-3">
+    <TechnicalEditing.Provider value={!pricedInput}><div className="space-y-3">
       <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-4">
         <CompactDecimalField
           id="longitudinal-length"
@@ -305,12 +331,16 @@ export function LongitudinalProductSection({
             const parsedEntry = parseLongitudinalQuantityEntry(value);
             if (!parsedEntry.accepted) return;
             const nextQuantity = parsedEntry.quantity;
+            if (!pricedInput) {
+              onChange({ ...input, quantity: nextQuantity, lastManualField: 'quantity' });
+              return;
+            }
             const transitioned = transitionLongitudinalQuantity({
               previousQuantity: input.quantity,
               nextQuantity,
-              mandatoryEnabled: input.mandatoryEnabled,
-              mandatoryPercentage: input.mandatoryPercentage,
-              rememberedMandatoryPercentage: input.rememberedMandatoryPercentage
+              mandatoryEnabled: pricedInput.mandatoryEnabled,
+              mandatoryPercentage: pricedInput.mandatoryPercentage,
+              rememberedMandatoryPercentage: pricedInput.rememberedMandatoryPercentage
             });
             onChange({
               ...input,
@@ -335,7 +365,7 @@ export function LongitudinalProductSection({
         <div className={errorClass}>{conflictFor('dimensions')}</div>
       )}
 
-      {input.baseMaterialPricing === 'paid-source-zero' ? (
+      {showPricing && (pricedInput?.baseMaterialPricing === 'paid-source-zero' ? (
         <ErpInlineState
           kind="empty"
           title="هزینه سنگ مادر قبلاً در محصول منبع محاسبه شده است؛ این ردیف فقط هزینه برش و عملیات جدید را دارد."
@@ -344,20 +374,20 @@ export function LongitudinalProductSection({
         <CompactDecimalField
           id="longitudinal-base-rate"
           label="فی هر مترمربع (تومان)"
-          value={input.baseRateToman ?? ''}
+          value={pricedInput?.baseRateToman ?? ''}
           monetary
           onValueChange={value => commitDecimal('baseRateToman', value, input.lastManualField)}
           error={conflictFor('baseRateToman')}
         />
-      )}
+      ))}
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-[var(--sds-border-default)] py-2 dark:border-[var(--sds-border-subtle)]">
-        {input.baseMaterialPricing !== 'paid-source-zero' && (
+        {showPricing && pricedInput && pricedInput.baseMaterialPricing !== 'paid-source-zero' && (
           <>
             <label className="inline-flex items-center gap-2 text-xs font-semibold">
               <CompactSwitch
                 label="حکمی"
-                checked={input.mandatoryEnabled}
+                checked={pricedInput.mandatoryEnabled}
                 onChange={mandatoryEnabled => onChange({ ...input, mandatoryEnabled })}
               />
               حکمی
@@ -366,7 +396,7 @@ export function LongitudinalProductSection({
               <CompactDecimalField
                 id="longitudinal-mandatory-percentage"
                 label="درصد حکمی"
-                value={input.mandatoryPercentage}
+                value={pricedInput.mandatoryPercentage}
                 onValueChange={value => {
                   if (value.trim() === '') return;
                   try {
@@ -398,7 +428,7 @@ export function LongitudinalProductSection({
           <CompactSwitch
             label="برش کالیبر"
             checked={resolved?.calibrationEnabled ?? input.calibrationEnabled}
-            disabled={noPhysicalCut || missingLongRate}
+            disabled={noPhysicalCut || (showPricing && missingLongRate)}
             onChange={calibrationEnabled => onChange({
               ...input,
               calibrationEnabled,
@@ -409,7 +439,7 @@ export function LongitudinalProductSection({
         </label>
       </div>
 
-      {missingLongRate && (
+      {showPricing && missingLongRate && (
         <div
           ref={cutRateErrorRef}
           id="longitudinal-cut-rate-error"
@@ -439,16 +469,16 @@ export function LongitudinalProductSection({
             ))}
           </div>
         )}
-        {!calculating && summaryRows.map(row => (
+        {!calculating && summaryRows.filter(row => technicalCalculation || showPricing || row.key === 'layout' || row.key === 'remainder').map(row => (
           <div
             key={row.key}
-            className="grid min-h-9 grid-cols-[7rem_1fr] items-center gap-3 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs dark:border-[var(--sds-border-subtle)]"
+            className="grid min-h-9 grid-cols-1 gap-1 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs sm:grid-cols-[7rem_1fr] sm:items-center sm:gap-3 dark:border-[var(--sds-border-subtle)]"
           >
             <span className="text-[var(--sds-text-muted)]">{row.label}</span>
             <span className="font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{row.value}</span>
           </div>
         ))}
       </section>
-    </div>
+    </div></TechnicalEditing.Provider>
   );
 }

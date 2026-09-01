@@ -1,16 +1,19 @@
 'use client';
 
 import React from 'react';
+import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpPressable, ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { formatPrice } from '@/lib/numberFormat';
 import {
   calculateSlab,
+  calculateSlabTechnical,
   parseCanonicalDecimal,
   parseStableIdentity,
   type CanonicalDecimal,
   type SlabCalculation,
   type SlabPolicyInput,
+  type SlabTechnicalInput,
   type SlabSourceRowInput,
   type StableIdentity
 } from '@sabalanerp/contract-product-graph';
@@ -24,13 +27,15 @@ import {
   commitSlabDecimal,
   createSlabSourceRow,
   removeSlabSourceRow,
-  replaceSlabSourceRow,
-  setSlabCuttingPricingMethod
+  replaceSlabSourceRow
 } from './slabProductState';
 
 const fieldClass =
   'min-h-10 w-full rounded-lg border border-[var(--sds-border-default)] bg-transparent px-3 text-sm outline-none focus:border-[var(--sds-accent)] focus:ring-1 focus:ring-[var(--sds-focus-ring)] dark:border-[var(--sds-border-default)]';
 const errorClass = 'mt-1 min-h-4 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]';
+const isPricedInput = (input: SlabPolicyInput | SlabTechnicalInput): input is SlabPolicyInput =>
+  !('inputRevision' in input);
+const TechnicalEditing = React.createContext(false);
 
 const toDisplay = (value: CanonicalDecimal | undefined, unit: 'cm' | 'm') =>
   value === undefined ? '' : convertCompactLengthUnit(value, 'm', unit);
@@ -59,7 +64,9 @@ function SlabField({
   inputMode?: 'decimal' | 'numeric';
   monetary?: boolean;
 }) {
+  const preserveIncompleteText = React.useContext(TechnicalEditing);
   const [draft, setDraft] = React.useState(value);
+  const [entryError, setEntryError] = React.useState<string>();
   const editingRef = React.useRef(false);
   React.useEffect(() => {
     if (!editingRef.current) setDraft(value);
@@ -110,19 +117,32 @@ function SlabField({
             editingRef.current = true;
           }}
           onChange={event => {
+            setEntryError(undefined);
             setDraft(event.target.value);
             onChange(event.target.value);
           }}
           onBlur={() => {
             editingRef.current = false;
+            if (preserveIncompleteText && draft.trim() !== '') {
+              try {
+                const normalized = parseCanonicalDecimal(draft);
+                if (inputMode === 'numeric' && (!/^[1-9]\d*$/.test(normalized) || !Number.isSafeInteger(Number(normalized)))) {
+                  setEntryError('تعداد صحیح و مثبت وارد کنید');
+                  return;
+                }
+              } catch {
+                setEntryError('عدد معتبر وارد کنید');
+                return;
+              }
+            }
             setDraft(value);
           }}
-          aria-invalid={Boolean(error)}
-          aria-describedby={error ? `${id}-error` : undefined}
+          aria-invalid={Boolean(entryError || error)}
+          aria-describedby={entryError || error ? `${id}-error` : undefined}
           className={fieldClass}
         />
       )}
-      <div id={`${id}-error`} className={errorClass}>{error ?? ''}</div>
+      <div id={`${id}-error`} className={errorClass}>{entryError ?? error ?? ''}</div>
     </div>
   );
 }
@@ -215,29 +235,38 @@ function SlabSourceRow({
   );
 }
 
-export function SlabProductSection({
+export function SlabProductSection<Input extends SlabPolicyInput | SlabTechnicalInput>({
   input,
   onChange,
   showValidation = false,
   calculation: workerCalculation,
   calculating = false,
+  sawKerfMeters,
   createSourceIdentity = () =>
     parseStableIdentity('slab-source-row', crypto.randomUUID())
 }: {
-  input: SlabPolicyInput;
-  onChange: (input: SlabPolicyInput) => void;
+  input: Input;
+  onChange: (input: Input) => void;
   showValidation?: boolean;
   calculation?: SlabCalculation | null;
   calculating?: boolean;
+  /** Server-projected technical catalog fact. No implicit Partner kerf policy. */
+  sawKerfMeters?: CanonicalDecimal;
   createSourceIdentity?: () => StableIdentity<'slab-source-row'>;
 }) {
+  const pricingVisible = useProductPricingVisibility();
+  const pricedInput = isPricedInput(input) ? input : undefined;
+  const showPricing = pricingVisible && pricedInput !== undefined;
+  const enabledKerf = sawKerfMeters ?? (pricedInput ? parseCanonicalDecimal('0.003') : undefined);
+  const technicalCalculation = React.useMemo(() => 'inputRevision' in input
+    ? calculateSlabTechnical(input) : null, [input]);
   const localCalculation = React.useMemo(
-    () => workerCalculation === undefined && !calculating
-      ? calculateSlab(input)
+    () => pricedInput && workerCalculation === undefined && !calculating
+      ? calculateSlab(pricedInput)
       : null,
-    [calculating, input, workerCalculation]
+    [calculating, pricedInput, workerCalculation]
   );
-  const calculation = workerCalculation ?? localCalculation;
+  const calculation = technicalCalculation ?? workerCalculation ?? localCalculation;
   const rawConflict = (field: string) => calculation?.ok
     ? undefined
     : calculation?.conflicts.find(item => item.field === field)?.message;
@@ -252,6 +281,8 @@ export function SlabProductSection({
     return 'اطلاعات این بخش را بررسی و اصلاح کنید';
   };
   const resolved = calculation?.ok ? calculation.result : undefined;
+  const pricedResult = pricedInput && calculation?.ok && 'totalAmountToman' in calculation.result
+    ? calculation.result : undefined;
   const commitDimension = (
     field: 'lengthMeters' | 'widthMeters',
     raw: string,
@@ -266,7 +297,7 @@ export function SlabProductSection({
   const sourceError = conflict('sourceRows');
 
   return (
-    <div className="space-y-3">
+    <TechnicalEditing.Provider value={!pricedInput}><div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <SlabField
           id="slab-length"
@@ -318,16 +349,16 @@ export function SlabProductSection({
         />
       </div>
 
-      <SlabField
+      {showPricing && <SlabField
         id="slab-base-rate"
         label="فی سنگ مادر مصرفی"
-        value={input.baseMaterialRateToman ?? ''}
+        value={pricedInput?.baseMaterialRateToman ?? ''}
         monetary
         onChange={value => safeCommit(() =>
           onChange(commitSlabDecimal(input, 'baseMaterialRateToman', value))
         )}
         error={conflict('baseMaterialRateToman')}
-      />
+      />}
 
       <section className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
         <div className="flex min-h-8 items-center justify-between gap-3">
@@ -372,25 +403,25 @@ export function SlabProductSection({
         {sourceError && <div className={errorClass}>{sourceError}</div>}
       </section>
 
-      <section className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
+      {showPricing && <section className="border-t border-[var(--sds-border-default)] py-3 dark:border-[var(--sds-border-subtle)]">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-bold">روش محاسبه برش</h3>
           <CompactSegmentedControl
             label="روش محاسبه برش اسلب"
-            value={input.cuttingPricingMethod}
+            value={pricedInput?.cuttingPricingMethod ?? 'lineBased'}
             options={[
               { value: 'lineBased', label: 'خطوط برش' },
               { value: 'squareMeter', label: 'مترمربع' }
             ]}
-            onChange={method => onChange(setSlabCuttingPricingMethod(input, method))}
+            onChange={method => onChange({ ...input, cuttingPricingMethod: method })}
           />
         </div>
-        {input.cuttingPricingMethod === 'squareMeter' && (
+        {pricedInput?.cuttingPricingMethod === 'squareMeter' && (
           <div className="mt-2 max-w-xs">
             <SlabField
               id="slab-square-meter-cut-rate"
               label="نرخ برش"
-              value={input.squareMeterCutRateToman ?? ''}
+              value={pricedInput.squareMeterCutRateToman ?? ''}
               monetary
               onChange={value => safeCommit(() =>
                 onChange(commitSlabDecimal(input, 'squareMeterCutRateToman', value))
@@ -399,15 +430,16 @@ export function SlabProductSection({
             />
           </div>
         )}
-      </section>
+      </section>}
 
       <div className="flex min-h-10 items-center gap-2 border-t border-[var(--sds-border-default)] py-2 text-xs font-semibold dark:border-[var(--sds-border-subtle)]">
         <CompactSwitch
           label="خوراک اره"
           checked={Number(input.kerfMeters) > 0}
-          onChange={enabled => onChange({
+          disabled={enabledKerf === undefined}
+          onChange={enabled => enabledKerf !== undefined && onChange({
             ...input,
-            kerfMeters: parseCanonicalDecimal(enabled ? '0.003' : '0')
+            kerfMeters: enabled ? enabledKerf : parseCanonicalDecimal('0')
           })}
         />
         خوراک اره
@@ -426,30 +458,30 @@ export function SlabProductSection({
           </div>
         )}
         {!calculating && [
-          ['محصول نهایی', resolved
+          { key: 'finished', label: 'محصول نهایی', value: resolved
             ? `${resolved.quantity} × ${resolved.lengthMeters}m × ${resolved.widthMeters}m`
-            : '—'],
-          ['منبع مصرفی', resolved
+            : '—' },
+          { key: 'consumed', label: 'منبع مصرفی', value: resolved
             ? `${resolved.packingPlan.consumedSources.length} اسلب`
-            : '—'],
-          ['منبع استفاده‌نشده', resolved
+            : '—' },
+          { key: 'unused', label: 'منبع استفاده‌نشده', value: resolved
             ? `${resolved.packingPlan.unusedSources.length} اسلب کامل`
-            : '—'],
-          ['باقی‌مانده برش', resolved
+            : '—' },
+          { key: 'remainders', label: 'باقی‌مانده برش', value: resolved
             ? `${resolved.packingPlan.remainders.length} قطعه`
-            : '—'],
-          ['برش', resolved ? formatPrice(resolved.cuttingAmountToman) : '—'],
-          ['جمع', resolved ? formatPrice(resolved.totalAmountToman) : '—']
-        ].map(([label, value]) => (
+            : '—' },
+          { key: 'cutting-price', pricing: true, label: 'برش', value: pricedResult ? formatPrice(pricedResult.cuttingAmountToman) : '—' },
+          { key: 'total-price', pricing: true, label: 'جمع', value: pricedResult ? formatPrice(pricedResult.totalAmountToman) : '—' }
+        ].filter(row => showPricing || !row.pricing).map(({ key, label, value }) => (
           <div
-            key={label}
-            className="grid min-h-9 grid-cols-[8rem_1fr] items-center gap-3 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs dark:border-[var(--sds-border-subtle)]"
+            key={key}
+            className="grid min-h-9 grid-cols-1 gap-1 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs sm:grid-cols-[8rem_1fr] sm:items-center sm:gap-3 dark:border-[var(--sds-border-subtle)]"
           >
             <span className="text-[var(--sds-text-muted)]">{label}</span>
             <span className="font-semibold">{value}</span>
           </div>
         ))}
       </section>
-    </div>
+    </div></TechnicalEditing.Provider>
   );
 }

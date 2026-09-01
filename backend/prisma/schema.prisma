@@ -7835,11 +7835,14 @@ model PerformanceExportReceipt {
   artifactPath           String?
   artifactMimeType       String?
   artifactSize           Int?
+  artifactKeyId          String?
+  startedAt              DateTime?
   attemptCount           Int                     @default(0)
   failureCode            String?
 
   @@index([requestedByUserId, requestedAt])
   @@index([status, expiresAt])
+  @@index([status, startedAt])
   @@map("performance_export_receipts")
 }
 

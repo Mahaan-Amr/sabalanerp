@@ -35,7 +35,7 @@ test('live performance insights are RTL, responsive, accessible, and disclose no
   await mockInsightsApi(page, { VIEW_PERFORMANCE_ANALYTICS: true, VIEW_NAMED_PERFORMANCE_RANKING: true });
   await page.goto('/dashboard/hr/personnel/performance/insights');
   await expect(page.getByRole('heading', { name: 'تحلیل، رتبه‌بندی و خروجی عملکرد' })).toBeVisible();
-  await expect(page.getByText('مطابق انتظار')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'سطح عملکرد: مطابق انتظار' })).toBeVisible();
   await expect(page.getByText(/امتیاز/)).toHaveCount(0);
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
   await assertNoSeriousAxeViolations(page);

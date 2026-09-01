@@ -28,11 +28,11 @@ export default function PerformanceConsequenceHandoff() {
   const [evidence, setEvidence] = useState('');
   useEffect(() => {
     if (!personnelId || !relationshipId) { setError('پرونده پرسنل یا رابطه استخدامی مشخص نیست.'); setLoading(false); return; }
-    personnelPerformanceAPI.eligibleConsequenceResults(personnelId)
+    personnelPerformanceAPI.eligibleConsequenceResults(personnelId, consequenceType)
       .then((response) => setResults(response.data.results || []))
       .catch((cause) => setError(apiError(cause)))
       .finally(() => setLoading(false));
-  }, [personnelId, relationshipId]);
+  }, [personnelId, relationshipId, consequenceType]);
   const evidenceReferences = useMemo(() => evidence.split(/[،,\n]/).map((item) => item.trim()).filter(Boolean), [evidence]);
   const submit = async () => {
     try {

@@ -7,6 +7,30 @@ import {
   escapePerformanceExportHtml,
   validateConsequenceHandoff,
 } from '../personnelPerformanceDisclosure';
+import {
+  decryptPerformanceExportArtifact,
+  encryptPerformanceExportArtifact,
+  validatePerformanceExportKeyEnvironment,
+  withinPerformanceExportDeadline,
+} from '../personnelPerformanceDisclosureStore';
+
+const exportKey = Buffer.alloc(32, 9);
+const confidentialArtifact = Buffer.from('personnel,level\nپرسنل محرمانه,مطابق انتظار');
+const encryptedArtifact = encryptPerformanceExportArtifact(confidentialArtifact, exportKey);
+assert.equal(encryptedArtifact.includes(confidentialArtifact), false, 'export artifact must not remain plaintext at rest');
+assert.deepEqual(decryptPerformanceExportArtifact(encryptedArtifact, exportKey), confidentialArtifact);
+const tamperedArtifact = Buffer.from(encryptedArtifact);
+tamperedArtifact[tamperedArtifact.length - 1] ^= 1;
+assert.throws(() => decryptPerformanceExportArtifact(tamperedArtifact, exportKey));
+assert.throws(() => validatePerformanceExportKeyEnvironment({
+  PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID: 'production-export-v1',
+  PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64: Buffer.alloc(16).toString('base64'),
+}), /معتبر نیست/);
+assert.equal(validatePerformanceExportKeyEnvironment({
+  PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID: 'production-export-v1',
+  PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64: exportKey.toString('base64'),
+}).key.length, 32);
+const exportDeadlineCheck = assert.rejects(() => withinPerformanceExportDeadline(new Promise(() => undefined), 5), /سقف مجاز/);
 
 const projected = buildPerformanceBadgeSummary({
   state: 'LEVEL',
@@ -97,4 +121,4 @@ assert.ok(validateConsequenceHandoff({
   independentEvidenceReferences: [],
 }).length >= 2);
 
-console.log('Personnel performance disclosure policy tests passed.');
+void exportDeadlineCheck.then(() => console.log('Personnel performance disclosure policy tests passed.'));

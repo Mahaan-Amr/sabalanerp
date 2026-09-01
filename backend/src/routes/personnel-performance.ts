@@ -339,10 +339,16 @@ router.get('/exports/:exportId/download', requestExport, async (req: AuthRequest
   try {
     const artifact = await claimPerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, token: String(req.query.token ?? '') });
     res.type(artifact.mimeType);
-    return res.download(artifact.artifactPath, artifact.filename, (error) => {
-      void completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered: !error }).catch(next);
-      if (error) return next(error);
+    res.attachment(artifact.filename);
+    let finished = false;
+    res.once('finish', () => {
+      finished = true;
+      void completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered: true }).catch(next);
     });
+    res.once('close', () => {
+      if (!finished) void completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered: false }).catch(next);
+    });
+    return res.end(artifact.bytes);
   } catch (error) { return next(error); }
 });
 
@@ -361,8 +367,12 @@ router.post('/consequence-handoffs', createConsequence, requirePersonnelPerforma
   catch (error) { return next(error); }
 });
 
-router.get('/consequence-handoffs/eligible-results/:personnelId', createConsequence, async (req, res, next) => {
-  try { return res.json({ success: true, results: await listEligibleConsequenceResults(prisma, req.params.personnelId) }); }
+router.get('/consequence-handoffs/eligible-results/:personnelId', createConsequence, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, results: await listEligibleConsequenceResults(prisma, {
+    personnelId: req.params.personnelId,
+    actorUserId: req.user!.id,
+    consequenceType: String(req.query.consequenceType ?? ''),
+  }) }); }
   catch (error) { return next(error); }
 });
 

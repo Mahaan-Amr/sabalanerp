@@ -177,6 +177,7 @@ export const validateConsequenceHandoff = (input: {
   const errors: string[] = [];
   if (!consequenceTypes.has(input.consequenceType)) errors.push('نوع بازبینی پیامد معتبر نیست.');
   if (!input.resultIds.length) errors.push('دست‌کم یک نتیجه مصوب باید انتخاب شود.');
+  if (['PERFORMANCE_IMPROVEMENT_REVIEW', 'DEMOTION_REVIEW'].includes(input.consequenceType) && input.resultIds.length < 2) errors.push('بازبینی اقدام نامساعد به سابقه چنددوره‌ای نیاز دارد.');
   if (!input.reasonCategory.trim()) errors.push('دسته دلیل الزامی است.');
   if (input.reason.trim().length < 20) errors.push('توضیح انسانی دلیل باید دست‌کم ۲۰ نویسه باشد.');
   if (!input.independentEvidenceReferences.length) errors.push('ارجاع به شاهد مستقل الزامی است.');

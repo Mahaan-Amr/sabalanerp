@@ -8,7 +8,7 @@ import { personnelPerformanceAPI } from '@/lib/api';
 import { dateFa } from '@/features/hr/hrUi';
 import { performanceBadgePresentation, type PerformanceBadgeSummary } from './performanceBadgeModel';
 
-export function PerformanceBadge({ badge, compact = false }: { badge: PerformanceBadgeSummary; compact?: boolean }) {
+export function PerformanceBadge({ badge }: { badge: PerformanceBadgeSummary; compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const presentation = performanceBadgePresentation(badge);
   return <>
@@ -22,7 +22,7 @@ export function PerformanceBadge({ badge, compact = false }: { badge: Performanc
         <Image src={presentation.lightAsset} alt="" fill sizes="36px" className="object-contain dark:hidden" unoptimized />
         <Image src={presentation.darkAsset} alt="" fill sizes="36px" className="hidden object-contain dark:block" unoptimized />
       </span>
-      {!compact && <span className="text-xs font-bold text-[var(--sds-text-primary)]">{presentation.labelFa}</span>}
+      <span className="text-xs font-bold text-[var(--sds-text-primary)]">{presentation.labelFa}</span>
       <span className="sr-only">{presentation.meaningFa}</span>
     </ErpPressable>
     <ErpSheet open={open} onClose={() => setOpen(false)} title="خلاصه سطح عملکرد" presentation="modal">
@@ -53,5 +53,5 @@ export function PersonalPerformanceBadge() {
       .catch(() => { if (active) setBadge(null); });
     return () => { active = false; };
   }, []);
-  return badge ? <PerformanceBadge badge={badge} compact /> : null;
+  return badge ? <PerformanceBadge badge={badge} /> : null;
 }

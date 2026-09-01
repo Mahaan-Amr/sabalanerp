@@ -29,6 +29,7 @@ import {
   recomputePerformanceProjectionsInTransaction,
   runPerformanceSerializableTransaction,
 } from './personnelPerformancePolicyStore';
+import { suspendPerformanceHandoffsForResult } from './personnelPerformanceDisclosureStore';
 
 const resultError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
 const systemActorAuthorityHash = canonicalPerformanceHash({ actorType: 'SYSTEM', actorCode: 'PERFORMANCE_MAINTENANCE' });
@@ -156,9 +157,14 @@ export const persistAcceptedPerformanceResult = async (tx: Prisma.TransactionCli
     encryptedPayloadId: encryptedTrace.id,
     createdAt: acceptedAt,
   } });
-  if (previous) await tx.performanceAcceptedResult.update({
-    where: { id: previous.id }, data: { status: PerformanceResultStatus.SUPERSEDED },
-  });
+  if (previous) {
+    await tx.performanceAcceptedResult.update({
+      where: { id: previous.id }, data: { status: PerformanceResultStatus.SUPERSEDED },
+    });
+    await suspendPerformanceHandoffsForResult(tx, {
+      resultId: previous.id, actorUserId: input.acceptedByUserId, reasonCode: 'PERFORMANCE_RESULT_SUPERSEDED', keyring: input.keyring,
+    });
+  }
   const resultId = randomUUID();
   const resultPayload = {
     schemaVersion: 1,
@@ -266,6 +272,9 @@ export const suspendAcceptedPerformanceResult = async (client: PrismaClient, inp
       resultId: result.id, actorUserId: input.actorUserId, eventType: 'RESULT_SUSPENDED', reason: input.reason.trim(),
       evidence: { previousStatus: result.status, nextStatus: suspended.status }, occurredAt: now, keyring,
     });
+    await suspendPerformanceHandoffsForResult(tx, {
+      resultId: result.id, actorUserId: input.actorUserId, reasonCode: 'PERFORMANCE_RESULT_SUSPENDED', keyring,
+    });
     const recomputation = await recomputePerformanceProjectionsInTransaction(tx, {
       now, actorUserId: input.actorUserId, reason: 'تعلیق دلیل‌دار اثر نتیجه', keyring,
     });
@@ -295,6 +304,9 @@ export const expirePerformanceResults = async (client: PrismaClient, input: {
         evidence: { expiresAt: result.expiresAt.toISOString() },
         occurredAt: now,
         keyring,
+      });
+      await suspendPerformanceHandoffsForResult(tx, {
+        resultId: result.id, actorUserId: input.actorUserId, reasonCode: 'PERFORMANCE_RESULT_EXPIRED', keyring,
       });
     }
     const recomputation = due.length > 0 ? await recomputePerformanceProjectionsInTransaction(tx, {

@@ -25,12 +25,20 @@ assert.throws(() => decryptPerformanceExportArtifact(tamperedArtifact, exportKey
 assert.throws(() => validatePerformanceExportKeyEnvironment({
   PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID: 'production-export-v1',
   PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64: Buffer.alloc(16).toString('base64'),
-}), /معتبر نیست/);
+}), /معتبر/);
 assert.equal(validatePerformanceExportKeyEnvironment({
   PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID: 'production-export-v1',
   PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64: exportKey.toString('base64'),
 }).key.length, 32);
-const exportDeadlineCheck = assert.rejects(() => withinPerformanceExportDeadline(new Promise(() => undefined), 5), /سقف مجاز/);
+assert.throws(() => validatePerformanceExportKeyEnvironment({
+  PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64: exportKey.toString('base64'),
+  PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID: 'production-export-v1',
+  PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64: exportKey.toString('base64'),
+}), /مستقل/);
+let deadlineAborted = false;
+const exportDeadlineCheck = assert.rejects(() => withinPerformanceExportDeadline((signal) => new Promise((_resolve) => {
+  signal.addEventListener('abort', () => { deadlineAborted = true; }, { once: true });
+}), 5), /سقف مجاز/).then(() => assert.equal(deadlineAborted, true));
 
 const projected = buildPerformanceBadgeSummary({
   state: 'LEVEL',

@@ -53,3 +53,27 @@ test('performance insights expose no analytical surface without independent perm
   await expect(page.getByRole('button', { name: 'تحلیل نام‌دار' })).toBeDisabled();
   await expect(page.getByText('توزیع سطح‌های مصوب')).toHaveCount(0);
 });
+
+test('manual consequence handoff requires explicit result, evidence, and human reason', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.route('**/api/hr/personnel-performance/consequence-handoffs/eligible-results/**', async (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, results: [{
+      id: 'result-1', labelFa: 'مطابق انتظار', measurementTo: '2026-08-22T20:29:59.999Z', status: 'EFFECTIVE',
+    }] }),
+  }));
+  let submitted: any;
+  await page.route('**/api/hr/personnel-performance/consequence-handoffs', async (route) => {
+    submitted = route.request().postDataJSON();
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ success: true, handoff: { id: 'handoff-1' } }) });
+  });
+  await page.goto('/dashboard/hr/personnel/performance/consequence/new?personnelId=personnel-1&relationshipId=relationship-1');
+  await expect(page.getByRole('heading', { name: 'ارجاع پیامد عملکرد' })).toBeVisible();
+  await expect(page.getByText(/هیچ تغییر خودکار/)).toBeVisible();
+  await page.getByRole('checkbox', { name: /مطابق انتظار/ }).check();
+  await page.getByLabel('چرخه سیاستی').fill('1405-H1');
+  await page.getByLabel('ارجاع شاهد مستقل').fill('evidence-42');
+  await page.getByLabel('دلیل انسانی').fill('بازبینی انسانی مستقل با اتکا به شاهد ثبت‌شده و نتیجه مصوب');
+  await page.getByRole('button', { name: 'ارسال برای بازبینی مستقل' }).click();
+  await expect.poll(() => submitted).toBeTruthy();
+  expect(submitted).toMatchObject({ personnelId: 'personnel-1', employmentRelationshipId: 'relationship-1', resultIds: ['result-1'], independentEvidenceReferences: ['evidence-42'] });
+});

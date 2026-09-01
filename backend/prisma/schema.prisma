@@ -7882,9 +7882,10 @@ model PerformanceConsequenceHandoff {
   consequenceType          String
   policyCycleKey           String
   status                   String    @default("SENT")
-  reasonCategory           String
-  reason                   String
-  encryptedPayloadId       String    @unique
+  reasonCategory           String?
+  reason                   String?
+  encryptedPayloadId       String?   @unique
+  packageId                String?   @unique
   snapshotHash             String
   createdByUserId          String
   createdAt                DateTime  @default(now())
@@ -7895,6 +7896,22 @@ model PerformanceConsequenceHandoff {
   @@index([subjectId, consequenceType, status])
   @@index([employmentRelationshipId, createdAt])
   @@map("performance_consequence_handoffs")
+}
+
+model PerformanceConsequencePackage {
+  id                            String   @id @default(cuid())
+  encryptedPayloadId            String   @unique
+  snapshotHash                  String
+  destinationResponsibilityId   String
+  destinationWorkspaceCode      String
+  destinationFeatureCode        String?
+  destinationQueueCode          String
+  destinationVersion            Int
+  assignedDestinationUserId     String
+  createdAt                     DateTime @default(now())
+
+  @@index([assignedDestinationUserId, createdAt])
+  @@map("performance_consequence_packages")
 }
 
 model PerformanceDeletionReceipt {
@@ -7910,7 +7927,7 @@ model PerformanceDeletionReceipt {
   reason               String
   recordCount          Int
   dependencyEffectHash String
-  actorUserId          String
+  actorUserId          String?
   authorityHash        String
   executedAt           DateTime @default(now())
 

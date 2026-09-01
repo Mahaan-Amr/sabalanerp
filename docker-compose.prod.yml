@@ -120,6 +120,7 @@ services:
       - backend_storage_hr_hiring:/app/storage/hr-hiring
       - backend_storage_accounting_contracts:/app/storage/accounting-contracts
       - backend_storage_support_tickets:/app/storage/support-tickets
+      - backend_storage_performance_exports:/app/storage/performance-exports
       - backend_uploads:/app/uploads
       - backend_recovery:/app/storage/recovery
       - recovery_coordination:/app/recovery-coordination
@@ -263,6 +264,7 @@ volumes:
   backend_storage_hr_hiring:
   backend_storage_accounting_contracts:
   backend_storage_support_tickets:
+  backend_storage_performance_exports:
   backend_uploads:
   backend_recovery:
   recovery_coordination:

@@ -83,11 +83,18 @@ export const resolvePersonnelPerformanceWriteGate = async (
   client: PrismaClient,
   action: PersonnelPerformanceWriteAction,
   now = new Date(),
+  subjectId?: string,
 ) => {
   const phase = await client.performanceFeaturePhaseVersion.findFirst({
     where: { effectiveFrom: { lte: now } },
     orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
   });
+  const cohort = phase?.cohortVersionId ? await client.performanceCohortVersion.findUnique({
+    where: { id: phase.cohortVersionId }, select: { id: true, version: true },
+  }) : null;
+  const membership = cohort && subjectId ? await client.performanceCohortMember.findUnique({
+    where: { cohortVersionId_subjectId: { cohortVersionId: cohort.id, subjectId } }, select: { id: true },
+  }) : null;
   const pause = phase ? await client.performanceSafetyPause.findFirst({
     where: { phaseVersionId: phase.id, status: 'ACTIVE' },
     orderBy: { startedAt: 'desc' },
@@ -96,9 +103,11 @@ export const resolvePersonnelPerformanceWriteGate = async (
     releaseEnabled: phase?.releaseEnabled ?? false,
     phase: phase?.phase ?? 'SCHEMA_PROTECTION',
     phaseVersion: phase?.version ?? 0,
-    cohortVersion: 0,
-    subjectInCohort: true,
-    safetyPause: pause ? { id: pause.id, scope: pause.scope === 'COHORT' ? 'COHORT' : 'ALL' } : null,
+    cohortVersion: cohort?.version ?? 0,
+    subjectInCohort: Boolean(membership),
+    safetyPause: pause && (pause.scope !== 'COHORT' || pause.cohortVersionId === cohort?.id)
+      ? { id: pause.id, scope: pause.scope === 'COHORT' ? 'COHORT' : 'ALL' }
+      : null,
   }, action);
 };
 

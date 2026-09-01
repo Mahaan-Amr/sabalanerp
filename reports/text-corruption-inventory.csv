@@ -1,3 +1,3 @@
 file,line,class,confidence,token
-frontend/src/app/dashboard/inventory/services/page.tsx,1040,question-marks,0.65,"{formatPrice(finishing.unitPrice ?? finishing.pricePerSquareMeter)}"
+frontend/src/app/dashboard/inventory/services/page.tsx,1073,question-marks,0.65,"{formatPrice(finishing.unitPrice ?? finishing.pricePerSquareMeter)}"
 frontend/src/app/dashboard/inventory/services/stone-finishings/edit/[id]/page.tsx,39,question-marks,0.65,"pricePerSquareMeter: (data.unitPrice ?? data.pricePerSquareMeter)?.toString() || '',"

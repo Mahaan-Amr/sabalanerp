@@ -398,7 +398,7 @@ export default function PerformanceAnalyticsPrototype() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const requested = searchParams.get("variant")?.toUpperCase();
-  const variant: Variant = requested === "B" || requested === "C" ? requested : "A";
+  const variant: Variant = requested === "A" || requested === "B" ? requested : "C";
   const [profile, setProfile] = useState<PermissionProfile>("hr");
   const [period, setPeriod] = useState("summer");
   const [unit, setUnit] = useState("all");

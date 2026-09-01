@@ -31,6 +31,7 @@ import {
 } from './personnelPerformancePolicyStore';
 
 const resultError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
+const systemActorAuthorityHash = canonicalPerformanceHash({ actorType: 'SYSTEM', actorCode: 'PERFORMANCE_MAINTENANCE' });
 
 const loadLevelPolicy = async (tx: Prisma.TransactionClient, keyring: PerformanceVaultKey) => {
   const row = await tx.performancePolicyVersion.findFirst({
@@ -45,7 +46,7 @@ const loadLevelPolicy = async (tx: Prisma.TransactionClient, keyring: Performanc
 
 const auditResultEvent = async (tx: Prisma.TransactionClient, input: {
   resultId: string;
-  actorUserId: string;
+  actorUserId: string | null;
   eventType: string;
   reason: string;
   evidence: unknown;
@@ -66,6 +67,7 @@ const auditResultEvent = async (tx: Prisma.TransactionClient, input: {
     aggregateId: input.resultId,
     eventType: input.eventType,
     actorUserId: input.actorUserId,
+    authorityHash: input.actorUserId === null ? systemActorAuthorityHash : undefined,
     reason: input.reason,
     encryptedPayloadId: encrypted.id,
     previousEventHash: previous?.eventHash,
@@ -272,7 +274,7 @@ export const suspendAcceptedPerformanceResult = async (client: PrismaClient, inp
 };
 
 export const expirePerformanceResults = async (client: PrismaClient, input: {
-  actorUserId: string;
+  actorUserId: string | null;
   now?: Date;
   keyring?: PerformanceVaultKey;
 }) => {

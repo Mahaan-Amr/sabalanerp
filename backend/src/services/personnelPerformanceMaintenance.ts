@@ -7,7 +7,7 @@ import {
 import { expirePerformanceResults } from './personnelPerformanceResultStore';
 import { resolvePersonnelPerformanceWriteGate } from './personnelPerformanceRolloutPolicy';
 
-const SYSTEM_ACTOR = 'SYSTEM_PERFORMANCE_MAINTENANCE';
+const SYSTEM_ACTOR = null;
 
 export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, now = new Date()) => {
   const minuteKey = now.toISOString().slice(0, 16);

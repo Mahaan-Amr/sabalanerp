@@ -1,7 +1,7 @@
 [
   {
     "file": "frontend/src/app/dashboard/inventory/services/page.tsx",
-    "line": 1040,
+    "line": 1073,
     "token": "{formatPrice(finishing.unitPrice ?? finishing.pricePerSquareMeter)}",
     "class": "question-marks",
     "confidence": 0.65

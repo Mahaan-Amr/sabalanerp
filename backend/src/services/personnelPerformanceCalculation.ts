@@ -351,12 +351,13 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
   const coverage = totalOriginalWeight.gt(0) ? totalCoveredWeight.div(totalOriginalWeight).mul(HUNDRED) : ZERO;
   if (coverage.lt(70)) reasons.push('پوشش وزن اصلی ارزیابی کمتر از ۷۰ درصد است.');
   const notEvaluable = !structuralBlocker && reasons.length > 0;
-  const totalBasis = sectionWork.reduce((sum, item) => sum.add(item.combinationBasis), ZERO);
+  const scoredSectionWork = sectionWork.filter((item) => item.sectionScore !== null);
+  const totalBasis = scoredSectionWork.reduce((sum, item) => sum.add(item.combinationBasis), ZERO);
   const exactScore = structuralBlocker || notEvaluable || totalBasis.eq(0)
     ? null
-    : sectionWork.reduce((sum, item) => item.sectionScore === null
-      ? sum
-      : sum.add(item.sectionScore.mul(item.combinationBasis)), ZERO).div(totalBasis);
+    : scoredSectionWork.reduce((sum, item) => (
+      sum.add(item.sectionScore!.mul(item.combinationBasis))
+    ), ZERO).div(totalBasis);
 
   const traceSections = sectionWork.map((sectionItem) => ({
     sectionId: sectionItem.section.sectionId,
@@ -596,7 +597,8 @@ export const reproducePerformanceCalculation = (trace: PerformanceCalculationTra
         && evidenceWithinWindow(evidence.occurredAt, section, criterion.evidencePolicy.lookbackDays)
         && hasVerifiableEvidenceIdentity(evidence)
       )).length;
-      const evidenceRequirementMet = reliableEvidenceCount >= criterion.evidencePolicy.minimumReliableCount;
+      const evidenceRequirementMet = !criterion.evidencePolicy.required
+        || reliableEvidenceCount >= criterion.evidencePolicy.minimumReliableCount;
       const binaryGateMatches = criterion.criterionKind !== 'BINARY_GATE'
         || criterion.applicabilityDecision !== 'APPLICABLE'
         || criterion.binaryGatePassed === true;

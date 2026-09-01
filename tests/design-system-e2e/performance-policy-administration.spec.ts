@@ -76,3 +76,36 @@ test('performance policy administration hides mutation controls without its inde
   await expect(page.getByText('مجوز مستقل مدیریت سیاست عملکرد برای این صفحه فعال نیست.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'معیار جدید' })).toHaveCount(0);
 });
+
+test('accepted performance prototypes open on the approved analytics list and preserve failed criteria drafts', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/dashboard/hr/personnel/performance-analytics-prototype');
+  await expect(page.getByRole('heading', { name: 'فهرست تحلیلی Personnel' })).toBeVisible();
+
+  await page.goto('/dashboard/hr/personnel/performance-criteria-prototype?variant=C&save=fail');
+  await page.getByRole('button', { name: 'ساخت معیار جدید' }).click();
+  const editor = page.getByRole('dialog', { name: 'ساخت معیار جدید' });
+  await editor.getByRole('textbox', { name: 'نام معیار' }).fill('معیار بازیابی ذخیره');
+  await expect(editor.getByText('ذخیره نشد', { exact: true })).toBeVisible();
+  await editor.getByRole('button', { name: 'بستن' }).click();
+  await expect(editor).toBeVisible();
+  await editor.getByRole('button', { name: 'تلاش دوباره' }).click();
+  await expect(editor.getByText('پیش‌نویس با دکمه ذخیره شد')).toBeVisible();
+  await editor.getByRole('button', { name: 'بستن' }).click();
+  await expect(editor).toBeHidden();
+});
+
+test('criteria publication rejects a missing or non-future effective date', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/dashboard/hr/personnel/performance-criteria-prototype?variant=C');
+  await page.getByRole('button', { name: 'ساخت معیار جدید' }).click();
+  const editor = page.getByRole('dialog', { name: 'ساخت معیار جدید' });
+  await editor.getByRole('textbox', { name: 'سهم این معیار' }).fill('۳۰');
+  await editor.getByRole('textbox', { name: 'توضیح امتیاز ۵' }).fill('رفتار برجسته و کاملاً قابل مشاهده');
+  await editor.getByRole('button', { name: 'بررسی نهایی' }).click();
+  const review = page.getByRole('dialog', { name: 'بررسی نهایی' });
+  await review.getByRole('textbox', { name: 'تاریخ اثر' }).fill('');
+  await review.getByRole('button', { name: 'زمان‌بندی نسخه' }).click();
+  await expect(page.getByText('تاریخ اثر باید یک تاریخ معتبر در آینده باشد.')).toBeVisible();
+  await expect(review).toBeVisible();
+});

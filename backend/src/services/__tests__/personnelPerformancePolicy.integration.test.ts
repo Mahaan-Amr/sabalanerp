@@ -84,6 +84,36 @@ const main = async () => {
   assert.equal(await first.performanceAuditEvent.count({
     where: { aggregateType: 'CRITERION_VERSION', aggregateId: activationVersion.id, eventType: 'ACTIVATED' },
   }), 1);
+
+  const systemActivationIdentity = await first.performanceCriterionIdentity.create({ data: {
+    stableKey: `system-activation-${database.runId}`,
+    conceptCode: `PERF-SYSTEM-${database.runId.toUpperCase()}`,
+    createdByUserId: actor.id,
+  } });
+  const systemActivationVersion = await first.performanceCriterionVersion.create({ data: {
+    criterionIdentityId: systemActivationIdentity.id,
+    version: 1,
+    contentHash: 'b'.repeat(64),
+    createdByUserId: actor.id,
+  } });
+  await first.performanceCriterionVersion.update({ where: { id: systemActivationVersion.id }, data: {
+    lifecycle: 'SCHEDULED',
+    effectiveFrom: activationTime,
+    publicationReason: 'آزمون عامل سیستمی نگهداری زمان‌بندی‌شده',
+    publishedByUserId: actor.id,
+    publishedAt: activationTime,
+  } });
+  await activateDuePerformanceArtifacts(first, {
+    actorUserId: null,
+    idempotencyKey: `system-artifact-activation-${database.runId}`,
+    now: activationTime,
+    keyring,
+  });
+  const systemAudit = await first.performanceAuditEvent.findFirstOrThrow({ where: {
+    aggregateType: 'CRITERION_VERSION', aggregateId: systemActivationVersion.id, eventType: 'ACTIVATED',
+  } });
+  assert.equal(systemAudit.actorUserId, null);
+  assert.match(systemAudit.authorityHash ?? '', /^[a-f0-9]{64}$/);
   const receipt = await first.performanceOperationReceipt.findFirstOrThrow({ where: { operationKind: 'ACTIVATE_DUE_ARTIFACTS' } });
   await assert.rejects(
     first.performanceOperationReceipt.update({ where: { id: receipt.id }, data: { intentHash: 'rewritten' } }),

@@ -53,6 +53,18 @@ type Dialog =
   | "trace"
   | null;
 
+const persianDateNumber = (value: string) => Number(value
+  .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
+  .replace(/\D/g, ""));
+
+const isFuturePersianDate = (value: string) => {
+  const today = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  return /^([۰-۹0-9]{4})\/[۰-۹0-9]{2}\/[۰-۹0-9]{2}$/.test(value.trim())
+    && persianDateNumber(value) > persianDateNumber(today);
+};
+
 type Criterion = {
   id: string;
   title: string;
@@ -1399,6 +1411,9 @@ export default function PerformanceCriteriaPrototype() {
   const [draftSaveStatus, setDraftSaveStatus] = useState(
     "همه تغییرات ذخیره شده‌اند",
   );
+  const [draftDirty, setDraftDirty] = useState(false);
+  const [effectiveDate, setEffectiveDate] = useState("۱۴۰۵/۰۷/۰۱");
+  const nextSaveFails = useRef(searchParams.get("save") === "fail");
   const [weightValid, setWeightValid] = useState(false);
   const [anchorFiveValid, setAnchorFiveValid] = useState(false);
   const [activeErrorSection, setActiveErrorSection] = useState<
@@ -1427,17 +1442,31 @@ export default function PerformanceCriteriaPrototype() {
     [pathname, router, searchParams],
   );
   const markDraftChanged = useCallback(() => {
+    setDraftDirty(true);
     setDraftSaveStatus("در حال ذخیره خودکار…");
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(
-      () => setDraftSaveStatus("همه تغییرات ذخیره شده‌اند"),
-      700,
-    );
+    autoSaveTimer.current = setTimeout(() => {
+      if (nextSaveFails.current) {
+        nextSaveFails.current = false;
+        setDraftSaveStatus("ذخیره نشد");
+        return;
+      }
+      setDraftDirty(false);
+      setDraftSaveStatus("همه تغییرات ذخیره شده‌اند");
+    }, 700);
   }, []);
   const saveDraftManually = useCallback(() => {
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    setDraftDirty(false);
     setDraftSaveStatus("پیش‌نویس با دکمه ذخیره شد");
   }, []);
+  const closeDraftEditor = useCallback(() => {
+    if (draftDirty) {
+      setDraftSaveStatus("ذخیره نشد؛ پیش از خروج «تلاش دوباره» را بزنید");
+      return;
+    }
+    setDialog(null);
+  }, [draftDirty]);
   const scrollToErrorSection = useCallback(
     (section: "definition" | "anchors") => {
       const target =
@@ -1618,7 +1647,7 @@ export default function PerformanceCriteriaPrototype() {
       )}
       <ErpSheet
         open={dialog === "simple" || dialog === "simpleNew"}
-        onClose={() => setDialog(null)}
+        onClose={closeDraftEditor}
         title={
           dialog === "simpleNew"
             ? "ساخت معیار جدید"
@@ -1644,7 +1673,7 @@ export default function PerformanceCriteriaPrototype() {
             <div className="flex flex-wrap justify-end gap-2">
               <ErpButton
                 label="بستن"
-                onClick={() => setDialog(null)}
+                onClick={closeDraftEditor}
                 tone="neutral"
                 variant="ghost"
               />
@@ -1652,7 +1681,7 @@ export default function PerformanceCriteriaPrototype() {
               effectiveProfile !== "auditor" ? (
                 <>
                   <ErpButton
-                    label="ذخیره پیش‌نویس"
+                    label={draftSaveStatus.startsWith("ذخیره نشد") ? "تلاش دوباره" : "ذخیره پیش‌نویس"}
                     onClick={saveDraftManually}
                     tone="neutral"
                     variant="outline"
@@ -1918,11 +1947,13 @@ export default function PerformanceCriteriaPrototype() {
             <ErpButton
               label="زمان‌بندی نسخه"
               icon={FaCalendarAlt}
-              onClick={() =>
-                notify(
-                  "Prototype: نسخه برای تاریخ انتخاب‌شده زمان‌بندی شد؛ هیچ داده واقعی تغییر نکرد.",
-                )
-              }
+              onClick={() => {
+                if (!isFuturePersianDate(effectiveDate)) {
+                  setMessage("تاریخ اثر باید یک تاریخ معتبر در آینده باشد.");
+                  return;
+                }
+                notify("Prototype: نسخه برای تاریخ انتخاب‌شده زمان‌بندی شد؛ هیچ داده واقعی تغییر نکرد.");
+              }}
               tone="primary"
               variant="solid"
             />
@@ -1981,7 +2012,7 @@ export default function PerformanceCriteriaPrototype() {
             </ErpSection>
           )}
           <ErpField label="تاریخ اثر">
-            <ErpInput defaultValue="۱۴۰۵/۰۷/۰۱" />
+            <ErpInput value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} aria-invalid={!isFuturePersianDate(effectiveDate)} />
           </ErpField>
           <p className="text-xs leading-6 text-[var(--sds-text-muted)]">
             تاریخ اثر باید در آینده باشد؛ تا آن تاریخ نسخه فعال فعلی بدون تغییر
@@ -1991,7 +2022,7 @@ export default function PerformanceCriteriaPrototype() {
       </ErpSheet>
       <ErpSheet
         open={dialog === "editor" || dialog === "branch"}
-        onClose={() => setDialog(null)}
+        onClose={closeDraftEditor}
         title={
           dialog === "branch"
             ? "ساخت نسخه تازه"
@@ -2016,13 +2047,13 @@ export default function PerformanceCriteriaPrototype() {
             <div className="flex flex-wrap justify-end gap-2">
               <ErpButton
                 label="بستن"
-                onClick={() => setDialog(null)}
+                onClick={closeDraftEditor}
                 tone="neutral"
                 variant="ghost"
               />
               {!editorReadOnly ? (
                 <ErpButton
-                  label="ذخیره پیش‌نویس"
+                  label={draftSaveStatus.startsWith("ذخیره نشد") ? "تلاش دوباره" : "ذخیره پیش‌نویس"}
                   onClick={saveDraftManually}
                   tone="primary"
                   variant="solid"

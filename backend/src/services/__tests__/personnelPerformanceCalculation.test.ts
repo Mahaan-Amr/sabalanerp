@@ -329,6 +329,33 @@ assert.equal(allNotApplicableCategory.exactScore, '50.000000');
 assert.equal(allNotApplicableCategory.trace.sections[0].categories[0].effectiveWeightPercent, '0.000000');
 assert.equal(allNotApplicableCategory.trace.sections[0].categories[1].effectiveWeightPercent, '100.000000');
 
+const nonApplicableSection = calculatePerformanceEvaluation({
+  template: optionalEvidenceTemplate,
+  sections: [
+    {
+      sectionId: 'scored-section', effectiveDays: 10, allocationPercent: '50.00',
+      effectiveFrom: '2026-01-01T00:00:00.000Z', effectiveTo: '2026-01-31T23:59:59.999Z',
+      snapshotFacts: { assignmentType: 'PRIMARY' },
+      responses: [{ criterionVersionId: 'accuracy-v2', grade: 5, evidence: [] }],
+    },
+    {
+      sectionId: 'not-applicable-section', effectiveDays: 10, allocationPercent: '50.00',
+      effectiveFrom: '2026-02-01T00:00:00.000Z', effectiveTo: '2026-02-28T23:59:59.999Z',
+      snapshotFacts: { assignmentType: 'SECONDARY' }, responses: [],
+    },
+  ],
+});
+assert.equal(nonApplicableSection.status, 'SCORED');
+assert.equal(nonApplicableSection.exactScore, '100.000000', 'a wholly non-applicable section must not become an implicit zero');
+assert.deepEqual(reproducePerformanceCalculation(nonApplicableSection.trace), {
+  exactScore: '100.000000',
+  matchesStoredResult: true,
+  sections: [
+    { sectionId: 'scored-section', exactScore: '100.000000', matchesStoredSection: true },
+    { sectionId: 'not-applicable-section', exactScore: null, matchesStoredSection: true },
+  ],
+});
+
 const kpiEvidenceRequired = calculatePerformanceEvaluation({
   template: {
     ...templateWithNonScoringCriteria,

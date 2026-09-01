@@ -106,6 +106,7 @@ const asTx = async <T>(client: PrismaClient, work: (tx: Prisma.TransactionClient
 export const runPerformanceSerializableTransaction = asTx;
 
 const policyError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
+const systemActorAuthorityHash = canonicalPerformanceHash({ actorType: 'SYSTEM', actorCode: 'PERFORMANCE_MAINTENANCE' });
 
 const ensureNoErrors = (errors: string[]) => {
   if (errors.length > 0) throw policyError(errors[0], 'PERFORMANCE_POLICY_VALIDATION_FAILED', 422);
@@ -918,7 +919,7 @@ export const listPerformancePolicies = async (client: PrismaClient, keyring = pe
 
 const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
   now: Date;
-  actorUserId: string;
+  actorUserId: string | null;
   reason: string;
   keyring: PerformanceVaultKey;
 }) => {
@@ -1035,6 +1036,7 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
       aggregateId: subject.id,
       eventType: 'RECOMPUTED',
       actorUserId: input.actorUserId,
+      authorityHash: input.actorUserId === null ? systemActorAuthorityHash : undefined,
       reason: input.reason,
       encryptedPayloadId: auditEvidence.id,
       previousEventHash: previousEvent?.eventHash,
@@ -1049,7 +1051,7 @@ export const recomputePerformanceProjectionsInTransaction = recomputeAllProjecti
 
 export const reconcilePerformanceProjectionSubjects = async (client: PrismaClient, input: {
   now: Date;
-  actorUserId: string;
+  actorUserId: string | null;
   keyring?: PerformanceVaultKey;
 }) => {
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
@@ -1071,7 +1073,7 @@ export const reconcilePerformanceProjectionSubjects = async (client: PrismaClien
 };
 
 export const activateDuePerformancePolicies = async (client: PrismaClient, input: {
-  actorUserId: string;
+  actorUserId: string | null;
   idempotencyKey: string;
   now?: Date;
   keyring?: PerformanceVaultKey;
@@ -1134,6 +1136,7 @@ export const activateDuePerformancePolicies = async (client: PrismaClient, input
         aggregateId: policy.id,
         eventType: 'ACTIVATED',
         actorUserId: input.actorUserId,
+        authorityHash: input.actorUserId === null ? systemActorAuthorityHash : undefined,
         reason: policy.publicationReason,
         previousEventHash: previousEvent?.eventHash,
         eventHash: canonicalPerformanceHash({
@@ -1165,7 +1168,7 @@ export const activateDuePerformancePolicies = async (client: PrismaClient, input
 };
 
 export const activateDuePerformanceArtifacts = async (client: PrismaClient, input: {
-  actorUserId: string;
+  actorUserId: string | null;
   idempotencyKey: string;
   now?: Date;
   keyring?: PerformanceVaultKey;
@@ -1197,6 +1200,7 @@ export const activateDuePerformanceArtifacts = async (client: PrismaClient, inpu
       await tx.performanceCriterionVersion.update({ where: { id: version.id }, data: { lifecycle: PerformanceArtifactLifecycle.ACTIVE } });
       await tx.performanceAuditEvent.create({ data: {
         aggregateType: 'CRITERION_VERSION', aggregateId: version.id, eventType: 'ACTIVATED', actorUserId: input.actorUserId,
+        authorityHash: input.actorUserId === null ? systemActorAuthorityHash : undefined,
         reason: version.publicationReason, eventHash: canonicalPerformanceHash({ type: 'CRITERION_VERSION', id: version.id, event: 'ACTIVATED', at: now.toISOString() }), occurredAt: now,
       } });
     }
@@ -1220,6 +1224,7 @@ export const activateDuePerformanceArtifacts = async (client: PrismaClient, inpu
       await tx.performanceTemplateVersion.update({ where: { id: version.id }, data: { lifecycle: PerformanceArtifactLifecycle.ACTIVE } });
       await tx.performanceAuditEvent.create({ data: {
         aggregateType: 'TEMPLATE_VERSION', aggregateId: version.id, eventType: 'ACTIVATED', actorUserId: input.actorUserId,
+        authorityHash: input.actorUserId === null ? systemActorAuthorityHash : undefined,
         reason: version.publicationReason, eventHash: canonicalPerformanceHash({ type: 'TEMPLATE_VERSION', id: version.id, event: 'ACTIVATED', at: now.toISOString() }), occurredAt: now,
       } });
     }

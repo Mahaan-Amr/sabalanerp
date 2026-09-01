@@ -167,21 +167,12 @@ const consequenceTypes = new Set([
   'DEMOTION_REVIEW',
 ]);
 
-export const PERFORMANCE_CONSEQUENCE_POLICY = {
-  version: 1,
-  policyKey: 'PERFORMANCE_CONSEQUENCE_HANDOFF_V1',
-  rules: {
-    COMPENSATION_REVIEW: { minimumResults: 1, maximumAgeDays: 365, requireMultiplePeriods: false, requireCompensationContext: true },
-    DISCRETIONARY_BONUS_REVIEW: { minimumResults: 1, maximumAgeDays: 365, requireMultiplePeriods: false, requireCompensationContext: true },
-    PROMOTION_REVIEW: { minimumResults: 1, maximumAgeDays: 365, requireMultiplePeriods: false, requireCompensationContext: false },
-    PERFORMANCE_IMPROVEMENT_REVIEW: { minimumResults: 2, maximumAgeDays: 180, requireMultiplePeriods: true, requireCompensationContext: false },
-    DEMOTION_REVIEW: { minimumResults: 2, maximumAgeDays: 180, requireMultiplePeriods: true, requireCompensationContext: false },
-  },
-} as const;
-
-export const performanceConsequenceRule = (consequenceType: string) => (
-  PERFORMANCE_CONSEQUENCE_POLICY.rules[consequenceType as keyof typeof PERFORMANCE_CONSEQUENCE_POLICY.rules]
-);
+export type PerformanceConsequenceRule = {
+  minimumResults: number;
+  maximumAgeDays: number;
+  requireMultiplePeriods: boolean;
+  requireCompensationContext: boolean;
+};
 
 export const validateConsequenceHandoff = (input: {
   consequenceType: string;
@@ -193,8 +184,6 @@ export const validateConsequenceHandoff = (input: {
   const errors: string[] = [];
   if (!consequenceTypes.has(input.consequenceType)) errors.push('نوع بازبینی پیامد معتبر نیست.');
   if (!input.resultIds.length) errors.push('دست‌کم یک نتیجه مصوب باید انتخاب شود.');
-  const rule = performanceConsequenceRule(input.consequenceType);
-  if (rule && input.resultIds.length < rule.minimumResults) errors.push('تعداد نتیجه‌های انتخاب‌شده با سیاست این نوع پیامد سازگار نیست.');
   if (!input.reasonCategory.trim()) errors.push('دسته دلیل الزامی است.');
   if (input.reason.trim().length < 20) errors.push('توضیح انسانی دلیل باید دست‌کم ۲۰ نویسه باشد.');
   if (!input.independentEvidenceReferences.length) errors.push('ارجاع به شاهد مستقل الزامی است.');

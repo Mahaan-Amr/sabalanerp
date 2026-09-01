@@ -7914,6 +7914,24 @@ model PerformanceConsequencePackage {
   @@map("performance_consequence_packages")
 }
 
+model PerformanceConsequencePolicyVersion {
+  id                String                       @id @default(cuid())
+  version           Int                          @unique
+  lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
+  effectiveFrom     DateTime?
+  retiredAt         DateTime?
+  content           Json
+  contentHash       String
+  publicationReason String?
+  publishedByUserId String?
+  publishedAt       DateTime?
+  createdByUserId   String?
+  createdAt         DateTime                     @default(now())
+
+  @@index([lifecycle, effectiveFrom])
+  @@map("performance_consequence_policy_versions")
+}
+
 model PerformanceDeletionReceipt {
   id                   String   @id @default(cuid())
   deletedTableName     String

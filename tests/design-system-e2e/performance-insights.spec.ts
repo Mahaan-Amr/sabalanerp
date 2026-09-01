@@ -19,6 +19,11 @@ const mockInsightsApi = async (page: Page, capabilities: Record<string, boolean>
     const { pathname } = new URL(route.request().url());
     const body = pathname.endsWith('/capabilities')
       ? { success: true, capabilities }
+      : pathname.endsWith('/consequence-handoffs/handoff-1')
+        ? { success: true, handoff: { id: 'handoff-1', status: 'RECEIVED' }, package: {
+          consequenceType: 'COMPENSATION_REVIEW', policyCycleKey: '1405-H1', reasonCategory: 'SUSTAINED_CONTRIBUTION',
+          reason: 'بازبینی مستقل بر پایه نتیجه مصوب و شاهد ثبت‌شده', selectedResults: [{ id: 'result-1' }],
+        } }
       : pathname.endsWith('/badge/me')
         ? { success: true, badge: { state: 'LEVEL', levelCode: 'MEETS_EXPECTATIONS', labelFa: 'مطابق انتظار', meaningFa: 'عملکرد مصوب با انتظارهای نقش هم‌خوان است.', version: 1 } }
         : pathname.endsWith('/analytics')
@@ -52,6 +57,15 @@ test('performance insights expose no analytical surface without independent perm
   await expect(page.getByRole('button', { name: 'تحلیل تجمیعی' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'تحلیل نام‌دار' })).toBeDisabled();
   await expect(page.getByText('توزیع سطح‌های مصوب')).toHaveCount(0);
+});
+
+test('assigned consequence destination can receive its minimum package from the notification link', async ({ page }) => {
+  await loginAsAdmin(page);
+  await mockInsightsApi(page, {});
+  await page.goto('/dashboard/hr/personnel/performance/insights?handoffId=handoff-1');
+  await expect(page.getByRole('heading', { name: 'بسته ارجاع اختصاص‌یافته' })).toBeVisible();
+  await expect(page.getByText('بازبینی مستقل بر پایه نتیجه مصوب و شاهد ثبت‌شده')).toBeVisible();
+  await expect(page.getByText(/نتیجه‌های مبنا/)).toContainText('۱');
 });
 
 test('manual consequence handoff requires explicit result, evidence, and human reason', async ({ page }) => {

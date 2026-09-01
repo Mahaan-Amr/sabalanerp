@@ -13,9 +13,8 @@ import {
   escapePerformanceExportHtml,
   validateConsequenceHandoff,
   type PerformanceAnalyticsMember,
+  type PerformanceConsequenceRule,
   PERFORMANCE_LEVELS,
-  PERFORMANCE_CONSEQUENCE_POLICY,
-  performanceConsequenceRule,
 } from './personnelPerformanceDisclosure';
 import {
   performanceVaultKeyFromEnvironment,
@@ -27,6 +26,28 @@ import { runPerformanceSerializableTransaction } from './personnelPerformancePol
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 
 const disclosureError = (message: string, code: string, status = 400) => Object.assign(new Error(message), { code, status });
+
+type ConsequencePolicyContent = { schemaVersion: 1; rules: Record<string, PerformanceConsequenceRule> };
+const effectiveConsequencePolicy = async (client: PrismaClient | Prisma.TransactionClient, at = new Date()) => {
+  const version = await client.performanceConsequencePolicyVersion.findFirst({
+    where: { lifecycle: 'ACTIVE', effectiveFrom: { lte: at } }, orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+  });
+  if (!version) throw disclosureError('سیاست فعال ارجاع پیامد عملکرد وجود ندارد.', 'PERFORMANCE_CONSEQUENCE_POLICY_MISSING', 409);
+  const content = version.content as unknown as ConsequencePolicyContent;
+  if (content.schemaVersion !== 1 || !content.rules || typeof content.rules !== 'object') {
+    throw disclosureError('ساختار سیاست ارجاع پیامد پشتیبانی نمی‌شود.', 'PERFORMANCE_CONSEQUENCE_POLICY_INVALID', 409);
+  }
+  return { version, content };
+};
+
+const consequenceRule = (policy: ConsequencePolicyContent, consequenceType: string) => {
+  const rule = policy.rules[consequenceType];
+  if (!rule || !Number.isInteger(rule.minimumResults) || rule.minimumResults < 1
+    || !Number.isInteger(rule.maximumAgeDays) || rule.maximumAgeDays < 1) {
+    throw disclosureError('نوع پیامد در سیاست فعال تعریف نشده است.', 'PERFORMANCE_CONSEQUENCE_TYPE_INVALID', 422);
+  }
+  return rule;
+};
 const exportRoot = () => path.resolve(process.env.PERSONNEL_PERFORMANCE_EXPORT_DIR || path.join(process.cwd(), 'storage', 'performance-exports'));
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const DEVELOPMENT_EXPORT_KEY = createHash('sha256').update('sabalan-local-performance-export-key').digest();
@@ -316,22 +337,24 @@ const analyticsPopulation = async (client: PrismaClient, keyring: PerformanceVau
     if (!relationship || !projection?.levelCode) return [];
     const jobId = assignmentByRelationship.get(relationship.id)?.position?.jobId ?? 'unclassified';
     const score = resultBySubject.get(subject.id);
+    if (!score) return [];
     return [{
       subjectId: subject.id,
       personnelId: relationship.personnel.id,
       displayName: `${relationship.personnel.firstName} ${relationship.personnel.lastName}`.trim(),
       employmentRelationshipId: relationship.id,
       levelCode: projection.levelCode,
-      comparabilitySignature: score?.signature ?? 'unknown',
+      comparabilitySignature: score.signature,
       peerGroupKey: currentFamilyByJob.get(jobId) ?? `job:${jobId}`,
       measurementTo: projection.newestMeasurementTo ?? projection.projectedAt,
     }];
   });
 };
 
-const fixedCohortPerformanceTrend = async (client: PrismaClient) => {
+const fixedCohortPerformanceTrend = async (client: PrismaClient, authorizedSubjectIds: readonly string[]) => {
+  if (!authorizedSubjectIds.length) return { suppressed: true as const, reasonCode: 'TREND_REPORTING_DISABLED' };
   const evaluations = await client.performanceEvaluation.findMany({
-    where: { status: 'ACCEPTED' }, orderBy: [{ measurementTo: 'desc' }, { id: 'desc' }],
+    where: { status: 'ACCEPTED', subjectId: { in: [...authorizedSubjectIds] } }, orderBy: [{ measurementTo: 'desc' }, { id: 'desc' }],
     select: { id: true, subjectId: true, measurementFrom: true, measurementTo: true },
   });
   const periodKeys = [...new Set(evaluations.map(({ measurementTo }) => `${measurementTo.getUTCFullYear()}-${String(measurementTo.getUTCMonth() + 1).padStart(2, '0')}`))].slice(0, 4);
@@ -384,7 +407,10 @@ export const getPerformanceAnalytics = async (client: PrismaClient, input: {
   if (input.personnelIds?.length) throw disclosureError('فیلتر دلخواه افراد برای این گزارش محرمانه مجاز نیست.', 'PERFORMANCE_ANALYTICS_ARBITRARY_SCOPE_FORBIDDEN', 422);
   const selected = population;
   const baseResult = buildPerformanceAnalytics({ population, selected, mode: input.mode });
-  const trend = input.mode === 'NAMED_RANKING' ? undefined : await fixedCohortPerformanceTrend(client);
+  const baseSuppressed = 'suppressed' in baseResult && baseResult.suppressed;
+  const trend = input.mode === 'NAMED_RANKING' || baseSuppressed
+    ? undefined
+    : await fixedCohortPerformanceTrend(client, population.map(({ subjectId }) => subjectId));
   const result = trend ? { ...baseResult, trend: trend.suppressed ? trend : { ...trend, reconstruction: undefined } } : baseResult;
   const reconstructionId = randomUUID();
   await client.$transaction(async (tx) => {
@@ -563,20 +589,22 @@ export const requestPerformanceExport = async (client: PrismaClient, input: {
   const now = new Date();
   const id = randomUUID();
   const scope = { reportKind: input.reportKind, personnelIds: [...(input.personnelIds ?? [])].sort(), purpose: input.purpose.trim(), generatedFromHash: canonicalPerformanceHash(report) };
-  const encrypted = await client.$transaction((tx) => persistPerformancePayload(tx, {
-    aggregateType: 'PERFORMANCE_EXPORT', aggregateId: id, payloadKind: 'SCOPE_SNAPSHOT', schemaVersion: 1,
-    payload: { scope, report }, keyring,
-  }));
-  const receipt = await client.performanceExportReceipt.create({ data: {
-    id,
-    requestedByUserId: input.actorUserId,
-    exportKind: input.exportKind,
-    scopeHash: canonicalPerformanceHash(scope),
-    permissionHash: canonicalPerformanceHash(permissionCodes.sort()),
-    encryptedPayloadId: encrypted.id,
-    downloadTokenHash: tokenHash(token),
-    expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
-  } });
+  const receipt = await client.$transaction(async (tx) => {
+    const encrypted = await persistPerformancePayload(tx, {
+      aggregateType: 'PERFORMANCE_EXPORT', aggregateId: id, payloadKind: 'SCOPE_SNAPSHOT', schemaVersion: 1,
+      payload: { scope, report }, keyring,
+    });
+    return tx.performanceExportReceipt.create({ data: {
+      id,
+      requestedByUserId: input.actorUserId,
+      exportKind: input.exportKind,
+      scopeHash: canonicalPerformanceHash(scope),
+      permissionHash: canonicalPerformanceHash(permissionCodes.sort()),
+      encryptedPayloadId: encrypted.id,
+      downloadTokenHash: tokenHash(token),
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+    } });
+  });
   queueMicrotask(() => { void processPerformanceExport(client, receipt.id, keyring); });
   return { receipt, downloadToken: token };
 };
@@ -751,7 +779,11 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
     if (!['ACTIVE', 'SUSPENDED'].includes(relationship.status)) throw disclosureError('برای رابطه استخدامی پایان‌یافته ارجاع آینده‌اثر مجاز نیست.', 'PERFORMANCE_HANDOFF_RELATIONSHIP_ENDED', 409);
     const subject = await tx.performanceSubject.findFirst({ where: { personnelId: input.personnelId, employmentRelationshipId: relationship.id, identityDetachedAt: null } });
     if (!subject) throw disclosureError('موضوع عملکرد معتبر پیدا نشد.', 'PERFORMANCE_HANDOFF_SUBJECT_NOT_FOUND', 404);
-    const rule = performanceConsequenceRule(input.consequenceType)!;
+    const { version: consequencePolicyVersion, content: consequencePolicy } = await effectiveConsequencePolicy(tx);
+    const rule = consequenceRule(consequencePolicy, input.consequenceType);
+    if (input.resultIds.length < rule.minimumResults) {
+      throw disclosureError('تعداد نتیجه‌های انتخاب‌شده با سیاست فعال این نوع پیامد سازگار نیست.', 'PERFORMANCE_HANDOFF_MINIMUM_RESULTS_REQUIRED', 409);
+    }
     const earliestAcceptedAt = new Date(Date.now() - rule.maximumAgeDays * 24 * 60 * 60_000);
     const results = await tx.performanceAcceptedResult.findMany({ where: {
       id: { in: [...input.resultIds] },
@@ -801,7 +833,11 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
       relationshipStatus: relationship.status,
       consequenceType: input.consequenceType,
       policyCycleKey: input.policyCycleKey,
-      consequencePolicy: { ...PERFORMANCE_CONSEQUENCE_POLICY, selectedRule: rule },
+      consequencePolicy: {
+        id: consequencePolicyVersion.id, version: consequencePolicyVersion.version,
+        contentHash: consequencePolicyVersion.contentHash, effectiveFrom: consequencePolicyVersion.effectiveFrom,
+        selectedRule: rule,
+      },
       destination: {
         responsibilityId: destination.responsibilityId,
         assignedUserId: destination.assignedUserId,
@@ -868,7 +904,7 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
       type: 'PERFORMANCE_CONSEQUENCE_REVIEW_REQUIRED',
       title: 'ارجاع عملکرد نیازمند بازبینی است',
       message: 'یک بسته محرمانه عملکرد در صف مسئولیت شما نیازمند بازبینی مستقل است.',
-      priority: 'HIGH', actionUrl: '/dashboard/hr/personnel/performance/insights',
+      priority: 'HIGH', actionUrl: `/dashboard/hr/personnel/performance/insights?handoffId=${encodeURIComponent(handoff.id)}`,
       referenceId: `performance-consequence:${handoff.id}`,
     } });
     const { encryptedPayloadId: _payloadId, ...publicHandoff } = handoff;
@@ -879,9 +915,14 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
 export const listEligibleConsequenceResults = async (client: PrismaClient, input: { personnelId: string; actorUserId: string; consequenceType: string }) => {
   await requireScopedConsequenceAuthority(client, input);
   const { personnelId } = input;
-  const rule = performanceConsequenceRule(input.consequenceType);
-  if (!rule) throw disclosureError('نوع پیامد معتبر نیست.', 'PERFORMANCE_CONSEQUENCE_TYPE_INVALID', 422);
-  const subjects = await client.performanceSubject.findMany({ where: { personnelId, identityDetachedAt: null }, select: { id: true } });
+  const { content } = await effectiveConsequencePolicy(client);
+  const rule = consequenceRule(content, input.consequenceType);
+  const currentRelationships = await client.hrEmploymentRelationship.findMany({
+    where: { personnelId, status: { in: ['ACTIVE', 'SUSPENDED'] } }, select: { id: true }, orderBy: { effectiveFrom: 'desc' }, take: 1,
+  });
+  const subjects = await client.performanceSubject.findMany({
+    where: { personnelId, employmentRelationshipId: { in: currentRelationships.map(({ id }) => id) }, identityDetachedAt: null }, select: { id: true },
+  });
   if (!subjects.length) return [];
   const evaluations = await client.performanceEvaluation.findMany({
     where: { subjectId: { in: subjects.map(({ id }) => id) }, status: 'ACCEPTED' },
@@ -908,15 +949,30 @@ export const listEligibleConsequenceResults = async (client: PrismaClient, input
 };
 
 export const getPerformanceConsequenceHandoff = async (client: PrismaClient, input: { handoffId: string; actorUserId: string; keyring?: PerformanceVaultKey }) => {
-  const handoff = await client.performanceConsequenceHandoff.findUnique({ where: { id: input.handoffId } });
-  if (!handoff) throw disclosureError('ارجاع پیامد پیدا نشد.', 'PERFORMANCE_HANDOFF_NOT_FOUND', 404);
-  await requireScopedConsequenceAuthority(client, { actorUserId: input.actorUserId, personnelId: handoff.personnelId, consequenceType: handoff.consequenceType });
-  await auditDisclosure(client, {
-    aggregateType: 'PERFORMANCE_CONSEQUENCE_HANDOFF', aggregateId: handoff.id, eventType: 'CONSEQUENCE_HANDOFF_VIEWED',
-    actorUserId: input.actorUserId, authorityCodes: ['CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF'], evidenceHash: handoff.snapshotHash,
+  const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
+  return client.$transaction(async (tx) => {
+    const handoff = await tx.performanceConsequenceHandoff.findUnique({ where: { id: input.handoffId } });
+    if (!handoff) throw disclosureError('ارجاع پیامد پیدا نشد.', 'PERFORMANCE_HANDOFF_NOT_FOUND', 404);
+    const packageRecord = handoff.packageId ? await tx.performanceConsequencePackage.findUnique({ where: { id: handoff.packageId } }) : null;
+    const isDestination = packageRecord?.assignedDestinationUserId === input.actorUserId;
+    if (!isDestination) {
+      await requireScopedConsequenceAuthority(tx, { actorUserId: input.actorUserId, personnelId: handoff.personnelId, consequenceType: handoff.consequenceType });
+    }
+    const destinationPackage = isDestination && packageRecord
+      ? await readPerformancePayload<Record<string, unknown>>(tx, packageRecord.encryptedPayloadId, keyring)
+      : undefined;
+    if (isDestination && handoff.status === 'SENT') {
+      await tx.performanceConsequenceHandoff.update({ where: { id: handoff.id }, data: { status: 'RECEIVED' } });
+    }
+    await auditDisclosure(tx, {
+      aggregateType: 'PERFORMANCE_CONSEQUENCE_HANDOFF', aggregateId: handoff.id, eventType: 'CONSEQUENCE_HANDOFF_VIEWED',
+      actorUserId: input.actorUserId,
+      authorityCodes: [isDestination ? 'PERFORMANCE_CONSEQUENCE_ASSIGNED_DESTINATION' : 'CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF'],
+      evidenceHash: handoff.snapshotHash,
+    });
+    const { encryptedPayloadId: _payloadId, ...publicHandoff } = handoff;
+    return { handoff: { ...publicHandoff, status: isDestination && handoff.status === 'SENT' ? 'RECEIVED' : handoff.status }, package: destinationPackage };
   });
-  const { encryptedPayloadId: _payloadId, ...publicHandoff } = handoff;
-  return { handoff: publicHandoff };
 };
 
 export const suspendPerformanceHandoffsForResult = async (tx: Prisma.TransactionClient, input: {

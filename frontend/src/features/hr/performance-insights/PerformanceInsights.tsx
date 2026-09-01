@@ -40,6 +40,7 @@ export default function PerformanceInsights() {
   const [exportKind, setExportKind] = useState<'PDF' | 'XLSX'>('XLSX');
   const [purpose, setPurpose] = useState('بازبینی مدیریتی دوره عملکرد');
   const [exportJob, setExportJob] = useState<{ id: string; status: string; token: string }>();
+  const [destinationHandoff, setDestinationHandoff] = useState<any>();
 
   const load = useCallback(async (nextSurface: Surface = surface) => {
     setLoading(true); setError(''); setSuccess('');
@@ -60,6 +61,14 @@ export default function PerformanceInsights() {
   }, [surface]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const handoffId = new URLSearchParams(window.location.search).get('handoffId');
+    if (!handoffId) return;
+    personnelPerformanceAPI.consequenceHandoff(handoffId)
+      .then(({ data }) => setDestinationHandoff(data))
+      .catch((cause) => setError(apiError(cause)));
+  }, []);
 
   const changeSurface = (value: string) => {
     const next = value as Surface;
@@ -121,6 +130,15 @@ export default function PerformanceInsights() {
   >
     {error && <ErpInlineState kind="error" title={error} />}
     {success && <ErpInlineState kind="success" title={success} />}
+    {destinationHandoff?.package && <ErpSection title="بسته ارجاع اختصاص‌یافته" description="این بسته حداقلی فقط برای بازبینی مستقل مقصد تعیین‌شده نمایش داده می‌شود.">
+      <ErpCard className="grid gap-3 p-4 sm:grid-cols-2">
+        <p>نوع بازبینی: <strong>{destinationHandoff.package.consequenceType}</strong></p>
+        <p>چرخه سیاست: <strong>{destinationHandoff.package.policyCycleKey}</strong></p>
+        <p>دسته دلیل: <strong>{destinationHandoff.package.reasonCategory}</strong></p>
+        <p>نتیجه‌های مبنا: <strong>{(destinationHandoff.package.selectedResults || []).length.toLocaleString('fa-IR')}</strong></p>
+        <p className="sm:col-span-2 text-sm text-[var(--sds-text-secondary)]">{destinationHandoff.package.reason}</p>
+      </ErpCard>
+    </ErpSection>}
     <ErpSegmentedControl value={surface} onChange={changeSurface} options={[
       { value: 'aggregate', label: 'تحلیل تجمیعی', disabled: !canAggregate },
       { value: 'ranking', label: 'تحلیل نام‌دار', disabled: !canRanking },

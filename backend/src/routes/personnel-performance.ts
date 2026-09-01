@@ -376,7 +376,8 @@ router.get('/consequence-handoffs/eligible-results/:personnelId', createConseque
   catch (error) { return next(error); }
 });
 
-router.get('/consequence-handoffs/:handoffId', createConsequence, async (req: AuthRequest, res, next) => {
+router.get('/consequence-handoffs/:handoffId', async (req: AuthRequest, res, next) => {
+  if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
   try { return res.json({ success: true, ...(await getPerformanceConsequenceHandoff(prisma, { handoffId: req.params.handoffId, actorUserId: req.user!.id })) }); }
   catch (error) { return next(error); }
 });

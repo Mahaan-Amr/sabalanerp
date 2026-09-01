@@ -1489,6 +1489,7 @@ export const personnelPerformanceAPI = {
   exportStatus: (exportId: string) => api.get(`/hr/personnel-performance/exports/${encodeURIComponent(exportId)}`),
   downloadExport: (exportId: string, token: string) => api.get(`/hr/personnel-performance/exports/${encodeURIComponent(exportId)}/download`, { params: { token }, responseType: 'blob' }),
   createConsequenceHandoff: (input: unknown) => api.post('/hr/personnel-performance/consequence-handoffs', input),
+  consequenceHandoff: (handoffId: string) => api.get(`/hr/personnel-performance/consequence-handoffs/${encodeURIComponent(handoffId)}`),
   eligibleConsequenceResults: (personnelId: string, consequenceType: string) => api.get(`/hr/personnel-performance/consequence-handoffs/eligible-results/${encodeURIComponent(personnelId)}`, { params: { consequenceType } }),
   rollout: () => api.get('/hr/personnel-performance/rollout'),
   reconstructReadiness: (input: { measurementFrom: string; measurementTo: string; batchSize?: number }, idempotencyKey: string) => api.post(

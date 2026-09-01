@@ -139,6 +139,49 @@ const reproducedEvaluation = reproducePerformanceCalculation(evaluation.trace);
 assert.equal(reproducedEvaluation.exactScore, '75.714286');
 assert.equal(reproducedEvaluation.matchesStoredResult, true);
 assert.ok(reproducedEvaluation.sections.every(({ matchesStoredSection }) => matchesStoredSection));
+
+const repeatingWeightTemplate: PerformanceTemplateSnapshot = {
+  schemaVersion: 1,
+  templateVersionId: 'template-repeating-weights-v1',
+  scoringPolicyVersionId: 'scoring-v1',
+  jobSharePercent: '100.00',
+  addendumSharePercent: '0.00',
+  categories: [{
+    id: 'precision',
+    titleFa: 'دقت بازتولید',
+    weightPercent: '100.00',
+    required: true,
+    criteria: [
+      { criterionVersionId: 'precision-a', titleFa: 'معیار الف', weightPercent: '18.28', kind: 'JUDGMENT', anchorsFa: ['یک', 'دو', 'سه', 'چهار', 'پنج'], applicability: null, evidence: { minimumReliableCount: 0, allowedKinds: [], required: false } },
+      { criterionVersionId: 'precision-b', titleFa: 'معیار ب', weightPercent: '43.07', kind: 'JUDGMENT', anchorsFa: ['یک', 'دو', 'سه', 'چهار', 'پنج'], applicability: null, evidence: { minimumReliableCount: 0, allowedKinds: [], required: false } },
+      { criterionVersionId: 'precision-c', titleFa: 'معیار پ', weightPercent: '9.42', kind: 'JUDGMENT', anchorsFa: ['یک', 'دو', 'سه', 'چهار', 'پنج'], applicability: null, evidence: { minimumReliableCount: 0, allowedKinds: [], required: false } },
+      { criterionVersionId: 'precision-na', titleFa: 'معیار نامرتبط', weightPercent: '29.23', kind: 'JUDGMENT', anchorsFa: ['یک', 'دو', 'سه', 'چهار', 'پنج'], applicability: { fact: 'assignmentType', operator: 'EQUALS', values: ['SECONDARY'] }, evidence: { minimumReliableCount: 0, allowedKinds: [], required: false } },
+    ],
+  }],
+};
+const repeatingWeightEvaluation = calculatePerformanceEvaluation({
+  template: repeatingWeightTemplate,
+  sections: [{
+    sectionId: 'precision-section',
+    effectiveDays: 1,
+    allocationPercent: '100.00',
+    effectiveFrom: '2026-01-01T00:00:00.000Z',
+    effectiveTo: '2026-01-31T23:59:59.999Z',
+    snapshotFacts: { assignmentType: 'PRIMARY' },
+    responses: [
+      { criterionVersionId: 'precision-a', grade: 4, evidence: [] },
+      { criterionVersionId: 'precision-b', grade: 4, evidence: [] },
+      { criterionVersionId: 'precision-c', grade: 5, evidence: [] },
+    ],
+  }],
+});
+assert.equal(repeatingWeightEvaluation.status, 'SCORED');
+assert.equal(repeatingWeightEvaluation.exactScore, '78.327681');
+assert.deepEqual(reproducePerformanceCalculation(repeatingWeightEvaluation.trace), {
+  exactScore: '78.327681',
+  matchesStoredResult: true,
+  sections: [{ sectionId: 'precision-section', exactScore: '78.327681', matchesStoredSection: true }],
+});
 assert.deepEqual(evaluation.trace.sections[0].categories[0].criteria.map((criterion) => ({
   id: criterion.criterionVersionId,
   original: criterion.originalWeightPercent,

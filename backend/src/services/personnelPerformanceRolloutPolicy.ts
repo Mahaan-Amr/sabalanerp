@@ -79,6 +79,30 @@ export const evaluatePersonnelPerformanceWriteGate = (
   return { allowed: true, phaseVersion: state.phaseVersion, cohortVersion: state.cohortVersion };
 };
 
+export const resolvePersonnelPerformanceWriteGate = async (
+  client: PrismaClient,
+  action: PersonnelPerformanceWriteAction,
+  now = new Date(),
+) => {
+  const phase = await client.performanceFeaturePhaseVersion.findFirst({
+    where: { effectiveFrom: { lte: now } },
+    orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+  });
+  const pause = phase ? await client.performanceSafetyPause.findFirst({
+    where: { phaseVersionId: phase.id, status: 'ACTIVE' },
+    orderBy: { startedAt: 'desc' },
+  }) : null;
+  return evaluatePersonnelPerformanceWriteGate({
+    releaseEnabled: phase?.releaseEnabled ?? false,
+    phase: phase?.phase ?? 'SCHEMA_PROTECTION',
+    phaseVersion: phase?.version ?? 0,
+    cohortVersion: 0,
+    subjectInCohort: true,
+    safetyPause: pause ? { id: pause.id, scope: pause.scope === 'COHORT' ? 'COHORT' : 'ALL' } : null,
+  }, action);
+};
+
 export const personnelPerformanceRollbackMode = (hasCanonicalWrite: boolean) => (
   hasCanonicalWrite ? 'EVIDENCE_PRESERVING_FIX_FORWARD' : 'COMPATIBLE_RELEASE_DISABLE'
 );
+import type { PrismaClient } from '@prisma/client';

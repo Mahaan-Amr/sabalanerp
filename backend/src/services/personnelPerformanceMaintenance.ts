@@ -5,11 +5,13 @@ import {
   reconcilePerformanceProjectionSubjects,
 } from './personnelPerformancePolicyStore';
 import { expirePerformanceResults } from './personnelPerformanceResultStore';
+import { resolvePersonnelPerformanceWriteGate } from './personnelPerformanceRolloutPolicy';
 
 const SYSTEM_ACTOR = 'SYSTEM_PERFORMANCE_MAINTENANCE';
 
 export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, now = new Date()) => {
   const minuteKey = now.toISOString().slice(0, 16);
+  const policyGate = await resolvePersonnelPerformanceWriteGate(client, 'MANAGE_POLICY', now);
   const [duePolicies, dueCriteria, dueTemplates, dueResults] = await Promise.all([
     client.performancePolicyVersion.count({ where: { lifecycle: PerformanceArtifactLifecycle.SCHEDULED, effectiveFrom: { lte: now } } }),
     client.performanceCriterionVersion.count({ where: { lifecycle: PerformanceArtifactLifecycle.SCHEDULED, effectiveFrom: { lte: now } } }),
@@ -25,12 +27,12 @@ export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, n
       return { ok: false as const, error: message };
     }
   };
-  const policies = duePolicies > 0
+  const policies = policyGate.allowed && duePolicies > 0
     ? await isolate('policy activation', () => activateDuePerformancePolicies(client, {
       actorUserId: SYSTEM_ACTOR, idempotencyKey: `scheduled-policy:${minuteKey}`, now,
     }))
     : null;
-  const artifacts = dueCriteria + dueTemplates > 0
+  const artifacts = policyGate.allowed && dueCriteria + dueTemplates > 0
     ? await isolate('artifact activation', () => activateDuePerformanceArtifacts(client, {
       actorUserId: SYSTEM_ACTOR, idempotencyKey: `scheduled-artifacts:${minuteKey}`, now,
     }))
@@ -41,7 +43,7 @@ export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, n
   const relationshipReconciliation = await isolate('relationship reconciliation', () => (
     reconcilePerformanceProjectionSubjects(client, { actorUserId: SYSTEM_ACTOR, now })
   ));
-  return { policies, artifacts, expiry, relationshipReconciliation };
+  return { policyGate, policies, artifacts, expiry, relationshipReconciliation };
 };
 
 export const startPersonnelPerformanceMaintenance = (client: PrismaClient) => {

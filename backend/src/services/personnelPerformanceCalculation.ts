@@ -79,6 +79,7 @@ type CriterionTrace = {
   grade: number | null;
   mappedPoints: string | null;
   originalWeightPercent: string;
+  sourceWeightPercent: string;
   effectiveWeightPercent: string;
   applicabilityDecision: ApplicabilityDecision;
   applicabilityReason: string;
@@ -108,11 +109,13 @@ export type PerformanceCalculationTrace = {
     effectiveFrom: string;
     effectiveTo: string;
     combinationBasis: string;
+    activeCategoryWeightPercent: string;
     categories: Array<{
       categoryId: string;
       titleFa: string;
       originalWeightPercent: string;
       effectiveWeightPercent: string;
+      applicableCriterionWeightPercent: string;
       requiredCoveragePercent: string;
       actualCoveragePercent: string;
       exactScore: string | null;
@@ -363,6 +366,7 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
     effectiveFrom: sectionItem.section.effectiveFrom,
     effectiveTo: sectionItem.section.effectiveTo,
     combinationBasis: fixed6(sectionItem.combinationBasis),
+    activeCategoryWeightPercent: fixed6(sectionItem.activeCategoryWeight),
     categories: sectionItem.categoryWork.map((categoryItem) => {
       const effectiveCategoryWeight = sectionItem.activeCategoryWeight.gt(0) && categoryItem.applicableWeight.gt(0)
         ? categoryItem.categoryOriginal.div(sectionItem.activeCategoryWeight).mul(HUNDRED)
@@ -372,6 +376,7 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
         titleFa: categoryItem.category.titleFa,
         originalWeightPercent: fixed6(categoryItem.categoryOriginal),
         effectiveWeightPercent: fixed6(effectiveCategoryWeight),
+        applicableCriterionWeightPercent: fixed6(categoryItem.applicableWeight),
         requiredCoveragePercent: categoryItem.category.required ? '50.000000' : '0.000000',
         actualCoveragePercent: fixed6(categoryItem.coverage),
         exactScore: categoryItem.score === null ? null : fixed6(categoryItem.score),
@@ -388,6 +393,7 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
             grade: item.grade,
             mappedPoints: points === null ? null : fixed6(points),
             originalWeightPercent: fixed6(item.originalGlobal),
+            sourceWeightPercent: fixed6(item.originalWithinCategory),
             effectiveWeightPercent: fixed6(effectiveGlobal),
             applicabilityDecision: item.applicability.decision,
             applicabilityReason: item.applicability.reason,
@@ -571,9 +577,19 @@ export const reproducePerformanceCalculation = (trace: PerformanceCalculationTra
   const rebuiltSections = trace.sections.map((section) => {
     const rebuiltCriteria = section.categories.flatMap((category) => category.criteria.map((criterion) => {
       const mappedPoints = criterion.grade === null ? null : trace.gradeMapping[criterion.grade - 1];
-      const contribution = mappedPoints === null
-        ? '0.000000'
-        : fixed6(decimal(mappedPoints).mul(criterion.effectiveWeightPercent).div(HUNDRED));
+      const effectiveWeight = decimal(section.activeCategoryWeightPercent).gt(0)
+        && decimal(category.applicableCriterionWeightPercent).gt(0)
+        && criterion.applicabilityDecision === 'APPLICABLE'
+        ? decimal(category.originalWeightPercent)
+          .div(section.activeCategoryWeightPercent)
+          .mul(criterion.sourceWeightPercent)
+          .div(category.applicableCriterionWeightPercent)
+          .mul(HUNDRED)
+        : ZERO;
+      const exactContribution = mappedPoints === null
+        ? ZERO
+        : decimal(mappedPoints).mul(effectiveWeight).div(HUNDRED);
+      const contribution = fixed6(exactContribution);
       const reliableEvidenceCount = criterion.evidence.filter((evidence) => (
         evidence.quality === 'RELIABLE'
         && criterion.evidencePolicy.allowedKinds.includes(evidence.kind)
@@ -586,6 +602,7 @@ export const reproducePerformanceCalculation = (trace: PerformanceCalculationTra
         || criterion.binaryGatePassed === true;
       return {
         criterionVersionId: criterion.criterionVersionId,
+        exactContribution,
         contribution,
         matchesStoredContribution: contribution === criterion.contribution
           && (mappedPoints === null || fixed6(mappedPoints) === criterion.mappedPoints)
@@ -595,7 +612,7 @@ export const reproducePerformanceCalculation = (trace: PerformanceCalculationTra
       };
     }));
     const exactScore = section.categories.some((category) => category.exactScore !== null)
-      ? fixed6(rebuiltCriteria.reduce((sum, criterion) => sum.add(criterion.contribution), ZERO))
+      ? fixed6(rebuiltCriteria.reduce((sum, criterion) => sum.add(criterion.exactContribution), ZERO))
       : null;
     return {
       ...section,

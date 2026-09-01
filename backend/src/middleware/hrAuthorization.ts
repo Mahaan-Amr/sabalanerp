@@ -11,6 +11,7 @@ export type HrAuthorizedRequest = AuthRequest & {
 export const requireHrAuthorization = (requirement: {
   workspaceLevel?: HrAccessLevel;
   feature?: { code: string; level: HrAccessLevel };
+  actionPermissionCodes?: string[];
   authorityCodes?: string[];
   dutyIdFromRequest?: (req: AuthRequest) => string | undefined;
   systemRoles?: string[];

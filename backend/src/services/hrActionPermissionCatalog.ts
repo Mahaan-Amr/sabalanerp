@@ -2,8 +2,27 @@ export type HrActionPermissionDefinition = {
   code: string;
   labelFa: string;
   level: 'VIEW' | 'EDIT' | 'ADMIN';
-  prerequisites: string[];
+  prerequisites: readonly string[];
 };
+
+const PERFORMANCE_ACTION_PERMISSIONS = [
+  { code: 'MANAGE_PERFORMANCE_POLICY', labelFa: 'مدیریت و انتشار سیاست عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'SUBMIT_PERFORMANCE_EVALUATION', labelFa: 'ارسال ارزیابی عملکرد سرپرست', level: 'EDIT', prerequisites: [] },
+  { code: 'REVIEW_PERFORMANCE_EVALUATION', labelFa: 'بررسی ارزیابی عملکرد', level: 'EDIT', prerequisites: [] },
+  { code: 'VIEW_PERFORMANCE_HISTORY', labelFa: 'مشاهده سابقه محرمانه عملکرد', level: 'VIEW', prerequisites: [] },
+  { code: 'VIEW_PERFORMANCE_BADGE_LIST', labelFa: 'مشاهده سطح عملکرد در فهرست پرسنل', level: 'VIEW', prerequisites: [] },
+  { code: 'VIEW_PERFORMANCE_ANALYTICS', labelFa: 'مشاهده تحلیل تجمیعی عملکرد', level: 'VIEW', prerequisites: [] },
+  { code: 'VIEW_NAMED_PERFORMANCE_RANKING', labelFa: 'مشاهده تحلیل و رتبه‌بندی نام‌دار عملکرد', level: 'VIEW', prerequisites: [] },
+  { code: 'VIEW_EVALUATOR_CALIBRATION', labelFa: 'مشاهده کالیبراسیون ارزیاب', level: 'VIEW', prerequisites: [] },
+  { code: 'REQUEST_PERFORMANCE_EXPORT', labelFa: 'درخواست خروجی محرمانه عملکرد', level: 'EDIT', prerequisites: [] },
+  { code: 'VIEW_PERFORMANCE_AUDIT', labelFa: 'مشاهده حسابرسی عملکرد', level: 'VIEW', prerequisites: [] },
+  { code: 'MANAGE_PERFORMANCE_RETENTION', labelFa: 'مدیریت نگهداری و محدودسازی شواهد عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF', labelFa: 'ایجاد واگذاری پیامد عملکرد', level: 'EDIT', prerequisites: [] },
+  { code: 'MANAGE_PERFORMANCE_ROLLOUT', labelFa: 'مدیریت مرحله و جامعه فعال‌سازی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'PAUSE_PERFORMANCE_EVALUATION', labelFa: 'توقف ایمن ارزیابی عملکرد', level: 'ADMIN', prerequisites: [] },
+] as const;
+
+export const PERFORMANCE_ACTION_PERMISSION_CODES = PERFORMANCE_ACTION_PERMISSIONS.map(({ code }) => code);
 
 export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
   code: string;
@@ -59,6 +78,9 @@ export const HR_ACTION_PERMISSION_GROUPS: ReadonlyArray<{
     code: 'FOUNDATION_ADMINISTRATION', labelFa: 'مدیریت ساختار سازمانی', permissions: [
       { code: 'PERMANENTLY_DELETE_ORGANIZATIONAL_FOUNDATION', labelFa: 'حذف دائمی واحد، شغل و جایگاه', level: 'ADMIN', prerequisites: ['ORGANIZATIONAL_STRUCTURE'] },
     ],
+  },
+  {
+    code: 'PERSONNEL_PERFORMANCE', labelFa: 'ارزیابی محرمانه عملکرد پرسنل', permissions: PERFORMANCE_ACTION_PERMISSIONS,
   },
 ] as const;
 

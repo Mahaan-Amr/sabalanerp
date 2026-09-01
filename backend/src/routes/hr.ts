@@ -23,6 +23,7 @@ import {
   runHrRedesignBackfill,
 } from '../services/hrRedesignDataContracts';
 import hrAuthorizationRoutes from './hr-authorization';
+import personnelPerformanceRoutes from './personnel-performance';
 import { activeHrActionPermissionsForUser, authorizeHrUser } from '../services/hrAuthorizationService';
 import {
   assertCapacityChangeAllowed,
@@ -53,6 +54,7 @@ const router = express.Router();
 
 router.use(protect);
 router.use('/authorization', hrAuthorizationRoutes);
+router.use('/performance', personnelPerformanceRoutes);
 
 export const featureForPath = (path: string) => {
   if (path === '/dashboard') return 'DASHBOARD';

@@ -25,7 +25,27 @@ import {
   updatePerformanceTemplateDraft,
 } from '../services/personnelPerformancePolicyStore';
 import { reproduceAcceptedPerformanceResult } from '../services/personnelPerformanceResultStore';
-import { PerformancePolicyKind, PerformanceTemplateKind } from '@prisma/client';
+import { PerformancePolicyKind, PerformanceReviewDecision, PerformanceTemplateKind } from '@prisma/client';
+import {
+  reconstructPerformanceReadiness,
+  retryFailedPerformanceReadinessRecords,
+} from '../services/personnelPerformanceReadinessStore';
+import {
+  cancelPerformanceEvaluation,
+  claimPerformanceReview,
+  decidePerformanceReview,
+  extendPerformanceSectionDeadline,
+  getPerformanceReviewSubmission,
+  getSupervisorPerformanceSection,
+  invalidatePerformanceEvaluation,
+  listPerformanceReviewQueue,
+  listPerformanceLifecycleSections,
+  listSupervisorPerformanceSections,
+  markPerformanceSectionNotEvaluable,
+  runPerformanceReminders,
+  saveSupervisorPerformanceDraft,
+  submitSupervisorPerformanceSection,
+} from '../services/personnelPerformanceWorkflowStore';
 
 const router = express.Router();
 const performancePermissionCodes = new Set<string>(PERFORMANCE_ACTION_PERMISSION_CODES);
@@ -75,6 +95,147 @@ router.get('/rollout', requireHrAuthorization({ actionPermissionCodes: ['MANAGE_
   } catch (error) {
     next(error);
   }
+});
+
+const subjectIdForSection = async (req: AuthRequest) => {
+  const section = await prisma.performanceEvaluationSection.findUnique({ where: { id: req.params.sectionId }, select: { evaluationId: true } });
+  if (!section) return undefined;
+  return (await prisma.performanceEvaluation.findUnique({ where: { id: section.evaluationId }, select: { subjectId: true } }))?.subjectId;
+};
+
+const subjectIdForSubmission = async (req: AuthRequest) => {
+  const submission = await prisma.performanceSubmission.findUnique({ where: { id: req.params.submissionId }, select: { sectionId: true } });
+  if (!submission) return undefined;
+  const section = await prisma.performanceEvaluationSection.findUnique({ where: { id: submission.sectionId }, select: { evaluationId: true } });
+  return section ? (await prisma.performanceEvaluation.findUnique({ where: { id: section.evaluationId }, select: { subjectId: true } }))?.subjectId : undefined;
+};
+
+const subjectIdForEvaluation = async (req: AuthRequest) => (
+  await prisma.performanceEvaluation.findUnique({ where: { id: req.params.evaluationId }, select: { subjectId: true } })
+)?.subjectId;
+
+const manageReadiness = requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_CYCLE'] });
+const manageLifecycle = requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_CYCLE'] });
+const submitPerformance = requireHrAuthorization({ actionPermissionCodes: ['SUBMIT_PERFORMANCE_EVALUATION'] });
+const reviewPerformance = requireHrAuthorization({ actionPermissionCodes: ['REVIEW_PERFORMANCE_EVALUATION'] });
+const pausePerformance = requireHrAuthorization({ actionPermissionCodes: ['PAUSE_PERFORMANCE_EVALUATION'] });
+const lifecycleAccess = requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_CYCLE', 'REVIEW_PERFORMANCE_EVALUATION', 'PAUSE_PERFORMANCE_EVALUATION'] });
+
+router.post('/readiness/reconstruct', manageReadiness, requirePersonnelPerformanceWriteGate('RECONSTRUCT_READINESS'), async (req: AuthRequest, res, next) => {
+  try {
+    const result = await reconstructPerformanceReadiness(prisma, {
+      idempotencyKey: String(req.header('x-idempotency-key') ?? ''),
+      measurementFrom: new Date(req.body.measurementFrom), measurementTo: new Date(req.body.measurementTo),
+      actorUserId: req.user!.id, batchSize: Number(req.body.batchSize || 100),
+    });
+    return res.status(result.run.status === 'COMPLETED' ? 200 : 202).json({ success: true, ...result });
+  } catch (error) { return next(error); }
+});
+
+router.get('/readiness/:runId', manageReadiness, async (req, res, next) => {
+  try {
+    const run = await prisma.performanceReadinessRun.findUnique({ where: { id: req.params.runId } });
+    if (!run) return res.status(404).json({ success: false, message: 'اجرای بازسازی آمادگی پیدا نشد.' });
+    const records = await prisma.performanceReadinessRecord.findMany({
+      where: { runId: run.id }, orderBy: { employmentAssignmentId: 'asc' },
+      select: { employmentAssignmentId: true, status: true, blockerCode: true, attemptCount: true, lastErrorCode: true, processedAt: true },
+    });
+    return res.json({ success: true, run, records });
+  } catch (error) { return next(error); }
+});
+
+router.post('/readiness/:runId/retry', manageReadiness, requirePersonnelPerformanceWriteGate('RECONSTRUCT_READINESS'), async (req: AuthRequest, res, next) => {
+  try {
+    return res.json({ success: true, ...(await retryFailedPerformanceReadinessRecords(prisma, {
+      runId: req.params.runId, actorUserId: req.user!.id, batchSize: Number(req.body.batchSize || 100),
+    })) });
+  } catch (error) { return next(error); }
+});
+
+router.get('/supervisor/sections', submitPerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, sections: await listSupervisorPerformanceSections(prisma, req.user!.id) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/supervisor/sections/:sectionId', submitPerformance, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...(await getSupervisorPerformanceSection(prisma, { sectionId: req.params.sectionId, userId: req.user!.id })) }); }
+  catch (error) { return next(error); }
+});
+
+router.put('/supervisor/sections/:sectionId/draft', submitPerformance, requirePersonnelPerformanceWriteGate('SAVE_SUPERVISOR_DRAFT', subjectIdForSection), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, draft: await saveSupervisorPerformanceDraft(prisma, { sectionId: req.params.sectionId, userId: req.user!.id, payload: req.body }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/supervisor/sections/:sectionId/submit', submitPerformance, requirePersonnelPerformanceWriteGate('SUBMIT_SUPERVISOR_EVALUATION', subjectIdForSection), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...(await submitSupervisorPerformanceSection(prisma, {
+    sectionId: req.params.sectionId, userId: req.user!.id, idempotencyKey: String(req.header('x-idempotency-key') ?? ''),
+  })) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/reviews', reviewPerformance, async (_req, res, next) => {
+  try { return res.json({ success: true, reviews: await listPerformanceReviewQueue(prisma) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/lifecycle/sections', lifecycleAccess, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, sections: await listPerformanceLifecycleSections(prisma, { actorUserId: req.user!.id }) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/reviews/:submissionId', reviewPerformance, async (req, res, next) => {
+  try { return res.json({ success: true, ...(await getPerformanceReviewSubmission(prisma, { submissionId: req.params.submissionId })) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/reviews/:submissionId/claim', reviewPerformance, requirePersonnelPerformanceWriteGate('DECIDE_HR_REVIEW', subjectIdForSubmission), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, claim: await claimPerformanceReview(prisma, { submissionId: req.params.submissionId, reviewerUserId: req.user!.id }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/reviews/:submissionId/decision', reviewPerformance, requirePersonnelPerformanceWriteGate('DECIDE_HR_REVIEW', subjectIdForSubmission), async (req: AuthRequest, res, next) => {
+  try {
+    if (!Object.values(PerformanceReviewDecision).includes(req.body.decision)) return res.status(422).json({ success: false, message: 'تصمیم بررسی معتبر نیست.' });
+    return res.json({ success: true, ...(await decidePerformanceReview(prisma, {
+      submissionId: req.params.submissionId, reviewerUserId: req.user!.id, decision: req.body.decision,
+      reason: String(req.body.reason ?? ''), idempotencyKey: String(req.header('x-idempotency-key') ?? ''),
+      reasonCategory: req.body.reasonCategory ? String(req.body.reasonCategory) : undefined,
+      criterionVersionId: req.body.criterionVersionId ? String(req.body.criterionVersionId) : undefined,
+      evidenceReferenceId: req.body.evidenceReferenceId ? String(req.body.evidenceReferenceId) : undefined,
+    })) });
+  } catch (error) { return next(error); }
+});
+
+router.post('/sections/:sectionId/not-evaluable', reviewPerformance, requirePersonnelPerformanceWriteGate('DECIDE_HR_REVIEW', subjectIdForSection), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...(await markPerformanceSectionNotEvaluable(prisma, {
+    sectionId: req.params.sectionId, reviewerUserId: req.user!.id,
+    reasonCategory: String(req.body.reasonCategory ?? ''), reason: String(req.body.reason ?? ''),
+    idempotencyKey: String(req.header('x-idempotency-key') ?? ''),
+  })) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/sections/:sectionId/extend', manageLifecycle, requirePersonnelPerformanceWriteGate('MANAGE_PERFORMANCE_CYCLE', subjectIdForSection), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, section: await extendPerformanceSectionDeadline(prisma, {
+    sectionId: req.params.sectionId, actorUserId: req.user!.id, dueAt: new Date(req.body.dueAt), reason: String(req.body.reason ?? ''),
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/evaluations/:evaluationId/cancel', manageLifecycle, requirePersonnelPerformanceWriteGate('MANAGE_PERFORMANCE_CYCLE', subjectIdForEvaluation), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evaluation: await cancelPerformanceEvaluation(prisma, { evaluationId: req.params.evaluationId, actorUserId: req.user!.id, reason: String(req.body.reason ?? '') }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/evaluations/:evaluationId/invalidate', pausePerformance, requirePersonnelPerformanceWriteGate('MANAGE_PERFORMANCE_CYCLE', subjectIdForEvaluation), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, evaluation: await invalidatePerformanceEvaluation(prisma, { evaluationId: req.params.evaluationId, actorUserId: req.user!.id, reason: String(req.body.reason ?? '') }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/reminders/run', manageLifecycle, requirePersonnelPerformanceWriteGate('SEND_WORKFLOW_REMINDERS'), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...(await runPerformanceReminders(prisma, { actorUserId: req.user!.id })) }); }
+  catch (error) { return next(error); }
 });
 
 const managePolicy = requireHrAuthorization({ actionPermissionCodes: ['MANAGE_PERFORMANCE_POLICY'] });

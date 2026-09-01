@@ -47,6 +47,8 @@
     "test:personnel-performance-foundation:db": "tsx src/services/__tests__/personnelPerformanceFoundation.integration.test.ts",
     "test:personnel-performance-policy": "tsx src/services/__tests__/personnelPerformanceCalculation.test.ts && tsx src/services/__tests__/personnelPerformancePolicy.test.ts && tsx src/routes/__tests__/personnelPerformanceRoutes.test.ts",
     "test:personnel-performance-policy:db": "tsx src/services/__tests__/personnelPerformancePolicy.integration.test.ts",
+    "test:personnel-performance-workflow": "tsx src/services/__tests__/personnelPerformanceWorkflow.test.ts && tsx src/routes/__tests__/personnelPerformanceRoutes.test.ts",
+    "test:personnel-performance-workflow:db": "tsx src/services/__tests__/personnelPerformanceWorkflow.integration.test.ts",
     "test:user-deletion-policy": "tsx src/services/__tests__/userDeletionPolicy.test.ts",
     "test:system-recovery": "tsx src/services/__tests__/systemRecoveryPolicy.test.ts && tsx src/services/__tests__/systemRecoveryFileReferences.test.ts && tsx src/services/__tests__/recoveryCrypto.test.ts",
     "test:deployment-control": "tsx src/services/__tests__/deploymentControl.test.ts && tsx src/services/__tests__/deploymentMaintenance.test.ts && tsx src/services/__tests__/deploymentCheckpointPolicy.test.ts && tsx src/services/__tests__/deploymentCheckpointStorage.test.ts && tsx src/services/__tests__/deploymentCheckpointRuntime.test.ts && tsx src/services/__tests__/deploymentGates.test.ts && tsx src/services/__tests__/deploymentHostJournal.test.ts && tsx src/services/__tests__/deploymentDrillPolicy.test.ts && tsx src/services/__tests__/deploymentProxyRefresh.test.ts",

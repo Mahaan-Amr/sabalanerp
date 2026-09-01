@@ -5183,6 +5183,7 @@ model HrEmploymentAssignment {
   workplaceId                       String?
   costCenterId                      String?
   responsibleSupervisorAssignmentId String?
+  performanceAllocationPercent      Decimal?                 @db.Decimal(5, 2)
   scheduleContributing              Boolean                  @default(false)
   createdBy                         String
   createdAt                         DateTime                 @default(now())
@@ -5194,11 +5195,36 @@ model HrEmploymentAssignment {
   costCenter                        HrCostCenter?            @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
   responsibleSupervisorAssignment   HrEmploymentAssignment?  @relation("HrResponsibleSupervisor", fields: [responsibleSupervisorAssignmentId], references: [id], onDelete: Restrict)
   supervisedAssignments             HrEmploymentAssignment[] @relation("HrResponsibleSupervisor")
+  performanceResponsibilities       HrAssignmentPerformanceResponsibility[] @relation("HrPerformanceAssignment")
+  supervisedPerformanceResponsibilities HrAssignmentPerformanceResponsibility[] @relation("HrPerformanceSupervisor")
 
   @@index([employmentRelationshipId, type, effectiveFrom, effectiveTo])
   @@index([positionId, effectiveFrom, effectiveTo])
   @@index([responsibleSupervisorAssignmentId])
   @@map("hr_employment_assignments")
+}
+
+model HrAssignmentPerformanceResponsibility {
+  id                     String                 @id @default(cuid())
+  employmentAssignmentId String
+  supervisorAssignmentId String
+  effectiveFrom          DateTime
+  effectiveTo            DateTime?
+  allocationPercent      Decimal                @db.Decimal(5, 2)
+  status                 String                 @default("ACTIVE")
+  supersedesResponsibilityId String?
+  reason                 String
+  createdBy              String
+  createdAt              DateTime               @default(now())
+  employmentAssignment   HrEmploymentAssignment @relation("HrPerformanceAssignment", fields: [employmentAssignmentId], references: [id], onDelete: Restrict)
+  supervisorAssignment   HrEmploymentAssignment @relation("HrPerformanceSupervisor", fields: [supervisorAssignmentId], references: [id], onDelete: Restrict)
+  supersedesResponsibility HrAssignmentPerformanceResponsibility? @relation("HrPerformanceResponsibilityCorrection", fields: [supersedesResponsibilityId], references: [id], onDelete: Restrict)
+  supersededByResponsibilities HrAssignmentPerformanceResponsibility[] @relation("HrPerformanceResponsibilityCorrection")
+
+  @@index([employmentAssignmentId, effectiveFrom, effectiveTo], map: "hr_perf_resp_assignment_period_idx")
+  @@index([employmentAssignmentId, status, effectiveFrom, effectiveTo], map: "hr_perf_resp_assignment_status_period_idx")
+  @@index([supervisorAssignmentId, effectiveFrom, effectiveTo], map: "hr_perf_resp_supervisor_period_idx")
+  @@map("hr_assignment_performance_responsibilities")
 }
 
 enum HrApplicationStage {
@@ -7488,6 +7514,48 @@ model PerformanceCycle {
   @@map("performance_cycles")
 }
 
+model PerformanceReadinessRun {
+  id                  String    @id @default(cuid())
+  stableKey           String    @unique
+  measurementFrom     DateTime
+  measurementTo       DateTime
+  sourceCount         Int
+  sourceHash          String
+  status              String    @default("RUNNING")
+  cursorAssignmentId  String?
+  appliedCount        Int       @default(0)
+  blockedCount        Int       @default(0)
+  failedCount         Int       @default(0)
+  driftDetected       Boolean   @default(false)
+  requestedByUserId   String
+  startedAt           DateTime  @default(now())
+  completedAt         DateTime?
+  updatedAt           DateTime  @updatedAt
+  records             PerformanceReadinessRecord[]
+
+  @@index([status, startedAt])
+  @@map("performance_readiness_runs")
+}
+
+model PerformanceReadinessRecord {
+  id                     String   @id @default(cuid())
+  runId                  String
+  employmentAssignmentId String
+  sourceHash             String
+  status                 String
+  blockerCode            String?
+  attemptCount           Int      @default(1)
+  lastErrorCode          String?
+  evaluationId           String?
+  sectionId              String?
+  processedAt            DateTime @default(now())
+  run                    PerformanceReadinessRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@unique([runId, employmentAssignmentId])
+  @@index([status, processedAt])
+  @@map("performance_readiness_records")
+}
+
 model PerformanceEvaluation {
   id                String                      @id @default(cuid())
   stableKey         String                      @unique
@@ -7518,6 +7586,11 @@ model PerformanceEvaluationSection {
   allocationPercent                Decimal                  @db.Decimal(5, 2)
   status                           PerformanceSectionStatus @default(DRAFT)
   templateSnapshotId               String?                  @unique
+  originalSubmissionDueAt          DateTime?
+  submissionDueAt                  DateTime?
+  reviewDueAt                      DateTime?
+  windowClosedAt                   DateTime?
+  extensionCount                   Int                      @default(0)
   createdAt                        DateTime                 @default(now())
   updatedAt                        DateTime                 @updatedAt
 

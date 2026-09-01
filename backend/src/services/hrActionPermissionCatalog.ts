@@ -7,6 +7,7 @@ export type HrActionPermissionDefinition = {
 
 const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'MANAGE_PERFORMANCE_POLICY', labelFa: 'مدیریت و انتشار سیاست عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'MANAGE_PERFORMANCE_CYCLE', labelFa: 'مدیریت چرخه و مهلت ارزیابی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'SUBMIT_PERFORMANCE_EVALUATION', labelFa: 'ارسال ارزیابی عملکرد سرپرست', level: 'EDIT', prerequisites: [] },
   { code: 'REVIEW_PERFORMANCE_EVALUATION', labelFa: 'بررسی ارزیابی عملکرد', level: 'EDIT', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_HISTORY', labelFa: 'مشاهده سابقه محرمانه عملکرد', level: 'VIEW', prerequisites: [] },

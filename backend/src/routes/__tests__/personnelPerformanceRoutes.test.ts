@@ -13,6 +13,23 @@ const registeredRoutes = (router as unknown as {
 assert.deepEqual(registeredRoutes, [
   'GET /capabilities',
   'GET /rollout',
+  'POST /readiness/reconstruct',
+  'GET /readiness/:runId',
+  'POST /readiness/:runId/retry',
+  'GET /supervisor/sections',
+  'GET /supervisor/sections/:sectionId',
+  'PUT /supervisor/sections/:sectionId/draft',
+  'POST /supervisor/sections/:sectionId/submit',
+  'GET /reviews',
+  'GET /lifecycle/sections',
+  'GET /reviews/:submissionId',
+  'POST /reviews/:submissionId/claim',
+  'POST /reviews/:submissionId/decision',
+  'POST /sections/:sectionId/not-evaluable',
+  'POST /sections/:sectionId/extend',
+  'POST /evaluations/:evaluationId/cancel',
+  'POST /evaluations/:evaluationId/invalidate',
+  'POST /reminders/run',
   'GET /criteria',
   'POST /criteria',
   'PUT /criteria/:versionId',
@@ -38,7 +55,7 @@ const rolloutLayer = (router as unknown as {
 }).stack.find((layer) => layer.route?.path === '/rollout');
 assert.ok(rolloutLayer && rolloutLayer.route!.stack.length >= 2, 'rollout metadata must retain server-side authorization middleware');
 
-for (const path of ['/criteria', '/templates', '/policies', '/activation/run-due-policies', '/activation/run-due-artifacts']) {
+for (const path of ['/readiness/reconstruct', '/readiness/:runId/retry', '/supervisor/sections/:sectionId/submit', '/reviews/:submissionId/decision', '/sections/:sectionId/not-evaluable', '/evaluations/:evaluationId/invalidate', '/criteria', '/templates', '/policies', '/activation/run-due-policies', '/activation/run-due-artifacts']) {
   const writeLayer = (router as unknown as {
     stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: RequestHandler }> } }>;
   }).stack.find((layer) => layer.route?.path === path && layer.route.methods.post);

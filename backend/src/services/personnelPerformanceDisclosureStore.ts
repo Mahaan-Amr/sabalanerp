@@ -43,7 +43,8 @@ const effectiveConsequencePolicy = async (client: PrismaClient | Prisma.Transact
 const consequenceRule = (policy: ConsequencePolicyContent, consequenceType: string) => {
   const rule = policy.rules[consequenceType];
   if (!rule || !Number.isInteger(rule.minimumResults) || rule.minimumResults < 1
-    || !Number.isInteger(rule.maximumAgeDays) || rule.maximumAgeDays < 1) {
+    || !Number.isInteger(rule.maximumAgeDays) || rule.maximumAgeDays < 1
+    || !rule.destination?.responsibilityTypeCode || !rule.destination.workspaceCode || !rule.destination.queueCode) {
     throw disclosureError('نوع پیامد در سیاست فعال تعریف نشده است.', 'PERFORMANCE_CONSEQUENCE_TYPE_INVALID', 422);
   }
   return rule;
@@ -351,10 +352,18 @@ const analyticsPopulation = async (client: PrismaClient, keyring: PerformanceVau
   });
 };
 
-const fixedCohortPerformanceTrend = async (client: PrismaClient, authorizedSubjectIds: readonly string[]) => {
+const fixedCohortPerformanceTrend = async (
+  client: PrismaClient,
+  authorizedSubjectIds: readonly string[],
+  reportingFrom?: Date,
+  reportingTo?: Date,
+) => {
   if (!authorizedSubjectIds.length) return { suppressed: true as const, reasonCode: 'TREND_REPORTING_DISABLED' };
   const evaluations = await client.performanceEvaluation.findMany({
-    where: { status: 'ACCEPTED', subjectId: { in: [...authorizedSubjectIds] } }, orderBy: [{ measurementTo: 'desc' }, { id: 'desc' }],
+    where: {
+      status: 'ACCEPTED', subjectId: { in: [...authorizedSubjectIds] },
+      ...(reportingFrom || reportingTo ? { measurementTo: { ...(reportingFrom ? { gte: reportingFrom } : {}), ...(reportingTo ? { lte: reportingTo } : {}) } } : {}),
+    }, orderBy: [{ measurementTo: 'desc' }, { id: 'desc' }],
     select: { id: true, subjectId: true, measurementFrom: true, measurementTo: true },
   });
   const periodKeys = [...new Set(evaluations.map(({ measurementTo }) => `${measurementTo.getUTCFullYear()}-${String(measurementTo.getUTCMonth() + 1).padStart(2, '0')}`))].slice(0, 4);
@@ -389,6 +398,18 @@ const fixedCohortPerformanceTrend = async (client: PrismaClient, authorizedSubje
         count: [...fixedSubjects].filter((subjectId) => byPeriod.get(periodKey)?.get(subjectId)?.levelCode === level.code).length,
       })),
     })),
+    populationPeriods: periodKeys.map((periodKey, index) => {
+      const present = new Set(byPeriod.get(periodKey)?.keys() ?? []);
+      const previous = new Set(index + 1 < periodKeys.length ? byPeriod.get(periodKeys[index + 1])?.keys() ?? [] : []);
+      return {
+        periodKey,
+        eligiblePopulationCount: authorizedSubjectIds.length,
+        resultPopulationCount: present.size,
+        missingResultCount: authorizedSubjectIds.filter((subjectId) => !present.has(subjectId)).length,
+        entriesSincePrevious: [...present].filter((subjectId) => !previous.has(subjectId)).length,
+        exitsSincePrevious: [...previous].filter((subjectId) => !present.has(subjectId)).length,
+      };
+    }),
     reconstruction: periodKeys.map((periodKey) => ({
       periodKey,
       members: [...fixedSubjects].map((subjectId) => ({ subjectId, ...byPeriod.get(periodKey)?.get(subjectId) })),
@@ -400,9 +421,16 @@ export const getPerformanceAnalytics = async (client: PrismaClient, input: {
   actorUserId: string;
   personnelIds?: readonly string[];
   mode?: 'AGGREGATE' | 'NAMED_RANKING';
+  reportingFrom?: Date;
+  reportingTo?: Date;
   keyring?: PerformanceVaultKey;
 }) => {
   const keyring = input.keyring ?? performanceVaultKeyFromEnvironment();
+  if ((input.reportingFrom && Number.isNaN(input.reportingFrom.getTime())) || (input.reportingTo && Number.isNaN(input.reportingTo.getTime()))
+    || (input.reportingFrom && input.reportingTo && (input.reportingFrom > input.reportingTo
+      || input.reportingTo.getTime() - input.reportingFrom.getTime() > 366 * 24 * 60 * 60_000))) {
+    throw disclosureError('بازه گزارش معتبر نیست یا از یک سال بیشتر است.', 'PERFORMANCE_ANALYTICS_WINDOW_INVALID', 422);
+  }
   const population = await analyticsPopulation(client, keyring);
   if (input.personnelIds?.length) throw disclosureError('فیلتر دلخواه افراد برای این گزارش محرمانه مجاز نیست.', 'PERFORMANCE_ANALYTICS_ARBITRARY_SCOPE_FORBIDDEN', 422);
   const selected = population;
@@ -410,14 +438,16 @@ export const getPerformanceAnalytics = async (client: PrismaClient, input: {
   const baseSuppressed = 'suppressed' in baseResult && baseResult.suppressed;
   const trend = input.mode === 'NAMED_RANKING' || baseSuppressed
     ? undefined
-    : await fixedCohortPerformanceTrend(client, population.map(({ subjectId }) => subjectId));
+    : await fixedCohortPerformanceTrend(client, population.map(({ subjectId }) => subjectId), input.reportingFrom, input.reportingTo);
   const result = trend ? { ...baseResult, trend: trend.suppressed ? trend : { ...trend, reconstruction: undefined } } : baseResult;
   const reconstructionId = randomUUID();
   await client.$transaction(async (tx) => {
     const snapshot = await persistPerformancePayload(tx, {
       aggregateType: 'PERFORMANCE_ANALYTICS_RECONSTRUCTION', aggregateId: reconstructionId, payloadKind: 'REPORTING_WINDOW', schemaVersion: 1,
       payload: {
-        asOf: new Date().toISOString(), windowKind: 'CURRENT_VALID_PROJECTION', mode: input.mode ?? 'AGGREGATE',
+        asOf: new Date().toISOString(), windowKind: input.reportingFrom || input.reportingTo ? 'CALLER_SELECTED' : 'LATEST_FOUR_PERIODS',
+        reportingFrom: input.reportingFrom?.toISOString() ?? null, reportingTo: input.reportingTo?.toISOString() ?? null,
+        mode: input.mode ?? 'AGGREGATE',
         population: population.map(({ subjectId, employmentRelationshipId, levelCode, comparabilitySignature, peerGroupKey, measurementTo }) => ({ subjectId, employmentRelationshipId, levelCode, comparabilitySignature, peerGroupKey, measurementTo })),
         suppressionOrResult: result,
         trendReconstruction: trend && !trend.suppressed ? trend.reconstruction : trend,
@@ -776,11 +806,14 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
     await requireScopedConsequenceAuthority(tx, input);
     const relationship = await tx.hrEmploymentRelationship.findUnique({ where: { id: input.employmentRelationshipId } });
     if (!relationship || relationship.personnelId !== input.personnelId) throw disclosureError('رابطه استخدامی معتبر پیدا نشد.', 'PERFORMANCE_HANDOFF_RELATIONSHIP_NOT_FOUND', 404);
-    if (!['ACTIVE', 'SUSPENDED'].includes(relationship.status)) throw disclosureError('برای رابطه استخدامی پایان‌یافته ارجاع آینده‌اثر مجاز نیست.', 'PERFORMANCE_HANDOFF_RELATIONSHIP_ENDED', 409);
-    const subject = await tx.performanceSubject.findFirst({ where: { personnelId: input.personnelId, employmentRelationshipId: relationship.id, identityDetachedAt: null } });
-    if (!subject) throw disclosureError('موضوع عملکرد معتبر پیدا نشد.', 'PERFORMANCE_HANDOFF_SUBJECT_NOT_FOUND', 404);
     const { version: consequencePolicyVersion, content: consequencePolicy } = await effectiveConsequencePolicy(tx);
     const rule = consequenceRule(consequencePolicy, input.consequenceType);
+    if (!['ACTIVE', 'SUSPENDED'].includes(relationship.status)
+      && !(input.consequenceType === 'DISCRETIONARY_BONUS_REVIEW' && rule.allowEndedRelationship)) {
+      throw disclosureError('سیاست فعال این نوع پیامد، ارجاع برای رابطه پایان‌یافته را مجاز نمی‌داند.', 'PERFORMANCE_HANDOFF_RELATIONSHIP_ENDED', 409);
+    }
+    const subject = await tx.performanceSubject.findFirst({ where: { personnelId: input.personnelId, employmentRelationshipId: relationship.id, identityDetachedAt: null } });
+    if (!subject) throw disclosureError('موضوع عملکرد معتبر پیدا نشد.', 'PERFORMANCE_HANDOFF_SUBJECT_NOT_FOUND', 404);
     if (input.resultIds.length < rule.minimumResults) {
       throw disclosureError('تعداد نتیجه‌های انتخاب‌شده با سیاست فعال این نوع پیامد سازگار نیست.', 'PERFORMANCE_HANDOFF_MINIMUM_RESULTS_REQUIRED', 409);
     }
@@ -798,11 +831,16 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
     }
     const destination = await resolveHrNamedResponsibility(tx, {
       sourceActionCode: 'CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF',
-      responsibilityTypeCode: `PERFORMANCE_CONSEQUENCE_DESTINATION_${input.consequenceType}`,
+      responsibilityTypeCode: rule.destination.responsibilityTypeCode,
       scopeType: 'PERSONNEL', scopeId: input.personnelId, sourceActorUserId: input.actorUserId,
     });
     if (destination.status !== 'RESOLVED' || destination.assignedUserId === input.actorUserId) {
       throw disclosureError('مقصد مستقل و واجد شرایط این ارجاع پیکربندی نشده است.', 'PERFORMANCE_HANDOFF_DESTINATION_UNRESOLVED', 409);
+    }
+    if (destination.destination.workspaceCode !== rule.destination.workspaceCode
+      || destination.destination.queueCode !== rule.destination.queueCode
+      || (rule.destination.featureCode && destination.destination.featureCode !== rule.destination.featureCode)) {
+      throw disclosureError('مسیر مقصد با نسخه مؤثر سیاست پیامد سازگار نیست.', 'PERFORMANCE_HANDOFF_DESTINATION_POLICY_MISMATCH', 409);
     }
     const active = await tx.performanceConsequenceHandoff.findFirst({ where: {
       personnelId: input.personnelId,
@@ -820,11 +858,16 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
     const recentResults = trendCandidates.filter((result, index, all) => all.findIndex(({ evaluationId }) => evaluationId === result.evaluationId) === index).slice(0, 4);
     const recentEvaluations = await tx.performanceEvaluation.findMany({ where: { id: { in: recentResults.map(({ evaluationId }) => evaluationId) } } });
     const recentEvaluationById = new Map(recentEvaluations.map((evaluation) => [evaluation.id, evaluation]));
-    const compensationSnapshot = relationship.hiringApplicationId ? await tx.hrCompensationSnapshot.findFirst({
-      where: { applicationId: relationship.hiringApplicationId }, orderBy: { version: 'desc' },
-      select: { id: true, version: true, currency: true, totalRials: true, payrollReviewStatus: true, preparedAt: true },
-    }) : null;
-    if (rule.requireCompensationContext && !compensationSnapshot) throw disclosureError('تصویر جبران خدمت لازم برای این ارجاع در دسترس نیست.', 'PERFORMANCE_HANDOFF_COMPENSATION_CONTEXT_REQUIRED', 409);
+    const compensationAgreement = await tx.hrCompensationAgreement.findFirst({
+      where: {
+        employmentRelationshipId: relationship.id, status: 'ACTIVE', effectiveFrom: { lte: new Date() },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: new Date() } }],
+      }, orderBy: { version: 'desc' },
+    });
+    if (rule.requireCompensationContext && (!compensationAgreement
+      || (rule.requireLegalControl && compensationAgreement.legalControlStatus !== 'APPROVED'))) {
+      throw disclosureError('توافق جاری جبران خدمت با کنترل حقوقی لازم برای این ارجاع در دسترس نیست.', 'PERFORMANCE_HANDOFF_COMPENSATION_CONTEXT_REQUIRED', 409);
+    }
     const snapshot = {
       schemaVersion: 1,
       subjectId: subject.id,
@@ -860,9 +903,20 @@ export const createPerformanceConsequenceHandoff = async (client: PrismaClient, 
         measurementTo: recentEvaluationById.get(result.evaluationId)?.measurementTo,
       })),
       employmentContext: { status: relationship.status, effectiveFrom: relationship.effectiveFrom, effectiveTo: relationship.effectiveTo },
-      compensationContext: compensationSnapshot ? {
-        hiringSnapshot: { ...compensationSnapshot, totalRials: compensationSnapshot.totalRials.toString() },
-        payRange: 'DESTINATION_REVALIDATION_REQUIRED', budget: 'DESTINATION_REVALIDATION_REQUIRED',
+      compensationContext: compensationAgreement ? {
+        agreement: {
+          id: compensationAgreement.id, version: compensationAgreement.version, currency: compensationAgreement.currency,
+          components: compensationAgreement.componentsJson, totalRials: compensationAgreement.totalRials.toString(),
+          effectiveFrom: compensationAgreement.effectiveFrom, effectiveTo: compensationAgreement.effectiveTo,
+          contentHash: compensationAgreement.contentHash,
+        },
+        payRange: {
+          minimumRials: compensationAgreement.payRangeMinimumRials.toString(),
+          maximumRials: compensationAgreement.payRangeMaximumRials.toString(),
+        },
+        budget: { code: compensationAgreement.budgetCode, availableRials: compensationAgreement.budgetAvailableRials.toString() },
+        legalControlStatus: compensationAgreement.legalControlStatus,
+        destinationMustRevalidateLiveContext: true,
       } : null,
       reasonCategory: input.reasonCategory,
       reason: input.reason.trim(),
@@ -954,11 +1008,22 @@ export const getPerformanceConsequenceHandoff = async (client: PrismaClient, inp
     const handoff = await tx.performanceConsequenceHandoff.findUnique({ where: { id: input.handoffId } });
     if (!handoff) throw disclosureError('ارجاع پیامد پیدا نشد.', 'PERFORMANCE_HANDOFF_NOT_FOUND', 404);
     const packageRecord = handoff.packageId ? await tx.performanceConsequencePackage.findUnique({ where: { id: handoff.packageId } }) : null;
-    const isDestination = packageRecord?.assignedDestinationUserId === input.actorUserId;
+    const now = new Date();
+    const effectiveDestinationAuthority = packageRecord ? await tx.hrNamedResponsibility.findFirst({ where: {
+      id: packageRecord.destinationResponsibilityId,
+      assignedUserId: input.actorUserId,
+      effectiveFrom: { lte: now },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+      responsibilityType: { isActive: true },
+    } }) : null;
+    const isDestination = packageRecord?.assignedDestinationUserId === input.actorUserId && Boolean(effectiveDestinationAuthority);
     if (!isDestination) {
       await requireScopedConsequenceAuthority(tx, { actorUserId: input.actorUserId, personnelId: handoff.personnelId, consequenceType: handoff.consequenceType });
     }
-    const destinationPackage = isDestination && packageRecord
+    if (isDestination && handoff.status === 'SUSPENDED') {
+      throw disclosureError('اعتبار شواهد این ارجاع معلق شده و بسته تا بازبینی دوباره قابل مشاهده نیست.', 'PERFORMANCE_HANDOFF_SUSPENDED', 409);
+    }
+    const destinationPackage = isDestination && packageRecord && ['SENT', 'RECEIVED'].includes(handoff.status)
       ? await readPerformancePayload<Record<string, unknown>>(tx, packageRecord.encryptedPayloadId, keyring)
       : undefined;
     if (isDestination && handoff.status === 'SENT') {

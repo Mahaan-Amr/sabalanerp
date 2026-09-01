@@ -172,6 +172,9 @@ export type PerformanceConsequenceRule = {
   maximumAgeDays: number;
   requireMultiplePeriods: boolean;
   requireCompensationContext: boolean;
+  allowEndedRelationship: boolean;
+  requireLegalControl: boolean;
+  destination: { responsibilityTypeCode: string; workspaceCode: string; featureCode?: string; queueCode: string };
 };
 
 export const validateConsequenceHandoff = (input: {

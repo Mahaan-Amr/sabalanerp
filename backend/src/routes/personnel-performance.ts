@@ -292,7 +292,12 @@ router.get('/history/:personnelId', viewHistory, async (req: AuthRequest, res, n
 });
 
 router.post('/analytics', viewAnalytics, async (req: AuthRequest, res, next) => {
-  try { return res.json({ success: true, analytics: await getPerformanceAnalytics(prisma, { actorUserId: req.user!.id, personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : undefined }) }); }
+  try { return res.json({ success: true, analytics: await getPerformanceAnalytics(prisma, {
+    actorUserId: req.user!.id,
+    personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : undefined,
+    reportingFrom: req.body.reportingFrom ? new Date(String(req.body.reportingFrom)) : undefined,
+    reportingTo: req.body.reportingTo ? new Date(String(req.body.reportingTo)) : undefined,
+  }) }); }
   catch (error) { return next(error); }
 });
 

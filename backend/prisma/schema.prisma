@@ -7932,6 +7932,32 @@ model PerformanceConsequencePolicyVersion {
   @@map("performance_consequence_policy_versions")
 }
 
+model HrCompensationAgreement {
+  id                       String   @id @default(cuid())
+  employmentRelationshipId String
+  version                  Int
+  status                   String   @default("DRAFT")
+  effectiveFrom            DateTime
+  effectiveTo              DateTime?
+  currency                 String   @default("IRR")
+  componentsJson           Json
+  totalRials               Decimal  @db.Decimal(18, 0)
+  payRangeMinimumRials     Decimal  @db.Decimal(18, 0)
+  payRangeMaximumRials     Decimal  @db.Decimal(18, 0)
+  budgetCode               String
+  budgetAvailableRials     Decimal  @db.Decimal(18, 0)
+  legalControlStatus       String
+  contentHash              String
+  approvedByUserId         String?
+  approvedAt               DateTime?
+  createdByUserId          String
+  createdAt                DateTime @default(now())
+
+  @@unique([employmentRelationshipId, version])
+  @@index([employmentRelationshipId, status, effectiveFrom, effectiveTo])
+  @@map("hr_compensation_agreements")
+}
+
 model PerformanceDeletionReceipt {
   id                   String   @id @default(cuid())
   deletedTableName     String

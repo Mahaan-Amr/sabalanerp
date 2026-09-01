@@ -41,6 +41,8 @@ export default function PerformanceInsights() {
   const [purpose, setPurpose] = useState('بازبینی مدیریتی دوره عملکرد');
   const [exportJob, setExportJob] = useState<{ id: string; status: string; token: string }>();
   const [destinationHandoff, setDestinationHandoff] = useState<any>();
+  const [reportingFrom, setReportingFrom] = useState(() => new Date(Date.now() - 120 * 24 * 60 * 60_000).toISOString().slice(0, 10));
+  const [reportingTo, setReportingTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   const load = useCallback(async (nextSurface: Surface = surface) => {
     setLoading(true); setError(''); setSuccess('');
@@ -49,7 +51,7 @@ export default function PerformanceInsights() {
       const nextCapabilities = capabilityResponse.data.capabilities || {};
       setCapabilities(nextCapabilities);
       if (nextSurface === 'aggregate' && nextCapabilities.VIEW_PERFORMANCE_ANALYTICS) {
-        setReport((await personnelPerformanceAPI.analytics()).data.analytics);
+        setReport((await personnelPerformanceAPI.analytics({ reportingFrom, reportingTo })).data.analytics);
       } else if (nextSurface === 'ranking' && nextCapabilities.VIEW_NAMED_PERFORMANCE_RANKING) {
         setReport((await personnelPerformanceAPI.ranking()).data.ranking);
       } else if (nextSurface === 'calibration') {
@@ -58,7 +60,7 @@ export default function PerformanceInsights() {
       } else setReport(undefined);
     } catch (cause) { setError(apiError(cause)); }
     finally { setLoading(false); }
-  }, [surface]);
+  }, [reportingFrom, reportingTo, surface]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -145,6 +147,12 @@ export default function PerformanceInsights() {
       { value: 'calibration', label: 'کالیبراسیون ارزیاب', disabled: !canCalibration },
     ]} />
 
+    {surface === 'aggregate' && canAggregate && <ErpCard className="grid gap-3 p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+      <ErpField label="از تاریخ"><ErpInput type="date" value={reportingFrom} onChange={(event) => setReportingFrom(event.target.value)} /></ErpField>
+      <ErpField label="تا تاریخ"><ErpInput type="date" value={reportingTo} onChange={(event) => setReportingTo(event.target.value)} /></ErpField>
+      <ErpButton label="اعمال بازه گزارش" onClick={() => void load('aggregate')} disabled={pending || !reportingFrom || !reportingTo} />
+    </ErpCard>}
+
     {surface === 'calibration' && canCalibration && <ErpSection title="کنترل تشخیصی ارزیاب" description="حداقل ده بخش پذیرفته‌شده از پنج Personnel و دو بازه لازم است.">
       <ErpCard className="grid gap-3 p-4 sm:grid-cols-[1fr_auto] sm:items-end">
         <ErpField label="ارزیاب"><ErpSelect value={evaluatorPersonnelId} onChange={(event) => setEvaluatorPersonnelId(event.target.value)}><option value="">انتخاب ارزیاب</option>{evaluators.map((evaluator) => <option key={evaluator.id} value={evaluator.id}>{evaluator.firstName} {evaluator.lastName}{evaluator.employeeNumber ? ` · ${evaluator.employeeNumber}` : ''}</option>)}</ErpSelect></ErpField>
@@ -160,7 +168,7 @@ export default function PerformanceInsights() {
       {!report?.suppressed && surface === 'aggregate' && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{(report?.levelDistribution || []).map((row: any) => <ErpCard key={row.levelCode} className="p-4"><ErpBadge tone={levelTone[row.levelCode] || 'neutral'}>{row.labelFa}</ErpBadge><p className="mt-3 text-2xl font-black">{row.count.toLocaleString('fa-IR')}</p><p className="text-xs text-[var(--sds-text-muted)]">{row.percent.toLocaleString('fa-IR')}٪ جمعیت واجد شرایط</p></ErpCard>)}</div>}
       {!report?.suppressed && surface === 'aggregate' && report?.trend && <ErpCard className="mt-4 p-4"><h3 className="font-bold">روند جمعیت ثابت و قابل‌مقایسه</h3>{report.trend.suppressed
         ? <p className="mt-2 text-sm text-[var(--sds-text-muted)]">برای نمایش روند، جمعیت ثابت کافی در دسترس نیست.</p>
-        : <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{report.trend.periods.map((period: any) => <div key={period.periodKey} className="rounded-xl border border-[var(--sds-border-default)] p-3"><p className="text-sm font-bold">بازه {period.periodKey}</p><div className="mt-2 space-y-1 text-xs text-[var(--sds-text-secondary)]">{period.levelDistribution.map((row: any) => <p key={row.levelCode}>{row.labelFa}: {row.count.toLocaleString('fa-IR')}</p>)}</div></div>)}</div>}</ErpCard>}
+        : <><div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{report.trend.periods.map((period: any) => <div key={period.periodKey} className="rounded-xl border border-[var(--sds-border-default)] p-3"><p className="text-sm font-bold">بازه {period.periodKey}</p><div className="mt-2 space-y-1 text-xs text-[var(--sds-text-secondary)]">{period.levelDistribution.map((row: any) => <p key={row.levelCode}>{row.labelFa}: {row.count.toLocaleString('fa-IR')}</p>)}</div></div>)}</div><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{report.trend.populationPeriods.map((period: any) => <div key={`population-${period.periodKey}`} className="rounded-xl border border-[var(--sds-border-default)] p-3 text-xs"><p className="font-bold">جمعیت {period.periodKey}</p><p>دارای نتیجه: {period.resultPopulationCount.toLocaleString('fa-IR')}</p><p>فاقد نتیجه: {period.missingResultCount.toLocaleString('fa-IR')}</p><p>ورودی: {period.entriesSincePrevious.toLocaleString('fa-IR')} · خروجی: {period.exitsSincePrevious.toLocaleString('fa-IR')}</p></div>)}</div></>}</ErpCard>}
       {!report?.suppressed && surface === 'ranking' && <div className="space-y-3">{(report?.groups || []).map((group: any) => <ErpCard key={group.levelCode} className="p-4"><ErpBadge tone={levelTone[group.levelCode] || 'neutral'}>{group.labelFa}</ErpBadge><div className="mt-3 flex flex-wrap gap-2">{group.members.map((member: any) => <span key={member.employmentRelationshipId} className="rounded-lg border border-[var(--sds-border-default)] px-3 py-2 text-sm">{member.displayName}</span>)}</div></ErpCard>)}</div>}
       {!loading && !report && <ErpEmptyState title="گزارشی برای نمایش وجود ندارد" />}
     </ErpSection>}

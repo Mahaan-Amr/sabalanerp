@@ -82,7 +82,7 @@ test('accepted performance prototypes open on the approved analytics list and pr
   await page.goto('/dashboard/hr/personnel/performance-analytics-prototype');
   await expect(page.getByRole('heading', { name: 'فهرست تحلیلی Personnel' })).toBeVisible();
 
-  await page.goto('/dashboard/hr/personnel/performance-criteria-prototype?variant=C&save=fail');
+  await page.goto('/dashboard/hr/personnel/performance-criteria-prototype?variant=A&save=fail');
   await page.getByRole('button', { name: 'ساخت معیار جدید' }).click();
   const editor = page.getByRole('dialog', { name: 'ساخت معیار جدید' });
   await editor.getByRole('textbox', { name: 'نام معیار' }).fill('معیار بازیابی ذخیره');
@@ -97,7 +97,7 @@ test('accepted performance prototypes open on the approved analytics list and pr
 
 test('criteria publication rejects a missing or non-future effective date', async ({ page }) => {
   await loginAsAdmin(page);
-  await page.goto('/dashboard/hr/personnel/performance-criteria-prototype?variant=C');
+  await page.goto('/dashboard/hr/personnel/performance-criteria-prototype?variant=A');
   await page.getByRole('button', { name: 'ساخت معیار جدید' }).click();
   const editor = page.getByRole('dialog', { name: 'ساخت معیار جدید' });
   await editor.getByRole('textbox', { name: 'سهم این معیار' }).fill('۳۰');

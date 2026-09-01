@@ -46,7 +46,8 @@ import {
   ErpPage,
   ErpSection,
 } from "@/components/erp";
-import { hrAPI, hrAuthorizationAPI, usersAPI } from "@/lib/api";
+import { hrAPI, hrAuthorizationAPI, personnelPerformanceAPI, usersAPI } from "@/lib/api";
+import { PerformanceBadge } from '@/features/hr/performance-badge/PerformanceBadge';
 import PermanentDeletionDialog from "@/features/hr/PermanentDeletionDialog";
 import RetentionAction from "@/features/hr/RetentionActionSheet";
 import {
@@ -232,6 +233,15 @@ export default function HrPersonnelPage() {
         const authority = authorityResult.value;
         const permissions = authority.data.data.actionPermissionCodes || [];
         setActionPermissions(permissions);
+        if (permissions.includes('VIEW_PERFORMANCE_BADGE_LIST') && people.data.data.length) {
+          try {
+            const badgeResponse = await personnelPerformanceAPI.badges(people.data.data.map((person: any) => person.id));
+            const badgeByPersonnel = new Map((badgeResponse.data.badges || []).map((item: any) => [item.personnelId, item.badge]));
+            if (sequence === loadSequence.current) setRows(people.data.data.map((person: any) => ({ ...person, performanceBadge: badgeByPersonnel.get(person.id) || null })));
+          } catch {
+            if (sequence === loadSequence.current) setRows(people.data.data.map((person: any) => ({ ...person, performanceBadge: null })));
+          }
+        }
         const personnelAccess = (authority.data.data.effectiveAccess?.features || [])
           .find((feature: any) => feature.feature === "PERSONNEL");
         const userAdministrationAccess = (authority.data.data.effectiveAccess?.features || [])
@@ -952,6 +962,7 @@ export default function HrPersonnelPage() {
               permanentlyDelete={permanentlyDelete}
               canEditPersonnel={canEditPersonnel}
               canAccessVehicleOperations={["ADMIN", "MANAGER"].includes(user?.role || "")}
+              canCreatePerformanceConsequence={actionPermissions.includes('CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF')}
             />
           ))}
           {!rows.length && (
@@ -1083,6 +1094,7 @@ function PersonnelCard(props: any) {
     permanentlyDelete,
     canEditPersonnel,
     canAccessVehicleOperations,
+    canCreatePerformanceConsequence,
   } = props;
   const relationship = person.hrEmploymentRelationships?.[0];
   const primary = relationship?.assignments?.find(
@@ -1131,6 +1143,8 @@ function PersonnelCard(props: any) {
         </div>
         {open ? <FaChevronUp /> : <FaChevronDown />}
       </ErpPressable>
+      {person.performanceBadge && <div className="mt-2"><PerformanceBadge badge={person.performanceBadge} /></div>}
+      {canCreatePerformanceConsequence && relationship && ['ACTIVE', 'SUSPENDED'].includes(relationship.status) && <div className="mt-2"><ErpButton label="ارجاع پیامد عملکرد" variant="soft" href={`/dashboard/hr/personnel/performance/consequence/new?personnelId=${encodeURIComponent(person.id)}&relationshipId=${encodeURIComponent(relationship.id)}`} /></div>}
       {relationship?.hiringApplication && (
         <Link
           className="mt-2 inline-block text-xs font-bold text-[var(--sds-success)] hover:underline"

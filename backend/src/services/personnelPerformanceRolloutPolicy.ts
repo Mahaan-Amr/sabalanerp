@@ -62,8 +62,6 @@ const cohortScopedActions = new Set<PersonnelPerformanceWriteAction>([
   'DECIDE_HR_REVIEW',
   'MANAGE_PERFORMANCE_CYCLE',
   'PROJECT_CURRENT_LEVEL',
-  'WRITE_ANALYTICS_PROJECTION',
-  'REQUEST_EXPORT',
   'CREATE_CONSEQUENCE_HANDOFF',
 ]);
 

@@ -1,2 +1,6 @@
 // Three variants of the performance-level badge, switchable via ?variant=, inside the existing Human Resources shell.
-export { default } from "@/features/hr/performance-badge-prototype/PerformanceBadgePrototype";
+import { redirect } from 'next/navigation';
+
+export default function RetiredPerformanceBadgePrototype() {
+  redirect('/dashboard/hr/personnel');
+}

@@ -6,6 +6,7 @@ import {
 } from './personnelPerformancePolicyStore';
 import { expirePerformanceResults } from './personnelPerformanceResultStore';
 import { resolvePersonnelPerformanceWriteGate } from './personnelPerformanceRolloutPolicy';
+import { cleanupExpiredPerformanceExports, processQueuedPerformanceExports } from './personnelPerformanceDisclosureStore';
 
 const SYSTEM_ACTOR = null;
 
@@ -43,7 +44,9 @@ export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, n
   const relationshipReconciliation = await isolate('relationship reconciliation', () => (
     reconcilePerformanceProjectionSubjects(client, { actorUserId: SYSTEM_ACTOR, now })
   ));
-  return { policyGate, policies, artifacts, expiry, relationshipReconciliation };
+  const exportCleanup = await isolate('export cleanup', () => cleanupExpiredPerformanceExports(client, now));
+  const exportQueue = await isolate('export queue', () => processQueuedPerformanceExports(client));
+  return { policyGate, policies, artifacts, expiry, relationshipReconciliation, exportCleanup, exportQueue };
 };
 
 export const startPersonnelPerformanceMaintenance = (client: PrismaClient) => {

@@ -201,6 +201,7 @@ export default function PerformanceWorkflow({ initialSectionId, initialSubmissio
       title="گردش ارزیابی عملکرد"
       description="هر بخش فقط برای سرپرست مسئول و بررسی‌کننده مجاز نمایش داده می‌شود."
       backHref="/dashboard/hr/personnel"
+      actions={[{ label: 'تحلیل و خروجی', href: '/dashboard/hr/personnel/performance/insights', tone: 'neutral' }]}
       metrics={[
         { label: "وظیفه سرپرست", value: sections.filter(({ status }) => ["DRAFT", "REJECTED"].includes(status)).length.toLocaleString("fa-IR"), tone: "warning" },
         { label: "آماده بررسی", value: reviews.length.toLocaleString("fa-IR"), tone: "info" },

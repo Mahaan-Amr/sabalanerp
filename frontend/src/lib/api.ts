@@ -1478,6 +1478,18 @@ export const servicesAPI = {
 
 export const personnelPerformanceAPI = {
   capabilities: () => api.get('/hr/personnel-performance/capabilities'),
+  personalBadge: () => api.get('/hr/personnel-performance/badge/me'),
+  badges: (personnelIds: string[]) => api.post('/hr/personnel-performance/badges', { personnelIds }),
+  history: (personnelId: string) => api.get(`/hr/personnel-performance/history/${encodeURIComponent(personnelId)}`),
+  analytics: (personnelIds?: string[]) => api.post('/hr/personnel-performance/analytics', { personnelIds }),
+  ranking: (personnelIds?: string[]) => api.post('/hr/personnel-performance/ranking', { personnelIds }),
+  calibrationEvaluators: () => api.get('/hr/personnel-performance/calibration/evaluators'),
+  calibration: (evaluatorPersonnelId: string) => api.post('/hr/personnel-performance/calibration', { evaluatorPersonnelId }),
+  requestExport: (input: unknown) => api.post('/hr/personnel-performance/exports', input),
+  exportStatus: (exportId: string) => api.get(`/hr/personnel-performance/exports/${encodeURIComponent(exportId)}`),
+  downloadExport: (exportId: string, token: string) => api.get(`/hr/personnel-performance/exports/${encodeURIComponent(exportId)}/download`, { params: { token }, responseType: 'blob' }),
+  createConsequenceHandoff: (input: unknown) => api.post('/hr/personnel-performance/consequence-handoffs', input),
+  eligibleConsequenceResults: (personnelId: string) => api.get(`/hr/personnel-performance/consequence-handoffs/eligible-results/${encodeURIComponent(personnelId)}`),
   rollout: () => api.get('/hr/personnel-performance/rollout'),
   reconstructReadiness: (input: { measurementFrom: string; measurementTo: string; batchSize?: number }, idempotencyKey: string) => api.post(
     '/hr/personnel-performance/readiness/reconstruct', input, { headers: { 'x-idempotency-key': idempotencyKey } },

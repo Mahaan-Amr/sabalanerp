@@ -1,2 +1,5 @@
-// Three variants of managerial performance analytics, switchable via ?variant=, inside the Human Resources shell.
-export { default } from "@/features/hr/performance-analytics-prototype/PerformanceAnalyticsPrototype";
+import { redirect } from 'next/navigation';
+
+export default function RetiredPerformanceAnalyticsPrototype() {
+  redirect('/dashboard/hr/personnel/performance/insights');
+}

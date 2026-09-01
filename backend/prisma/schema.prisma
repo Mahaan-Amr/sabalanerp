@@ -7234,6 +7234,7 @@ enum PerformanceExportStatus {
   QUEUED
   RUNNING
   READY
+  DELIVERING
   DOWNLOADED
   FAILED
   EXPIRED
@@ -7816,23 +7817,81 @@ model PerformanceLegalHold {
 }
 
 model PerformanceExportReceipt {
-  id                 String                  @id @default(cuid())
-  requestedByUserId  String
-  exportKind         String
-  scopeHash          String
-  permissionHash     String
-  status             PerformanceExportStatus @default(QUEUED)
-  encryptedPayloadId String?                 @unique
-  artifactHash       String?
-  requestedAt        DateTime                @default(now())
-  readyAt            DateTime?
-  expiresAt          DateTime?
-  downloadedAt       DateTime?
-  deletedAt          DateTime?
+  id                     String                  @id @default(cuid())
+  requestedByUserId      String
+  exportKind             String
+  scopeHash              String
+  permissionHash         String
+  status                 PerformanceExportStatus @default(QUEUED)
+  encryptedPayloadId     String?                 @unique
+  artifactHash           String?
+  requestedAt            DateTime                @default(now())
+  readyAt                DateTime?
+  expiresAt              DateTime?
+  downloadedAt           DateTime?
+  deletedAt              DateTime?
+  downloadTokenHash      String?                 @unique
+  downloadTokenExpiresAt DateTime?
+  artifactPath           String?
+  artifactMimeType       String?
+  artifactSize           Int?
+  attemptCount           Int                     @default(0)
+  failureCode            String?
 
   @@index([requestedByUserId, requestedAt])
   @@index([status, expiresAt])
   @@map("performance_export_receipts")
+}
+
+model PerformancePeerFamilyVersion {
+  id                String                       @id @default(cuid())
+  familyKey         String
+  version           Int
+  lifecycle         PerformanceArtifactLifecycle @default(DRAFT)
+  effectiveFrom     DateTime?
+  reason            String
+  createdByUserId   String
+  publishedByUserId String?
+  membershipHash    String
+  createdAt         DateTime                     @default(now())
+
+  @@unique([familyKey, version])
+  @@index([lifecycle, effectiveFrom])
+  @@map("performance_peer_family_versions")
+}
+
+model PerformancePeerFamilyJob {
+  id              String   @id @default(cuid())
+  familyVersionId String
+  jobId           String
+  createdAt       DateTime @default(now())
+
+  @@unique([familyVersionId, jobId])
+  @@index([jobId, familyVersionId])
+  @@map("performance_peer_family_jobs")
+}
+
+model PerformanceConsequenceHandoff {
+  id                       String    @id @default(cuid())
+  subjectId                String
+  personnelId              String
+  employmentRelationshipId String
+  consequenceType          String
+  policyCycleKey           String
+  status                   String    @default("SENT")
+  reasonCategory           String
+  reason                   String
+  encryptedPayloadId       String    @unique
+  snapshotHash             String
+  createdByUserId          String
+  createdAt                DateTime  @default(now())
+  suspendedAt              DateTime?
+  closedAt                 DateTime?
+  supersedesHandoffId      String?
+
+  @@index([subjectId, consequenceType, status])
+  @@index([employmentRelationshipId, createdAt])
+  @@map("performance_consequence_handoffs")
 }
 
 model PerformanceDeletionReceipt {

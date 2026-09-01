@@ -24,7 +24,7 @@ import {
   updatePerformancePolicyDraft,
   updatePerformanceTemplateDraft,
 } from '../services/personnelPerformancePolicyStore';
-import { reproduceAcceptedPerformanceResult } from '../services/personnelPerformanceResultStore';
+import { reproduceAcceptedPerformanceResult, suspendAcceptedPerformanceResult } from '../services/personnelPerformanceResultStore';
 import { PerformancePolicyKind, PerformanceReviewDecision, PerformanceTemplateKind } from '@prisma/client';
 import {
   reconstructPerformanceReadiness,
@@ -46,6 +46,22 @@ import {
   saveSupervisorPerformanceDraft,
   submitSupervisorPerformanceSection,
 } from '../services/personnelPerformanceWorkflowStore';
+import {
+  claimPerformanceExportDownload,
+  completePerformanceExportDownload,
+  createPerformanceConsequenceHandoff,
+  createPerformanceCorrection,
+  getEvaluatorCalibration,
+  getPerformanceAnalytics,
+  getPerformanceConsequenceHandoff,
+  getPerformanceExport,
+  getPerformanceHistory,
+  listPerformanceEvaluators,
+  listEligibleConsequenceResults,
+  getPersonalPerformanceBadge,
+  getPersonnelPerformanceBadges,
+  requestPerformanceExport,
+} from '../services/personnelPerformanceDisclosureStore';
 
 const router = express.Router();
 const performancePermissionCodes = new Set<string>(PERFORMANCE_ACTION_PERMISSION_CODES);
@@ -235,6 +251,133 @@ router.post('/evaluations/:evaluationId/invalidate', pausePerformance, requirePe
 
 router.post('/reminders/run', manageLifecycle, requirePersonnelPerformanceWriteGate('SEND_WORKFLOW_REMINDERS'), async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, ...(await runPerformanceReminders(prisma, { actorUserId: req.user!.id })) }); }
+  catch (error) { return next(error); }
+});
+
+const viewBadgeList = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_BADGE_LIST'] });
+const viewHistory = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_HISTORY'] });
+const viewAnalytics = requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_ANALYTICS'] });
+const viewNamedRanking = requireHrAuthorization({ actionPermissionCodes: ['VIEW_NAMED_PERFORMANCE_RANKING'] });
+const viewCalibration = requireHrAuthorization({ actionPermissionCodes: ['VIEW_EVALUATOR_CALIBRATION'] });
+const requestExport = requireHrAuthorization({ actionPermissionCodes: ['REQUEST_PERFORMANCE_EXPORT'] });
+const createConsequence = requireHrAuthorization({ actionPermissionCodes: ['CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF'] });
+
+const subjectIdForResult = async (req: AuthRequest) => {
+  const result = await prisma.performanceAcceptedResult.findUnique({ where: { id: req.params.resultId }, select: { evaluationId: true } });
+  return result ? (await prisma.performanceEvaluation.findUnique({ where: { id: result.evaluationId }, select: { subjectId: true } }))?.subjectId : undefined;
+};
+
+const subjectIdForHandoff = async (req: AuthRequest) => (
+  await prisma.performanceSubject.findFirst({
+    where: { personnelId: String(req.body.personnelId ?? ''), employmentRelationshipId: String(req.body.employmentRelationshipId ?? ''), identityDetachedAt: null },
+    select: { id: true },
+  })
+)?.id;
+
+router.get('/badge/me', async (req: AuthRequest, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'نشست شما معتبر نیست.' });
+    return res.json({ success: true, badge: await getPersonalPerformanceBadge(prisma, req.user.id) });
+  } catch (error) { return next(error); }
+});
+
+router.post('/badges', viewBadgeList, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, badges: await getPersonnelPerformanceBadges(prisma, { actorUserId: req.user!.id, personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : [] }) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/history/:personnelId', viewHistory, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, history: await getPerformanceHistory(prisma, { actorUserId: req.user!.id, personnelId: req.params.personnelId }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/analytics', viewAnalytics, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, analytics: await getPerformanceAnalytics(prisma, { actorUserId: req.user!.id, personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : undefined }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/ranking', viewNamedRanking, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ranking: await getPerformanceAnalytics(prisma, { actorUserId: req.user!.id, personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : undefined, mode: 'NAMED_RANKING' }) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/calibration/evaluators', viewCalibration, async (_req, res, next) => {
+  try { return res.json({ success: true, evaluators: await listPerformanceEvaluators(prisma) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/calibration', viewCalibration, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, calibration: await getEvaluatorCalibration(prisma, { actorUserId: req.user!.id, evaluatorPersonnelId: String(req.body.evaluatorPersonnelId ?? '') }) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/exports', requestExport, requirePersonnelPerformanceWriteGate('REQUEST_EXPORT'), async (req: AuthRequest, res, next) => {
+  try {
+    const result = await requestPerformanceExport(prisma, {
+      actorUserId: req.user!.id,
+      exportKind: req.body.exportKind,
+      reportKind: req.body.reportKind,
+      personnelIds: Array.isArray(req.body.personnelIds) ? req.body.personnelIds : undefined,
+      purpose: String(req.body.purpose ?? ''),
+    });
+    return res.status(202).json({ success: true, export: {
+      id: result.receipt.id,
+      exportKind: result.receipt.exportKind,
+      status: result.receipt.status,
+      requestedAt: result.receipt.requestedAt,
+      expiresAt: result.receipt.expiresAt,
+    }, downloadToken: result.downloadToken });
+  } catch (error) { return next(error); }
+});
+
+router.get('/exports/:exportId', requestExport, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, export: await getPerformanceExport(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id }) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/exports/:exportId/download', requestExport, async (req: AuthRequest, res, next) => {
+  try {
+    const artifact = await claimPerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, token: String(req.query.token ?? '') });
+    res.type(artifact.mimeType);
+    return res.download(artifact.artifactPath, artifact.filename, (error) => {
+      void completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered: !error }).catch(next);
+      if (error) return next(error);
+    });
+  } catch (error) { return next(error); }
+});
+
+router.post('/consequence-handoffs', createConsequence, requirePersonnelPerformanceWriteGate('CREATE_CONSEQUENCE_HANDOFF', subjectIdForHandoff), async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, handoff: await createPerformanceConsequenceHandoff(prisma, {
+    actorUserId: req.user!.id,
+    personnelId: String(req.body.personnelId ?? ''),
+    employmentRelationshipId: String(req.body.employmentRelationshipId ?? ''),
+    consequenceType: String(req.body.consequenceType ?? ''),
+    policyCycleKey: String(req.body.policyCycleKey ?? ''),
+    resultIds: Array.isArray(req.body.resultIds) ? req.body.resultIds : [],
+    reasonCategory: String(req.body.reasonCategory ?? ''),
+    reason: String(req.body.reason ?? ''),
+    independentEvidenceReferences: Array.isArray(req.body.independentEvidenceReferences) ? req.body.independentEvidenceReferences : [],
+  }) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/consequence-handoffs/eligible-results/:personnelId', createConsequence, async (req, res, next) => {
+  try { return res.json({ success: true, results: await listEligibleConsequenceResults(prisma, req.params.personnelId) }); }
+  catch (error) { return next(error); }
+});
+
+router.get('/consequence-handoffs/:handoffId', createConsequence, async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...(await getPerformanceConsequenceHandoff(prisma, { handoffId: req.params.handoffId, actorUserId: req.user!.id })) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/results/:resultId/suspend', pausePerformance, requirePersonnelPerformanceWriteGate('PROJECT_CURRENT_LEVEL', subjectIdForResult), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...(await suspendAcceptedPerformanceResult(prisma, { resultId: req.params.resultId, actorUserId: req.user!.id, reason: String(req.body.reason ?? '') })) }); }
+  catch (error) { return next(error); }
+});
+
+router.post('/evaluations/:evaluationId/corrections', reviewPerformance, requirePersonnelPerformanceWriteGate('DECIDE_HR_REVIEW', subjectIdForEvaluation), async (req: AuthRequest, res, next) => {
+  try { return res.status(201).json({ success: true, correction: await createPerformanceCorrection(prisma, { evaluationId: req.params.evaluationId, actorUserId: req.user!.id, correctionKind: String(req.body.correctionKind ?? ''), reason: String(req.body.reason ?? '') }) }); }
   catch (error) { return next(error); }
 });
 

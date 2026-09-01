@@ -44,10 +44,7 @@ import {
 import { NotificationCenter } from "@/components/NotificationCenter";
 import { readContractSubmissionDiagnostic } from "@/features/contract-creation/utils/contractSubmissionDiagnostics";
 import { hasHrFeature, type HrBaseFeature } from '@/features/hr/hrAccessNavigation';
-import {
-  PerformanceBadgeHeaderPrototype,
-  type PerformanceBadgeVariant,
-} from '@/features/hr/performance-badge-prototype/PerformanceBadgePrototype';
+import { PersonalPerformanceBadge } from '@/features/hr/performance-badge/PerformanceBadge';
 
 interface User {
   id: string;
@@ -175,12 +172,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const searchParams = useSearchParams();
   const { currentWorkspace, accessibleWorkspaces, loading: workspaceAccessLoading } = useWorkspace();
   const isHrWorkspace = pathname.startsWith("/dashboard/hr");
-  const isPerformanceBadgePrototype = pathname === "/dashboard/hr/personnel/performance-badge-prototype";
-  const requestedPerformanceBadgeVariant = searchParams.get("variant")?.toUpperCase();
-  const performanceBadgeVariant: PerformanceBadgeVariant =
-    requestedPerformanceBadgeVariant === "B" || requestedPerformanceBadgeVariant === "C"
-      ? requestedPerformanceBadgeVariant
-      : "A";
   const isSalesWorkspace = pathname.startsWith("/dashboard/sales");
   const isSalesLanding = pathname === "/dashboard/sales";
   const isSalesCustomerIndex =
@@ -625,9 +616,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         {/* Top Bar */}
         <header
           data-dashboard-topbar
-          className={`sds-dashboard-topbar flex items-center px-3 sm:px-4 ${isPerformanceBadgePrototype ? "min-h-16 py-2" : "h-16"}`}
+          className="sds-dashboard-topbar flex h-16 items-center px-3 sm:px-4"
         >
-          <div className={`flex w-full items-center justify-between ${isPerformanceBadgePrototype ? "flex-wrap gap-y-2" : ""}`}>
+          <div className="flex w-full items-center justify-between">
             <div className="flex items-center gap-4">
               <ErpPressable
                 type="button"
@@ -665,10 +656,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               </div>
             </div>
 
-            <div className={`flex items-center gap-2 ${isPerformanceBadgePrototype ? "w-full justify-end sm:w-auto" : ""}`}>
-              {isPerformanceBadgePrototype && (
-                <PerformanceBadgeHeaderPrototype variant={performanceBadgeVariant} />
-              )}
+            <div className="flex items-center gap-2">
+              <PersonalPerformanceBadge />
               <NotificationCenter />
               <div className="relative profile-dropdown-container">
                 <ErpPressable

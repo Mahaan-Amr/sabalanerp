@@ -384,14 +384,14 @@ type AcceptedResultPayload = { exactScore: string; measurementTo?: string; trace
 const listCurrentPerformanceSubjects = async (tx: Prisma.TransactionClient) => {
   const relationships = await tx.hrEmploymentRelationship.findMany({
     where: { status: { in: ['ACTIVE', 'SUSPENDED'] } },
-    select: { id: true },
+    select: { id: true, personnelId: true },
   });
   return tx.performanceSubject.findMany({
     where: {
       employmentRelationshipId: { in: relationships.map(({ id }) => id) },
       identityDetachedAt: null,
     },
-    select: { id: true },
+    select: { id: true, personnelId: true },
     orderBy: { id: 'asc' },
   });
 };
@@ -1043,6 +1043,18 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
       eventHash: canonicalPerformanceHash({ auditId, subjectId: subject.id, projection, evidenceHash: auditEvidence.contentHash }),
       occurredAt: input.now,
     } });
+    if (subject.personnelId && (!previous || previous.sourceResultsHash !== sourceResultsHash)) {
+      const user = await tx.user.findUnique({ where: { personnelId: subject.personnelId }, select: { id: true } });
+      if (user) await tx.notification.create({ data: {
+        userId: user.id,
+        type: 'PERFORMANCE_SUMMARY_UPDATED',
+        title: 'خلاصه عملکرد به‌روزرسانی شد',
+        message: 'خلاصه مصوب عملکرد شما به‌روزرسانی شده و سطح جاری در سربرگ قابل مشاهده است.',
+        priority: 'NORMAL',
+        actionUrl: '/dashboard/hr/personnel/performance',
+        referenceId: `performance-projection:${subject.id}:v${projection.version}`,
+      } });
+    }
   }
   return { subjectCount: subjects.length, resultHash: population.preview.resultHash };
 };

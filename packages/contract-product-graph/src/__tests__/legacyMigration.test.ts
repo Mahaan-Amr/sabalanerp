@@ -220,6 +220,260 @@ const longitudinalPolicyInput = ({
 }
 
 {
+  const result = planLegacyProductGraphMigration({
+    contractId: 'prepared-contract',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      rowId: 'prepared-row',
+      productId: 'prepared-catalog',
+      productType: 'prepared',
+      name: 'Prepared stone pieces',
+      preparedUnit: 'count',
+      preparedQuantity: 200,
+      quantity: 200,
+      unitPrice: 200000,
+      originalTotalPrice: 40000000,
+      totalPrice: 40000000
+    }]
+  }, 40000000);
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('expected prepared-product migration');
+  const commercial = result.graph.rows[0]?.commercial;
+  assert.equal(commercial?.requestedQuantity, '200');
+  assert.equal(commercial?.baseRateToman, '200000');
+  assert.equal(commercial?.baseAmountToman, '40000000');
+  assert.equal(commercial?.totalAmountToman, '40000000');
+}
+
+{
+  const result = planLegacyProductGraphMigration({
+    contractId: 'prepared-contract-conflicting-quantity',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      rowId: 'prepared-row-conflicting-quantity',
+      productId: 'prepared-catalog',
+      productType: 'prepared',
+      name: 'Prepared stone pieces',
+      preparedUnit: 'count',
+      preparedQuantity: 200,
+      quantity: 199,
+      unitPrice: 200000,
+      originalTotalPrice: 40000000,
+      totalPrice: 40000000
+    }]
+  }, 40000000);
+  assert.equal(result.ok, false);
+  if (result.ok) throw new Error('expected contradictory quantity evidence to fail');
+  assert.equal(result.conflicts[0]?.code, 'legacy-canonical-input-invalid');
+  assert.deepEqual(result.conflicts[0]?.path, [
+    'products',
+    '0',
+    'preparedProduct'
+  ]);
+}
+
+{
+  const result = planLegacyProductGraphMigration({
+    contractId: 'prepared-contract-conflicting-base',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      rowId: 'prepared-row-conflicting-base',
+      productId: 'prepared-catalog',
+      productType: 'prepared',
+      name: 'Prepared stone pieces',
+      preparedUnit: 'count',
+      preparedQuantity: 200,
+      quantity: 200,
+      unitPrice: 200000,
+      originalTotalPrice: 39999999,
+      totalPrice: 40000000
+    }]
+  }, 40000000);
+  assert.equal(result.ok, false);
+  if (result.ok) throw new Error('expected contradictory base evidence to fail');
+  assert.equal(result.conflicts[0]?.code, 'legacy-canonical-input-invalid');
+}
+
+{
+  const result = planLegacyProductGraphMigration({
+    contractId: 'prepared-contract-conflicting-total',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      rowId: 'prepared-row-conflicting-total',
+      productId: 'prepared-catalog',
+      productType: 'prepared',
+      name: 'Prepared stone pieces',
+      preparedUnit: 'count',
+      preparedQuantity: 200,
+      quantity: 200,
+      unitPrice: 200000,
+      originalTotalPrice: 40000000,
+      totalPrice: 39999999
+    }]
+  }, 39999999);
+  assert.equal(result.ok, false);
+  if (result.ok) throw new Error('expected contradictory total evidence to fail');
+  assert.equal(result.conflicts[0]?.code, 'legacy-canonical-input-invalid');
+}
+
+for (const [label, missingField] of [
+  ['missing-unit', 'preparedUnit'],
+  ['missing-quantity', 'preparedQuantity'],
+  ['missing-rate', 'unitPrice'],
+  ['missing-total', 'totalPrice'],
+] as const) {
+  const product: Record<string, unknown> = {
+    rowId: `prepared-row-${label}`,
+    productId: 'prepared-catalog',
+    productType: 'prepared',
+    name: 'Incomplete prepared stone',
+    preparedUnit: 'count',
+    preparedQuantity: 200,
+    unitPrice: 200000,
+    originalTotalPrice: 40000000,
+    totalPrice: 40000000
+  };
+  delete product[missingField];
+  const result = planLegacyProductGraphMigration({
+    contractId: `prepared-contract-${label}`,
+    revision: 0,
+    calculationPolicy: policy,
+    products: [product]
+  }, 40000000);
+  assert.equal(result.ok, false);
+  if (result.ok) throw new Error(`expected ${label} evidence to fail`);
+  assert.equal(result.conflicts[0]?.code, 'legacy-canonical-input-invalid');
+}
+
+for (const prepared of [
+  { unit: 'squareMeter', quantity: 2.5, rate: 1_800_000, amount: '4500000' },
+  { unit: 'ton', quantity: 1.234, rate: 2_000_000, amount: '2468000' },
+] as const) {
+  const result = planLegacyProductGraphMigration({
+    contractId: `prepared-contract-${prepared.unit}`,
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      rowId: `prepared-row-${prepared.unit}`,
+      productId: 'prepared-catalog',
+      productType: 'prepared',
+      name: 'Measured prepared stone',
+      preparedUnit: prepared.unit,
+      preparedQuantity: prepared.quantity,
+      quantity: prepared.quantity,
+      unitPrice: prepared.rate,
+      originalTotalPrice: Number(prepared.amount),
+      totalPrice: Number(prepared.amount)
+    }]
+  }, prepared.amount);
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('expected measured prepared-product migration');
+  const commercial = result.graph.rows[0]?.commercial;
+  assert.equal(commercial?.requestedQuantity, String(prepared.quantity));
+  assert.equal(commercial?.baseRateToman, String(prepared.rate));
+  assert.equal(commercial?.baseAmountToman, prepared.amount);
+  assert.equal(
+    commercial?.calculationSnapshot?.unit,
+    prepared.unit
+  );
+}
+
+{
+  const result = planLegacyProductGraphMigration({
+    contractId: 'prepared-contract-commercially-equal-residue',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      rowId: 'prepared-row-commercially-equal-residue',
+      productId: 'prepared-catalog',
+      productType: 'prepared',
+      name: 'Measured prepared stone with floating residue',
+      preparedUnit: 'squareMeter',
+      preparedQuantity: 50,
+      quantity: 50.00000000000001,
+      unitPrice: 1_000,
+      originalTotalPrice: 50_000,
+      totalPrice: 50_000
+    }]
+  }, 50_000);
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('expected commercially equal quantity evidence to migrate');
+  assert.equal(result.graph.rows[0]?.commercial.requestedQuantity, '50');
+  assert.deepEqual(
+    result.graph.rows[0]?.commercial.calculationSnapshot?.quantityNormalization,
+    {
+      policyVersion: 'commercial-quantity-v1',
+      unit: 'squareMeter',
+      scale: '3',
+      rounding: 'ROUND_HALF_UP',
+      rawWitnesses: {
+        preparedQuantity: '50',
+        quantity: '50.00000000000001'
+      },
+      normalizedWitnesses: {
+        preparedQuantity: '50',
+        quantity: '50'
+      },
+      rawDifference: '-0.00000000000001',
+      sealedQuantity: '50'
+    }
+  );
+}
+
+{
+  const result = planLegacyProductGraphMigration({
+    contractId: 'prepared-contract-scale-three-normalization',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      rowId: 'prepared-row-scale-three-normalization',
+      productId: 'prepared-catalog',
+      productType: 'prepared',
+      name: 'Measured prepared stone requiring commercial normalization',
+      preparedUnit: 'ton',
+      preparedQuantity: 1.2345,
+      unitPrice: 1_000,
+      originalTotalPrice: 1_235,
+      totalPrice: 1_235
+    }]
+  }, 1_235);
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('expected scale-three quantity normalization');
+  assert.equal(result.graph.rows[0]?.commercial.requestedQuantity, '1.235');
+  assert.deepEqual(
+    result.graph.rows[0]?.commercial.calculationSnapshot?.quantityPolicy,
+    { scale: '3', rounding: 'ROUND_HALF_UP' }
+  );
+}
+
+{
+  const result = planLegacyProductGraphMigration({
+    contractId: 'prepared-contract-fractional-count',
+    revision: 0,
+    calculationPolicy: policy,
+    products: [{
+      rowId: 'prepared-row-fractional-count',
+      productId: 'prepared-catalog',
+      productType: 'prepared',
+      name: 'Invalid prepared stone count',
+      preparedUnit: 'count',
+      preparedQuantity: 1.5,
+      quantity: 1.5,
+      unitPrice: 200_000,
+      originalTotalPrice: 300_000,
+      totalPrice: 300_000
+    }]
+  }, 300_000);
+  assert.equal(result.ok, false);
+  if (result.ok) throw new Error('expected fractional count evidence to fail');
+  assert.equal(result.conflicts[0]?.code, 'legacy-canonical-input-invalid');
+}
+
+{
   const input = {
     ...createNewLongitudinalProductInput({
       calculationPolicyVersion: policy.calculation,

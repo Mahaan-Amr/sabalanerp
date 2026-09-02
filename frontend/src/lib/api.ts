@@ -978,14 +978,19 @@ export const accountingAPI = {
   updateSettings: (data: any) => api.put('/accounting/settings', data),
   executeAction: (data: any) => api.post('/accounting/actions', data),
   getBiometricConnectorDiagnostics: () => api.get('/biometric-connector/diagnostics'),
+  createBiometricDiagnosticCommand: (workstationId: string) => api.post('/biometric-connector/diagnostics/command', { workstationId }),
+  completeBiometricDiagnostic: (data: any) => api.post('/biometric-connector/diagnostics/result', data),
 };
 
 export const dispatchConfirmationAPI = {
   getCapabilities: () => api.get('/dispatch-confirmation/capabilities'),
   enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment`, data),
+  createEnrollmentCommand: (personnelId: string, data: { workstationId: string; finger: string }) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment-commands`, data),
   withdrawEnrollment: (enrollmentId: string, reason: string) => api.post(`/dispatch-confirmation/enrollments/${enrollmentId}/withdraw`, { reason }),
   startSession: (waybillId: string, workstationId: string) => api.post(`/dispatch-confirmation/waybills/${waybillId}/sessions`, { workstationId }),
   verifyBiometric: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-attempts`, {}),
+  createBiometricCommand: (sessionId: string, finger: 'RIGHT_INDEX' | 'LEFT_INDEX') => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-command`, { finger }),
+  completeBiometricAttempt: (sessionId: string, data: any) => api.post(`/dispatch-confirmation/sessions/${sessionId}/biometric-attempts`, data),
   beginFallback: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/fallback`, {}),
   resendOtp: (sessionId: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/otp/resend`, {}),
   verifyOtp: (sessionId: string, code: string) => api.post(`/dispatch-confirmation/sessions/${sessionId}/otp/verify`, { code }),

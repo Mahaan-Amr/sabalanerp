@@ -51,11 +51,13 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             packages/contract-product-graph/package-lock.json
+            packages/partner-sales-contracts/package-lock.json
             backend/package-lock.json
             frontend/package-lock.json
       - run: npm ci
       - run: npm ci --prefix packages/contract-product-graph
-      - run: npm run build:contract-product-graph
+      - run: npm ci --prefix packages/partner-sales-contracts
+      - run: npm run build:partner-sales-contracts
       - run: npm ci --prefix backend
       - run: npm ci --prefix frontend
       - run: npx playwright install --with-deps chrome

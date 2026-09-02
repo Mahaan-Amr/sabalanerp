@@ -3,6 +3,7 @@ import { GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
 import { BiometricConnector, SimulatorScenario } from './biometricProtocol';
 import { ProtectedTemplateEnvelope, ProtectedTemplateVault } from './biometricTemplateVault';
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
+import { SafeConnectorResult } from './biometricWorkstationProtocol';
 
 type Tx = Prisma.TransactionClient;
 export class DispatchConfirmationValidationError extends Error {}
@@ -68,6 +69,20 @@ export class DispatchConfirmationService {
       throw new DispatchConfirmationConflictError('The internal driver is not currently eligible for biometric confirmation.');
     }
     return driver;
+  }
+
+  async assertEnrollmentCaptureAllowed(personnelId: string) {
+    const at = this.now();
+    if (!this.dependencies.legalReadinessEnabled) throw new DispatchConfirmationConflictError('Physical biometric capture is disabled until the approved legal readiness gate is enabled.');
+    const personnel = await this.prisma.personnel.findUnique({ where: { id: personnelId }, include: { internalDriverProfile: true } });
+    if (!personnel?.internalDriverProfile) throw new DispatchConfirmationValidationError('An active internal driver personnel record is required.');
+    await this.assertInternalDriverEligible(personnel.internalDriverProfile.id);
+    const [policy, active] = await Promise.all([
+      this.prisma.biometricGovernancePolicy.findFirst({ where: { activeFrom: { lte: at }, OR: [{ retiredAt: null }, { retiredAt: { gt: at } }] } }),
+      this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId, status: 'ACTIVE' } }),
+    ]);
+    if (!policy) throw new DispatchConfirmationConflictError('Biometric capture is disabled until legal basis and retention policy are active.');
+    if (active) throw new DispatchConfirmationConflictError('The driver already has an active biometric enrollment.');
   }
 
   async enrollInternalDriver(input: { personnelId: string; acknowledgement: string; confirmationPhone: string; templates: EnrollmentTemplateInput[]; actorId: string }) {
@@ -246,27 +261,50 @@ export class DispatchConfirmationService {
   }
 
   async verifyInternalBiometric(input: { sessionId: string; actorId: string; scenario?: SimulatorScenario }) {
-    const session = await this.activeSession(input.sessionId, input.actorId);
+    const prepared = await this.prepareInternalBiometric(input.sessionId, input.actorId);
+    const sequence = await this.prisma.dispatchBiometricAttempt.count({ where: { sessionId: prepared.sessionId } }) + 1;
+    const at = this.now();
+    try {
+      const result = await this.dependencies.connector.execute({ commandId: randomUUID(), nonce: randomUUID(), workstationId: prepared.workstationId,
+        issuedAt: at.toISOString(), expiresAt: prepared.expiresAt.toISOString(), operation: 'VERIFY', payload: { challengeId: prepared.sessionId,
+          expectedDriverId: prepared.driverId, templateReference: prepared.templateReference,
+          simulation: { scenario: input.scenario || 'SUCCESS', attempt: sequence } } });
+      return this.recordInternalBiometricResult({ sessionId: input.sessionId, actorId: input.actorId, result });
+    } finally { prepared.expectedTemplate.fill(0); }
+  }
+
+  async prepareInternalBiometric(sessionId: string, actorId: string, finger?: string) {
+    const session = await this.activeSession(sessionId, actorId);
     if (session.driverSource !== GuardDriverSource.INTERNAL || session.method !== 'INTERNAL_BIOMETRIC') throw new DispatchConfirmationValidationError('This session does not accept biometric verification.');
     const driver = await this.prisma.internalDriverProfile.findUnique({ where: { id: session.driverId } });
     await this.assertInternalDriverEligible(session.driverId);
     const enrollment = driver && await this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: driver.personnelId, status: 'ACTIVE', retentionUntil: { gt: this.now() } }, include: { templates: true } });
-    if (!enrollment?.templates.length) throw new DispatchConfirmationConflictError('The protected enrollment is unavailable.');
-    const sequence = await this.prisma.dispatchBiometricAttempt.count({ where: { sessionId: session.id } }) + 1;
+    const templates = enrollment?.templates.slice().sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime()) || [];
+    const template = finger ? templates.find((item) => item.finger === finger) : templates[0];
+    if (!driver || !template) throw new DispatchConfirmationConflictError('The protected enrollment is unavailable.');
+    const expectedTemplate = this.dependencies.vault.open(template.protectedEnvelope as unknown as ProtectedTemplateEnvelope,
+      { personnelId: driver.personnelId, finger: template.finger, format: template.format });
+    return { sessionId: session.id, driverId: session.driverId, personnelId: driver.personnelId, workstationId: session.workstationId,
+      waybillIntegrityHash: session.waybillIntegrityHash, expiresAt: session.expiresAt, templateReference: template.templateReference, expectedTemplate };
+  }
+
+  async recordInternalBiometricResult(input: { sessionId: string; actorId: string; result: SafeConnectorResult }) {
+    const session = await this.activeSession(input.sessionId, input.actorId);
+    if (session.driverSource !== GuardDriverSource.INTERNAL || session.method !== 'INTERNAL_BIOMETRIC') throw new DispatchConfirmationValidationError('This session does not accept biometric verification.');
+    await this.assertInternalDriverEligible(session.driverId);
     const at = this.now();
-    const result = await this.dependencies.connector.execute({ commandId: randomUUID(), nonce: randomUUID(), workstationId: session.workstationId,
-      issuedAt: at.toISOString(), expiresAt: session.expiresAt.toISOString(), operation: 'VERIFY', payload: { challengeId: session.id,
-        expectedDriverId: session.driverId, templateReference: enrollment.templates[0].templateReference,
-        simulation: { scenario: input.scenario || 'SUCCESS', attempt: sequence } } });
-    const safeResult = { availability: result.availability, device: result.device, captureQuality: result.captureQuality, liveness: result.liveness,
-      match: result.match, errorCategory: result.errorCategory, retryable: result.retryable, sequence };
-    await this.prisma.$transaction(async (tx) => {
+    const safeResult = await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
-      await tx.dispatchBiometricAttempt.create({ data: { sessionId: session.id, sequence, result: json(safeResult) } });
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DISPATCH_BIOMETRIC_ATTEMPT:${session.id}`);
+      const sequence = await tx.dispatchBiometricAttempt.count({ where: { sessionId: session.id } }) + 1;
+      const safe = { availability: input.result.availability, device: input.result.device, captureQuality: input.result.captureQuality, liveness: input.result.liveness,
+        match: input.result.match, errorCategory: input.result.errorCategory, retryable: input.result.retryable, sequence };
+      await tx.dispatchBiometricAttempt.create({ data: { sessionId: session.id, sequence, result: json(safe) } });
       await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id,
-        eventType: 'BIOMETRIC_ATTEMPT_RECORDED', payload: safeResult, actorId: input.actorId, at });
+        eventType: 'BIOMETRIC_ATTEMPT_RECORDED', payload: safe, actorId: input.actorId, at });
+      return safe;
     });
-    if (result.match.state === 'MATCH' && result.captureQuality.state === 'ACCEPTED' && result.liveness.state === 'LIVE') {
+    if (input.result.match.state === 'MATCH' && input.result.captureQuality.state === 'ACCEPTED' && input.result.liveness.state === 'LIVE') {
       return { result: safeResult, authorization: await this.issueAuthorization(session.id, input.actorId) };
     }
     const attempts = await this.prisma.dispatchBiometricAttempt.findMany({ where: { sessionId: session.id }, orderBy: { sequence: 'asc' } });
@@ -275,11 +313,11 @@ export class DispatchConfirmationService {
       return value.match?.state !== 'NO_MATCH' || value.captureQuality?.state !== 'ACCEPTED' || value.liveness?.state !== 'LIVE';
     });
     const nonMatchCount = consecutiveNonMatches === -1 ? attempts.length : consecutiveNonMatches;
-    const qualifyingFailure = ['DEVICE_DISCONNECTED', 'CAPTURE_TIMEOUT', 'SDK_LICENSE_INVALID'].includes(result.errorCategory);
+    const qualifyingFailure = ['DEVICE_DISCONNECTED', 'CAPTURE_TIMEOUT', 'SDK_LICENSE_INVALID'].includes(input.result.errorCategory);
     if (nonMatchCount >= 3 || qualifyingFailure) await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
       await tx.dispatchConfirmationSession.update({ where: { id: session.id }, data: {
-        fallbackEligibleAt: at, fallbackFailure: json({ errorCategory: result.errorCategory, nonMatchCount, device: result.device }) } });
+        fallbackEligibleAt: at, fallbackFailure: json({ errorCategory: input.result.errorCategory, nonMatchCount, device: input.result.device }) } });
     });
     return { result: safeResult, fallbackEligible: nonMatchCount >= 3 || qualifyingFailure };
   }

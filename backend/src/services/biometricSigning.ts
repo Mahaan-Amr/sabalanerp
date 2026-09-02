@@ -1,12 +1,12 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { BiometricCommand, canonicalizeBiometricValue, SignedBiometricCommand } from './biometricProtocol';
 
-export const signBiometricCommand = (command: BiometricCommand, secret: string): SignedBiometricCommand => ({
+export const signBiometricCommand = (command: BiometricCommand, secret: string | Buffer): SignedBiometricCommand => ({
   command,
   signature: createHmac('sha256', secret).update(canonicalizeBiometricValue(command)).digest('base64url'),
 });
 
-export const assertBiometricCommandSignature = (signed: SignedBiometricCommand, secret: string) => {
+export const assertBiometricCommandSignature = (signed: SignedBiometricCommand, secret: string | Buffer) => {
   const expected = signBiometricCommand(signed.command, secret).signature;
   const suppliedBytes = Buffer.from(signed.signature);
   const expectedBytes = Buffer.from(expected);

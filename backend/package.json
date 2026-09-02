@@ -80,6 +80,7 @@
     "verify:guard-driver-queue": "tsx scripts/verify-guard-driver-queue.ts",
     "verify:dispatch-allocations": "tsx scripts/verify-dispatch-allocations-waybills.ts",
     "verify:dispatch-confirmation": "tsx scripts/verify-dispatch-confirmation.ts",
+    "reconcile:biometric-connector": "tsx scripts/reconcile-biometric-connector.ts",
     "verify:physical-gate-exit": "tsx scripts/verify-physical-gate-exit.ts",
     "verify:dispatch-corrections-outages": "tsx scripts/verify-dispatch-corrections-outages.ts",
     "verify:dispatch-cutover": "tsx scripts/verify-dispatch-cutover.ts",

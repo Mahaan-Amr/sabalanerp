@@ -2,7 +2,7 @@
 
 ## Status
 
-This document fixes the production seam for issue #224. The checked-in BioMini implementation is an evaluation adapter only. Simulator mode remains the only ERP-integrated mode until every security, licensing and legal gate below is implemented and accepted.
+This document fixes the production seam for issue #224. The authenticated loopback host, ERP handshake, one-use transport encryption, replay journal, physical adapter process boundary, and role-specific UI integration are implemented. Production activation remains fail-closed until every licensing, signing, legal, physical, training, and pilot gate below is accepted.
 
 ## Deep module and seam
 
@@ -22,11 +22,11 @@ SabalanERP browser
 
 The workstation connector never issues a waybill, confirmation or exit authorization. The ERP remains the only lifecycle authority.
 
-## Template handling that must be added before live enrollment
+## Implemented template handling
 
 The simulator contract currently carries only `templateReference`; that is intentionally insufficient for a real workstation to match against an ERP-held encrypted template. Production must add two one-use cryptographic envelopes without weakening the raw-material prohibition:
 
-- **Enrollment:** the adapter extracts an ISO/IEC 19794-2 template in memory and encrypts it directly to an ERP enrollment public key. Only ciphertext leaves the connector. The ERP decrypts it in memory, seals it with `ProtectedTemplateVault`, and discards the transport plaintext.
+- **Enrollment:** the adapter extracts an ISO/IEC 19794-2 template in memory. The loopback host immediately encrypts it with a per-workstation transport key, bound to command, personnel, finger, workstation and purpose. Only ciphertext crosses the browser. The ERP decrypts it in memory, seals it with `ProtectedTemplateVault`, and clears the transport plaintext.
 - **Verification:** the ERP opens the selected enrollment template in memory and immediately encrypts it to the allowlisted connector instance, bound to command ID, driver, waybill hash, workstation, purpose and expiry. The connector decrypts it only after authenticating and reserving the command, performs 1:1 matching in memory, then zeroes both expected and probe buffers.
 
 Neither envelope may be logged, journaled, placed in URLs, returned by diagnostics, retained after the command, or accepted for another command. The browser may relay ciphertext but cannot decrypt it. A connector restart loses all in-flight material and produces an interrupted/unknown result that requires reconciliation.
@@ -35,7 +35,7 @@ Neither envelope may be logged, journaled, placed in URLs, returned by diagnosti
 
 The loopback host exposes one command endpoint and one non-sensitive version endpoint. It must:
 
-- bind only to `127.0.0.1` and `::1`;
+- bind only to `127.0.0.1` (the browser client uses the same explicit IPv4 loopback address);
 - allow only configured SabalanERP HTTPS origins and reject requests without an `Origin` header;
 - authenticate the ERP signature before parsing vendor-specific fields;
 - enforce workstation, command, purpose, issued-at and expiry binding;
@@ -57,3 +57,11 @@ Production configuration remains fail-closed until all are true:
 4. Enrollment and verification envelopes pass replay, substitution, expiry and restart tests.
 5. Origin restrictions, loopback binding, journal ACLs and secret provisioning pass security review.
 6. Issue #224's physical accuracy, liveness, latency, reconnect and 500-cycle gates pass.
+
+## ERP handshake
+
+- HR requests one short-lived `CAPTURE` command per finger; at least two distinct, live, quality-accepted captures must be completed together before enrollment is committed.
+- Accounting starts a confirmation session bound to the issued waybill snapshot, requests a `VERIFY` command, and relays the encrypted expected template to the local host.
+- The host performs 1:1 matching and returns only signed quality, liveness, match, device and error evidence.
+- The ERP atomically consumes the persisted challenge before recording the attempt. A success can create one exit authorization; signed device outage evidence can unlock the existing OTP plus independent Guard fallback.
+- Health checks use the same signed command/result path and feed the Accounting monitoring view.

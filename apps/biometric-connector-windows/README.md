@@ -1,6 +1,6 @@
 # Sabalan BioMini workstation adapter
 
-This Windows-only adapter is the Xperix/Suprema implementation behind SabalanERP's device-neutral biometric connector seam. It is currently an **evaluation executable**, not an approved production connector.
+This Windows-only package is the Xperix/Suprema implementation behind SabalanERP's device-neutral biometric connector seam. Its software path is implemented, but it remains **pilot-gated** until the signed distribution, vendor rights, counsel approval, and physical acceptance evidence are supplied.
 
 It deliberately:
 
@@ -42,13 +42,31 @@ Exit code `0` means the requested check passed. Any non-zero exit is fail-closed
 
 The serial environment variable is mandatory and must come from the approved-device inventory. A different Slim 2 is rejected rather than silently accepted. The evaluation quality floor is `40`, matching the vendor sample's default; it remains provisional until the representative-driver study predeclares the production threshold.
 
-## Production gates still required
+## Authenticated workstation host
+
+`host/` is the production-facing loopback service. It binds only to `127.0.0.1:47631`, accepts one exact ERP origin, verifies 32-byte HMAC command credentials, durably reserves hashed command identities, serializes device operations, and signs safe results. Enrollment and verification templates use command-bound AES-256-GCM envelopes and are zeroed after use. Ciphertext is relayed by the browser but is never journaled locally.
+
+Build and test it with:
+
+```powershell
+npm --prefix .\host ci
+npm --prefix .\host test
+npm --prefix .\host run build
+```
+
+`package-production.ps1` assembles an external distribution from an approved SDK directory and a portable Node executable. Proprietary Xperix files stay outside Git. A Sabalan code-signing certificate is mandatory. `install-connector.ps1` pins the trusted signer thumbprint, rejects unsigned, modified, missing, duplicate, escaping, or unmanifested package files, installs into a manifest-addressed release directory, restricts configuration/journal ACLs to SYSTEM and Administrators, generates per-workstation credentials, and registers a SYSTEM startup task. HTTPS and signature verification cannot be disabled.
+
+The production packager uses `build-production.ps1` and emits `adapter\Sabalan.BioMini.Adapter.exe` with production version metadata. The evaluation executable remains limited to the local hardware-evaluation commands and is excluded from production packages.
+
+The installer creates `erp-provisioning.json`. Transfer its object into the ERP secret named `BIOMETRIC_WORKSTATIONS_JSON`, verify the workstation, and then securely remove that export from the workstation.
+
+## External activation gates still required
 
 Before this adapter may be hosted by the authenticated loopback connector:
 
 1. written production SDK and redistribution/matching terms;
 2. an organization-owned code-signing certificate and signed release pipeline;
 3. counsel-approved biometric consent, retention, deletion, incident and legal-hold configuration;
-4. encrypted one-use transfer of the expected enrollment template to the connector, with no local cache;
-5. connector authentication, strict ERP-origin checks, nonce journal and signed result envelope;
-6. the accuracy, latency, spoof, reconnect, restart and 500-cycle tests in issue #224.
+4. production workstation installation and configuration reconciliation;
+5. the accuracy, latency, spoof, reconnect, restart and 500-cycle tests in issue #224; and
+6. completed operator competency and support coverage records.

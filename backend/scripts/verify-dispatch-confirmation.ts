@@ -5,6 +5,10 @@ import { DispatchConfirmationService } from '../src/services/dispatchConfirmatio
 import { DeterministicBiometricSimulator } from '../src/services/biometricSimulator';
 import { ProtectedTemplateVault } from '../src/services/biometricTemplateVault';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../src/services/identitySessionService';
+import { BiometricWorkstationGateway } from '../src/services/biometricWorkstationGateway';
+import { signBiometricConnectorResponse } from '../src/services/biometricWorkstationProtocol';
+import { reconcileBiometricConnectorChallenges } from '../src/services/biometricConnectorReconciliation';
+import { verifyProductionDispatchAuditChains } from '../src/services/dispatchDocumentAuditRecovery/operations';
 
 const prisma = new PrismaClient();
 const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -25,6 +29,7 @@ const main = async () => {
   await prisma.internalDriverEligibilityPeriod.create({ data: { driverId: driver.id, status: 'ELIGIBLE', effectiveFrom: now,
     reason: 'Dispatch confirmation verification', recordedBy: actor.id } });
   if (!await prisma.biometricGovernancePolicy.findFirst({ where: { activeFrom: { lte: now }, retiredAt: null } })) {
+    await assert.rejects(service.assertEnrollmentCaptureAllowed(personnel.id), /disabled until legal basis/i);
     await assert.rejects(service.enrollInternalDriver({ personnelId: personnel.id, acknowledgement: 'accepted', confirmationPhone: '09121111111',
       templates: [{ finger: 'LEFT_INDEX', format: 'ISO-19794-2', material: Buffer.from('one'), deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' },
         { finger: 'RIGHT_INDEX', format: 'ISO-19794-2', material: Buffer.from('two'), deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' }], actorId: actor.id }), /disabled until legal basis/i);
@@ -119,6 +124,27 @@ const main = async () => {
   await assert.rejects(prisma.dispatchExitAuthorization.update({ where: { id: revoked.id }, data: { validUntil: new Date('2099-01-01') } }), /immutable/i);
   await assert.rejects(prisma.dispatchExitAuthorization.update({ where: { id: revoked.id }, data: { status: 'ACTIVE' } }), /status transition/i);
 
+  const physicalWaybill = await cloneInternalWaybill();
+  const physicalSession = await service.startSession({ waybillId: physicalWaybill.id, actorId: actor.id, workstationId: 'ACCOUNTING-01' });
+  const commandSecret = randomBytes(32);
+  const transportKey = randomBytes(32);
+  const gateway = new BiometricWorkstationGateway(prisma, { 'ACCOUNTING-01': { commandSecretBase64: commandSecret.toString('base64'),
+    activeTransportKeyId: 'verify-transport-v1', transportKeysBase64: { 'verify-transport-v1': transportKey.toString('base64') } } }, () => now);
+  const prepared = await service.prepareInternalBiometric(physicalSession.id, actor.id);
+  let issued;
+  try { issued = await gateway.issueVerification({ workstationId: prepared.workstationId, actorId: actor.id, sessionId: prepared.sessionId,
+    driverId: prepared.driverId, waybillIntegrityHash: prepared.waybillIntegrityHash, expectedTemplate: prepared.expectedTemplate }); }
+  finally { prepared.expectedTemplate.fill(0); }
+  const signedResult = signBiometricConnectorResponse({ commandId: issued.command.commandId, result: { availability: 'AVAILABLE',
+    device: { model: 'BioMini SLIM 2', serial: 'VERIFY-SERIAL', connectorVersion: '1.0.0', sdkVersion: '3.11.1.595' },
+    captureQuality: { state: 'ACCEPTED', score: 86 }, liveness: { state: 'LIVE', score: 999 }, match: { state: 'MATCH', score: 97 }, errorCategory: 'NONE', retryable: false }, completedAt: now.toISOString() }, commandSecret);
+  const claimed = await gateway.claimVerification({ challengeId: issued.command.commandId, actorId: actor.id, signedResponse: signedResult });
+  const physicalMatched = await service.recordInternalBiometricResult({ sessionId: physicalSession.id, actorId: actor.id, result: claimed.response.result });
+  await gateway.complete([claimed.challenge.id], true);
+  assert.equal(physicalMatched.authorization.status, 'ACTIVE');
+  assert.equal((await prisma.biometricConnectorChallenge.findUniqueOrThrow({ where: { id: claimed.challenge.id } })).status, 'COMPLETED');
+  await service.revokeAuthorization({ authorizationId: physicalMatched.authorization.id, actorId: actor.id, reason: 'End production handshake verification fixture' });
+
   const fallback = await service.startSession({ waybillId: internalWaybill.id, actorId: actor.id, workstationId: 'ACCOUNTING-01' });
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const result = await service.verifyInternalBiometric({ sessionId: fallback.id, actorId: actor.id, scenario: 'NON_MATCH' });
@@ -170,6 +196,15 @@ const main = async () => {
   if (protectedResponse.status !== 200) assert.fail(`Protected evidence API returned ${protectedResponse.status}: ${await protectedResponse.text()}`);
   const protectedBody = await protectedResponse.json() as { data: Record<string, unknown> };
   assert.equal('otpChallenges' in protectedBody.data, false);
+  const staleChallengeId = randomUUID();
+  await prisma.biometricConnectorChallenge.create({ data: { id: staleChallengeId, operation: 'HEALTH', workstationId: 'ACCOUNTING-01', actorId: actor.id,
+    subjectId: 'ACCOUNTING-01', contextId: 'reconciliation-test', commandDigest: randomBytes(32).toString('hex'), nonceHash: randomBytes(32).toString('hex'), issuedAt: new Date(now.getTime() - 60_000), expiresAt: new Date(now.getTime() - 30_000) } });
+  const reconciliation = await reconcileBiometricConnectorChallenges(prisma, { actorId: actor.id, now });
+  assert.ok(reconciliation.staleCommandsFailed >= 1);
+  assert.equal((await prisma.biometricConnectorChallenge.findUniqueOrThrow({ where: { id: staleChallengeId } })).status, 'FAILED');
+  assert.ok(await prisma.dispatchEvidenceException.findFirst({ where: { aggregateType: 'BIOMETRIC_CONNECTOR_CHALLENGE', aggregateId: staleChallengeId, status: 'OPEN' } }));
+  const reconciliationAudits = await prisma.dispatchLifecycleAudit.findMany({ where: { aggregateType: 'BIOMETRIC_CONNECTOR_CHALLENGE', aggregateId: staleChallengeId }, orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
+  assert.deepEqual(verifyProductionDispatchAuditChains(reconciliationAudits), []);
   console.log('Dispatch confirmation API/database verification passed.');
 };
 

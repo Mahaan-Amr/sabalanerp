@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FaSync } from 'react-icons/fa';
 import {
   ErpBadge,
@@ -15,6 +15,7 @@ import {
 } from '@/components/erp';
 import RoleAwareDispatchCases from '@/features/dispatch-case/RoleAwareDispatchCases';
 import { accountingAPI, dispatchConfirmationAPI } from '@/lib/api';
+import { biometricConnectorClient } from '@/lib/biometricConnector';
 
 type DispatchNotice = { kind: 'success' | 'error'; text: string };
 const dispatchStatusLabels: Record<string, string> = {
@@ -28,6 +29,8 @@ export default function AccountingDispatchPage() {
   const [dispatchCandidates, setDispatchCandidates] = useState<any[]>([]);
   const [dispatchReason, setDispatchReason] = useState('');
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
+  const [dispatchPending, setDispatchPending] = useState(false);
+  const dispatchPendingRef = useRef(false);
   const [dispatchNotice, setDispatchNotice] = useState<DispatchNotice | null>(null);
   const [confirmation, setConfirmation] = useState<any>(null);
   const [otpCode, setOtpCode] = useState('');
@@ -64,6 +67,9 @@ export default function AccountingDispatchPage() {
   }, []);
 
   const runDispatch = async (command: () => Promise<any>, success: string) => {
+    if (dispatchPendingRef.current) return;
+    dispatchPendingRef.current = true;
+    setDispatchPending(true);
     setDispatchNotice(null);
     try {
       const response = await command();
@@ -79,8 +85,8 @@ export default function AccountingDispatchPage() {
         // Confirmation-only actors may not have permission to list candidates.
       }
     } catch (error: any) {
-      setDispatchNotice({ kind: 'error', text: error?.response?.data?.error || 'فرمان ارسال انجام نشد.' });
-    }
+      setDispatchNotice({ kind: 'error', text: error?.response?.data?.error || error?.message || 'فرمان ارسال انجام نشد.' });
+    } finally { dispatchPendingRef.current = false; setDispatchPending(false); }
   };
 
   useEffect(() => {
@@ -127,7 +133,7 @@ export default function AccountingDispatchPage() {
                     <div className="mt-3 flex flex-wrap gap-2">
                       <ErpButton
                         label="پذیرش و صدور بارنامه"
-                        disabled={dispatchTimelineStale}
+                        disabled={dispatchTimelineStale || dispatchPending}
                         onClick={() => void runDispatch(
                           () => accountingAPI.decideDispatchCandidate(candidate.id, { action: 'ACCEPT', reason: '', idempotencyKey: crypto.randomUUID() }),
                           'نامزد پذیرفته و بارنامه صادر شد.',
@@ -137,7 +143,7 @@ export default function AccountingDispatchPage() {
                         label="رد نامزد"
                         tone="danger"
                         variant="outline"
-                        disabled={dispatchTimelineStale || !dispatchReason.trim()}
+                        disabled={dispatchTimelineStale || dispatchPending || !dispatchReason.trim()}
                         onClick={() => void runDispatch(
                           () => accountingAPI.decideDispatchCandidate(candidate.id, { action: 'REJECT', reason: dispatchReason.trim(), idempotencyKey: crypto.randomUUID() }),
                           'نامزد رد شد.',
@@ -153,9 +159,13 @@ export default function AccountingDispatchPage() {
                           <ErpButton
                             label="آغاز تأیید راننده"
                             variant="soft"
-                            disabled={dispatchTimelineStale}
+                            disabled={dispatchTimelineStale || dispatchPending}
                             onClick={() => void runDispatch(
-                              () => dispatchConfirmationAPI.startSession(activeWaybill.id, 'ACCOUNTING-WEB'),
+                              async () => {
+                                let workstationId = 'ACCOUNTING-WEB';
+                                try { workstationId = (await biometricConnectorClient.status()).workstationId; } catch { /* External-driver OTP sessions do not require the scanner. */ }
+                                return dispatchConfirmationAPI.startSession(activeWaybill.id, workstationId);
+                              },
                               'نشست تأیید آغاز شد.',
                             )}
                           />
@@ -166,7 +176,7 @@ export default function AccountingDispatchPage() {
                               label="ابطال بارنامه"
                               tone="danger"
                               variant="outline"
-                              disabled={dispatchTimelineStale || !dispatchReason.trim()}
+                              disabled={dispatchTimelineStale || dispatchPending || !dispatchReason.trim()}
                               onClick={() => void runDispatch(
                                 () => accountingAPI.voidDispatchWaybill(activeWaybill.id, { reason: dispatchReason.trim(), idempotencyKey: crypto.randomUUID() }),
                                 'بارنامه باطل شد.',
@@ -175,7 +185,7 @@ export default function AccountingDispatchPage() {
                             <ErpButton
                               label="جایگزینی بارنامه"
                               variant="outline"
-                              disabled={dispatchTimelineStale || !dispatchReason.trim()}
+                              disabled={dispatchTimelineStale || dispatchPending || !dispatchReason.trim()}
                               onClick={() => void runDispatch(
                                 () => accountingAPI.replaceDispatchWaybill(activeWaybill.id, { reason: dispatchReason.trim(), idempotencyKey: crypto.randomUUID() }),
                                 'بارنامه جایگزین صادر شد.',
@@ -195,17 +205,24 @@ export default function AccountingDispatchPage() {
           <ErpCard className="mt-4 p-4">
             <strong>نشست تأیید {confirmation.id}</strong>
             <div className="mt-3 flex flex-wrap gap-2">
-              <ErpButton label="تطبیق بیومتریک" disabled={dispatchTimelineStale} onClick={() => void runDispatch(() => dispatchConfirmationAPI.verifyBiometric(confirmation.id), 'تلاش بیومتریک ثبت شد.')} />
-              <ErpButton label="آغاز مسیر جایگزین" variant="outline" disabled={dispatchTimelineStale} onClick={() => void runDispatch(() => dispatchConfirmationAPI.beginFallback(confirmation.id), 'مسیر جایگزین آغاز شد.')} />
-              <ErpButton label="ارسال دوباره رمز" variant="ghost" disabled={dispatchTimelineStale} onClick={() => void runDispatch(() => dispatchConfirmationAPI.resendOtp(confirmation.id), 'رمز دوباره ارسال شد.')} />
+              {(['RIGHT_INDEX', 'LEFT_INDEX'] as const).map((finger) => (
+                <ErpButton key={finger} label={finger === 'RIGHT_INDEX' ? 'تطبیق انگشت اشاره راست' : 'تطبیق انگشت اشاره چپ'} disabled={dispatchTimelineStale || dispatchPending} onClick={() => void runDispatch(async () => {
+                  const issued = await dispatchConfirmationAPI.createBiometricCommand(confirmation.id, finger);
+                  const connectorResult = await biometricConnectorClient.execute(issued.data.data);
+                  return dispatchConfirmationAPI.completeBiometricAttempt(confirmation.id, { challengeId: issued.data.data.command.commandId,
+                    signedResponse: { response: connectorResult.response, signature: connectorResult.signature } });
+                }, 'تلاش بیومتریک ثبت شد.')} />
+              ))}
+              <ErpButton label="آغاز مسیر جایگزین" variant="outline" disabled={dispatchTimelineStale || dispatchPending} onClick={() => void runDispatch(() => dispatchConfirmationAPI.beginFallback(confirmation.id), 'مسیر جایگزین آغاز شد.')} />
+              <ErpButton label="ارسال دوباره رمز" variant="ghost" disabled={dispatchTimelineStale || dispatchPending} onClick={() => void runDispatch(() => dispatchConfirmationAPI.resendOtp(confirmation.id), 'رمز دوباره ارسال شد.')} />
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               <ErpInput aria-label="رمز یک‌بارمصرف راننده" value={otpCode} onChange={(event) => setOtpCode(event.target.value)} />
-              <ErpButton label="تأیید رمز" disabled={dispatchTimelineStale || !otpCode.trim()} onClick={() => void runDispatch(() => dispatchConfirmationAPI.verifyOtp(confirmation.id, otpCode.trim()), 'رمز راننده تأیید شد.')} />
+              <ErpButton label="تأیید رمز" disabled={dispatchTimelineStale || dispatchPending || !otpCode.trim()} onClick={() => void runDispatch(() => dispatchConfirmationAPI.verifyOtp(confirmation.id, otpCode.trim()), 'رمز راننده تأیید شد.')} />
             </div>
             {confirmation.authorization?.id && (
               <div className="mt-3">
-                <ErpButton label="لغو مجوز خروج" tone="danger" variant="outline" disabled={dispatchTimelineStale || !dispatchReason.trim()} onClick={() => void runDispatch(() => dispatchConfirmationAPI.revokeAuthorization(confirmation.authorization.id, dispatchReason.trim()), 'مجوز خروج لغو شد.')} />
+                <ErpButton label="لغو مجوز خروج" tone="danger" variant="outline" disabled={dispatchTimelineStale || dispatchPending || !dispatchReason.trim()} onClick={() => void runDispatch(() => dispatchConfirmationAPI.revokeAuthorization(confirmation.authorization.id, dispatchReason.trim()), 'مجوز خروج لغو شد.')} />
               </div>
             )}
           </ErpCard>

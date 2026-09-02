@@ -3512,6 +3512,32 @@ model DispatchBiometricAttempt {
   @@map("dispatch_biometric_attempts")
 }
 
+model BiometricConnectorChallenge {
+  id            String   @id
+  operation     String
+  workstationId String
+  actorId       String
+  subjectId     String
+  contextId     String
+  contextHash   String?
+  finger        String?
+  commandDigest String
+  nonceHash     String   @unique
+  status        String   @default("ISSUED")
+  issuedAt      DateTime
+  expiresAt     DateTime
+  processingStartedAt DateTime?
+  completedAt   DateTime?
+  resultDigest  String?
+  resultSummary Json?
+  createdAt     DateTime @default(now())
+
+  @@index([subjectId, operation, status])
+  @@index([expiresAt, status])
+  @@index([status, processingStartedAt])
+  @@map("biometric_connector_challenges")
+}
+
 model DispatchGuardApproval {
   id                String                      @id @default(cuid())
   sessionId         String

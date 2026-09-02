@@ -55,7 +55,11 @@ namespace Sabalan.Biometrics
         private const int FakeDetectionLevel = 1;
         private const int CaptureTimeoutMilliseconds = 15000;
         private const int MinimumExtractionQuality = 40;
+#if SABALAN_PRODUCTION
+        private const string AdapterVersion = "1.0.0";
+#else
         private const string AdapterVersion = "0.1.0-evaluation";
+#endif
 
         private readonly UFScannerManager scannerManager;
         private readonly UFMatcher matcher;
@@ -106,7 +110,7 @@ namespace Sabalan.Biometrics
             if (quality < MinimumExtractionQuality)
             {
                 Array.Clear(template, 0, template.Length);
-                throw new BioMiniSdkException("POOR_CAPTURE_QUALITY", "The extracted fingerprint quality is below the provisional evaluation threshold.");
+                throw new BioMiniSdkException("POOR_CAPTURE_QUALITY", "The extracted fingerprint quality is below the configured acceptance threshold.");
             }
 
             int livenessScore = scanner.LfdScore;
@@ -167,7 +171,7 @@ namespace Sabalan.Biometrics
                 throw new BioMiniSdkException("DEVICE_IDENTITY_INVALID", "The scanner did not expose a stable serial number.");
             string allowedSerial = Environment.GetEnvironmentVariable("SABALAN_BIOMETRIC_ALLOWED_SERIAL");
             if (String.IsNullOrWhiteSpace(allowedSerial))
-                throw new BioMiniSdkException("CONFIGURATION_ERROR", "SABALAN_BIOMETRIC_ALLOWED_SERIAL must identify the approved evaluation unit.");
+                throw new BioMiniSdkException("CONFIGURATION_ERROR", "SABALAN_BIOMETRIC_ALLOWED_SERIAL must identify the approved scanner.");
             if (!String.Equals(scanner.Serial, allowedSerial.Trim(), StringComparison.Ordinal))
                 throw new BioMiniSdkException("DEVICE_IDENTITY_INVALID", "The connected scanner serial is not allowlisted.");
         }

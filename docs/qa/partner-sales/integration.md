@@ -103,9 +103,10 @@ Sales consumers, Partner frontend adapters, and shared navigation for changes.
 
 ### Current #334 review follow-up (2026-09-03)
 
-The previous green validation run is not release acceptance: both independent
-reviews returned blocking findings. The candidate has changed since that run and
-requires fresh complete validation and two passing independent reviews.
+The earlier green validation run was not release acceptance: both independent
+reviews returned blocking findings. Those findings are addressed below and the
+hardened candidate has fresh complete validation; final acceptance still requires
+both independent reviewers to pass this exact branch patch.
 
 The product owner approved the Partner document policy recorded in ADR-0046:
 atomic issuance retains the price-free customer waybill and a wholesale statement
@@ -159,13 +160,25 @@ validated together before the successor becomes effective. Real-schema tests cov
 financial and physical voiding, replay, concurrent writers, retained lineage, and
 corrupted evidence that must fail closed.
 
+The final standards review then identified two dispatch authorization gaps. The
+candidate list now evaluates every Partner Case inside one repeatable-read
+authorization snapshot, includes ordinary candidates unchanged, and serializes
+only an explicit status/waybill allowlist—never the allocation revision, queue,
+recipient, confirmation phone, or internal fulfillment evidence. Partner dispatch
+accept, reject/return, evidence quarantine, void, replacement, and idempotent replay
+now re-evaluate both current Case authority and current Accounting workspace/manage
+capability inside the committing transaction. A denied accept or replacement also
+removes every PDF staged by that losing command. Real-schema HTTP tests cover two
+Partner candidates with only one Case grant, an ordinary candidate, and deterministic
+post-preflight workspace/feature revocation races for accept, void, and replacement.
+
 Latest full validation (2026-09-04): `node scripts/run-partner-sales-tests.mjs all`
 passed the complete unit, transport, lifecycle/downstream (65/65), foundation,
 typecheck, live-browser (5 passed with 3 intentional duplicate-mutation skips), and
 authenticated real-schema/API (6/6) gates. The final-candidate manifest is
-`partner-qa-239e0618-1cb8-4cc3-9d76-3a67a83ef556`; it validates integrated
-implementation commit `b0016d0acff7ff7542832e033bcaa10227dc69f8` and tree
-`139658329fc2ef356c5f6e3f0cb8bd16cb309d8d` directly on fetched mainline base
+`partner-qa-453f48a3-40a8-4fd3-aaba-c113b7d41116`; it validates hardened
+implementation commit `fcdd52f7a51be3936e7e11278c33c0db4bf94e6f` and tree
+`6fb51317068d0f08f867e2707b57cedcea3c48a5` directly on fetched mainline base
 `14a94586ee1bf48dbce6b74a53731c0f12ac7cdc`. Its cached patch is empty because
 all issue content was committed before the post-rebase run; the recorded working
 patch contains only the explicitly excluded local visual/build artifacts and is

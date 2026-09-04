@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   DispatchDocumentConflictError,
+  DispatchDocumentAuthorizationError,
   DispatchDocumentEvidenceConflictError,
   DispatchDocumentIntegrityError,
   DispatchDocumentNotAvailableError,
@@ -23,6 +24,7 @@ const bytes = (value: string) => new TextEncoder().encode(value);
 const sha256 = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 
 const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce?: boolean; failSourceEvidence?: boolean;
+  denyAcceptAfterStaging?: boolean; denyReplaceAfterStaging?: boolean;
   restrictStatementAccess?: boolean } = {}) => {
   const files = new Map<string, Uint8Array>();
   const state = {
@@ -45,6 +47,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
     },
     allocateWaybillNumber: async () => (++nextNumber).toString(),
     acceptAndIssue: async (input) => {
+      if (options.denyAcceptAfterStaging) throw new DispatchDocumentAuthorizationError('revoked');
       if (input.expectedSourceIntegrityHash !== 'source-hash') throw new DispatchDocumentConflictError('stale');
       const result = { candidateId: input.candidateId, status: 'ACCEPTED' as const, waybill: input.waybill };
       state.issued.push(input);
@@ -70,6 +73,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       return result;
     },
     replaceWaybill: async (input) => {
+      if (options.denyReplaceAfterStaging) throw new DispatchDocumentAuthorizationError('revoked');
       state.replacements.push(input);
       state.issued.push({ waybill: input.replacement, artifacts: input.artifacts });
       const result = { voided: { id: input.waybillId, number: '7001', status: 'VOIDED' as const }, replacement: input.replacement };
@@ -103,6 +107,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       files.set(storageKey, content);
     },
     read: async (storageKey) => files.get(storageKey) ?? null,
+    discard: async (storageKey) => { files.delete(storageKey); },
   };
   const sourceReader: DispatchDocumentSourceReader = {
     readPrimaryBundle: async ({ candidateId, waybill }) => ({
@@ -171,6 +176,7 @@ const run = async () => {
   assert.deepEqual(parseDispatchDocumentKinds(['STATEMENT', 'WAYBILL']), ['STATEMENT', 'WAYBILL']);
   assert.throws(() => parseDispatchDocumentKinds(['WAYBILL', 'UNKNOWN']), DispatchDocumentValidationError);
   assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentValidationError('invalid')), 400);
+  assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentAuthorizationError('revoked')), 403);
   assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentConflictError('conflict')), 409);
   assert.equal(dispatchDocumentHttpStatus(new PilotSafetyPauseError('paused')), 409);
   assert.equal(dispatchDocumentHttpStatus(new DispatchDocumentNotAvailableError()), 404);
@@ -317,12 +323,24 @@ const run = async () => {
   const storageRetry = makeHarness({ failSecondStageOnce: true });
   await assert.rejects(() => storageRetry.service.decideCandidate({ candidateId: 'candidate-storage-retry', action: 'ACCEPT',
     idempotencyKey: 'storage-retry-key', actorId: 'accountant' }), /simulated storage interruption/);
-  assert.equal(storageRetry.files.size, 1, 'a losing staged file is retained as an unreferenced immutable orphan');
+  assert.equal(storageRetry.files.size, 0, 'a partially staged pair is removed after publication failure');
   assert.equal(storageRetry.state.issued.length, 0);
   await storageRetry.service.decideCandidate({ candidateId: 'candidate-storage-retry', action: 'ACCEPT',
     idempotencyKey: 'storage-retry-key', actorId: 'accountant' });
   assert.equal(storageRetry.state.issued.length, 1);
-  assert.equal(storageRetry.files.size, 3, 'retry publishes a fresh verified pair without overwriting the losing staged file');
+  assert.equal(storageRetry.files.size, 2, 'retry publishes only the committed verified pair');
+
+  const deniedAccept = makeHarness({ denyAcceptAfterStaging: true });
+  await assert.rejects(() => deniedAccept.service.decideCandidate({ candidateId: 'candidate-denied', action: 'ACCEPT',
+    idempotencyKey: 'denied-accept', actorId: 'accountant' }), DispatchDocumentAuthorizationError);
+  assert.equal(deniedAccept.files.size, 0, 'commit-time authorization denial removes both staged PDFs');
+  assert.equal(deniedAccept.state.issued.length, 0);
+
+  const deniedReplace = makeHarness({ denyReplaceAfterStaging: true });
+  await assert.rejects(() => deniedReplace.service.replaceWaybill({ waybillId: 'waybill-denied', reason: 'مجوز لغو شد',
+    idempotencyKey: 'denied-replace', actorId: 'accountant' }), DispatchDocumentAuthorizationError);
+  assert.equal(deniedReplace.files.size, 0, 'replacement denial removes both staged successor PDFs');
+  assert.equal(deniedReplace.state.replacements.length, 0);
 
   const adjustmentFiles = new Map<string, Uint8Array>();
   const preparer = createStatementAdjustmentArtifactPreparer({

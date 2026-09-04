@@ -8,7 +8,7 @@ import {
 } from '@prisma/client';
 import type { DispatchDocumentCommandScope, DispatchDocumentKind, PublishedDispatchArtifact } from './contracts';
 import type { DispatchArtifactStorage, DispatchDocumentRepository, DispatchSourceIntegrityVerifier } from './ports';
-import { DispatchDocumentConflictError, DispatchDocumentValidationError } from './service';
+import { DispatchDocumentAuthorizationError, DispatchDocumentConflictError, DispatchDocumentValidationError } from './service';
 import { DispatchDocumentEvidenceConflictError } from './service';
 import { assertCanonicalDispatchCommandAllowed } from '../dispatchCutover';
 import { isPostCutoverFinalization, isShipmentStatementFlowActive } from './featureGate';
@@ -18,6 +18,7 @@ import { createPrismaAllocationPricingBindingPort } from '../allocationPricingPr
 import { verifyDispatchArtifactStorageUnderLock } from './artifactStorageLock';
 import { shipmentSourceForAllocationLine } from '../allocationSource';
 import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
+import { readPartnerDispatchAccountingCapability } from '../partnerSales/accounting/capabilities';
 
 type Tx = Prisma.TransactionClient;
 const json = (value: unknown) => value as Prisma.InputJsonValue;
@@ -46,7 +47,7 @@ const authorizePartnerAccountingWrite = async (tx: Tx, input: { actorId: string;
   const result = await createAuditedPartnerAuthorization(tx, { actorId: input.actorId, purpose: 'ACCOUNTING', channel: 'API' }, {
     correlationId: input.correlationId, reason: 'تایید دسترسی نوشتن اسناد ارسال پرونده همکار',
   }).authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: input.partnerCaseId });
-  return result.ok;
+  return result.ok && await readPartnerDispatchAccountingCapability(tx, input.actorId);
 };
 
 const isDispatchCommandKeyUniqueViolation = (error: Prisma.PrismaClientKnownRequestError) => {
@@ -159,7 +160,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       }
       return commandResult(tx, input.scope, input.scopeId, input.idempotencyKey, input.command, input.intentFingerprint);
     });
-    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentAuthorizationError('Current Case-scoped Accounting dispatch authority is required.');
     return result;
   }
   async allocateWaybillNumber() {
@@ -252,7 +253,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       })) return partnerAuthorizationDenied;
       return commandResult(tx, 'CANDIDATE', input.candidateId, input.idempotencyKey, 'ACCEPT_AND_ISSUE', input.intentFingerprint);
     }) as any);
-    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentAuthorizationError('Current Case-scoped Accounting dispatch authority is required.');
     return result;
   }
   async recordEvidenceConflict(input: Parameters<DispatchDocumentRepository['recordEvidenceConflict']>[0]) {
@@ -274,7 +275,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
         idempotencyKey: input.idempotencyKey, actorId: input.actorId, correlationId: input.correlationId,
         intentFingerprint: input.intentFingerprint });
     });
-    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentAuthorizationError('Current Case-scoped Accounting dispatch authority is required.');
     return result;
   }
   async rejectCandidate(input: Parameters<DispatchDocumentRepository['rejectCandidate']>[0]) {
@@ -314,7 +315,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
         command: 'REJECT', status: 'SUCCEEDED', result: storedCommandResult(result, input.intentFingerprint), actorId: input.actorId, correlationId: input.correlationId, completedAt: at } });
       return result;
     });
-    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentAuthorizationError('Current Case-scoped Accounting dispatch authority is required.');
     return result;
   }
   async voidWaybill(input: Parameters<DispatchDocumentRepository['voidWaybill']>[0]) {
@@ -344,7 +345,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
           waybillIntegrityHash: waybill.integrityHash, before: { status: 'ISSUED' }, after: { status: 'VOIDED' } }, actorId: input.actorId, at });
       return result;
     });
-    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentAuthorizationError('Current Case-scoped Accounting dispatch authority is required.');
     return result;
   }
   async replaceWaybill(input: Parameters<DispatchDocumentRepository['replaceWaybill']>[0]) {
@@ -403,7 +404,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
           correlationId: input.correlationId, idempotencyKey: input.idempotencyKey }, actorId: input.actorId, at });
       return result;
     });
-    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentAuthorizationError('Current Case-scoped Accounting dispatch authority is required.');
     return result;
   }
   async getArtifact(input: { artifactId: string; waybillId: string }) {

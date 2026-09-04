@@ -43,6 +43,9 @@ export interface DispatchDocumentSourceReader {
 export interface DispatchArtifactStorage {
   stage(input: { storageKey: string; bytes: Uint8Array }): Promise<void>;
   read(storageKey: string): Promise<Uint8Array | null>;
+  /** Remove an artifact staged by a command whose database transaction did not
+   * commit. Implementations may omit this only when staging is self-cleaning. */
+  discard?(storageKey: string): Promise<void>;
 }
 
 export type IssuedWaybill = {

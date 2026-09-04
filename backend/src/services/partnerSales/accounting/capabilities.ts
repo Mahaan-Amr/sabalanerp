@@ -22,3 +22,16 @@ export async function readPartnerAccountingCapabilities(tx: Prisma.TransactionCl
   ]);
   return { payments, tax, approve: approve && (actor.role === 'ADMIN' || workspace === 'admin') };
 }
+
+/** Re-evaluate the narrow dispatch mutation capability in the transaction that
+ * commits the Partner Case mutation. Route middleware is only a preflight and
+ * must not remain authoritative after a concurrent permission revocation. */
+export async function readPartnerDispatchAccountingCapability(tx: Prisma.TransactionClient, actorId: string) {
+  const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
+  if (!actor?.isActive) return false;
+  const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role });
+  const workspace = effective.workspaces.find(row => row.workspace === 'accounting')?.permission;
+  if (!['edit', 'admin'].includes(workspace || '')) return false;
+  return (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role,
+    workspace: 'accounting', feature: 'accounting_dispatch_candidates_manage', requiredPermission: 'edit' })).allowed;
+}

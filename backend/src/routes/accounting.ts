@@ -74,6 +74,9 @@ import {
 import { requestAccountingSalesContractCorrection } from '../services/salesContractCorrectionDuty';
 import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from '../services/partnerSales/accounting/errors';
+import { readPartnerSnapshot } from '../services/partnerSales/authorization/readSnapshot';
+import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
+import { randomUUID } from 'node:crypto';
 
 const router = express.Router();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
@@ -311,13 +314,31 @@ router.get('/dispatch-evidence-exceptions', accountingDispatchView, async (_req:
 });
 
 router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthRequest, res: Response) => {
-    try {
-    const manage = await resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role,
-      workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
-      requiredPermission: FEATURE_PERMISSIONS.EDIT });
-    const candidates = await prisma.accountingDispatchCandidate.findMany({
-      include: { workItem: true, allocationRevision: { include: { lines: true, queueTurn: true } }, waybills: { orderBy: { issuedAt: 'asc' } } },
-      orderBy: { createdAt: 'asc' },
+  try {
+    const { manage, candidates } = await readPartnerSnapshot(prisma, async tx => {
+      const manage = await resolveNarrowFeatureAccess(tx, { userId: req.user!.id, role: req.user!.role,
+        workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
+        requiredPermission: FEATURE_PERMISSIONS.EDIT });
+      const owners = await tx.accountingDispatchCandidate.findMany({ orderBy: { id: 'asc' }, select: {
+        id: true, allocationRevision: { select: { sourceKind: true, partnerCaseId: true } },
+      } });
+      const authority = createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'LIST' }, {
+        correlationId: String(req.get('X-Correlation-Id') || randomUUID()), reason: 'بررسی دسترسی فهرست اسناد ارسال پرونده همکار',
+      });
+      const allowedPartnerCases = new Set<string>();
+      for (const caseId of [...new Set(owners.flatMap(owner => owner.allocationRevision.sourceKind === 'PARTNER_CASE'
+        && owner.allocationRevision.partnerCaseId ? [owner.allocationRevision.partnerCaseId] : []))].sort()) {
+        if ((await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId })).ok) allowedPartnerCases.add(caseId);
+      }
+      const allowedIds = owners.flatMap(owner => owner.allocationRevision.sourceKind === 'SALES_CONTRACT'
+        || (owner.allocationRevision.sourceKind === 'PARTNER_CASE' && owner.allocationRevision.partnerCaseId
+          && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
+      const candidates = await tx.accountingDispatchCandidate.findMany({ where: { id: { in: allowedIds } }, select: {
+        id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
+        waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
+          issuedAt: true, voidedAt: true, replacesWaybillId: true } },
+      }, orderBy: { createdAt: 'asc' } });
+      return { manage, candidates };
     });
     res.setHeader('X-Dispatch-Documents-Permission', manage.allowed ? 'MANAGE' : 'VIEW');
     return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,

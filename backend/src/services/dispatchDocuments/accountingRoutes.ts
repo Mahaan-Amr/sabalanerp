@@ -5,6 +5,7 @@ import type { DispatchDocumentKind } from './contracts';
 import { PilotSafetyPauseError } from '../dispatchCutover';
 import {
   DispatchDocumentConflictError,
+  DispatchDocumentAuthorizationError,
   DispatchDocumentIntegrityError,
   DispatchDocumentNotAvailableError,
   DispatchDocumentValidationError,
@@ -16,7 +17,8 @@ type Middleware = RequestHandler | RequestHandler[];
 
 const correlationId = (req: AuthRequest) => String(req.get('X-Correlation-Id') || randomUUID());
 const idempotencyKey = (req: AuthRequest) => String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '');
-export const dispatchDocumentHttpStatus = (error: unknown): 400 | 404 | 409 | null => {
+export const dispatchDocumentHttpStatus = (error: unknown): 400 | 403 | 404 | 409 | null => {
+  if (error instanceof DispatchDocumentAuthorizationError) return 403;
   if (error instanceof DispatchDocumentNotAvailableError) return 404;
   if (error instanceof DispatchDocumentValidationError) return 400;
   if (error instanceof DispatchDocumentConflictError || error instanceof DispatchDocumentIntegrityError

@@ -10,6 +10,9 @@ import { createPrismaDispatchReplayTruthVerifier, replayPersistedDispatchDocumen
 import { DispatchConfirmationService } from '../dispatchConfirmation';
 import { DeterministicBiometricSimulator } from '../biometricSimulator';
 import { ProtectedTemplateVault } from '../biometricTemplateVault';
+import { readdir } from 'node:fs/promises';
+import path from 'node:path';
+import type { Prisma } from '@prisma/client';
 
 async function main() {
   const url = new URL(process.env.DATABASE_URL || '');
@@ -35,6 +38,33 @@ async function main() {
           method, headers: { 'content-type': 'application/json', cookie: `${SESSION_COOKIE}=${token}`,
             'Idempotency-Key': key, 'X-Correlation-Id': key }, ...(body ? { body: JSON.stringify(body) } : {}) });
         return { status: response.status, body: await response.json() as any };
+      };
+      const storedPdfFiles = async () => {
+        try {
+          return (await readdir(path.join(process.cwd(), 'storage', 'dispatch-documents'), { recursive: true }))
+            .map(String).filter(file => file.endsWith('.pdf')).sort();
+        } catch (error: any) { if (error?.code === 'ENOENT') return []; throw error; }
+      };
+      const raceAfterPreflight = async (lockKey: string, operation: () => Promise<{ status: number; body: any }>,
+        revoke: (tx: Prisma.TransactionClient) => Promise<void>) => {
+        let waiting: ReturnType<typeof operation> | undefined;
+        await prisma.$transaction(async tx => {
+          await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', lockKey);
+          waiting = operation();
+          let blocked = false;
+          const deadline = Date.now() + 15_000;
+          while (Date.now() < deadline) {
+            await tx.$queryRaw`SELECT pg_stat_clear_snapshot()::text`;
+            const rows = await tx.$queryRaw<Array<{ count: bigint }>>`SELECT count(*) FROM pg_stat_activity
+              WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'
+                AND query LIKE '%pg_advisory_xact_lock%'`;
+            if (Number(rows[0].count)) { blocked = true; break; }
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
+          assert.equal(blocked, true, `dispatch request did not reach commit lock ${lockKey}`);
+          await revoke(tx);
+        }, { timeout: 30_000 });
+        return waiting!;
       };
       const payload = { sourceKind: 'PARTNER_CASE', expected, deliveryId: 'second-delivery',
         reason: 'ثبت بارگیری نهایی پرونده همکار با قیمت مصوب' };
@@ -84,12 +114,58 @@ async function main() {
       assert.equal(revision.lines.every(line => line.sourceContractId === null && line.sourceContractItemId === null), true);
       assert.equal(revision.pricingReferences.length, 0, 'Partner pricing must not manufacture ordinary pricing references');
       assert.equal(revision.partnerPricing?.events.length, 1);
+      const workspacePermissionBeforeRaces = await prisma.workspacePermission.findUnique({ where: { userId_workspace: {
+        userId: accountantId, workspace: 'accounting',
+      } } });
+      const revokeDispatchCapability = async (tx: Prisma.TransactionClient) => {
+        await tx.workspacePermission.upsert({ where: { userId_workspace: { userId: accountantId, workspace: 'accounting' } },
+          create: { userId: accountantId, workspace: 'accounting', permissionLevel: 'view', grantedBy: accountantId },
+          update: { permissionLevel: 'view' } });
+        await tx.featurePermission.update({ where: { userId_workspace_feature: { userId: accountantId,
+          workspace: 'accounting', feature: 'accounting_dispatch_candidates_manage' } }, data: { permissionLevel: 'view' } });
+      };
+      const restoreDispatchCapability = async () => {
+        await prisma.featurePermission.update({ where: { userId_workspace_feature: { userId: accountantId,
+          workspace: 'accounting', feature: 'accounting_dispatch_candidates_manage' } }, data: { permissionLevel: 'edit' } });
+        if (workspacePermissionBeforeRaces) await prisma.workspacePermission.update({ where: { userId_workspace: {
+          userId: accountantId, workspace: 'accounting' } }, data: { permissionLevel: workspacePermissionBeforeRaces.permissionLevel } });
+        else await prisma.workspacePermission.delete({ where: { userId_workspace: { userId: accountantId, workspace: 'accounting' } } });
+      };
+      const filesBeforeDeniedIssue = await storedPdfFiles();
+      const deniedIssue = await raceAfterPreflight(`ACCOUNTING_DISPATCH_CANDIDATE:${candidateId}`,
+        () => request(`/api/accounting/dispatch-candidates/${candidateId}/decision`, 'POST', { action: 'ACCEPT' },
+          accountingSession.token, `${expected.caseId}-denied-issue-documents`),
+        revokeDispatchCapability);
+      assert.equal(deniedIssue.status, 403, JSON.stringify(deniedIssue.body));
+      assert.equal((await prisma.accountingDispatchCandidate.findUniqueOrThrow({ where: { id: candidateId } })).status, 'PENDING');
+      assert.equal(await prisma.accountingDispatchWaybill.count({ where: { candidateId } }), 0);
+      assert.deepEqual(await storedPdfFiles(), filesBeforeDeniedIssue,
+        'commit-time permission denial must remove the staged primary PDF pair');
+      await restoreDispatchCapability();
       const issued = await request(`/api/accounting/dispatch-candidates/${candidateId}/decision`, 'POST', { action: 'ACCEPT' },
         accountingSession.token, `${expected.caseId}-issue-documents`);
       assert.equal(issued.status, 200, JSON.stringify(issued.body));
       const waybillId = issued.body.data.waybill.id;
       const artifacts = await prisma.dispatchDocumentArtifact.findMany({ where: { waybillId }, orderBy: { kind: 'asc' } });
       assert.deepEqual(new Set(artifacts.map(row => row.kind)), new Set(['WAYBILL', 'STATEMENT']));
+      const deniedVoid = await raceAfterPreflight(`ACCOUNTING_DISPATCH_WAYBILL:${waybillId}`,
+        () => request(`/api/accounting/dispatch-waybills/${waybillId}/void`, 'POST', { reason: 'آزمون لغو همزمان مجوز' },
+          accountingSession.token, `${expected.caseId}-denied-void`),
+        revokeDispatchCapability);
+      assert.equal(deniedVoid.status, 403, JSON.stringify(deniedVoid.body));
+      assert.equal((await prisma.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybillId } })).status, 'ISSUED');
+      await restoreDispatchCapability();
+      const filesBeforeDeniedReplacement = await storedPdfFiles();
+      const deniedReplacement = await raceAfterPreflight(`ACCOUNTING_DISPATCH_WAYBILL:${waybillId}`,
+        () => request(`/api/accounting/dispatch-waybills/${waybillId}/replace`, 'POST', { reason: 'آزمون جایگزینی با مجوز لغوشده' },
+          accountingSession.token, `${expected.caseId}-denied-replacement`),
+        revokeDispatchCapability);
+      assert.equal(deniedReplacement.status, 403, JSON.stringify(deniedReplacement.body));
+      assert.equal((await prisma.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybillId } })).status, 'ISSUED');
+      assert.equal(await prisma.accountingDispatchWaybill.count({ where: { replacesWaybillId: waybillId } }), 0);
+      assert.deepEqual(await storedPdfFiles(), filesBeforeDeniedReplacement,
+        'commit-time replacement denial must remove the staged successor PDF pair');
+      await restoreDispatchCapability();
       const readerId = `${expected.caseId}-waybill-reader`;
       await prisma.user.create({ data: { id: readerId, username: readerId, email: `${readerId}@example.invalid`,
         password: 'not-a-login', firstName: 'Waybill', lastName: 'Reader' } });
@@ -129,7 +205,7 @@ async function main() {
         revocationReason: 'آزمون لغو دسترسی نوشتن اسناد', revocationCorrelationId: `${expected.caseId}-revoke-document-write` } });
       const deniedReplay = await request(`/api/accounting/dispatch-candidates/${candidateId}/decision`, 'POST', { action: 'ACCEPT' },
         accountingSession.token, `${expected.caseId}-issue-documents`);
-      assert.equal(deniedReplay.status, 409, 'idempotent Partner document commands must recheck current Case write authority');
+      assert.equal(deniedReplay.status, 403, 'idempotent Partner document commands must recheck current Case write authority');
       const exited = await request(`/api/security/exit-desk/authorizations/${authorization.id}/exit`, 'POST', {
         reasonDetail: 'خروج فیزیکی آزمایشی پرونده همکار',
       }, logisticsSession.token, `${expected.caseId}-physical-exit`);

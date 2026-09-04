@@ -28,12 +28,17 @@ export const prepareDispatchArtifact = async (dependencies: {
   const createId = dependencies.id ?? randomUUID;
   const id = createId();
   const storageKey = `dispatch-documents/${createId()}.pdf`;
-  await dependencies.storage.stage({ storageKey, bytes: output.bytes });
-  const verified = await dependencies.storage.read(storageKey);
-  if (!verified || verified.byteLength !== output.bytes.byteLength || digest(verified) !== digest(output.bytes)) {
-    throw new DispatchDocumentIntegrityError('Staged dispatch artifact failed verification.');
+  try {
+    await dependencies.storage.stage({ storageKey, bytes: output.bytes });
+    const verified = await dependencies.storage.read(storageKey);
+    if (!verified || verified.byteLength !== output.bytes.byteLength || digest(verified) !== digest(output.bytes)) {
+      throw new DispatchDocumentIntegrityError('Staged dispatch artifact failed verification.');
+    }
+    return { id, kind: renderInput.kind, templateVersion: renderInput.templateVersion, storageKey,
+      mediaType: 'application/pdf', byteLength: verified.byteLength, sha256: digest(verified),
+      publishedAt: (dependencies.now ?? (() => new Date()))().toISOString() };
+  } catch (error) {
+    await dependencies.storage.discard?.(storageKey);
+    throw error;
   }
-  return { id, kind: renderInput.kind, templateVersion: renderInput.templateVersion, storageKey,
-    mediaType: 'application/pdf', byteLength: verified.byteLength, sha256: digest(verified),
-    publishedAt: (dependencies.now ?? (() => new Date()))().toISOString() };
 };

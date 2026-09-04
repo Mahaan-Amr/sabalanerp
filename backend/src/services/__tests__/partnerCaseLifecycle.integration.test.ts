@@ -71,15 +71,17 @@ test('Partner dispatch statements require current internal Accounting authority 
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
   const database = temporary.client();
   const ids = idsFor(`partner-dispatch-policy-${temporary.runId}`);
+  const hiddenIds = idsFor(`partner-dispatch-policy-hidden-${temporary.runId}`);
   try {
-    await database.$transaction(tx => seedCase(tx, ids));
+    await database.$transaction(async tx => { await seedCase(tx, ids); await seedCase(tx, hiddenIds); });
     const managerId = `${ids.caseId}-accountant`;
     await database.user.create({ data: { id: managerId, username: managerId, email: `${managerId}@example.invalid`,
-      password: 'not-a-login', firstName: 'Accounting', lastName: 'Policy', role: 'ADMIN' } });
+      password: 'not-a-login', firstName: 'Accounting', lastName: 'Policy' } });
     await database.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
     await database.effectiveActionGrant.create({ data: { id: `${managerId}-accounting-read`, principalKind: 'USER',
       principalId: managerId, subjectUserId: managerId, domain: 'PARTNER', action: 'ACCOUNTING_READ',
-      rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: managerId,
+      rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'PURPOSE_BOUND', boundRootId: ids.caseId,
+      effect: 'ALLOW', grantedBy: managerId,
       reason: 'isolated dispatch document policy fixture', correlationId: `${managerId}-accounting-read` } });
     // Residual narrow grants must not let a Partner persona read wholesale shipment documents.
     const residualGrant = { userId: ids.partnerId, workspace: 'accounting',
@@ -120,6 +122,45 @@ test('Partner dispatch statements require current internal Accounting authority 
       const candidate = await database.accountingDispatchCandidate.create({ data: { allocationRevisionId: revision.id } });
       candidates[sourceKind] = candidate.id;
     }
+    const hiddenProject = await database.projectAddress.create({ data: {
+      customerId: hiddenIds.customerId, address: 'Hidden isolated policy fixture',
+    } });
+    const hiddenLoading = await database.logisticsLoading.create({ data: { loadingNumber: `${hiddenIds.caseId}-loading`,
+      customerId: hiddenIds.customerId, projectId: hiddenProject.id, createdBy: managerId } });
+    const hiddenDriver = await database.externalDriver.create({ data: { firstName: 'Hidden', lastName: 'Policy',
+      nationalCode: `${temporary.runId}h`, phone: '09120000001', createdBy: managerId } });
+    const hiddenVehicle = await database.externalVehicle.create({ data: { vehicleType: 'Hidden policy fixture', createdBy: managerId } });
+    const hiddenQueue = await database.guardDriverQueueTurn.create({ data: { driverSource: 'EXTERNAL',
+      externalDriverId: hiddenDriver.id, externalVehicleId: hiddenVehicle.id, admittedBy: managerId, admissionSnapshot: {},
+      integrityHash: 'c'.repeat(64), loadingId: hiddenLoading.id } });
+    const hiddenBatch = await database.logisticsAllocationBatch.create({ data: { loadingId: hiddenLoading.id,
+      idempotencyKey: 'hidden-policy-fixture', finalizedBy: managerId } });
+    const hiddenCase = await database.partnerSaleCase.findUniqueOrThrow({ where: { id: hiddenIds.caseId }, select: {
+      id: true, headRevision: true, integrityHash: true, internalRecordId: true,
+    } });
+    const hiddenDelivery = await database.partnerCaseDelivery.findFirstOrThrow({ where: {
+      caseId: hiddenCase.id, revision: hiddenCase.headRevision,
+    }, select: { id: true } });
+    const hiddenRevision = await database.logisticsAllocationRevision.create({ data: { sourceKind: 'PARTNER_CASE',
+      loadingId: hiddenLoading.id, queueTurnId: hiddenQueue.id, batchId: hiddenBatch.id, revisionNumber: 1,
+      snapshot: { privateRecipient: 'must-not-be-serialized', confirmationPhone: '09120000000' },
+      integrityHash: 'd'.repeat(64), finalizedBy: managerId, partnerCaseId: hiddenCase.id,
+      partnerCaseRevision: hiddenCase.headRevision, partnerIntegrityHash: hiddenCase.integrityHash,
+      partnerInternalRecordId: hiddenCase.internalRecordId, partnerDeliveryId: hiddenDelivery.id,
+    } });
+    candidates.HIDDEN_PARTNER_CASE = (await database.accountingDispatchCandidate.create({ data: {
+      allocationRevisionId: hiddenRevision.id,
+    } })).id;
+    await database.workspacePermission.create({ data: { userId: managerId, workspace: 'accounting',
+      permissionLevel: 'view', grantedBy: managerId } });
+    await database.featurePermission.create({ data: { userId: managerId, workspace: 'accounting',
+      feature: 'accounting_dispatch_candidates_view', permissionLevel: 'view', grantedBy: managerId } });
+    await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
+      'backend/src/services/__tests__/partnerDispatchListHttpProbe.ts'], { timeout: 60_000, env: { ...process.env,
+        DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: managerId,
+        PARTNER_TEST_ORDINARY_CANDIDATE_ID: candidates.SALES_CONTRACT,
+        PARTNER_TEST_ALLOWED_CANDIDATE_ID: candidates.PARTNER_CASE,
+        PARTNER_TEST_HIDDEN_CANDIDATE_ID: candidates.HIDDEN_PARTNER_CASE } });
     const access = createPrismaDispatchDocumentAccessPolicy(database);
     const request = { actorId: ids.partnerId, candidateId: candidates.PARTNER_CASE, kinds: ['STATEMENT'] as ['STATEMENT'] };
     assert.equal(await access.canReadDocuments(request), false);

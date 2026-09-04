@@ -15,8 +15,10 @@ const tx = {
   dispatchDocumentCommandResult: { findUnique: async () => null, create: async () => { writes.push('command'); return {}; } },
   accountingDispatchCandidate: {
     findUnique: async () => replacementMode
-      ? ({ id: 'candidate-1', status: 'ACCEPTED', allocationRevisionId: 'revision-1', allocationRevision: { finalizedAt: new Date('2026-08-10T00:00:00.000Z') } })
-      : ({ id: 'candidate-1', status: 'PENDING', allocationRevisionId: 'revision-1', workItem: { id: 'work-1' } }),
+      ? ({ id: 'candidate-1', status: 'ACCEPTED', allocationRevisionId: 'revision-1', allocationRevision: {
+        sourceKind: 'SALES_CONTRACT', finalizedAt: new Date('2026-08-10T00:00:00.000Z') } })
+      : ({ id: 'candidate-1', status: 'PENDING', allocationRevisionId: 'revision-1', workItem: { id: 'work-1' },
+        allocationRevision: { sourceKind: 'SALES_CONTRACT', partnerCaseId: null } }),
     update: async ({ data }: any) => { writes.push(`candidate:${data.status}`); return {}; },
   },
   accountingDispatchWorkItem: { update: async () => { writes.push('work-item:COMPLETED'); return {}; } },
@@ -25,7 +27,8 @@ const tx = {
   logisticsAllocationRevisionPricing: { findMany: async () => [{ contractId: 'contract-b' }, { contractId: 'contract-a' }] },
   accountingDispatchWaybill: {
     findUnique: async () => replacementMode ? ({ id: 'waybill-old', status: 'ISSUED', candidateId: 'candidate-1',
-      physicalExit: null, manualOutageExit: null, replacementWaybill: null }) : null,
+      physicalExit: null, manualOutageExit: null, replacementWaybill: null,
+      candidate: { allocationRevision: { sourceKind: 'SALES_CONTRACT', partnerCaseId: null } } }) : null,
     create: async () => { writes.push('WAYBILL_CREATED'); throw new Error('stale evidence must not issue'); },
   },
   dispatchLifecycleAudit: { findFirst: async () => null, create: async () => { writes.push('audit'); return {}; } },
@@ -87,10 +90,16 @@ const run = async () => {
     const replayValue = { candidateId: 'candidate-race', status: 'ACCEPTED' as const,
       waybill: { id: 'waybill-race', number: '91', status: 'ISSUED' as const,
         issuedAt: '2026-08-10T01:00:00.000Z', replacesWaybillId: null } };
+    let racingAttempts = 0;
     const racingPrisma = {
-      $transaction: async () => { throw duplicateCommand; },
-      dispatchDocumentCommandResult: { findUnique: async () => ({ command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED',
-        result: { intentFingerprint: 'race-intent', value: replayValue } }) },
+      $transaction: async (work: any) => {
+        racingAttempts += 1;
+        if (racingAttempts % 2 === 1) throw duplicateCommand;
+        return work({ accountingDispatchCandidate: { findUnique: async () => ({
+          allocationRevision: { sourceKind: 'SALES_CONTRACT', partnerCaseId: null },
+        }) }, dispatchDocumentCommandResult: { findUnique: async () => ({ command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED',
+          result: { intentFingerprint: 'race-intent', value: replayValue } }) } });
+      },
     } as any;
     const racingRepository = new PrismaDispatchDocumentRepository(racingPrisma,
       { assess: async () => ({ status: 'CURRENT', staleContracts: [] }) }, storage);
@@ -102,9 +111,15 @@ const run = async () => {
       expectedSourceIntegrityHash: 'race-source', waybillSnapshot: {}, waybill: replayValue.waybill, artifacts: [],
       idempotencyKey: 'race-key', actorId: 'accountant', correlationId: 'race-correlation', intentFingerprint: 'other-intent' }),
     DispatchDocumentConflictError, 'same key with a different intent remains a conflict');
+    let unrelatedAttempts = 0;
     const unrelatedRepository = new PrismaDispatchDocumentRepository({
-      $transaction: async () => { throw duplicateCommand; },
-      dispatchDocumentCommandResult: { findUnique: async () => null },
+      $transaction: async (work: any) => {
+        unrelatedAttempts += 1;
+        if (unrelatedAttempts === 1) throw duplicateCommand;
+        return work({ accountingDispatchCandidate: { findUnique: async () => ({
+          allocationRevision: { sourceKind: 'SALES_CONTRACT', partnerCaseId: null },
+        }) }, dispatchDocumentCommandResult: { findUnique: async () => null } });
+      },
     } as any, { assess: async () => ({ status: 'CURRENT', staleContracts: [] }) }, storage);
     await assert.rejects(() => unrelatedRepository.acceptAndIssue({ candidateId: 'candidate-race', allocationRevisionId: 'revision-race',
       expectedSourceIntegrityHash: 'race-source', waybillSnapshot: {}, waybill: replayValue.waybill, artifacts: [],
@@ -115,7 +130,8 @@ const run = async () => {
     });
     const unrelatedTargetRepository = new PrismaDispatchDocumentRepository({
       $transaction: async () => { throw unrelatedTarget; },
-      dispatchDocumentCommandResult: racingPrisma.dispatchDocumentCommandResult,
+      dispatchDocumentCommandResult: { findUnique: async () => ({ command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED',
+        result: { intentFingerprint: 'race-intent', value: replayValue } }) },
     } as any, { assess: async () => ({ status: 'CURRENT', staleContracts: [] }) }, storage);
     await assert.rejects(() => unrelatedTargetRepository.acceptAndIssue({ candidateId: 'candidate-race', allocationRevisionId: 'revision-race',
       expectedSourceIntegrityHash: 'race-source', waybillSnapshot: {}, waybill: replayValue.waybill, artifacts: [],

@@ -11,9 +11,10 @@ import type {
   PrimaryBundleIdentity,
   PrimaryBundleSource,
 } from './ports';
-import { prepareDispatchArtifact } from './artifactPreparation';
+import { prepareDispatchArtifact, type PreparedDispatchArtifact } from './artifactPreparation';
 
 export class DispatchDocumentValidationError extends Error {}
+export class DispatchDocumentAuthorizationError extends Error {}
 export class DispatchDocumentConflictError extends Error {}
 export class DispatchDocumentEvidenceConflictError extends DispatchDocumentConflictError {}
 export class DispatchDocumentIntegrityError extends Error {}
@@ -127,15 +128,26 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
       throw new DispatchDocumentConflictError('Dispatch document source does not match the reserved waybill identity.');
     }
     assertRenderSourceConsistency(source);
-    const prepared = await Promise.all([source.waybill, source.statement].map(renderInput => prepareDispatchArtifact({
-      publisher: dependencies.publisher, storage: dependencies.storage, id, now: () => new Date(root.issuedAt),
-    }, renderInput)));
+    const prepared: PreparedDispatchArtifact[] = [];
+    try {
+      for (const renderInput of [source.waybill, source.statement]) {
+        prepared.push(await prepareDispatchArtifact({ publisher: dependencies.publisher, storage: dependencies.storage,
+          id, now: () => new Date(root.issuedAt) }, renderInput));
+      }
+    } catch (error) {
+      await Promise.all(prepared.map(artifact => dependencies.storage.discard?.(artifact.storageKey)));
+      throw error;
+    }
     const artifacts: PublishedDispatchArtifact[] = prepared.map(artifact => ({ ...artifact, waybillId: root.waybillId,
       adjustmentSequence: null, generatorVersion: source.provenance.generatorVersion,
       sourceVersionIdentities: source.provenance.sourceVersionIdentities }));
     if (artifacts.length !== 2) throw new DispatchDocumentIntegrityError('Primary dispatch bundle is incomplete.');
     void actorId;
     return artifacts;
+  };
+
+  const discard = async (artifacts: PublishedDispatchArtifact[]) => {
+    await Promise.all(artifacts.map(artifact => dependencies.storage.discard?.(artifact.storageKey)));
   };
 
   const decideCandidate = async (input: {
@@ -173,9 +185,16 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     if (source.candidateId !== candidateId) throw new DispatchDocumentConflictError('Dispatch source candidate changed.');
     const artifacts = await publish(source, root, actorId);
     const waybill: IssuedWaybill = { id: root.waybillId, number: root.number, status: 'ISSUED', issuedAt: root.issuedAt, replacesWaybillId: null };
-    return dependencies.repository.acceptAndIssue({ candidateId, allocationRevisionId: source.allocationRevisionId,
-      expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
-      waybill, artifacts, idempotencyKey, actorId, correlationId, authority: input.authority, intentFingerprint: fingerprint });
+    try {
+      const result = await dependencies.repository.acceptAndIssue({ candidateId, allocationRevisionId: source.allocationRevisionId,
+        expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
+        waybill, artifacts, idempotencyKey, actorId, correlationId, authority: input.authority, intentFingerprint: fingerprint });
+      if (result.waybill?.id !== waybill.id) await discard(artifacts);
+      return result;
+    } catch (error) {
+      await discard(artifacts);
+      throw error;
+    }
   };
 
   const voidWaybill = async (input: { waybillId: string; reason: string; idempotencyKey: string; actorId: string; correlationId?: string; authority?: unknown }) => {
@@ -206,11 +225,17 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     if (source.predecessorWaybillId !== waybillId) throw new DispatchDocumentConflictError('Replacement source changed.');
     const artifacts = await publish(source, root, actorId);
     const replacement: IssuedWaybill = { id: root.waybillId, number: root.number, status: 'ISSUED', issuedAt: root.issuedAt, replacesWaybillId: waybillId };
-    return dependencies.repository.replaceWaybill({ waybillId, allocationRevisionId: source.allocationRevisionId,
-      expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
-      replacement, artifacts, reason: required(input.reason, 'reason'), idempotencyKey,
-      actorId, correlationId, authority: input.authority ?? {},
-      intentFingerprint: fingerprint });
+    try {
+      const result = await dependencies.repository.replaceWaybill({ waybillId, allocationRevisionId: source.allocationRevisionId,
+        expectedSourceIntegrityHash: source.sourceIntegrityHash, waybillSnapshot: source.waybillSnapshot,
+        replacement, artifacts, reason: required(input.reason, 'reason'), idempotencyKey,
+        actorId, correlationId, authority: input.authority ?? {}, intentFingerprint: fingerprint }) as any;
+      if (result?.replacement?.id !== replacement.id) await discard(artifacts);
+      return result;
+    } catch (error) {
+      await discard(artifacts);
+      throw error;
+    }
   };
 
   const assertAccess = async (actorId: string, waybillId: string) => {

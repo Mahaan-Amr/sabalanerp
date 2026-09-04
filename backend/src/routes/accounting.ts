@@ -57,7 +57,7 @@ import {
 } from '../services/dispatchCorrectionOutage';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { configureDispatchDocumentsRuntime, createAccountingDispatchDocumentRouter,
-  dispatchDocumentHttpStatus } from '../services/dispatchDocuments';
+  DispatchDocumentAuthorizationError, dispatchDocumentHttpStatus } from '../services/dispatchDocuments';
 import { renderDispatchDocumentPdf } from '../documents/dispatch/dispatchDocumentPdf';
 import { getStatementAdjustmentArtifactPreparer } from '../services/statementAdjustmentRuntime';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
@@ -77,6 +77,7 @@ import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from '
 import { readPartnerSnapshot } from '../services/partnerSales/authorization/readSnapshot';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { randomUUID } from 'node:crypto';
+import { readPartnerDispatchAccountingViewCapability } from '../services/partnerSales/accounting/capabilities';
 
 const router = express.Router();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
@@ -316,9 +317,6 @@ router.get('/dispatch-evidence-exceptions', accountingDispatchView, async (_req:
 router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthRequest, res: Response) => {
   try {
     const { manage, candidates } = await readPartnerSnapshot(prisma, async tx => {
-      const manage = await resolveNarrowFeatureAccess(tx, { userId: req.user!.id, role: req.user!.role,
-        workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
-        requiredPermission: FEATURE_PERMISSIONS.EDIT });
       const owners = await tx.accountingDispatchCandidate.findMany({ orderBy: { id: 'asc' }, select: {
         id: true, allocationRevision: { select: { sourceKind: true, partnerCaseId: true } },
       } });
@@ -326,10 +324,26 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         correlationId: String(req.get('X-Correlation-Id') || randomUUID()), reason: 'بررسی دسترسی فهرست اسناد ارسال پرونده همکار',
       });
       const allowedPartnerCases = new Set<string>();
+      const writablePartnerCases = new Set<string>();
       for (const caseId of [...new Set(owners.flatMap(owner => owner.allocationRevision.sourceKind === 'PARTNER_CASE'
         && owner.allocationRevision.partnerCaseId ? [owner.allocationRevision.partnerCaseId] : []))].sort()) {
-        if ((await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId })).ok) allowedPartnerCases.add(caseId);
+        if ((await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId })).ok) {
+          allowedPartnerCases.add(caseId);
+          if ((await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok) writablePartnerCases.add(caseId);
+        }
       }
+      // With no Partner roots there is no central Case authorization above to
+      // take the User -> authority fence, so take that same ordered fence here.
+      if (!owners.some(owner => owner.allocationRevision.sourceKind === 'PARTNER_CASE')) {
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${req.user!.id} FOR UPDATE`;
+        await tx.$queryRaw`SELECT revision FROM effective_authorization_state WHERE id = 1 FOR UPDATE`;
+      }
+      if (!await readPartnerDispatchAccountingViewCapability(tx, req.user!.id)) {
+        throw new DispatchDocumentAuthorizationError('Current Accounting dispatch view authority is required.');
+      }
+      const manage = await resolveNarrowFeatureAccess(tx, { userId: req.user!.id, role: req.user!.role,
+        workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
+        requiredPermission: FEATURE_PERMISSIONS.EDIT });
       const allowedIds = owners.flatMap(owner => owner.allocationRevision.sourceKind === 'SALES_CONTRACT'
         || (owner.allocationRevision.sourceKind === 'PARTNER_CASE' && owner.allocationRevision.partnerCaseId
           && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
@@ -338,7 +352,12 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true } },
       }, orderBy: { createdAt: 'asc' } });
-      return { manage, candidates };
+      const ownerById = new Map(owners.map(owner => [owner.id, owner.allocationRevision]));
+      return { manage, candidates: candidates.map(candidate => {
+        const owner = ownerById.get(candidate.id);
+        return { ...candidate, canManage: manage.allowed && Boolean(owner && (owner.sourceKind === 'SALES_CONTRACT'
+          || (owner.sourceKind === 'PARTNER_CASE' && owner.partnerCaseId && writablePartnerCases.has(owner.partnerCaseId)))) };
+      }) };
     });
     res.setHeader('X-Dispatch-Documents-Permission', manage.allowed ? 'MANAGE' : 'VIEW');
     return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,

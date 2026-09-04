@@ -35,3 +35,15 @@ export async function readPartnerDispatchAccountingCapability(tx: Prisma.Transac
   return (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role,
     workspace: 'accounting', feature: 'accounting_dispatch_candidates_manage', requiredPermission: 'edit' })).allowed;
 }
+
+/** Current list authority evaluated only after the caller has entered the
+ * Partner authorization fence for every Case in its snapshot. */
+export async function readPartnerDispatchAccountingViewCapability(tx: Prisma.TransactionClient, actorId: string) {
+  const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
+  if (!actor?.isActive) return false;
+  const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role });
+  const workspace = effective.workspaces.find(row => row.workspace === 'accounting')?.permission;
+  if (!['view', 'edit', 'admin'].includes(workspace || '')) return false;
+  return (await resolveNarrowFeatureAccess(tx, { userId: actorId, role: actor.role,
+    workspace: 'accounting', feature: 'accounting_dispatch_candidates_view', requiredPermission: 'view' })).allowed;
+}

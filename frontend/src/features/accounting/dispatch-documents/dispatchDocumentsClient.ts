@@ -103,7 +103,7 @@ export function mapDispatchDocumentReadModel(value: unknown): DispatchDocumentCa
   } : undefined;
 
   return {
-    id: text(candidate.id), state,
+    id: text(candidate.id), canManage: false, state,
     customerName: text(customer.companyName, text(customer.name, text(customer.id, 'مشتری در تصویر ثابت ثبت نشده'))),
     destination: text(project.address, text(project.name, text(project.id, 'مقصد در تصویر ثابت ثبت نشده'))),
     loadingNumber: text(loading.number, text(loading.id, `پرونده ${text(candidate.id)}`)), finalizedAt: iso(revision.finalizedAt || snapshot.finalizedAt),
@@ -147,8 +147,10 @@ export const dispatchDocumentApiPaths = (baseUrl = '/api/accounting') => ({
 export function createDispatchDocumentsHttpClient(baseUrl = '/api/accounting'): DispatchDocumentsClient {
   const paths = dispatchDocumentApiPaths(baseUrl);
   const cases = new Map<string, DispatchDocumentCase>();
-  const readOne = async (candidateId: string, waybillId?: string) => mapDispatchDocumentReadModel(
-    await parseJsonResponse<unknown>(await send(paths.readModel(candidateId, waybillId))));
+  const readOne = async (candidateId: string, waybillId?: string, canManage = cases.get(candidateId)?.canManage ?? false) => ({
+    ...mapDispatchDocumentReadModel(await parseJsonResponse<unknown>(await send(paths.readModel(candidateId, waybillId)))),
+    canManage,
+  });
   const load = async (): Promise<DispatchDocumentWorkspace> => {
     const response = await send(paths.candidates());
     const candidates = await parseJsonResponse<JsonRecord[]>(response);
@@ -156,7 +158,7 @@ export function createDispatchDocumentsHttpClient(baseUrl = '/api/accounting'): 
       || list(candidate.waybills).length > 0);
     const mapped = await Promise.all(visible.map((candidate) => {
       const waybills = list(candidate.waybills);
-      return readOne(text(candidate.id), text(waybills[waybills.length - 1]?.id) || undefined);
+      return readOne(text(candidate.id), text(waybills[waybills.length - 1]?.id) || undefined, candidate.canManage === true);
     }));
     cases.clear(); mapped.forEach((item) => cases.set(item.id, item));
     const projected = response.headers.get('X-Dispatch-Documents-Permission');

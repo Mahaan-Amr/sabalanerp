@@ -18,15 +18,18 @@ const contracts = [{
 
 const seedCases = (): DispatchDocumentCase[] => [
   {
+    canManage: true,
     id: 'dispatch-ready', state: 'READY', customerName: 'شرکت عمران آریا', destination: 'پروژه ونک', loadingNumber: 'ارسال ۱۲۶۰', finalizedAt: '2026-08-09T08:15:00.000Z', total: { amount: '8740000000', currency: 'IRR' }, vehiclePlate: '۷۸ الف ۴۵۶ ایران ۱۱', driverName: 'علی رضایی', readiness: { code: 'READY', label: 'آماده بررسی', reasons: [] }, contracts,
   },
   {
+    canManage: true,
     id: 'dispatch-blocked', state: 'BLOCKED', customerName: 'سازه گستر شرق', destination: 'پروژه نیاوران', loadingNumber: 'ارسال ۱۲۶۳', finalizedAt: '2026-08-09T09:10:00.000Z', total: { amount: '4920000000', currency: 'IRR' }, vehiclePlate: '۲۱ ب ۷۸۲ ایران ۳۳', driverName: 'رضا قنبری', readiness: { code: 'STALE_PRICING', label: 'نسخه قیمت پس از نهایی‌سازی تغییر کرده است', reasons: [
       { id: 'stale-1', label: 'قرارداد ۱۴۰۵-۳۴، ردیف پایدار ۱۱: نسخه قیمت تازه‌تری تأیید شده است.', ownerLabel: 'بازگشت به لجستیک', ownerHref: '/dashboard/logistics' },
       { id: 'stale-2', label: 'صدور فقط پس از نهایی‌سازی تخصیص جانشین ممکن است.', ownerLabel: 'مشاهده قرارداد', ownerHref: '/dashboard/accounting/contracts' },
     ] }, contracts,
   },
   {
+    canManage: true,
     id: 'dispatch-issued', state: 'ISSUED', customerName: 'سنگ‌سازان پارس', destination: 'کارگاه شهریار', loadingNumber: 'ارسال ۱۲۵۸', finalizedAt: '2026-08-08T14:20:00.000Z', total: { amount: '2180000000', currency: 'IRR' }, vehiclePlate: '۴۵ ج ۶۷۸ ایران ۲۲', driverName: 'مهدی احمدی', readiness: { code: 'READY', label: 'بسته صادرشده', reasons: [] }, contracts,
     bundle: {
       id: 'bundle-1258', number: '۱۲۵۸', status: 'ISSUED', issuedAt: '2026-08-08T15:00:00.000Z',
@@ -44,7 +47,7 @@ const seedCases = (): DispatchDocumentCase[] => [
 const clone = <T,>(value: T): T => structuredClone(value);
 
 export function createFixtureDispatchDocumentsClient(permission: DispatchDocumentPermission = 'MANAGE'): DispatchDocumentsClient {
-  let cases = permission === 'UNAUTHORIZED' ? [] : seedCases();
+  let cases = permission === 'UNAUTHORIZED' ? [] : seedCases().map(item => ({ ...item, canManage: permission === 'MANAGE' }));
   const decisions = new Map<string, DispatchDocumentCase>();
   const replacements = new Map<string, DispatchDocumentCase>();
   const find = (caseId: string) => {

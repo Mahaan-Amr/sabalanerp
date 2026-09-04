@@ -192,7 +192,11 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
       if (result.waybill?.id !== waybill.id) await discard(artifacts);
       return result;
     } catch (error) {
-      await discard(artifacts);
+      // Unknown repository failures can be an acknowledgement loss after a
+      // successful COMMIT. Keep those bytes for durable-command recovery and
+      // reconciliation; only this typed denial proves artifact metadata did not
+      // commit and permits immediate removal.
+      if (error instanceof DispatchDocumentAuthorizationError) await discard(artifacts);
       throw error;
     }
   };
@@ -233,7 +237,7 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
       if (result?.replacement?.id !== replacement.id) await discard(artifacts);
       return result;
     } catch (error) {
-      await discard(artifacts);
+      if (error instanceof DispatchDocumentAuthorizationError) await discard(artifacts);
       throw error;
     }
   };

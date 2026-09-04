@@ -38,6 +38,7 @@ export type DispatchDocumentContract = {
 
 export type DispatchDocumentCase = {
   id: string;
+  canManage: boolean;
   state: DispatchDocumentFilter;
   customerName: string;
   destination: string;
@@ -101,7 +102,7 @@ export function canRunDispatchDocumentCommand(
 ): boolean {
   if (workspace.permission === 'UNAUTHORIZED' || staleOrPending) return false;
   if (command === 'DOWNLOAD' || command === 'PRINT') return item.state === 'ISSUED' && hasCompletePrimaryBundle(item);
-  if (workspace.permission !== 'MANAGE') return false;
+  if (workspace.permission !== 'MANAGE' || !item.canManage) return false;
   if (command === 'ACCEPT' || command === 'REJECT') return item.state === 'READY' && item.readiness.code === 'READY';
   return command === 'REPLACE' && item.state === 'ISSUED' && item.bundle?.status === 'ISSUED' && hasCompletePrimaryBundle(item);
 }

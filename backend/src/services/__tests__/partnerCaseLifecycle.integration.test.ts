@@ -152,9 +152,12 @@ test('Partner dispatch statements require current internal Accounting authority 
       allocationRevisionId: hiddenRevision.id,
     } })).id;
     await database.workspacePermission.create({ data: { userId: managerId, workspace: 'accounting',
-      permissionLevel: 'view', grantedBy: managerId } });
-    await database.featurePermission.create({ data: { userId: managerId, workspace: 'accounting',
-      feature: 'accounting_dispatch_candidates_view', permissionLevel: 'view', grantedBy: managerId } });
+      permissionLevel: 'edit', grantedBy: managerId } });
+    for (const [feature, permissionLevel] of [['accounting_dispatch_candidates_view', 'view'],
+      ['accounting_dispatch_candidates_manage', 'edit']] as const) {
+      await database.featurePermission.create({ data: { userId: managerId, workspace: 'accounting',
+        feature, permissionLevel, grantedBy: managerId } });
+    }
     await promisify(execFile)(process.execPath, ['backend/node_modules/tsx/dist/cli.mjs',
       'backend/src/services/__tests__/partnerDispatchListHttpProbe.ts'], { timeout: 60_000, env: { ...process.env,
         DATABASE_URL: temporary.databaseUrl, PARTNER_TEST_ACTOR_ID: managerId,

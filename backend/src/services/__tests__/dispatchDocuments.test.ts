@@ -24,7 +24,7 @@ const bytes = (value: string) => new TextEncoder().encode(value);
 const sha256 = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 
 const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce?: boolean; failSourceEvidence?: boolean;
-  denyAcceptAfterStaging?: boolean; denyReplaceAfterStaging?: boolean;
+  denyAcceptAfterStaging?: boolean; denyReplaceAfterStaging?: boolean; ambiguousAcceptAfterCommit?: boolean;
   restrictStatementAccess?: boolean } = {}) => {
   const files = new Map<string, Uint8Array>();
   const state = {
@@ -48,6 +48,7 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
     allocateWaybillNumber: async () => (++nextNumber).toString(),
     acceptAndIssue: async (input) => {
       if (options.denyAcceptAfterStaging) throw new DispatchDocumentAuthorizationError('revoked');
+      if (options.ambiguousAcceptAfterCommit) throw new Error('commit acknowledgement lost');
       if (input.expectedSourceIntegrityHash !== 'source-hash') throw new DispatchDocumentConflictError('stale');
       const result = { candidateId: input.candidateId, status: 'ACCEPTED' as const, waybill: input.waybill };
       state.issued.push(input);
@@ -335,6 +336,12 @@ const run = async () => {
     idempotencyKey: 'denied-accept', actorId: 'accountant' }), DispatchDocumentAuthorizationError);
   assert.equal(deniedAccept.files.size, 0, 'commit-time authorization denial removes both staged PDFs');
   assert.equal(deniedAccept.state.issued.length, 0);
+
+  const ambiguousAccept = makeHarness({ ambiguousAcceptAfterCommit: true });
+  await assert.rejects(() => ambiguousAccept.service.decideCandidate({ candidateId: 'candidate-ambiguous', action: 'ACCEPT',
+    idempotencyKey: 'ambiguous-accept', actorId: 'accountant' }), /acknowledgement lost/);
+  assert.equal(ambiguousAccept.files.size, 2,
+    'an ambiguous repository failure retains staged bytes for durable-command recovery and reconciliation');
 
   const deniedReplace = makeHarness({ denyReplaceAfterStaging: true });
   await assert.rejects(() => deniedReplace.service.replaceWaybill({ waybillId: 'waybill-denied', reason: 'مجوز لغو شد',

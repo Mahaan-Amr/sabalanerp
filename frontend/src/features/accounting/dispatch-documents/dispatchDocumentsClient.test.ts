@@ -26,13 +26,17 @@ test('production adapter retains ordered artifacts in PRINT_BOTH response', asyn
         { id: 'statement-pdf', kind: 'STATEMENT', byteLength: 1, sha256: 'b', publishedAt: '2026-08-09T12:00:00Z' }] }] };
   globalThis.fetch = async (input) => {
     const url = String(input);
-    if (url.endsWith('/dispatch-candidates')) return new Response(JSON.stringify({ success: true, data: [{ id: 'case', waybills: [{ id: 'waybill' }] }] }), { status: 200 });
+    if (url.endsWith('/dispatch-candidates')) return new Response(JSON.stringify({ success: true,
+      data: [{ id: 'case', canManage: true, waybills: [{ id: 'waybill' }] }] }), { status: 200,
+      headers: { 'X-Dispatch-Documents-Permission': 'MANAGE' } });
     if (url.includes('/document-read-model')) return new Response(JSON.stringify({ success: true, data: readModel }), { status: 200 });
     if (url.endsWith('/print-handoffs')) return new Response(new Blob(['combined']), { status: 200 });
     return new Response(new Blob(['pdf'], { type: 'application/pdf' }), { status: 200 });
   };
   const client = createDispatchDocumentsHttpClient();
-  await client.load();
+  const workspace = await client.load();
+  assert.equal(workspace.permission, 'MANAGE');
+  assert.equal(workspace.cases[0].canManage, true, 'the candidate-scoped mutation projection survives read-model hydration');
   const result = await client.handoff('case', { kind: 'PRINT_BOTH' });
   assert.deepEqual(result.artifacts.map((item) => item.kind), ['WAYBILL', 'STATEMENT']);
 });

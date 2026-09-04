@@ -129,7 +129,7 @@ export default function AccountingDispatchPage() {
                       {dispatchStatusLabels[candidate.status] || candidate.status}
                     </ErpBadge>
                   </div>
-                  {candidate.status === 'PENDING' && dispatchCapabilities.canManageAccountingCandidates && (
+                  {candidate.status === 'PENDING' && candidate.canManage && dispatchCapabilities.canManageAccountingCandidates && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       <ErpButton
                         label="پذیرش و صدور بارنامه"
@@ -170,7 +170,7 @@ export default function AccountingDispatchPage() {
                             )}
                           />
                         )}
-                        {dispatchCapabilities.canManageAccountingCandidates && (
+                        {candidate.canManage && dispatchCapabilities.canManageAccountingCandidates && (
                           <>
                             <ErpButton
                               label="ابطال بارنامه"

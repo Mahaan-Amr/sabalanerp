@@ -36,6 +36,8 @@ test('profile responder assignment is append-only, CAS protected and exactly rep
       await tx.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
       await tx.partnerReleaseCohort.create({ data: { id: partnerId, name: partnerId, activationEnabled: true,
         enrollmentPaused: false, operationalPaused: true } });
+      await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+        cohortId: partnerId, enrollmentPaused: false, operationalPaused: true } });
       await tx.partnerCohortMembership.create({ data: { id: partnerId, profileId: partnerId, cohortId: partnerId,
         actorId, eligibilityEvidence: { fixture: true } } });
       for (const responderId of [responderA, responderB]) await grantScopedAction(tx,

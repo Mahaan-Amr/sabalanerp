@@ -182,6 +182,10 @@ test('successor stays ineffective until every gate passes and final dependency r
   let service = createPartnerSharedCorrectionService(dependencies);
   assert.equal((await service.execute(save)).ok, true);
   assert.equal(state.staged, true); assert.equal(state.activated, false);
+  dependencies.authorize = async () => ({ ok: false, error: partnerError('FORBIDDEN') });
+  const revokedSaveReplay = await service.execute(save);
+  assert.equal(revokedSaveReplay.ok ? null : revokedSaveReplay.error.code, 'FORBIDDEN');
+  dependencies.authorize = async () => ({ ok: true, value: { evidenceId: 'current-authorization' } });
   const alteredSave = structuredClone(save);
   alteredSave.intent.contractDate = '2026-08-31';
   alteredSave.idempotency.payloadHash = await canonicalHash({ schemaVersion: 1, type: 'SHARED_CORRECTION_SAVE',
@@ -194,6 +198,13 @@ test('successor stays ineffective until every gate passes and final dependency r
     ACCOUNTING_MANAGER: 'accounting-manager', ACCOUNTING_VERIFY: 'verifier', CUSTOMER_CONFIRM: 'customer-evidence' };
   for (const gate of ['SALES_SCOPE', 'ACCOUNTING_PROCESS', 'ACCOUNTING_MANAGER', 'ACCOUNTING_VERIFY'] as const) {
     dependencies.actorId = actors[gate]; service = createPartnerSharedCorrectionService(dependencies);
+    if (gate === 'ACCOUNTING_MANAGER') {
+      Object.assign(state.snapshot, { stagedAccountingApproverId: 'different-accounting-manager' });
+      const mismatch = await service.execute(await gateCommand(gate, actors[gate], owner));
+      assert.equal(mismatch.ok ? null : mismatch.error.code, 'FORBIDDEN');
+      assert.equal(state.snapshot.gates.length, 2, 'a mismatched manager must not lock the remaining gates');
+      Object.assign(state.snapshot, { stagedAccountingApproverId: actors[gate] });
+    }
     assert.equal((await service.execute(await gateCommand(gate, actors[gate], owner))).ok, true);
     assert.equal(state.activated, false);
   }
@@ -212,6 +223,9 @@ test('successor stays ineffective until every gate passes and final dependency r
   dependencies.revalidateForEffect = async () => ({ ok: true, value: base() });
   assert.equal((await service.execute(finalGate)).ok, true);
   assert.equal(state.activated, true);
+  dependencies.authorize = async () => ({ ok: false, error: partnerError('FORBIDDEN') });
+  const revokedGateReplay = await service.execute(finalGate);
+  assert.equal(revokedGateReplay.ok ? null : revokedGateReplay.error.code, 'FORBIDDEN');
 
   async function gateCommand(gate: 'SALES_SCOPE' | 'ACCOUNTING_PROCESS' | 'ACCOUNTING_MANAGER' | 'ACCOUNTING_VERIFY' | 'CUSTOMER_CONFIRM', actorId: string,
     expected: typeof owner): Promise<Extract<PartnerCommand, { type: 'CORRECTION_GATE' }>> {
@@ -264,6 +278,11 @@ test('suspended Partner voiding is requested only by named remediation and prese
   assert.equal((await service.execute(request)).ok, true);
   assert.equal(state.snapshot.opportunity?.requesterId, 'sales-remediation');
   assert.equal(state.finalized, false);
+  const currentAuthorization = dependencies.authorize;
+  dependencies.authorize = async () => ({ ok: false, error: partnerError('FORBIDDEN') });
+  const revokedRequestReplay = await service.execute(request);
+  assert.equal(revokedRequestReplay.ok ? null : revokedRequestReplay.error.code, 'FORBIDDEN');
+  dependencies.authorize = currentAuthorization;
 
   const gateActors: Record<string, string> = { SALES_SCOPE: 'sales-manager', ACCOUNTING_PROCESS: 'processor',
     ACCOUNTING_MANAGER: 'accounting-manager', ACCOUNTING_VERIFY: 'verifier', CUSTOMER_CONFIRM: 'customer-evidence' };

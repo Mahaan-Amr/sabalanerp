@@ -8,6 +8,7 @@ const emptyClient = {
   roleFeaturePermission: { findMany: async () => [], findUnique: async () => null },
   hrWorkspaceAccessGrant: { findMany: async () => [] },
   hrFeatureAccessGrant: { findMany: async () => [] },
+  partnerProfile: { findUnique: async () => null },
 };
 
 const clientWith = (workspace: string) => ({
@@ -46,6 +47,7 @@ const run = async () => {
   for (const [workspace, path, purposes] of [
     ['sales', '/dashboard/sales/partners', ['MANAGEMENT']],
     ['sales', '/dashboard/sales/partner-inquiries', ['RESPONDER']],
+    ['hr', '/dashboard/hr/partners', ['ONBOARDING']],
   ] as const) {
     const client = { ...clientWith(workspace), $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({}) };
     const inherited = await resolveWorkspaceRouteAvailability(client as never, {

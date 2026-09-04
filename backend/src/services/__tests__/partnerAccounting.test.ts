@@ -29,6 +29,19 @@ test('commitment queues once and does not create an official receivable', async 
   assert.equal(fixture.receivables.length, 0);
 });
 
+test('first invoice after an effective correction retains the original realization and uses the successor terms', async () => {
+  const fixture = new PartnerAccountingFixture();
+  fixture.source.view = { ...fixture.source.view, owner: { ...fixture.source.view.owner,
+    revision: fixture.source.view.owner.revision + 1, integrityHash: `sha256-v1:${'d'.repeat(64)}` } };
+  const adapter = createPartnerAccountingAdapter(fixture);
+  const result = await adapter.enqueueCommitted(fixture.source.view, fixture.commitment);
+  assert.equal(result.ok, true);
+  assert.equal(fixture.queues.length, 1);
+  assert.equal(fixture.queues[0].commitmentEventId, fixture.commitment.eventId);
+  assert.equal(fixture.queues[0].preparation.owner.revision, fixture.source.view.owner.revision);
+  assert.equal(fixture.receivables.length, 0);
+});
+
 test('only official financial approval creates one Partner receivable with the Accounting effective date', async () => {
   const fixture = new PartnerAccountingFixture();
   const adapter = createPartnerAccountingAdapter(fixture);

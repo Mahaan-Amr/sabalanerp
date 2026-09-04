@@ -31,20 +31,26 @@ export function createPartnerWorkspaceHttpPort(
         query.data.purpose !== 'RESPONDER_WORKSPACE')) {
       return { ok: false, error: partnerError('INVALID_PAYLOAD') } as never;
     }
-    try {
-      const response = await client.post('/partner/workspaces/query-v2', query.data);
-      const envelope = response.data && typeof response.data === 'object' && !Array.isArray(response.data)
-        ? response.data as { success?: unknown; data?: unknown } : undefined;
-      if (envelope?.success !== true) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
-      const parsed = query.data.purpose === 'PARTNER_MANAGEMENT'
-        ? PartnerManagementWorkspaceViewV2Schema.safeParse(envelope.data)
-        : ResponderWorkspaceViewV2Schema.safeParse(envelope.data);
-      return parsed.success ? { ok: true, value: parsed.data } as never
-        : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
-    } catch (error) {
-      const failure = businessFailure(error);
-      if (failure) return failure as never;
-      throw error;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await client.post('/partner/workspaces/query-v2', query.data);
+        const envelope = response.data && typeof response.data === 'object' && !Array.isArray(response.data)
+          ? response.data as { success?: unknown; data?: unknown } : undefined;
+        if (envelope?.success !== true) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
+        const parsed = query.data.purpose === 'PARTNER_MANAGEMENT'
+          ? PartnerManagementWorkspaceViewV2Schema.safeParse(envelope.data)
+          : ResponderWorkspaceViewV2Schema.safeParse(envelope.data);
+        return parsed.success ? { ok: true, value: parsed.data } as never
+          : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
+      } catch (error) {
+        const failure = businessFailure(error);
+        if (failure) return failure as never;
+        if (attempt === 1) throw error;
+        // Read-only query: one bounded retry recovers a replaced local/runtime
+        // upstream connection without replaying a command or weakening denial.
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
     }
+    throw new Error('Unreachable workspace query retry state');
   } };
 }

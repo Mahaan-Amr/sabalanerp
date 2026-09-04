@@ -69,6 +69,8 @@ export interface ReportingSnapshot {
   roots: readonly Root[];
   authorization(purpose: ReportPurpose, channel: ReportChannel): Foundation.PartnerAuthorizationPort;
   caseEvidence(root: Root, purpose: ReportPurpose): Promise<CaseEvidence>;
+  /** Persists the frozen artifact in the same repeatable-read transaction as its source evidence. */
+  putExport(artifact: FrozenExport): Promise<void>;
 }
 export type Metrics = {
   wholesalePurchases: string;
@@ -100,6 +102,5 @@ export type FrozenExport = {
 };
 /** Private durable storage supplied by #334. No public/static file URLs. */
 export interface ReportExportStore {
-  put(artifact: FrozenExport): Promise<void>;
   get(id: string): Promise<FrozenExport | null>;
 }

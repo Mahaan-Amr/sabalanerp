@@ -86,6 +86,8 @@ function fixture() {
   };
   const service = createPartnerRetailCorrectionService(repository, {
     calendar,
+    sealSuccessorOwner: async (_tx, input) => ({ ok: true, value: { caseId: input.predecessor.caseId,
+      revision: input.predecessor.revision + 1, integrityHash: input.retailEvidenceHash } }),
     authorize: async (_tx, input) => {
       const persona = input.actorId === 'partner-328' ? 'PARTNER' : 'INTERNAL';
       return { ok: true, value: { evidenceId: input.action === 'CORRECTION_SCOPE_APPROVE'

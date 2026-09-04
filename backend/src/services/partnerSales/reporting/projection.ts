@@ -92,17 +92,23 @@ export function projectReportRow(runtime: ContractRuntime, data: CaseEvidence, p
     deliveries: fulfillment.deliveries, deliveryProgress: null };
   if (data.deliveryProgress !== null) {
     const seen = new Set<string>();
-    row.deliveryProgress = data.deliveryProgress.map(item => {
+    row.deliveryProgress = data.deliveryProgress.flatMap(item => {
       const product = fulfillment.products.find(product => product.productRowId === item.productRowId);
-      if (!product || product.unit !== item.unit || seen.has(item.productRowId)) conflict();
+      if ((product && product.unit !== item.unit) || seen.has(item.productRowId)) conflict();
       seen.add(item.productRowId);
       for (const amount of [item.contracted, item.reserved, item.dispatched]) {
         runtime.SignedDecimalSchema.parse(amount);
         if (amount.startsWith('-')) conflict();
       }
+      if (!product) {
+        if ([item.contracted, item.reserved, item.dispatched].some(amount => subtract(amount, '0') !== '0')) conflict();
+        return [];
+      }
+      if (subtract(item.contracted, product.quantity) !== '0') conflict();
       if (subtract(item.contracted, sum([item.reserved, item.dispatched])).startsWith('-')) conflict();
-      return { productRowId: item.productRowId, unit: item.unit, contracted: item.contracted, reserved: item.reserved, dispatched: item.dispatched };
+      return [{ productRowId: item.productRowId, unit: item.unit, contracted: item.contracted, reserved: item.reserved, dispatched: item.dispatched }];
     });
+    if (fulfillment.products.some(product => !seen.has(product.productRowId))) conflict();
   }
   if (purpose === 'FULFILLMENT') return row;
   row.currency = internal.totals.currency;

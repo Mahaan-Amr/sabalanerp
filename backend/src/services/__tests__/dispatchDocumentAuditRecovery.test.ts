@@ -454,14 +454,15 @@ test('mandatory Prisma truth verifier accepts only immutable writer-owned pricin
   const eventPayload = { allocationRevisionId: 'revision-1', allocationRevisionLineId: 'line-1', pricingVersionId: version.id, pricingRowId: 'pricing-row-1',
     quantity: '2.000', grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000', consumesFinalRemainder: true,
     evidence: { ledgerSequence: 1 }, recordedBy: 'logistics-1' };
-  const revisionLine = { id: 'line-1', sourceContractId: 'contract-1', sourceContractItemId: 'item-1', productRowId: 'product-row-1', unit: 'M3', quantity: decimal('2.000') };
+  const revisionLine = { id: 'line-1', sourceKind: 'SALES_CONTRACT', sourceContractId: 'contract-1', sourceContractItemId: 'item-1',
+    productId: 'product-1', productRowId: 'product-row-1', unit: 'M3', quantity: decimal('2.000') };
   const event = { ...eventPayload, quantity: decimal(eventPayload.quantity), grossAmount: decimal(eventPayload.grossAmount), discountAmount: decimal(eventPayload.discountAmount), netAmount: decimal(eventPayload.netAmount), integrityHash: pricedAllocationIntegrityHash(eventPayload),
     allocationRevisionLine: revisionLine, pricingRow: row };
   const pricedAllocation = { currency: 'TOMAN', pricingVersions: [{ contractId: 'contract-1', pricingVersionId: version.id, integrityHash: version.integrityHash, readinessEvidenceHash: 'd'.repeat(64) }],
     lines: [{ allocationRevisionLineId: 'line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'product-row-1', unit: 'M3', quantity: '2.000', grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000', ledgerSequence: 1 }],
     totals: { grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000' } };
   const sourceHash = dispatchDocumentSourceIntegrityHash({ allocationRevisionId: 'revision-1', allocationIntegrityHash: 'c'.repeat(64), pricedAllocation });
-  const revision = { id: 'revision-1', integrityHash: 'c'.repeat(64), pricingReferences: [{ pricingVersionId: version.id, expectedPricingHash: version.integrityHash, pricingVersion: version }],
+  const revision = { id: 'revision-1', sourceKind: 'SALES_CONTRACT', integrityHash: 'c'.repeat(64), pricingReferences: [{ pricingVersionId: version.id, expectedPricingHash: version.integrityHash, pricingVersion: version }],
     pricedAllocationEvents: [event], candidate: { waybills: [{ snapshot: { documentProvenance: { sourceIntegrityHash: sourceHash, allocationRevisionId: 'revision-1', allocationIntegrityHash: 'c'.repeat(64) } },
       documentArtifacts: [{ kind: 'WAYBILL', statementAdjustmentId: null, sourceIntegrityHash: sourceHash }, { kind: 'STATEMENT', statementAdjustmentId: null, sourceIntegrityHash: sourceHash }] }] } };
   const tx = { logisticsAllocationRevision: { findUnique: async () => revision },

@@ -43,3 +43,9 @@ test('refresh failure preserves the Last Successful View while first-load failur
     error: 'offline',
   });
 });
+
+test('Partner Accounting summaries cannot remain visible while authority is revalidated', () => {
+  const loaded = reduceAccountingWorkspaceLoad(undefined, { type: 'success', data: { partnerAccountingIncluded: true, privateTotal: '1600' } });
+  assert.equal(reduceAccountingWorkspaceLoad(loaded, { type: 'start' }).data, null);
+  assert.equal(reduceAccountingWorkspaceLoad(loaded, { type: 'failure', message: 'permission denied' }).data, null);
+});

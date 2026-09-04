@@ -22,7 +22,8 @@ import { deduplicatePersonnelReportParticipants, normalizePersonnelReportDirecto
 import { prepareSecurityPersonnelReportPdfEvidence, renderSecurityPersonnelReportHistoryPdfHtml } from '../services/securityPersonnelReportPdf';
 import { personnelSearchWhere } from '../services/hrPersonnelBoundary';
 import { completeGuardInboundMovement, GuardInboundMovementConflictError, guardInboundMovementInclude,
-  GuardInboundMovementNotFoundError, GuardInboundMovementValidationError, recordGuardInboundMovement } from '../services/guardInboundMovement';
+  GuardInboundMovementNotFoundError, GuardInboundMovementValidationError, presentGuardInboundMovement,
+  recordGuardInboundMovement } from '../services/guardInboundMovement';
 import canonicalGuardQueueRoutes from './canonical-guard-queue';
 
 const router = express.Router();
@@ -836,7 +837,7 @@ router.get('/vehicle-movements', protect, securityView, async (req: AuthRequest,
       orderBy: { occurredAt: 'desc' },
       take: Number(req.query.limit || 100)
     });
-    res.json({ success: true, data: movements });
+    res.json({ success: true, data: movements.map(presentGuardInboundMovement) });
   } catch (error) {
     console.error('Vehicle movements list error:', error);
     res.status(500).json({ success: false, error: 'Server error' });

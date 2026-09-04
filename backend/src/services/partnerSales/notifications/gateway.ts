@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import type { ContractRuntime, NotificationGateway } from './contracts';
 import { inquiryNoticeKinds } from './contracts';
 import { PARTNER_NOTIFICATION_RESOURCE, type PartnerNotificationAccess } from './access';
@@ -7,7 +7,7 @@ import { publishNotificationEvent } from '../../notificationService';
 /** Uses the existing application client and notification/event/outbox schema.
  * Each call is its own transaction AFTER the committed inquiry cause. */
 export function createPartnerInAppGateway(
-  contract: ContractRuntime, database: PrismaClient, access: PartnerNotificationAccess,
+  contract: ContractRuntime, database: PrismaClient | Prisma.TransactionClient, access: PartnerNotificationAccess,
 ): NotificationGateway {
   return {
     async enqueue(input) {
@@ -17,7 +17,7 @@ export function createPartnerInAppGateway(
       }
       const notification = parsed.data;
       try {
-        return await database.$transaction(async tx => {
+        const run = async (tx: Prisma.TransactionClient) => {
           const key = `partner-notification-v1:${notification.notificationId}`;
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
           const previous = await tx.notificationEvent.findUnique({
@@ -54,7 +54,10 @@ export function createPartnerInAppGateway(
           });
           if (!event) throw new Error('PARTNER_NOTIFICATION_NOT_CREATED');
           return { ok: true as const, value: { deliveryId: event.id, mode: 'LIVE' as const } };
-        });
+        };
+        return typeof (database as PrismaClient).$transaction === 'function'
+          ? await (database as PrismaClient).$transaction(run)
+          : await run(database as Prisma.TransactionClient);
       } catch {
         // No raw database, validator, authorization or economic evidence logs.
         // The committed cause remains retryable at the source outbox owner.

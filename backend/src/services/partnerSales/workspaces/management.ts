@@ -60,8 +60,12 @@ export function createPrismaManagementWorkspaceReader(input: {
 
   async function profileActions(transaction: Transaction, profileId: string) {
     const root = { kind: 'PROFILE' as const, id: profileId };
+    // This is an advisory read-model projection, not mutation authority. Admin
+    // commands are reauthorized later with the actor-entered decision reason;
+    // identify the projection truthfully so the UI can open that reason dialog.
+    const projectionReason = 'Partner management availability projection; command requires an explicit actor reason.';
     const values = await Promise.all(actionGroups.map(group =>
-      projectActionAvailabilityV2(authorization(transaction, group.purpose), root, group.actions)));
+      projectActionAvailabilityV2(authorization(transaction, group.purpose, projectionReason), root, group.actions)));
     const output = new Map<PartnerActionV2, ActionAvailabilityV2>();
     for (const item of values.flat()) output.set(item.action, item);
     return [...output.values()];

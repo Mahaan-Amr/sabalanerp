@@ -30,6 +30,7 @@ type DeadlineItem = {
   amount: string;
   currency?: string | null;
   contractId?: string | null;
+  partnerContext?: { caseNumber: string; internalRecordNumber: string; debtor: { displayName: string } };
   contract?: {
     contractNumber?: string | null;
     title?: string | null;
@@ -140,7 +141,7 @@ export default function AccountingDeadlinesPanel({
           <ul className="divide-y divide-[var(--sds-border-subtle)] rounded-lg border border-[var(--sds-border-default)]">
             {deadlines.items.map((item) => {
               const Icon = item.type === 'receivable' ? FaReceipt : FaMoneyCheckAlt;
-              const title = item.contract?.contractNumber
+              const title = item.partnerContext ? `پرونده ${item.partnerContext.caseNumber}` : item.contract?.contractNumber
                 ? `قرارداد ${item.contract.contractNumber}`
                 : item.type === 'receivable' ? 'دریافتنی قدیمی' : 'چک قدیمی';
               return (
@@ -155,7 +156,7 @@ export default function AccountingDeadlinesPanel({
                     <span className="min-w-0 flex-1">
                       <span className="sds-text-primary block truncate text-sm font-semibold">{title}</span>
                       <span className="sds-text-muted mt-1 block truncate text-xs">
-                        {item.contract?.customer?.displayName || typeLabels[item.type]} · سررسید {dateFa(item.dueDate)}
+                        {item.partnerContext?.debtor.displayName || item.contract?.customer?.displayName || typeLabels[item.type]} · سررسید {dateFa(item.dueDate)}
                       </span>
                     </span>
                     <span className="hidden text-left sm:block">

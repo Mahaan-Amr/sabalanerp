@@ -69,7 +69,8 @@ function createAuthorization(source: AuthorizationSource<PartnerActionV2>, bindi
       : !parsed.data.actionGranted ? partnerError('FORBIDDEN') : null;
     if (denial) return { ok: false, error: denial };
     if (partner && !readActions.has(action) && partner.state !== 'ACTIVE') return { ok: false, error: partnerError('PARTNER_NOT_ACTIVE') };
-    if (['CASE_COMMIT', 'CORRECTION_SCOPE_APPROVE'].includes(action) && resource.partnerStatus !== 'ACTIVE') {
+    const internalVoidingGate = !partner && action === 'CORRECTION_SCOPE_APPROVE' && resource.correctionScope === 'VOID';
+    if (['CASE_COMMIT', 'CORRECTION_SCOPE_APPROVE'].includes(action) && resource.partnerStatus !== 'ACTIVE' && !internalVoidingGate) {
       return { ok: false, error: partnerError('PARTNER_NOT_ACTIVE') };
     }
     return { ok: true, value: parsed.data };

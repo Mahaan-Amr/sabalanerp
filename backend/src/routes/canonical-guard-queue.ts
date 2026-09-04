@@ -8,6 +8,9 @@ import { PhysicalGateExitConflictError, PhysicalGateExitService, PhysicalGateExi
 import { approveManualOutageExit, DispatchRecoveryConflictError, DispatchRecoveryValidationError,
   registerManualOutageExit, reportMissingManualOutagePaper, spoilManualOutageExit, verifyGuardPhysicalReturn } from '../services/dispatchCorrectionOutage';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
+import { withPartnerGuardReadScope } from '../services/partnerSales/fulfillment/guardReadScope';
+import { randomUUID } from 'node:crypto';
+import { PartnerLoadingCommandError } from '../services/partnerSales/fulfillment/loadingAuthority';
 
 const router = express.Router();
 const physicalExitService = new PhysicalGateExitService(prisma);
@@ -34,6 +37,8 @@ const responseTurn = (turn: any, redacted = false) => {
   };
 };
 const fail = (res: any, error: unknown, context: string) => {
+  if (error instanceof PartnerLoadingCommandError) return res.status(error.error.status).json({ success: false,
+    code: error.error.code, error: error.error.message });
   if (error instanceof PilotSafetyPauseError || error instanceof GuardQueueConflictError || error instanceof PhysicalGateExitConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
   if (error instanceof GuardQueueValidationError || error instanceof PhysicalGateExitValidationError || error instanceof DispatchRecoveryValidationError) return res.status(400).json({ success: false, error: error.message });
   console.error(context, error);
@@ -94,11 +99,14 @@ router.get('/dispatch-evidence-exceptions', protect, guardView, async (_req: Wor
 router.get('/canonical-driver-queue', protect, guardView, async (req: WorkspaceRequest, res) => {
   try {
     const history = req.query.history === 'true';
-    const turns = await prisma.guardDriverQueueTurn.findMany({
+    const turns = await withPartnerGuardReadScope(prisma, { actorId: req.user!.id, correlationId: randomUUID() }, async scope => {
+    const rows = await scope.database.guardDriverQueueTurn.findMany({
       where: history ? undefined : { status: { in: ['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING', 'LOADING_FINALIZED'] } },
       include: { events: { orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] } },
       orderBy: history ? [{ admittedAt: 'desc' }, { id: 'desc' }] : [{ admittedAt: 'asc' }, { id: 'asc' }],
       take: history ? 250 : undefined,
+    });
+    return rows.map(scope.present);
     });
     const redacted = req.workspacePermission === WORKSPACE_PERMISSIONS.VIEW;
     return res.json({ success: true, data: turns.map((turn) => responseTurn(turn, redacted)), capabilities: { canEdit: !redacted } });

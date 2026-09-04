@@ -81,12 +81,37 @@ const mapPersistedEvidence = (item: any, guardReturnValidated = false): Shipment
 });
 
 export const isPersistedContractQuantitySupersededByApprovedPricing = (
-  item: { kind: string; contractItemId: string },
+  item: { kind: string; contractItemId: string | null },
   approvedPricingContractItems: ReadonlySet<string>,
-) => item.kind === 'CONTRACTED_SET' && approvedPricingContractItems.has(item.contractItemId);
+) => item.kind === 'CONTRACTED_SET' && item.contractItemId !== null && approvedPricingContractItems.has(item.contractItemId);
 
-const persistedEvidencePayload = (item: ShipmentQuantityEvidence) => ({
-  contractId: item.contractId, contractItemId: item.contractItemId, productRowId: item.productRowId,
+export type PartnerPersistedShipmentEvidence = Omit<ShipmentQuantityEvidence, 'contractId' | 'contractItemId'> & {
+  sourceKind: 'PARTNER_CASE'; contractId: null; contractItemId: null; partnerLineageId: string;
+  partnerCaseId: string; partnerCaseRevision: number; partnerIntegrityHash: string;
+};
+
+export function shipmentQuantitySourceFields(row: {
+  sourceKind: string; contractId: string | null; contractItemId: string | null;
+  partnerLineageId: string | null; partnerCaseId: string | null; partnerCaseRevision: number | null; partnerIntegrityHash: string | null;
+}) {
+  if (row.sourceKind === 'SALES_CONTRACT' && row.contractId && row.contractItemId &&
+      row.partnerLineageId === null && row.partnerCaseId === null && row.partnerCaseRevision === null && row.partnerIntegrityHash === null) {
+    return { contractId: row.contractId, contractItemId: row.contractItemId };
+  }
+  if (row.sourceKind === 'PARTNER_CASE' && row.contractId === null && row.contractItemId === null &&
+      row.partnerLineageId && row.partnerCaseId && row.partnerCaseRevision && row.partnerIntegrityHash) {
+    return { sourceKind: 'PARTNER_CASE' as const, contractId: null, contractItemId: null,
+      partnerLineageId: row.partnerLineageId, partnerCaseId: row.partnerCaseId,
+      partnerCaseRevision: row.partnerCaseRevision, partnerIntegrityHash: row.partnerIntegrityHash };
+  }
+  throw new Error('Shipment quantity source identity conflicts');
+}
+
+const persistedEvidencePayload = (item: ShipmentQuantityEvidence | PartnerPersistedShipmentEvidence) => ({
+  ...('sourceKind' in item && item.sourceKind === 'PARTNER_CASE'
+    ? { sourceKind: item.sourceKind, partnerLineageId: item.partnerLineageId, partnerCaseId: item.partnerCaseId,
+      partnerCaseRevision: item.partnerCaseRevision, partnerIntegrityHash: item.partnerIntegrityHash }
+    : { contractId: item.contractId, contractItemId: item.contractItemId }), productRowId: item.productRowId,
   unit: item.unit, kind: item.kind, quantity: item.quantity, effectiveAt: item.effectiveAt,
   recordedAt: item.recordedAt, sourceType: item.sourceType, sourceId: item.sourceId,
   sourceVersion: item.sourceVersion, metadata: item.metadata || {},
@@ -94,7 +119,7 @@ const persistedEvidencePayload = (item: ShipmentQuantityEvidence) => ({
   ...(item.dispatchEvidenceId ? { dispatchEvidenceId: item.dispatchEvidenceId } : {}),
 });
 
-export const shipmentQuantityEvidenceIntegrityHash = (item: ShipmentQuantityEvidence) =>
+export const shipmentQuantityEvidenceIntegrityHash = (item: ShipmentQuantityEvidence | PartnerPersistedShipmentEvidence) =>
   hash(persistedEvidencePayload(item));
 
 const projectionIntegrityPayload = (row: {
@@ -137,6 +162,13 @@ export const guardReturnValidationFailure = (item: any, allReturns: readonly any
   if (!['PHYSICAL_EXIT', 'MANUAL_OUTAGE_EXIT'].includes(item.dispatchEvidence.kind)) return 'Verified Guard return must reference physical dispatch evidence';
   for (const field of ['contractId', 'contractItemId', 'productRowId', 'unit'] as const) {
     if (item[field] !== item.dispatchEvidence[field]) return `Verified Guard return ${field} attribution does not match its dispatch`;
+  }
+  if ((item.sourceKind ?? 'SALES_CONTRACT') !== (item.dispatchEvidence.sourceKind ?? 'SALES_CONTRACT')) {
+    return 'Verified Guard return source kind does not match its dispatch';
+  }
+  if (item.sourceKind === 'PARTNER_CASE' && (!item.partnerLineageId || !item.partnerCaseId ||
+      item.partnerLineageId !== item.dispatchEvidence.partnerLineageId || item.partnerCaseId !== item.dispatchEvidence.partnerCaseId)) {
+    return 'Verified Guard return Partner lineage does not match its dispatch';
   }
   const dispatchLoadingId = asRecord(item.dispatchEvidence.metadata).loadingId
     || asRecord(item.metadata).dispatchLoadingId;
@@ -281,7 +313,7 @@ export const captureFinanciallyApprovedContractQuantityVersions = async (prisma:
 };
 
 export const readShipmentQuantityProjection = async (
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   scope: Scope,
   options: { cutoff?: string; mode?: 'OPERATIONAL_AS_OF' | 'AUDIT_KNOWN_AT' } = {},
 ): Promise<ShipmentQuantityProjection> => {

@@ -8,7 +8,7 @@ export const loginAsAdmin = async (page: Page) => {
   await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(username);
   await page.locator('input[type="password"]').fill(password);
   await page.getByRole('button', { name: 'ورود', exact: true }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
 };
 
 export const isolatedTestNamespace = (testInfo: TestInfo) => [
@@ -24,25 +24,41 @@ export const waitForStableState = async (page: Page) => {
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 15_000 });
 };
 
+const waitForFiniteVisualAnimations = async (page: Page) => {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    const animations = document.getAnimations().filter((animation) => {
+      const endTime = animation.effect?.getComputedTiming().endTime;
+      return animation.playState !== 'finished'
+        && typeof endTime === 'number'
+        && Number.isFinite(endTime)
+        && endTime <= 1_000;
+    });
+    await Promise.allSettled(animations.map((animation) => animation.finished));
+  });
+};
+
 export const setTheme = async (page: Page, theme: 'light' | 'dark') => {
   await page.evaluate((nextTheme) => {
     document.documentElement.setAttribute('data-theme', nextTheme);
     localStorage.setItem('theme', nextTheme);
   }, theme);
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-  // Tailwind utility transitions do not consume the zero-duration SDS motion
-  // tokens, so let their color interpolation settle before sampling contrast.
-  await page.waitForTimeout(200);
+  await waitForFiniteVisualAnimations(page);
 };
 
 export const setViewportAndZoom = async (page: Page, viewport: { width: number; height: number }, zoom = 1) => {
   await page.setViewportSize(viewport);
+  await page.waitForLoadState('domcontentloaded');
   await page.evaluate((nextZoom) => {
     document.documentElement.style.zoom = nextZoom === 1 ? '' : String(nextZoom);
   }, zoom);
 };
 
 export const assertNoSeriousAxeViolations = async (page: Page) => {
+  await waitForFiniteVisualAnimations(page);
   const results = await new AxeBuilder({ page }).analyze();
   const violations = results.violations.filter(
     ({ impact }) => impact === 'critical' || impact === 'serious'

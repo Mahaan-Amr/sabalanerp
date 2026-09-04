@@ -10,8 +10,8 @@ export function createPartnerTechnicalRecoveryAuthority(binding: { actorId: stri
   : PartnerTechnicalRecoveryDependencies['authorize'] {
   return async (tx, input) => {
     if (input.actorId !== binding.actorId) return { ok: false, error: partnerError('NOT_FOUND') };
-    // Same order as technicalRecoveryLease: session -> Profile -> Users ->
-    // central authority. No caller may enter this after locking a Case child.
+    // The Prisma composition has already locked global operations control;
+    // session -> Profile -> Users -> central authority follows that boundary.
     await tx.$queryRaw`SELECT "draftId" FROM sales_contract_edit_sessions WHERE "draftId" = ${input.recoveryId} FOR UPDATE`;
     const session = await tx.salesContractEditSession.findUnique({ where: { draftId: input.recoveryId },
       select: { ownerUserId: true, contractId: true } });

@@ -29,3 +29,15 @@ test('workspace HTTP port rejects a purpose-confused or widened response', async
   const result = await confused.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE' });
   assert.equal(!result.ok && result.error.code, 'INTEGRITY_CONFLICT');
 });
+
+test('workspace HTTP port retries one transient read failure but never widens the response', async () => {
+  let calls = 0;
+  const port = createPartnerWorkspaceHttpPort({ post: async () => {
+    calls += 1;
+    if (calls === 1) throw new Error('replaced local upstream connection');
+    return { data: { success: true, data: { schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE',
+      actorId: 'responder-334', inquiries: [] } } };
+  } });
+  assert.equal((await port.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE' })).ok, true);
+  assert.equal(calls, 2);
+});

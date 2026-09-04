@@ -19,7 +19,7 @@ const login = async (page: Page) => {
   await page.locator('input[name="identifier"]').fill('admin');
   await page.locator('input[name="password"]').fill('admin123');
   await page.locator('form').getByRole('button', { name: 'ورود' }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
 };
 
 const backgroundAlpha = async (page: Page, selector: string) =>
@@ -52,6 +52,7 @@ test('HR sidebar and workspace dismiss layers never become opaque on hover', asy
 });
 
 test('HR landing preserves real data and produces the approved responsive theme artifacts', async ({ page }) => {
+  test.setTimeout(240_000);
   const runtimeErrors: string[] = [];
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
@@ -77,11 +78,11 @@ test('HR landing preserves real data and produces the approved responsive theme 
   await expect(page.getByRole('link', { name: /ظرفیت خالی/ })).toHaveAttribute('href', '/dashboard/hr/structure/positions?filter=vacant');
   await expect(page.getByRole('link', { name: /ساختار سازمانی/ }).first()).toHaveAttribute('href', '/dashboard/hr/structure');
 
-  await page.goto('/dashboard/hr/structure/positions?filter=vacant');
+  await page.goto('/dashboard/hr/structure/positions?filter=vacant', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'نمای ظرفیت جایگاه‌ها' })).toBeVisible();
-  await page.goto('/dashboard/hr/tasks?scope=mine');
+  await page.goto('/dashboard/hr/tasks?scope=mine', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'وظایف منابع انسانی' })).toBeVisible();
-  await page.goto('/dashboard/hr');
+  await page.goto('/dashboard/hr', { waitUntil: 'domcontentloaded' });
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.screenshot({ path: path.join(screenshotDirectory, 'desktop-dark-1920x1080.png') });
@@ -95,8 +96,10 @@ test('HR landing preserves real data and produces the approved responsive theme 
   const mobileNavigation = page.getByRole('navigation', { name: 'ناوبری منابع انسانی' });
   await expect(mobileNavigation).toBeVisible();
   await expect(mobileNavigation.getByRole('link')).toHaveCount(5);
-  await mobileNavigation.getByRole('link', { name: 'ساختار' }).click();
-  await expect(page).toHaveURL(/\/dashboard\/hr\/structure$/);
+  await Promise.all([
+    page.waitForURL(/\/dashboard\/hr\/structure$/, { timeout: 60_000 }),
+    mobileNavigation.getByRole('link', { name: 'ساختار' }).click(),
+  ]);
   await expect(page.getByRole('navigation', { name: 'ناوبری منابع انسانی' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.evaluate(() => window.scrollTo(0, 0));

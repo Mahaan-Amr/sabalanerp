@@ -102,7 +102,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   useEffect(() => {
     if (!currentUser) return;
     let active = true;
-    const paths = ['/dashboard/sales/partners', '/dashboard/sales/partner-inquiries'];
+    const paths = ['/dashboard/sales/partners', '/dashboard/sales/partner-inquiries', '/dashboard/sales/partner-cases'];
     Promise.all(paths.map(async path => {
       try {
         const response = await dashboardAPI.getRouteAvailability(path);
@@ -416,6 +416,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
             href: "/dashboard/sales/partner-inquiries",
             icon: FaClipboardList,
             show: partnerRouteAccess['/dashboard/sales/partner-inquiries'] === true,
+          },
+          {
+            name: "Partner Cases",
+            namePersian: "پرونده‌ها و حساب همکار",
+            href: "/dashboard/sales/partner-cases",
+            icon: FaFileContract,
+            show: partnerRouteAccess['/dashboard/sales/partner-cases'] === true,
           },
           {
             name: "Reports",

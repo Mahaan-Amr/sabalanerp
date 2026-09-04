@@ -12,6 +12,7 @@ import {
 import { prisma } from '../lib/prisma';
 import {
   PARTNER_CASE_RETENTION_BLOCKER,
+  PARTNER_CASE_LIFECYCLE_BLOCKER,
   contractDeactivationEligibility,
   contractHardDeleteEligibility,
   type ContractLifecycleAction,
@@ -19,6 +20,8 @@ import {
 } from './contractLifecyclePolicy';
 
 type LifecycleClient = PrismaClient | Prisma.TransactionClient;
+const partnerOwned = (contract: { partnerCaseId: string | null; partnerKind: string | null }) =>
+  Boolean(contract.partnerCaseId) || contract.partnerKind === 'PARTNER_CUSTOMER';
 
 const mutableFinancialStatuses: AccountingRecordStatus[] = [
   AccountingRecordStatus.DRAFT,
@@ -138,6 +141,7 @@ export const getContractLifecyclePreview = async (contractId: string) => {
       inactiveBy: true,
       inactiveReason: true,
       partnerCaseId: true,
+      partnerKind: true,
     },
   });
   if (!contract) throw new Error('Contract not found');
@@ -150,24 +154,31 @@ export const getContractLifecyclePreview = async (contractId: string) => {
     contract,
     dependencies,
     deleteEligibility: contractHardDeleteEligibility({ status: contract.status,
-      numberedPartnerCase: contract.partnerCaseId !== null, dependencies }),
+      numberedPartnerCase: partnerOwned(contract), dependencies }),
     deactivationEligibility: contractDeactivationEligibility({
       alreadyInactive: contract.isInactive,
+      numberedPartnerCase: partnerOwned(contract),
       openOperations: dependencies.openOperationsByKind,
     }),
     pendingRequests,
   };
 };
 
-export const listContractLifecycleRequests = async (query: { status?: string; kind?: string } = {}) => {
+export const listContractLifecycleRequests = async (query: { status?: string; kind?: string } = {}, options: { ordinaryOnly?: boolean } = {}) => {
   const status = Object.values(ContractLifecycleRequestStatus).includes(query.status as ContractLifecycleRequestStatus)
     ? query.status as ContractLifecycleRequestStatus
     : undefined;
   const kind = Object.values(ContractLifecycleRequestKind).includes(query.kind as ContractLifecycleRequestKind)
     ? query.kind as ContractLifecycleRequestKind
     : undefined;
+  const partnerRequests = options.ordinaryOnly ? await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT r.id FROM contract_lifecycle_requests r LEFT JOIN sales_contracts c ON c.id = r."contractId"
+    WHERE c."partnerCaseId" IS NOT NULL OR c."partnerKind" = 'PARTNER_CUSTOMER'
+      OR r."contractSnapshot"->>'partnerKind' = 'PARTNER_CUSTOMER'
+      OR r."contractSnapshot"->>'partnerCaseId' IS NOT NULL` : [];
   return prisma.contractLifecycleRequest.findMany({
-    where: { ...(status ? { status } : {}), ...(kind ? { kind } : {}) },
+    where: { ...(status ? { status } : {}), ...(kind ? { kind } : {}),
+      ...(options.ordinaryOnly ? { id: { notIn: partnerRequests.map(row => row.id) } } : {}) },
     orderBy: { requestedAt: 'desc' },
     take: 200,
   });
@@ -187,9 +198,10 @@ export const createContractLifecycleRequest = async ({
   const normalizedReason = requireReason(reason);
   const contract = await prisma.salesContract.findUnique({ where: { id: contractId } });
   if (!contract) throw new Error('Contract not found');
-  if (kind === ContractLifecycleRequestKind.DELETE && contract.partnerCaseId) {
+  if (kind === ContractLifecycleRequestKind.DELETE && partnerOwned(contract)) {
     throw new Error(`${PARTNER_CASE_RETENTION_BLOCKER.label} قابل حذف نیست؛ برای نگهداری سابقه، پرونده را لغو کنید`);
   }
+  if (partnerOwned(contract)) throw new ContractLifecycleBlockedError([PARTNER_CASE_LIFECYCLE_BLOCKER]);
   if (kind === ContractLifecycleRequestKind.DELETE && contract.status !== ContractStatus.DRAFT && contract.status !== ContractStatus.CANCELLED) {
     throw new Error('Only draft or voided contracts can be requested for hard deletion');
   }
@@ -248,7 +260,9 @@ export const executeContractLifecycleAction = async ({
   if (!contract) throw new Error('Contract not found');
   const preview = await getContractLifecyclePreview(contractId);
 
-  const eligibility = action === 'DELETE'
+  const eligibility = partnerOwned(contract) && action !== 'DELETE'
+    ? { eligible: false, blockers: [PARTNER_CASE_LIFECYCLE_BLOCKER] }
+    : action === 'DELETE'
     ? preview.deleteEligibility
     : action === 'DEACTIVATE'
       ? preview.deactivationEligibility
@@ -287,9 +301,11 @@ export const executeContractLifecycleAction = async ({
     const lockedContract = await tx.salesContract.findUnique({ where: { id: contractId } });
     if (!lockedContract) throw new Error('Contract not found');
     const lockedDependencies = await getContractLifecycleDependencies(contractId, tx);
-    const lockedEligibility = action === 'DELETE'
+    const lockedEligibility = partnerOwned(lockedContract) && action !== 'DELETE'
+      ? { eligible: false, blockers: [PARTNER_CASE_LIFECYCLE_BLOCKER] }
+      : action === 'DELETE'
       ? contractHardDeleteEligibility({ status: lockedContract.status,
-        numberedPartnerCase: lockedContract.partnerCaseId !== null, dependencies: lockedDependencies })
+        numberedPartnerCase: partnerOwned(lockedContract), dependencies: lockedDependencies })
       : action === 'DEACTIVATE'
         ? contractDeactivationEligibility({ alreadyInactive: lockedContract.isInactive, openOperations: lockedDependencies.openOperationsByKind })
         : { eligible: lockedContract.isInactive, blockers: [] as ContractLifecycleBlocker[] };

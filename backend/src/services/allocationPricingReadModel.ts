@@ -1,6 +1,9 @@
 import type { Prisma } from '@prisma/client';
 import { pricedAllocationIntegrityHash, sumExactMoney } from './pricedAllocationLedger';
 import { approvedPricingOperationalContractItemId } from './approvedPricing';
+import { ordinaryAllocationLine } from './allocationSource';
+import { PartnerEventSchema } from '@sabalanerp/partner-sales-contracts';
+import { readPartnerOfficialPurchase } from './partnerSales/accounting/officialPurchase';
 
 type Tx = Prisma.TransactionClient;
 
@@ -9,7 +12,8 @@ const record = (value: unknown): Readonly<Record<string, unknown>> => {
   return value as Readonly<Record<string, unknown>>;
 };
 
-export type BoundPricedAllocationReadModel = {
+type OrdinaryBoundPricedAllocationReadModel = {
+  sourceKind?: never;
   currency: string;
   pricingVersions: Array<{
     contractId: string;
@@ -31,6 +35,15 @@ export type BoundPricedAllocationReadModel = {
   }>;
   totals: { grossAmount: string; discountAmount: string; netAmount: string };
 };
+export type PartnerBoundPricedAllocationReadModel = {
+  sourceKind: 'PARTNER_CASE'; currency: string;
+  pricingVersions: Array<{ caseId: string; internalRecordId: string; financialApprovalEvidenceId: string;
+    sourceFinancialRecordId: string; integrityHash: string; readinessEvidenceHash: string }>;
+  lines: Array<{ allocationRevisionLineId: string; productRowId: string; unit: string; quantity: string;
+    grossAmount: string; discountAmount: string; netAmount: string; ledgerSequence: number }>;
+  totals: { grossAmount: string; discountAmount: string; netAmount: string };
+};
+export type BoundPricedAllocationReadModel = OrdinaryBoundPricedAllocationReadModel | PartnerBoundPricedAllocationReadModel;
 
 export type BoundAllocationPricingFreshness =
   | { status: 'CURRENT'; staleContracts: [] }
@@ -42,6 +55,31 @@ export const assessBoundAllocationPricingFreshness = async (
   tx: Tx,
   allocationRevisionId: string,
 ): Promise<BoundAllocationPricingFreshness> => {
+  const revision = await tx.logisticsAllocationRevision.findUnique({ where: { id: allocationRevisionId },
+    select: { sourceKind: true, partnerPricing: { select: { caseId: true, internalRecordId: true,
+      sourceFinancialRecordId: true, financialApprovalEvidenceId: true, preparationEvidenceHash: true } } } });
+  if (revision?.sourceKind === 'PARTNER_CASE') {
+    if (!revision.partnerPricing) throw new Error('Partner allocation revision has no priced binding.');
+    const events = await tx.partnerCaseEvent.findMany({ where: { caseId: revision.partnerPricing.caseId },
+      orderBy: [{ sequence: 'asc' }, { id: 'asc' }], select: { evidence: true } });
+    const approvals = events.flatMap(row => {
+      const evidence = row.evidence && typeof row.evidence === 'object' && !Array.isArray(row.evidence)
+        ? row.evidence as Record<string, unknown> : {};
+      const parsed = PartnerEventSchema.safeParse(evidence.publicEvent);
+      return parsed.success && 'financialApprovalEvidenceId' in parsed.data ? [parsed.data] : [];
+    });
+    const approval = approvals.find(row => row.financialApprovalEvidenceId === revision.partnerPricing!.financialApprovalEvidenceId);
+    if (!approval) throw new Error('Partner official financial approval evidence is missing.');
+    const clock = (await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0].now;
+    const purchase = await readPartnerOfficialPurchase(tx, { internalRecordId: revision.partnerPricing.internalRecordId,
+      approval, cutoff: clock, asOf: clock, voided: false });
+    if (!purchase.covered || !purchase.official || purchase.official.invoice.status !== 'ISSUED'
+        || purchase.official.invoice.invoiceRecordId !== revision.partnerPricing.sourceFinancialRecordId
+        || purchase.official.invoice.preparation.evidenceHash !== revision.partnerPricing.preparationEvidenceHash) {
+      throw new Error('Partner official shipment pricing is no longer current.');
+    }
+    return { status: 'CURRENT', staleContracts: [] };
+  }
   const references = await tx.logisticsAllocationRevisionPricing.findMany({
     where: { allocationRevisionId }, orderBy: { contractId: 'asc' },
   });
@@ -66,6 +104,49 @@ export const readBoundPricedAllocation = async (
   tx: Tx,
   allocationRevisionId: string,
 ): Promise<BoundPricedAllocationReadModel> => {
+  const revision = await tx.logisticsAllocationRevision.findUnique({ where: { id: allocationRevisionId }, include: {
+    lines: true, partnerPricing: { include: { events: { include: { allocationRevisionLine: true },
+      orderBy: [{ approvalEvidenceId: 'asc' }, { recordedAt: 'asc' }, { id: 'asc' }] } } } } });
+  if (revision?.sourceKind === 'PARTNER_CASE') {
+    const reference = revision.partnerPricing;
+    if (!reference || reference.allocationRevisionId !== revision.id || !revision.partnerCaseId ||
+        reference.caseId !== revision.partnerCaseId || reference.caseRevision !== revision.partnerCaseRevision ||
+        reference.integrityHash !== revision.partnerIntegrityHash || reference.internalRecordId !== revision.partnerInternalRecordId ||
+        !reference.events.length || reference.discountAmount.toFixed(12) !== '0.000000000000' ||
+        reference.netAmount.toFixed(12) !== reference.grossAmount.toFixed(12)) throw new Error('Partner priced allocation attribution changed.');
+    const sequences = new Map<string, number[]>();
+    const lines = reference.events.map(event => {
+      const line = event.allocationRevisionLine;
+      const evidence = record(event.evidence), ledgerSequence = Number(evidence.ledgerSequence);
+      const payload = { sourceKind: 'PARTNER_CASE' as const, caseId: reference.caseId,
+        internalRecordId: reference.internalRecordId, allocationRevisionLineId: line.id,
+        productRowId: line.productRowId, quantity: event.quantity.toFixed(3), unit: line.unit,
+        pricingVersionId: reference.financialApprovalEvidenceId, pricingRowId: event.approvalEvidenceId,
+        grossAmount: event.grossAmount.toFixed(12), discountAmount: event.discountAmount.toFixed(12),
+        netAmount: event.netAmount.toFixed(12), consumesFinalRemainder: event.consumesFinalRemainder,
+        evidence: event.evidence, recordedBy: event.recordedBy };
+      if (!Number.isSafeInteger(ledgerSequence) || ledgerSequence < 1 ||
+          event.integrityHash !== pricedAllocationIntegrityHash(payload) || line.sourceKind !== 'PARTNER_CASE' ||
+          line.partnerCaseId !== reference.caseId || line.partnerCaseRevision !== reference.caseRevision ||
+          line.partnerIntegrityHash !== reference.integrityHash || line.partnerLineageId === null ||
+          line.sourceContractId !== null || line.sourceContractItemId !== null || line.productId !== null ||
+          line.quantity.toFixed(3) !== event.quantity.toFixed(3)) throw new Error('Partner priced allocation event failed integrity verification.');
+      sequences.set(event.approvalEvidenceId, [...(sequences.get(event.approvalEvidenceId) || []), ledgerSequence]);
+      return { allocationRevisionLineId: line.id, productRowId: line.productRowId, unit: line.unit,
+        quantity: payload.quantity, grossAmount: payload.grossAmount, discountAmount: payload.discountAmount,
+        netAmount: payload.netAmount, ledgerSequence };
+    }).sort((left, right) => left.productRowId.localeCompare(right.productRowId) || left.ledgerSequence - right.ledgerSequence);
+    for (const values of sequences.values()) if (values.sort((a, b) => a - b).some((value, index) => value !== index + 1)) {
+      throw new Error('Partner priced allocation row has a non-contiguous ledger sequence.');
+    }
+    const totals = { grossAmount: sumExactMoney(lines.map(line => line.grossAmount)),
+      discountAmount: sumExactMoney(lines.map(line => line.discountAmount)), netAmount: sumExactMoney(lines.map(line => line.netAmount)) };
+    return { sourceKind: 'PARTNER_CASE', currency: reference.currency,
+      pricingVersions: [{ caseId: reference.caseId, internalRecordId: reference.internalRecordId,
+        financialApprovalEvidenceId: reference.financialApprovalEvidenceId,
+        sourceFinancialRecordId: reference.sourceFinancialRecordId,
+        integrityHash: reference.pricingIntegrityHash, readinessEvidenceHash: reference.readinessEvidenceHash }], lines, totals };
+  }
   const [references, events] = await Promise.all([
     tx.logisticsAllocationRevisionPricing.findMany({
       where: { allocationRevisionId }, include: { pricingVersion: true }, orderBy: { contractId: 'asc' },
@@ -106,7 +187,7 @@ export const readBoundPricedAllocation = async (
       || event.integrityHash !== pricedAllocationIntegrityHash(payload)) {
       throw new Error(`Priced allocation event ${event.id} failed integrity verification.`);
     }
-    const revisionLine = event.allocationRevisionLine;
+    const revisionLine = ordinaryAllocationLine(event.allocationRevisionLine);
     const reference = referencesByContract.get(revisionLine.sourceContractId);
     if (!reference || reference.pricingVersionId !== event.pricingVersionId
       || event.pricingRow.pricingVersionId !== event.pricingVersionId

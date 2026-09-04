@@ -1,19 +1,11 @@
 import { contracts, type FulfillmentPartnerPort, type FulfillmentView, type PartnerErrorCode, type Result } from './contracts';
-import type { PartnerFulfillmentCommand, PartnerFulfillmentRepository, PartnerFulfillmentSource, PartnerPhysicalLineage } from './repository';
-import { formatShipmentQuantity, parseShipmentQuantityToScaledInteger } from '../../shipmentQuantityProjection';
+import type { PartnerFulfillmentCommand, PartnerFulfillmentRepository, PartnerFulfillmentSource, PartnerPhysicalLineage, PartnerLoadingSource } from './repository';
+import { parseShipmentQuantityToScaledInteger } from '../../shipmentQuantityProjection';
+import { buildPartnerPhysicalLineage, canonicalPartnerQuantity as canonicalQuantity } from './lineage';
 
 const failure = <T = never>(code: PartnerErrorCode): Result<T> => ({ ok: false, error: contracts.partnerError(code) });
 
-const canonicalQuantity = (value: string): string | null => {
-  try {
-    const units = parseShipmentQuantityToScaledInteger(value);
-    return units > 0n ? formatShipmentQuantity(units) : null;
-  } catch {
-    return null;
-  }
-};
-
-const validateSource = (input: FulfillmentView, source: PartnerFulfillmentSource): Result<PartnerFulfillmentSource> => {
+const validateSource = (input: FulfillmentView, source: PartnerFulfillmentSource, historical = false): Result<PartnerFulfillmentSource> => {
   const parsedInput = contracts.FulfillmentViewSchema.safeParse(input);
   const parsedSource = contracts.FulfillmentViewSchema.safeParse(source.view);
   const parsedGraph = contracts.CaseGraphRefSchema.safeParse(source.graph);
@@ -26,7 +18,7 @@ const validateSource = (input: FulfillmentView, source: PartnerFulfillmentSource
   const revisionConflict = contracts.checkExpectedRevision(parsedInput.data.owner, view.owner);
   if (revisionConflict) return { ok: false, error: revisionConflict };
   if (contracts.canonicalJson(parsedInput.data) !== contracts.canonicalJson(view)) return failure('INTEGRITY_CONFLICT');
-  if (source.caseState !== 'COMMITTED') return failure('STATE_CONFLICT');
+  if (!historical && source.caseState !== 'COMMITTED') return failure('STATE_CONFLICT');
   if (contracts.checkExpectedRevision(view.owner, parsedGraph.data.owner)) return failure('INTEGRITY_CONFLICT');
   if (!view.products.length || new Set(view.products.map(row => row.productRowId)).size !== view.products.length) return failure('INTEGRITY_CONFLICT');
   const viewRows = [...view.products.map(row => row.productRowId)].sort();
@@ -39,8 +31,7 @@ const validateSource = (input: FulfillmentView, source: PartnerFulfillmentSource
       contracts.canonicalJson(viewRows) !== contracts.canonicalJson(graphRows) ||
       contracts.canonicalJson(graphRows) !== contracts.canonicalJson(canonicalRows)) return failure('INTEGRITY_CONFLICT');
   if (view.products.some(row => canonicalQuantity(row.quantity) === null)) return failure('INTEGRITY_CONFLICT');
-  if (new Set(view.deliveries.map(row => row.deliveryId)).size !== view.deliveries.length ||
-      view.deliveries.some(row => row.destination !== source.customer.destination)) return failure('INTEGRITY_CONFLICT');
+  if (new Set(view.deliveries.map(row => row.deliveryId)).size !== view.deliveries.length) return failure('INTEGRITY_CONFLICT');
   const products = new Map(view.products.map(row => [row.productRowId, row]));
   const delivered = new Map<string, bigint>();
   for (const delivery of view.deliveries) {
@@ -52,25 +43,10 @@ const validateSource = (input: FulfillmentView, source: PartnerFulfillmentSource
     }
   }
   for (const [productRowId, product] of products) {
-    if ((delivered.get(productRowId) || 0n) !== parseShipmentQuantityToScaledInteger(product.quantity)) return failure('INTEGRITY_CONFLICT');
+    if ((delivered.get(productRowId) || 0n) > parseShipmentQuantityToScaledInteger(product.quantity)) return failure('INTEGRITY_CONFLICT');
   }
   return { ok: true, value: { ...source, view, graph: parsedGraph.data } };
 };
-
-const lineageFor = async (source: PartnerFulfillmentSource, product: FulfillmentView['products'][number]): Promise<PartnerPhysicalLineage> => ({
-  lineageId: `partner-fulfillment:${(await contracts.canonicalHash(`${source.view.owner.caseId}:${product.productRowId}`)).slice(10)}`,
-  sourceKind: 'PARTNER_CASE',
-  caseId: source.view.owner.caseId,
-  createdFrom: source.view.owner,
-  internalRecordId: source.view.recordId,
-  productRowId: product.productRowId,
-  quantity: canonicalQuantity(product.quantity) as string,
-  unit: product.unit,
-  recipient: source.customer,
-  deliveryIds: source.view.deliveries
-    .filter(delivery => delivery.items.some(item => item.productRowId === product.productRowId))
-    .map(delivery => delivery.deliveryId),
-});
 
 export function createPartnerFulfillmentAdapter(repository: PartnerFulfillmentRepository) {
   const inspect = (view: FulfillmentView, mode: 'SUCCESSOR' | 'VOIDING') => repository.transaction(async tx => {
@@ -84,17 +60,19 @@ export function createPartnerFulfillmentAdapter(repository: PartnerFulfillmentRe
     for (const row of dependencies) counts.set(row.productRowId, (counts.get(row.productRowId) || 0) + 1);
     const blocked = new Set<string>();
     for (const product of validated.value.view.products) {
-      if (!counts.has(product.productRowId) && await tx.findLineage(view.owner.caseId, product.productRowId)) blocked.add(product.productRowId);
+      if (!counts.has(product.productRowId) && await tx.findLineage(view.owner.caseId,
+        product.productRowId)) blocked.add(product.productRowId);
     }
     dependencies.filter(row => {
       const product = products.get(row.productRowId);
-      if (!product || counts.get(row.productRowId) !== 1 || row.sourceKind !== 'PARTNER_CASE' ||
-          row.internalRecordId !== validated.value.view.recordId || row.health !== 'CURRENT' || row.unit !== product.unit ||
+      if (counts.get(row.productRowId) !== 1 || row.sourceKind !== 'PARTNER_CASE' || !row.evidenceIds.length ||
+          row.internalRecordId !== validated.value.view.recordId || row.health !== 'CURRENT' || (product && row.unit !== product.unit) ||
           contracts.checkExpectedRevision(validated.value.view.owner, row.owner)) return true;
       try {
         const contracted = parseShipmentQuantityToScaledInteger(row.contracted);
         const reserved = parseShipmentQuantityToScaledInteger(row.finalizedReserved);
         const dispatched = parseShipmentQuantityToScaledInteger(row.physicallyDispatched);
+        if (!product) return contracted !== 0n || reserved !== 0n || dispatched !== 0n;
         const proposed = parseShipmentQuantityToScaledInteger(product.quantity);
         const invalid = contracted <= 0n || reserved < 0n || dispatched < 0n || reserved + dispatched > contracted;
         return invalid || contracted !== proposed || (mode === 'VOIDING' ? reserved > 0n || dispatched > 0n : reserved + dispatched > proposed);
@@ -109,7 +87,35 @@ export function createPartnerFulfillmentAdapter(repository: PartnerFulfillmentRe
   });
   const inspectDependencies: FulfillmentPartnerPort['inspectDependencies'] = view => inspect(view, 'SUCCESSOR');
 
+  const readLoading = (expected: FulfillmentView['owner'], deliveryId: string, historical: boolean): Promise<Result<PartnerLoadingSource>> => repository.transaction(async tx => {
+      if (!contracts.RevisionRefSchema.safeParse(expected).success || !contracts.IdSchema.safeParse(deliveryId).success) return failure('INVALID_PAYLOAD');
+      const loaded = await tx.readAuthorizedSource(expected, historical ? 'INSPECT_LOADING' : 'SELECT_DELIVERY');
+      if (!loaded.ok) return loaded;
+      const stale = contracts.checkExpectedRevision(expected, loaded.value.view.owner);
+      if (stale) return { ok: false, error: stale };
+      const validated = validateSource(loaded.value.view, loaded.value, historical);
+      if (!validated.ok) return validated;
+      const source = validated.value;
+      const delivery = source.view.deliveries.find(row => row.deliveryId === deliveryId);
+      if (!delivery) return failure('NOT_FOUND');
+      const rows: PartnerLoadingSource['rows'] = [];
+      for (const item of delivery.items) {
+        const product = source.view.products.find(row => row.productRowId === item.productRowId)!;
+        const lineage = await tx.findLineage(expected.caseId, item.productRowId);
+        if (!lineage || lineage.sourceKind !== 'PARTNER_CASE' || lineage.caseId !== expected.caseId ||
+            lineage.internalRecordId !== source.view.recordId || lineage.productRowId !== item.productRowId ||
+            lineage.unit !== product.unit || lineage.recipient.customerId !== source.customer.customerId ||
+            lineage.createdFrom.caseId !== expected.caseId || lineage.createdFrom.revision > expected.revision) return failure('INTEGRITY_CONFLICT');
+        rows.push({ lineageId: lineage.lineageId, productRowId: item.productRowId, description: product.description,
+          unit: product.unit, plannedQuantity: canonicalQuantity(item.quantity)! });
+      }
+      return { ok: true, value: { sourceKind: 'PARTNER_CASE', owner: source.view.owner,
+        internalRecordId: source.view.recordId, deliveryId, plannedDate: delivery.date,
+        recipient: { ...source.customer, destination: delivery.destination }, rows } };
+    });
   return {
+    readLoadingSource: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, false),
+    readLoadingEvidence: (expected: FulfillmentView['owner'], deliveryId: string) => readLoading(expected, deliveryId, true),
     inspectDependencies,
     inspectVoidingDependencies: (view: FulfillmentView) => inspect(view, 'VOIDING'),
     ensureCommittedLineage: (view: FulfillmentView, command: PartnerFulfillmentCommand) => repository.transaction(async tx => {
@@ -123,6 +129,8 @@ export function createPartnerFulfillmentAdapter(repository: PartnerFulfillmentRe
         expected: command.expected, view });
       const scopedCommand = { ...command, idempotency: { actorId: command.authenticatedActorId, operation,
         targetId: view.owner.caseId, key: command.idempotencyKey, payloadHash: intentHash } };
+      const loaded = await tx.readAuthorizedSource(view.owner, 'MATERIALIZE', command.authenticatedActorId);
+      if (!loaded.ok) return loaded;
       const replay = await tx.readLineageCommand(scopedCommand);
       if (replay) {
         if (replay.intentHash !== intentHash || contracts.compareIdempotency(replay.idempotency, scopedCommand.idempotency) !== 'REPLAY') {
@@ -130,16 +138,21 @@ export function createPartnerFulfillmentAdapter(repository: PartnerFulfillmentRe
         }
         return { ok: true, value: { commandId: replay.commandId, replayed: true, lineageEvidenceIds: replay.lineageEvidenceIds } };
       }
-      const loaded = await tx.readAuthorizedSource(view.owner, 'MATERIALIZE', command.authenticatedActorId);
-      if (!loaded.ok) return loaded;
       const validated = validateSource(view, loaded.value);
       if (!validated.ok) return validated;
       const lineages: PartnerPhysicalLineage[] = [];
       for (const product of validated.value.view.products) {
-        const expected = await lineageFor(validated.value, product);
+        const expected = await buildPartnerPhysicalLineage(validated.value, product);
         const existing = await tx.findLineage(expected.caseId, expected.productRowId);
         if (existing) {
-          if (contracts.canonicalJson(existing) !== contracts.canonicalJson(expected)) return failure('INTEGRITY_CONFLICT');
+          if (existing.lineageId !== expected.lineageId || existing.sourceKind !== 'PARTNER_CASE' ||
+              existing.caseId !== expected.caseId || existing.internalRecordId !== expected.internalRecordId ||
+              existing.productRowId !== expected.productRowId || existing.unit !== expected.unit ||
+              existing.recipient.customerId !== expected.recipient.customerId ||
+              !contracts.RevisionRefSchema.safeParse(existing.createdFrom).success ||
+              existing.createdFrom.caseId !== expected.caseId || existing.createdFrom.revision > expected.createdFrom.revision ||
+              (existing.createdFrom.revision === expected.createdFrom.revision &&
+                contracts.canonicalJson(existing) !== contracts.canonicalJson(expected))) return failure('INTEGRITY_CONFLICT');
           lineages.push(existing);
           continue;
         }

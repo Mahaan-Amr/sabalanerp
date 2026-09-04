@@ -19,8 +19,7 @@ export function createPartnerAccountingAdapter(repository: PartnerAccountingRepo
       if (contracts.canonicalJson(parsedView.data) !== contracts.canonicalJson(source.view) ||
           contracts.canonicalJson(parsedEvent.data) !== contracts.canonicalJson(source.commitment) ||
           source.commitment.internalRecordId !== source.view.recordId ||
-          source.commitment.salesCreditOwnerId !== source.partnerSellerId ||
-          contracts.checkExpectedRevision(source.commitment.owner, source.view.owner)) return failure('INTEGRITY_CONFLICT');
+          source.commitment.salesCreditOwnerId !== source.partnerSellerId) return failure('INTEGRITY_CONFLICT');
       const existing = await tx.findQueue(source.view.owner.caseId);
       if (existing) {
         if (existing.commitmentEventId !== source.commitment.eventId || existing.preparation.evidenceHash !== prepared.value.evidenceHash) return failure('IDEMPOTENCY_CONFLICT');

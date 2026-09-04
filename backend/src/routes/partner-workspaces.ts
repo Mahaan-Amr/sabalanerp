@@ -45,7 +45,8 @@ export function createPartnerWorkspaceRouter(dependencies: {
     }
     try {
       return reply(response, await dependencies.queryFor(request).query(parsed.data as never));
-    } catch {
+    } catch (error) {
+      console.error('Partner workspace query failed:', error);
       return reply(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') });
     }
   });

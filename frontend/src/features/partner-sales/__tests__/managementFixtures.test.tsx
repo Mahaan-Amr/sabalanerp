@@ -9,8 +9,8 @@ import { ManagementView } from '../management/ManagementView';
 
 test('purpose-projected fixtures keep HR, Sales, Accounting, CRM and ordinary Manager separate', async () => {
   const expected: Record<ManagementPersona, string[]> = {
-    HR: ['تأیید هویت'], SALES: ['تغییر شرایط تجاری', 'تعیین پاسخ‌دهنده'], ACCOUNTING: ['تغییر شرایط اعتبار'],
-    CRM: ['تأیید انتقال'], ADMIN: ['تأیید هویت', 'تغییر شرایط تجاری', 'تغییر شرایط اعتبار', 'تأیید انتقال'],
+    HR: ['تأیید هویت'], SALES: ['تغییر شرایط تجاری', 'تعیین پاسخ‌دهنده', 'تغییر پاسخ‌دهنده'], ACCOUNTING: ['تغییر شرایط اعتبار'],
+    CRM: ['تأیید انتقال'], ADMIN: ['تأیید هویت', 'تغییر شرایط تجاری', 'تغییر شرایط اعتبار', 'تغییر پاسخ‌دهنده', 'تأیید انتقال'],
     MANAGER: [], PARTNER: [], EXPIRED: [],
   };
   for (const persona of Object.keys(expected) as ManagementPersona[]) {
@@ -19,7 +19,7 @@ test('purpose-projected fixtures keep HR, Sales, Accounting, CRM and ordinary Ma
     assert.equal(response.ok, true); if (!response.ok) continue;
     const html = renderToStaticMarkup(<ManagementView view={response.value} now={Date.now()} disabled={false} onChoose={() => undefined} />);
     const buttons = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) || [];
-    for (const label of ['تأیید هویت', 'تغییر شرایط تجاری', 'تغییر شرایط اعتبار', 'تأیید انتقال']) {
+    for (const label of ['تأیید هویت', 'تغییر شرایط تجاری', 'تغییر شرایط اعتبار', 'تغییر پاسخ‌دهنده', 'تأیید انتقال']) {
       assert.equal(buttons.some(button => button.includes(`>${label}</span>`)), expected[persona].includes(label), `${persona}: ${label}`);
     }
     assert.doesNotMatch(html, /قیمت مشتری|حاشیه سود|retail/);

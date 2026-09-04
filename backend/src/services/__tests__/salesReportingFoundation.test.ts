@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { AccountingRecordStatus, FinancialRecordKind } from '@prisma/client';
 import { snapshotRealizedSale, recordRealizedAdjustment, recordContractCancellation, reassignContractSeller } from '../salesAttributionService';
-import { buildRealizedSalesHeadline, buildSalesPipelineHeadline, buildSalesReportContractWhere, buildSalesReportScope, resolveAllTimeSalesReportPeriod, resolveSalesReportPeriod, selectAccountingRegisteredRecord } from '../salesReportingService';
+import { buildRealizedSalesHeadline, buildSalesPipelineHeadline, buildSalesReportContractPartitions, buildSalesReportContractWhere, buildSalesReportScope, projectPartnerRevenueForSales, resolveAllTimeSalesReportPeriod, resolveSalesReportPeriod, selectAccountingRegisteredRecord } from '../salesReportingService';
 
 const contract: any = {
   id: 'contract-1',
@@ -106,6 +106,19 @@ const run = async () => {
 
   const companyAccess = { userId: 'admin-1', role: 'ADMIN', departmentId: null, canManage: true, canCompany: true };
   assert.deepEqual(buildSalesReportContractWhere(companyAccess, {}), {}, 'company reporting scope remains company-wide');
+  assert.deepEqual(buildSalesReportContractPartitions({ departmentId: 'sales-dept' }), {
+    ordinary: { AND: [{ departmentId: 'sales-dept' }, { OR: [{ partnerKind: null }, { partnerKind: { not: 'PARTNER_CUSTOMER' } }] }] },
+    partner: { AND: [{ departmentId: 'sales-dept' }, { partnerKind: 'PARTNER_CUSTOMER' }] },
+  }, 'ordinary reporting excludes compatibility contracts before the Partner event projection is unioned');
+
+  const partnerRevenue = projectPartnerRevenueForSales([{
+    schemaVersion: 1, type: 'CASE_COMMITTED', eventId: 'partner-commit', commandId: 'partner-command',
+    correlationId: 'partner-correlation', actorId: 'partner-seller', recordedAt: '2026-08-01T08:00:00.000Z',
+    effectiveDate: '2026-08-01', owner: { caseId: 'partner-case', revision: 1,
+      integrityHash: `sha256-v1:${'a'.repeat(64)}` }, internalRecordId: 'partner-internal', trigger: 'SIGNED',
+    salesCreditOwnerId: 'partner-seller', sabalanNetAmount: { amount: '100', currency: 'IRR' },
+  }], '2026-08-31T23:59:59.000Z');
+  assert.equal(partnerRevenue?.amount, '100', 'Sales and BI consume the frozen Sabalan amount, never the retail compatibility amount');
 
   const allTime = resolveAllTimeSalesReportPeriod([
     { createdAt: '2024-01-10T12:00:00.000Z', reportingEvents: [{ effectiveAt: '2023-12-20T08:00:00.000Z' }] },

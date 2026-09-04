@@ -5,7 +5,8 @@ import { PrismaClient, type Prisma } from '@prisma/client';
 import { parseCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { canonicalHash, type PartnerCommand } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerCaseService, type PartnerCaseDependencies } from '../partnerSales/cases/aggregate';
-import { validateResolvedDraft, type ResolvedCaseDraft } from '../partnerSales/cases/revisions';
+import { buildRevisionEvidence, validateResolvedDraft, type ResolvedCaseDraft } from '../partnerSales/cases/revisions';
+import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 
 function databaseUrl() {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -23,6 +24,22 @@ const graphFor = (productRowId: string) => parseCanonicalProductGraph({ schemaVe
   sourceBatches: [], remainingStones: [], allocations: [], operationGroups: [], toolSelections: [], finishingSelections: [] });
 const configurationHash = `sha256-v1:${'1'.repeat(64)}`;
 const approvalEvidenceHash = `sha256-v1:${'2'.repeat(64)}`;
+
+test('revision commercial evidence preserves significant fractional digits beyond ambient Decimal precision', async () => {
+  const ids = { caseId: 'exact-case', partnerId: 'exact-partner', customerId: 'exact-customer', profileId: 'exact-profile',
+    accountId: 'exact-account', departmentId: 'exact-department', inquiryId: 'exact-inquiry', inquiryRowId: 'exact-inquiry-row' };
+  const input = await command(ids), source = await resolved(ids, ids.caseId);
+  input.intent.rows[0].retailUnitPrice.amount = '90071992547409931234.01';
+  input.intent.customerPaymentPlan.installments[0].amount.amount = '180143985094819862468.02';
+  const approval = { ...createPartnerFixtures().approval, wholesaleUnitPrice: { amount: '100', currency: 'IRT' as const } };
+  const result = buildRevisionEvidence({ command: input, resolved: source, graph: source.graph,
+    graphHash: input.intent.graphHash, rows: [{ ...source.rows[0], approval, retailUnitPrice: input.intent.rows[0].retailUnitPrice }] });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  if (result.ok) {
+    assert.equal(result.value.retailEnvelope.totals.net, '180143985094819862468.02');
+    assert.equal(result.value.resaleDifference, '180143985094819862268.02');
+  }
+});
 
 test('family-aware technical measures bind longitudinal quantity instead of the raw piece count', async () => {
   const ids = { caseId: 'measure-case', partnerId: 'measure-partner', customerId: 'measure-customer',
@@ -78,20 +95,23 @@ async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, s
       ] });
       await tx.department.create({ data: { id: ids.departmentId, name: ids.departmentId, namePersian: 'فروش تستی' } });
       await tx.partnerProfile.create({ data: { id: ids.profileId, userId: ids.partnerId, state: 'ACTIVE' } });
+      await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${ids.profileId}, true)`;
       await tx.partnerCommercialAccount.create({ data: { id: ids.accountId, profileId: ids.profileId } });
       await tx.partnerReleaseCohort.create({ data: { id: ids.profileId, name: ids.profileId,
         activationEnabled: true, enrollmentPaused: false, operationalPaused: false } });
+      await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+        cohortId: ids.profileId, enrollmentPaused: false, operationalPaused: false } });
       await tx.partnerCohortMembership.create({ data: { id: ids.profileId, profileId: ids.profileId,
         cohortId: ids.profileId, actorId: ids.responderId, eligibilityEvidence: { fixture: true } } });
       await tx.crmCustomer.create({ data: { id: ids.customerId, firstName: 'Customer', lastName: 'Case',
-        ownerUserId: ids.partnerId, createdBy: ids.partnerId } });
+        ownerUserId: ids.partnerId, createdBy: ids.partnerId, partnerOwnerProfileId: ids.profileId, partnerRevision: 1 } });
       await tx.crmCustomer.create({ data: { id: ids.secondCustomerId, firstName: 'Customer', lastName: 'Revised',
-        ownerUserId: ids.partnerId, createdBy: ids.partnerId } });
+        ownerUserId: ids.partnerId, createdBy: ids.partnerId, partnerOwnerProfileId: ids.profileId, partnerRevision: 1 } });
       await tx.crmPotentialProject.createMany({ data: [
         { id: ids.firstProjectId, customerId: ids.customerId, responsibleSellerId: ids.partnerId,
-          createdBy: ids.partnerId, title: 'پروژه نخست', workType: 'سنگ' },
+          createdBy: ids.partnerId, title: 'پروژه نخست', workType: 'سنگ', partnerRevision: 1 },
         { id: ids.secondProjectId, customerId: ids.secondCustomerId, responsibleSellerId: ids.partnerId,
-          createdBy: ids.partnerId, title: 'پروژه دوم', workType: 'سنگ' },
+          createdBy: ids.partnerId, title: 'پروژه دوم', workType: 'سنگ', partnerRevision: 1 },
       ] });
       await tx.partnerInquiry.create({ data: { id: ids.inquiryId, profileId: ids.profileId, revision: 2, submittedAt: new Date() } });
       await tx.partnerInquiryAssignment.create({ data: { id: ids.assignmentId, inquiryId: ids.inquiryId, revision: 1,
@@ -360,7 +380,8 @@ test('an unchanged Project binding must still belong to the exact current custom
     const created = await service(tx, ids).execute(submitted);
     assert.equal(created.ok, true);
     if (!created.ok || !created.value.case) return;
-    await tx.crmPotentialProject.update({ where: { id: ids.firstProjectId }, data: { wonSalesContractId: null } });
+    await tx.crmPotentialProject.update({ where: { id: ids.firstProjectId }, data: {
+      wonSalesContractId: null, partnerRevision: { increment: 1 } } });
     const revised = await service(tx, ids).execute(await reviseCommand(ids, submitted, 1,
       created.value.case.owner.integrityHash, 'missing-project-binding'));
     assert.equal(revised.ok ? null : revised.error.code, 'ROW_STALE');

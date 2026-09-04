@@ -73,6 +73,7 @@ import {
 } from '../services/contractLifecycleService';
 import { requestAccountingSalesContractCorrection } from '../services/salesContractCorrectionDuty';
 import { getEffectiveUserAccess } from '../services/effectiveAccessService';
+import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from '../services/partnerSales/accounting/errors';
 
 const router = express.Router();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
@@ -83,6 +84,7 @@ const accountingActionFeature: Record<string, string[]> = {
   CREATE_RECEIVABLE: [FEATURES.ACCOUNTING_RECEIVABLES_MANAGE],
   APPROVE_FINANCIAL_INVOICE: [FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID],
   REGISTER_RECEIPT: [FEATURES.ACCOUNTING_PAYMENTS_MANAGE],
+  REVERSE_RECEIPT: [FEATURES.ACCOUNTING_PAYMENTS_MANAGE],
   UPDATE_CHECK_STATUS: [FEATURES.ACCOUNTING_PAYMENTS_MANAGE],
   MARK_TAX_READY: [FEATURES.ACCOUNTING_TAX_MANAGE],
   TRACK_TAX_SUBMISSION: [FEATURES.ACCOUNTING_TAX_MANAGE],
@@ -166,7 +168,20 @@ const accountingFeatureView = (feature: Feature) => [
   requireWorkspaceAccess(WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.VIEW),
   requireFeatureAccess(feature, FEATURE_PERMISSIONS.VIEW),
 ];
-const accountingContractsView = accountingFeatureView(FEATURES.ACCOUNTING_CONTRACTS_VIEW);
+const accountingContractsView = [...accountingFeatureView(FEATURES.ACCOUNTING_CONTRACTS_VIEW),
+  async (req: AuthRequest, res: Response, next: express.NextFunction) => {
+    if (!req.params.contractId) return next();
+    try {
+      const contract = await prisma.salesContract.findUnique({ where: { id: req.params.contractId },
+        select: { partnerCaseId: true, partnerKind: true } });
+      // Partner Accounting has an internal debtor/source. The retail projection
+      // cannot enter ordinary detail, lifecycle or PDF handlers by a deep link.
+      if (contract?.partnerCaseId || contract?.partnerKind === 'PARTNER_CUSTOMER') {
+        res.status(404).json({ success: false, error: 'رکورد حسابداری در دسترس نیست.' }); return;
+      }
+      next();
+    } catch (error) { next(error); }
+  }];
 const accountingFinancialRecordsView = accountingFeatureView(FEATURES.ACCOUNTING_RECORDS_APPROVE_VOID);
 const accountingReceivablesView = accountingFeatureView(FEATURES.ACCOUNTING_RECEIVABLES_MANAGE);
 const accountingPaymentsView = accountingFeatureView(FEATURES.ACCOUNTING_PAYMENTS_MANAGE);
@@ -450,13 +465,23 @@ const markOriginalSalesContractPrinted = async (
   });
 };
 
+const accountingReadFailure = (res: Response, error: unknown) => {
+  if (error instanceof PartnerAccountingCommandError) return res.status(error.status).json({
+    success: false, code: error.code, error: error.message, message: error.message, actionUrl: error.actionUrl,
+  });
+  const trackingId = `ACC-${Date.now().toString(36).toUpperCase()}`;
+  console.error('Accounting read technical failure:', { trackingId, error });
+  return res.status(500).json({ success: false, trackingId,
+    error: 'دریافت اطلاعات حسابداری موقتاً ممکن نیست؛ دوباره تلاش کنید و در صورت تکرار، کد پیگیری را به پشتیبانی بدهید.' });
+};
+
 export const getAccountingWorkspaceResponse = async (req: AuthRequest, res: Response) => {
   try {
-    const workspace = await getAccountingWorkspace(req.query);
+    const workspace = await getAccountingWorkspace(req.query, { userId: req.user!.id });
     res.json({ success: true, data: workspace });
   } catch (error) {
     console.error('Accounting workspace error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    accountingReadFailure(res, error);
   }
 };
 
@@ -466,11 +491,11 @@ export const createAccountingFinancialTrendResponse = (
   loadTrend: typeof getAccountingFinancialTrend = getAccountingFinancialTrend,
 ) => async (req: AuthRequest, res: Response) => {
   try {
-    const trend = await loadTrend(req.query.range);
+    const trend = await loadTrend(req.query.range, new Date(), { userId: req.user!.id });
     res.json({ success: true, data: trend });
   } catch (error) {
     console.error('Accounting financial trend error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    accountingReadFailure(res, error);
   }
 };
 
@@ -524,7 +549,7 @@ router.get('/contracts/:contractId/lifecycle', accountingContractsView, async (r
 
 router.get('/contract-lifecycle-requests', accountingView, async (req: AuthRequest, res: Response) => {
   try {
-    const data = await listContractLifecycleRequests(req.query as any);
+    const data = await listContractLifecycleRequests(req.query as any, { ordinaryOnly: true });
     res.json({ success: true, data });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });
@@ -797,48 +822,48 @@ router.get('/contracts/:contractId/sales-pdf', accountingContractsView, async (r
 
 router.get('/financial-records', accountingFinancialRecordsView, async (req: AuthRequest, res: Response) => {
   try {
-    const data = await listFinancialRecords(req.query);
+    const data = await listFinancialRecords(req.query, { userId: req.user!.id });
     res.json({ success: true, data });
   } catch (error) {
     console.error('Accounting records error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    accountingReadFailure(res, error);
   }
 });
 
 router.get('/receivables', accountingReceivablesView, async (req: AuthRequest, res: Response) => {
   try {
-    const data = await listReceivables(req.query);
+    const data = await listReceivables(req.query, { userId: req.user!.id });
     res.json({ success: true, data });
   } catch (error) {
     console.error('Accounting receivables error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    accountingReadFailure(res, error);
   }
 });
 
 router.get('/payments', accountingPaymentsView, async (req: AuthRequest, res: Response) => {
   try {
-    const data = await listPaymentStatuses(req.query);
+    const data = await listPaymentStatuses(req.query, { userId: req.user!.id });
     res.json({ success: true, data });
   } catch (error) {
     console.error('Accounting payments error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    accountingReadFailure(res, error);
   }
 });
 
 router.get('/tax', accountingTaxView, async (req: AuthRequest, res: Response) => {
   try {
-    const data = await listTaxRecords(req.query);
+    const data = await listTaxRecords(req.query, { userId: req.user!.id });
     res.json({ success: true, data });
   } catch (error) {
     console.error('Accounting tax error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    accountingReadFailure(res, error);
   }
 });
 
 router.get('/correction-requests', accountingCorrectionsView, async (req: AuthRequest, res: Response) => {
   try {
     const [data, capabilities] = await Promise.all([
-      listCorrectionRequests(req.query),
+      listCorrectionRequests(req.query, { userId: req.user!.id }),
       getAccountingActionCapabilities(req.user!.id, req.user!.role),
     ]);
     res.json({ success: true, data: { ...data, actionAvailability: {
@@ -847,7 +872,7 @@ router.get('/correction-requests', accountingCorrectionsView, async (req: AuthRe
     } } });
   } catch (error) {
     console.error('Accounting correction requests error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    accountingReadFailure(res, error);
   }
 });
 
@@ -923,21 +948,21 @@ router.get('/audit/dispatch-documents/recovery', accountingRecoveryEvidenceView,
 
 router.get('/audit', accountingAuditView, async (req: AuthRequest, res: Response) => {
   try {
-    const data = await listAuditLogs(req.query);
+    const data = await listAuditLogs(req.query, { userId: req.user!.id });
     res.json({ success: true, data });
   } catch (error) {
     console.error('Accounting audit error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    accountingReadFailure(res, error);
   }
 });
 
 router.get('/performance', accountingView, async (req: AuthRequest, res: Response) => {
   try {
-    const data = await getAccountantPerformanceReport(req.query);
+    const data = await getAccountantPerformanceReport(req.query, { userId: req.user!.id });
     res.json({ success: true, data });
   } catch (error) {
     console.error('Accounting performance error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    accountingReadFailure(res, error);
   }
 });
 
@@ -1052,6 +1077,14 @@ export const createAccountingActionHandler = (
       res.json({ success: true, data: result });
     } catch (error: any) {
       console.error('Accounting action error:', error);
+      if (error instanceof PartnerAccountingCommandError) return res.status(error.status).json({
+        success: false, code: error.code, error: error.message, message: error.message, actionUrl: error.actionUrl,
+      });
+      if (error instanceof PartnerAccountingTechnicalError) {
+        const trackingId = `ACC-${Date.now().toString(36).toUpperCase()}`;
+        console.error('Partner Accounting technical failure:', { trackingId, diagnostic: error.diagnostic });
+        return res.status(500).json({ success: false, error: error.message, trackingId });
+      }
       if (error instanceof FinancialEvidenceConflictError && (req.body.invoiceId || req.body.recordId)) {
         const reviewCase = await recordFinancialEvidenceReviewCase({
           invoiceId: req.body.invoiceId || req.body.recordId,

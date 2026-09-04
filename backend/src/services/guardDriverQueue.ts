@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { GuardDriverQueueTurnStatus, GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
 import { projectExternalDriverReadiness, projectExternalVehicleReadiness, projectInternalDriverReadiness } from './dispatchMasterDataPolicy';
 import { assertCanonicalDispatchCommandAllowed, recordFirstCanonicalAdmission } from './dispatchCutover';
+import { preparePartnerLoadingQueueChange, preparePartnerGuardQueueRelease } from './partnerSales/fulfillment/loadingQueue';
+import { PartnerLoadingCommandError } from './partnerSales/fulfillment/loadingAuthority';
+import type { RevisionRef } from '@sabalanerp/partner-sales-contracts';
 
 const stableValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -234,7 +237,11 @@ export const makeGuardQueueTurnAvailable = async (prisma: PrismaClient, turnId: 
   return updated;
 }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
-export const reserveGuardQueueTurn = async (prisma: PrismaClient, input: { turnId: string; loadingId: string; actorId: string }) => prisma.$transaction(async (tx) => {
+export const reserveGuardQueueTurn = async (prisma: PrismaClient, input: { turnId: string; loadingId: string; actorId: string;
+  expected?: RevisionRef; correlationId?: string; reason?: string;
+}) => prisma.$transaction(async (tx) => {
+  const source = await preparePartnerLoadingQueueChange(tx, input, 'RESERVE');
+  if (!source.ok) return { partnerFailure: source.error };
   await assertCanonicalDispatchCommandAllowed(tx);
   for (const key of [`GUARD_QUEUE:${input.turnId}`, `LOGISTICS_LOADING:${input.loadingId}`].sort()) {
     await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', key);
@@ -256,12 +263,20 @@ export const reserveGuardQueueTurn = async (prisma: PrismaClient, input: { turnI
   const updated = await tx.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: turn.id } });
   await appendQueueEvent(tx, {
     turnId: turn.id, eventType: 'RESERVED_FOR_LOADING', fromStatus: turn.status, toStatus: updated.status, actorId: input.actorId,
-    payload: { loadingId: loading.id, reservedAt: updated.reservedAt },
+    payload: { loadingId: loading.id, reservedAt: updated.reservedAt,
+      ...(source.value.sourceKind === 'PARTNER_CASE' ? { source: source.value } : {}) },
   });
   return updated;
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).then(outcome => {
+  if ('partnerFailure' in outcome) throw new PartnerLoadingCommandError(outcome.partnerFailure);
+  return outcome;
+});
 
-export const releaseGuardQueueReservation = async (prisma: PrismaClient, input: { turnId: string; loadingId: string; actorId: string; reason: string }) => prisma.$transaction(async (tx) => {
+export const releaseGuardQueueReservation = async (prisma: PrismaClient, input: { turnId: string; loadingId: string; actorId: string;
+  reason: string; correlationId?: string;
+}) => prisma.$transaction(async (tx) => {
+  const source = await preparePartnerLoadingQueueChange(tx, input, 'RELEASE');
+  if (!source.ok) return { partnerFailure: source.error };
   for (const key of [`GUARD_QUEUE:${input.turnId}`, `LOGISTICS_LOADING:${input.loadingId}`].sort()) {
     await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', key);
   }
@@ -280,10 +295,14 @@ export const releaseGuardQueueReservation = async (prisma: PrismaClient, input: 
   const updated = await tx.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: turn.id } });
   await appendQueueEvent(tx, {
     turnId: turn.id, eventType: 'RESERVATION_RELEASED', fromStatus: turn.status, toStatus: updated.status,
-    actorId: input.actorId, reason, payload: { loadingId: input.loadingId },
+    actorId: input.actorId, reason, payload: { loadingId: input.loadingId,
+      ...(source.value.sourceKind === 'PARTNER_CASE' ? { source: source.value } : {}) },
   });
   return updated;
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).then(outcome => {
+  if ('partnerFailure' in outcome) throw new PartnerLoadingCommandError(outcome.partnerFailure);
+  return outcome;
+});
 
 export const returnGuardQueueTurnToWaiting = async (prisma: PrismaClient, input: { turnId: string; actorId: string; reason: string }) => prisma.$transaction(async (tx) => {
   await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `GUARD_QUEUE:${input.turnId}`);
@@ -306,9 +325,12 @@ export const returnGuardQueueTurnToWaiting = async (prisma: PrismaClient, input:
 }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
 export const closeGuardQueueTurnWithoutLoading = async (prisma: PrismaClient, input: { turnId: string; actorId: string; reason: string }) => prisma.$transaction(async (tx) => {
+  const owner = await preparePartnerGuardQueueRelease(tx, input);
+  if (!owner.ok) return { partnerFailure: owner.error };
   await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `GUARD_QUEUE:${input.turnId}`);
   let turn = await tx.guardDriverQueueTurn.findUnique({ where: { id: input.turnId } });
   if (!turn) throw new GuardQueueValidationError('Canonical queue turn was not found.');
+  if (turn.loadingId !== owner.value.loadingId) throw new GuardQueueConflictError('The queue reservation changed before departure.');
   const reason = input.reason.trim();
   if (!reason) throw new GuardQueueValidationError('A close-without-loading reason is required.');
   const closableStatuses = new Set<GuardDriverQueueTurnStatus>([
@@ -324,7 +346,8 @@ export const closeGuardQueueTurnWithoutLoading = async (prisma: PrismaClient, in
     } });
     await appendQueueEvent(tx, {
       turnId: turn.id, eventType: 'RESERVATION_RELEASED_FOR_DEPARTURE', fromStatus: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING,
-      toStatus: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, actorId: input.actorId, reason, payload: { loadingId },
+      toStatus: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, actorId: input.actorId, reason,
+      payload: { loadingId, ...(owner.value.source?.sourceKind === 'PARTNER_CASE' ? { source: owner.value.source } : {}) },
     });
   }
   const fromStatus = turn.status;
@@ -342,12 +365,18 @@ export const closeGuardQueueTurnWithoutLoading = async (prisma: PrismaClient, in
     actorId: input.actorId, reason, payload: { closedAt: updated.closedAt },
   });
   return updated;
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).then(outcome => {
+  if ('partnerFailure' in outcome) throw new PartnerLoadingCommandError(outcome.partnerFailure);
+  return outcome;
+});
 
 export const voidGuardQueueTurn = async (prisma: PrismaClient, input: { turnId: string; actorId: string; reason: string; replacementTurnId?: string }) => prisma.$transaction(async (tx) => {
+  const owner = await preparePartnerGuardQueueRelease(tx, input);
+  if (!owner.ok) return { partnerFailure: owner.error };
   await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `GUARD_QUEUE:${input.turnId}`);
   let turn = await tx.guardDriverQueueTurn.findUnique({ where: { id: input.turnId } });
   if (!turn) throw new GuardQueueValidationError('Canonical queue turn was not found.');
+  if (turn.loadingId !== owner.value.loadingId) throw new GuardQueueConflictError('The queue reservation changed before voiding.');
   const reason = input.reason.trim();
   if (!reason) throw new GuardQueueValidationError('A void reason is required.');
   const voidableStatuses = new Set<GuardDriverQueueTurnStatus>([
@@ -366,7 +395,8 @@ export const voidGuardQueueTurn = async (prisma: PrismaClient, input: { turnId: 
     } });
     await appendQueueEvent(tx, {
       turnId: turn.id, eventType: 'RESERVATION_RELEASED_FOR_VOID', fromStatus: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING,
-      toStatus: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, actorId: input.actorId, reason, payload: { loadingId },
+      toStatus: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING, actorId: input.actorId, reason,
+      payload: { loadingId, ...(owner.value.source?.sourceKind === 'PARTNER_CASE' ? { source: owner.value.source } : {}) },
     });
   }
   const fromStatus = turn.status;
@@ -379,7 +409,10 @@ export const voidGuardQueueTurn = async (prisma: PrismaClient, input: { turnId: 
     payload: { voidedAt: updated.voidedAt, replacementTurnId: updated.replacementTurnId },
   });
   return updated;
-}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).then(outcome => {
+  if ('partnerFailure' in outcome) throw new PartnerLoadingCommandError(outcome.partnerFailure);
+  return outcome;
+});
 
 export const listGuardQueueAdmissionOptions = async (prisma: PrismaClient, at = new Date()) => {
   const openStatuses: GuardDriverQueueTurnStatus[] = [

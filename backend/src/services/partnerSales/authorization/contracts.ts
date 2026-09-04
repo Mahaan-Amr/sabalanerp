@@ -10,7 +10,7 @@ export interface AuthorizationEvidence<Action extends PartnerActionV2 = PartnerA
     partnerProfile?: { state: PermissionContext['partnerStatus']; revision: number } };
   resource: { root: AuthorizationRoot; partnerSellerId: string;
     partnerStatus: PermissionContext['partnerStatus']; lifecycleRevision: number; departmentId?: string;
-    assignment?: PermissionContext['assignment']; requesterId?: string } | null;
+    assignment?: PermissionContext['assignment']; requesterId?: string; correctionScope?: string } | null;
   grants: Array<{ action: Action; rootKind: AuthorizationRoot['kind']; purpose: PermissionContext['purpose'];
     scope: PermissionContext['scope']; expiresAt?: string; boundRootId?: string;
     provenance?: { source: 'DIRECT_ACTION' | 'ROLE_ACTION'; grantId: string; version: 1 } }>;

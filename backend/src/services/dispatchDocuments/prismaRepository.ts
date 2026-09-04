@@ -16,6 +16,8 @@ import { isRetryableDispatchTransactionError, refreshProjectionContracts } from 
 import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { createPrismaAllocationPricingBindingPort } from '../allocationPricingPrismaAdapter';
 import { verifyDispatchArtifactStorageUnderLock } from './artifactStorageLock';
+import { shipmentSourceForAllocationLine } from '../allocationSource';
+import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
 
 type Tx = Prisma.TransactionClient;
 const json = (value: unknown) => value as Prisma.InputJsonValue;
@@ -35,6 +37,17 @@ export const dispatchDocumentLifecycleAuditEventHash = (input: {
 const resultJson = (value: unknown) => json(stable(value));
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value)
   ? value as Record<string, any> : {};
+const partnerAuthorizationDenied = { partnerAuthorizationDenied: true } as const;
+const isPartnerAuthorizationDenied = (value: unknown): value is typeof partnerAuthorizationDenied =>
+  record(value).partnerAuthorizationDenied === true;
+const authorizePartnerAccountingWrite = async (tx: Tx, input: { actorId: string; correlationId: string;
+  partnerCaseId: string | null }) => {
+  if (!input.partnerCaseId) return true;
+  const result = await createAuditedPartnerAuthorization(tx, { actorId: input.actorId, purpose: 'ACCOUNTING', channel: 'API' }, {
+    correlationId: input.correlationId, reason: 'تایید دسترسی نوشتن اسناد ارسال پرونده همکار',
+  }).authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: input.partnerCaseId });
+  return result.ok;
+};
 
 const isDispatchCommandKeyUniqueViolation = (error: Prisma.PrismaClientKnownRequestError) => {
   if (error.code !== 'P2002') return false;
@@ -130,36 +143,53 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
     private readonly artifactStorage: DispatchArtifactStorage) {}
 
   async findCommandResult(input: Parameters<DispatchDocumentRepository['findCommandResult']>[0]) {
-    const row = await this.prisma.dispatchDocumentCommandResult.findUnique({ where: { scope_scopeId_idempotencyKey: {
-      scope: input.scope, scopeId: input.scopeId, idempotencyKey: input.idempotencyKey } } });
-    if (!row) return null;
-    const envelope = record(row.result);
-    if (row.command !== input.command || envelope.intentFingerprint !== input.intentFingerprint) {
-      throw new DispatchDocumentConflictError('The idempotency key is already bound to another dispatch command intent.');
-    }
-    return row.status === 'SUCCEEDED' ? envelope.value : null;
+    const result = await this.prisma.$transaction(async tx => {
+      if (input.actorId && input.correlationId && ['CANDIDATE', 'WAYBILL'].includes(input.scope)) {
+        const candidate = input.scope === 'CANDIDATE'
+          ? await tx.accountingDispatchCandidate.findUnique({ where: { id: input.scopeId }, select: {
+            allocationRevision: { select: { sourceKind: true, partnerCaseId: true } },
+          } })
+          : (await tx.accountingDispatchWaybill.findUnique({ where: { id: input.scopeId }, select: {
+            candidate: { select: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true } } } },
+          } }))?.candidate;
+        if (candidate?.allocationRevision.sourceKind === 'PARTNER_CASE' && !await authorizePartnerAccountingWrite(tx, {
+          actorId: input.actorId, correlationId: input.correlationId,
+          partnerCaseId: candidate.allocationRevision.partnerCaseId,
+        })) return partnerAuthorizationDenied;
+      }
+      return commandResult(tx, input.scope, input.scopeId, input.idempotencyKey, input.command, input.intentFingerprint);
+    });
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    return result;
   }
   async allocateWaybillNumber() {
     const rows = await this.prisma.$queryRawUnsafe<Array<{ number: bigint }>>(`SELECT nextval('accounting_dispatch_waybill_number_seq') AS number`);
     return rows[0].number.toString();
   }
   async acceptAndIssue(input: Parameters<DispatchDocumentRepository['acceptAndIssue']>[0]) {
-    return runSerializableDispatchOperation(this.prisma, async (tx) => {
+    const result = await runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${input.candidateId}`]);
+      const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: input.candidateId }, include: {
+        workItem: true, allocationRevision: { select: { sourceKind: true, partnerCaseId: true } },
+      } });
+      if (!candidate) throw new DispatchDocumentValidationError('Accounting dispatch candidate was not found.');
+      if (candidate.allocationRevision.sourceKind === 'PARTNER_CASE' && !await authorizePartnerAccountingWrite(tx, {
+        actorId: input.actorId, correlationId: input.correlationId,
+        partnerCaseId: candidate.allocationRevision.partnerCaseId,
+      })) return partnerAuthorizationDenied;
       const prior = await commandResult(tx, 'CANDIDATE', input.candidateId, input.idempotencyKey, 'ACCEPT_AND_ISSUE', input.intentFingerprint);
       if (prior) return prior as any;
-      const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: input.candidateId }, include: { workItem: true } });
-      if (!candidate) throw new DispatchDocumentValidationError('Accounting dispatch candidate was not found.');
       if (candidate.status !== AccountingDispatchCandidateStatus.PENDING || candidate.allocationRevisionId !== input.allocationRevisionId) {
         throw new DispatchDocumentConflictError('Only the current pending candidate can be issued.');
       }
       await assertCanonicalDispatchCommandAllowed(tx);
       const [cutover, revision] = await Promise.all([
         tx.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' } }),
-        tx.logisticsAllocationRevision.findUnique({ where: { id: input.allocationRevisionId }, select: { finalizedAt: true } }),
+        tx.logisticsAllocationRevision.findUnique({ where: { id: input.allocationRevisionId }, select: { sourceKind: true, finalizedAt: true } }),
       ]);
-      if (!revision || !isShipmentStatementFlowActive(process.env, cutover)
-        || !cutover?.cutoverAt || !isPostCutoverFinalization(revision.finalizedAt, cutover.cutoverAt)) {
+      const ordinaryAtomic = Boolean(revision && isShipmentStatementFlowActive(process.env, cutover)
+        && cutover?.cutoverAt && isPostCutoverFinalization(revision.finalizedAt, cutover.cutoverAt));
+      if (!revision || (revision.sourceKind !== 'PARTNER_CASE' && !ordinaryAtomic)) {
         throw new DispatchDocumentConflictError('This candidate belongs to the compatibility waybill-only path.');
       }
       const pricingContracts = await tx.logisticsAllocationRevisionPricing.findMany({
@@ -212,63 +242,95 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
         payload: { candidateId: candidate.id, allocationRevisionId: input.allocationRevisionId, artifactIds: input.artifacts.map(item => item.id),
           sourceIntegrityHash: input.expectedSourceIntegrityHash, idempotencyKey: input.idempotencyKey, correlationId: input.correlationId }, actorId: input.actorId, at: issuedAt });
       return result;
-    }, async () => (await this.findCommandResult({ scope: 'CANDIDATE', scopeId: input.candidateId,
-      idempotencyKey: input.idempotencyKey, command: 'ACCEPT_AND_ISSUE', intentFingerprint: input.intentFingerprint })) as any);
+    }, async () => this.prisma.$transaction(async tx => {
+      const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: input.candidateId }, select: {
+        allocationRevision: { select: { sourceKind: true, partnerCaseId: true } },
+      } });
+      if (candidate?.allocationRevision.sourceKind === 'PARTNER_CASE' && !await authorizePartnerAccountingWrite(tx, {
+        actorId: input.actorId, correlationId: input.correlationId,
+        partnerCaseId: candidate.allocationRevision.partnerCaseId,
+      })) return partnerAuthorizationDenied;
+      return commandResult(tx, 'CANDIDATE', input.candidateId, input.idempotencyKey, 'ACCEPT_AND_ISSUE', input.intentFingerprint);
+    }) as any);
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    return result;
   }
   async recordEvidenceConflict(input: Parameters<DispatchDocumentRepository['recordEvidenceConflict']>[0]) {
-    return runSerializableDispatchOperation(this.prisma, async (tx) => {
+    const result = await runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${input.candidateId}`]);
+      const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: input.candidateId }, include: {
+        allocationRevision: { select: { sourceKind: true, partnerCaseId: true } },
+      } });
+      if (!candidate) throw new DispatchDocumentValidationError('Accounting dispatch candidate was not found.');
+      if (candidate.allocationRevision.sourceKind === 'PARTNER_CASE' && !await authorizePartnerAccountingWrite(tx, {
+        actorId: input.actorId, correlationId: input.correlationId,
+        partnerCaseId: candidate.allocationRevision.partnerCaseId,
+      })) return partnerAuthorizationDenied;
       const prior = await commandResult(tx, 'CANDIDATE', input.candidateId, input.idempotencyKey, 'ACCEPT_AND_ISSUE', input.intentFingerprint);
       if (prior) return prior as any;
-      const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: input.candidateId } });
-      if (!candidate) throw new DispatchDocumentValidationError('Accounting dispatch candidate was not found.');
       if (candidate.status !== 'PENDING') throw new DispatchDocumentConflictError('Only a pending candidate can be quarantined for evidence conflict.');
       return completeCandidateWithoutIssue(tx, { candidateId: candidate.id, status: 'EVIDENCE_CONFLICT',
         reason: input.reason, eventType: 'PRICING_EVIDENCE_CONFLICT', eventPayload: { reason: input.reason },
         idempotencyKey: input.idempotencyKey, actorId: input.actorId, correlationId: input.correlationId,
         intentFingerprint: input.intentFingerprint });
     });
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    return result;
   }
   async rejectCandidate(input: Parameters<DispatchDocumentRepository['rejectCandidate']>[0]) {
-    return runSerializableDispatchOperation(this.prisma, async (tx) => {
+    const result = await runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${input.candidateId}`]);
-      const prior = await commandResult(tx, 'CANDIDATE', input.candidateId, input.idempotencyKey, 'REJECT', input.intentFingerprint);
-      if (prior) return prior as any;
       const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: input.candidateId },
         include: { allocationRevision: { include: { lines: true } } } });
       if (!candidate) throw new DispatchDocumentValidationError('Accounting dispatch candidate was not found.');
+      if (candidate.allocationRevision.sourceKind === 'PARTNER_CASE' && !await authorizePartnerAccountingWrite(tx, {
+        actorId: input.actorId, correlationId: input.correlationId,
+        partnerCaseId: candidate.allocationRevision.partnerCaseId,
+      })) return partnerAuthorizationDenied;
+      const prior = await commandResult(tx, 'CANDIDATE', input.candidateId, input.idempotencyKey, 'REJECT', input.intentFingerprint);
+      if (prior) return prior as any;
       if (candidate.status !== 'PENDING') throw new DispatchDocumentConflictError('Only a pending candidate can be decided.');
       const at = new Date();
       const status = input.action === 'REJECT' ? 'REJECTED' as const : 'RETURNED' as const;
       await tx.accountingDispatchCandidate.update({ where: { id: candidate.id }, data: { status, dispositionAt: at, dispositionBy: input.actorId, dispositionReason: input.reason } });
       await tx.accountingDispatchWorkItem.update({ where: { candidateId: candidate.id }, data: { status: 'COMPLETED', completedAt: at } });
       for (const line of candidate.allocationRevision.lines) {
-        const evidence = { id: `${candidate.id}:${line.id}`, contractId: line.sourceContractId,
-          contractItemId: line.sourceContractItemId, productRowId: line.productRowId, unit: line.unit,
+        const evidence = { id: `${candidate.id}:${line.id}`, ...shipmentSourceForAllocationLine(line),
+          productRowId: line.productRowId, unit: line.unit,
           kind: 'ALLOCATION_RELEASED' as const, quantity: line.quantity.toFixed(3), effectiveAt: at.toISOString(),
           recordedAt: at.toISOString(), sourceType: 'ACCOUNTING_CANDIDATE_DISPOSITION', sourceId: `${candidate.id}:${line.id}`,
           sourceVersion: 1, integrityHash: '', metadata: { revisionId: candidate.allocationRevisionId,
             candidateId: candidate.id, revisionLineId: line.id } };
         evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
-        await tx.shipmentQuantityEvidence.create({ data: { contractId: evidence.contractId, contractItemId: evidence.contractItemId,
+        await tx.shipmentQuantityEvidence.create({ data: { ...shipmentSourceForAllocationLine(line),
           productRowId: evidence.productRowId, unit: evidence.unit, kind: evidence.kind, quantity: line.quantity,
           effectiveAt: at, recordedAt: at, sourceType: evidence.sourceType, sourceId: evidence.sourceId, sourceVersion: 1,
           integrityHash: evidence.integrityHash, metadata: json(evidence.metadata) } });
       }
-      await refreshProjectionContracts(tx, candidate.allocationRevision.lines.map(line => line.sourceContractId));
+      await refreshProjectionContracts(tx, candidate.allocationRevision.lines.filter(line => line.sourceKind === 'SALES_CONTRACT')
+        .map(line => shipmentSourceForAllocationLine(line).contractId).filter((id): id is string => Boolean(id)));
       const result = { candidateId: candidate.id, status, waybill: null };
       await tx.dispatchDocumentCommandResult.create({ data: { scope: 'CANDIDATE', scopeId: candidate.id, idempotencyKey: input.idempotencyKey,
         command: 'REJECT', status: 'SUCCEEDED', result: storedCommandResult(result, input.intentFingerprint), actorId: input.actorId, correlationId: input.correlationId, completedAt: at } });
       return result;
     });
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    return result;
   }
   async voidWaybill(input: Parameters<DispatchDocumentRepository['voidWaybill']>[0]) {
-    return runSerializableDispatchOperation(this.prisma, async (tx) => {
+    const result = await runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_WAYBILL:${input.waybillId}`]);
+      const waybill = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId }, include: {
+        physicalExit: true, manualOutageExit: true,
+        candidate: { include: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true } } } },
+      } });
+      if (!waybill) throw new DispatchDocumentValidationError('Dispatch waybill was not found.');
+      if (waybill.candidate.allocationRevision.sourceKind === 'PARTNER_CASE' && !await authorizePartnerAccountingWrite(tx, {
+        actorId: input.actorId, correlationId: input.correlationId,
+        partnerCaseId: waybill.candidate.allocationRevision.partnerCaseId,
+      })) return partnerAuthorizationDenied;
       const prior = await commandResult(tx, 'WAYBILL', input.waybillId, input.idempotencyKey, 'VOID', input.intentFingerprint);
       if (prior) return prior;
-      const waybill = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId }, include: { physicalExit: true, manualOutageExit: true } });
-      if (!waybill) throw new DispatchDocumentValidationError('Dispatch waybill was not found.');
       if (waybill.status !== 'ISSUED' || waybill.physicalExit || waybill.manualOutageExit) throw new DispatchDocumentConflictError('Only an unexited issued waybill can be voided.');
       const at = new Date();
       await tx.dispatchExitAuthorization.updateMany({ where: { waybillId: waybill.id, status: 'ACTIVE' }, data: { status: 'REVOKED', revokedAt: at, revokedBy: input.actorId, revocationReason: input.reason } });
@@ -282,23 +344,33 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
           waybillIntegrityHash: waybill.integrityHash, before: { status: 'ISSUED' }, after: { status: 'VOIDED' } }, actorId: input.actorId, at });
       return result;
     });
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    return result;
   }
   async replaceWaybill(input: Parameters<DispatchDocumentRepository['replaceWaybill']>[0]) {
-    return runSerializableDispatchOperation(this.prisma, async (tx) => {
+    const result = await runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_WAYBILL:${input.waybillId}`]);
+      const predecessor = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId }, include: {
+        physicalExit: true, manualOutageExit: true, replacementWaybill: true,
+        candidate: { include: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true } } } },
+      } });
+      if (!predecessor) throw new DispatchDocumentValidationError('Dispatch waybill was not found.');
+      if (predecessor.candidate.allocationRevision.sourceKind === 'PARTNER_CASE' && !await authorizePartnerAccountingWrite(tx, {
+        actorId: input.actorId, correlationId: input.correlationId,
+        partnerCaseId: predecessor.candidate.allocationRevision.partnerCaseId,
+      })) return partnerAuthorizationDenied;
       const prior = await commandResult(tx, 'WAYBILL', input.waybillId, input.idempotencyKey, 'REPLACE', input.intentFingerprint);
       if (prior) return prior;
-      const predecessor = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId }, include: { physicalExit: true, manualOutageExit: true, replacementWaybill: true } });
-      if (!predecessor) throw new DispatchDocumentValidationError('Dispatch waybill was not found.');
       if (predecessor.status !== 'ISSUED' || predecessor.physicalExit || predecessor.manualOutageExit || predecessor.replacementWaybill) {
         throw new DispatchDocumentConflictError('Only an unexited current issued waybill can be replaced.');
       }
       await assertCanonicalDispatchCommandAllowed(tx);
       const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: predecessor.candidateId },
-        include: { allocationRevision: { select: { finalizedAt: true } } } });
+        include: { allocationRevision: { select: { sourceKind: true, finalizedAt: true } } } });
       const cutover = await tx.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' } });
-      if (!candidate || !isShipmentStatementFlowActive(process.env, cutover) || !cutover?.cutoverAt
-        || !isPostCutoverFinalization(candidate.allocationRevision.finalizedAt, cutover.cutoverAt)) {
+      const ordinaryAtomic = Boolean(candidate && isShipmentStatementFlowActive(process.env, cutover) && cutover?.cutoverAt
+        && isPostCutoverFinalization(candidate.allocationRevision.finalizedAt, cutover.cutoverAt));
+      if (!candidate || (candidate.allocationRevision.sourceKind !== 'PARTNER_CASE' && !ordinaryAtomic)) {
         throw new DispatchDocumentConflictError('This waybill belongs to the compatibility waybill-only path.');
       }
       const pricingContracts = await tx.logisticsAllocationRevisionPricing.findMany({
@@ -331,6 +403,8 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
           correlationId: input.correlationId, idempotencyKey: input.idempotencyKey }, actorId: input.actorId, at });
       return result;
     });
+    if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentConflictError('Current Case-scoped Accounting write authority is required.');
+    return result;
   }
   async getArtifact(input: { artifactId: string; waybillId: string }) {
     const artifact = await this.prisma.dispatchDocumentArtifact.findFirst({ where: { id: input.artifactId, waybillId: input.waybillId },
@@ -367,12 +441,12 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
     const requiredKinds = input.kinds.filter(kind => kind === 'WAYBILL' || kind === 'STATEMENT');
     if (!requiredKinds.length) return false;
     const waybill = await this.prisma.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId },
-      select: { status: true, candidate: { select: { allocationRevision: { select: { finalizedAt: true } } } },
+      select: { status: true, candidate: { select: { allocationRevision: { select: { sourceKind: true, finalizedAt: true } } } },
         documentArtifacts: { where: { kind: { in: requiredKinds as PrismaDispatchDocumentKind[] } }, select: { kind: true } } } });
     if (!waybill || !['ISSUED', 'VOIDED', 'EXIT_RECORDED'].includes(waybill.status)) return false;
     const cutover = await this.prisma.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' }, select: { cutoverAt: true } });
-    if (!cutover?.cutoverAt || !waybill.candidate.allocationRevision.finalizedAt
-      || !isPostCutoverFinalization(waybill.candidate.allocationRevision.finalizedAt, cutover.cutoverAt)) return false;
+    if (waybill.candidate.allocationRevision.sourceKind !== 'PARTNER_CASE'
+      && (!cutover?.cutoverAt || !isPostCutoverFinalization(waybill.candidate.allocationRevision.finalizedAt, cutover.cutoverAt))) return false;
     const present = new Set(waybill.documentArtifacts.map(item => item.kind));
     return requiredKinds.some(kind => !present.has(kind));
   }

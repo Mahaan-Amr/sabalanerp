@@ -34,8 +34,11 @@ jobs:
       - run: npm run build:partner-sales-contracts
       - run: npm --prefix frontend ci --ignore-scripts
       - run: npm --prefix backend ci --ignore-scripts
+      - run: npm --prefix backend run db:generate
       - run: node scripts/run-partner-sales-tests.mjs unit
-      - run: node scripts/run-partner-sales-tests.mjs integration
+      # Hosted runners have no approved local stack; real-schema integration stays
+      # mandatory in the trusted local-baseline all run below.
+      - run: node scripts/run-partner-sales-tests.mjs transport
       - run: node scripts/run-partner-sales-tests.mjs foundation
       - run: node scripts/run-partner-sales-tests.mjs typecheck
       - run: node scripts/run-partner-sales-tests.mjs check-inventory
@@ -73,8 +76,10 @@ jobs:
       - run: npm run build:partner-sales-contracts
       - run: npm --prefix frontend ci --ignore-scripts
       - run: npm --prefix backend ci --ignore-scripts
+      - run: npm --prefix backend run db:generate
       - run: npx playwright install chrome
-      # Runtime owner prepares the existing stack. This workflow never starts or rebuilds it.
+      # Runtime owner prepares the existing stack. The runner rebuilds only its
+      # backend/frontend candidate images and restores the normal database afterward.
       - run: node scripts/run-partner-sales-tests.mjs all
       - uses: actions/upload-artifact@v4
         if: always()

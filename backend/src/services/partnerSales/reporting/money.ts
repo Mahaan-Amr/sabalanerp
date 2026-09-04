@@ -17,3 +17,11 @@ export function sum(values: readonly string[]): string {
 }
 export const negate = (value: string) => value.startsWith('-') ? value.slice(1) : `-${value}`;
 export const subtract = (left: string, right: string) => sum([left, negate(right)]);
+
+export function multiply(left: string, right: string): string {
+  const a = sum([left]), b = sum([right]);
+  const scale = (a.split('.')[1]?.length ?? 0) + (b.split('.')[1]?.length ?? 0);
+  const units = BigInt(a.replace('.', '')) * BigInt(b.replace('.', ''));
+  const digits = (units < 0n ? -units : units).toString().padStart(scale + 1, '0');
+  return sum([`${units < 0n ? '-' : ''}${scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits}`]);
+}

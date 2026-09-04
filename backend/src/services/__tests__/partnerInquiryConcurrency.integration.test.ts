@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient, type Prisma } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { canonicalHash, partnerError, type InquiryIdentity, type PartnerCommand } from '@sabalanerp/partner-sales-contracts';
 import { createPrismaPartnerInquiryService, type PartnerInquiryDependencies } from '../partnerSales/inquiries/service';
 import { createAuditedPartnerAuthorization } from '../partnerSales/authorization/audited';
@@ -13,11 +13,18 @@ function databaseUrl() {
   if (url.hostname !== '127.0.0.1' || url.port !== '55432' || url.pathname !== '/sabalanerp') throw new Error('Existing local DB required');
   url.searchParams.set('connection_limit', '4'); url.searchParams.set('pool_timeout', '10'); return url.toString();
 }
-type Fixture = { prefix: string; partnerId: string; responderId: string; managerId: string; inquiryId: string };
+type Fixture = { prefix: string; partnerId: string; responderId: string; managerId: string; inquiryId: string;
+  previousControl: { revision: number; enrollmentPaused: boolean; operationalPaused: boolean;
+    lastOperationalPauseAt: Date | null; cohortId: string | null; readinessEvidence: Prisma.JsonValue | null } };
 
 async function setup(database: PrismaClient, state: 'PENDING' | 'REJECTED' = 'PENDING'): Promise<Fixture> {
   const prefix = `inquiry-race-${randomUUID()}`, partnerId = `${prefix}-partner`, responderId = `${prefix}-responder`;
   const managerId = `${prefix}-manager`, inquiryId = `${prefix}-inquiry`;
+  const previousControl = await database.partnerOperationsControl.findUniqueOrThrow({
+    where: { id: 'partner-operations' },
+    select: { revision: true, enrollmentPaused: true, operationalPaused: true,
+      lastOperationalPauseAt: true, cohortId: true, readinessEvidence: true },
+  });
   await database.$transaction(async tx => {
     await tx.user.createMany({ data: [partnerId, responderId, managerId].map((id, index) => ({ id, username: id,
       email: `${id}@example.invalid`, password: 'not-a-login', firstName: `Race${index}`, lastName: 'Fixture',
@@ -25,6 +32,8 @@ async function setup(database: PrismaClient, state: 'PENDING' | 'REJECTED' = 'PE
     await tx.partnerProfile.create({ data: { id: partnerId, userId: partnerId, state: 'ACTIVE' } });
     await tx.partnerReleaseCohort.create({ data: { id: partnerId, name: partnerId, activationEnabled: true,
       enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+      cohortId: partnerId, enrollmentPaused: false, operationalPaused: false } });
     await tx.partnerCohortMembership.create({ data: { id: partnerId, profileId: partnerId, cohortId: partnerId,
       actorId: managerId, eligibilityEvidence: { fixture: true } } });
     await tx.partnerInquiry.create({ data: { id: inquiryId, profileId: partnerId, revision: 1, submittedAt: new Date() } });
@@ -36,12 +45,30 @@ async function setup(database: PrismaClient, state: 'PENDING' | 'REJECTED' = 'PE
         productRowId: `${prefix}-row` }, identity: identity(partnerId), description: 'سنگ تست همزمانی',
         configuration: [{ label: 'نوع', value: 'آماده' }] } } });
   });
-  return { prefix, partnerId, responderId, managerId, inquiryId };
+  return { prefix, partnerId, responderId, managerId, inquiryId, previousControl };
 }
 
 async function cleanup(database: PrismaClient, fixture: Fixture) {
   await database.$transaction(async tx => {
+    const userIds = [fixture.partnerId, fixture.responderId, fixture.managerId,
+      `${fixture.prefix}-replacement-a`, `${fixture.prefix}-replacement-b`];
+    const inquiryEvents = await tx.partnerInquiryEvent.findMany({
+      where: { inquiryId: fixture.inquiryId }, select: { id: true }, orderBy: { id: 'asc' },
+    });
+    for (const event of inquiryEvents) {
+      const key = `partner-inquiry-delivery-v1:${event.id}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+    }
+    const notifications = await tx.notification.findMany({
+      where: { userId: { in: userIds } },
+      select: { id: true, eventId: true },
+    });
+    const notificationIds = notifications.map(notification => notification.id);
+    const notificationEventIds = notifications.flatMap(notification => notification.eventId ? [notification.eventId] : []);
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+    await tx.notificationDeliveryAttempt.deleteMany({ where: { notificationId: { in: notificationIds } } });
+    await tx.notification.deleteMany({ where: { id: { in: notificationIds } } });
+    await tx.notificationOutbox.deleteMany({ where: { eventId: { in: notificationEventIds } } });
     await tx.notificationEvent.deleteMany({ where: { resourceType: 'PARTNER_NOTIFICATION',
       resourceId: { startsWith: fixture.prefix } } });
     await tx.partnerCommandOutcome.deleteMany({ where: { targetScope: fixture.inquiryId } });
@@ -52,10 +79,20 @@ async function cleanup(database: PrismaClient, fixture: Fixture) {
     await tx.partnerInquiryAssignment.deleteMany({ where: { inquiryId: fixture.inquiryId } });
     await tx.partnerInquiry.delete({ where: { id: fixture.inquiryId } });
     await tx.partnerCohortMembership.deleteMany({ where: { profileId: fixture.partnerId } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+      ...fixture.previousControl,
+      readinessEvidence: fixture.previousControl.readinessEvidence === null
+        ? Prisma.DbNull
+        : fixture.previousControl.readinessEvidence as Prisma.InputJsonValue,
+    } });
     await tx.partnerReleaseCohort.delete({ where: { id: fixture.partnerId } });
     await tx.partnerProfile.delete({ where: { id: fixture.partnerId } });
-    await tx.user.deleteMany({ where: { id: { in: [fixture.partnerId, fixture.responderId, fixture.managerId,
-      `${fixture.prefix}-replacement-a`, `${fixture.prefix}-replacement-b`] } } });
+    // Re-enable FK triggers before removing users. The live outbox worker can
+    // finish a claimed delivery while this test cleans up; normal constraints
+    // make that insert serialize before the cascading user delete instead of
+    // leaving an orphan notification behind.
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
+    await tx.user.deleteMany({ where: { id: { in: userIds } } });
   });
 }
 

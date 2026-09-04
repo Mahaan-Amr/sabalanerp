@@ -6,9 +6,14 @@ import { assertSabalanerpLocalPostgresTarget, temporaryDatabaseUrl } from './shi
 
 const namePattern = /^sabalanerp_concurrency_[a-f0-9]{16}$/;
 
-const compose = (repositoryRoot: string, command: string) => execFileSync('docker', [
-  'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'exec', '-T', 'postgres', 'sh', '-lc', command,
-], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
+const compose = (repositoryRoot: string, command: string) => {
+  const composeFile = path.join(repositoryRoot, 'docker-compose.local.yml');
+  const status = execFileSync('docker', ['compose', '-f', composeFile, 'ps', '--format', 'json', 'postgres'],
+    { cwd: repositoryRoot, encoding: 'utf8', timeout: 30_000 });
+  assertSabalanerpLocalPostgresTarget(status);
+  return execFileSync('docker', ['compose', '-f', composeFile, 'exec', '-T', 'postgres', 'sh', '-lc', command],
+    { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
+};
 
 /** Exact-schema concurrency database without copying unrelated local data. */
 export async function createPartnerLifecycleDatabase(input: { repositoryRoot: string; sourceDatabaseUrl: string }) {

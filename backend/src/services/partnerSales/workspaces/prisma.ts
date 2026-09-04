@@ -4,6 +4,7 @@ import { createPartnerInquiryQuery } from '../inquiries/query';
 import type { PartnerInquiryDependencies } from '../inquiries/service';
 import { createPrismaManagementWorkspaceReader } from './management';
 import { createPartnerWorkspaceQuery } from './query';
+import { readPartnerSnapshot } from '../authorization/readSnapshot';
 
 type Transaction = Prisma.TransactionClient;
 
@@ -18,7 +19,7 @@ export function createPrismaPartnerWorkspaceQuery(input: {
   const readManagementWorkspace = input.readManagementWorkspace ?? createPrismaManagementWorkspaceReader(input);
   return createPartnerWorkspaceQuery<Transaction>({
     actorId: input.actorId,
-    transaction: work => input.database.$transaction(work),
+    transaction: work => readPartnerSnapshot(input.database, work),
     async listResponderInquiryIds(transaction, page) {
       const take = Math.min(page.limit * 4 + 1, 401);
       const rows = page.cursor

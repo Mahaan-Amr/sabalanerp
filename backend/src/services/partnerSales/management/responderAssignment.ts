@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { PartnerManagementCommandV2Schema, canonicalHash, partnerError,
   type PartnerManagementCommandV2Port, type Result } from '@sabalanerp/partner-sales-contracts';
-import { authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
+import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../authorization/technicalRollout';
 
 type Transaction = Prisma.TransactionClient;
 export interface PartnerResponderAssignmentDependencies {
@@ -17,7 +17,10 @@ export interface PartnerResponderAssignmentDependencies {
 
 export function createPrismaPartnerResponderAssignmentService(input:
   Omit<PartnerResponderAssignmentDependencies, 'transaction'> & { database: PrismaClient }) {
-  return createPartnerResponderAssignmentService({ ...input, transaction: run => input.database.$transaction(run) });
+  return createPartnerResponderAssignmentService({ ...input, transaction: run => input.database.$transaction(async tx => {
+    await lockPartnerOperationsControl(tx);
+    return run(tx);
+  }) });
 }
 
 function commandIntent(command: Extract<ReturnType<typeof PartnerManagementCommandV2Schema.parse>, { type: 'RESPONDER_ASSIGN' }>) {

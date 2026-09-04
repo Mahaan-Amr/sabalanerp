@@ -3,6 +3,7 @@ import {
   PricedAllocationInvariantError,
   allocatePricedRevision,
   type LockedApprovedPricingVersion,
+  type LockedPartnerApprovedPricingVersion,
 } from '../pricedAllocationLedger';
 
 const version = (overrides: Partial<LockedApprovedPricingVersion> = {}): LockedApprovedPricingVersion => ({
@@ -45,6 +46,34 @@ const line = (quantity: string, overrides: Record<string, string> = {}) => ({
   unit: 'm2',
   ...overrides,
 });
+
+{
+  const wholesale: LockedPartnerApprovedPricingVersion = {
+    sourceKind: 'PARTNER_CASE', caseId: 'partner-case-1', internalRecordId: 'internal-sale-1',
+    id: 'wholesale-approved-1', versionNumber: 1, sourceFinancialRecordId: 'official-invoice-1',
+    approvedAt: '2026-09-03T10:00:00.000Z', approvedBy: 'finance-1', schemaVersion: 1, currency: 'IRT',
+    grossAmount: '300.000000000000', discountAmount: '10.000000000000', netAmount: '290.000000000000',
+    integrityHash: 'published-wholesale-hash', readinessEvidenceHash: 'published-approval-hash',
+    rows: [
+      { id: 'wholesale-row-1', productRowId: 'case-row-1', ordinal: 0, contractedQuantity: '3.000', unit: 'm2',
+        canonicalAllInTotal: '100.000000000000', discountEligible: true,
+        componentEvidence: { discountBasis: '80.000000000000' }, integrityHash: 'wholesale-row-1-hash' },
+      { id: 'wholesale-row-2', productRowId: 'case-row-2', ordinal: 1, contractedQuantity: '2.000', unit: 'm2',
+        canonicalAllInTotal: '200.000000000000', discountEligible: true,
+        componentEvidence: { discountBasis: '20.000000000000' }, integrityHash: 'wholesale-row-2-hash' },
+    ],
+  };
+  const result = allocatePricedRevision({ versions: [wholesale], priorEvents: [], lines: [{
+    sourceKind: 'PARTNER_CASE', caseId: 'partner-case-1', internalRecordId: 'internal-sale-1',
+    allocationRevisionLineId: 'partner-allocation-1', productRowId: 'case-row-2', quantity: '1.000', unit: 'm2',
+  }] });
+  assert.equal(result.events[0].pricingRowId, 'wholesale-row-2');
+  assert.equal(result.events[0].grossAmount, '100.000000000000');
+  assert.equal(result.events[0].discountAmount, '1.000000000000');
+  assert.equal(result.events[0].netAmount, '99.000000000000');
+  assert.equal('contractId' in result.events[0], false, 'the same pricing engine accepts a real Case source without a retail surrogate');
+  assert.equal('contractItemId' in result.events[0], false);
+}
 
 {
   const first = allocatePricedRevision({ versions: [version()], priorEvents: [], lines: [line('1.000')] });

@@ -87,8 +87,9 @@ const validTime = (value: string) => Boolean(value && !Number.isNaN(Date.parse(v
 export const validateDispatchLifecycleConservation = (input: {
   candidate: { status: string; dispositionAt: string | null; dispositionBy: string | null };
   lifecycle: { requiresPrintHandoff: boolean; hasPrintHandoff: boolean; requiresGuardExit: boolean; hasGuardExit: boolean; requiredAdjustmentIds: readonly string[]; actualAdjustmentIds: readonly string[] };
-  quantityWitnesses: readonly { stage: 'ALLOCATION' | 'PRICED' | 'DOCUMENTED' | 'EXIT'; contractId: string;
-    contractItemId: string; productRowId: string; unit: string; value: string }[];
+  quantityWitnesses: readonly ({ stage: 'ALLOCATION' | 'PRICED' | 'DOCUMENTED' | 'EXIT'; productRowId: string;
+    unit: string; value: string } & ({ contractId: string; contractItemId: string; sourceKind?: never }
+    | { sourceKind: 'PARTNER_CASE'; caseId: string; lineageId: string }))[];
   moneyWitnesses: readonly { stage: 'PRICED' | 'DOCUMENTED'; currency: string; gross: string; discount: string; net: string }[];
   adjustmentWitnesses: readonly { id: string; currency: string; before: string; delta: string; after: string }[];
 }) => {
@@ -99,9 +100,15 @@ export const validateDispatchLifecycleConservation = (input: {
   for (const id of input.lifecycle.requiredAdjustmentIds) if (!input.lifecycle.actualAdjustmentIds.includes(id)) issues.push({ code: 'MISSING_EVIDENCE', subjectId: id, detail: 'Posted correction adjustment is missing.' });
   const quantities = new Map<string, Map<string, bigint>>();
   for (const witness of input.quantityWitnesses) {
-    const atoms = parseFixed(witness.value, 3); const identity = `${witness.contractId}:${witness.contractItemId}:${witness.productRowId}:${witness.unit}`;
+    const atoms = parseFixed(witness.value, 3);
+    const sourceValid = witness.sourceKind === 'PARTNER_CASE'
+      ? Boolean(witness.caseId && witness.lineageId)
+      : Boolean(witness.contractId && witness.contractItemId);
+    const identity = witness.sourceKind === 'PARTNER_CASE'
+      ? `PARTNER_CASE:${witness.caseId}:${witness.lineageId}:${witness.productRowId}:${witness.unit}`
+      : `SALES_CONTRACT:${witness.contractId}:${witness.contractItemId}:${witness.productRowId}:${witness.unit}`;
     const stages = quantities.get(identity) ?? new Map<string, bigint>();
-    if (atoms === null || !witness.contractId || !witness.contractItemId || !witness.productRowId || !witness.unit || stages.has(witness.stage)) issues.push({ code: atoms === null ? 'INVALID_FIXED_POINT' : 'DUPLICATE_EVIDENCE', subjectId: identity, detail: 'Quantity witness is invalid or duplicated.' });
+    if (atoms === null || !sourceValid || !witness.productRowId || !witness.unit || stages.has(witness.stage)) issues.push({ code: atoms === null ? 'INVALID_FIXED_POINT' : 'DUPLICATE_EVIDENCE', subjectId: identity, detail: 'Quantity witness is invalid or duplicated.' });
     else stages.set(witness.stage, atoms);
     quantities.set(identity, stages);
   }

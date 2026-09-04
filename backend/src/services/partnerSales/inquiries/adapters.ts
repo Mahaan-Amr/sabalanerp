@@ -3,6 +3,7 @@ import { canonicalHash, partnerError, type Result } from '@sabalanerp/partner-sa
 import { randomUUID } from 'node:crypto';
 import { resolveScopedActions } from '../../effectiveAccessService';
 import { decodeTechnicalSavedSnapshot } from '../cases/technicalSavedRecords';
+import { readSubmittedTechnicalSnapshots } from '../cases/submissionEvidence';
 import type { PartnerInquiryDependencies } from './service';
 
 /** Reads the latest append-only profile assignment. Historical eligibility is
@@ -76,9 +77,10 @@ const familyLabels: Record<string, string> = {
 export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['resolveConfiguration'] = async (tx, input) => {
   const session = await tx.salesContractEditSession.findUnique({ where: { draftId: input.reference.recoveryId },
     select: { ownerUserId: true, recovery: true } });
-  if (!session || session.ownerUserId !== input.actorId || !session.recovery || Array.isArray(session.recovery) ||
-      typeof session.recovery !== 'object') return { ok: false, error: partnerError('NOT_FOUND') };
-  const history = (session.recovery as Record<string, unknown>).validatedSnapshots;
+  if (session && session.ownerUserId !== input.actorId) return { ok: false, error: partnerError('NOT_FOUND') };
+  const history = session?.recovery && typeof session.recovery === 'object' && !Array.isArray(session.recovery)
+    ? (session.recovery as Record<string, unknown>).validatedSnapshots
+    : await readSubmittedTechnicalSnapshots(tx, input.actorId, input.reference.recoveryId);
   if (!Array.isArray(history)) return { ok: false, error: partnerError('NOT_FOUND') };
   for (const record of history) {
     const snapshot = await decodeTechnicalSavedSnapshot(record);

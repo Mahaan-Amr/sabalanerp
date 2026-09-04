@@ -18,6 +18,10 @@ export type FinancialTrendData = {
   currency: 'RIAL';
   hasLegacyFallback: boolean;
   points: FinancialTrendPoint[];
+  partnerSeries?: Array<{ currency: string; points: Array<{
+    periodKey: string; label: string; startsAt: string; endsAt: string;
+    invoiced: string; received: string; outstanding: string;
+  }> }>;
 };
 
 export type FinancialTrendState = {
@@ -30,7 +34,8 @@ export const pendingFinancialTrend = (
   requestedRange?: FinancialTrendRange,
 ): FinancialTrendState => ({
   status: 'loading',
-  data: previous?.data && (!requestedRange || previous.data.range === requestedRange) ? previous.data : null,
+  data: previous?.data && !previous.data.partnerSeries?.length &&
+    (!requestedRange || previous.data.range === requestedRange) ? previous.data : null,
 });
 
 export const resolveFinancialTrend = (
@@ -39,8 +44,8 @@ export const resolveFinancialTrend = (
 ): FinancialTrendState => ({ status: 'available', data });
 
 export const failFinancialTrend = (previous: FinancialTrendState): FinancialTrendState => ({
-  status: previous.data ? 'stale' : 'error',
-  data: previous.data,
+  status: previous.data && !previous.data.partnerSeries?.length ? 'stale' : 'error',
+  data: previous.data?.partnerSeries?.length ? null : previous.data,
 });
 
 export const financialTrendToman = (rial: number) => rial / 10;

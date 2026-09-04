@@ -148,8 +148,11 @@ api.interceptors.request.use(async (config) => {
 });
 
 // Response interceptor to handle errors
+let unauthorizedRedirectStarted = false;
+
 api.interceptors.response.use(
   (response) => {
+    if (response.config.url === '/auth/login') unauthorizedRedirectStarted = false;
     clearRetryKey(response.config as RetryAwareConfig);
     return response;
   },
@@ -159,7 +162,11 @@ api.interceptors.response.use(
         typeof window !== 'undefined'
         && !window.location.pathname.startsWith('/login')
         && !isPublicVerificationPath(window.location.pathname)
-      ) window.location.href = '/login';
+        && !unauthorizedRedirectStarted
+      ) {
+        unauthorizedRedirectStarted = true;
+        window.location.replace('/login');
+      }
     }
     const status = Number(error.response?.status || 0);
     if (error.response) {

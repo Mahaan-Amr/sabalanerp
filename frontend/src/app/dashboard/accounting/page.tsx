@@ -157,7 +157,11 @@ export default function AccountingDashboardPage() {
 
   useEffect(() => {
     const revalidateOnFocus = () => {
-      if (document.visibilityState === 'visible' && currentUserId) void loadHrMetrics(currentUserId);
+      if (document.visibilityState === 'visible' && currentUserId) {
+        void loadHrMetrics(currentUserId);
+        void loadWorkspace();
+        void loadFinancialTrend(trendRange);
+      }
     };
     window.addEventListener('focus', revalidateOnFocus);
     document.addEventListener('visibilitychange', revalidateOnFocus);
@@ -165,7 +169,7 @@ export default function AccountingDashboardPage() {
       window.removeEventListener('focus', revalidateOnFocus);
       document.removeEventListener('visibilitychange', revalidateOnFocus);
     };
-  }, [currentUserId, loadHrMetrics]);
+  }, [currentUserId, loadHrMetrics, loadWorkspace, loadFinancialTrend, trendRange]);
 
   const financialTrendPanel = (
     <AccountingFinancialTrend

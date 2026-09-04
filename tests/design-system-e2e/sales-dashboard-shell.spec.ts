@@ -354,14 +354,16 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
 
   await page.goto('/dashboard/crm/customers');
   await expect(page.getByRole('navigation', { name: 'ناوبری فروش' })).toHaveCount(0);
+  const customerCollection = page.waitForResponse(response => response.url().includes('/api/crm/customers?') &&
+    [200, 304].includes(response.status()));
   await page.goto('/dashboard/crm/customers?workspace=sales');
-
-  // The customer collection replaces its loading surface after the data request.
-  // Wait for that committed view so the navigation link is not replaced between
-  // pointer-down and click while React applies the collection result.
-  await expect(page.getByText(/^نمایش .* از .* مشتری$/)).toBeVisible();
-  await page.getByRole('navigation', { name: 'ناوبری فروش' }).getByRole('link', { name: 'محصولات' }).click();
-  await expect(page).toHaveURL(/\/dashboard\/sales\/products$/);
+  await customerCollection;
+  const productsLink = page.getByRole('navigation', { name: 'ناوبری فروش' }).getByRole('link', { name: 'محصولات' });
+  await expect(productsLink).toHaveAttribute('href', '/dashboard/sales/products');
+  await Promise.all([
+    page.waitForURL(/\/dashboard\/sales\/products$/),
+    productsLink.click(),
+  ]);
   await expect(page.getByRole('navigation', { name: 'ناوبری فروش' }).getByRole('link', { name: 'محصولات' })).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('.dashboard-shell')).toHaveClass(/sds-neumorphic-scope/);
 });

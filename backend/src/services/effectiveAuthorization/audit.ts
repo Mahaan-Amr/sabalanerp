@@ -50,3 +50,18 @@ export async function readAuthorizationDecisionByCorrelation(tx: Prisma.Transact
     ORDER BY "recordedAt" DESC, id DESC LIMIT 1`;
   return rows[0] ?? null;
 }
+
+export async function readAuthorizationDecisionById(tx: Prisma.TransactionClient, input: {
+  id: string; domain: string; actorId: string; action: string; rootKind: string; rootId: string;
+  purpose: string; channel: string; allowed: boolean;
+}) {
+  const rows = await tx.$queryRaw<Array<AuthorizationDecisionAudit & { id: string }>>`
+    SELECT id, domain, "actorId", action, "rootKind", "rootId", purpose, channel, allowed, "isAdmin", code, scope, reason,
+      "correlationId", "authorizationRevision", "lifecycleRevision", "assignmentId", "assignmentRevision", "evaluatedAt", "evaluatedGrantIds"
+    FROM effective_authorization_audit
+    WHERE id = ${input.id} AND domain = ${input.domain} AND "actorId" = ${input.actorId}
+      AND action = ${input.action} AND "rootKind" = ${input.rootKind} AND "rootId" = ${input.rootId}
+      AND purpose = ${input.purpose} AND channel = ${input.channel} AND allowed = ${input.allowed}
+    LIMIT 1`;
+  return rows[0] ?? null;
+}

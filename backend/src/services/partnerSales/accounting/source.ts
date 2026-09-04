@@ -1,6 +1,8 @@
 import { contracts, type Money, type PartnerErrorCode, type Result, type RevisionRef, type SabalanInternalRecordView } from './contracts';
 import type { CommittedAccountingSource } from './repository';
 
+export const PARTNER_INTERNAL_ACCOUNTING_SOURCE = 'PARTNER_INTERNAL_RECORD' as const;
+
 export type PartnerAccountingSource = {
   view: SabalanInternalRecordView;
   partnerSellerId: string;

@@ -54,6 +54,8 @@ test('Prisma profile gates re-read current identity, terms, responder, cohort an
         revision: 1, responderId: ids.responder, actorId: ids.actor, reason: 'پاسخ‌دهنده تست', eligibilityEvidence: {} } });
       await tx.partnerReleaseCohort.create({ data: { id: ids.cohort, name: ids.cohort,
         activationEnabled: true, enrollmentPaused: false, operationalPaused: false } });
+      await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+        cohortId: ids.cohort, enrollmentPaused: false, operationalPaused: false } });
       await tx.partnerCohortMembership.create({ data: { id: `${prefix}-membership`, profileId: ids.profile,
         cohortId: ids.cohort, actorId: ids.actor, eligibilityEvidence: {} } });
       const store = createPrismaPartnerProfileStore(database);

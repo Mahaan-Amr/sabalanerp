@@ -1,7 +1,16 @@
 import { randomUUID } from 'node:crypto';
+import { readRetailCorrectionState } from '../partnerSales/corrections/persistedRetailState';
+import { caseComparableAmount } from '../partnerSales/reporting/comparable';
+import { subtract } from '../partnerSales/reporting/money';
+import { synchronizePartnerContractedQuantities } from '../partnerSales/fulfillment/quantityStore';
+import { validatePartnerSharedAccountingEffect, stagePartnerAccountingReplacement } from '../partnerSales/accounting/sharedCorrection';
+import { approvePartnerFinancialSourceWithinTransaction } from '../partnerSales/accounting/financialApproval';
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { lockPartnerOperationsControl } from '../partnerSales/authorization/technicalRollout';
 import {
+  ApprovedInquirySchema,
   PartnerEventSchema,
+  TotalsSchema,
   canonicalHash,
   partnerError,
   type PartnerAction,
@@ -25,6 +34,7 @@ import {
   type PartnerVoidingOpportunity,
   type PartnerVoidingSnapshot,
 } from '../partnerSales/corrections/voiding';
+import { voidAccountingRecordInTransaction } from '../accountingService';
 
 type Transaction = Prisma.TransactionClient;
 type SharedSave = Extract<PartnerCommand, { type: 'SHARED_CORRECTION_SAVE' }>;
@@ -91,6 +101,7 @@ export type PartnerFinancialCorrectionAuthority = (tx: Transaction, input: {
   action: PartnerAction;
   caseId: string;
   correctionId?: string;
+  evidenceId?: string;
 }) => Promise<Result<{ evidenceId: string }>>;
 
 export type PartnerFinancialCorrectionAdapterInput = {
@@ -110,7 +121,7 @@ async function preparedPricingIsPersisted(tx: Transaction,
   snapshot: PartnerCorrectionSnapshot<PrismaSharedSuccessorPayload>, prepared: PreparedPrismaSharedSuccessor) {
   const predecessorRows = await tx.partnerCaseRowBinding.findMany({ where: { caseId: snapshot.caseId,
     revision: snapshot.owner.revision }, select: { productRowId: true, configurationHash: true,
-    inquiryUsages: { select: { approvalId: true, evidenceHash: true, approval: { select: { expiresAt: true,
+    inquiryUsages: { select: { approvalId: true, evidenceHash: true, approvalSnapshot: true, approval: { select: { expiresAt: true,
       evidenceHash: true, row: { select: { configurationHash: true, outcome: true } } } } } } } });
   const predecessors = new Map(predecessorRows.map(row => [row.productRowId, row]));
   const approvals = await tx.partnerInquiryApproval.findMany({ where: { id: { in: prepared.products.map(row => row.approvalId) } },
@@ -127,8 +138,10 @@ async function preparedPricingIsPersisted(tx: Transaction,
     if (price.configurationChanged !== configurationChanged) return false;
     if (!configurationChanged) {
       const frozen = predecessor.inquiryUsages[0];
+      const frozenSnapshot = ApprovedInquirySchema.safeParse(frozen?.approvalSnapshot);
       return predecessor.inquiryUsages.length === 1 && price.source === 'FROZEN' && frozen.approvalId === price.approvalId &&
-        frozen.evidenceHash === price.evidenceHash && frozen.approval.evidenceHash === price.evidenceHash &&
+        (frozenSnapshot.success ? frozenSnapshot.data.evidenceHash : frozen.evidenceHash) === price.evidenceHash &&
+        frozen.approval.evidenceHash === price.evidenceHash &&
         frozen.approval.row.configurationHash === product.configurationHash && frozen.approval.row.outcome === 'APPROVED' &&
         frozen.approval.expiresAt.toISOString() === price.approvalExpiresAt;
     }
@@ -188,6 +201,12 @@ async function lockOpportunity(tx: Transaction, correctionId: string) {
   } });
 }
 
+async function hasOpenRetailCorrection(tx: Transaction, caseId: string) {
+  const state = await readRetailCorrectionState(tx, caseId);
+  const correction = object(object(state?.outcome)?.correction);
+  return typeof correction?.status === 'string' && !['EXPIRED', 'REJECTED', 'EFFECTIVE'].includes(correction.status);
+}
+
 const gatesFrom = (rows: Array<{ kind: string; outcome: string; actorId: string; evidence: Prisma.JsonValue }> ):
 CorrectionGateEvidence[] | null => {
   const gates: CorrectionGateEvidence[] = [];
@@ -208,8 +227,14 @@ Promise<PartnerCorrectionSnapshot<PrismaSharedSuccessorPayload> | null> {
   if (!sale || !correction || correction.caseId !== sale.id || !['SHARED', 'SABALAN_TERMS'].includes(correction.scope)) return null;
   const gates = gatesFrom(correction.gates);
   if (!gates) return null;
+  const stagedInvoice = await tx.accountingFinancialRecord.findFirst({ where: {
+    sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: sale.internalRecordId,
+    metadata: { path: ['correctionId'], equals: correction.id }, financiallyApprovedAt: { not: null },
+  } });
   let candidate: PartnerCorrectionCandidate<PrismaSharedSuccessorPayload> | undefined;
   if (correction.save) {
+    const revision = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: {
+      caseId: sale.id, revision: correction.save.successorRevision } } });
     const savedEvent = await tx.partnerCaseEvent.findFirst({ where: { caseId: sale.id,
       caseRevision: correction.save.successorRevision, type: 'CORRECTION_SUCCESSOR_SAVED' }, orderBy: { sequence: 'desc' } });
     const evidence = object(savedEvent?.evidence);
@@ -219,8 +244,10 @@ Promise<PartnerCorrectionSnapshot<PrismaSharedSuccessorPayload> | null> {
     candidate = { owner: { caseId: sale.id, revision: correction.save.successorRevision,
       integrityHash: correction.save.successor.integrityHash }, pricing: pricing as PartnerCorrectionCandidate['pricing'],
       dependencies: dependencies as unknown as PartnerCorrectionDependencyInput,
-      payload: { evidence: { graphHash: '', graph: {}, partySnapshots: {}, wholesaleEnvelope: {}, retailEnvelope: {},
-        paymentEvidence: {}, customerContent: {} }, projections: { internal: {}, customer: {} }, products: [],
+      payload: { evidence: { graphHash: revision.graphHash, graph: json(revision.graph), partySnapshots: json(revision.partySnapshots),
+        wholesaleEnvelope: json(revision.wholesaleEnvelope), retailEnvelope: json(revision.retailEnvelope),
+        paymentEvidence: json(revision.paymentEvidence), customerContent: json(revision.customerContent) },
+        projections: { internal: json(revision.internalProjection), customer: json(revision.customerProjection) }, products: [],
         deliveries: [], paymentPlans: [] } };
   }
   return { caseId: sale.id, state: sale.state, owner: { caseId: sale.id, revision: sale.headRevision,
@@ -228,7 +255,8 @@ Promise<PartnerCorrectionSnapshot<PrismaSharedSuccessorPayload> | null> {
     opportunity: { correctionId: correction.id, scope: correction.scope as 'SHARED' | 'SABALAN_TERMS',
       requesterId: correction.requesterId, predecessor: { caseId: sale.id, revision: correction.predecessorRevision,
         integrityHash: correction.predecessor.integrityHash }, approvedBy: correction.approvedBy,
-      expiresAt: correction.expiresAt.toISOString() }, ...(candidate ? { candidate } : {}), gates };
+      expiresAt: correction.expiresAt.toISOString() }, ...(candidate ? { candidate } : {}),
+    ...(stagedInvoice?.financiallyApprovedBy ? { stagedAccountingApproverId: stagedInvoice.financiallyApprovedBy } : {}), gates };
 }
 
 async function insertPaymentPlan(tx: Transaction, caseId: string, revision: number, plan: StoredCorrectionPaymentPlan) {
@@ -264,9 +292,12 @@ async function stageShared(tx: Transaction, candidate: PartnerCorrectionCandidat
   await tx.partnerCaseRowBinding.createMany({ data: payload.products.map(row => ({ caseId: input.snapshot.caseId,
     revision: candidate.owner.revision, productRowId: row.productRowId, configurationHash: row.configurationHash,
     quantity: row.quantity, unit: row.unit, precisionPolicyVersion: row.precisionPolicyVersion })) });
-  await tx.partnerInquiryUsage.createMany({ data: payload.products.map(row => ({ id: randomUUID(), caseId: input.snapshot.caseId,
+  const usages = await Promise.all(payload.products.map(async row => ({ id: randomUUID(), caseId: input.snapshot.caseId,
     caseRevision: candidate.owner.revision, productRowId: row.productRowId, approvalId: row.approvalId,
-    approvalSnapshot: row.approvalSnapshot, evidenceHash: row.approvalEvidenceHash })) });
+    approvalSnapshot: row.approvalSnapshot, evidenceHash: await canonicalHash({ schemaVersion: 1,
+      caseId: input.snapshot.caseId, caseRevision: candidate.owner.revision,
+      productRowId: row.productRowId, approval: row.approvalSnapshot }) })));
+  await tx.partnerInquiryUsage.createMany({ data: usages });
   for (const delivery of payload.deliveries) {
     await tx.partnerCaseDelivery.create({ data: { id: delivery.deliveryId, caseId: input.snapshot.caseId,
       revision: candidate.owner.revision, date: new Date(`${delivery.date}T00:00:00.000Z`), destination: delivery.destination } });
@@ -290,6 +321,8 @@ async function stageShared(tx: Transaction, candidate: PartnerCorrectionCandidat
     correlationId: input.command.correlationId, effectiveDate: new Date(`${input.command.intent.contractDate}T00:00:00.000Z`),
     evidence: json({ pricing: candidate.pricing, dependencies: candidate.dependencies,
       dependencyEvidenceIds: input.dependencyEvidenceIds, authorizationEvidenceId: input.authorizationEvidenceId }) } });
+  await stagePartnerAccountingReplacement(tx, { caseId: input.snapshot.caseId,
+    correctionId: input.snapshot.opportunity.correctionId, actorId: input.command.idempotency.actorId });
 }
 
 async function appendGate(tx: Transaction, gate: CorrectionGateEvidence & { command: GateCommand;
@@ -301,9 +334,10 @@ async function appendGate(tx: Transaction, gate: CorrectionGateEvidence & { comm
 }
 
 const moneyEnvelope = (value: Prisma.JsonValue) => {
-  const row = object(value), totals = object(row?.totals);
-  return totals && typeof totals.payable === 'string' && (totals.currency === 'IRR' || totals.currency === 'IRT')
-    ? { payable: new Prisma.Decimal(totals.payable), currency: totals.currency } : null;
+  const row = object(value), parsed = TotalsSchema.safeParse(row?.totals);
+  if (row?.schemaVersion !== 1 || !parsed.success) return null;
+  const totals = parsed.data;
+  return { payable: new Prisma.Decimal(totals.payable), net: caseComparableAmount(totals), currency: totals.currency };
 };
 
 async function activateShared(tx: Transaction, input: {
@@ -327,9 +361,15 @@ async function activateShared(tx: Transaction, input: {
   if (!previousMoney || !nextMoney || previousMoney.currency !== nextMoney.currency || !current.commitmentEventId) {
     return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
   }
+  const accounting = await validatePartnerSharedAccountingEffect(tx, { caseId: current.id,
+    internalRecordId: current.internalRecordId, partnerSellerId: current.profile.userId,
+    successor: object(successor.internalProjection)?.accounting, correctionId: input.command.correctionId });
+  if (!accounting.ok) return accounting;
   const instant = await databaseNow(tx), date = instant.slice(0, 10), eventIds: string[] = [];
   const adjustmentIds: string[] = [];
-  const delta = nextMoney.payable.sub(previousMoney.payable);
+  // This ledger adjusts realized net sales. Accounting retains the independently
+  // evidenced payable obligation, including taxes and charges.
+  const delta = new Prisma.Decimal(subtract(nextMoney.net, previousMoney.net));
   if (!delta.isZero()) {
     const adjustmentId = randomUUID(), eventId = randomUUID();
     const publicEvent = PartnerEventSchema.parse({ schemaVersion: 1, type: 'SABALAN_ADJUSTMENT', eventId,
@@ -379,12 +419,29 @@ async function activateShared(tx: Transaction, input: {
     reason: input.command.reason, evidence: json({ publicEvent, dependencyEvidenceIds: input.dependencyEvidenceIds,
       gateActors: input.gateActors, adjustmentEventIds: adjustmentIds }) } });
   eventIds.push(effectiveId);
+  await synchronizePartnerContractedQuantities(tx, current.id);
+  if (accounting.value.replacement && accounting.value.predecessor && accounting.value.approval) {
+    const { replacement, predecessor, approval } = accounting.value;
+    await voidAccountingRecordInTransaction(tx, { recordId: predecessor.id, actorId: approval.actorId,
+      voidReason: input.command.reason, externalReference: approval.externalReference!,
+      downstreamNote: approval.downstreamNote || '', voidedAt: new Date(instant) });
+    if (await tx.accountingReceivable.count({ where: { invoiceRecordId: predecessor.id, status: { not: 'VOIDED' } } })) {
+      return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    }
+    const published = await approvePartnerFinancialSourceWithinTransaction(tx, replacement, { ...approval,
+      commandId: `${input.command.commandId}:replacement`, correlationId: input.command.correlationId,
+      approvedAt: new Date(instant), effectiveDate: new Date(`${date}T00:00:00.000Z`) });
+    const approvalEventId = object(object(published.metadata)?.partnerApproval)?.eventId;
+    if (typeof approvalEventId !== 'string') throw new Error('Partner replacement publication evidence missing');
+    eventIds.push(approvalEventId);
+  }
   return { ok: true, value: { eventIds } };
 }
 
 async function voidingSnapshot(tx: Transaction, input: { caseId: string; correctionId?: string }): Promise<PartnerVoidingSnapshot | null> {
   const sale = await lockCase(tx, input.caseId);
   if (!sale || !sale.commitmentEventId) return null;
+  if (!input.correctionId && await hasOpenRetailCorrection(tx, sale.id)) return null;
   const correction = input.correctionId ? await lockOpportunity(tx, input.correctionId) : null;
   if (input.correctionId && (!correction || correction.caseId !== sale.id || correction.scope !== 'VOID')) return null;
   let opportunity: PartnerVoidingOpportunity | undefined;
@@ -447,12 +504,12 @@ async function finalizeVoid(tx: Transaction, input: {
     correlationId: input.command.correlationId, actorId: input.command.idempotency.actorId,
     recordedAt: instant, effectiveDate: date, owner: input.snapshot.owner,
     internalRecordId: current.internalRecordId, originalRealizationEventId: current.commitmentEventId,
-    correctionId: input.command.correctionId, delta: wholesale.payable.negated().toString(),
+    correctionId: input.command.correctionId, delta: subtract('0', wholesale.net),
     currency: wholesale.currency, reason: input.command.reason });
   await tx.partnerFinancialAdjustment.create({ data: { id: adjustmentRecordId, caseId: current.id,
     caseRevision: current.headRevision, correctionId: input.command.correctionId,
     originalRealizationEventId: current.commitmentEventId, effectiveDate: new Date(`${date}T00:00:00.000Z`),
-    delta: wholesale.payable.negated(), currency: wholesale.currency,
+    delta: subtract('0', wholesale.net), currency: wholesale.currency,
     commandId: `${input.command.commandId}:void-adjustment`, evidence: json(adjustment) } });
   await tx.partnerCaseEvent.create({ data: { id: adjustmentEventId, caseId: current.id,
     caseRevision: current.headRevision, integrityHash: current.integrityHash,
@@ -472,7 +529,21 @@ async function finalizeVoid(tx: Transaction, input: {
     stateRevision: current.stateRevision, commitmentEventId: current.commitmentEventId },
     data: { state: 'VOIDED', stateRevision: { increment: 1 } } });
   if (updated.count !== 1) return { ok: false, error: partnerError('ROW_STALE') };
-  await tx.salesContract.update({ where: { id: current.customerContractId }, data: { status: 'CANCELLED' } });
+  await tx.salesContract.update({ where: { id: current.customerContractId }, data: { status: 'CANCELLED',
+    isInactive: true, inactiveAt: new Date(instant), inactiveBy: input.command.idempotency.actorId,
+    inactiveReason: input.command.reason } });
+  await tx.contractPublicConfirmation.updateMany({ where: { contractId: current.customerContractId,
+    status: { in: ['PENDING', 'ACTIVE'] } }, data: { status: 'INVALIDATED', cancelledAt: new Date(instant) } });
+  const financialRecords = await tx.accountingFinancialRecord.findMany({ where: {
+    metadata: { path: ['partnerCaseId'], equals: current.id }, kind: 'INVOICE_CANDIDATE',
+    status: { not: 'VOIDED' } }, select: { id: true } });
+  for (const record of financialRecords) {
+    await voidAccountingRecordInTransaction(tx, { recordId: record.id,
+      actorId: input.command.idempotency.actorId, voidReason: input.command.reason,
+      externalReference: input.command.correctionId,
+      downstreamNote: `Partner void evidence: ${allAdjustments.join(',')}; dependencies: ${input.dependencyEvidenceIds.join(',')}`,
+      voidedAt: new Date(instant) });
+  }
   await tx.partnerCaseEvent.create({ data: { id: voidEventId, caseId: current.id, caseRevision: current.headRevision,
     integrityHash: current.integrityHash, sequence: await nextSequence(tx, current.id),
     stateRevision: current.stateRevision + 1, type: voided.type, fromState: 'COMMITTED', toState: 'VOIDED',
@@ -496,7 +567,10 @@ export function createPrismaPartnerFinancialCorrectionServices(input: PartnerFin
   const transaction = async <T>(work: (tx: Transaction) => Promise<T>): Promise<T> => {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await input.database.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        return await input.database.$transaction(async tx => {
+          await lockPartnerOperationsControl(tx);
+          return work(tx);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       } catch (error) {
         const row = object(error), meta = object(row?.meta);
         const serializationConflict = row?.code === 'P2034' || meta?.code === '40001' ||

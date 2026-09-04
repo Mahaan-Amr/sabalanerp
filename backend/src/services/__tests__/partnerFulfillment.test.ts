@@ -42,7 +42,8 @@ class PartnerFulfillmentFixture implements PartnerFulfillmentRepository {
         readAuthorizedSource: async () => ({ ok: true, value: structuredClone(this.source) }),
         readLineageCommand: async command => this.commands.find(row => row.commandId === command.commandId ||
           contracts.compareIdempotency(row.idempotency, command.idempotency) !== 'DISTINCT') || null,
-        findLineage: async (caseId, productRowId) => this.lineages.find(row => row.caseId === caseId && row.productRowId === productRowId) || null,
+        findLineage: async (caseId, productRowId) => this.lineages.find(row => row.caseId === caseId &&
+          row.productRowId === productRowId) || null,
         commitLineages: async input => {
           if (contracts.checkExpectedRevision(input.command.expected, this.source.view.owner)) {
             return { ok: false, error: contracts.partnerError('ROW_STALE') };
@@ -138,6 +139,57 @@ test('delivery allocation cannot exceed the canonical row quantity', async () =>
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.error.code, 'INTEGRITY_CONFLICT');
   assert.equal(fixture.lineages.length, 0);
+});
+
+test('direct deliveries to two destinations of the same customer retain one physical lineage', async () => {
+  const fixture = new PartnerFulfillmentFixture();
+  fixture.source.view.deliveries = [
+    { ...fixture.source.view.deliveries[0]!, items: [{ productRowId: 'fixture-313-row', quantity: '1' }] },
+    { ...fixture.source.view.deliveries[0]!, deliveryId: 'second-delivery', destination: 'دومین محل تحویل مشتری',
+      items: [{ productRowId: 'fixture-313-row', quantity: '1' }] },
+  ];
+  const result = await createPartnerFulfillmentAdapter(fixture).ensureCommittedLineage(fixture.source.view, lineageCommand(fixture));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.ok && result.value.lineageEvidenceIds.length, 1);
+});
+
+test('loading selects the exact revision-owned Delivery instead of the lineage default destination', async () => {
+  const fixture = new PartnerFulfillmentFixture();
+  fixture.source.view.deliveries = [
+    { ...fixture.source.view.deliveries[0]!, items: [{ productRowId: 'fixture-313-row', quantity: '1.25' }] },
+    { ...fixture.source.view.deliveries[0]!, deliveryId: 'second-delivery', date: '2026-09-10',
+      destination: 'دومین محل تحویل مشتری', items: [{ productRowId: 'fixture-313-row', quantity: '0.75' }] },
+  ];
+  const adapter = createPartnerFulfillmentAdapter(fixture);
+  const materialized = await adapter.ensureCommittedLineage(fixture.source.view, lineageCommand(fixture));
+  assert.equal(materialized.ok, true);
+  const selected = await adapter.readLoadingSource(fixture.source.view.owner, 'second-delivery');
+  assert.equal(selected.ok, true, JSON.stringify(selected));
+  if (selected.ok) {
+    assert.equal(selected.value.deliveryId, 'second-delivery');
+    assert.equal(selected.value.plannedDate, '2026-09-10');
+    assert.equal(selected.value.recipient.destination, 'دومین محل تحویل مشتری');
+    assert.equal(selected.value.recipient.customerId, fixture.fixtures.case.customerId);
+    assert.equal(selected.value.rows[0]?.plannedQuantity, '0.750');
+    assert.deepEqual(selected.value.rows.map(row => row.lineageId), materialized.ok && materialized.value.lineageEvidenceIds);
+    assert.doesNotMatch(JSON.stringify(selected.value), /wholesale|retailUnitPrice|payable|discount/);
+  }
+});
+
+test('a retail-only Case successor retains the original stable physical lineage', async () => {
+  const fixture = new PartnerFulfillmentFixture();
+  const adapter = createPartnerFulfillmentAdapter(fixture);
+  const first = await adapter.ensureCommittedLineage(fixture.source.view, lineageCommand(fixture));
+  assert.equal(first.ok, true);
+  const origin = structuredClone(fixture.lineages[0]);
+  const owner = { ...fixture.source.view.owner, revision: 2, integrityHash: `sha256-v1:${'b'.repeat(64)}` };
+  fixture.source.view = { ...fixture.source.view, owner };
+  fixture.source.graph = { ...fixture.source.graph, owner };
+  const successor = await adapter.ensureCommittedLineage(fixture.source.view, lineageCommand(fixture, 'successor-materialize'));
+  assert.equal(successor.ok, true);
+  assert.equal(fixture.lineages.length, 1, 'one Case row must not acquire a second physical source');
+  assert.deepEqual(fixture.lineages[0], origin, 'the original physical origin remains immutable');
+  assert.deepEqual(successor.ok && successor.value.lineageEvidenceIds, first.ok && first.value.lineageEvidenceIds);
 });
 
 test('dependency inspection blocks a successor below reserved plus dispatched quantity', async () => {
@@ -248,19 +300,21 @@ test('malformed canonical evidence returns a controlled error and duplicate Deli
   assert.equal(duplicateDeliveryRow.lineages.length, 0);
 });
 
-test('partial Delivery allocation and a drifted contracted baseline both fail closed', async () => {
+test('lineage preserves the full commitment while Delivery planning may still be partial or empty', async () => {
   const partial = new PartnerFulfillmentFixture();
   partial.source.view.deliveries[0]!.items[0]!.quantity = '1.999';
   const partialResult = await createPartnerFulfillmentAdapter(partial)
     .ensureCommittedLineage(partial.source.view, lineageCommand(partial));
-  assert.equal(partialResult.ok, false);
+  assert.equal(partialResult.ok, true, JSON.stringify(partialResult));
 
   const omitted = new PartnerFulfillmentFixture();
   omitted.source.view.deliveries = [];
   const omittedResult = await createPartnerFulfillmentAdapter(omitted)
     .ensureCommittedLineage(omitted.source.view, lineageCommand(omitted));
-  assert.equal(omittedResult.ok, false);
+  assert.equal(omittedResult.ok, true, JSON.stringify(omittedResult));
+});
 
+test('a drifted contracted baseline fails closed', async () => {
   const drifted = new PartnerFulfillmentFixture();
   drifted.dependencies = [quantityDependency(drifted, {
     contracted: '3.000', finalizedReserved: '1.000', physicallyDispatched: '0.000', evidenceIds: ['wrong-baseline'],
@@ -283,6 +337,19 @@ test('dependency evidence is bound to the exact Case revision and internal recor
   assert.deepEqual(result, { ok: true, value: {
     evidenceIds: ['stale-evidence'], blockedProductRowIds: ['fixture-313-row'],
   } });
+});
+
+test('removed rows require an exact zero current obligation and retain their audit evidence', async () => {
+  const fixture = new PartnerFulfillmentFixture();
+  fixture.dependencies = [quantityDependency(fixture, { evidenceIds: ['current-baseline'] }),
+    quantityDependency(fixture, { productRowId: 'removed-row', contracted: '0.000', finalizedReserved: '0.000',
+      physicallyDispatched: '0.000', evidenceIds: ['removed-row-zero-baseline'] })];
+  const adapter = createPartnerFulfillmentAdapter(fixture);
+  assert.deepEqual((await adapter.inspectDependencies(fixture.source.view)), { ok: true, value: {
+    evidenceIds: ['current-baseline', 'removed-row-zero-baseline'], blockedProductRowIds: [] } });
+  fixture.dependencies[1] = { ...fixture.dependencies[1]!, contracted: '1.000' };
+  const obsolete = await adapter.inspectDependencies(fixture.source.view);
+  assert.deepEqual(obsolete.ok && obsolete.value.blockedProductRowIds, ['removed-row']);
 });
 
 test('concurrent commands atomically converge on one physical lineage', async () => {

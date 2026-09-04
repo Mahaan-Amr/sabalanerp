@@ -66,6 +66,8 @@ export interface DispatchDocumentRepository {
     idempotencyKey: string;
     command: 'ACCEPT_AND_ISSUE' | 'REJECT' | 'VOID' | 'REPLACE' | 'PRINT_HANDOFF';
     intentFingerprint: string;
+    actorId?: string;
+    correlationId?: string;
   }): Promise<unknown | null>;
   allocateWaybillNumber(): Promise<string>;
   acceptAndIssue(input: {
@@ -155,6 +157,8 @@ export interface DispatchSourceIntegrityVerifier<Transaction = unknown> {
 export interface DispatchDocumentAccessPolicy {
   canReadWaybill(input: { actorId: string; waybillId: string }): Promise<boolean>;
   canReadCandidate(input: { actorId: string }): Promise<boolean>;
+  canReadDocuments(input: { actorId: string; waybillId?: string; candidateId?: string;
+    kinds: DispatchDocumentKind[] }): Promise<boolean>;
 }
 
 export interface DispatchIntegrityIncidentReporter {

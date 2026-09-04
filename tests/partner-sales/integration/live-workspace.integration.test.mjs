@@ -9,13 +9,13 @@ test('live Partner workspace uses the current session and real local schema', as
   await withFixture(`partner-qa-${randomUUID()}`, async ({ namespace, token }) => {
     const get = async path => {
       const response = await fetch(`${target.backend}${path}`, {
-        headers: { cookie: `sabalan_session=${token}` }, redirect: 'error', signal: AbortSignal.timeout(15_000),
+        headers: { Connection: 'close', cookie: `sabalan_session=${token}` }, redirect: 'error', signal: AbortSignal.timeout(15_000),
       });
       return { status: response.status, body: await response.json() };
     };
     const post = async (body, authenticated = true) => {
       const response = await fetch(`${target.backend}/api/partner/workspaces/query-v2`, {
-        method: 'POST', headers: { 'content-type': 'application/json',
+        method: 'POST', headers: { Connection: 'close', 'content-type': 'application/json',
           ...(authenticated ? { cookie: `sabalan_session=${token}` } : {}) },
         body: JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(15_000),
       });

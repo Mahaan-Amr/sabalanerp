@@ -48,6 +48,16 @@ const renderPanel = (data: AccountingDeadlines) => renderToStaticMarkup(
   />,
 );
 
+test('Partner deadline identifies its actual debtor without an ordinary customer contract link', () => {
+  const html = renderPanel(deadlines({ items: [{ ...deadlines().items[0], contractId: null, contract: null,
+    partnerContext: { caseNumber: 'PC-334', internalRecordNumber: 'PI-334', debtor: { displayName: 'همکار آزمایشی' } },
+  }] }));
+  assert.match(html, /PC-334/);
+  assert.match(html, /همکار آزمایشی/);
+  assert.doesNotMatch(html, /دریافتنی قدیمی/);
+  assert.doesNotMatch(html, /\/contracts\//);
+});
+
 test('combined deadline panel links buckets and rows to their canonical destinations', () => {
   const html = renderPanel(deadlines());
   assert.match(html, /\/dashboard\/accounting\?due=next7&amp;deadlineType=all/);

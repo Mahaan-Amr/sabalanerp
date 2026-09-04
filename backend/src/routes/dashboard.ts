@@ -7,13 +7,15 @@ import { getUserWorkspaces } from '../middleware/workspace';
 import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import { resolveCoreDashboardSalesAccess } from '../services/coreDashboardAccess';
 import { summarizeCoreDashboard } from '../services/coreDashboardSummary';
-import { buildRealizedSalesHeadline, buildSalesReportContractWhere, buildSalesReportScope, resolveAllTimeSalesReportPeriod } from '../services/salesReportingService';
+import { buildSalesReport, buildSalesReportContractWhere } from '../services/salesReportingService';
 import { resolveWorkspaceRouteAvailability } from '../services/workspaceRouteAvailability';
 import { resolveWorkspaceActionAvailability, WORKSPACE_ACTION_RULES } from '../services/workspaceActionAvailability';
 
 const router = express.Router();
 
 router.get('/route-availability', protect, async (req: any, res) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Vary', 'Cookie, Authorization');
   const path = typeof req.query.path === 'string' ? req.query.path : '';
   if (!path.startsWith('/dashboard')) return res.status(400).json({ success: false, message: 'مسیر ارسال‌شده معتبر نیست.' });
   const data = await resolveWorkspaceRouteAvailability(prisma, { userId: req.user.id, role: req.user.role, path });
@@ -23,6 +25,8 @@ router.get('/route-availability', protect, async (req: any, res) => {
 export const createActionAvailabilityHandler = (
   resolver = resolveWorkspaceActionAvailability,
 ) => async (req: any, res: any) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Vary', 'Cookie, Authorization');
   const workspace = String(req.query.workspace || '').toLowerCase() as keyof typeof WORKSPACE_ACTION_RULES;
   if (!Object.prototype.hasOwnProperty.call(WORKSPACE_ACTION_RULES, workspace)) return res.status(400).json({
     success: false,
@@ -47,11 +51,12 @@ router.get('/stats', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_STATS
     }
     const reportQuery = { period: 'all' };
     const whereClause = buildSalesReportContractWhere(reportAccess, reportQuery);
-    const reportScope = buildSalesReportScope(reportAccess, reportQuery);
+    const ordinaryWhere = { AND: [whereClause, { OR: [{ partnerKind: null },
+      { partnerKind: { not: 'PARTNER_CUSTOMER' } }] }] };
 
-    const [contracts, totalCustomers, recentContracts] = await Promise.all([
+    const [contracts, totalCustomers, recentContracts, salesReport] = await Promise.all([
       prisma.salesContract.findMany({
-        where: whereClause,
+        where: ordinaryWhere,
         select: {
           id: true,
           status: true,
@@ -69,7 +74,7 @@ router.get('/stats', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_STATS
       }),
       prisma.crmCustomer.count(),
       prisma.salesContract.findMany({
-        where: whereClause,
+        where: ordinaryWhere,
         take: 5,
         select: {
           id: true,
@@ -85,22 +90,16 @@ router.get('/stats', protect, requireFeatureAccess(FEATURES.CORE_DASHBOARD_STATS
         },
         orderBy: { createdAt: 'desc' },
       }),
+      buildSalesReport(reportAccess, reportQuery),
     ]);
-    const allTimePeriod = resolveAllTimeSalesReportPeriod(contracts);
-    const salesHeadline = buildRealizedSalesHeadline({
-      contracts,
-      sellerId: reportScope.sellerId,
-      from: allTimePeriod.from,
-      to: allTimePeriod.to,
-    });
     const summary = summarizeCoreDashboard({
       contracts,
       totalCustomers,
       realizedSales: {
-        total: salesHeadline.netRealized,
-        average: salesHeadline.averageRealizedValue,
-        successRate: salesHeadline.successRate,
-        realizedContracts: salesHeadline.realizedCount,
+        total: salesReport.cards.netRealized,
+        average: salesReport.cards.averageRealizedValue,
+        successRate: salesReport.cards.successRate,
+        realizedContracts: salesReport.cards.realizedCount,
       },
     });
 

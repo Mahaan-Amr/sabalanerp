@@ -1,6 +1,9 @@
 import { prisma } from '../lib/prisma';
 import { AccountingRecordStatus, FinancialRecordKind, Prisma, PrismaClient } from '@prisma/client';
 import { rankBiSellers } from './biRecommendationService';
+import * as partnerContracts from '@sabalanerp/partner-sales-contracts';
+import { projectSabalanRevenue } from './partnerSales/reporting/revenue';
+import { readPersistedPartnerEvents } from './partnerSales/events/persisted';
 
 const DAY = 86_400_000;
 const REALIZED = new Set(['SIGNED', 'PRINTED']);
@@ -256,6 +259,20 @@ export const buildSalesReportContractWhere = (
   };
 };
 
+export const buildSalesReportContractPartitions = (where: Prisma.SalesContractWhereInput): {
+  ordinary: Prisma.SalesContractWhereInput; partner: Prisma.SalesContractWhereInput;
+} => ({
+  ordinary: { AND: [where, { OR: [{ partnerKind: null }, { partnerKind: { not: 'PARTNER_CUSTOMER' } }] }] },
+  partner: { AND: [where, { partnerKind: 'PARTNER_CUSTOMER' }] },
+});
+
+export const projectPartnerRevenueForSales = (events: partnerContracts.PartnerEvent[], capturedAt: string) => {
+  const revenue = projectSabalanRevenue(partnerContracts, events,
+    { from: '1900-01-01', to: capturedAt.slice(0, 10), asOf: capturedAt });
+  const realized = revenue.find(entry => entry.type === 'REALIZED');
+  return realized ? { amount: realized.amount, events: revenue } : null;
+};
+
 type SalesHeadlineContract = {
   id: string;
   status: string;
@@ -359,9 +376,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
   const scope = await validateSalesReportScope(access, query);
   const where = buildSalesReportContractWhere(access, query);
 
-  const contracts = await prisma.salesContract.findMany({
-    where,
-    include: {
+  const contractInclude = Prisma.validator<Prisma.SalesContractInclude>()({
       customer: { include: { projectAddresses: true } },
       department: { select: { id: true, namePersian: true, name: true } },
       createdByUser: { select: { id: true, firstName: true, lastName: true, username: true } },
@@ -371,9 +386,34 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       deliveries: true,
       payments: { include: { installments: true } },
       reportingEvents: true,
-      wonCrmPotentialProject: { select: { id: true, title: true } }
-    }
+      wonCrmPotentialProject: { select: { id: true, title: true } },
   });
+  const partitions = buildSalesReportContractPartitions(where);
+  const ordinaryContracts = await prisma.salesContract.findMany({
+    where: partitions.ordinary,
+    include: contractInclude,
+  });
+  const partnerRows = await prisma.salesContract.findMany({
+    where: partitions.partner,
+    include: {
+      ...contractInclude,
+      partnerCase: { select: { id: true, internalRecordId: true, events: { orderBy: { sequence: 'asc' },
+        select: { id: true, type: true, caseRevision: true, integrityHash: true, evidence: true } } } },
+    },
+  });
+  const capturedAt = new Date().toISOString();
+  const contracts: typeof ordinaryContracts = [...ordinaryContracts, ...partnerRows.flatMap(row => {
+    if (!row.partnerCase) throw new Error('Partner sales reporting root integrity conflict');
+    const publicEvents = readPersistedPartnerEvents(row.partnerCase, row.partnerCase.events);
+    const projected = projectPartnerRevenueForSales(publicEvents, capturedAt);
+    if (!projected) return [];
+    return [{ ...row, totalAmount: new Prisma.Decimal(projected.amount),
+      realizedAmount: new Prisma.Decimal(projected.amount),
+      reportingEvents: projected.events.map(entry => ({ id: entry.sourceKey, contractId: row.id,
+        eventType: entry.type, amount: new Prisma.Decimal(entry.amount), effectiveAt: new Date(`${entry.effectiveDate}T00:00:00.000Z`),
+        sellerId: entry.sellerId, sourceKey: entry.sourceKey, reason: null, metadata: null,
+        createdBy: null, createdAt: new Date(entry.recordedAt) })) }];
+  })];
 
   if (allTime) {
     period = resolveAllTimeSalesReportPeriod(contracts);

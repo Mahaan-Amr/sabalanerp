@@ -69,6 +69,13 @@ import partnerTechnicalPolicyRoutes from "./routes/partner-technical-policy";
 import partnerInquiryRoutes from "./routes/partner-inquiries";
 import partnerManagementRoutes from "./routes/partner-management";
 import partnerWorkspaceRoutes from "./routes/partner-workspaces";
+import partnerCaseRoutes from "./routes/partner-cases";
+import partnerRetailCollectionRoutes from "./routes/partner-retail-collections";
+import partnerFulfillmentRoutes from "./routes/partner-fulfillment";
+import partnerCorrectionRoutes from "./routes/partner-corrections";
+import partnerAccountingRoutes from "./routes/partner-accounting";
+import partnerReportRoutes from "./routes/partner-reports";
+import partnerOperationsRoutes from "./routes/partner-operations";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -262,6 +269,13 @@ app.use("/api/partner/management/technical-policy", partnerTechnicalPolicyRoutes
 app.use("/api/partner/inquiries", partnerInquiryRoutes);
 app.use("/api/partner/management", partnerManagementRoutes);
 app.use("/api/partner/workspaces", partnerWorkspaceRoutes);
+app.use("/api/partner/cases", partnerCaseRoutes);
+app.use("/api/partner/retail-collections", partnerRetailCollectionRoutes);
+app.use("/api/partner/fulfillment", partnerFulfillmentRoutes);
+app.use("/api/partner/corrections", partnerCorrectionRoutes);
+app.use("/api/partner/accounting", partnerAccountingRoutes);
+app.use("/api/partner/reports", partnerReportRoutes);
+app.use("/api/partner/operations", partnerOperationsRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/orders", orderRoutes);

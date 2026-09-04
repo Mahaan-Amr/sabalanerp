@@ -4,7 +4,7 @@ import { HR_REDESIGN_CATALOG } from './hrRedesignDataContracts';
 import { HR_ACTION_PERMISSIONS } from './hrActionPermissionCatalog';
 // Explicit resource-scoped actions use the same central access entry point.
 // Legacy workspace/feature access does not imply a resource-scoped grant.
-export { grantScopedAction, revokeScopedAction, resolveScopedActions } from './effectiveAuthorization/scopedActions';
+export { grantScopedAction, readScopedActions, revokeScopedAction, resolveScopedActions } from './effectiveAuthorization/scopedActions';
 
 export type EffectiveWorkspacePermission = 'view' | 'edit' | 'admin';
 

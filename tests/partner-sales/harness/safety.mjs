@@ -5,7 +5,9 @@ import { parseComposeStatus } from '../../../scripts/design-system-e2e-preflight
 export const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
 export const interfaceVersion = 'partner-qa-harness/v1';
 
-export function localTarget(env = process.env) {
+const browserDatabasePattern = /^sabalanerp_partner_browser_[a-f0-9]{16}$/;
+
+export function localTarget(env = process.env, database = 'sabalanerp') {
   for (const key of ['DATABASE_URL', 'PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'PGSERVICE', 'PGOPTIONS', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'COMPOSE_FILE']) {
     if (env[key]) throw new Error(`Partner QA refuses inherited ${key}; use only sabalanerp-local.`);
   }
@@ -14,12 +16,15 @@ export function localTarget(env = process.env) {
   }
   const frontend = env.PARTNER_QA_URL || 'http://127.0.0.1:3000';
   if (frontend !== 'http://127.0.0.1:3000') throw new Error('Partner QA frontend must be http://127.0.0.1:3000.');
-  return { frontend, backend: 'http://127.0.0.1:5000', database: 'sabalanerp' };
+  if (database !== 'sabalanerp' && !browserDatabasePattern.test(database)) {
+    throw new Error('Partner QA refuses an unowned database target.');
+  }
+  return { frontend, backend: 'http://127.0.0.1:5000', database };
 }
 
-export function validateRuntime(runtime) {
+export function validateRuntime(runtime, database = 'sabalanerp') {
   if (runtime.project !== 'sabalanerp-local' || !['development', 'test'].includes(runtime.nodeEnv)
-    || runtime.databaseHost !== 'postgres' || runtime.databaseName !== 'sabalanerp'
+    || runtime.databaseHost !== 'postgres' || runtime.databaseName !== database
     || runtime.smsEnvironment !== 'sandbox' || runtime.smsCredentialsPresent !== false) {
     throw new Error('Partner QA requires sabalanerp-local with its original database and credential-free SMS sandbox.');
   }
@@ -52,8 +57,9 @@ function status() {
   return services.map(({ Service, ID, Image }) => ({ service: Service, container: ID, image: Image }));
 }
 
-export async function preflight() {
-  const target = localTarget();
+export async function preflight(options = {}) {
+  const database = options.database || 'sabalanerp';
+  const target = localTarget(process.env, database);
   // Verify before every other Docker action, including context inspection and exec.
   status();
   const context = JSON.parse(docker(['context', 'inspect']));
@@ -70,7 +76,7 @@ export async function preflight() {
       smsCredentialsPresent: Object.entries(process.env).some(([key,value]) => /SMS.*(KEY|TOKEN|SECRET|PASSWORD)/i.test(key) && Boolean(value))
     }));
   `]));
-  validateRuntime(runtime);
+  validateRuntime(runtime, database);
   await verifyLocalHttp();
   return { target, runtime, services };
 }
@@ -80,7 +86,9 @@ export async function verifyLocalHttp(fetchImpl = fetch) {
   for (const url of [`${target.backend}/api/ready`, `${target.frontend}/login`]) {
     // Synchronous Docker inspections can outlast server keep-alive deadlines.
     // These sparse probes need no pooled socket; release even an error response.
-    const response = await fetchImpl(url, { headers: { Connection: 'close' }, redirect: 'error', signal: AbortSignal.timeout(15_000) });
+    // The freshly rebuilt Next.js container can report healthy before its first
+    // server-rendered route has completed the one-time cold compilation.
+    const response = await fetchImpl(url, { headers: { Connection: 'close' }, redirect: 'error', signal: AbortSignal.timeout(60_000) });
     await response.body?.cancel();
     if (!response.ok) throw new Error('Partner QA local HTTP readiness failed.');
   }

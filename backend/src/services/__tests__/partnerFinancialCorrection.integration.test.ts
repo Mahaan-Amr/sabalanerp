@@ -6,6 +6,8 @@ import { canonicalHash, partnerError, type PartnerCommand, type RevisionRef } fr
 import { createPrismaPartnerFinancialCorrectionServices } from '../crossWorkspaceDutyAdapters/partnerFinancialCorrectionAdapter';
 import { partnerVoidingInspectionHash } from '../partnerSales/corrections/voiding';
 import type { PartnerCorrectionDependencyInput } from '../partnerSales/corrections/dependencyChecks';
+import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
+import { capturePartnerContractedQuantities, readPartnerShipmentQuantityProjection } from '../partnerSales/fulfillment/quantityStore';
 
 function databaseUrl() {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
@@ -35,8 +37,8 @@ async function seedCommittedCase(tx: Prisma.TransactionClient, ids: ReturnType<t
     headRevision: 1, integrityHash: owner.integrityHash } });
   await tx.partnerCaseRevision.create({ data: { caseId: ids.caseId, revision: 1, integrityHash: owner.integrityHash,
     graphHash: hash('b'), graph: {}, partySnapshots: {},
-    wholesaleEnvelope: { totals: { payable: '1000', currency: 'IRR' } },
-    retailEnvelope: { totals: { payable: '1200', currency: 'IRR' } }, paymentEvidence: {}, customerContent: {},
+    wholesaleEnvelope: { schemaVersion: 1, totals: { net: '900', discount: '50', tax: '100', charges: '50', payable: '1000', currency: 'IRR' } },
+    retailEnvelope: { schemaVersion: 1, totals: { net: '1200', discount: '0', tax: '0', charges: '0', payable: '1200', currency: 'IRR' } }, paymentEvidence: {}, customerContent: {},
     internalProjection: {}, customerProjection: {}, actorId: ids.partnerId, commandId: `${ids.caseId}-create` } });
   await tx.partnerProductRow.create({ data: { id: `${ids.caseId}-seed-row`, caseId: ids.caseId } });
   await tx.partnerCaseRowBinding.create({ data: { caseId: ids.caseId, revision: 1,
@@ -93,6 +95,16 @@ test('real-schema voiding commits cancellation, internal adjustment, audit and n
     await database.$transaction(async tx => {
       const ids = idsFor(`partner-correction-${randomUUID()}`);
       const owner = await seedCommittedCase(tx, ids);
+      const invoice = await tx.accountingFinancialRecord.create({ data: { id: `${ids.caseId}-invoice`,
+        kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT', sourceId: ids.internalId,
+        contractId: ids.contractId, customerId: ids.customerId, amount: '1000', currency: 'IRR',
+        financiallyApprovedAt: new Date('2026-08-30T07:00:00.000Z'), financiallyApprovedBy: ids.partnerId,
+        createdBy: ids.partnerId, metadata: { partnerCaseId: ids.caseId } } });
+      const receivable = await tx.accountingReceivable.create({ data: { id: `${ids.caseId}-receivable`,
+        contractId: ids.contractId, invoiceRecordId: invoice.id, customerId: ids.customerId,
+        originalAmount: '1000', remainingAmount: '1000', currency: 'IRR', dueDate: new Date('2026-09-30'),
+        status: 'OPEN', createdBy: ids.partnerId,
+        metadata: { partnerReceivable: { id: `${ids.caseId}-receivable`, originalEvidence: 'retained' } } } });
       const transactionalDatabase = { $transaction: async <T>(work: (inner: Prisma.TransactionClient) => Promise<T>) => {
         await tx.$executeRaw`SAVEPOINT partner_financial_correction`;
         try { const result = await work(tx); await tx.$executeRaw`RELEASE SAVEPOINT partner_financial_correction`; return result; }
@@ -121,20 +133,30 @@ test('real-schema voiding commits cancellation, internal adjustment, audit and n
         const result = await serviceFor(actors[gate]).execute(await gateCommand(actors[gate], owner, request.commandId, gate));
         assert.equal(result.ok, true, gate);
       }
-      const [sale, contract, adjustment, voidEvent, notice] = await Promise.all([
+      const [sale, contract, adjustment, voidEvent, notice, voidedInvoice, voidedReceivable, accountingAudit] = await Promise.all([
         tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } }),
         tx.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } }),
         tx.partnerFinancialAdjustment.findFirstOrThrow({ where: { caseId: ids.caseId } }),
         tx.partnerCaseEvent.findFirstOrThrow({ where: { caseId: ids.caseId, type: 'CASE_VOIDED' } }),
         tx.partnerOutboxMessage.findFirstOrThrow({ where: { purpose: 'CUSTOMER_CANCELLATION_NOTICE',
           event: { caseId: ids.caseId } } }),
+        tx.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoice.id } }),
+        tx.accountingReceivable.findUniqueOrThrow({ where: { id: receivable.id } }),
+        tx.accountingAuditLog.findFirstOrThrow({ where: { action: 'VOID_ACCOUNTING_RECORD', recordId: invoice.id } }),
       ]);
       assert.equal(sale.state, 'VOIDED');
       assert.equal(sale.commitmentEventId, ids.commitmentId);
       assert.equal(sale.caseNumber, `${ids.caseId}-number`);
       assert.equal(contract.status, 'CANCELLED');
       assert.equal(adjustment.originalRealizationEventId, ids.commitmentId);
-      assert.equal(adjustment.delta.toString(), '-1000');
+      assert.equal(adjustment.delta.toString(), '-850', 'void reverses net realization, excluding taxes and charges');
+      assert.equal(voidedInvoice.status, 'VOIDED');
+      assert.equal(voidedReceivable.status, 'VOIDED');
+      assert.deepEqual((voidedReceivable.metadata as { partnerReceivable?: unknown }).partnerReceivable,
+        { id: receivable.id, originalEvidence: 'retained' }, 'void preserves immutable obligation provenance for historical reads');
+      assert.equal(voidedReceivable.remainingAmount.toString(), '1000', 'Accounting void preserves the original receivable amount');
+      assert.equal((voidedInvoice.metadata as { externalVoidReference?: string }).externalVoidReference, request.commandId);
+      assert.equal(accountingAudit.entityId, invoice.id);
       assert.equal(voidEvent.toState, 'VOIDED');
       assert.match(notice.deduplicationKey, /partner-void-notice/);
       assert.equal((notice.safePayload as { readOnlyLinkEvidenceId?: string }).readOnlyLinkEvidenceId,
@@ -179,10 +201,12 @@ test('real-schema shared successor is staged append-only and becomes the head on
         dueDate: new Date('2026-09-01'), amount: '1200', currency: 'IRR', method: 'CASH', evidence: {} } });
       const initialReceiptHash = await canonicalHash({ receipts: [] });
       const correctionId = `${ids.caseId}-correction`;
+      const [opportunityClock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
       await tx.partnerCorrectionOpportunity.create({ data: { id: correctionId, caseId: ids.caseId,
         predecessorRevision: 1, scope: 'SHARED', scopeHash: hash('e'), requesterId: ids.partnerId,
-        approvedBy: 'sales-manager', approvedAt: new Date('2026-08-30T08:00:00.000Z'),
-        expiresAt: new Date('2026-09-02T08:00:00.000Z'), calendarVersion: 'tehran-v1', evidence: {} } });
+        approvedBy: 'sales-manager', approvedAt: new Date(opportunityClock.now.getTime() - 60 * 60 * 1000),
+        expiresAt: new Date(opportunityClock.now.getTime() + 24 * 60 * 60 * 1000),
+        calendarVersion: 'tehran-v1', evidence: {} } });
       const transactionalDatabase = { $transaction: async <T>(work: (inner: Prisma.TransactionClient) => Promise<T>) => {
         await tx.$executeRaw`SAVEPOINT partner_shared_correction`;
         try { const result = await work(tx); await tx.$executeRaw`RELEASE SAVEPOINT partner_shared_correction`; return result; }
@@ -193,9 +217,9 @@ test('real-schema shared successor is staged append-only and becomes the head on
         database: transactionalDatabase,
         authorize: async () => ({ ok: true as const, value: { evidenceId: 'authorization-evidence' } }),
         prepareSharedSuccessor: async () => ({ ok: true as const, value: {
-          evidence: { graphHash: hash('f'), graph: {}, partySnapshots: {},
-            wholesaleEnvelope: { totals: { payable: '1200', currency: 'IRR' } },
-            retailEnvelope: { totals: { payable: '1400', currency: 'IRR' } }, paymentEvidence: {}, customerContent: {} },
+          evidence: { graphHash: hash('f'), graph: { savedGraphMarker: 'immutable-successor' }, partySnapshots: {},
+            wholesaleEnvelope: { schemaVersion: 1, totals: { net: '1000', discount: '50', tax: '150', charges: '100', payable: '1200', currency: 'IRR' } },
+            retailEnvelope: { schemaVersion: 1, totals: { net: '1400', discount: '0', tax: '0', charges: '0', payable: '1400', currency: 'IRR' } }, paymentEvidence: {}, customerContent: {} },
           pricing: [{ productRowId: rowId, configurationChanged: false, source: 'FROZEN' as const,
             approvalId: approval.id, configurationHash: hash('c'), evidenceHash: approval.evidenceHash,
             approvalExpiresAt: approval.expiresAt.toISOString() }],
@@ -213,7 +237,9 @@ test('real-schema shared successor is staged append-only and becomes the head on
           buildProjections: async () => ({ ok: true as const, value: { internal: {}, customer: {} } }),
         } }),
         revalidateSharedEffect: async (currentTx: Prisma.TransactionClient, context: {
-          candidate: { dependencies: PartnerCorrectionDependencyInput } }) => {
+          candidate: { dependencies: PartnerCorrectionDependencyInput; payload: { evidence: { graph: unknown } } } }) => {
+          assert.deepEqual(context.candidate.payload.evidence.graph, { savedGraphMarker: 'immutable-successor' },
+            'resuming a saved correction revalidates its persisted graph, not an empty placeholder');
           const receipts = await currentTx.partnerRetailReceipt.findMany({ where: { caseId: ids.caseId },
             orderBy: { id: 'asc' }, select: { id: true, planId: true, kind: true, originalReceiptId: true,
               amount: true, currency: true, effectiveDate: true, commandId: true } });
@@ -273,8 +299,150 @@ test('real-schema shared successor is staged append-only and becomes the head on
       assert.equal(saveRow.successorRevision, 2);
       assert.equal(sale.headRevision, 2);
       assert.equal(sale.state, 'COMMITTED');
-      assert.equal(adjustment.delta.toString(), '200');
+      assert.equal(adjustment.delta.toString(), '100', 'shared correction adjusts net realization, not the payable delta');
       assert.equal(effective.caseRevision, 2);
+      throw rollback;
+    }, { timeout: 30_000 });
+  } catch (error) {
+    if (error !== rollback) throw error;
+  } finally {
+    await database.$disconnect();
+  }
+});
+
+test('Partner shipment coverage retains removed lineage history, rejects gaps and seals zero current obligation', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const rollback = new Error('rollback Partner quantity coverage fixture');
+  try {
+    await database.$transaction(async tx => {
+      const ids = idsFor(`partner-quantity-coverage-${randomUUID()}`);
+      const owner = await seedCommittedCase(tx, ids, 'ACTIVE');
+      const secondId = `${ids.caseId}-removed-row`;
+      await tx.partnerProductRow.create({ data: { id: secondId, caseId: ids.caseId } });
+      await tx.partnerCaseRowBinding.create({ data: { caseId: ids.caseId, revision: 1, productRowId: secondId,
+        configurationHash: hash('9'), quantity: '2', unit: 'piece', precisionPolicyVersion: 'exact-v1' } });
+      const products = [{ productRowId: `${ids.caseId}-seed-row`, quantity: '1', unit: 'piece' },
+        { productRowId: secondId, quantity: '2', unit: 'piece' }];
+      for (const product of products) await tx.partnerFulfillmentLineage.create({ data: { id: `${product.productRowId}-lineage`,
+        caseId: ids.caseId, caseRevision: 1, integrityHash: owner.integrityHash, internalRecordId: ids.internalId,
+        ...product, recipient: { customerId: ids.customerId }, deliveryIds: [], commandId: `${product.productRowId}-lineage` } });
+      const view = { ...createPartnerFixtures().fulfillment, owner, recordId: ids.internalId,
+        products: products.map(product => ({ ...product, description: 'سنگ آزمایشی تبار فیزیکی' })) };
+      await capturePartnerContractedQuantities(tx, view);
+      const first = await readPartnerShipmentQuantityProjection(tx, ids.caseId);
+      assert.equal(first.rows.length, 2);
+      assert.equal(first.totalsByUnit[0].contracted, '3.000');
+      assert.equal(first.totalsByUnit[0].isComplete, true);
+      await tx.$executeRaw`SAVEPOINT missing_partner_baseline`;
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+      await tx.shipmentQuantityEvidence.deleteMany({ where: { partnerCaseId: ids.caseId, productRowId: secondId } });
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
+      const missing = await readPartnerShipmentQuantityProjection(tx, ids.caseId);
+      assert.equal(missing.rows.length, 2, 'a lost row remains visible as missing coverage');
+      assert.equal(missing.totalsByUnit[0].isComplete, false);
+      assert.equal(missing.rows.find(row => row.productRowId === secondId)?.canAuthorizeLoading, false);
+      await tx.$executeRaw`ROLLBACK TO SAVEPOINT missing_partner_baseline`;
+      await tx.$executeRaw`RELEASE SAVEPOINT missing_partner_baseline`;
+      await tx.$executeRaw`SAVEPOINT damaged_partner_baseline`;
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+      await tx.shipmentQuantityEvidence.updateMany({ where: { partnerCaseId: ids.caseId }, data: { metadata: { tampered: true } } });
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
+      await assert.rejects(capturePartnerContractedQuantities(tx, view), /integrity conflict/);
+      await tx.$executeRaw`ROLLBACK TO SAVEPOINT damaged_partner_baseline`;
+      await tx.$executeRaw`RELEASE SAVEPOINT damaged_partner_baseline`;
+      const previous = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: { caseId: ids.caseId, revision: 1 } } });
+      const successor = { ...owner, revision: 2, integrityHash: hash('c') };
+      await tx.partnerCaseRevision.create({ data: { ...previous, revision: 2, predecessorRevision: 1,
+        integrityHash: successor.integrityHash, commandId: `${ids.caseId}-successor`,
+        graph: {}, partySnapshots: {}, wholesaleEnvelope: previous.wholesaleEnvelope as Prisma.InputJsonValue,
+        retailEnvelope: previous.retailEnvelope as Prisma.InputJsonValue, paymentEvidence: {}, customerContent: {},
+        internalProjection: {}, customerProjection: {} } });
+      await tx.partnerCaseRowBinding.create({ data: { caseId: ids.caseId, revision: 2, ...products[0],
+        configurationHash: hash('9'), precisionPolicyVersion: 'exact-v1' } });
+      await tx.partnerSaleCase.update({ where: { id: ids.caseId }, data: { headRevision: 2,
+        integrityHash: successor.integrityHash, stateRevision: 5 } });
+      await tx.sabalanToPartnerSaleRecord.update({ where: { id: ids.internalId }, data: {
+        expectedRevision: 2, integrityHash: successor.integrityHash } });
+      await tx.salesContract.update({ where: { id: ids.contractId }, data: { partnerRevision: 2, partnerIntegrityHash: successor.integrityHash } });
+      const effectiveInstant = new Date();
+      await tx.partnerCaseEvent.create({ data: { id: `${ids.caseId}-effect`, caseId: ids.caseId, caseRevision: 2,
+        integrityHash: successor.integrityHash, sequence: 2, stateRevision: 5, type: 'CORRECTION_EFFECTIVE',
+        fromState: 'COMMITTED', toState: 'COMMITTED', actorId: ids.partnerId, commandId: `${ids.caseId}-effect`,
+        correlationId: `${ids.caseId}-effect`, effectiveDate: new Date(effectiveInstant.toISOString().slice(0, 10)),
+        recordedAt: effectiveInstant, evidence: {} } });
+      const stale = await readPartnerShipmentQuantityProjection(tx, ids.caseId);
+      assert.equal(stale.totalsByUnit[0].isComplete, false, 'advancing the Case without its quantity baseline cannot report current coverage');
+      assert.equal(stale.rows.every(row => !row.canAuthorizeLoading), true);
+      await capturePartnerContractedQuantities(tx, { ...view, owner: successor, products: [view.products[0]] });
+      const current = await readPartnerShipmentQuantityProjection(tx, ids.caseId);
+      assert.equal(current.totalsByUnit[0].isComplete, true);
+      assert.equal(current.totalsByUnit[0].contracted, '1.000');
+      assert.equal(current.rows.find(row => row.productRowId === secondId)?.quantities?.availableToLoad, '0.000');
+      const immediatelyBefore = await readPartnerShipmentQuantityProjection(tx, ids.caseId, {
+        cutoff: new Date(effectiveInstant.getTime() - 1).toISOString() });
+      assert.equal(immediatelyBefore.totalsByUnit[0].isComplete, true);
+      assert.equal(immediatelyBefore.totalsByUnit[0].contracted, '3.000', 'same-day history before correction retains predecessor quantities');
+      const historical = await readPartnerShipmentQuantityProjection(tx, ids.caseId, { cutoff: '2026-08-31T20:29:59.999Z' });
+      assert.equal(historical.totalsByUnit[0].contracted, '3.000');
+      assert.equal(historical.totalsByUnit[0].isComplete, true);
+      assert.equal(await tx.partnerFulfillmentLineage.count({ where: { caseId: ids.caseId } }), 2);
+      throw rollback;
+    }, { timeout: 30_000 });
+  } catch (error) { if (error !== rollback) throw error; }
+  finally { await database.$disconnect(); }
+});
+
+test('real schema binds frozen output and fulfillment evidence to one exact Case owner and rejects rewrites', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const rollback = new Error('rollback Partner exact evidence fixture');
+  try {
+    await database.$transaction(async tx => {
+      const ids = idsFor(`partner-evidence-${randomUUID()}`);
+      const other = idsFor(`partner-evidence-other-${randomUUID()}`);
+      const owner = await seedCommittedCase(tx, ids);
+      await seedCommittedCase(tx, other);
+      const snapshotId = `${ids.caseId}-snapshot`;
+      await tx.partnerCustomerOutputSnapshot.create({ data: { id: snapshotId, caseId: ids.caseId,
+        caseRevision: 1, integrityHash: owner.integrityHash, contentHash: hash('3'),
+        contractNumber: `${ids.contractId}-number`, recipient: '09120000000',
+        expiresAt: new Date('2027-08-30T08:00:00.000Z'), content: { exact: true },
+        commandId: `${ids.caseId}-snapshot-command` } });
+      const artifact = await tx.partnerCustomerArtifact.create({ data: { id: `${ids.caseId}-artifact`, snapshotId,
+        caseId: ids.caseId, caseRevision: 1, mode: 'FINAL', outputHash: hash('4'), byteHash: hash('5'),
+        content: Buffer.from('immutable partner output'), actorId: ids.partnerId, publishedAt: new Date() } });
+      const lineage = await tx.partnerFulfillmentLineage.create({ data: { id: `${ids.caseId}-lineage`,
+        caseId: ids.caseId, caseRevision: 1, integrityHash: owner.integrityHash, internalRecordId: ids.internalId,
+        productRowId: `${ids.caseId}-seed-row`, quantity: '1', unit: 'piece', recipient: { customer: ids.customerId },
+        deliveryIds: [`${ids.caseId}-delivery`], commandId: `${ids.caseId}-lineage-command` } });
+      const mismatchRowId = `${ids.caseId}-mismatch-row`;
+      await tx.partnerProductRow.create({ data: { id: mismatchRowId, caseId: ids.caseId } });
+      await tx.partnerCaseRowBinding.create({ data: { caseId: ids.caseId, revision: 1,
+        productRowId: mismatchRowId, configurationHash: hash('9'), quantity: '1', unit: 'piece',
+        precisionPolicyVersion: 'exact-v1' } });
+      const report = await tx.partnerReportExport.create({ data: { id: `${ids.caseId}-report`, actorId: ids.partnerId,
+        expiresAt: new Date('2027-08-30T08:00:00.000Z'), query: { purpose: 'PARTNER' }, report: { exact: true },
+        roots: [ids.caseId], contentHash: hash('6') } });
+      const rejected = async (name: string, work: () => Promise<unknown>, pattern: RegExp) => {
+        await tx.$executeRawUnsafe(`SAVEPOINT ${name}`);
+        try { await assert.rejects(work(), pattern); }
+        finally { await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${name}`);
+          await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${name}`); }
+      };
+      await rejected('artifact_owner_mismatch', () => tx.partnerCustomerArtifact.create({ data: {
+        id: `${ids.caseId}-bad-artifact`, snapshotId, caseId: other.caseId, caseRevision: 1, mode: 'PREVIEW',
+        outputHash: hash('4'), byteHash: hash('5'), content: Buffer.from('bad owner'), actorId: ids.partnerId,
+      } }), /partner_customer_artifact_snapshot_owner/);
+      await rejected('lineage_owner_mismatch', () => tx.partnerFulfillmentLineage.create({ data: {
+        id: `${ids.caseId}-bad-lineage`, caseId: ids.caseId, caseRevision: 1, integrityHash: owner.integrityHash,
+        internalRecordId: other.internalId, productRowId: mismatchRowId, quantity: '1', unit: 'piece',
+        recipient: { customer: ids.customerId }, deliveryIds: [`${ids.caseId}-delivery`],
+        commandId: `${ids.caseId}-bad-lineage-command`,
+      } }), /partner_fulfillment_internal_record_owner/);
+      await rejected('artifact_rewrite', () => tx.partnerCustomerArtifact.update({ where: { id: artifact.id },
+        data: { byteHash: hash('7') } }), /append-only/);
+      await rejected('lineage_delete', () => tx.partnerFulfillmentLineage.delete({ where: { id: lineage.id } }), /append-only/);
+      await rejected('report_rewrite', () => tx.partnerReportExport.update({ where: { id: report.id },
+        data: { contentHash: hash('8') } }), /append-only/);
       throw rollback;
     }, { timeout: 30_000 });
   } catch (error) {

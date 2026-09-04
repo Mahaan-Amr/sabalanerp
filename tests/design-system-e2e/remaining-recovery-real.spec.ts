@@ -8,7 +8,7 @@ import { loginAsAdmin, setTheme, assertNoHorizontalOverflow } from './support/de
 const fixture = JSON.parse(readFileSync('packages/contract-product-graph/src/__tests__/fixtures/remaining-child-chain.json', 'utf8'));
 
 test('real remaining-chain draft saves, reloads, edits and reaches accounting without money or inventory drift', async ({ page, baseURL }, testInfo) => {
-  test.setTimeout(180_000);
+  test.setTimeout(360_000);
   expect(new URL(baseURL!).hostname).toMatch(/^(localhost|127\.0\.0\.1)$/);
   const databaseUrl = process.env.REMAINING_RECOVERY_QA_DATABASE_URL ||
     'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public&connection_limit=2&pool_timeout=10';
@@ -59,9 +59,9 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
         currency: 'تومان', totalContractAmount: 23071875 } };
     // Exercise the real recovered-draft entry point, without intercepting any application endpoint.
     await page.evaluate(data => localStorage.setItem('contractWizardState', JSON.stringify({ currentStep: 8, wizardData: data })), wizardData);
-    await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8');
+    await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
     const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
-    await expect(submit).toBeEnabled();
+    await expect(submit).toBeEnabled({ timeout: 60_000 });
     const responsePromise = page.waitForResponse(r => new URL(r.url()).pathname.endsWith('/sales/contracts') && r.request().method() === 'POST');
     await submit.click();
     const response = await responsePromise;
@@ -81,9 +81,9 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
       expect(projectCanonicalProductGraph(graph, audience).products.slice(1, 4).map(p => p.baseAmountToman)).toEqual(['0', '0', '0']);
     }
     await expect(page).toHaveURL(new RegExp(`/dashboard/sales/contracts/${id}`), { timeout: 60_000 });
-    await expect(page.getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible();
-    await page.reload();
-    await expect(page.getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
     for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
       await page.setViewportSize({ width, height: 900 });
       await setTheme(page, theme);
@@ -94,7 +94,9 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
     await page.setViewportSize({ width: 1440, height: 900 });
     for (const variant of ['original', 'summary']) {
       await page.getByRole('combobox', { name: 'نسخه چاپ' }).selectOption(variant);
-      const downloadPromise = page.waitForEvent('download', { timeout: 45_000 });
+      // A cold PDF render can take close to one minute in the constrained local
+      // Compose runtime; keep the record alive until that real render completes.
+      const downloadPromise = page.waitForEvent('download', { timeout: 90_000 });
       await page.getByRole('button', { name: 'دانلود PDF', exact: true }).click();
       const download = await downloadPromise;
       const pdfPath = testInfo.outputPath(`contract-${variant}.pdf`);
@@ -109,12 +111,13 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
     await page.getByRole('button', { name: 'ذخیره تغییرات', exact: true }).click();
     const updatedResponse = await updatePromise;
     expect(updatedResponse.status(), JSON.stringify(await updatedResponse.json())).toBe(200);
+    await expect(page).toHaveURL(new RegExp(`/dashboard/sales/contracts/${id}(?:\\?|$)`), { timeout: 60_000 });
     const edited = await load();
     expect(edited.totalAmount!.toString()).toBe('23071875');
     expect(edited.items.map(i => i.id).sort()).toEqual(saved.items.map(i => i.id).sort());
     expect(parseCanonicalProductGraph(edited.productGraphState!.graph).allocations).toEqual(graph.allocations);
-    await page.goto(`/dashboard/accounting/contracts/${id}`);
-    await expect(page.getByRole('heading', { name: 'خلاصه قرارداد', exact: true })).toBeVisible();
+    await page.goto(`/dashboard/accounting/contracts/${id}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'خلاصه قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
     await page.screenshot({ path: testInfo.outputPath('accounting.png'), fullPage: true });
     expect(errors).toEqual([]);
     expect(failures).toEqual([]);

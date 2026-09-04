@@ -86,7 +86,7 @@ test('HR work schedule and Persian time selection are RTL, keyboard, mobile, and
   await expect(personnel).toBeVisible();
   await personnel.getByRole('button').first().click();
   await personnel.getByRole('button', { name: 'مشاهده برنامه کاری' }).click();
-  await expect(page.getByRole('heading', { name: 'ساعت کاری' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: /^برنامه کاری / })).toBeVisible();
 
   await setViewportAndZoom(page, { width: 390, height: 844 });
   const saturday = page.getByRole('button', { name: 'شنبه', exact: true });
@@ -104,7 +104,7 @@ test('HR work schedule and Persian time selection are RTL, keyboard, mobile, and
 
   await setViewportAndZoom(page, { width: 780, height: 844 }, 2);
   await assertNoHorizontalOverflow(page);
-  await expect(page.getByRole('button', { name: 'اعمال برای روزهای انتخاب‌شده' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'اعمال زمان' })).toBeVisible();
 });
 
 test('Hiring lifecycle journey remains keyboard, reduced-motion, mobile, zoom, and theme safe', async ({ page }) => {

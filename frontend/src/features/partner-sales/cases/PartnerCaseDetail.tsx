@@ -68,7 +68,7 @@ export function PartnerCaseDetailContent({ view, actions }: { view: PartnerCaseV
       <ErpSection title="پرداخت مشتری"><PaymentPlan plan={view.customerPaymentPlan} /></ErpSection>
       <ErpSection title="پرداخت به سبلان"><PaymentPlan plan={view.sabalanPaymentPlan} /></ErpSection>
       {(actions.canRequestCorrection || actions.canCancel || actions.canRequestVoid) && <ErpSection title="اقدام‌های پرونده">
-        <ErpActionGrid items={[
+        <ErpActionGrid columns={1} items={[
           ...(actions.canRequestCorrection ? [{ title: 'درخواست اصلاح', description: 'دامنه اصلاح و دلیل ثبت می‌شود.', icon: FaEdit, tone: 'warning' as const, onClick: actions.onRequestCorrection }] : []),
           ...(actions.canCancel ? [{ title: 'لغو پیش از قطعیت', description: 'هر دو رکورد با هم لغو و سوابق حفظ می‌شوند.', icon: FaBan, tone: 'danger' as const, onClick: actions.onCancel }] : []),
           ...(actions.canRequestVoid ? [{ title: 'درخواست ابطال', description: 'پس از بررسی وابستگی‌ها و تأییدهای لازم.', icon: FaBan, tone: 'danger' as const, onClick: actions.onRequestVoid }] : []),

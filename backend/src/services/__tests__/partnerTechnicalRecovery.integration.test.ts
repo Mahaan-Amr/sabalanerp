@@ -71,6 +71,8 @@ test('real pre-Case authority binds creator-private recovery to the current Part
     await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'ACTIVE' } });
     await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
       enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+      cohortId: actorId, enrollmentPaused: false, operationalPaused: false } });
     await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
       actorId, eligibilityEvidence: { fixture: true } } });
     const dependencies = { actorId, transaction: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => run(tx),
@@ -105,6 +107,8 @@ test('pre-Case technical authority rejects internal ADMIN, pending identity, for
       'active identity outside a release cohort cannot read the mounted technical surface');
     await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
       enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+      cohortId: actorId, enrollmentPaused: false, operationalPaused: false } });
     await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
       actorId, eligibilityEvidence: { fixture: true } } });
     assert.equal((await authorize(tx, request)).ok, true, 'own active Partner bundle, even with a stray legacy role');
@@ -126,6 +130,8 @@ test('real database policy and private catalog evidence produce a validated safe
       commercialAccount: { create: { id: actorId } } } });
     await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
       enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+      cohortId: actorId, enrollmentPaused: false, operationalPaused: false } });
     await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
       actorId, eligibilityEvidence: { fixture: true } } });
     const product = await tx.product.create({ data: { id: actorId, code: actorId, name: actorId, namePersian: 'سنگ تست فنی',

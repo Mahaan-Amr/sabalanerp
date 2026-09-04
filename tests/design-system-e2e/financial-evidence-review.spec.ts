@@ -150,8 +150,10 @@ test('approval conflict reloads the contract and opens the exact dedicated revie
   await expect(page.getByRole('button', { name: 'بستن پرچم' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'لغو پرچم' })).toHaveCount(0);
 
-  await reviewLink.click();
-  await expect(page).toHaveURL(new RegExp(`${caseHref}$`));
+  await Promise.all([
+    page.waitForURL(new RegExp(`${caseHref}$`)),
+    reviewLink.click(),
+  ]);
   await expect(page.getByTestId('financial-evidence-review-case')).toBeVisible();
   await expect(page.getByText('اختلاف دقیق', { exact: true })).toBeVisible();
   await expect(page.getByText('مقدار قابل‌مقایسه طبق قاعده منبع').first()).toBeVisible();

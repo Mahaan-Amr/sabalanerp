@@ -131,6 +131,11 @@ export function createPartnerVoidingService<Transaction>(dependencies: PartnerVo
           if (!saved || saved.commandId !== command.commandId || saved.payloadHash !== command.idempotency.payloadHash) {
             return failure('IDEMPOTENCY_CONFLICT');
           }
+          const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId,
+            action: command.type === 'CORRECTION_GATE' ? gateAction[command.gate]
+              : command.type === 'VOID_REMEDIATION_REQUEST' ? 'VOID_REMEDIATION_REQUEST' : 'VOID_REQUEST',
+            caseId: command.expected.caseId, correctionId: saved.correctionId });
+          if (!authorization.ok) return authorization;
           return { ok: true, value: { ...saved, replayed: true } };
         }
         const snapshot = await dependencies.lockSnapshot(tx, { caseId: command.expected.caseId,

@@ -9,8 +9,18 @@ import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterData
 import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
 import { createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
+import { allocateLoadingNumber } from '../services/logisticsLoadingNumber';
+import { createPartnerCaseLoading, readPartnerCaseLoading, withLogisticsLoadingReadScope } from '../services/dispatchAllocation';
+import { randomUUID } from 'node:crypto';
+import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
+import { PartnerLoadingCommandError } from '../services/partnerSales/fulfillment/loadingAuthority';
 
 const router = express.Router();
+const respondPartnerLoading = (res: Response, result: Result<unknown>, successStatus = 200) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  return result.ok ? res.status(successStatus).json({ success: true, data: result.value })
+    : res.status(result.error.status).json({ success: false, code: result.error.code, error: result.error.message });
+};
 
 const LINEAR_TOLERANCE = 0.5;
 const EDITABLE_STATUS = 'DRAFT';
@@ -35,11 +45,13 @@ router.post('/canonical-driver-queue/:id/reserve', canEdit, canManageDrivers, as
   try {
     const loadingId = String(req.body.loadingId || '').trim();
     if (!loadingId) return res.status(400).json({ success: false, error: 'loadingId is required.' });
-    const turn = await reserveGuardQueueTurn(prisma, { turnId: req.params.id, loadingId, actorId: req.user.id });
+    const turn = await reserveGuardQueueTurn(prisma, { turnId: req.params.id, loadingId, actorId: req.user.id,
+      expected: req.body.expected, reason: req.body.reason, correlationId: req.get('X-Correlation-Id') });
     return res.json({ success: true, data: {
       ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId,
     } });
   } catch (error) {
+    if (error instanceof PartnerLoadingCommandError) return respondPartnerLoading(res, { ok: false, error: error.error });
     if (error instanceof GuardQueueConflictError || error instanceof PilotSafetyPauseError) return res.status(409).json({ success: false, error: error.message });
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') return res.status(409).json({ success: false, error: 'The queue turn changed during reservation.' });
     if (error instanceof GuardQueueValidationError) return res.status(400).json({ success: false, error: error.message });
@@ -52,11 +64,13 @@ router.post('/canonical-driver-queue/:id/release', canEdit, canManageDrivers, as
   try {
     const turn = await releaseGuardQueueReservation(prisma, {
       turnId: req.params.id, loadingId: String(req.body.loadingId || '').trim(), actorId: req.user.id, reason: String(req.body.reason || ''),
+      correlationId: req.get('X-Correlation-Id'),
     });
     return res.json({ success: true, data: {
       ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId,
     } });
   } catch (error) {
+    if (error instanceof PartnerLoadingCommandError) return respondPartnerLoading(res, { ok: false, error: error.error });
     if (error instanceof GuardQueueConflictError) return res.status(409).json({ success: false, error: error.message });
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') return res.status(409).json({ success: false, error: 'The queue reservation changed during release.' });
     if (error instanceof GuardQueueValidationError) return res.status(400).json({ success: false, error: error.message });
@@ -70,9 +84,11 @@ router.put('/loadings/:id/canonical-allocations/:queueTurnId', canEdit, canEditL
     const draft = await saveCanonicalAllocationDraft(prisma, {
       loadingId: req.params.id, queueTurnId: req.params.queueTurnId,
       lines: Array.isArray(req.body.lines) ? req.body.lines : [], actorId: req.user.id,
+      expected: req.body.expected, reason: req.body.reason, correlationId: req.get('X-Correlation-Id'),
     });
     return res.json({ success: true, data: draft });
   } catch (error) {
+    if (error instanceof PartnerLoadingCommandError) return respondPartnerLoading(res, { ok: false, error: error.error });
     if (error instanceof DispatchAllocationConflictError || error instanceof PilotSafetyPauseError) return res.status(409).json({ success: false, error: error.message });
     if (error instanceof DispatchAllocationValidationError) return res.status(400).json({ success: false, error: error.message });
     console.error('Canonical allocation draft error:', error);
@@ -528,20 +544,6 @@ const replaceDriverAllocationRecords = async (tx: Prisma.TransactionClient, load
   }
 };
 
-const generateLoadingNumber = async () => {
-  const now = new Date();
-  const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  const count = await prisma.logisticsLoading.count({
-    where: {
-      createdAt: {
-        gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
-        lt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-      }
-    }
-  });
-  return `L-${datePart}-${String(count + 1).padStart(4, '0')}`;
-};
-
 const linePayloadToCreate = async (line: any) => {
   const sourceItem = await prisma.contractItem.findUnique({
     where: { id: line.sourceContractItemId },
@@ -658,7 +660,7 @@ const buildLinesAndDriverAllocations = async (body: any) => {
 
 const loadLoading = (id: string) => {
   return prisma.logisticsLoading.findUnique({
-    where: { id },
+    where: { id, sourceKind: 'SALES_CONTRACT' },
     include: {
       customer: true,
       project: true,
@@ -740,19 +742,24 @@ const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string
   }
 };
 
-router.get('/dashboard', canView, canViewDashboard, async (_req: any, res: Response) => {
+router.get('/dashboard', canView, canViewDashboard, async (req: any, res: Response) => {
   try {
+    const { drafts, finalized, cancelled, drivers, recent } = await withLogisticsLoadingReadScope(prisma,
+      { actorId: req.user.id, correlationId: randomUUID() }, async scope => {
     const [drafts, finalized, cancelled, drivers] = await Promise.all([
-      prisma.logisticsLoading.count({ where: { status: EDITABLE_STATUS as any } }),
-      prisma.logisticsLoading.count({ where: { status: FINALIZED_STATUS as any } }),
-      prisma.logisticsLoading.count({ where: { status: CANCELLED_STATUS as any } }),
-      prisma.guardDriverQueueTurn.count({ where: { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING } })
+      scope.database.logisticsLoading.count({ where: scope.where({ status: EDITABLE_STATUS }) }),
+      scope.database.logisticsLoading.count({ where: scope.where({ status: FINALIZED_STATUS }) }),
+      scope.database.logisticsLoading.count({ where: scope.where({ status: CANCELLED_STATUS }) }),
+      scope.database.guardDriverQueueTurn.count({ where: { status: GuardDriverQueueTurnStatus.AVAILABLE_FOR_LOADING } })
     ]);
 
-    const recent = await prisma.logisticsLoading.findMany({
+    const recent = await scope.database.logisticsLoading.findMany({
+      where: scope.where(),
       take: 8,
       orderBy: { updatedAt: 'desc' },
       include: { customer: true, project: true, lines: true }
+    });
+    return { drafts, finalized, cancelled, drivers, recent };
     });
 
     res.json({
@@ -764,7 +771,7 @@ router.get('/dashboard', canView, canViewDashboard, async (_req: any, res: Respo
           loadingNumber: loading.loadingNumber,
           status: loading.status,
           customerName: `${loading.customer.firstName} ${loading.customer.lastName}`.trim(),
-          projectName: loading.project.projectName || loading.project.address,
+          projectName: loading.project?.projectName || loading.project?.address,
           loadingDate: loading.loadingDate,
           lineCount: loading.lines.length
         }))
@@ -944,16 +951,16 @@ router.post('/projects/:projectId/draft', canEdit, canCreateLoadings, async (req
       return res.status(400).json({ success: false, error: 'No loadable remaining exists for this project' });
     }
 
-    const loading = await prisma.logisticsLoading.create({
+    const loading = await prisma.$transaction(async tx => tx.logisticsLoading.create({
       data: {
-        loadingNumber: await generateLoadingNumber(),
+        loadingNumber: await allocateLoadingNumber(tx),
         customerId: project.customerId,
         projectId: project.id,
         loadingDate: req.body?.loadingDate ? new Date(req.body.loadingDate) : new Date(),
         notes: req.body?.notes || null,
         createdBy: req.user.id
       }
-    });
+    }));
 
     res.status(201).json({ success: true, resumed: false, data: await loadLoading(loading.id) });
   } catch (error: any) {
@@ -966,11 +973,12 @@ router.get('/loadings', canView, canViewLoadings, async (req: any, res: Response
   try {
     const status = req.query.status ? String(req.query.status) : undefined;
     const projectId = req.query.projectId ? String(req.query.projectId) : undefined;
-    const loadings = await prisma.logisticsLoading.findMany({
-      where: {
+    const loadings = await withLogisticsLoadingReadScope(prisma, { actorId: req.user.id, correlationId: randomUUID() },
+      scope => scope.database.logisticsLoading.findMany({
+      where: scope.where({
         ...(status ? { status: status as any } : {}),
         ...(projectId ? { projectId } : {})
-      },
+      }),
       include: {
         customer: true,
         project: true,
@@ -980,7 +988,7 @@ router.get('/loadings', canView, canViewLoadings, async (req: any, res: Response
       },
       orderBy: { updatedAt: 'desc' },
       take: 100
-    });
+    }));
 
     res.json({
       success: true,
@@ -992,7 +1000,7 @@ router.get('/loadings', canView, canViewLoadings, async (req: any, res: Response
         finalizedAt: loading.finalizedAt,
         cancelledAt: loading.cancelledAt,
         customerName: `${loading.customer.firstName} ${loading.customer.lastName}`.trim(),
-        projectName: loading.project.projectName || loading.project.address,
+        projectName: loading.project?.projectName || loading.project?.address,
         projectId: loading.projectId,
         lineCount: loading.lines.length,
         correctionCount: loading.corrections.length,
@@ -1017,20 +1025,30 @@ router.get('/loadings', canView, canViewLoadings, async (req: any, res: Response
 });
 
 router.post('/loadings', canEdit, canCreateLoadings, [
-  body('projectId').notEmpty().withMessage('Project is required'),
+  body('sourceKind').optional().isIn(['SALES_CONTRACT', 'PARTNER_CASE']),
+  body('projectId').if((_value, { req }) => req.body?.sourceKind !== 'PARTNER_CASE').notEmpty().withMessage('Project is required'),
   body('lines').optional().isArray().withMessage('Lines must be an array')
 ], async (req: any, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
 
+    if (req.body.sourceKind === 'PARTNER_CASE') {
+      if (Object.keys(req.body).some(key => !['sourceKind', 'expected', 'deliveryId', 'idempotencyKey', 'reason'].includes(key))) {
+        return respondPartnerLoading(res, { ok: false, error: partnerError('INVALID_PAYLOAD') });
+      }
+      const result = await createPartnerCaseLoading(prisma, { expected: req.body.expected, deliveryId: req.body.deliveryId,
+        actorId: req.user.id, correlationId: req.get('X-Correlation-Id') || randomUUID(), reason: req.body.reason,
+        idempotencyKey: req.get('Idempotency-Key') || req.body.idempotencyKey });
+      return respondPartnerLoading(res, result, result.ok && !result.value.replayed ? 201 : 200);
+    }
     const project = await getProjectWithCustomer(req.body.projectId);
     if (!project) return res.status(404).json({ success: false, error: 'Project not found' });
 
-    const loadingNumber = await generateLoadingNumber();
     const { lineCreates, allocationCreatesByTurn } = await buildLinesAndDriverAllocations(req.body);
 
     const loading = await prisma.$transaction(async (tx) => {
+      const loadingNumber = await allocateLoadingNumber(tx);
       const created = await tx.logisticsLoading.create({
         data: { loadingNumber, customerId: project.customerId, projectId: project.id, loadingDate: req.body.loadingDate ? new Date(req.body.loadingDate) : new Date(), notes: req.body.notes || null, createdBy: req.user.id, lines: { create: lineCreates } }
       });
@@ -1042,12 +1060,17 @@ router.post('/loadings', canEdit, canCreateLoadings, [
     res.status(201).json({ success: true, data: await loadLoading(loading.id) });
   } catch (error: any) {
     console.error('Create loading error:', error);
+    if (req.body?.sourceKind === 'PARTNER_CASE') return res.status(500).json({ success: false,
+      error: 'ثبت بارگیری انجام نشد؛ دوباره تلاش کنید و در صورت تکرار با پشتیبانی تماس بگیرید.' });
     res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Server error' });
   }
 });
 
 router.get('/loadings/:id', canView, canViewLoadings, async (req: any, res: Response) => {
   try {
+    const owner = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id }, select: { sourceKind: true } });
+    if (owner?.sourceKind === 'PARTNER_CASE') return respondPartnerLoading(res, await readPartnerCaseLoading(prisma, {
+      loadingId: req.params.id, actorId: req.user.id, correlationId: req.get('X-Correlation-Id') || randomUUID() }));
     const loading = await loadLoading(req.params.id);
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
     res.json({ success: true, data: loading });
@@ -1059,7 +1082,7 @@ router.get('/loadings/:id', canView, canViewLoadings, async (req: any, res: Resp
 
 router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Response) => {
   try {
-    const existing = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id, sourceKind: 'SALES_CONTRACT' } });
     if (!existing) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (existing.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be edited' });
 
@@ -1088,7 +1111,7 @@ router.put('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Resp
 
 router.delete('/loadings/:id', canEdit, canEditLoadings, async (req: any, res: Response) => {
   try {
-    const existing = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id, sourceKind: 'SALES_CONTRACT' } });
     if (!existing) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (existing.status !== EDITABLE_STATUS) return res.status(400).json({ success: false, error: 'Only draft loadings can be deleted' });
 
@@ -1109,6 +1132,7 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
     if (canonicalDraftCount > 0) {
       const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim();
       const batch = await finalizeCanonicalLoadingAllocations(prisma, { loadingId: req.params.id, idempotencyKey, actorId: req.user.id,
+        expected: req.body?.expected, reason: req.body?.reason, correlationId: req.get('X-Correlation-Id'),
         effectiveAuthority: { actorRole: req.user.role, workspace: 'logistics', workspacePermission: String((req as any).workspacePermission || 'MANAGE') } });
       return res.json({ success: true, data: batch });
     }
@@ -1140,6 +1164,7 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
 
     res.json({ success: true, data: await loadLoading(updated.id) });
   } catch (error: any) {
+    if (error instanceof PartnerLoadingCommandError) return respondPartnerLoading(res, { ok: false, error: error.error });
     console.error('Finalize loading error:', error);
     const status = error instanceof DispatchAllocationConflictError || error instanceof PilotSafetyPauseError ? 409
       : error instanceof DispatchAllocationValidationError ? 400 : 400;
@@ -1154,7 +1179,7 @@ router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
 
-    const loading = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id } });
+    const loading = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id, sourceKind: 'SALES_CONTRACT' } });
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
     if (loading.status === CANCELLED_STATUS) return res.status(400).json({ success: false, error: 'Loading is already cancelled' });
 

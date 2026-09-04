@@ -103,10 +103,31 @@ export const formatShipmentQuantity = (value: bigint): string => {
   return `${sign}${absolute / SCALE}.${String(absolute % SCALE).padStart(3, '0')}`;
 };
 
-const rowKey = (item: Pick<ShipmentQuantityEvidence, 'contractId' | 'contractItemId' | 'productRowId' | 'unit'>) =>
-  [item.contractId, item.contractItemId, item.productRowId, item.unit].join('\u001f');
+type PhysicalRowIdentity = { readonly productRowId: string; readonly unit: string };
+type QuantityEvidenceFor<T extends PhysicalRowIdentity> = Omit<ShipmentQuantityEvidence,
+  'contractId' | 'contractItemId' | 'productRowId' | 'unit'> & T;
+type VerifiedRowFor<T extends PhysicalRowIdentity> = T & Pick<LastVerifiedShipmentRow, 'quantities' | 'verifiedAt'>;
+type ProjectionRowFor<T extends PhysicalRowIdentity> = Omit<ShipmentProjectionRow,
+  'contractId' | 'contractItemId' | 'productRowId' | 'unit'> & T;
+type ProjectionFor<T extends PhysicalRowIdentity> = Omit<ShipmentQuantityProjection, 'rows'> & {
+  readonly rows: readonly ProjectionRowFor<T>[];
+};
+type ProjectionOptions<T extends PhysicalRowIdentity> = {
+  readonly cutoff?: string;
+  readonly mode?: 'OPERATIONAL_AS_OF' | 'AUDIT_KNOWN_AT';
+  readonly lastVerifiedRows?: readonly VerifiedRowFor<T>[];
+};
+export type PartnerShipmentIdentity = PhysicalRowIdentity & {
+  readonly sourceKind: 'PARTNER_CASE';
+  readonly caseId: string;
+  readonly internalRecordId: string;
+  readonly lineageId: string;
+};
+export type PartnerShipmentQuantityEvidence = QuantityEvidenceFor<PartnerShipmentIdentity>;
+export type PartnerShipmentQuantityProjection = ProjectionFor<PartnerShipmentIdentity>;
 
-const eventOrder = (left: ShipmentQuantityEvidence, right: ShipmentQuantityEvidence) =>
+const eventOrder = (left: Pick<ShipmentQuantityEvidence, 'effectiveAt' | 'recordedAt' | 'id'>,
+  right: Pick<ShipmentQuantityEvidence, 'effectiveAt' | 'recordedAt' | 'id'>) =>
   left.effectiveAt.localeCompare(right.effectiveAt)
   || left.recordedAt.localeCompare(right.recordedAt)
   || left.id.localeCompare(right.id);
@@ -120,26 +141,37 @@ const healthPriority: Record<ShipmentProjectionHealth, number> = {
 
 export const projectShipmentQuantities = (
   allEvidence: readonly ShipmentQuantityEvidence[],
-  options: {
-    readonly cutoff?: string;
-    readonly mode?: 'OPERATIONAL_AS_OF' | 'AUDIT_KNOWN_AT';
-    readonly lastVerifiedRows?: readonly LastVerifiedShipmentRow[];
-  } = {},
-): ShipmentQuantityProjection => {
+  options: ProjectionOptions<Pick<ShipmentQuantityEvidence, 'contractId' | 'contractItemId' | 'productRowId' | 'unit'>> = {},
+): ShipmentQuantityProjection => projectPhysicalQuantities(allEvidence,
+  item => ({ contractId: item.contractId, contractItemId: item.contractItemId, productRowId: item.productRowId, unit: item.unit }),
+  item => [item.contractId, item.contractItemId, item.productRowId, item.unit].join('\u001f'), options);
+
+/** Same physical ledger rules, but no customer Contract or manufactured ContractItem identity. */
+export const projectPartnerShipmentQuantities = (
+  allEvidence: readonly PartnerShipmentQuantityEvidence[], options: ProjectionOptions<PartnerShipmentIdentity> = {},
+): PartnerShipmentQuantityProjection => projectPhysicalQuantities<PartnerShipmentIdentity>(allEvidence,
+  item => ({ sourceKind: item.sourceKind, caseId: item.caseId, internalRecordId: item.internalRecordId,
+    lineageId: item.lineageId, productRowId: item.productRowId, unit: item.unit }),
+  item => [item.sourceKind, item.caseId, item.internalRecordId, item.lineageId, item.productRowId, item.unit].join('\u001f'), options);
+
+function projectPhysicalQuantities<T extends PhysicalRowIdentity>(
+  allEvidence: readonly QuantityEvidenceFor<T>[], identityFor: (item: T) => T,
+  rowKey: (item: T) => string, options: ProjectionOptions<T>,
+): ProjectionFor<T> {
   const mode = options.mode || 'OPERATIONAL_AS_OF';
   const cutoff = options.cutoff || new Date().toISOString();
   const included = allEvidence.filter((item) => {
     if (item.effectiveAt > cutoff) return false;
     return mode !== 'AUDIT_KNOWN_AT' || item.recordedAt <= cutoff;
   });
-  const grouped = new Map<string, ShipmentQuantityEvidence[]>();
+  const grouped = new Map<string, QuantityEvidenceFor<T>[]>();
   for (const item of included) {
     const key = rowKey(item);
     grouped.set(key, [...(grouped.get(key) || []), item]);
   }
   const lastVerified = new Map((options.lastVerifiedRows || []).map((row) => [rowKey(row), row]));
 
-  const rows = [...grouped.entries()].map(([key, unsorted]): ShipmentProjectionRow => {
+  const rows = [...grouped.entries()].map(([key, unsorted]): ProjectionRowFor<T> => {
     const events = [...unsorted].sort(eventOrder);
     const identity = events[0];
     let contracted: bigint | null = null;
@@ -230,10 +262,7 @@ export const projectShipmentQuantities = (
     const quantities = finalHealth !== 'CURRENT' && verified ? verified.quantities : computed;
 
     return {
-      contractId: identity.contractId,
-      contractItemId: identity.contractItemId,
-      productRowId: identity.productRowId,
-      unit: identity.unit,
+      ...identityFor(identity),
       quantities,
       health: finalHealth,
       healthReasons,
@@ -279,4 +308,4 @@ export const projectShipmentQuantities = (
       isComplete: value.complete,
     })),
   };
-};
+}

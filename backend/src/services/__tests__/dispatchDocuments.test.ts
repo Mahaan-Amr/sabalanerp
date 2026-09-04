@@ -22,7 +22,8 @@ import { PilotSafetyPauseError } from '../dispatchCutover';
 const bytes = (value: string) => new TextEncoder().encode(value);
 const sha256 = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 
-const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce?: boolean; failSourceEvidence?: boolean } = {}) => {
+const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce?: boolean; failSourceEvidence?: boolean;
+  restrictStatementAccess?: boolean } = {}) => {
   const files = new Map<string, Uint8Array>();
   const state = {
     commands: new Map<string, { command: string; fingerprint: string; value: unknown }>(),
@@ -155,7 +156,10 @@ const makeHarness = (options: { failStatementOnce?: boolean; failSecondStageOnce
       }
       return { bytes: bytes(`pdf:${input.kind}`), mediaType: 'application/pdf' };
     } },
-    access: { canReadWaybill: async ({ actorId }) => actorId === 'allowed', canReadCandidate: async ({ actorId }) => actorId === 'allowed' },
+    access: { canReadWaybill: async ({ actorId }) => ['allowed', 'allowed-internal'].includes(actorId),
+      canReadCandidate: async ({ actorId }) => ['allowed', 'allowed-internal'].includes(actorId),
+      canReadDocuments: async ({ actorId, kinds }: { actorId: string; kinds: DispatchDocumentKind[] }) =>
+        !options.restrictStatementAccess || kinds.every(kind => kind === 'WAYBILL') || actorId === 'allowed-internal' },
     incidents: { report: async input => { state.incidents.push(input); } },
     id: (() => { let value = 0; return () => `id-${++value}`; })(),
     now: () => new Date('2026-08-09T12:00:00.000Z'),
@@ -177,6 +181,30 @@ const run = async () => {
   assert.deepEqual(state.issued[0].artifacts.map((artifact: PublishedDispatchArtifact) => artifact.kind), ['WAYBILL', 'STATEMENT']);
   assert.equal(state.issued[0].artifacts[0].generatorVersion, 'generator-v1');
   assert.equal(files.size, 2);
+  {
+    const restricted = makeHarness({ restrictStatementAccess: true });
+    const pair = await restricted.service.decideCandidate({ candidateId: 'candidate-1', action: 'ACCEPT',
+      idempotencyKey: 'partner-pair', actorId: 'accountant' });
+    const waybillId = pair.waybill!.id;
+    const artifacts: PublishedDispatchArtifact[] = restricted.state.issued[0].artifacts;
+    const request = { waybillId, actorId: 'allowed', correlationId: 'partner-download' };
+    assert.ok((await restricted.service.retrieveArtifact({ ...request, artifactId: artifacts[0].id })).bytes.length);
+    await assert.rejects(() => restricted.service.retrieveArtifact({ ...request, artifactId: artifacts[1].id }),
+      DispatchDocumentNotAvailableError, 'a waybill grant must not expose the wholesale statement');
+    await assert.rejects(() => restricted.service.printHandoff({ ...request, kinds: ['WAYBILL', 'STATEMENT'],
+      idempotencyKey: 'partner-print-both' }), DispatchDocumentNotAvailableError);
+    await assert.rejects(() => restricted.service.printHandoff({ ...request, kinds: ['STATEMENT_ADJUSTMENT'],
+      idempotencyKey: 'partner-adjustment' }), DispatchDocumentNotAvailableError);
+    await assert.rejects(() => restricted.service.getCombinedReadModel({ ...request, candidateId: 'candidate-1' }),
+      DispatchDocumentNotAvailableError, 'the combined model contains internal pricing evidence');
+    const internal = { ...request, actorId: 'allowed-internal' };
+    assert.ok((await restricted.service.retrieveArtifact({ ...internal, artifactId: artifacts[1].id })).bytes.length);
+    const print = await restricted.service.printHandoff({ ...internal, kinds: ['WAYBILL', 'STATEMENT'], idempotencyKey: 'internal-print' });
+    await print.complete.succeeded();
+    await assert.rejects(() => restricted.service.printHandoff({ ...request, kinds: ['WAYBILL', 'STATEMENT'],
+      idempotencyKey: 'internal-print' }), DispatchDocumentNotAvailableError, 'replay must recheck document audience');
+    assert.ok(await restricted.service.getCombinedReadModel({ ...internal, candidateId: 'candidate-1' }));
+  }
   for (const artifact of state.issued[0].artifacts) {
     const content = files.get(artifact.storageKey)!;
     assert.equal(artifact.sha256, sha256(content));

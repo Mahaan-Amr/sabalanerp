@@ -70,6 +70,7 @@ export type PartnerCorrectionSnapshot<Payload = unknown> = {
     expiresAt: string;
   };
   candidate?: PartnerCorrectionCandidate<Payload>;
+  stagedAccountingApproverId?: string;
   gates: CorrectionGateEvidence[];
 };
 
@@ -216,6 +217,10 @@ export function createPartnerSharedCorrectionService<Transaction, Payload = unkn
           if (!saved || saved.commandId !== command.commandId || saved.payloadHash !== expectedHash) {
             return failure('IDEMPOTENCY_CONFLICT');
           }
+          const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId,
+            action: command.type === 'SHARED_CORRECTION_SAVE' ? 'CORRECTION_REQUEST' : gateAction[command.gate],
+            caseId: command.expected.caseId, correctionId: saved.correctionId });
+          if (!authorization.ok) return authorization;
           return { ok: true, value: { ...saved, replayed: true } };
         }
         const correctionId = command.type === 'SHARED_CORRECTION_SAVE' ? command.opportunityId : command.correctionId;
@@ -268,6 +273,10 @@ export function createPartnerSharedCorrectionService<Transaction, Payload = unkn
             dependencies.actorId === snapshot.opportunity.requesterId) return failure('FORBIDDEN');
         if (command.gate === 'ACCOUNTING_MANAGER' && snapshot.gates.some(gate =>
           gate.gate === 'ACCOUNTING_PROCESS' && gate.actorId === dependencies.actorId)) return failure('FORBIDDEN');
+        if (command.gate === 'ACCOUNTING_MANAGER' && command.outcome === 'APPROVE' &&
+            snapshot.stagedAccountingApproverId && snapshot.stagedAccountingApproverId !== dependencies.actorId) {
+          return failure('FORBIDDEN');
+        }
         if (command.gate === 'SALES_SCOPE' && dependencies.actorId !== snapshot.opportunity.approvedBy) return failure('FORBIDDEN');
         const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId,
           action: gateAction[command.gate], caseId: snapshot.caseId, correctionId });

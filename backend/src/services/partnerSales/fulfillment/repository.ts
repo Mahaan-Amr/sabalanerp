@@ -37,6 +37,18 @@ export type PartnerPhysicalLineage = {
   deliveryIds: string[];
 };
 
+/** An operational selection, not another writable commercial Delivery. The
+ * loading writer must resolve it again in its transaction before reserving. */
+export type PartnerLoadingSource = {
+  sourceKind: 'PARTNER_CASE';
+  owner: RevisionRef;
+  internalRecordId: string;
+  deliveryId: string;
+  plannedDate: string;
+  recipient: PartnerFulfillmentRecipient;
+  rows: Array<{ lineageId: string; productRowId: string; description: string; unit: string; plannedQuantity: string }>;
+};
+
 export type PartnerQuantityDependency = {
   sourceKind: 'PARTNER_CASE';
   owner: RevisionRef;
@@ -71,7 +83,7 @@ export type PartnerFulfillmentCommandReceipt = {
 };
 
 export interface PartnerFulfillmentTransaction {
-  readAuthorizedSource(expected: RevisionRef, action: 'MATERIALIZE' | 'INSPECT_DEPENDENCIES' | 'INSPECT_VOIDING', authenticatedActorId?: string): Promise<Result<PartnerFulfillmentSource>>;
+  readAuthorizedSource(expected: RevisionRef, action: 'MATERIALIZE' | 'SELECT_DELIVERY' | 'INSPECT_LOADING' | 'INSPECT_DEPENDENCIES' | 'INSPECT_VOIDING', authenticatedActorId?: string): Promise<Result<PartnerFulfillmentSource>>;
   /** Lookup is scoped by command identity OR actor/operation/target/key so a
    * changed command ID cannot bypass a durable replay decision. */
   readLineageCommand(command: PartnerFulfillmentCommandScope): Promise<PartnerFulfillmentCommandReceipt | null>;

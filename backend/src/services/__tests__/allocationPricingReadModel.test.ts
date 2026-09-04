@@ -15,12 +15,13 @@ const event = {
   quantity: new Prisma.Decimal(payload.quantity), grossAmount: new Prisma.Decimal(payload.grossAmount),
   discountAmount: new Prisma.Decimal(payload.discountAmount), netAmount: new Prisma.Decimal(payload.netAmount),
   integrityHash: pricedAllocationIntegrityHash(payload), recordedAt: new Date(),
-  allocationRevisionLine: { id: 'line-1', sourceContractId: 'contract-1', sourceContractItemId: 'item-1',
+  allocationRevisionLine: { id: 'line-1', sourceKind: 'SALES_CONTRACT', sourceContractId: 'contract-1', sourceContractItemId: 'item-1', productId: 'product-1',
     productRowId: 'stable-row-1', unit: 'm2', quantity: new Prisma.Decimal('1.250') },
   pricingRow: { pricingVersionId: 'version-1', contractItemId: 'frozen-item-1', linkedContractItemId: 'item-1',
     productRowId: 'stable-row-1', unit: 'm2' },
 };
 const tx = {
+  logisticsAllocationRevision: { findUnique: async () => null },
   logisticsAllocationRevisionPricing: { findMany: async () => [{
     contractId: 'contract-1', pricingVersionId: 'version-1', expectedPricingHash: 'version-hash',
     readinessEvidenceHash: 'ready-hash', pricingVersion: { currency: 'TOMAN', integrityHash: 'version-hash' },
@@ -38,6 +39,7 @@ const main = async () => {
   assert.deepEqual(model.totals, {
     grossAmount: '12.500000000000', discountAmount: '2.500000000000', netAmount: '10.000000000000',
   });
+  if ('sourceKind' in model) throw new Error('ordinary fixture returned Partner pricing');
   assert.equal(model.lines[0].contractItemId, 'item-1');
   assert.deepEqual(await assessBoundAllocationPricingFreshness(tx as never, 'revision-1'), {
     status: 'CURRENT', staleContracts: [],

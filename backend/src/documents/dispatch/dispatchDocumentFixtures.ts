@@ -100,6 +100,7 @@ const reattribution: DispatchDocumentRenderData = {
 
 const ordinaryStatement = statement('statement-ordinary', [4]);
 const largeDecimalStatement = statement('statement-large-decimal', [2]);
+if ('sourceKind' in largeDecimalStatement.payload) throw new Error('ordinary fixture became a Partner statement');
 if (largeDecimalStatement.kind === 'STATEMENT') {
   for (const contract of largeDecimalStatement.payload.contracts) {
     for (const line of contract.lines) {
@@ -122,7 +123,7 @@ const ordinaryWaybill: DispatchDocumentRenderData = {
   kind: 'WAYBILL',
   payload: {
     allocationRevisionId: 'allocation-revision-ordinary',
-    contracts: ordinaryStatement.kind === 'STATEMENT'
+    contracts: ordinaryStatement.kind === 'STATEMENT' && !('sourceKind' in ordinaryStatement.payload)
       ? ordinaryStatement.payload.contracts.map((contract) => ({
         contractId: contract.contractId,
         contractNumber: contract.contractNumber,

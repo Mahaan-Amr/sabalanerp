@@ -74,6 +74,13 @@ export type DispatchDocumentContractGroup = {
   lines: DispatchDocumentLine[];
 };
 
+export type PartnerDispatchDocumentLine = {
+  productRowId: string;
+  label: string;
+  unit: string;
+  quantity: CanonicalQuantity;
+};
+
 export type DispatchDocumentRenderBase = {
   schemaVersion: 1;
   documentId: string;
@@ -90,6 +97,12 @@ export type WaybillRenderInput = DispatchDocumentRenderBase & {
   payload: {
     allocationRevisionId: string;
     contracts: DispatchDocumentContractGroup[];
+  } | {
+    sourceKind: 'PARTNER_CASE';
+    allocationRevisionId: string;
+    caseNumber: string;
+    deliveryReference: string;
+    lines: PartnerDispatchDocumentLine[];
   };
 };
 
@@ -97,14 +110,20 @@ export type StatementRenderLine = DispatchDocumentLine & ShipmentMoneyAllocation
 
 export type StatementRenderInput = DispatchDocumentRenderBase & {
   kind: 'STATEMENT';
-  payload: {
+  payload: ({
     currency: string;
     contracts: Array<{
       contractId: string;
       contractNumber: string;
       lines: StatementRenderLine[];
     } & ShipmentMoneyAllocation>;
-  } & ShipmentMoneyAllocation;
+  } & ShipmentMoneyAllocation) | ({
+    sourceKind: 'PARTNER_CASE';
+    caseNumber: string;
+    deliveryReference: string;
+    currency: string;
+    lines: Array<PartnerDispatchDocumentLine & ShipmentMoneyAllocation>;
+  } & ShipmentMoneyAllocation);
 };
 
 export type StatementAdjustmentRenderInput = DispatchDocumentRenderBase & {

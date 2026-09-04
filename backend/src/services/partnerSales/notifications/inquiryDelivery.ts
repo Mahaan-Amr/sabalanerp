@@ -4,7 +4,7 @@ import { createPrismaPartnerAuthorizationV2 } from '../authorization/prisma';
 import { resolvePartnerScopedAuthority } from '../authorization/centralAuthority';
 import { createPartnerInAppGateway } from './gateway';
 import { planInquiryNotifications, type InquiryNotificationCause } from './inquiries';
-import type { ContractRuntime, SafeNotification } from './contracts';
+import type { ContractRuntime, NotificationGateway, SafeNotification } from './contracts';
 import type { PartnerNotificationAccess, PartnerNotificationEvidence } from './access';
 
 type Evidence = Record<string, unknown>;
@@ -108,7 +108,8 @@ export function createInquiryNotificationAccess(contract: ContractRuntime): Part
 
 export const inquiryNotificationAccess = createInquiryNotificationAccess(PartnerContracts);
 
-async function recordAttempt(database: PrismaClient, eventId: string, handled: boolean, status?: string) {
+async function recordAttempt(database: PrismaClient | Prisma.TransactionClient,
+  eventId: string, handled: boolean, status?: string) {
   const [clock] = await database.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
   await database.partnerInquiryNotificationDelivery.upsert({ where: { eventId },
     create: { eventId, attempts: 1, lastAttemptAt: clock.now,
@@ -122,23 +123,30 @@ async function recordAttempt(database: PrismaClient, eventId: string, handled: b
  * records every attempt while the immutable source event stays append-only. */
 export async function dispatchPartnerInquiryEvents(database: PrismaClient, eventIds: readonly string[],
   access: PartnerNotificationAccess = inquiryNotificationAccess): Promise<void> {
-  const gateway = createPartnerInAppGateway(PartnerContracts, database, access);
   for (const eventId of [...new Set(eventIds)]) {
-    const completed = await database.partnerInquiryNotificationDelivery.findUnique({ where: { eventId }, select: { handledAt: true } });
-    if (completed?.handledAt) continue;
-    try {
-      const notices = await planned(database, PartnerContracts, eventId);
-      if (!notices.length) { await recordAttempt(database, eventId, false); continue; }
-      const results = await Promise.all(notices.map(notice => gateway.enqueue(notice)));
-      const delivered = results.every(result => result.ok);
-      const handled = results.every(result => result.ok || result.error.code === 'NOT_FOUND');
-      const status = delivered ? 'DELIVERED' : handled && results.some(result => result.ok) ? 'DELIVERED_WITH_SKIPS' : 'SKIPPED';
-      await recordAttempt(database, eventId, handled, handled ? status : undefined);
-    } catch {
-      // The source event remains pending. Never persist validator, database or
-      // recipient details in the retry ledger.
-      await recordAttempt(database, eventId, false);
-    }
+    await database.$transaction(async tx => {
+      const key = `partner-inquiry-delivery-v1:${eventId}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+      const completed = await tx.partnerInquiryNotificationDelivery.findUnique({
+        where: { eventId }, select: { handledAt: true },
+      });
+      if (completed?.handledAt) return;
+      try {
+        const notices = await planned(tx, PartnerContracts, eventId);
+        if (!notices.length) { await recordAttempt(tx, eventId, false); return; }
+        const gateway = createPartnerInAppGateway(PartnerContracts, tx, access);
+        const results: Awaited<ReturnType<NotificationGateway['enqueue']>>[] = [];
+        for (const notice of notices) results.push(await gateway.enqueue(notice));
+        const delivered = results.every(result => result.ok);
+        const handled = results.every(result => result.ok || result.error.code === 'NOT_FOUND');
+        const status = delivered ? 'DELIVERED' : handled && results.some(result => result.ok) ? 'DELIVERED_WITH_SKIPS' : 'SKIPPED';
+        await recordAttempt(tx, eventId, handled, handled ? status : undefined);
+      } catch {
+        // The source event remains pending. Never persist validator, database or
+        // recipient details in the retry ledger.
+        await recordAttempt(tx, eventId, false);
+      }
+    });
   }
 }
 

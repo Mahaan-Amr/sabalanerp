@@ -163,18 +163,17 @@ Latest full validation (2026-09-04): `node scripts/run-partner-sales-tests.mjs a
 passed the complete unit, transport, lifecycle/downstream (65/65), foundation,
 typecheck, live-browser (5 passed with 3 intentional duplicate-mutation skips), and
 authenticated real-schema/API (6/6) gates. The final-candidate manifest is
-`partner-qa-184d0694-3546-47a8-a134-12cb227f11a0`; source HEAD is
-`1a222ab0476b334ec6dfe61c06c90e3552504146`, review base is
-`f0b116e1dad634f0026bc37982050a3f683def86`, and the validated staged-content patch
-identity (all issue content except this self-describing evidence file) is
-`00ea121bc2cfcb29f834529b7596e4a8aa8b4276`. The manifest records cached patch
-`e103c7c346590b6c4ba5090bc61d57971de586ac98496e8c93a0c06502bcb867`, working patch
-`f94f6fee0fb8450abad866e2a13b565bc2cc67809611b4f0fab1579b432ac989`, exact schema
-hash `58ee6e50c449e0b8c0bd473399e9b779`, 223 applied migration-ledger rows, isolated
+`partner-qa-239e0618-1cb8-4cc3-9d76-3a67a83ef556`; it validates integrated
+implementation commit `b0016d0acff7ff7542832e033bcaa10227dc69f8` and tree
+`139658329fc2ef356c5f6e3f0cb8bd16cb309d8d` directly on fetched mainline base
+`14a94586ee1bf48dbce6b74a53731c0f12ac7cdc`. Its cached patch is empty because
+all issue content was committed before the post-rebase run; the recorded working
+patch contains only the explicitly excluded local visual/build artifacts and is
+not part of the candidate. The manifest records exact schema hash
+`58ee6e50c449e0b8c0bd473399e9b779`, 223 applied migration-ledger rows, isolated
 browser database cleanup, candidate container identities, and restoration of the
-normal local runtime. Prisma independently reports 221 migration directories, a
-valid schema, no pending migration, and an up-to-date local database; the differing
-counts describe ledger rows versus migration directories rather than a schema gap.
+normal local runtime. Prisma independently reports the same 223 migration
+directories, a valid schema, no pending migration, and an up-to-date local database.
 The production build, architecture ownership check, design-system checks (25/25 and
 14/14), Prisma validation/generation, and idempotent migrate-deploy check also passed.
 Rendered A4 Partner documents were visually inspected: the customer waybill is

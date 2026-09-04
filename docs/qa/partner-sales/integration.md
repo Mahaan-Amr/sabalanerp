@@ -167,18 +167,26 @@ only an explicit status/waybill allowlist—never the allocation revision, queue
 recipient, confirmation phone, or internal fulfillment evidence. Partner dispatch
 accept, reject/return, evidence quarantine, void, replacement, and idempotent replay
 now re-evaluate both current Case authority and current Accounting workspace/manage
-capability inside the committing transaction. A denied accept or replacement also
-removes every PDF staged by that losing command. Real-schema HTTP tests cover two
-Partner candidates with only one Case grant, an ordinary candidate, and deterministic
-post-preflight workspace/feature revocation races for accept, void, and replacement.
+capability inside the committing transaction. The list also rechecks current
+Accounting view authority after entering the shared authorization fence and projects
+mutation availability per candidate: ordinary shipments retain workspace-level
+MANAGE behavior, while a Partner candidate additionally requires Case-scoped
+`ACCOUNTING_WRITE`. Typed authorization denial removes every PDF staged by that
+losing command; an unknown repository failure retains the staged bytes because it
+may be an acknowledgement loss after a successful commit and therefore requires
+durable-command reconciliation. Real-schema HTTP tests cover two Partner candidates
+with only one Case read grant, an ordinary candidate, deterministic post-middleware
+view revocation, and post-preflight workspace/feature revocation races for accept,
+void, and replacement. Service tests cover both proven-denial cleanup and ambiguous
+commit retention.
 
 Latest full validation (2026-09-04): `node scripts/run-partner-sales-tests.mjs all`
 passed the complete unit, transport, lifecycle/downstream (65/65), foundation,
 typecheck, live-browser (5 passed with 3 intentional duplicate-mutation skips), and
 authenticated real-schema/API (6/6) gates. The final-candidate manifest is
-`partner-qa-453f48a3-40a8-4fd3-aaba-c113b7d41116`; it validates hardened
-implementation commit `fcdd52f7a51be3936e7e11278c33c0db4bf94e6f` and tree
-`6fb51317068d0f08f867e2707b57cedcea3c48a5` directly on fetched mainline base
+`partner-qa-e47ee055-bdac-475e-9634-d1b9aeeeedaf`; it validates hardened
+implementation commit `7046004bed9784c3c8582d8e1832b1e0f5541e6e` and tree
+`f0d42a14ad7ad885faf04d2035aa828ba005c0b5` directly on fetched mainline base
 `14a94586ee1bf48dbce6b74a53731c0f12ac7cdc`. Its cached patch is empty because
 all issue content was committed before the post-rebase run; the recorded working
 patch contains only the explicitly excluded local visual/build artifacts and is

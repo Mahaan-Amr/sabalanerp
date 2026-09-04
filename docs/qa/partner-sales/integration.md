@@ -184,9 +184,9 @@ Latest full validation (2026-09-04): `node scripts/run-partner-sales-tests.mjs a
 passed the complete unit, transport, lifecycle/downstream (65/65), foundation,
 typecheck, live-browser (5 passed with 3 intentional duplicate-mutation skips), and
 authenticated real-schema/API (6/6) gates. The final-candidate manifest is
-`partner-qa-e47ee055-bdac-475e-9634-d1b9aeeeedaf`; it validates hardened
-implementation commit `7046004bed9784c3c8582d8e1832b1e0f5541e6e` and tree
-`f0d42a14ad7ad885faf04d2035aa828ba005c0b5` directly on fetched mainline base
+`partner-qa-745cdc72-7648-4dc4-8f8a-72e7cdfa734c`; it validates hardened
+candidate commit `15096c3cb326d3ebebb8f4a8ce1c1f84b2f2489c` and tree
+`b327dff25248d3aeb3f68ef2dd32d1a9c893379c` directly on fetched mainline base
 `14a94586ee1bf48dbce6b74a53731c0f12ac7cdc`. Its cached patch is empty because
 all issue content was committed before the post-rebase run; the recorded working
 patch contains only the explicitly excluded local visual/build artifacts and is
@@ -197,6 +197,9 @@ normal local runtime. Prisma independently reports the same 223 migration
 directories, a valid schema, no pending migration, and an up-to-date local database.
 The production build, architecture ownership check, design-system checks (25/25 and
 14/14), Prisma validation/generation, and idempotent migrate-deploy check also passed.
+The dedicated authenticated Accounting dispatch browser suite also passed its
+MANAGE, VIEW, and unauthorized/no-disclosure scenarios (3/3); its login locator and
+unauthorized route-guard assertion use the current accessible application surfaces.
 Rendered A4 Partner documents were visually inspected: the customer waybill is
 price-free and the separate wholesale statement is legible and priced. Unscoped
 Accounting HTTP regressions prove that Partner retail contracts are absent from both

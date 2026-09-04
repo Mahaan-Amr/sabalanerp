@@ -9,7 +9,7 @@ const credentials = {
 const login = async (page: Page, role: keyof typeof credentials) => {
   await page.goto('/login');
   await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill(credentials[role].identifier);
-  await page.getByRole('textbox', { name: 'رمز عبور خود را وارد کنید' }).fill(credentials[role].password);
+  await page.getByRole('textbox', { name: 'رمز عبور', exact: true }).fill(credentials[role].password);
   await Promise.all([
     page.waitForURL(/\/dashboard$/),
     page.getByRole('button', { name: 'ورود', exact: true }).click(),
@@ -46,9 +46,10 @@ test('VIEW authority is projected by the mounted backend without mutation contro
 
 test('unauthorized authority receives a real 403 without case disclosure', async ({ page }) => {
   await login(page, 'unauthorized');
-  const response = await openWorkspace(page);
+  const response = await page.request.get('/api/accounting/dispatch-candidates');
 
   expect(response.status()).toBe(403);
-  await expect(page.getByText('دسترسی به اسناد ارسال حسابداری برای این نقش مجاز نیست.')).toBeVisible();
+  await page.goto('/dashboard/accounting/dispatch-documents');
+  await expect(page.getByRole('heading', { name: 'دسترسی به این بخش مجاز نیست' })).toBeVisible();
   await expect(page.getByLabel('صف پرونده‌های اسناد ارسال')).toHaveCount(0);
 });

@@ -407,9 +407,10 @@ const historicalAnalyticsPopulation = async (
     const sections = await client.performanceEvaluationSection.findMany({ where: { evaluationId: evaluation.id, status: 'ACCEPTED' }, select: { employmentAssignmentId: true } });
     const assignments = await client.hrEmploymentAssignment.findMany({ where: { id: { in: sections.map(({ employmentAssignmentId }) => employmentAssignmentId) } }, include: { position: { select: { jobId: true } } } });
     const peerKeys = new Set<string>();
+    let completeJobCoverage = true;
     for (const assignment of assignments) {
       const jobId = assignment.position?.jobId;
-      if (!jobId) continue;
+      if (!jobId) { completeJobCoverage = false; continue; }
       // Resolve the version before membership: a newer version may remove this Job.
       const effectiveFamilies = latestPerformancePeerFamilies(await client.performancePeerFamilyVersion.findMany({ where: {
         lifecycle: { in: ['ACTIVE', 'RETIRED'] },
@@ -421,7 +422,7 @@ const historicalAnalyticsPopulation = async (
       if (!peerKey) { peerKeys.add('ambiguous'); peerKeys.add(`job:${jobId}`); }
       else peerKeys.add(peerKey);
     }
-    if (namedRanking && (peerKeys.size !== 1 || assignments.length !== sections.length || !sections.length)) continue;
+    if (namedRanking && (!completeJobCoverage || peerKeys.size !== 1 || assignments.length !== sections.length || !sections.length)) continue;
     members.push({
       subjectId: subject.id, personnelId: relationship.personnel.id,
       displayName: `${relationship.personnel.firstName} ${relationship.personnel.lastName}`.trim(),

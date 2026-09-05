@@ -71,9 +71,13 @@ export type CutoverEvidence = {
     dryRunArtifactPath: string;
     applyArtifactPath: string;
     repeatArtifactPath: string;
+    cohortArtifactPath: string;
+    cohortApprovalArtifactPath: string;
     dryRunArtifactSha256: string;
     applyArtifactSha256: string;
     repeatArtifactSha256: string;
+    cohortArtifactSha256: string;
+    cohortApprovalArtifactSha256: string;
     manifestHash: string;
     dryRunCompleted: boolean;
     applyCompleted: boolean;
@@ -82,6 +86,10 @@ export type CutoverEvidence = {
     unresolvedCount: number;
     quarantinedCount: number;
     unreviewedCohortCount: number;
+    sourceCounts: Record<string, number>;
+    releaseCohortCounts: Record<string, number>;
+    releaseCohortCount: number;
+    excludedBlockedCount: number;
   };
   integrity: {
     artifactPath: string;
@@ -158,6 +166,12 @@ export type LegacyPricingCohortSnapshot = {
   sourceApprovalRecordCount: string | number;
   sourceRowCount: string | number;
   counts: Record<string, number>;
+  entries: Array<{
+    contractId: string;
+    sourceFinancialRecordId: string;
+    sourceEvidenceHash: string;
+    status: string;
+  }>;
 };
 
 type CommandExecution = { exitCode: number; stdout: string; stderr: string };
@@ -240,6 +254,7 @@ export const assertAuthoritativeGateParity = (signed: CutoverEvidence, current: 
 export const verifyFileBackedCutoverEvidence = async (
   evidence: CutoverEvidence,
   recaptureLegacyCohort: () => Promise<LegacyPricingCohortSnapshot>,
+  cohortApprovalVerifier?: { keyId: string; signingKey: string },
 ): Promise<CutoverEvidence> => {
   const verified = structuredClone(evidence);
 
@@ -294,10 +309,12 @@ export const verifyFileBackedCutoverEvidence = async (
       exitCode: Number(artifact.value.exitCode), outputSha256: hashBytes(output) };
   }));
 
-  const [dry, apply, repeat, current] = await Promise.all([
+  const [dry, apply, repeat, cohort, cohortApproval, current] = await Promise.all([
     readArtifact(verified.legacy.dryRunArtifactPath, 'Legacy dry-run'),
     readArtifact(verified.legacy.applyArtifactPath, 'Legacy apply'),
     readArtifact(verified.legacy.repeatArtifactPath, 'Legacy repeat'),
+    readArtifact(verified.legacy.cohortArtifactPath, 'Legacy release cohort'),
+    readArtifact(verified.legacy.cohortApprovalArtifactPath, 'Legacy release cohort approval'),
     recaptureLegacyCohort(),
   ]);
   exact(dry.value.mode, 'DRY_RUN', 'Legacy dry-run mode');
@@ -318,13 +335,65 @@ export const verifyFileBackedCutoverEvidence = async (
     exact(String(repeat.value.afterManifest[field]), String(current[field]), `Legacy cohort ${field}`);
   }
   exact(JSON.stringify(repeat.value.afterManifest.counts), JSON.stringify(current.counts), 'Legacy cohort counts');
-  const counts = current.counts;
-  const unresolvedCount = Number(counts.REPAIR_REQUIRED ?? 0) + Number(counts.EVIDENCE_CONFLICT ?? 0) + Number(counts.STALE ?? 0);
+  exact(cohort.value.schemaVersion, 1, 'Legacy release cohort schema version');
+  exact(cohort.value.sourceManifestHash, current.manifestHash, 'Legacy release cohort source manifest hash');
+  if (!Array.isArray(cohort.value.entries)) throw new Error('Legacy release cohort artifact must contain an entries array.');
+  if (cohort.value.entries.length > 0) {
+    if (!cohortApprovalVerifier || cohortApprovalVerifier.signingKey.length < 32) {
+      throw new Error('A trusted legacy release cohort approval verifier is required.');
+    }
+    exact(cohortApproval.value.algorithm, 'HMAC-SHA256', 'Legacy release cohort approval algorithm');
+    exact(cohortApproval.value.keyId, cohortApprovalVerifier.keyId, 'Legacy release cohort approval key');
+    if (typeof cohortApproval.value.approvedBy !== 'string' || !cohortApproval.value.approvedBy.trim()) {
+      throw new Error('Legacy release cohort approval is missing its approver identity.');
+    }
+    const approvalPayload = JSON.stringify({ algorithm: 'HMAC-SHA256', keyId: cohortApprovalVerifier.keyId,
+      approvedBy: cohortApproval.value.approvedBy.trim(), cohortSha256: hashBytes(cohort.bytes) });
+    const expectedSignature = Buffer.from(createHmac('sha256', cohortApprovalVerifier.signingKey).update(approvalPayload).digest('hex'), 'hex');
+    const actualSignature = Buffer.from(String(cohortApproval.value.signature ?? ''), 'hex');
+    if (expectedSignature.length !== actualSignature.length || !timingSafeEqual(expectedSignature, actualSignature)) {
+      throw new Error('Legacy release cohort approval signature verification failed.');
+    }
+  }
+  if (current.entries.length !== Number(current.sourceContractCount)) {
+    throw new Error('Legacy release cohort snapshot does not contain every source contract.');
+  }
+  const dispositions = new Map<string, Record<string, unknown>>();
+  for (const [index, raw] of cohort.value.entries.entries()) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`Legacy release cohort disposition ${index} is invalid.`);
+    const disposition = raw as Record<string, unknown>;
+    const identity = `${String(disposition.contractId ?? '')}:${String(disposition.sourceFinancialRecordId ?? '')}`;
+    if (identity === ':' || dispositions.has(identity)) throw new Error(`Legacy release cohort disposition ${index} has an invalid or duplicate identity.`);
+    if (typeof disposition.reviewedBy !== 'string' || !disposition.reviewedBy.trim()
+      || typeof disposition.reason !== 'string' || !disposition.reason.trim()
+      || typeof disposition.reviewedAt !== 'string' || Number.isNaN(Date.parse(disposition.reviewedAt))) {
+      throw new Error(`Legacy release cohort disposition ${index} has incomplete review evidence.`);
+    }
+    dispositions.set(identity, disposition);
+  }
+  const included: LegacyPricingCohortSnapshot['entries'] = [];
+  let excludedBlockedCount = 0;
+  for (const entry of current.entries) {
+    const identity = `${entry.contractId}:${entry.sourceFinancialRecordId}`;
+    const disposition = dispositions.get(identity);
+    if (!disposition) throw new Error(`Legacy release cohort disposition is missing for ${identity}.`);
+    exact(disposition.sourceEvidenceHash, entry.sourceEvidenceHash, `Legacy release cohort disposition ${identity} hash`);
+    if (disposition.decision === 'INCLUDE') included.push(entry);
+    else if (disposition.decision === 'EXCLUDE_BLOCKED' && entry.status === 'REPAIR_REQUIRED') excludedBlockedCount += 1;
+    else throw new Error(`Legacy release cohort disposition ${identity} is not permitted for ${entry.status}.`);
+    dispositions.delete(identity);
+  }
+  if (dispositions.size !== 0) throw new Error('Legacy release cohort artifact contains identities outside the current source cohort.');
+  const unresolvedCount = included.filter(entry => ['REPAIR_REQUIRED', 'EVIDENCE_CONFLICT', 'STALE'].includes(entry.status)).length;
+  const releaseCohortCounts = Object.fromEntries(Object.keys(current.counts).map(status => [status, 0])) as Record<string, number>;
+  for (const entry of included) releaseCohortCounts[entry.status] = (releaseCohortCounts[entry.status] ?? 0) + 1;
   verified.legacy = {
     ...verified.legacy,
     dryRunArtifactSha256: hashBytes(dry.bytes),
     applyArtifactSha256: hashBytes(apply.bytes),
     repeatArtifactSha256: hashBytes(repeat.bytes),
+    cohortArtifactSha256: hashBytes(cohort.bytes),
+    cohortApprovalArtifactSha256: hashBytes(cohortApproval.bytes),
     manifestHash: current.manifestHash,
     dryRunCompleted: true,
     applyCompleted: true,
@@ -332,7 +401,11 @@ export const verifyFileBackedCutoverEvidence = async (
     repeatCreatedCount: Number(repeat.value.outcomeCounts?.SEALED ?? Number.NaN),
     unresolvedCount,
     quarantinedCount: unresolvedCount,
-    unreviewedCohortCount: Number(counts.LEGACY_REVIEW_REQUIRED ?? 0),
+    unreviewedCohortCount: included.filter(entry => entry.status === 'LEGACY_REVIEW_REQUIRED').length,
+    sourceCounts: { ...current.counts },
+    releaseCohortCounts,
+    releaseCohortCount: included.length,
+    excludedBlockedCount,
   };
   return verified;
 };
@@ -387,12 +460,19 @@ export const evaluateCutoverEvidence = (evidence: CutoverEvidence): CutoverDecis
   if (!evidence.legacy.dryRunCompleted || !evidence.legacy.applyCompleted || !evidence.legacy.repeatCompleted) failures.push('LEGACY_PREFLIGHT_INCOMPLETE');
   if (!sha256Pattern.test(evidence.legacy.dryRunArtifactSha256)
     || !sha256Pattern.test(evidence.legacy.applyArtifactSha256)
-    || !sha256Pattern.test(evidence.legacy.repeatArtifactSha256)) failures.push('LEGACY_ARTIFACT_HASH_INVALID');
+    || !sha256Pattern.test(evidence.legacy.repeatArtifactSha256)
+    || !sha256Pattern.test(evidence.legacy.cohortArtifactSha256)
+    || !sha256Pattern.test(evidence.legacy.cohortApprovalArtifactSha256)) failures.push('LEGACY_ARTIFACT_HASH_INVALID');
   if (!sha256Pattern.test(evidence.legacy.manifestHash)) failures.push('LEGACY_MANIFEST_HASH_INVALID');
   addCountFailure(failures, 'LEGACY_REPEAT_CREATED', evidence.legacy.repeatCreatedCount);
   addCountFailure(failures, 'LEGACY_UNRESOLVED', evidence.legacy.unresolvedCount);
   addCountFailure(failures, 'LEGACY_QUARANTINED', evidence.legacy.quarantinedCount);
   addCountFailure(failures, 'LEGACY_UNREVIEWED', evidence.legacy.unreviewedCohortCount);
+  if (!Number.isSafeInteger(evidence.legacy.releaseCohortCount) || evidence.legacy.releaseCohortCount < 0) failures.push('LEGACY_RELEASE_COHORT_COUNT_INVALID');
+  if (!Number.isSafeInteger(evidence.legacy.excludedBlockedCount) || evidence.legacy.excludedBlockedCount < 0) failures.push('LEGACY_EXCLUDED_BLOCKED_COUNT_INVALID');
+  for (const [scope, counts] of [['SOURCE', evidence.legacy.sourceCounts], ['RELEASE', evidence.legacy.releaseCohortCounts]] as const) {
+    if (!counts || Object.values(counts).some(count => !Number.isSafeInteger(count) || count < 0)) failures.push(`LEGACY_${scope}_COUNTS_INVALID`);
+  }
   addCountFailure(failures, 'ORPHAN_ARTIFACTS', evidence.integrity.orphanArtifactCount);
   addCountFailure(failures, 'INCOMPLETE_BUNDLES', evidence.integrity.incompleteBundleCount);
   addCountFailure(failures, 'AUDIT_GAPS', evidence.integrity.auditGapCount);

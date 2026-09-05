@@ -38,6 +38,11 @@ const requiredEnvironment = (name: string) => {
 const requiredEnvironmentList = (name: string) => requiredEnvironment(name).split(',').map(value => value.trim()).filter(Boolean);
 
 const signingKey = requiredEnvironment('SHIPMENT_STATEMENT_CUTOVER_SIGNING_KEY');
+const cohortApprovalVerifier = () => {
+  const approvalKey = requiredEnvironment('SHIPMENT_STATEMENT_COHORT_APPROVAL_KEY');
+  if (approvalKey === signingKey) throw new Error('The cohort approval key must be independent from the cutover signing key.');
+  return { keyId: requiredEnvironment('SHIPMENT_STATEMENT_COHORT_APPROVAL_KEY_ID'), signingKey: approvalKey };
+};
 const prisma = new PrismaClient();
 const repository = new PrismaShipmentStatementCutoverRepository(prisma);
 
@@ -49,7 +54,12 @@ const recaptureLegacyCohort = async () => {
   const manifest = buildLegacyPricingManifest(candidates);
   return { manifestHash: manifest.manifestHash, sourceContractCount: manifest.sourceContractCount,
     sourceApprovalRecordCount: manifest.sourceApprovalRecordCount, sourceRowCount: manifest.sourceRowCount,
-    counts: manifest.counts };
+    counts: manifest.counts, entries: manifest.entries.map(entry => ({
+      contractId: entry.contractId,
+      sourceFinancialRecordId: entry.sourceFinancialRecordId,
+      sourceEvidenceHash: entry.sourceEvidenceHash,
+      status: entry.status,
+    })) };
 };
 
 const repositoryRoot = basename(process.cwd()).toLowerCase() === 'backend' ? resolve(process.cwd(), '..') : process.cwd();
@@ -89,7 +99,8 @@ const run = async () => {
       + Number(currentLegacy.counts.EVIDENCE_CONFLICT ?? 0) + Number(currentLegacy.counts.STALE ?? 0);
     const unreviewedLegacy = Number(currentLegacy.counts.LEGACY_REVIEW_REQUIRED ?? 0);
     let evidence: CutoverEvidence;
-    if (unresolvedLegacy !== 0 || unreviewedLegacy !== 0) {
+    const hasReviewedReleaseCohort = Boolean(callerEvidence.legacy.cohortArtifactPath?.trim());
+    if ((unresolvedLegacy !== 0 || unreviewedLegacy !== 0) && !hasReviewedReleaseCohort) {
       evidence = structuredClone(callerEvidence);
       evidence.environment = { composeProject: 'sabalanerp-local', servicesHealthy: false };
       evidence.deployment.additiveMigrationsOnly = false;
@@ -105,7 +116,7 @@ const run = async () => {
         incidentContacts: requiredEnvironmentList('SHIPMENT_STATEMENT_INCIDENT_CONTACTS'),
         monitoringChecks: requiredEnvironmentList('SHIPMENT_STATEMENT_MONITORING_CHECKS'), run: runCommand,
       });
-      evidence = await verifyFileBackedCutoverEvidence(captured, async () => currentLegacy);
+      evidence = await verifyFileBackedCutoverEvidence(captured, recaptureLegacyCohort, cohortApprovalVerifier());
     }
     const state = await repository.loadState();
     evidence.deployment.databaseGateEnabled = state.enabled;
@@ -139,7 +150,7 @@ const run = async () => {
   if (command === 'activate') {
     const source = requiredOption('--manifest');
     const manifest = await readAndVerifyCutoverManifest(source, signingKey);
-    const currentFileEvidence = await verifyFileBackedCutoverEvidence(manifest.evidence, recaptureLegacyCohort);
+    const currentFileEvidence = await verifyFileBackedCutoverEvidence(manifest.evidence, recaptureLegacyCohort, cohortApprovalVerifier());
     if (JSON.stringify(currentFileEvidence) !== JSON.stringify(manifest.evidence)) {
       throw new Error('File-backed cutover evidence changed after the manifest was signed; rerun every gate.');
     }
@@ -160,7 +171,7 @@ const run = async () => {
         incidentContacts: requiredEnvironmentList('SHIPMENT_STATEMENT_INCIDENT_CONTACTS'),
         monitoringChecks: requiredEnvironmentList('SHIPMENT_STATEMENT_MONITORING_CHECKS'), run: runCommand,
       });
-      const verified = await verifyFileBackedCutoverEvidence(captured, recaptureLegacyCohort);
+      const verified = await verifyFileBackedCutoverEvidence(captured, recaptureLegacyCohort, cohortApprovalVerifier());
       assertAuthoritativeGateParity(manifest.evidence, verified);
       if (evaluateCutoverEvidence(verified).decision !== 'GO') {
         throw new Error('The immediately repeated authoritative cutover gates returned NO-GO.');

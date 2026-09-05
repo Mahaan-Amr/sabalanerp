@@ -1,7 +1,7 @@
 import { assessPerformanceEvaluationRetention } from '../services/personnelPerformanceRetentionStore';
 import { placePerformanceLegalHold, decidePerformanceLegalHold, listPerformanceLegalHolds } from '../services/personnelPerformanceLegalHoldStore';
 import { pausePersonnelPerformance, getPersonnelPerformanceOperationsState, disablePersonnelPerformanceBeforeFirstWrite } from '../services/personnelPerformanceOperationsStore';
-import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase } from '../services/personnelPerformancePrivacyStore';
+import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase, listPerformancePrivacyQueue } from '../services/personnelPerformancePrivacyStore';
 import { restrictPerformanceEvidence } from '../services/personnelPerformanceRestrictions';
 import { findApplicablePerformancePause } from '../services/personnelPerformanceRolloutPolicy';
 import express from 'express';
@@ -605,6 +605,11 @@ router.post('/privacy/requests', async (req: AuthRequest, res, next) => {
     });
     return res.status(201).json({ success: true, privacyCase });
   } catch (error) { return next(error); }
+});
+router.get('/privacy/requests', requireHrAuthorization({ actionPermissionCodes: ['VIEW_PERFORMANCE_PRIVACY_CASE'] }), async (req: AuthRequest, res, next) => {
+  try { return res.json({ success: true, ...await listPerformancePrivacyQueue(prisma, {
+    actorUserId: req.user!.id, afterId: req.query.afterId === undefined ? undefined : String(req.query.afterId),
+  }) }); } catch (error) { return next(error); }
 });
 router.get('/privacy/requests/:caseId', async (req: AuthRequest, res, next) => {
   try { return res.json({ success: true, privacyCase: await getPerformancePrivacyCase(prisma, req.user!.id, req.params.caseId) }); }

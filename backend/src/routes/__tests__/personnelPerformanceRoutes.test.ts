@@ -65,6 +65,7 @@ assert.deepEqual(registeredRoutes, [
   'POST /activation/run-due-artifacts',
   'GET /traces/:traceId',
   'POST /privacy/requests',
+  'GET /privacy/requests',
   'GET /privacy/requests/:caseId',
   'POST /privacy/requests/:caseId/:action',
   'POST /restrictions',

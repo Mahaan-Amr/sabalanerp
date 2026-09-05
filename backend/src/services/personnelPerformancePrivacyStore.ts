@@ -95,6 +95,44 @@ export const requestPerformancePrivacy = async (client: Client, input: {
   return publicCase(record);
 });
 
+export const listPerformancePrivacyQueue = async (client: Client, input: { actorUserId: string; afterId?: string }) => inTransaction(client, async (tx) => {
+  await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+  const authority = await requirePermission(tx, input.actorUserId, 'VIEW_PERFORMANCE_PRIVACY_CASE');
+  if (input.afterId !== undefined && (typeof input.afterId !== 'string' || !input.afterId || input.afterId.length > 128)) {
+    throw privacyError('نشانگر صفحه معتبر نیست.', 'PERFORMANCE_PRIVACY_INVALID', 422);
+  }
+  const cursor = input.afterId ? await tx.performancePrivacyCase.findUnique({ where: { id: input.afterId }, select: { id: true, requestedAt: true } }) : null;
+  if (input.afterId && !cursor) throw privacyError('نشانگر صفحه در دسترس نیست.', 'PERFORMANCE_PRIVACY_INVALID', 422);
+  const rows = await tx.performancePrivacyCase.findMany({ where: { status: { not: 'CLOSED' },
+    ...(cursor ? { OR: [{ requestedAt: { gt: cursor.requestedAt } }, { requestedAt: cursor.requestedAt, id: { gt: cursor.id } }] } : {}) },
+    orderBy: [{ requestedAt: 'asc' }, { id: 'asc' }], take: 51 });
+  const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  const correctionCaseIds = rows.slice(0, 50).filter((row) => row.requestKind === 'CORRECTION' && row.status === 'VERIFIED').map(({ id }) => id);
+  const scopes = correctionCaseIds.length ? await tx.performancePrivacyScope.findMany({ where: { caseId: { in: correctionCaseIds } }, select: { caseId: true } }) : [];
+  const links = correctionCaseIds.length ? await tx.performancePrivacyCorrection.findMany({ where: { caseId: { in: correctionCaseIds } } }) : [];
+  const corrections = links.length ? await tx.performanceCorrection.findMany({ where: { id: { in: links.map(({ correctionId }) => correctionId) } }, select: { id: true, status: true } }) : [];
+  const items = rows.slice(0, 50).map((record) => {
+    const dueAt = record.status === 'RECEIVED' ? record.acknowledgeBy : record.status === 'ACKNOWLEDGED' ? record.verifyBy : record.respondBy;
+    let nextAction = record.status === 'RECEIVED' ? 'ACKNOWLEDGE'
+      : record.status === 'ACKNOWLEDGED' ? 'VERIFY' : record.status === 'VERIFIED' ? 'RESPOND' : 'CLOSE';
+    if (record.requestKind === 'CORRECTION' && record.status === 'VERIFIED') {
+      const caseLinks = links.filter(({ caseId }) => caseId === record.id);
+      if (caseLinks.length < scopes.filter(({ caseId }) => caseId === record.id).length) nextAction = 'OPEN_CORRECTION';
+      else if (caseLinks.some(({ correctionId }) => {
+        const correction = corrections.find(({ id }) => id === correctionId);
+        return !correction || correction.status === 'OPEN';
+      })) nextAction = 'WAIT_FOR_CORRECTION_DECISION';
+    }
+    return { ...publicCase(record), nextAction, dueAt, overdue: record.status !== 'RESPONDED' && dueAt < clock.now };
+  });
+  const disclosureReceiptId = randomUUID();
+  await tx.performanceAuditEvent.create({ data: { id: disclosureReceiptId, aggregateType: 'PERFORMANCE_PRIVACY_QUEUE', aggregateId: disclosureReceiptId,
+    eventType: 'PERFORMANCE_PRIVACY_QUEUE_DISCLOSED', actorUserId: input.actorUserId, authorityHash: canonicalPerformanceHash(authority),
+    reason: 'AUTHORIZED_CASE_QUEUE', eventHash: canonicalPerformanceHash({ id: disclosureReceiptId,
+      scope: items.map(({ id, version }) => ({ id, version })), afterId: input.afterId ?? null }) } });
+  return { items, nextCursor: rows.length > 50 ? items[items.length - 1].id : null, disclosureReceiptId };
+});
+
 export const getPerformancePrivacyCase = async (client: Client, actorUserId: string, caseId: string) => inTransaction(client, async (tx) => {
   await tx.$queryRaw`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
   const record = await tx.performancePrivacyCase.findUnique({ where: { id: caseId } });

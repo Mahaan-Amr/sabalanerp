@@ -10,7 +10,7 @@ import { claimPerformanceExportDownload, encryptPerformanceExportArtifact, getPe
 import { persistPerformancePayload, performanceVaultKeyFromEnvironment } from '../personnelPerformancePayloadStore';
 import { assessPerformanceEvaluationRetention } from '../personnelPerformanceRetentionStore';
 import { prisma } from '../../lib/prisma';
-import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase } from '../personnelPerformancePrivacyStore';
+import { requestPerformancePrivacy, getPerformancePrivacyCase, actOnPerformancePrivacyCase, listPerformancePrivacyQueue } from '../personnelPerformancePrivacyStore';
 
 const rollback = Symbol('privacy-test');
 const main = async () => {
@@ -32,9 +32,15 @@ const main = async () => {
       assert.equal(typeof own.disclosureReceiptId, 'string', 'authorized case reads return their audit receipt');
       await assert.rejects(() => getPerformancePrivacyCase(tx, other.id, request.id), (error: { code?: string }) => error.code === 'PERFORMANCE_PRIVACY_UNAVAILABLE');
       await assert.rejects(() => actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: request.id, expectedVersion: 1, action: 'ACKNOWLEDGE', reasonCode: 'REQUEST_RECEIVED' }));
-      for (const featureCode of ['ACKNOWLEDGE_PERFORMANCE_PRIVACY_CASE','VERIFY_PERFORMANCE_PRIVACY_IDENTITY','DECIDE_PERFORMANCE_PRIVACY_ACCESS','RESTRICT_PERFORMANCE_EVIDENCE','VIEW_PERFORMANCE_PRIVACY_CASE','DECIDE_PERFORMANCE_ERASURE','MANAGE_PERFORMANCE_RETENTION']) {
+      for (const featureCode of ['ACKNOWLEDGE_PERFORMANCE_PRIVACY_CASE','VERIFY_PERFORMANCE_PRIVACY_IDENTITY','DECIDE_PERFORMANCE_PRIVACY_ACCESS','RESTRICT_PERFORMANCE_EVIDENCE','VIEW_PERFORMANCE_PRIVACY_CASE','DECIDE_PERFORMANCE_ERASURE','MANAGE_PERFORMANCE_RETENTION','DECIDE_PERFORMANCE_PRIVACY_CORRECTION']) {
         await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:${featureCode}`, userId: other.id, featureCode, level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated privacy test' } });
       }
+      await assert.rejects(() => listPerformancePrivacyQueue(tx, { actorUserId: actor.id }),
+        (error: { code?: string }) => error.code === 'PERFORMANCE_PRIVACY_UNAVAILABLE', 'subject ownership does not grant the reviewer work queue');
+      const queue = await listPerformancePrivacyQueue(tx, { actorUserId: other.id });
+      assert.ok(queue.items.some((item) => item.id === request.id && item.nextAction === 'ACKNOWLEDGE'));
+      assert.equal('request' in queue.items[0], false, 'queue does not duplicate confidential request payloads');
+      assert.equal(typeof queue.disclosureReceiptId, 'string');
       await assert.rejects(() => requestPerformancePrivacy(tx, { actorUserId: other.id, subjectId: subject.id, requestKind: 'ACCESS', evaluationIds: [], reason: 'درخواست بدون اختیار ثبت' }));
       const acknowledged = await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: request.id, expectedVersion: 1, action: 'ACKNOWLEDGE', reasonCode: 'REQUEST_RECEIVED' });
       assert.equal(acknowledged.status, 'ACKNOWLEDGED');
@@ -60,6 +66,11 @@ const main = async () => {
       await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: erasure.id, expectedVersion: 4, action: 'CLOSE', reasonCode: 'RESPONSE_DELIVERED' });
       const closedAssessment = await assessPerformanceEvaluationRetention(tx, { actorUserId: other.id, evaluationId: evaluation.id });
       assert.equal(closedAssessment.status, 'REQUIRES_RETENTION_DECISION', 'closing a request never invents a draft closure date');
+      const correctionRequest = await requestPerformancePrivacy(tx, { actorUserId: actor.id, subjectId: subject.id, requestKind: 'CORRECTION', evaluationIds: [evaluation.id], reason: 'درخواست بررسی اصلاح سابقه' });
+      await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: correctionRequest.id, expectedVersion: 1, action: 'ACKNOWLEDGE', reasonCode: 'REQUEST_RECEIVED' });
+      await actOnPerformancePrivacyCase(tx, { actorUserId: other.id, caseId: correctionRequest.id, expectedVersion: 2, action: 'VERIFY', reasonCode: 'IDENTITY_AND_SCOPE_VERIFIED' });
+      assert.equal((await listPerformancePrivacyQueue(tx, { actorUserId: other.id })).items.find(({ id }) => id === correctionRequest.id)?.nextAction, 'OPEN_CORRECTION');
+
       await tx.hrFeatureAccessGrant.create({ data: { stableKey: `${suffix}:destination-reader`, userId: other.id, featureCode: 'VIEW_ASSIGNED_PERFORMANCE_CONSEQUENCE_HANDOFF', level: 'ADMIN', effectiveFrom: new Date('2020-01-01Z'), grantedByUserId: actor.id, reason: 'Isolated package restriction test' } });
       const responsibilityType = await tx.hrResponsibilityTypeCatalog.create({ data: { code: `TEST-${suffix}`, displayName: 'آزمون مقصد' } });
       const destination = await tx.hrNamedResponsibility.create({ data: { stableKey: `${suffix}:destination`, responsibilityTypeCode: responsibilityType.code, scopeType: 'PERSONNEL', scopeId: person.id, assignedUserId: other.id, effectiveFrom: new Date('2020-01-01Z'), createdByUserId: actor.id } });

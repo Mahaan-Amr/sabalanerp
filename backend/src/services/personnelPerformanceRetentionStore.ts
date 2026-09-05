@@ -1,3 +1,4 @@
+import { readPerformanceConsequenceDependencies } from './personnelPerformanceConsequenceDependencies';
 import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { canonicalPerformanceHash } from './personnelPerformancePolicy';
@@ -78,14 +79,9 @@ export const assessPerformanceEvaluationRetention = async (client: PrismaClient 
   const unresolvedHandoffs: string[] = [];
   const handoffs = await tx.performanceConsequenceHandoff.findMany({ where: { subjectId: subject.id }, orderBy: { id: 'asc' } });
   for (const handoff of handoffs) {
-    const packageRecord = handoff.packageId ? await tx.performanceConsequencePackage.findUnique({ where: { id: handoff.packageId } }) : null;
-    const payloadId = packageRecord?.encryptedPayloadId ?? handoff.encryptedPayloadId;
-    if (!payloadId) { unresolvedHandoffs.push(handoff.id); continue; }
-    const snapshot = await readPerformancePayload<{ selectedResults?: Array<{ id: string }>; recentTrend?: Array<{ resultId: string }>; projectionResultIds?: string[]; currentProjection?: { state: string } }>(tx, payloadId, performanceVaultKeyFromEnvironment());
-    if (canonicalPerformanceHash(snapshot) !== handoff.snapshotHash) throw Object.assign(new Error('وابستگی پیامد قابل تأیید نیست.'), { code: 'PERFORMANCE_RETENTION_DEPENDENCY_UNVERIFIED', status: 409 });
-    if (snapshot.currentProjection?.state === 'LEVEL' && !snapshot.projectionResultIds) unresolvedHandoffs.push(handoff.id);
-    if (snapshot.selectedResults?.some(({ id }) => resultIds.has(id)) || snapshot.recentTrend?.some(({ resultId }) => resultIds.has(resultId))
-      || snapshot.projectionResultIds?.some((id) => resultIds.has(id)) || unresolvedHandoffs.includes(handoff.id)) {
+    const linkage = await readPerformanceConsequenceDependencies(tx, handoff);
+    if (linkage.resultIds === null) unresolvedHandoffs.push(handoff.id);
+    if (linkage.resultIds === null || linkage.resultIds.some((id) => resultIds.has(id))) {
       dependencies.push({ id: handoff.id, kind: 'CONSEQUENCE', closedAt: handoff.closedAt });
       holdScopes.push({ aggregateType: 'PERFORMANCE_CONSEQUENCE_HANDOFF', aggregateId: handoff.id });
     }

@@ -1,3 +1,4 @@
+import { readPerformanceConsequenceDependencies } from './personnelPerformanceConsequenceDependencies';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { persistPerformancePayload, readPerformancePayload, performanceVaultKeyFromEnvironment, type PerformanceVaultKey } from './personnelPerformancePayloadStore';
@@ -47,6 +48,15 @@ export const capturePerformanceExportSources = async (tx: Prisma.TransactionClie
     if (phase.cohortVersionId) {
       add('PERFORMANCE_COHORT', await tx.performanceCohortVersion.findMany({ where: { id: phase.cohortVersionId } }));
       add('PERFORMANCE_COHORT_MEMBER', await tx.performanceCohortMember.findMany({ where: { cohortVersionId: phase.cohortVersionId } }));
+    }
+  }
+  const resultIds = new Set(results.map(({ id }) => id));
+  for (const handoff of await tx.performanceConsequenceHandoff.findMany({ where: { subjectId: { in: subjectIds } } })) {
+    const linkage = await readPerformanceConsequenceDependencies(tx, handoff);
+    if (linkage.resultIds === null) throw unavailable();
+    if (linkage.resultIds.some((id) => resultIds.has(id))) {
+      add('PERFORMANCE_CONSEQUENCE_HANDOFF', [handoff]);
+      if (handoff.packageId) add('PERFORMANCE_CONSEQUENCE_PACKAGE', await tx.performanceConsequencePackage.findMany({ where: { id: handoff.packageId } }));
     }
   }
   // Source payloads remain references with integrity hashes, not duplicated confidential narratives.
@@ -117,5 +127,20 @@ export const findPerformanceExportLegalHold = async (tx: Prisma.TransactionClien
     SELECT hold.id FROM performance_legal_holds hold JOIN descendants d
       ON hold."aggregateType" = d.kind AND hold."aggregateIdHash" = encode(sha256(convert_to(d.id, 'UTF8')), 'hex')
     WHERE hold.status = 'ACTIVE' LIMIT 1`;
-  return rows[0] ?? null;
+  if (rows[0]) return rows[0];
+  const subjectHashes = new Set(scopes.filter(({ aggregateType }) => aggregateType === 'PERFORMANCE_SUBJECT').map(({ aggregateIdHash }) => aggregateIdHash));
+  const resultHashes = new Set(scopes.filter(({ aggregateType }) => aggregateType === 'ACCEPTED_RESULT').map(({ aggregateIdHash }) => aggregateIdHash));
+  const evaluationHashes = new Set(scopes.filter(({ aggregateType }) => aggregateType === 'EVALUATION').map(({ aggregateIdHash }) => aggregateIdHash));
+  const holds = await tx.performanceLegalHold.findMany({ where: { status: 'ACTIVE', aggregateType: 'PERFORMANCE_CONSEQUENCE_HANDOFF' } });
+  for (const hold of holds) {
+    const handoff = await tx.performanceConsequenceHandoff.findUnique({ where: { id: hold.aggregateId } });
+    if (!handoff) return hold; // A held scope with missing ownership cannot authorize deletion.
+    if (!subjectHashes.has(hashId(handoff.subjectId))) continue;
+    let linkage;
+    try { linkage = await readPerformanceConsequenceDependencies(tx, handoff); } catch { return hold; }
+    if (linkage.resultIds === null || linkage.resultIds.some((id) => resultHashes.has(hashId(id)))) return hold;
+    const results = await tx.performanceAcceptedResult.findMany({ where: { id: { in: linkage.resultIds } }, select: { evaluationId: true } });
+    if (results.length !== linkage.resultIds.length || results.some(({ evaluationId }) => evaluationHashes.has(hashId(evaluationId)))) return hold;
+  }
+  return null;
 };

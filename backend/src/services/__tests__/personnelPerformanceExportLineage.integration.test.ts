@@ -117,7 +117,16 @@ const main = async () => {
     const laterHold = await placePerformanceLegalHold(client, { actorUserId: actor.id, aggregateType: 'CALCULATION_TRACE', aggregateId: laterTrace.id, reasonCode: 'LATER_DESCENDANT_HOLD' });
     await release(sectionHold.id);
     assert.equal(await cleanupExpiredPerformanceExports(client, future), 0, 'a later descendant hold still preserves exports of its source evaluation');
+    const handoffId = randomUUID();
+    const handoffPayload = await persistPerformancePayload(client, { aggregateType: 'PERFORMANCE_CONSEQUENCE_HANDOFF', aggregateId: handoffId,
+      payloadKind: 'IMMUTABLE_HANDOFF', schemaVersion: 1, payload: { selectedResults: [{ id: source.results[0].id }], recentTrend: [], projectionResultIds: [] }, keyring });
+    await client.performanceConsequenceHandoff.create({ data: { id: handoffId, subjectId: source.subjects[0].id, personnelId: source.subjects[0].personnelId!, employmentRelationshipId: source.subjects[0].employmentRelationshipId!,
+      consequenceType: 'COMPENSATION_REVIEW', policyCycleKey: randomUUID(), encryptedPayloadId: handoffPayload.id, snapshotHash: handoffPayload.contentHash, createdByUserId: actor.id } });
+    const handoffHold = await placePerformanceLegalHold(client, { actorUserId: actor.id, aggregateType: 'PERFORMANCE_CONSEQUENCE_HANDOFF', aggregateId: handoffId, reasonCode: 'CONSEQUENCE_LITIGATION' });
     await release(laterHold.id);
+    assert.equal(await cleanupExpiredPerformanceExports(client, future), 0, 'a held consequence using a report source preserves every dependent export');
+    for (const file of [aggregate.artifactPath!, named.artifactPath!, ...failedPaths]) await access(file);
+    await release(handoffHold.id);
     assert.equal(await cleanupExpiredPerformanceExports(client, future), 2);
     for (const file of [aggregate.artifactPath!, named.artifactPath!, ...failedPaths]) await assert.rejects(() => access(file));
     assert.equal(await cleanupExpiredPerformanceExports(client, future), 0, 'cleanup is idempotent');

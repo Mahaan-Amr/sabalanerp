@@ -72,10 +72,10 @@ candidate.
 4. an independently remote-read-back checkpoint plus isolated recovery and
    deployment/rollback rehearsal evidence;
 5. connected telemetry evidence;
-6. all six fresh attributable approvals; and
-7. a fresh local exact-candidate browser image rebuild while the configured Docker
+6. an independent candidate-bound no-open-release-defects attestation;
+7. all six fresh attributable approvals; and
+8. a fresh local exact-candidate browser image rebuild while the configured Docker
    proxy is unavailable.
 
 No production deployment, activation, cohort enrollment, pause/resume change,
 traffic opening, or real SMS occurred.
-

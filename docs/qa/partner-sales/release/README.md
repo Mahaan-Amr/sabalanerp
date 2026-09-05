@@ -24,6 +24,8 @@ Activation remains closed because:
   drill and quarterly deployment/rollback rehearsal have not been supplied;
 - connected production telemetry has not been proven for this candidate;
 - fresh independent claim-specific gate attestations have not been supplied;
+- no independent candidate-bound attestation proves the absence of open
+  release-blocking defects for this candidate;
 - Docker Desktop's configured `127.0.0.1:1080` build proxy is unavailable, so the
   exact-candidate browser image rebuild could not be repeated locally; and
 - the release owner, Sales, Accounting, technical/security, HR, and Logistics

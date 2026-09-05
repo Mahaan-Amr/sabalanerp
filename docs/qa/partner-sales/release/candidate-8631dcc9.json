@@ -46,18 +46,7 @@
   "remoteCheckpoint": {
     "status": "MISSING"
   },
-  "attestations": {
-    "docs/qa/dependency-advisories-364.md#verification-and-residual-risk": {
-      "source": "HASH_VERIFIED_ARTIFACT",
-      "reference": "docs/qa/dependency-advisories-364.md",
-      "digestSha256": "fe17ed357e1b6a931e88d943be0583a702f2a627258472df013bc88cd2a5187a",
-      "candidateCommit": "8631dcc9a8060300b279dbebc996cd2cc40568eb",
-      "candidateTree": "199ce8ee065cd2a037e21ce9859f2d21d07419c2",
-      "schemaId": "partner-schema-v1",
-      "checkedAt": "2026-09-05T09:45:06.991Z",
-      "expiresAt": "2026-09-05T10:00:06.991Z"
-    }
-  },
+  "attestations": {},
   "gates": {
     "exactPairConstraints": {
       "status": "BLOCKED",
@@ -174,9 +163,9 @@
       ]
     },
     "noOpenReleaseDefects": {
-      "status": "PASS",
+      "status": "BLOCKED",
       "evidence": [
-        "docs/qa/dependency-advisories-364.md#verification-and-residual-risk"
+        "docs/qa/partner-sales/release/verification-2026-09-05-candidate-8631dcc9.md"
       ]
     }
   },
@@ -222,6 +211,7 @@
     "Immutable backend, frontend, Inquiry, Nginx and supporting image digests are not recorded for the candidate release set.",
     "The candidate contains 224 migrations while the existing local runtime reports 245 applied migrations.",
     "Fresh independent claim-specific attestations have not been supplied for the candidate's functional readiness gates.",
+    "No independent candidate-bound attestation proves the absence of release-blocking defects for this candidate.",
     "The exact-candidate local browser image rebuild is blocked by Docker Desktop's unavailable 127.0.0.1:1080 proxy.",
     "No remotely read-back verified checkpoint, candidate-bound isolated recovery drill or quarterly rehearsal evidence is recorded.",
     "Connected production telemetry has not been proven for this candidate.",

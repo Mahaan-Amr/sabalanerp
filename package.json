@@ -93,8 +93,5 @@
     "@playwright/test": "^1.61.1",
     "concurrently": "^8.2.2",
     "pg": "^8.11.3"
-  },
-  "dependencies": {
-    "xlsx": "^0.18.5"
   }
 }

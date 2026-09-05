@@ -42,8 +42,9 @@ for (const root of ['CUSTOMER', 'INQUIRY', 'CASE'] as const) test(`first Partner
       assert.equal((await service.execute(await conversion(actorId, profileId, 1, 'START', `start-${suffix}`))).ok, true);
       await tx.workspacePermission.update({ where: { id: permission.id }, data: { isActive: false } });
       if (root === 'CUSTOMER') {
+        await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${profileId}, true)`;
         await tx.crmCustomer.create({ data: { id: `customer-${suffix}`, firstName: 'Partner', lastName: 'Customer',
-          ownerUserId: profileId, partnerOwnerProfileId: profileId } });
+          ownerUserId: profileId, partnerOwnerProfileId: profileId, partnerRevision: 1 } });
       } else if (root === 'INQUIRY') {
         await tx.partnerInquiry.create({ data: { id: `inquiry-${suffix}`, profileId } });
       } else {

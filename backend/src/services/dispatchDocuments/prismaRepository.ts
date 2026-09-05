@@ -12,6 +12,7 @@ import { DispatchDocumentAuthorizationError, DispatchDocumentConflictError, Disp
 import { DispatchDocumentEvidenceConflictError } from './service';
 import { assertCanonicalDispatchCommandAllowed } from '../dispatchCutover';
 import { isPostCutoverFinalization, isShipmentStatementFlowActive } from './featureGate';
+import { loadShipmentStatementRuntimeStateUnderLock } from './runtimeState';
 import { isRetryableDispatchTransactionError, refreshProjectionContracts } from '../dispatchAllocation';
 import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 import { createPrismaAllocationPricingBindingPort } from '../allocationPricingPrismaAdapter';
@@ -185,7 +186,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       }
       await assertCanonicalDispatchCommandAllowed(tx);
       const [cutover, revision] = await Promise.all([
-        tx.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' } }),
+        loadShipmentStatementRuntimeStateUnderLock(tx),
         tx.logisticsAllocationRevision.findUnique({ where: { id: input.allocationRevisionId }, select: { sourceKind: true, finalizedAt: true } }),
       ]);
       const ordinaryAtomic = Boolean(revision && isShipmentStatementFlowActive(process.env, cutover)
@@ -368,7 +369,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       await assertCanonicalDispatchCommandAllowed(tx);
       const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: predecessor.candidateId },
         include: { allocationRevision: { select: { sourceKind: true, finalizedAt: true } } } });
-      const cutover = await tx.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' } });
+      const cutover = await loadShipmentStatementRuntimeStateUnderLock(tx);
       const ordinaryAtomic = Boolean(candidate && isShipmentStatementFlowActive(process.env, cutover) && cutover?.cutoverAt
         && isPostCutoverFinalization(candidate.allocationRevision.finalizedAt, cutover.cutoverAt));
       if (!candidate || (candidate.allocationRevision.sourceKind !== 'PARTNER_CASE' && !ordinaryAtomic)) {

@@ -502,8 +502,8 @@ test('pending Partner onboarding records legacy Project responsibility and ACTIV
 test('migration preflight rejects an existing active Partner profile with legacy Project responsibility', async () => {
   const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
   const rollback = new Error('rollback CRM migration preflight fixture');
-  const migration = readFileSync(path.resolve(process.cwd(),
-    'prisma/migrations/20260829160000_partner_crm_transfer/migration.sql'), 'utf8');
+  const migration = readFileSync(path.resolve(__dirname,
+    '../../../prisma/migrations/20260829160000_partner_crm_transfer/migration.sql'), 'utf8');
   const preflights = [...migration.matchAll(/DO \$\$[\s\S]*?\$\$;/g)];
   const preflight = preflights.at(-1)?.[0];
   if (!preflight) throw new Error('CRM migration preflight not found');

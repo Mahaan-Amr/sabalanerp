@@ -4,7 +4,8 @@ import { PartnerResponderRuntime } from '@/features/partner-sales/workspaces/Par
 
 const scenarios: readonly string[] = ['RESPONDER', 'PARTIAL', 'UNCERTAIN', 'PAUSED', 'REASSIGNED', 'EXPIRED', 'UNASSIGNED', 'MULTIPLE', 'REFRESH_DENIED'];
 
-export default function PartnerResponderPage({ searchParams }: { searchParams: { fixture?: string } }) {
+export default async function PartnerResponderPage(props: { searchParams: Promise<{ fixture?: string }> }) {
+  const searchParams = await props.searchParams;
   if (process.env.NEXT_PUBLIC_ENABLE_PROTOTYPES === '1' && searchParams.fixture && scenarios.includes(searchParams.fixture)) {
     return <ResponderFixturePreview scenario={searchParams.fixture as ResponderScenario} />;
   }

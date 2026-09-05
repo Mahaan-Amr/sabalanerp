@@ -52,6 +52,7 @@ export interface AllocationPricingBindingPort {
 }
 
 export type AllocationPricingBindingCode =
+  | 'SHIPMENT_STATEMENTS_PAUSED'
   | 'PRICING_NOT_READY'
   | 'PRICING_SCOPE_MISMATCH'
   | 'PRICING_HASH_MISMATCH'
@@ -142,10 +143,14 @@ export const bindFinalizedAllocationPricing = async (
   eventIntegrityHashes: string[];
 }> => {
   const cutover = await port.loadCutover();
-  if (!isShipmentStatementFlowActive(environment, cutover)
-    || !cutover?.cutoverAt
-    || !isPostCutoverFinalization(input.finalizedAt, cutover.cutoverAt)) {
+  if (!cutover?.cutoverAt || !isPostCutoverFinalization(input.finalizedAt, cutover.cutoverAt)) {
     return { path: 'LEGACY_WAYBILL_ONLY', pricingVersionIds: [], eventIntegrityHashes: [] };
+  }
+  if (!isShipmentStatementFlowActive(environment, cutover)) {
+    throw new AllocationPricingBindingError(
+      'SHIPMENT_STATEMENTS_PAUSED',
+      'Post-cutover shipment statement finalization is paused; legacy fallback is forbidden.',
+    );
   }
   if (input.lines.some((line) => !isPositiveCanonicalQuantity(line.quantity))) {
     throw new AllocationPricingBindingError('PRICED_ALLOCATION_INVALID', 'Finalized allocation quantities must be positive.');

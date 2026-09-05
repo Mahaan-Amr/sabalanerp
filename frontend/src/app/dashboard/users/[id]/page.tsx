@@ -1,11 +1,12 @@
 'use client';
 import { ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpSheet, ErpTextarea } from '@/components/erp';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, use } from 'react';
 import { FaDesktop, FaEdit, FaKey, FaShieldAlt, FaTrash, FaUser } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpEmptyState, ErpLoading, ErpPage, ErpSection, ErpSummaryGrid } from '@/components/erp';
 import { authAPI, usersAPI } from '@/lib/api';
 
-export default function UserDetailsPage({ params }: { params: { id: string } }) {
+export default function UserDetailsPage(props: { params: Promise<{ id: string }> }) {
+  const params = use(props.params);
   const [user, setUser] = useState<any>(null);
   const [currentRole, setCurrentRole] = useState('');
   const [loading, setLoading] = useState(true);

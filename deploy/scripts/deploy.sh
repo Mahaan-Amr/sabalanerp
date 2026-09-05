@@ -54,6 +54,7 @@ run_backend() {
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
+      -e "DEPLOYMENT_LEASE_TOKEN=${DEPLOYMENT_LEASE_TOKEN:-}" \
       -e "DEPLOYMENT_OWNER=${DEPLOYMENT_OWNER}" \
       -e "DEPLOYMENT_PHASE=${DEPLOYMENT_PHASE:-}" \
       -e "DEPLOYMENT_RESULT=${DEPLOYMENT_RESULT:-}" \
@@ -83,6 +84,7 @@ run_backend_timed() {
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
+      -e "DEPLOYMENT_LEASE_TOKEN=${DEPLOYMENT_LEASE_TOKEN:-}" \
       -e "DEPLOYMENT_OWNER=${DEPLOYMENT_OWNER}" \
       -e "DEPLOYMENT_LEASE_MS=1200000" \
       -e "DEPLOYMENT_CONTROL_IMAGE=${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
@@ -121,6 +123,26 @@ run_backend_timed_with_heartbeat() {
   timed_status=$?
   set -e
   return "${timed_status}"
+}
+
+wait_for_cutover_approval() {
+  approval_path="$1"
+  duration="$2"
+  elapsed=0
+  heartbeat_elapsed=0
+  while [ ! -f "${approval_path}" ]; do
+    [ "${elapsed}" -lt "${duration}" ] || {
+      echo "Timed out waiting for the independently signed live cohort approval." >&2
+      return 1
+    }
+    sleep 5
+    elapsed=$((elapsed + 5))
+    heartbeat_elapsed=$((heartbeat_elapsed + 5))
+    if [ "${heartbeat_elapsed}" -ge 60 ]; then
+      control heartbeat || return 1
+      heartbeat_elapsed=0
+    fi
+  done
 }
 
 control() {
@@ -586,6 +608,8 @@ elif [ "${acquire_code}" -ne 0 ]; then
   exit "${acquire_code}"
 fi
 DB_LEASE_ACQUIRED=1
+DEPLOYMENT_LEASE_TOKEN="$(session_value leaseToken)"
+export DEPLOYMENT_LEASE_TOKEN
 
 phase MAINTENANCE_REQUESTED
 if [ "${DRAINED_EARLY}" -eq 0 ]; then
@@ -636,6 +660,79 @@ if [ "${BOOTSTRAP}" -eq 1 ]; then
   BOOTSTRAP=0
 else
   phase MIGRATIONS_APPLIED
+fi
+
+shipment_cutover_required="$(env_value SHIPMENT_STATEMENT_CUTOVER_REQUIRED)"
+shipment_cutover_required="${shipment_cutover_required:-false}"
+case "${shipment_cutover_required}" in
+  true|false) ;;
+  *) echo "SHIPMENT_STATEMENT_CUTOVER_REQUIRED must be true or false." >&2; exit 1 ;;
+esac
+if [ "${shipment_cutover_required}" = "true" ]; then
+  target_gate="$(env_value CUSTOMER_SHIPMENT_STATEMENTS_ENABLED)"
+  [ "${target_gate}" = "true" ] || {
+    echo "A required shipment-statement cutover needs CUSTOMER_SHIPMENT_STATEMENTS_ENABLED=true for the target release." >&2
+    exit 1
+  }
+  cutover_input_host_dir="${DEPLOYMENT_REPORT_DIR_HOST%/}/shipment-statement-cutover/pending"
+  cutover_input_container_dir="/app/deployment-reports/shipment-statement-cutover/pending"
+  cutover_output_host_dir="${DEPLOYMENT_REPORT_DIR_HOST%/}/shipment-statement-cutover/${DEPLOYMENT_ID}"
+  cutover_output_container_dir="/app/deployment-reports/shipment-statement-cutover/${DEPLOYMENT_ID}"
+  cutover_evidence_input="${cutover_input_container_dir}/evidence.json"
+  cutover_reviews_host="${cutover_input_host_dir}/legacy-pricing-reviews.json"
+  cutover_reviews="${cutover_input_container_dir}/legacy-pricing-reviews.json"
+  cutover_evidence="${cutover_output_container_dir}/evidence.json"
+  cutover_artifacts="${cutover_output_container_dir}/artifacts"
+  cutover_cohort_host="${cutover_output_host_dir}/artifacts/live-cohort.json"
+  cutover_cohort="${cutover_artifacts}/live-cohort.json"
+  cutover_cohort_approval_host="${cutover_output_host_dir}/artifacts/live-cohort-approval.json"
+  cutover_manifest="${cutover_output_container_dir}/manifest.json"
+  cutover_receipt="${cutover_output_container_dir}/receipt.json"
+  [ -f "${cutover_input_host_dir}/evidence.json" ] || {
+    echo "Required cutover evidence is missing under ${cutover_input_host_dir}." >&2
+    exit 1
+  }
+  [ ! -e "${cutover_output_host_dir}" ] || {
+    echo "A shipment-statement cutover output already exists for deployment ${DEPLOYMENT_ID}; refusing reuse." >&2
+    exit 1
+  }
+  mkdir -p "${cutover_output_host_dir}"
+  echo "Running the required Customer Shipment Statement cutover inside the owned maintenance boundary..."
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  if [ -f "${cutover_reviews_host}" ]; then
+    run_backend_timed_with_heartbeat "${remaining}" env \
+      CUSTOMER_SHIPMENT_STATEMENTS_ENABLED=false \
+      SHIPMENT_STATEMENT_RELEASE_ID="${DEPLOYMENT_RELEASE_ID}" \
+      node dist-cutover/scripts/shipment-statement-cutover.js legacy \
+        --evidence "${cutover_evidence_input}" --reviews "${cutover_reviews}" \
+        --artifacts "${cutover_artifacts}" --out "${cutover_evidence}"
+  else
+    run_backend_timed_with_heartbeat "${remaining}" env \
+      CUSTOMER_SHIPMENT_STATEMENTS_ENABLED=false \
+      SHIPMENT_STATEMENT_RELEASE_ID="${DEPLOYMENT_RELEASE_ID}" \
+      node dist-cutover/scripts/shipment-statement-cutover.js legacy \
+        --evidence "${cutover_evidence_input}" --artifacts "${cutover_artifacts}" --out "${cutover_evidence}"
+  fi
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  run_backend_timed_with_heartbeat "${remaining}" env \
+    CUSTOMER_SHIPMENT_STATEMENTS_ENABLED=false \
+    SHIPMENT_STATEMENT_RELEASE_ID="${DEPLOYMENT_RELEASE_ID}" \
+    node dist-cutover/scripts/shipment-statement-cutover.js cohort --out "${cutover_cohort}"
+  echo "The exact drained cohort is ready at ${cutover_cohort_host}. Review it and create ${cutover_cohort_approval_host}."
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  wait_for_cutover_approval "${cutover_cohort_approval_host}" "${remaining}"
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  run_backend_timed_with_heartbeat "${remaining}" env \
+    CUSTOMER_SHIPMENT_STATEMENTS_ENABLED=false \
+    SHIPMENT_STATEMENT_RELEASE_ID="${DEPLOYMENT_RELEASE_ID}" \
+    node dist-cutover/scripts/shipment-statement-cutover.js manifest \
+      --evidence "${cutover_evidence}" --artifacts "${cutover_artifacts}" --out "${cutover_manifest}"
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  run_backend_timed_with_heartbeat "${remaining}" env \
+    CUSTOMER_SHIPMENT_STATEMENTS_ENABLED=false \
+    SHIPMENT_STATEMENT_RELEASE_ID="${DEPLOYMENT_RELEASE_ID}" \
+    node dist-cutover/scripts/shipment-statement-cutover.js activate \
+      --manifest "${cutover_manifest}" --receipt "${cutover_receipt}"
 fi
 
 mkdir -p "${DEPLOYMENT_REPORT_DIR_HOST}"

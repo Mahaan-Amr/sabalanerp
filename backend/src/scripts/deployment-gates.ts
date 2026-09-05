@@ -8,6 +8,7 @@ import { assertRemoteCheckpointFingerprint } from '../services/deploymentCheckpo
 import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 import { sha256File } from '../services/recoveryCrypto';
 import { validateLiveStoredFileReferences } from '../services/systemRecoveryEngine';
+import { verifyShipmentStatementDeploymentState } from '../services/shipmentStatementOperations';
 
 const execFileAsync = promisify(execFile);
 const deploymentId = String(process.env.DEPLOYMENT_ID || '').trim();
@@ -54,6 +55,9 @@ const main = async () => {
         if (!/up to date/i.test(`${result.stdout}\n${result.stderr}`)) throw new Error('Prisma migration history is not up to date.');
         return { status: 'up-to-date' };
       },
+    }, {
+      name: 'shipment-statement-runtime-state',
+      run: async () => verifyShipmentStatementDeploymentState(prisma),
     }, {
       name: 'contract-financial-evidence',
       run: async () => {

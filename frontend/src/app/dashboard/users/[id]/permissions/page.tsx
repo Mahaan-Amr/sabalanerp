@@ -1,8 +1,9 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 
-export default function UserPermissionsRedirectPage({ params }: { params: { id: string } }) {
+export default function UserPermissionsRedirectPage(props: { params: Promise<{ id: string }> }) {
+  const params = use(props.params);
   const router = useRouter();
 
   useEffect(() => {

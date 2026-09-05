@@ -146,10 +146,10 @@ test('bulk responder decision commits valid rows independently, preserves stale 
       idempotency: { actorId: ids.responderId, operation: 'INQUIRY_DECIDE' as const,
         targetId: ids.inquiryId, key: 'bulk-decision-1', payloadHash: decisionHash } };
     const responder = createPartnerInquiryService({ actorId: ids.responderId, ...shared });
-    await tx.partnerReleaseCohort.update({ where: { id: ids.actorId }, data: { operationalPaused: true } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: true } });
     const paused = await responder.execute(command);
     assert.equal(paused.ok ? null : paused.error.code, 'OPERATIONAL_PAUSE');
-    await tx.partnerReleaseCohort.update({ where: { id: ids.actorId }, data: { operationalPaused: false } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: false } });
     const result = await responder.execute(command);
     assert.equal(result.ok, true);
     if (!result.ok || !result.value.batch) return;

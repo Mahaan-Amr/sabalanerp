@@ -29,7 +29,7 @@ const lockedEvidence = (): LockedPricingEvidence => ({
 const makePort = (overrides: Partial<AllocationPricingBindingPort> = {}) => {
   const calls = { locks: [] as string[], references: [] as unknown[], events: [] as unknown[] };
   const port: AllocationPricingBindingPort = {
-    loadCutover: async () => ({ enabled: true, cutoverAt: new Date('2026-08-09T12:00:00.000Z') }),
+    loadCutover: async () => ({ enabled: true, cutoverAt: new Date('2026-08-09T12:00:00.000Z'), operationalPaused: false }),
     lockPricingScope: async (keys) => { calls.locks.push(...keys); },
     loadLockedPricingEvidence: async () => [lockedEvidence()],
     loadPriorPricedEvents: async () => [],
@@ -85,9 +85,22 @@ const main = async () => {
 
 {
   const { port, calls } = makePort();
-  const result = await bindFinalizedAllocationPricing(port, input, { CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'false' });
-  assert.equal(result.path, 'LEGACY_WAYBILL_ONLY');
+  await assert.rejects(
+    () => bindFinalizedAllocationPricing(port, input, { CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'false' }),
+    (error: unknown) => error instanceof AllocationPricingBindingError && error.code === 'SHIPMENT_STATEMENTS_PAUSED',
+  );
   assert.deepEqual(calls.references, []);
+}
+
+{
+  const { port, calls } = makePort({
+    loadCutover: async () => ({ enabled: true, cutoverAt: new Date('2026-08-09T12:00:00.000Z'), operationalPaused: true }),
+  });
+  await assert.rejects(
+    () => bindFinalizedAllocationPricing(port, input, { CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'true' }),
+    (error: unknown) => error instanceof AllocationPricingBindingError && error.code === 'SHIPMENT_STATEMENTS_PAUSED',
+  );
+  assert.deepEqual(calls, { locks: [], references: [], events: [] });
 }
 
 for (const evidence of [

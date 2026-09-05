@@ -13,13 +13,16 @@ const reasonMessage = {
   SAFETY_PAUSED: 'عملیات ارزیابی عملکرد به‌دلیل توقف ایمن موقتاً بسته است.',
 } as const;
 
-export const requirePersonnelPerformanceWriteGate = (action: PersonnelPerformanceWriteAction) => async (
-  _req: AuthRequest,
+export const requirePersonnelPerformanceWriteGate = (
+  action: PersonnelPerformanceWriteAction,
+  subjectIdFromRequest?: (req: AuthRequest) => Promise<string | undefined> | string | undefined,
+) => async (
+  req: AuthRequest,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    const decision = await resolvePersonnelPerformanceWriteGate(prisma, action);
+    const decision = await resolvePersonnelPerformanceWriteGate(prisma, action, new Date(), await subjectIdFromRequest?.(req));
     if (!decision.allowed) return res.status(409).json({
       success: false,
       message: `${reasonMessage[decision.reason]} پس از رفع مانع، عملیات را دوباره انجام دهید.`,

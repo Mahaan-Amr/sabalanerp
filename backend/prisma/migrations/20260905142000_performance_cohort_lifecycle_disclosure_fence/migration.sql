@@ -1,0 +1,3 @@
+CREATE TRIGGER performance_cohort_version_disclosure_revision
+BEFORE INSERT OR UPDATE OR DELETE ON performance_cohort_versions
+FOR EACH STATEMENT EXECUTE FUNCTION performance_bump_disclosure_revision();

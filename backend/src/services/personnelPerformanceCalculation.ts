@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 
 export const PERFORMANCE_GRADE_POINTS = ['0', '25', '50', '75', '100'] as const;
@@ -67,6 +68,8 @@ export type PerformanceEvaluationInput = {
     effectiveTo: string;
     snapshotFacts: Record<string, unknown>;
     responses: PerformanceCriterionResponse[];
+    template?: PerformanceTemplateSnapshot;
+    notEvaluable?: boolean;
   }>;
 };
 
@@ -103,6 +106,8 @@ export type PerformanceCalculationTrace = {
   };
   sections: Array<{
     sectionId: string;
+    templateVersionId: string;
+    scoringPolicyVersionId: string;
     exactScore: string | null;
     effectiveDays: number;
     allocationPercent: string;
@@ -139,6 +144,10 @@ const ZERO = decimal(0);
 const HUNDRED = decimal(100);
 const fixed6 = (value: Prisma.Decimal.Value) => decimal(value).toDecimalPlaces(6, Prisma.Decimal.ROUND_HALF_UP).toFixed(6);
 const fixed2 = (value: Prisma.Decimal.Value) => decimal(value).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toFixed(2);
+const canonicalCombinedId = (values: string[]) => {
+  const unique = [...new Set(values)].sort();
+  return unique.length === 1 ? unique[0] : createHash('sha256').update(JSON.stringify(unique)).digest('hex');
+};
 
 const hasAtMostTwoDecimalPlaces = (value: string) => /^\d+(?:\.\d{1,2})?$/.test(value);
 const hasAtMostSixDecimalPlaces = (value: string) => /^\d+(?:\.\d{1,6})?$/.test(value);
@@ -226,13 +235,13 @@ const hasVerifiableEvidenceIdentity = (evidence: PerformanceCriterionResponse['e
 );
 
 export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput): PerformanceEvaluationCalculation => {
-  const validationErrors = validatePerformanceTemplate(input.template);
+  const sectionTemplates = input.sections.map((section) => section.template ?? input.template);
+  const validationErrors = [...new Set(sectionTemplates.flatMap(validatePerformanceTemplate))];
   const reasons = [...validationErrors];
   let structuralBlocker = validationErrors.length > 0;
-  let totalOriginalWeight = ZERO;
-  let totalCoveredWeight = ZERO;
 
   const sectionWork = input.sections.map((section) => {
+    const sectionTemplate = section.template ?? input.template;
     const effectiveFromMs = new Date(section.effectiveFrom).getTime();
     const effectiveToMs = new Date(section.effectiveTo).getTime();
     if (!Number.isFinite(effectiveFromMs) || !Number.isFinite(effectiveToMs) || effectiveFromMs >= effectiveToMs) {
@@ -249,7 +258,9 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
       reasons.push(`درصد تخصیص کاری بخش «${section.sectionId}» معتبر نیست.`);
     }
     const responses = new Map(section.responses.map((response) => [response.criterionVersionId, response]));
-    const categoryWork = input.template.categories.map((category) => {
+    let sectionOriginalWeight = ZERO;
+    let sectionCoveredWeight = ZERO;
+    const categoryWork = sectionTemplate.categories.map((category) => {
       const categoryOriginal = decimal(category.weightPercent);
       let coveredWithinCategory = ZERO;
       const criterionWork = category.criteria.map((criterion) => {
@@ -258,7 +269,7 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
         const originalGlobal = categoryOriginal.mul(originalWithinCategory).div(HUNDRED);
         const applicability = evaluateApplicability(criterion, section.snapshotFacts, response);
         if (applicability.decision === 'BLOCKED') {
-          structuralBlocker = true;
+          if (!section.notEvaluable) structuralBlocker = true;
           reasons.push(`${criterion.titleFa}: ${applicability.reason}`);
         }
         const reliableEvidence = (response?.evidence ?? []).filter((evidence) => (
@@ -270,23 +281,23 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
         const evidenceRequirementMet = !criterion.evidence.required
           || reliableEvidence.length >= criterion.evidence.minimumReliableCount;
         const grade = response?.grade ?? null;
-        if (applicability.decision === 'APPLICABLE' && criterion.kind === 'JUDGMENT' && grade === null) {
+        if (!section.notEvaluable && applicability.decision === 'APPLICABLE' && criterion.kind === 'JUDGMENT' && grade === null) {
           structuralBlocker = true;
           reasons.push(`برای معیار «${criterion.titleFa}» باید یکی از پنج درجه ثبت شود.`);
         }
-        if (applicability.decision === 'APPLICABLE' && !evidenceRequirementMet) {
+        if (!section.notEvaluable && applicability.decision === 'APPLICABLE' && !evidenceRequirementMet) {
           reasons.push(`معیار «${criterion.titleFa}» حداقل شاهد قابل اتکا را ندارد.`);
         }
-        if (applicability.decision === 'APPLICABLE' && criterion.kind === 'BINARY_GATE' && response?.binaryGatePassed !== true) {
+        if (!section.notEvaluable && applicability.decision === 'APPLICABLE' && criterion.kind === 'BINARY_GATE' && response?.binaryGatePassed !== true) {
           structuralBlocker = true;
           reasons.push(`کنترل الزامی «${criterion.titleFa}» تأیید نشده است.`);
         }
         if (applicability.decision === 'APPLICABLE' && criterion.kind === 'JUDGMENT' && grade !== null && evidenceRequirementMet) {
           coveredWithinCategory = coveredWithinCategory.add(originalWithinCategory);
-          totalCoveredWeight = totalCoveredWeight.add(originalGlobal);
+          sectionCoveredWeight = sectionCoveredWeight.add(originalGlobal);
         }
         if (applicability.decision === 'APPLICABLE' && criterion.kind === 'JUDGMENT') {
-          totalOriginalWeight = totalOriginalWeight.add(originalGlobal);
+          sectionOriginalWeight = sectionOriginalWeight.add(originalGlobal);
         }
         return {
           criterion,
@@ -305,7 +316,7 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
       ));
       const applicableWeight = applicable.reduce((sum, item) => sum.add(item.originalWithinCategory), ZERO);
       const coverage = applicableWeight.gt(0) ? coveredWithinCategory.div(applicableWeight).mul(HUNDRED) : HUNDRED;
-      if (category.required && applicableWeight.gt(0) && coverage.lt(50)) {
+      if (!section.notEvaluable && category.required && applicableWeight.gt(0) && coverage.lt(50)) {
         reasons.push(`پوشش دسته الزامی «${category.titleFa}» کمتر از ۵۰ درصد است.`);
       }
       const scoreNumerator = applicable.reduce((sum, item) => {
@@ -318,14 +329,15 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
     const activeCategoryWeight = categoryWork
       .filter(({ applicableWeight }) => applicableWeight.gt(0))
       .reduce((sum, item) => sum.add(item.categoryOriginal), ZERO);
-    const sectionScore = activeCategoryWeight.gt(0)
+    const sectionScore = !section.notEvaluable && activeCategoryWeight.gt(0)
       ? categoryWork.reduce((sum, item) => item.score === null
         ? sum
         : sum.add(item.score.mul(item.categoryOriginal)), ZERO).div(activeCategoryWeight)
       : null;
     const combinationBasis = decimal(Math.max(section.effectiveDays, 0)).mul(allocation);
     return {
-      section, allocation, categoryWork, activeCategoryWeight, sectionScore, combinationBasis,
+      section, sectionTemplate, allocation, categoryWork, activeCategoryWeight, sectionScore, combinationBasis,
+      sectionOriginalWeight, sectionCoveredWeight,
       effectiveFromMs, effectiveToMs,
     };
   });
@@ -348,7 +360,9 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
     }
   }
 
-  const coverage = totalOriginalWeight.gt(0) ? totalCoveredWeight.div(totalOriginalWeight).mul(HUNDRED) : ZERO;
+  const weightedOriginal = sectionWork.reduce((sum, item) => sum.add(item.sectionOriginalWeight.mul(item.combinationBasis)), ZERO);
+  const weightedCovered = sectionWork.reduce((sum, item) => sum.add(item.sectionCoveredWeight.mul(item.combinationBasis)), ZERO);
+  const coverage = weightedOriginal.gt(0) ? weightedCovered.div(weightedOriginal).mul(HUNDRED) : ZERO;
   if (coverage.lt(70)) reasons.push('پوشش وزن اصلی ارزیابی کمتر از ۷۰ درصد است.');
   const notEvaluable = !structuralBlocker && reasons.length > 0;
   const scoredSectionWork = sectionWork.filter((item) => item.sectionScore !== null);
@@ -361,6 +375,8 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
 
   const traceSections = sectionWork.map((sectionItem) => ({
     sectionId: sectionItem.section.sectionId,
+    templateVersionId: sectionItem.sectionTemplate.templateVersionId,
+    scoringPolicyVersionId: sectionItem.sectionTemplate.scoringPolicyVersionId,
     exactScore: sectionItem.sectionScore === null ? null : fixed6(sectionItem.sectionScore),
     effectiveDays: sectionItem.section.effectiveDays,
     allocationPercent: fixed6(sectionItem.allocation),
@@ -422,8 +438,8 @@ export const calculatePerformanceEvaluation = (input: PerformanceEvaluationInput
     reasons: [...new Set(reasons)],
     trace: {
       schemaVersion: 2,
-      templateVersionId: input.template.templateVersionId,
-      scoringPolicyVersionId: input.template.scoringPolicyVersionId,
+      templateVersionId: canonicalCombinedId(sectionTemplates.map(({ templateVersionId }) => templateVersionId)),
+      scoringPolicyVersionId: canonicalCombinedId(sectionTemplates.map(({ scoringPolicyVersionId }) => scoringPolicyVersionId)),
       gradeMapping: PERFORMANCE_GRADE_POINTS,
       precisionScale: 6,
       coverage: { requiredPercent: '70.000000', actualPercent: fixed6(coverage) },

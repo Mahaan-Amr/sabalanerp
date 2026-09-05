@@ -1,3 +1,5 @@
+import type { Prisma, PrismaClient } from '@prisma/client';
+
 export const PERSONNEL_PERFORMANCE_PHASES = [
   'SCHEMA_PROTECTION',
   'POLICY_DARK_LAUNCH',
@@ -14,6 +16,8 @@ export type PersonnelPerformancePhase = typeof PERSONNEL_PERFORMANCE_PHASES[numb
 export type PersonnelPerformanceWriteAction =
   | 'MANAGE_POLICY'
   | 'RECONSTRUCT_READINESS'
+  | 'MANAGE_PERFORMANCE_CYCLE'
+  | 'SEND_WORKFLOW_REMINDERS'
   | 'SAVE_SUPERVISOR_DRAFT'
   | 'SUBMIT_SUPERVISOR_EVALUATION'
   | 'DECIDE_HR_REVIEW'
@@ -36,6 +40,8 @@ type PersonnelPerformanceRolloutState = {
 const minimumPhase: Record<PersonnelPerformanceWriteAction, PersonnelPerformancePhase> = {
   MANAGE_POLICY: 'POLICY_DARK_LAUNCH',
   RECONSTRUCT_READINESS: 'READINESS',
+  MANAGE_PERFORMANCE_CYCLE: 'SUPERVISOR_HR_PILOT',
+  SEND_WORKFLOW_REMINDERS: 'SUPERVISOR_HR_PILOT',
   SAVE_SUPERVISOR_DRAFT: 'SUPERVISOR_HR_PILOT',
   SUBMIT_SUPERVISOR_EVALUATION: 'SUPERVISOR_HR_PILOT',
   DECIDE_HR_REVIEW: 'SUPERVISOR_HR_PILOT',
@@ -56,9 +62,8 @@ const cohortScopedActions = new Set<PersonnelPerformanceWriteAction>([
   'SAVE_SUPERVISOR_DRAFT',
   'SUBMIT_SUPERVISOR_EVALUATION',
   'DECIDE_HR_REVIEW',
+  'MANAGE_PERFORMANCE_CYCLE',
   'PROJECT_CURRENT_LEVEL',
-  'WRITE_ANALYTICS_PROJECTION',
-  'REQUEST_EXPORT',
   'CREATE_CONSEQUENCE_HANDOFF',
 ]);
 
@@ -80,7 +85,7 @@ export const evaluatePersonnelPerformanceWriteGate = (
 };
 
 export const resolvePersonnelPerformanceWriteGate = async (
-  client: PrismaClient,
+  client: PrismaClient | Prisma.TransactionClient,
   action: PersonnelPerformanceWriteAction,
   now = new Date(),
   subjectId?: string,
@@ -90,28 +95,73 @@ export const resolvePersonnelPerformanceWriteGate = async (
     orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
   });
   const cohort = phase?.cohortVersionId ? await client.performanceCohortVersion.findUnique({
-    where: { id: phase.cohortVersionId }, select: { id: true, version: true },
+    where: { id: phase.cohortVersionId, lifecycle: 'ACTIVE', effectiveFrom: { lte: now } }, select: { id: true, version: true },
   }) : null;
   const membership = cohort && subjectId ? await client.performanceCohortMember.findUnique({
     where: { cohortVersionId_subjectId: { cohortVersionId: cohort.id, subjectId } }, select: { id: true },
   }) : null;
-  const pause = phase ? await client.performanceSafetyPause.findFirst({
-    where: { phaseVersionId: phase.id, status: 'ACTIVE' },
-    orderBy: { startedAt: 'desc' },
-  }) : null;
+  const pause = await findApplicablePerformancePause(client, subjectId);
   return evaluatePersonnelPerformanceWriteGate({
     releaseEnabled: phase?.releaseEnabled ?? false,
     phase: phase?.phase ?? 'SCHEMA_PROTECTION',
     phaseVersion: phase?.version ?? 0,
     cohortVersion: cohort?.version ?? 0,
     subjectInCohort: Boolean(membership),
-    safetyPause: pause && (pause.scope !== 'COHORT' || pause.cohortVersionId === cohort?.id)
+    safetyPause: pause
       ? { id: pause.id, scope: pause.scope === 'COHORT' ? 'COHORT' : 'ALL' }
       : null,
   }, action);
 };
 
+/** Call inside the writer's transaction before taking narrower aggregate locks or resolving authority. */
+export const assertPersonnelPerformanceWriteAdmission = async (
+  tx: Prisma.TransactionClient, action: PersonnelPerformanceWriteAction, subjectId?: string,
+) => {
+  const fence = await tx.$queryRaw<Array<{ revision: bigint }>>`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+  if (!fence.length) throw Object.assign(new Error('وضعیت انتشار عملکرد در دسترس نیست.'), { code: 'PERFORMANCE_OPERATIONS_FENCE_UNAVAILABLE', status: 409 });
+  const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  const decision = await resolvePersonnelPerformanceWriteGate(tx, action, clock.now, subjectId);
+  if (!decision.allowed) throw Object.assign(new Error('عملیات با مرحله انتشار یا عضویت فعلی مجاز نیست.'), {
+    code: `PERFORMANCE_${decision.reason}`, status: 409,
+  });
+  return decision;
+};
+
 export const personnelPerformanceRollbackMode = (hasCanonicalWrite: boolean) => (
   hasCanonicalWrite ? 'EVIDENCE_PRESERVING_FIX_FORWARD' : 'COMPATIBLE_RELEASE_DISABLE'
 );
-import type { PrismaClient } from '@prisma/client';
+
+export const findApplicablePerformancePause = async (
+  client: PrismaClient | Prisma.TransactionClient,
+  subjectId?: string,
+) => {
+  // A pause survives phase and membership version changes until explicitly resumed.
+  const memberships = subjectId ? await client.performanceCohortMember.findMany({
+    where: { subjectId }, select: { cohortVersionId: true },
+  }) : [];
+  return client.performanceSafetyPause.findFirst({
+    where: {
+      status: 'ACTIVE',
+      ...(subjectId ? { OR: [
+        { scope: 'ALL' },
+        { scope: 'COHORT', cohortVersionId: { in: memberships.map(({ cohortVersionId }) => cohortVersionId) } },
+      ] } : {}),
+    },
+    orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+  });
+};
+
+export const isPerformanceTransactionConflict = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object' || !('code' in error)) return false;
+  if (error.code === 'P2034') return true;
+  if (error.code !== 'P2010' || !('meta' in error) || !error.meta || typeof error.meta !== 'object' || !('code' in error.meta)) return false;
+  return ['40001', '40P01'].includes(String(error.meta.code));
+};
+
+export const normalizePerformanceWriteError = (error: unknown): unknown => {
+  if (isPerformanceTransactionConflict(error)) return Object.assign(new Error('وضعیت هم‌زمان تغییر کرده است؛ درخواست را دوباره ارسال کنید.'), { code: 'PERFORMANCE_WRITE_RETRY_REQUIRED', status: 409 });
+  const message = error instanceof Error ? error.message : '';
+  const codes = ['PERFORMANCE_SAFETY_PAUSED', 'PERFORMANCE_RELEASE_DISABLED', 'PERFORMANCE_FIX_FORWARD_REQUIRED', 'PERFORMANCE_CAPABILITY_NOT_ACTIVE'] as const;
+  const code = codes.find((candidate) => message.includes(candidate));
+  return code ? Object.assign(new Error('عملیات با وضعیت فعلی انتشار عملکرد مجاز نیست.'), { code, status: 409 }) : error;
+};

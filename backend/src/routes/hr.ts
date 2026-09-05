@@ -217,8 +217,44 @@ const assignmentInclude = {
       position: { select: { id: true, code: true, title: true } },
       employmentRelationship: { include: { personnel: { select: { id: true, firstName: true, lastName: true, user: { select: { id: true } } } } } }
     }
-  }
+  },
+  performanceResponsibilities: {
+    orderBy: { effectiveFrom: 'asc' as const },
+    include: { supervisorAssignment: { include: {
+      position: { select: { id: true, code: true, title: true } },
+      employmentRelationship: { include: { personnel: { select: { id: true, firstName: true, lastName: true } } } },
+    } } },
+  },
 } as const;
+
+const performanceAllocation = (value: unknown) => {
+  const normalized = normalizeApplicantDigits(String(value ?? '')).trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) throw new Error('درصد تخصیص عملکرد باید با حداکثر دو رقم اعشار وارد شود.');
+  const allocation = new Prisma.Decimal(normalized);
+  if (allocation.lte(0) || allocation.gt(100)) throw new Error('درصد تخصیص عملکرد باید بیشتر از صفر و حداکثر صد باشد.');
+  return allocation;
+};
+
+const createInitialPerformanceResponsibility = async (client: Prisma.TransactionClient, input: {
+  assignmentId: string;
+  supervisorAssignmentId: string | null;
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+  allocationPercent: Prisma.Decimal;
+  reason: string;
+  actorUserId: string;
+}) => {
+  if (!input.supervisorAssignmentId) return null;
+  return client.hrAssignmentPerformanceResponsibility.create({ data: {
+    employmentAssignmentId: input.assignmentId,
+    supervisorAssignmentId: input.supervisorAssignmentId,
+    effectiveFrom: input.effectiveFrom,
+    effectiveTo: input.effectiveTo,
+    allocationPercent: input.allocationPercent,
+    reason: input.reason,
+    createdBy: input.actorUserId,
+  } });
+};
 
 const personnelInclude = {
   user: { select: { id: true, username: true, email: true, isActive: true } },
@@ -377,7 +413,11 @@ const validateAssignment = async (client: any, input: {
         OR: input.effectiveTo
           ? [{ effectiveTo: null }, { effectiveTo: { gte: input.effectiveTo } }]
           : [{ effectiveTo: null }],
-        employmentRelationship: { status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED'] } }
+        employmentRelationship: {
+          status: { in: ['PLANNED', 'ACTIVE', 'SUSPENDED', 'ENDED'] },
+          effectiveFrom: { lte: input.effectiveFrom },
+          OR: input.effectiveTo ? [{ effectiveTo: null }, { effectiveTo: { gte: input.effectiveTo } }] : [{ effectiveTo: null }],
+        }
       },
       select: { id: true }
     });
@@ -1787,6 +1827,9 @@ router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, req
     const status = req.body.status === 'PLANNED' ? 'PLANNED' : 'ACTIVE';
     if (status === 'ACTIVE' && effectiveFrom > new Date()) throw new Error('استخدام با تاریخ شروع آینده باید برنامه‌ریزی‌شده باشد.');
     const positionId = textValue(req.body.positionId); if (!positionId) throw new Error('تخصیص اصلی اولیه الزامی است.');
+    const allocation = performanceAllocation(req.body.performanceAllocationPercent);
+    const performanceContextReason = textValue(req.body.performanceContextReason);
+    if (performanceContextReason.length < 8) throw new Error('دلیل ثبت زمینه عملکرد باید روشن و حداقل هشت نویسه باشد.');
     const result = await prisma.$transaction(async (tx) => {
       const personnel = await tx.personnel.create({ data: { firstName, lastName, nationalCode, employeeNumber: nullableText(normalizeApplicantDigits(req.body.employeeNumber)), isActive: status === 'ACTIVE' } });
       if (req.body.userId) {
@@ -1796,7 +1839,8 @@ router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, req
       }
       const relationship = await tx.hrEmploymentRelationship.create({ data: { personnelId: personnel.id, status, effectiveFrom, originalStartDate: effectiveFrom, startDateVerified: true, createdBy: actorId(req) } });
       const validated = await validateAssignment(tx, { relationshipId: relationship.id, positionId, type: 'PRIMARY', effectiveFrom, effectiveTo: null, responsibleSupervisorAssignmentId: nullableText(req.body.responsibleSupervisorAssignmentId) });
-      await tx.hrEmploymentAssignment.create({ data: { employmentRelationshipId: relationship.id, positionId, type: 'PRIMARY', effectiveFrom, organizationalUnitId: validated.position.organizationalUnitId, workplaceId: validated.position.workplaceId, costCenterId: validated.position.costCenterId, responsibleSupervisorAssignmentId: validated.supervisorAssignmentId, createdBy: actorId(req) } });
+      const assignment = await tx.hrEmploymentAssignment.create({ data: { employmentRelationshipId: relationship.id, positionId, type: 'PRIMARY', effectiveFrom, organizationalUnitId: validated.position.organizationalUnitId, workplaceId: validated.position.workplaceId, costCenterId: validated.position.costCenterId, responsibleSupervisorAssignmentId: validated.supervisorAssignmentId, performanceAllocationPercent: allocation, createdBy: actorId(req) } });
+      await createInitialPerformanceResponsibility(tx, { assignmentId: assignment.id, supervisorAssignmentId: validated.supervisorAssignmentId, effectiveFrom, effectiveTo: null, allocationPercent: allocation, reason: performanceContextReason, actorUserId: actorId(req) });
       await tx.hrPersonnelAudit.create({ data: {
         personnelId: personnel.id,
         actorUserId: actorId(req),
@@ -1872,9 +1916,14 @@ router.post('/relationships/:id/assignments', editAccess, async (req: WorkspaceR
     const type = req.body.type as 'PRIMARY' | 'SECONDARY' | 'ACTING'; if (!['PRIMARY', 'SECONDARY', 'ACTING'].includes(type)) throw new Error('نوع تخصیص معتبر نیست.');
     const effectiveFrom = parseDate(req.body.effectiveFrom, 'تاریخ شروع'); const effectiveTo = optionalDate(req.body.effectiveTo, 'تاریخ پایان');
     const positionId = textValue(req.body.positionId);
+    const allocation = performanceAllocation(req.body.performanceAllocationPercent);
+    const performanceContextReason = textValue(req.body.performanceContextReason);
+    if (performanceContextReason.length < 8) throw new Error('دلیل ثبت زمینه عملکرد باید روشن و حداقل هشت نویسه باشد.');
     const record = await prisma.$transaction(async (tx) => {
       const validated = await validateAssignment(tx, { relationshipId: req.params.id, positionId, type, effectiveFrom, effectiveTo, responsibleSupervisorAssignmentId: nullableText(req.body.responsibleSupervisorAssignmentId) });
-      return tx.hrEmploymentAssignment.create({ data: { employmentRelationshipId: req.params.id, positionId, type, effectiveFrom, effectiveTo, organizationalUnitId: validated.position.organizationalUnitId, workplaceId: validated.position.workplaceId, costCenterId: validated.position.costCenterId, responsibleSupervisorAssignmentId: validated.supervisorAssignmentId, scheduleContributing: type !== 'PRIMARY' && Boolean(req.body.scheduleContributing), createdBy: actorId(req) }, include: assignmentInclude });
+      const assignment = await tx.hrEmploymentAssignment.create({ data: { employmentRelationshipId: req.params.id, positionId, type, effectiveFrom, effectiveTo, organizationalUnitId: validated.position.organizationalUnitId, workplaceId: validated.position.workplaceId, costCenterId: validated.position.costCenterId, responsibleSupervisorAssignmentId: validated.supervisorAssignmentId, performanceAllocationPercent: allocation, scheduleContributing: type !== 'PRIMARY' && Boolean(req.body.scheduleContributing), createdBy: actorId(req) } });
+      await createInitialPerformanceResponsibility(tx, { assignmentId: assignment.id, supervisorAssignmentId: validated.supervisorAssignmentId, effectiveFrom, effectiveTo, allocationPercent: allocation, reason: performanceContextReason, actorUserId: actorId(req) });
+      return tx.hrEmploymentAssignment.findUniqueOrThrow({ where: { id: assignment.id }, include: assignmentInclude });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.status(201).json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Create employment assignment'); }
@@ -1884,6 +1933,9 @@ router.post('/relationships/:id/transfer-primary', editAccess, async (req: Works
   try {
     const effectiveFrom = parseDate(req.body.effectiveFrom, 'تاریخ اجرای انتقال');
     const positionId = textValue(req.body.positionId); if (!positionId) throw new Error('جایگاه جدید الزامی است.');
+    const allocation = performanceAllocation(req.body.performanceAllocationPercent);
+    const performanceContextReason = textValue(req.body.performanceContextReason);
+    if (performanceContextReason.length < 8) throw new Error('دلیل ثبت زمینه عملکرد باید روشن و حداقل هشت نویسه باشد.');
     const record = await prisma.$transaction(async (tx) => {
       const current = await tx.hrEmploymentAssignment.findFirst({
         where: { employmentRelationshipId: req.params.id, type: 'PRIMARY', effectiveFrom: { lte: effectiveFrom }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveFrom } }] },
@@ -1891,12 +1943,122 @@ router.post('/relationships/:id/transfer-primary', editAccess, async (req: Works
       });
       if (!current) throw new Error('تخصیص اصلی جاری برای انتقال پیدا نشد؛ ابتدا یک تخصیص اصلی ثبت کنید.');
       if (effectiveFrom <= current.effectiveFrom) throw new Error('تاریخ انتقال باید پس از شروع تخصیص اصلی جاری باشد.');
-      await tx.hrEmploymentAssignment.update({ where: { id: current.id }, data: { effectiveTo: new Date(effectiveFrom.getTime() - 1) } });
+      const previousEffectiveTo = new Date(effectiveFrom.getTime() - 1);
+      await tx.hrEmploymentAssignment.update({ where: { id: current.id }, data: { effectiveTo: previousEffectiveTo } });
+      await tx.hrAssignmentPerformanceResponsibility.updateMany({
+        where: { employmentAssignmentId: current.id, status: 'ACTIVE', OR: [{ effectiveTo: null }, { effectiveTo: { gt: previousEffectiveTo } }] },
+        data: { effectiveTo: previousEffectiveTo },
+      });
       const validated = await validateAssignment(tx, { relationshipId: req.params.id, positionId, type: 'PRIMARY', effectiveFrom, effectiveTo: null, responsibleSupervisorAssignmentId: nullableText(req.body.responsibleSupervisorAssignmentId) });
-      return tx.hrEmploymentAssignment.create({ data: { employmentRelationshipId: req.params.id, positionId, type: 'PRIMARY', effectiveFrom, organizationalUnitId: validated.position.organizationalUnitId, workplaceId: validated.position.workplaceId, costCenterId: validated.position.costCenterId, responsibleSupervisorAssignmentId: validated.supervisorAssignmentId, createdBy: actorId(req) }, include: assignmentInclude });
+      const assignment = await tx.hrEmploymentAssignment.create({ data: { employmentRelationshipId: req.params.id, positionId, type: 'PRIMARY', effectiveFrom, organizationalUnitId: validated.position.organizationalUnitId, workplaceId: validated.position.workplaceId, costCenterId: validated.position.costCenterId, responsibleSupervisorAssignmentId: validated.supervisorAssignmentId, performanceAllocationPercent: allocation, createdBy: actorId(req) } });
+      await createInitialPerformanceResponsibility(tx, { assignmentId: assignment.id, supervisorAssignmentId: validated.supervisorAssignmentId, effectiveFrom, effectiveTo: null, allocationPercent: allocation, reason: performanceContextReason, actorUserId: actorId(req) });
+      return tx.hrEmploymentAssignment.findUniqueOrThrow({ where: { id: assignment.id }, include: assignmentInclude });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.status(201).json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Transfer primary assignment'); }
+});
+
+router.post('/assignments/:id/performance-context', editAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const effectiveFrom = parseDate(req.body.effectiveFrom, 'تاریخ اثر زمینه عملکرد');
+    const requestedEffectiveTo = optionalDate(req.body.effectiveTo, 'پایان دوره زمینه عملکرد');
+    const supervisorAssignmentId = textValue(req.body.responsibleSupervisorAssignmentId);
+    if (!supervisorAssignmentId) throw new Error('سرپرست مسئول ارزیابی الزامی است.');
+    const allocation = performanceAllocation(req.body.performanceAllocationPercent);
+    const reason = textValue(req.body.reason);
+    if (reason.length < 8) throw new Error('دلیل اصلاح زمینه عملکرد باید روشن و حداقل هشت نویسه باشد.');
+    const record = await prisma.$transaction(async (tx) => {
+      const assignment = await tx.hrEmploymentAssignment.findUnique({
+        where: { id: req.params.id },
+        include: { employmentRelationship: { select: { personnelId: true } } },
+      });
+      if (!assignment) throw new Error('تخصیص پیدا نشد.');
+      if (effectiveFrom < assignment.effectiveFrom || (assignment.effectiveTo && effectiveFrom >= assignment.effectiveTo)) {
+        throw new Error('تاریخ اثر زمینه عملکرد باید داخل بازه تخصیص باشد.');
+      }
+      const sameStart = await tx.hrAssignmentPerformanceResponsibility.findFirst({
+        where: { employmentAssignmentId: assignment.id, status: 'ACTIVE', effectiveFrom },
+      });
+      const future = await tx.hrAssignmentPerformanceResponsibility.findFirst({
+        where: { employmentAssignmentId: assignment.id, status: 'ACTIVE', effectiveFrom: { gt: effectiveFrom } },
+        orderBy: { effectiveFrom: 'asc' },
+      });
+      const coveringPrevious = sameStart ? null : await tx.hrAssignmentPerformanceResponsibility.findFirst({
+        where: {
+          employmentAssignmentId: assignment.id,
+          status: 'ACTIVE',
+          effectiveFrom: { lt: effectiveFrom },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gt: effectiveFrom } }],
+        },
+        orderBy: { effectiveFrom: 'desc' },
+      });
+      const effectiveTo = requestedEffectiveTo ?? sameStart?.effectiveTo ?? future?.effectiveFrom ?? assignment.effectiveTo;
+      if (effectiveTo && (effectiveTo <= effectiveFrom || (assignment.effectiveTo && effectiveTo > assignment.effectiveTo))) {
+        throw new Error('پایان دوره زمینه عملکرد باید پس از شروع و داخل بازه تخصیص باشد.');
+      }
+      const validated = await validateAssignment(tx, {
+        relationshipId: assignment.employmentRelationshipId,
+        positionId: assignment.positionId || '',
+        type: assignment.type,
+        effectiveFrom,
+        effectiveTo,
+        responsibleSupervisorAssignmentId: supervisorAssignmentId,
+        excludeAssignmentId: assignment.id,
+      });
+      if (future && (!effectiveTo || effectiveTo > future.effectiveFrom)) {
+        throw new Error('پایان دوره جدید باید حداکثر تا شروع دوره مسئولیت بعدی باشد.');
+      }
+      const excludedResponsibilityIds = [sameStart?.id, coveringPrevious?.id].filter((id): id is string => Boolean(id));
+      const overlapping = await tx.hrAssignmentPerformanceResponsibility.findFirst({ where: {
+        employmentAssignmentId: assignment.id,
+        status: 'ACTIVE',
+        ...(excludedResponsibilityIds.length ? { id: { notIn: excludedResponsibilityIds } } : {}),
+        effectiveFrom: { lt: effectiveTo ?? new Date('9999-12-31T23:59:59.999Z') },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: effectiveFrom } }],
+      } });
+      if (overlapping) throw new Error('دوره زمینه عملکرد با یک سابقه فعال دیگر هم‌پوشانی دارد.');
+      if (sameStart) await tx.hrAssignmentPerformanceResponsibility.update({
+        where: { id: sameStart.id }, data: { status: 'SUPERSEDED' },
+      });
+      else if (coveringPrevious) await tx.hrAssignmentPerformanceResponsibility.update({
+        where: { id: coveringPrevious.id }, data: { effectiveTo: effectiveFrom },
+      });
+      await tx.hrAssignmentPerformanceResponsibility.create({ data: {
+        employmentAssignmentId: assignment.id,
+        supervisorAssignmentId: validated.supervisorAssignmentId!,
+        effectiveFrom,
+        effectiveTo,
+        allocationPercent: allocation,
+        supersedesResponsibilityId: sameStart?.id,
+        reason,
+        createdBy: actorId(req),
+      } });
+      const latestResponsibility = await tx.hrAssignmentPerformanceResponsibility.findFirstOrThrow({
+        where: { employmentAssignmentId: assignment.id, status: 'ACTIVE' },
+        orderBy: { effectiveFrom: 'desc' },
+      });
+      await tx.hrEmploymentAssignment.update({ where: { id: assignment.id }, data: {
+        responsibleSupervisorAssignmentId: latestResponsibility.supervisorAssignmentId,
+        performanceAllocationPercent: latestResponsibility.allocationPercent,
+      } });
+      await tx.hrPersonnelAudit.create({ data: {
+        personnelId: assignment.employmentRelationship.personnelId,
+        actorUserId: actorId(req),
+        eventType: 'PERFORMANCE_ASSIGNMENT_CONTEXT_UPDATED',
+        sourceCategory: 'PERSONNEL_PERFORMANCE',
+        reason,
+        payloadJson: {
+          assignmentId: assignment.id,
+          supervisorAssignmentId: validated.supervisorAssignmentId,
+          effectiveFrom: effectiveFrom.toISOString(),
+          effectiveTo: effectiveTo?.toISOString() ?? null,
+          performanceAllocationPercent: allocation.toFixed(2),
+        },
+      } });
+      return tx.hrEmploymentAssignment.findUniqueOrThrow({ where: { id: assignment.id }, include: assignmentInclude });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    res.json({ success: true, data: record });
+  } catch (error) { handleError(res, error, 'Update assignment performance context'); }
 });
 
 const assignmentWithdrawalHandler = (action: 'CANCELLED' | 'ENDED') => async (req: WorkspaceRequest, res: Response) => {
@@ -1910,13 +2072,14 @@ const assignmentWithdrawalHandler = (action: 'CANCELLED' | 'ENDED') => async (re
       if (replay) return { assignment: await tx.hrEmploymentAssignment.findUnique({ where: { id: req.params.id }, include: assignmentInclude }), withdrawal: replay };
       const assignment = await tx.hrEmploymentAssignment.findUnique({
         where: { id: req.params.id },
-        include: { ...assignmentInclude, employmentRelationship: { include: { personnel: { select: { id: true, firstName: true, lastName: true } } } }, supervisedAssignments: { select: { id: true } } },
+        include: { ...assignmentInclude, employmentRelationship: { include: { personnel: { select: { id: true, firstName: true, lastName: true } } } }, supervisedAssignments: { select: { id: true } }, _count: { select: { supervisedPerformanceResponsibilities: true } } },
       });
       if (!assignment) throw new Error('تخصیص پیدا نشد.');
       const now = new Date();
       const effectiveAt = action === 'ENDED' ? parseDate(req.body.effectiveTo || req.body.effectiveAt, 'تاریخ پایان') : now;
       if (action === 'CANCELLED' && assignment.effectiveFrom <= now) throw new Error('فقط تخصیصی که هنوز آغاز نشده است قابل لغو است؛ تخصیص جاری را پایان دهید.');
       if (action === 'CANCELLED' && assignment.effectiveTo) throw new Error('تخصیص پایان‌یافته قابل لغو نیست.');
+      if (action === 'CANCELLED' && assignment._count.supervisedPerformanceResponsibilities > 0) throw new Error('این تخصیص در سابقه مسئولیت ارزیابی استفاده شده و پیش از اصلاح آن سابقه قابل لغو نیست.');
       if (action === 'ENDED' && (assignment.effectiveFrom > now || assignment.effectiveTo)) throw new Error('فقط تخصیص جاری و باز قابل پایان‌دادن است؛ تخصیص آینده را لغو کنید.');
       if (action === 'ENDED' && (effectiveAt < assignment.effectiveFrom || effectiveAt > now)) throw new Error('تاریخ پایان باید بین شروع تخصیص و زمان جاری باشد.');
       const withdrawal = await tx.hrEmploymentAssignmentWithdrawal.create({
@@ -1938,11 +2101,16 @@ const assignmentWithdrawalHandler = (action: 'CANCELLED' | 'ENDED') => async (re
       });
       if (action === 'ENDED') {
         const updated = await tx.hrEmploymentAssignment.update({ where: { id: assignment.id }, data: { effectiveTo: effectiveAt }, include: assignmentInclude });
+        await tx.hrAssignmentPerformanceResponsibility.updateMany({
+          where: { employmentAssignmentId: assignment.id, status: 'ACTIVE', OR: [{ effectiveTo: null }, { effectiveTo: { gt: effectiveAt } }] },
+          data: { effectiveTo: effectiveAt },
+        });
         return { assignment: updated, withdrawal };
       }
       if (assignment.supervisedAssignments.length) {
         await tx.hrEmploymentAssignment.updateMany({ where: { responsibleSupervisorAssignmentId: assignment.id }, data: { responsibleSupervisorAssignmentId: null } });
       }
+      await tx.hrAssignmentPerformanceResponsibility.deleteMany({ where: { employmentAssignmentId: assignment.id } });
       await tx.hrEmploymentAssignment.delete({ where: { id: assignment.id } });
       return { assignment: null, withdrawal };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -1974,7 +2142,16 @@ router.get('/supervisor-candidates', viewAccess, async (req, res) => {
     const position = await prisma.hrPosition.findUnique({ where: { id: textValue(req.query.positionId) } });
     if (!position?.supervisorPositionId) return res.json({ success: true, data: [] });
     const effectiveFrom = parseDate(req.query.effectiveFrom || new Date().toISOString(), 'تاریخ شروع'); const effectiveTo = optionalDate(req.query.effectiveTo, 'تاریخ پایان');
-    const rows = await prisma.hrEmploymentAssignment.findMany({ where: { positionId: position.supervisorPositionId, effectiveFrom: { lte: effectiveFrom }, OR: effectiveTo ? [{ effectiveTo: null }, { effectiveTo: { gte: effectiveTo } }] : [{ effectiveTo: null }], employmentRelationship: { status: { in: ['ACTIVE', 'PLANNED', 'SUSPENDED'] } } }, include: { employmentRelationship: { include: { personnel: true } }, position: true } });
+    const rows = await prisma.hrEmploymentAssignment.findMany({ where: {
+      positionId: position.supervisorPositionId,
+      effectiveFrom: { lte: effectiveFrom },
+      OR: effectiveTo ? [{ effectiveTo: null }, { effectiveTo: { gte: effectiveTo } }] : [{ effectiveTo: null }],
+      employmentRelationship: {
+        status: { in: ['ACTIVE', 'PLANNED', 'SUSPENDED', 'ENDED'] },
+        effectiveFrom: { lte: effectiveFrom },
+        OR: effectiveTo ? [{ effectiveTo: null }, { effectiveTo: { gte: effectiveTo } }] : [{ effectiveTo: null }],
+      },
+    }, include: { employmentRelationship: { include: { personnel: true } }, position: true } });
     res.json({ success: true, data: rows.map((row) => ({ id: row.id, positionTitle: row.position?.title || 'جایگاه حذف‌شده', personnelId: row.employmentRelationship.personnelId, name: `${row.employmentRelationship.personnel.firstName} ${row.employmentRelationship.personnel.lastName}` })) });
   } catch (error) { handleError(res, error, 'Supervisor candidates'); }
 });

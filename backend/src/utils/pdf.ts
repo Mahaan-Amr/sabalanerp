@@ -42,13 +42,16 @@ function ensureDirectoryExists(directoryPath: string): void {
 }
 
 // Generate a PDF from HTML content with RTL support
-export async function generatePdfBufferFromHtml(options: Omit<GeneratePdfOptions, 'fileName' | 'outputDir'> & { htmlContent: string }): Promise<Buffer> {
+export async function generatePdfBufferFromHtml(options: Omit<GeneratePdfOptions, 'fileName' | 'outputDir'> & { htmlContent: string; signal?: AbortSignal }): Promise<Buffer> {
   const browser = await puppeteer.launch({
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
+  const abort = () => { void browser.close(); };
+  options.signal?.addEventListener('abort', abort, { once: true });
   try {
+    if (options.signal?.aborted) throw Object.assign(new Error('PDF generation aborted.'), { code: 'PDF_GENERATION_ABORTED' });
     const page = await browser.newPage();
     if (options.assertNoOverflowSelector) {
       await page.setViewport({
@@ -104,6 +107,7 @@ export async function generatePdfBufferFromHtml(options: Omit<GeneratePdfOptions
     });
     return Buffer.from(pdf);
   } finally {
+    options.signal?.removeEventListener('abort', abort);
     await browser.close();
   }
 }

@@ -1,3 +1,6 @@
+import { normalizePerformanceWriteError, isPerformanceTransactionConflict } from './personnelPerformanceRolloutPolicy';
+import { activePerformanceRestrictionIds } from './personnelPerformanceRestrictionQueries';
+import { isSupportedPerformanceRetentionPolicy } from './personnelPerformanceRetention';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   PerformanceArtifactLifecycle,
@@ -86,18 +89,28 @@ export const DEFAULT_SCORING_POLICY_CONTENT: ScoringPolicyContent = {
   precisionScale: 6,
 };
 
-const asTx = async <T>(client: PrismaClient, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> => {
+const asTx = async <T>(client: PrismaClient | Prisma.TransactionClient, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> => {
+  const fencedWork = async (tx: Prisma.TransactionClient) => {
+    const fence = await tx.$queryRaw<Array<{ revision: bigint }>>`SELECT revision FROM performance_disclosure_revision WHERE id = 1 FOR UPDATE`;
+    if (!fence.length) throw Object.assign(new Error('وضعیت انتشار عملکرد در دسترس نیست.'), { code: 'PERFORMANCE_OPERATIONS_FENCE_UNAVAILABLE', status: 409 });
+    return work(tx);
+  };
+  if (!('$transaction' in client)) return fencedWork(client).catch((error: unknown) => {
+    // The transaction owner must see the original conflict so it can retry the whole operation.
+    if (isPerformanceTransactionConflict(error)) throw error;
+    throw normalizePerformanceWriteError(error);
+  });
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      return await client.$transaction(work, {
+      return await client.$transaction(fencedWork, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
         timeout: 300_000,
         maxWait: 30_000,
       });
     } catch (error) {
       lastError = error;
-      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'P2034') || attempt === 3) throw error;
+      if (!isPerformanceTransactionConflict(error) || attempt === 3) throw normalizePerformanceWriteError(error);
     }
   }
   throw lastError;
@@ -157,6 +170,8 @@ const validateTemplateContent = (content: PerformanceTemplatePolicyContent) => {
 };
 
 const validatePolicyContent = (kind: PerformancePolicyKind, content: PerformancePolicyContent) => {
+  if (kind === PerformancePolicyKind.RETENTION) return isSupportedPerformanceRetentionPolicy(content)
+    ? [] : ['برنامه نگهداری با نسخه مصوب سازمان سازگار نیست. پیش از انتشار، همه طبقات و مبدأهای نگهداری را تکمیل کنید.'];
   if (kind === PerformancePolicyKind.LEVEL_CLASSIFICATION) return validateLevelPolicyContent(content as LevelPolicyContent);
   if (kind === PerformancePolicyKind.CURRENT_LEVEL) {
     const policy = content as CurrentLevelPolicyContent;
@@ -309,7 +324,7 @@ export const updatePerformanceTemplateDraft = async (client: PrismaClient, input
   });
 };
 
-export const createPerformancePolicyDraft = async (client: PrismaClient, input: {
+export const createPerformancePolicyDraft = async (client: PrismaClient | Prisma.TransactionClient, input: {
   policyKind: PerformancePolicyKind;
   content: PerformancePolicyContent;
   createdByUserId: string;
@@ -344,7 +359,7 @@ export const createPerformancePolicyDraft = async (client: PrismaClient, input: 
   });
 };
 
-export const updatePerformancePolicyDraft = async (client: PrismaClient, input: {
+export const updatePerformancePolicyDraft = async (client: PrismaClient | Prisma.TransactionClient, input: {
   versionId: string;
   content: PerformancePolicyContent;
   keyring?: PerformanceVaultKey;
@@ -381,17 +396,18 @@ const getPolicyContent = async <T extends PerformancePolicyContent>(
 
 type AcceptedResultPayload = { exactScore: string; measurementTo?: string; trace?: unknown };
 
-const listCurrentPerformanceSubjects = async (tx: Prisma.TransactionClient) => {
+const listCurrentPerformanceSubjects = async (tx: Prisma.TransactionClient, subjectIds?: string[]) => {
   const relationships = await tx.hrEmploymentRelationship.findMany({
     where: { status: { in: ['ACTIVE', 'SUSPENDED'] } },
-    select: { id: true },
+    select: { id: true, personnelId: true },
   });
   return tx.performanceSubject.findMany({
     where: {
       employmentRelationshipId: { in: relationships.map(({ id }) => id) },
       identityDetachedAt: null,
+      ...(subjectIds ? { id: { in: subjectIds } } : {}),
     },
-    select: { id: true },
+    select: { id: true, personnelId: true },
     orderBy: { id: 'asc' },
   });
 };
@@ -413,17 +429,19 @@ const calculatePopulation = async (
   input: {
     now: Date;
     keyring: PerformanceVaultKey;
+    subjectIds?: string[];
     proposed?: { kind: PerformancePolicyKind; id: string; content: PerformancePolicyContent };
   },
 ) => {
-  const subjects = await listCurrentPerformanceSubjects(tx);
-  const projections = await tx.performanceCurrentLevelProjection.findMany();
+  const subjects = await listCurrentPerformanceSubjects(tx, input.subjectIds);
+  const projections = await tx.performanceCurrentLevelProjection.findMany({ where: input.subjectIds ? { subjectId: { in: input.subjectIds } } : {} });
   const projectionBySubject = new Map(projections.map((projection) => [projection.subjectId, projection]));
   const evaluations = await tx.performanceEvaluation.findMany({
     where: { subjectId: { in: subjects.map((subject) => subject.id) } },
     select: { id: true, subjectId: true, measurementTo: true },
   });
   const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
+  const restrictedIds = new Set(await activePerformanceRestrictionIds(tx, evaluations.map(({ id }) => id)));
   const results = evaluations.length === 0 ? [] : await tx.performanceAcceptedResult.findMany({
     where: { evaluationId: { in: evaluations.map((evaluation) => evaluation.id) } },
     orderBy: [{ evaluationId: 'asc' }, { version: 'desc' }],
@@ -449,7 +467,7 @@ const calculatePopulation = async (
         exactScore: payload.exactScore,
         measurementTo: (payload.measurementTo ? new Date(payload.measurementTo) : evaluation.measurementTo).toISOString(),
         expiresAt: result.expiresAt.toISOString(),
-        status: result.status,
+        status: restrictedIds.has(result.evaluationId) ? 'SUSPENDED' : result.status,
       });
       decodedBySubject.set(evaluation.subjectId, list);
     } catch (error) {
@@ -478,12 +496,13 @@ const calculatePopulation = async (
     return {
       subjectId: subject.id,
       before: beforeProjection ? { state: beforeProjection.state, levelCode: beforeProjection.levelCode } : null,
-      after: { state: after.state, levelCode: after.levelCode },
+      after: { state: after.state === 'UNEVALUATED' && evaluations.some((evaluation) => evaluation.subjectId === subject.id && restrictedIds.has(evaluation.id)) ? 'TEMPORARILY_UNAVAILABLE' : after.state, levelCode: after.levelCode },
     };
   });
   return {
     preview: buildDeterministicPolicyPreview(population),
     sourcePopulationHash: canonicalPerformanceHash({
+      restrictedEvaluationIds: [...restrictedIds].sort(),
       subjects: subjects.map(({ id }) => id),
       projections: projections.map(({ subjectId, state, levelCode, sourceResultsHash }) => ({
         subjectId, state, levelCode, sourceResultsHash,
@@ -922,8 +941,9 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
   actorUserId: string | null;
   reason: string;
   keyring: PerformanceVaultKey;
+  subjectIds?: string[];
 }) => {
-  const population = await calculatePopulation(tx, { now: input.now, keyring: input.keyring });
+  const population = await calculatePopulation(tx, { now: input.now, keyring: input.keyring, subjectIds: input.subjectIds });
   if (population.preview.counts.errors > 0) {
     throw policyError('بازمحاسبه سطح جاری خطای حل‌نشده دارد و تغییر اتمیک متوقف شد.', 'PERFORMANCE_RECOMPUTATION_FAILED', 409);
   }
@@ -941,10 +961,10 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
     orderBy: [{ effectiveFrom: 'asc' }, { version: 'asc' }],
     select: { effectiveFrom: true },
   });
-  const subjects = await listCurrentPerformanceSubjects(tx);
+  const subjects = await listCurrentPerformanceSubjects(tx, input.subjectIds);
   const currentSubjectIds = subjects.map(({ id }) => id);
   const staleProjections = await tx.performanceCurrentLevelProjection.findMany({
-    where: { subjectId: { notIn: currentSubjectIds } },
+    where: { subjectId: { notIn: currentSubjectIds, ...(input.subjectIds ? { in: input.subjectIds } : {}) } },
   });
   for (const stale of staleProjections) {
     const auditId = randomUUID();
@@ -966,6 +986,7 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
     where: { subjectId: { in: subjects.map(({ id }) => id) } }, select: { id: true, subjectId: true, measurementTo: true },
   });
   const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
+  const restrictedIds = new Set(await activePerformanceRestrictionIds(tx, evaluations.map(({ id }) => id)));
   const results = evaluations.length === 0 ? [] : await tx.performanceAcceptedResult.findMany({
     where: { evaluationId: { in: evaluations.map(({ id }) => id) } },
   });
@@ -980,7 +1001,7 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
       exactScore: payload.exactScore,
       measurementTo: (payload.measurementTo ? new Date(payload.measurementTo) : evaluation.measurementTo).toISOString(),
       expiresAt: result.expiresAt.toISOString(),
-      status: result.status,
+      status: restrictedIds.has(result.evaluationId) ? 'SUSPENDED' : result.status,
     });
     resultsBySubject.set(evaluation.subjectId, items);
   }
@@ -997,12 +1018,13 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
       nextPolicyEffectiveAt: nextScheduledPolicy?.effectiveFrom ?? null,
       results: resultsBySubject.get(subject.id) ?? [],
     });
+    const projectionState = next.state === 'UNEVALUATED' && evaluations.some((evaluation) => evaluation.subjectId === subject.id && restrictedIds.has(evaluation.id)) ? 'TEMPORARILY_UNAVAILABLE' : next.state;
     const sourceResultsHash = canonicalPerformanceHash(next.sourceResultsHashInput);
     const projection = await tx.performanceCurrentLevelProjection.upsert({
       where: { subjectId: subject.id },
       create: {
         subjectId: subject.id,
-        state: next.state,
+        state: projectionState,
         levelCode: next.levelCode,
         levelPolicyVersionId: next.state === 'LEVEL' ? levelPolicy.id : null,
         sourceResultsHash,
@@ -1012,7 +1034,7 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
         projectedAt: input.now,
       },
       update: {
-        state: next.state,
+        state: projectionState,
         levelCode: next.levelCode,
         levelPolicyVersionId: next.state === 'LEVEL' ? levelPolicy.id : null,
         sourceResultsHash,
@@ -1043,6 +1065,18 @@ const recomputeAllProjections = async (tx: Prisma.TransactionClient, input: {
       eventHash: canonicalPerformanceHash({ auditId, subjectId: subject.id, projection, evidenceHash: auditEvidence.contentHash }),
       occurredAt: input.now,
     } });
+    if (subject.personnelId && (!previous || previous.sourceResultsHash !== sourceResultsHash)) {
+      const user = await tx.user.findUnique({ where: { personnelId: subject.personnelId }, select: { id: true } });
+      if (user) await tx.notification.create({ data: {
+        userId: user.id,
+        type: 'PERFORMANCE_SUMMARY_UPDATED',
+        title: 'خلاصه عملکرد به‌روزرسانی شد',
+        message: 'خلاصه مصوب عملکرد شما به‌روزرسانی شده و سطح جاری در سربرگ قابل مشاهده است.',
+        priority: 'NORMAL',
+        actionUrl: '/dashboard/hr/personnel/performance',
+        referenceId: `performance-projection:${subject.id}:v${projection.version}`,
+      } });
+    }
   }
   return { subjectCount: subjects.length, resultHash: population.preview.resultHash };
 };
@@ -1108,6 +1142,7 @@ export const activateDuePerformancePolicies = async (client: PrismaClient, input
         where: { id: policy.activationPreviewId },
       });
       const content = await readPerformancePayload<PerformancePolicyContent>(tx, policy.encryptedPayloadId, keyring);
+      ensureNoErrors(validatePolicyContent(policy.policyKind, content));
       const currentPopulation = await calculatePopulation(tx, {
         now: policy.effectiveFrom,
         keyring,

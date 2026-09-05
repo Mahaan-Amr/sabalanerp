@@ -19,6 +19,8 @@
     "test:accounting-dispatch-documents": "tsx src/features/accounting/dispatch-documents/dispatchDocumentsViewModel.test.ts && tsx src/features/accounting/dispatch-documents/dispatchDocumentsClient.test.ts && tsx src/features/accounting/dispatch-documents/dispatchDocumentsFixture.test.ts && tsx src/features/accounting/dispatch-documents/AccountingDispatchDocuments.test.tsx",
     "test:hr-personnel-collection": "npx tsx src/features/hr/personnelListState.test.ts",
     "test:hr-performance-policy": "npx tsx src/features/hr/performance-policy/performancePolicyAdminModel.test.ts",
+    "test:hr-performance-workflow": "npx tsx src/features/hr/performance-workflow/performanceWorkflowModel.test.ts",
+    "test:hr-performance-disclosure": "npx tsx src/features/hr/performance-badge/performanceBadgeModel.test.ts",
     "test:hr-duty-surfaces": "npx tsx src/features/hr-duties/destinationDutyState.test.ts",
     "test:hr-e2e": "playwright test e2e/hr-role-workflows.spec.ts"
   },

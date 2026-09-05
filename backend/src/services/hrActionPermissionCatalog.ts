@@ -6,7 +6,21 @@ export type HrActionPermissionDefinition = {
 };
 
 const PERFORMANCE_ACTION_PERMISSIONS = [
+  { code: 'REQUEST_PERFORMANCE_PRIVACY_CASE', labelFa: 'ثبت درخواست حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'VIEW_PERFORMANCE_PRIVACY_CASE', labelFa: 'مشاهده پرونده حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'ACKNOWLEDGE_PERFORMANCE_PRIVACY_CASE', labelFa: 'اعلام دریافت درخواست حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'VERIFY_PERFORMANCE_PRIVACY_IDENTITY', labelFa: 'احراز هویت درخواست حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'DECIDE_PERFORMANCE_PRIVACY_ACCESS', labelFa: 'تصمیم دسترسی حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'REGISTER_PERFORMANCE_CORRECTION', labelFa: 'ثبت اصلاح نسخه‌دار عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'DECIDE_PERFORMANCE_PRIVACY_CORRECTION', labelFa: 'تصمیم اصلاح حریم خصوصی عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'DECIDE_PERFORMANCE_ERASURE', labelFa: 'تصمیم حذف مجاز شواهد عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'RESTRICT_PERFORMANCE_EVIDENCE', labelFa: 'محدودسازی شواهد عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'RELEASE_PERFORMANCE_RESTRICTION', labelFa: 'رفع محدودسازی شواهد عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'PLACE_PERFORMANCE_LEGAL_HOLD', labelFa: 'ایجاد توقف نگهداری عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'RELEASE_PERFORMANCE_LEGAL_HOLD', labelFa: 'تصویب رفع توقف نگهداری عملکرد', level: 'ADMIN', prerequisites: [] },
+
   { code: 'MANAGE_PERFORMANCE_POLICY', labelFa: 'مدیریت و انتشار سیاست عملکرد', level: 'ADMIN', prerequisites: [] },
+  { code: 'MANAGE_PERFORMANCE_CYCLE', labelFa: 'مدیریت چرخه و مهلت ارزیابی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'SUBMIT_PERFORMANCE_EVALUATION', labelFa: 'ارسال ارزیابی عملکرد سرپرست', level: 'EDIT', prerequisites: [] },
   { code: 'REVIEW_PERFORMANCE_EVALUATION', labelFa: 'بررسی ارزیابی عملکرد', level: 'EDIT', prerequisites: [] },
   { code: 'VIEW_PERFORMANCE_HISTORY', labelFa: 'مشاهده سابقه محرمانه عملکرد', level: 'VIEW', prerequisites: [] },
@@ -18,6 +32,9 @@ const PERFORMANCE_ACTION_PERMISSIONS = [
   { code: 'VIEW_PERFORMANCE_AUDIT', labelFa: 'مشاهده حسابرسی عملکرد', level: 'VIEW', prerequisites: [] },
   { code: 'MANAGE_PERFORMANCE_RETENTION', labelFa: 'مدیریت نگهداری و محدودسازی شواهد عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'CREATE_PERFORMANCE_CONSEQUENCE_HANDOFF', labelFa: 'ایجاد واگذاری پیامد عملکرد', level: 'EDIT', prerequisites: [] },
+  { code: 'VIEW_ASSIGNED_PERFORMANCE_CONSEQUENCE_HANDOFF', labelFa: 'مشاهده ارجاع پیامد عملکرد اختصاص‌یافته', level: 'VIEW', prerequisites: [] },
+  { code: 'REVIEW_PERFORMANCE_CONSEQUENCE_LEGAL_CONTROL', labelFa: 'کنترل حقوقی مستقل پیامد عملکرد', level: 'EDIT', prerequisites: [] },
+  { code: 'MANAGE_COMPENSATION_AGREEMENTS', labelFa: 'انتشار توافق جبران خدمت', level: 'ADMIN', prerequisites: [] },
   { code: 'MANAGE_PERFORMANCE_ROLLOUT', labelFa: 'مدیریت مرحله و جامعه فعال‌سازی عملکرد', level: 'ADMIN', prerequisites: [] },
   { code: 'PAUSE_PERFORMANCE_EVALUATION', labelFa: 'توقف ایمن ارزیابی عملکرد', level: 'ADMIN', prerequisites: [] },
 ] as const;
@@ -111,5 +128,7 @@ export const expandHrActionPermissionSelection = (selectedCodes: readonly string
 };
 
 export const actionPermissionsForLegacyAuthority = (authorityCode: string) => (
-  expandHrActionPermissionSelection(LEGACY_AUTHORITY_ACTION_BUNDLES[authorityCode] ?? [])
+  expandHrActionPermissionSelection(authorityCode.startsWith('PERFORMANCE_CONSEQUENCE_LEGAL_CONTROL_')
+    ? ['REVIEW_PERFORMANCE_CONSEQUENCE_LEGAL_CONTROL']
+    : LEGACY_AUTHORITY_ACTION_BUNDLES[authorityCode] ?? [])
 );

@@ -43,6 +43,7 @@ const verifySabalanerpLocalPostgres = (repositoryRoot: string) => {
 export const createDispatchDocumentsTemporaryDatabase = async (input: {
   repositoryRoot: string;
   sourceDatabaseUrl: string;
+  schemaOnly?: boolean;
 }) => {
   const runId = randomBytes(8).toString('hex');
   const databaseName = checkedName(`${DATABASE_PREFIX}${runId}`);
@@ -56,7 +57,7 @@ export const createDispatchDocumentsTemporaryDatabase = async (input: {
   verifySabalanerpLocalPostgres(input.repositoryRoot);
   compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'CREATE DATABASE ${quoted}'`);
   try {
-    compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+    compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges ${input.schemaOnly ? '--schema-only' : ''} | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
   } catch (error) {
     compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
     throw error;

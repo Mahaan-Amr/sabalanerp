@@ -102,6 +102,7 @@ import { inquiryNotificationAccess, startPartnerInquiryNotificationDelivery } fr
 import { verifyHrRedesignCutover } from "./services/hrRedesignCutover";
 import { resolveHrRedesignCutoverStartup } from "./services/hrRedesignCutoverStartup";
 import { validatePerformanceVaultEnvironment } from "./services/personnelPerformancePayloadStore";
+import { validatePerformanceExportKeyEnvironment } from "./services/personnelPerformanceDisclosureStore";
 import { startPersonnelPerformanceMaintenance } from "./services/personnelPerformanceMaintenance";
 
 initializeRecoveryRuntime();
@@ -139,6 +140,8 @@ const validateProductionEnvironment = () => {
     "SMS_IR_DISPATCH_EXIT_MANUAL_RETRY_TEMPLATE_ID",
     "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID",
     "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64",
+    "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID",
+    "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64",
   ];
   const missingVars = requiredVars.filter((key) => !process.env[key]);
   const hiringTemplateId =
@@ -180,6 +183,7 @@ const validateProductionEnvironment = () => {
   let hasInvalidPerformanceVault = false;
   try {
     validatePerformanceVaultEnvironment(process.env);
+    validatePerformanceExportKeyEnvironment(process.env);
   } catch {
     hasInvalidPerformanceVault = true;
   }

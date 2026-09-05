@@ -1,3 +1,4 @@
+import { enablePerformanceTestRelease } from './personnelPerformanceTestRelease';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { PerformancePolicyKind } from '@prisma/client';
@@ -31,6 +32,7 @@ const main = async () => {
     firstName: 'عامل',
     lastName: 'سیاست',
   } });
+  await enablePerformanceTestRelease(first, actor.id);
   const content = {
     schemaVersion: 1 as const,
     conceptCode: `PERF-CONCURRENCY-${database.runId.toUpperCase()}`,

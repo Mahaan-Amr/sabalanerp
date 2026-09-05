@@ -34,6 +34,34 @@ export interface NotificationPolicyDraft {
 
 const REGISTERED_NOTIFICATION_EVENTS = {
   ...PARTNER_NOTIFICATION_EVENTS,
+  PERFORMANCE_SUPERVISOR_TASK: {
+    type: 'PERFORMANCE_SUPERVISOR_TASK', mandatory: true,
+    titleTemplate: 'ارزیابی عملکرد جدید', messageTemplate: 'یک بخش ارزیابی عملکرد برای تکمیل آماده است.',
+    priority: 'HIGH', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  PERFORMANCE_REVIEW_READY: {
+    type: 'PERFORMANCE_REVIEW_READY', mandatory: true,
+    titleTemplate: 'بررسی ارزیابی عملکرد', messageTemplate: 'یک ارسال ارزیابی عملکرد آماده بررسی است.',
+    priority: 'HIGH', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  PERFORMANCE_SUBMISSION_DECIDED: {
+    type: 'PERFORMANCE_SUBMISSION_DECIDED', mandatory: true,
+    titleTemplate: 'نتیجه بررسی ارزیابی', messageTemplate: 'نتیجه بررسی یکی از ارسال‌های ارزیابی عملکرد شما ثبت شد.',
+    priority: 'HIGH', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  PERFORMANCE_REMINDER: {
+    type: 'PERFORMANCE_REMINDER', mandatory: true,
+    titleTemplate: 'یادآوری ارزیابی عملکرد', messageTemplate: 'مهلت یکی از اقدام‌های ارزیابی عملکرد شما نزدیک است یا گذشته است.',
+    priority: 'HIGH', allowedVariables: [],
+    allowedChannels: ['IN_APP', 'REALTIME', 'WEB_PUSH'],
+    allowedRecipientResolvers: ['DIRECT_USER'],
+  },
   HR_DUTY_ASSIGNED: {
     type: 'HR_DUTY_ASSIGNED', mandatory: true,
     titleTemplate: 'وظیفه جدید', messageTemplate: 'یک وظیفه جدید در فضای کاری شما آماده رسیدگی است.',

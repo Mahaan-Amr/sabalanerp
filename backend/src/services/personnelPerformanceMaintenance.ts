@@ -6,6 +6,7 @@ import {
 } from './personnelPerformancePolicyStore';
 import { expirePerformanceResults } from './personnelPerformanceResultStore';
 import { resolvePersonnelPerformanceWriteGate } from './personnelPerformanceRolloutPolicy';
+import { cleanupExpiredPerformanceExports, processQueuedPerformanceExports } from './personnelPerformanceDisclosureStore';
 
 const SYSTEM_ACTOR = null;
 
@@ -22,9 +23,10 @@ export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, n
     try {
       return { ok: true as const, value: await work() };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`Personnel performance maintenance ${operation} failed closed:`, error);
-      return { ok: false as const, error: message };
+      const candidate = error && typeof error === 'object' && 'code' in error ? error.code : null;
+      const code = typeof candidate === 'string' && /^PERFORMANCE_[A-Z_]{1,80}$/.test(candidate) ? candidate : 'PERFORMANCE_MAINTENANCE_FAILED';
+      console.error(`Personnel performance maintenance ${operation} failed closed: ${code}`);
+      return { ok: false as const, error: code };
     }
   };
   const policies = policyGate.allowed && duePolicies > 0
@@ -43,13 +45,20 @@ export const runPersonnelPerformanceMaintenance = async (client: PrismaClient, n
   const relationshipReconciliation = await isolate('relationship reconciliation', () => (
     reconcilePerformanceProjectionSubjects(client, { actorUserId: SYSTEM_ACTOR, now })
   ));
-  return { policyGate, policies, artifacts, expiry, relationshipReconciliation };
+  const exportCleanup = await isolate('export cleanup', () => cleanupExpiredPerformanceExports(client, now));
+  const exportQueue = await isolate('export queue', () => processQueuedPerformanceExports(client));
+  return { policyGate, policies, artifacts, expiry, relationshipReconciliation, exportCleanup, exportQueue };
 };
 
 export const startPersonnelPerformanceMaintenance = (client: PrismaClient) => {
-  const run = () => runPersonnelPerformanceMaintenance(client).catch((error) => {
-    console.error('Personnel performance maintenance failed closed:', error);
-  });
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try { await runPersonnelPerformanceMaintenance(client); }
+    catch { console.error('Personnel performance maintenance failed closed: PERFORMANCE_MAINTENANCE_FAILED'); }
+    finally { running = false; }
+  };
   const initial = setTimeout(run, 5_000);
   initial.unref();
   const interval = setInterval(run, 60_000);

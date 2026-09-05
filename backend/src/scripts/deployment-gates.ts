@@ -32,6 +32,21 @@ const writableDirectoryGate = (directory: string) => async () => {
   return { directory };
 };
 
+const performanceExportStorageGate = async () => {
+  const directory = '/app/storage/performance-exports';
+  await writableDirectoryGate(directory)();
+  const ready = await prisma.performanceExportReceipt.findMany({
+    where: { status: 'READY' }, select: { id: true, artifactPath: true },
+  });
+  for (const receipt of ready) {
+    if (!receipt.artifactPath) throw new Error(`READY performance export ${receipt.id} has no artifact path.`);
+    const resolved = path.resolve(receipt.artifactPath);
+    if (!resolved.startsWith(`${directory}${path.sep}`)) throw new Error(`Performance export ${receipt.id} is outside protected storage.`);
+    await fs.promises.access(resolved, fs.constants.R_OK);
+  }
+  return { directory, readyArtifacts: ready.length };
+};
+
 const main = async () => {
   if (!deploymentId) throw Object.assign(new Error('DEPLOYMENT_ID is required.'), { code: 'DEPLOYMENT_CONFIGURATION_MISSING' });
   const inquiryDatabase = process.env.INQUIRY_RECOVERY_SOURCE_DIR
@@ -87,6 +102,7 @@ const main = async () => {
     { name: 'hr-storage', run: writableDirectoryGate('/app/storage/hr-hiring') },
     { name: 'accounting-storage', run: writableDirectoryGate('/app/storage/accounting-contracts') },
     { name: 'support-storage', run: writableDirectoryGate('/app/storage/support-tickets') },
+    { name: 'performance-export-storage', run: performanceExportStorageGate },
     { name: 'uploads-storage', run: writableDirectoryGate('/app/uploads') },
     { name: 'database-file-references', run: async () => validateLiveStoredFileReferences(prisma) },
     ...(!previousUnchangedMode ? [{
